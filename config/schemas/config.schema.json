@@ -1397,7 +1397,7 @@
           "minimum": 2
         },
         "version_poll_interval_secs": {
-          "description": "How often the webserver polls `gkg_schema_version` for the active\nversion, in seconds. Must be at least 1.",
+          "description": "How long the webserver waits before retrying a failed snapshot install\nor reopening a lost active-version watch, in seconds. Also the base\nbackoff of the indexer readiness gate. Must be at least 1.",
           "type": "integer",
           "format": "uint64",
           "minimum": 1

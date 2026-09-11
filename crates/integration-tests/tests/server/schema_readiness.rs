@@ -40,7 +40,7 @@ use tower::ServiceExt;
 
 const SECRET: &str = "test-secret-that-is-at-least-32-bytes-long";
 const WAIT_LIMIT: Duration = Duration::from_secs(30);
-const POLL_INTERVAL: Duration = Duration::from_secs(1);
+const RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const NEW_PROPERTY_VALUE: &str = "new property";
 
 const PROPERTIES_ADDED_IN_V2: [(&str, &str); 2] = [
@@ -120,13 +120,14 @@ async fn missing_and_corrupt_archives_fail_closed_and_recover_without_restart() 
     cluster.await_serving(Some(3)).await;
 
     cluster.retire(3).await;
+    cluster.mirror_active_version().await;
     cluster.await_serving(None).await;
     cluster.promote(3).await;
     cluster.await_serving(Some(3)).await;
 }
 
 #[tokio::test]
-async fn active_table_loss_and_recovery_gate_warm_and_cold_readers() {
+async fn active_table_loss_gates_cold_readers_until_recovery() {
     let mut cluster = Cluster::start(1).await;
     cluster.publish_archive(2).await;
     cluster.create_tables(&[2]).await;
@@ -136,14 +137,11 @@ async fn active_table_loss_and_recovery_gate_warm_and_cold_readers() {
     cluster
         .rename_table("v2_gl_project", "unavailable_project")
         .await;
-    cluster.await_serving(None).await;
-    assert_eq!(cluster.live_status().await, StatusCode::OK);
-
     let cold_readers = [
         cluster.spawn_read_only_reader(1),
         cluster.spawn_read_only_reader(2),
     ];
-    sleep(POLL_INTERVAL * 2).await;
+    sleep(RETRY_INTERVAL * 2).await;
     for reader in &cold_readers {
         assert_eq!(reader.ready_status().await, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(reader.live_status().await, StatusCode::OK);
@@ -152,7 +150,6 @@ async fn active_table_loss_and_recovery_gate_warm_and_cold_readers() {
     cluster
         .rename_table("unavailable_project", "v2_gl_project")
         .await;
-    cluster.await_serving(Some(2)).await;
     for reader in &cold_readers {
         reader.await_ready().await;
         reader.assert_read_only().await;
@@ -162,20 +159,39 @@ async fn active_table_loss_and_recovery_gate_warm_and_cold_readers() {
 }
 
 #[tokio::test]
-async fn metadata_read_failure_keeps_the_last_usable_schema() {
+async fn first_rollout_reads_clickhouse_until_the_dispatcher_mirrors_the_key() {
     let mut cluster = Cluster::start(1).await;
     cluster.create_tables(&[1]).await;
+    cluster.promote_in_clickhouse_only(1).await;
+
+    let reader = cluster.spawn_read_only_reader(1);
+    reader.await_ready().await;
+    assert_eq!(
+        cluster.ready_status().await,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+
+    cluster.mirror_active_version().await;
+    cluster.await_serving(Some(1)).await;
+}
+
+#[tokio::test]
+async fn catalog_loss_keeps_the_last_usable_schema() {
+    let mut cluster = Cluster::start(1).await;
+    cluster.create_tables(&[1, 2]).await;
     cluster.promote(1).await;
     cluster.await_serving(Some(1)).await;
 
-    cluster
-        .rename_table("gkg_schema_version", "unavailable_schema_version")
-        .await;
-    cluster.await_failed_version_read().await;
-
+    cluster.drop_catalog_bucket().await;
+    sleep(RETRY_INTERVAL * 2).await;
     assert_eq!(cluster.ready_status().await, StatusCode::OK);
     let result = cluster.run_query(project_query(1)).await.unwrap();
     assert_eq!(project_row(&result), expected_project_row(1));
+
+    cluster.reopen_catalog().await;
+    cluster.publish_archive(2).await;
+    cluster.promote(2).await;
+    cluster.await_serving(Some(2)).await;
 }
 
 struct Cluster {
@@ -301,7 +317,33 @@ impl Cluster {
     }
 
     async fn promote(&self, version: u32) {
+        self.promote_in_clickhouse_only(version).await;
+        self.mirror_active_version().await;
+    }
+
+    async fn promote_in_clickhouse_only(&self, version: u32) {
         promote_version(&self.graph.create_client(), version)
+            .await
+            .unwrap();
+    }
+
+    async fn mirror_active_version(&self) {
+        self.catalog
+            .sync_active_version(&self.graph.create_client())
+            .await
+            .unwrap();
+    }
+
+    async fn drop_catalog_bucket(&self) {
+        self.nats_client
+            .jetstream()
+            .delete_key_value(ONTOLOGY_ARCHIVES_BUCKET)
+            .await
+            .unwrap();
+    }
+
+    async fn reopen_catalog(&self) {
+        OntologyCatalog::open(self.nats_client.clone())
             .await
             .unwrap();
     }
@@ -424,33 +466,8 @@ impl Cluster {
         )
     }
 
-    async fn await_failed_version_read(&self) {
-        timeout(WAIT_LIMIT, async {
-            loop {
-                self.graph.execute("SYSTEM FLUSH LOGS").await;
-                let failures = self
-                    .graph
-                    .query(
-                        "SELECT query_id FROM system.query_log WHERE exception != '' \
-                         AND startsWith(query, 'SELECT version FROM gkg_schema_version FINAL')",
-                    )
-                    .await;
-                if failures.iter().any(|batch| batch.num_rows() > 0) {
-                    return;
-                }
-                sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await
-        .expect("the active schema poll must hit the metadata failure");
-    }
-
     async fn ready_status(&self) -> StatusCode {
         probe(&self.router, "/ready").await
-    }
-
-    async fn live_status(&self) -> StatusCode {
-        probe(&self.router, "/live").await
     }
 
     async fn list_tools(&mut self) -> Result<ListToolsResponse, Status> {
@@ -514,7 +531,7 @@ impl Reader {
             }
         })
         .await
-        .expect("a cold reader must become ready when the active tables are restored");
+        .expect("a cold reader must become ready");
     }
 
     async fn assert_read_only(&self) {
@@ -698,7 +715,7 @@ fn test_archive(version: u32) -> OntologyArchive {
 fn webserver_config(graph: &TestContext, nats_address: &str) -> AppConfig {
     let mut config = AppConfig::embedded_defaults();
     config.graph = graph.config.clone();
-    config.schema.version_poll_interval_secs = POLL_INTERVAL.as_secs();
+    config.schema.version_poll_interval_secs = RETRY_INTERVAL.as_secs();
     config.nats.url = format!("nats://{nats_address}");
     config
 }

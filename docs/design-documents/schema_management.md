@@ -160,22 +160,28 @@ parser, and compiler. Validate a cross-version rollout before relying on it.
 
 ### Webserver readiness gate
 
-`ActiveSchema` polls `gkg_schema_version` every `schema.version_poll_interval_secs` seconds
-(default `5`). Each poll reads the active version, builds a snapshot for it when the installed one
-differs, checks that every table the snapshot's ontology expects exists in `system.tables`, and
-rechecks the active version before installing. Readiness means "a snapshot is installed":
+`ActiveSchema` watches the `active_version` key in the `orbit_ontology_archives` NATS KV bucket
+instead of polling ClickHouse. The dispatcher syncs the key from `gkg_schema_version` at boot,
+right after each promotion, and on every migration-completion tick, so ClickHouse stays the source
+of truth.
+At boot, a missing key falls back to one read of `gkg_schema_version`; if that read fails too
+(fresh install, table not created yet), the webserver stays pending until the key is written.
 
-| Poll result | Snapshot | `/ready` |
+Each version the watch delivers is an install attempt: load the archive, check that every expected
+table exists in `system.tables`, swap the snapshot. Readiness means "a snapshot is installed":
+
+| Install attempt | Snapshot | `/ready` |
 |---|---|---|
 | no active version | cleared | `503` with `schema_pending` |
 | usable archive and all expected tables, whatever the version relative to the binary | installed | `200` |
 | a table of the active version is missing | cleared | `503` with `schema_pending` |
 | the active archive is missing, corrupt, or fails to load | cleared | `503` with `schema_pending` |
-| version or table metadata read fails | unchanged | last state |
+| the watch is lost (bucket dropped, NATS outage) | unchanged | last state |
 
-A failure clears the slot only once the poll confirms the failed version is still active, so a
-promotion mid-poll cannot wipe a usable snapshot. Every failure retries on the next poll without a
-restart. `/live` never depends on the active schema, and there is no outdated-version shutdown: a newer
+Failed installs retry every `schema.version_poll_interval_secs` seconds; a lost watch is reopened
+at the same cadence while the installed snapshot keeps serving. Tables are checked at install time
+only. A dispatcher from a release before this key existed never writes it, so on a rollback to
+such a release these webservers keep serving their last version until they are replaced. `/live` never depends on the active schema, and there is no outdated-version shutdown: a newer
 active version is served, not refused.
 
 While no snapshot is installed, schema-dependent RPCs (introspection, named queries, query
@@ -207,7 +213,7 @@ Implemented in `crates/orbit-server/src/active_schema.rs`.
 ```yaml
 schema:
   max_retained_versions: 2              # active + retired keep-set size (default: 2, minimum: 2)
-  version_poll_interval_secs: 5         # active-archive poll cadence (default: 5, minimum: 1)
+  version_poll_interval_secs: 5         # webserver retry/reopen backoff (default: 5, minimum: 1)
   indexer_schema_wait_timeout_secs: 300 # indexer wait budget before exiting (default: 300, minimum: 1)
 ```
 
@@ -215,8 +221,8 @@ With `max_retained_versions: 2`, cleanup keeps the active tables and the most re
 retired table-set, as well as any migrating versions. The retained version can be higher or lower
 than active after a rollback. Values below 2 are rejected at startup.
 
-`version_poll_interval_secs` controls how often the webserver re-reads the active version from
-`gkg_schema_version` to refresh its serving snapshot (see "Webserver readiness gate" above); it is
+`version_poll_interval_secs` is how long the webserver waits before retrying a failed snapshot
+install or reopening a lost active-version watch (see "Webserver readiness gate" above); it is
 also the base backoff interval for the indexer readiness gate.
 
 `indexer_schema_wait_timeout_secs` is the total time the indexer waits for the dispatcher to
@@ -411,8 +417,9 @@ Promotion and retained-table rollback change active/retired statuses in one
 [synchronous insert](https://clickhouse.com/docs/guides/developer/transactional).
 Archive storage and view changes are not transactional with that write. Promotion then clears the campaign.
 
-On promotion, every Webserver swaps to the new archive on its next poll without restarting (see
-"Webserver readiness gate"). Requests already running keep their snapshot.
+Promotion then syncs the `active_version` KV key, so every Webserver swaps to the new archive as
+soon as the write lands, without restarting (see "Webserver readiness gate"). Requests already
+running keep their snapshot.
 
 ### Automatic cleanup via retention window
 

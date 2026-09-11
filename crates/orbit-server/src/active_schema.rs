@@ -1,7 +1,10 @@
+use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use anyhow::anyhow;
 use clickhouse_client::ArrowClickHouseClient;
+use futures::TryStreamExt;
 use named_queries::{NamedQueries, NamedQuery};
 use ontology::Ontology;
 use ontology::archive::OntologyArchive;
@@ -11,6 +14,7 @@ use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::{AppConfig, PathResolverConfig};
 use query_engine::compiler::validate_normalize;
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 use tracing::{info, warn};
@@ -38,8 +42,8 @@ impl ActiveSchema {
             catalog,
             path_resolver_config: config.path_resolver.clone(),
         };
-        let poll_interval = Duration::from_secs(config.schema.version_poll_interval_secs);
-        tokio::spawn(active.clone().follow(loader, poll_interval, shutdown));
+        let retry_backoff = Duration::from_secs(config.schema.version_poll_interval_secs);
+        tokio::spawn(active.clone().follow(loader, retry_backoff, shutdown));
         active
     }
 
@@ -71,65 +75,74 @@ impl ActiveSchema {
     async fn follow(
         self: Arc<Self>,
         loader: SnapshotLoader,
-        poll_interval: Duration,
+        retry_backoff: Duration,
         shutdown: CancellationToken,
     ) {
-        let mut ticks = tokio::time::interval(poll_interval);
-        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            let poll = async {
-                ticks.tick().await;
-                self.refresh(&loader).await
-            };
             tokio::select! {
                 _ = shutdown.cancelled() => return,
-                result = poll => {
-                    if let Err(error) = result {
-                        warn!(%error, "active schema refresh failed; retrying");
-                    }
+                Err(error) = self.follow_active_version(&loader, retry_backoff) => {
+                    warn!(%error, "active version watch lost; reopening");
                 }
+            }
+            tokio::select! {
+                _ = shutdown.cancelled() => return,
+                _ = sleep(retry_backoff) => {}
             }
         }
     }
 
-    async fn refresh(&self, loader: &SnapshotLoader) -> anyhow::Result<()> {
-        let Some(active_version) = read_active_version(&loader.graph).await? else {
+    async fn follow_active_version(
+        &self,
+        loader: &SnapshotLoader,
+        retry_backoff: Duration,
+    ) -> anyhow::Result<Infallible> {
+        let mut changes = loader.catalog.active_version_changes().await?;
+        let mut target = match loader.active_version().await {
+            Ok(version) => version,
+            Err(error) => {
+                warn!(%error, "active version unknown; keeping the last installed snapshot");
+                self.installed().map(|snapshot| snapshot.migration_version)
+            }
+        };
+        loop {
+            let next_change = match self.install_version(loader, target).await {
+                Ok(()) => changes.try_next().await?,
+                Err(error) => {
+                    warn!(%error, "active schema unavailable; retrying");
+                    tokio::select! {
+                        change = changes.try_next() => change?,
+                        _ = sleep(retry_backoff) => continue,
+                    }
+                }
+            };
+            target = next_change.ok_or_else(|| anyhow!("active version watch closed"))?;
+        }
+    }
+
+    async fn install_version(
+        &self,
+        loader: &SnapshotLoader,
+        version: Option<u32>,
+    ) -> anyhow::Result<()> {
+        let Some(version) = version else {
             self.install(None);
             return Ok(());
         };
-
-        let snapshot = match self
+        if self
             .installed()
-            .filter(|snapshot| snapshot.migration_version == active_version)
+            .is_some_and(|snapshot| snapshot.migration_version == version)
         {
-            Some(current) => Ok(current),
-            None => loader.load(active_version).await,
-        };
-        let tables_complete = match &snapshot {
-            Ok(snapshot) => {
-                let expected: Vec<String> = GraphSchema::from_ontology(&snapshot.ontology)
-                    .table_names()
-                    .into_iter()
-                    .map(String::from)
-                    .collect();
-                version_tables_complete(&loader.graph, active_version, &expected).await?
-            }
-            Err(_) => false,
-        };
-
-        // A failure only clears the slot once the failed version is confirmed still
-        // active. Otherwise a promotion mid-poll would clear a usable snapshot.
-        if read_active_version(&loader.graph).await? != Some(active_version) {
             return Ok(());
         }
-        match snapshot {
+        match loader.load(version).await {
             Ok(snapshot) => {
-                self.install(tables_complete.then_some(snapshot));
+                self.install(Some(snapshot));
                 Ok(())
             }
             Err(error) => {
                 self.install(None);
-                Err(error.context(format!("active ontology v{active_version} unavailable")))
+                Err(error.context(format!("active ontology v{version} unavailable")))
             }
         }
     }
@@ -195,6 +208,15 @@ struct SnapshotLoader {
 }
 
 impl SnapshotLoader {
+    /// The key is a cache of `gkg_schema_version`; before the first dispatcher
+    /// that writes it runs, ClickHouse is the only place the answer exists.
+    async fn active_version(&self) -> anyhow::Result<Option<u32>> {
+        match self.catalog.active_version().await? {
+            Some(version) => Ok(Some(version)),
+            None => Ok(read_active_version(&self.graph).await?),
+        }
+    }
+
     async fn load(&self, version: u32) -> anyhow::Result<Arc<SchemaSnapshot>> {
         let ontology = if version == self.embedded.schema_version() {
             self.embedded.load_ontology()?
@@ -202,6 +224,14 @@ impl SnapshotLoader {
             self.catalog.load(version).await?.load_ontology()?
         };
         let ontology = Arc::new(ontology.with_schema_version_prefix(&table_prefix(version)));
+        let expected_tables: Vec<String> = GraphSchema::from_ontology(&ontology)
+            .table_names()
+            .into_iter()
+            .map(String::from)
+            .collect();
+        if !version_tables_complete(&self.graph, version, &expected_tables).await? {
+            return Err(anyhow!("v{version} tables are incomplete"));
+        }
         let path_resolver =
             PathResolver::new(self.graph.clone(), &ontology, &self.path_resolver_config).await;
         SchemaSnapshot::new(version, ontology, Arc::new(path_resolver)).map(Arc::new)
