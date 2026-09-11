@@ -185,10 +185,11 @@ previous definitions remain indexed. Definition reads return the full current fi
 labeled `ranges=unverified`, instead of potentially stale slices. File overviews
 report that the outline is unavailable. Test code is included.
 
-File refresh invalidates all relationships for the affected project. Dedicated
-relationship lookups refuse incomplete results; SQL, MCP, and repository maps
-warn about affected projects. Re-run `orbit index` to rebuild relationships.
-An empty relationship result while invalidated does not mean there are no connections.
+File refresh also reparses the indexed files that import a changed file, or that
+it imports, so relationships between them are re-resolved. Relationships between
+unchanged files are kept. If a changed file imports a project file the indexer
+cannot parse, relationship commands, SQL, MCP, and repository maps warn that
+relationships may be stale for that file. Re-run `orbit index` to clear the warning.
 
 Name/path matches and missing graph relationships do not establish field reads,
 field writes, or dataflow. Inspect source bodies to check these details.

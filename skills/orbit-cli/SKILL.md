@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.7
+version: 0.5.8
 license: MIT
 metadata:
   audience: developers
@@ -129,10 +129,11 @@ keep the previous definitions; definition reads return the full current file wit
 `ranges=unverified`, and file overviews report that the outline is unavailable.
 Test code is included.
 
-File refresh invalidates all relationships for that project: it is not a full
-semantic rebuild. Relationship lookups refuse incomplete results; SQL, MCP, and
-repo maps warn about affected projects. Re-run `index` to rebuild relationships.
-Do not treat missing connections as evidence that code is unrelated.
+File refresh reparses changed files together with the indexed files they import
+or that import them, so cross-file relationships are re-resolved without a full
+rebuild. Edges touching unchanged files are kept. When a changed file imports a
+project file that the indexer cannot parse, relationship commands print a
+stale warning naming that file; re-run `index` to clear it.
 
 `--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
 (`"Class|Method"`) also works. It is not repeatable.

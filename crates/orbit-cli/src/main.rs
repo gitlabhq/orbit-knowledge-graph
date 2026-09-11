@@ -192,8 +192,8 @@ struct IndexArgs {
                   Start implementing once the edit point and nearby pattern are clear. \
                   Queries with three or fewer matches include source automatically. \
                   Search matches indexed names and paths, not source bodies or regexes. \
-                  Changed and new source files are refreshed on demand; unchanged files are not reparsed. \
-                  Project relationships are invalidated until a full `index` rebuild. \
+                  Changed and new source files are refreshed on demand together with their import neighbors; \
+                  other files are not reparsed. \
                   Name/path matches do not establish a code connection or dataflow.\n\n\
                   Add --related-to, --callers, or --callees to a positional FQN for \
                   relationship lookups. An explicit target after the flag takes \
@@ -285,7 +285,8 @@ fn context_long_about() -> String {
          Refreshes changed and new source files on demand without reparsing unchanged files. \
          If source cannot be verified, file requests report an unavailable outline; \
          definition requests show the full file labeled `ranges=unverified`. \
-         File refresh invalidates project relationships; re-run `index` to rebuild them.",
+         File refresh re-resolves relationships through import neighbors; imports outside the \
+         indexed checkout leave a stale-relationship warning until a full `index`.",
         launcher = commands::setup::spec::launcher()
     )
 }
@@ -1065,7 +1066,11 @@ fn index_repo(
     let mut sources = workspace::fingerprint_files(&git.repo_path, &file_inventory);
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
-    refresh::mark_incomplete(&client, git)?;
+    refresh::mark_stale(
+        &client,
+        git.project_id,
+        "the whole project until indexing completes",
+    )?;
     workspace::store_source_fingerprints(&client, git.project_id, &Default::default())?;
 
     let node_tables: Vec<String> = ontology
@@ -1146,7 +1151,7 @@ fn index_repo(
         .collect();
     workspace::store_source_fingerprints(&client, git.project_id, &sources)?;
     if stable_sources {
-        refresh::clear_incomplete(&client, git.project_id)?;
+        refresh::clear_stale(&client, git.project_id)?;
     }
     workspace::set_status(
         &client,
