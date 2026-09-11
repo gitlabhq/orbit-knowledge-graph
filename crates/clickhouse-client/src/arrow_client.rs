@@ -98,7 +98,10 @@ fn replicate_merge_tree_engines(sql: &str) -> String {
             .find(|c: char| !c.is_alphanumeric() && c != '_')
             .map_or(sql.len(), |end| index + end);
         let engine = &sql[index..word_end];
-        if engine.ends_with("MergeTree") && !engine.starts_with("Replicated") {
+        if engine.ends_with("MergeTree")
+            && !engine.starts_with("Replicated")
+            && !engine.starts_with("Shared")
+        {
             result.push_str("Replicated");
         }
         cursor = index;
@@ -476,6 +479,12 @@ impl ArrowQuery {
         self
     }
 
+    /// For statements that are not idempotent, such as `ATTACH PARTITION ... FROM`.
+    pub fn without_quorum_retry(mut self) -> Self {
+        self.retry_quorum_conflicts = false;
+        self
+    }
+
     pub async fn execute(self) -> Result<(), ClickHouseError> {
         if !self.retry_quorum_conflicts {
             return self.inner.execute().await.map_err(ClickHouseError::Query);
@@ -791,7 +800,7 @@ mod tests {
             ),
             "CREATE TABLE t (x Int64) Engine  =\n  ReplicatedSummingMergeTree() ORDER BY x"
         );
-        let untouched = "CREATE TABLE t (engine String, x Int64) ENGINE = Null; SELECT engine FROM system.tables WHERE engine = 'MergeTree'";
+        let untouched = "CREATE TABLE t (engine String, x Int64) ENGINE = Null; SELECT engine FROM system.tables WHERE engine = 'MergeTree'; CREATE TABLE c (x Int64) ENGINE = SharedMergeTree ORDER BY x";
         assert_eq!(replicate_merge_tree_engines(untouched), untouched);
     }
 

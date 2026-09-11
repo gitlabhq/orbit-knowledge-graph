@@ -100,7 +100,7 @@ Then tell each writer that the cluster is replicated:
 | GitLab Orbit | `clickhouse.datalake.replicated: true` and `clickhouse.graph.replicated: true` in the Helm values. |
 
 With the switch on, GitLab Orbit creates `Replicated*MergeTree` tables, writes with a majority quorum, reads
-with sequential consistency, and retries the two transient quorum errors. One replica can leave the cluster
+with sequential consistency, and retries the transient quorum and Keeper errors. One replica can leave the cluster
 while indexing and queries continue. Leave the switch off on a single node and on ClickHouse Cloud.
 
 ClickHouse 26.7 and later reject the GitLab migrations that create `AggregatingMergeTree` tables with

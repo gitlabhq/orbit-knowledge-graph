@@ -122,6 +122,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `datalake.username` | `default` | Auth user |
 | `datalake.password` | None | Auth password |
 | `datalake.session_settings` | `{}` | ClickHouse session-level settings (e.g., `max_execution_time`, `max_query_size`) |
+| `datalake.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
 ### Graph
 

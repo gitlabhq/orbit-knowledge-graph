@@ -273,28 +273,18 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
     let sql = "SELECT s FROM wide_overflow ORDER BY id LIMIT 2148";
 
     // preferred_block_size_bytes=0 reproduces the incident profile; the default
-    // of 1MB would mask the bug.
-    let mut without_cap = client
+    // of 1MB would mask the bug. The overflow arrives with the first chunk.
+    let overflow = client
         .query(sql)
         .with_setting("max_memory_usage", "0")
         .with_setting("preferred_block_size_bytes", "0")
         .fetch_arrow_streamed(Some(8_000))
         .await
-        .expect("query opens");
-    let mut overflowed = false;
-    while let Some(batch) = without_cap.next().await {
-        if let Err(err) = batch {
-            assert!(
-                err.to_string().contains("cannot contain more than"),
-                "expected the Arrow 2GB overflow, got: {err}"
-            );
-            overflowed = true;
-            break;
-        }
-    }
+        .err()
+        .expect("a reduced row cap alone must still overflow on a >2GB block");
     assert!(
-        overflowed,
-        "a reduced row cap alone must still overflow on a >2GB block"
+        overflow.to_string().contains("cannot contain more than"),
+        "expected the Arrow 2GB overflow, got: {overflow}"
     );
 
     let mut with_cap = client
