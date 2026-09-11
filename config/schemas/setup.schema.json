@@ -2,9 +2,9 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "setup.schema.json",
   "title": "Orbit setup texts",
-  "description": "Every string `orbit setup` writes into an assistant's files: the managed instruction block, the two hook nudges, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-cli/src/commands/setup/spec.rs.",
+  "description": "Every string `orbit setup` writes into an assistant's files: the managed instruction block, the hook nudges, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-cli/src/commands/setup/spec.rs.",
   "type": "object",
-  "required": ["instructions", "nudge_search", "nudge_read"],
+  "required": ["instructions", "nudge_search", "nudge_usage", "nudge_in_file", "nudge_read"],
   "additionalProperties": false,
   "properties": {
     "instructions": {
@@ -15,7 +15,17 @@
     "nudge_search": {
       "type": "string",
       "minLength": 1,
-      "description": "Context the hook guard returns for a search tool call."
+      "description": "Context the hook guard returns for a search whose term or target it cannot name."
+    },
+    "nudge_usage": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Context the hook guard returns for a text search over a tree for an identifier; {{term}} is the identifier."
+    },
+    "nudge_in_file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Context the hook guard returns for a text search inside one source file; {{term}} is the identifier and {{path}} the shell-quoted file."
     },
     "nudge_read": {
       "type": "string",

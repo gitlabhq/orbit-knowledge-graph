@@ -188,7 +188,9 @@ struct IndexArgs {
                   not cat, head, sed, or raw Read. Use those bodies for exact edits; \
                   use context --file for a file overview with imports and signatures. \
                   Start implementing once the edit point and nearby pattern are clear. \
-                  Queries with three or fewer matches include source automatically. \
+                  Shows the top ten matches, with source for the first five in a shared 24,000-character output budget. \
+                  Remaining source space is divided equally among the selected matches. \
+                  Long bodies stop at a line boundary with a truncation notice and a context command. \
                   Search matches indexed names and paths, not source bodies or regexes. \
                   Changed and new source files are refreshed on demand together with their neighbors \
                   (files they import, that import them, or that share a relationship); other files are not reparsed. \
@@ -210,11 +212,6 @@ struct GrepArgs {
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
-
-    /// Maximum matched definitions to show, shared across the queries of one
-    /// call (at least three each).
-    #[arg(long, default_value = "10")]
-    limit: usize,
 
     /// Only search definitions under this repo-relative directory or file
     /// (e.g. `crates/query-engine`); repeatable, and accepts globs such as
@@ -656,7 +653,6 @@ async fn dispatch(command: Commands) -> Result<()> {
         Commands::Grep(GrepArgs {
             query,
             repo,
-            limit,
             path,
             kind,
             db,
@@ -664,7 +660,6 @@ async fn dispatch(command: Commands) -> Result<()> {
             query,
             repo,
             db,
-            limit,
             path,
             orbit_search::RecallFilter {
                 kinds: kind_names(kind),
@@ -1239,7 +1234,7 @@ mod tests {
         );
 
         assert!(matches!(
-            Cli::parse_from(["orbit", "grep", "who calls this", "--limit", "5"]).command,
+            Cli::parse_from(["orbit", "grep", "who calls this"]).command,
             Commands::Grep(_)
         ));
         assert!(matches!(
@@ -1302,6 +1297,7 @@ mod tests {
             &["orbit", "remote", "status"],
             &["orbit", "ask", "x"],
             &["orbit", "grep", "x", "--body"],
+            &["orbit", "grep", "x", "--limit", "5"],
             &["orbit", "context", "x", "--outline"],
             &["orbit", "grep", "x", "--related"],
             &["orbit", "context", "--file", "a.rs", "--related"],

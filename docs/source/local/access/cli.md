@@ -163,17 +163,21 @@ working.
 ## Search definitions
 
 `grep` searches indexed names and paths, not source bodies or regular expressions.
+It returns the top ten ranked matches without parent or file quotas.
 Use one concept per query, such as `orbit grep "rate limit"`. Inspect weak or
 unmatched candidates with `context` before retrying; **weak matches** does not
 mean every term failed to match.
 
 Read known definitions directly with `orbit context <fqn>`, or use
 `context --file <path>` for a file overview with imports and definition
-signatures. Reuse that source
-for edits instead of reading it again with raw file tools. Start implementing
+signatures. Numbered source lines are verbatim working-tree text. Strip `NN|`
+and reuse them for edits instead of rereading the file with raw tools. Start implementing
 once the edit point is clear; follow identifiers only for remaining questions
-and batch independent lookups. Queries with three or fewer matches include source
-automatically; broader results include a copyable `context` command.
+and batch independent lookups. `grep` includes source for the first five matches, including weak matches,
+with exact identifiers first. A shared 24,000-character budget covers the whole
+response, including batched queries and path listings. After result listings,
+the remaining space is divided equally among the selected matches. Long bodies
+stop at a line boundary with a truncation notice and a `context` command.
 
 `grep` and `context` refresh changed and new source files on demand, including
 edits made without changing commits. Deleted files are removed. Unchanged files
@@ -183,8 +187,9 @@ search results and definition ranges together.
 
 If parsing fails, source is unsupported, or files change during refresh, the
 previous definitions remain indexed. Definition reads return the full current file,
-labeled `ranges=unverified`, instead of potentially stale slices. File overviews
-report that the outline is unavailable. Test code is included.
+labeled `ranges=unverified`, instead of potentially stale slices. `grep` uses that
+label and truncates the current file to its source budget. File overviews report that the outline
+is unavailable. Test code is included.
 
 File refresh also reparses the changed file's neighbors: files it imports, files
 that import it, and files that share a relationship with it. Relationships between
@@ -202,7 +207,7 @@ Name/path matches and missing graph relationships do not establish field reads,
 field writes, or dataflow. Inspect source bodies to check these details.
 
 Use `--repo` to choose a checkout and `--db` to choose its database. Use `--path`
-or `--kind` to narrow search results, and `--limit` to change the number shown.
+or `--kind` to narrow search results. `grep` has no `--limit` flag.
 
 ## Run as an MCP server
 

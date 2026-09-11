@@ -20,6 +20,8 @@ struct SetupAssets;
 struct SetupTexts {
     instructions: String,
     nudge_search: String,
+    nudge_usage: String,
+    nudge_in_file: String,
     nudge_read: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
@@ -58,6 +60,12 @@ static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instruc
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| render_launcher(TEXTS.nudge_search.trim_end(), launcher()));
 
+static RENDERED_NUDGE_USAGE: LazyLock<String> =
+    LazyLock::new(|| render_launcher(TEXTS.nudge_usage.trim_end(), launcher()));
+
+static RENDERED_NUDGE_IN_FILE: LazyLock<String> =
+    LazyLock::new(|| render_launcher(TEXTS.nudge_in_file.trim_end(), launcher()));
+
 static RENDERED_NUDGE_READ: LazyLock<String> =
     LazyLock::new(|| render_launcher(TEXTS.nudge_read.trim_end(), launcher()));
 
@@ -67,6 +75,14 @@ pub(crate) fn instructions() -> &'static str {
 
 pub(crate) fn nudge_search() -> &'static str {
     &RENDERED_NUDGE_SEARCH
+}
+
+pub(crate) fn nudge_usage() -> &'static str {
+    &RENDERED_NUDGE_USAGE
+}
+
+pub(crate) fn nudge_in_file() -> &'static str {
+    &RENDERED_NUDGE_IN_FILE
 }
 
 pub(crate) fn nudge_read() -> &'static str {
@@ -223,6 +239,14 @@ mod tests {
             assert!(!text.trim().is_empty());
             assert!(!text.contains("{{"), "unresolved placeholder: {text}");
         }
+        for text in [nudge_usage(), nudge_in_file()] {
+            assert!(!text.contains("{{orbit}}"), "unresolved launcher: {text}");
+            assert!(
+                text.contains("{{term}}"),
+                "missing term placeholder: {text}"
+            );
+        }
+        assert!(nudge_in_file().contains("{{path}}"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 mod local;
 
-use std::io::Write;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -28,14 +28,50 @@ fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVo
     ))
 }
 
-const MIN_HITS_PER_QUERY: usize = 3;
-const BODY_LIMIT: usize = 3;
+const RESULT_LIMIT: usize = 10;
+const BODY_LIMIT: usize = 5;
+const OUTPUT_CHARS: usize = 24_000;
+const OUTPUT_OMITTED: &str =
+    "\nOutput budget reached; narrow with --path/--kind or use context on a listed FQN.\n";
+
+struct Output {
+    text: String,
+    remaining: usize,
+    omitted: bool,
+}
+
+impl Output {
+    fn new() -> Self {
+        Self {
+            text: String::new(),
+            remaining: OUTPUT_CHARS - OUTPUT_OMITTED.chars().count(),
+            omitted: false,
+        }
+    }
+
+    fn push(&mut self, text: &str) -> bool {
+        let chars = text.chars().count();
+        if chars > self.remaining {
+            self.omitted = true;
+            return false;
+        }
+        self.text.push_str(text);
+        self.remaining -= chars;
+        true
+    }
+
+    fn finish(mut self) -> String {
+        if self.omitted {
+            self.text.push_str(OUTPUT_OMITTED);
+        }
+        self.text
+    }
+}
 
 pub(crate) fn run(
     queries: Vec<String>,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
-    limit: usize,
     paths: Vec<String>,
     filter: RecallFilter,
 ) -> Result<()> {
@@ -51,77 +87,95 @@ pub(crate) fn run(
     let context_command = context_command(launcher, repo.as_deref(), db.as_deref());
     let (git, search) = local::open(repo, db, &paths)?;
 
-    let mut out = std::io::stdout().lock();
+    let mut out = Output::new();
     if queries.is_empty() {
-        return report_outline(
+        report_outline(
             &mut out,
             &search,
             git.short_sha(),
             &paths,
             &filter,
             launcher,
-        );
+        )?;
+        print!("{}", out.finish());
+        return Ok(());
     }
     if !paths.is_empty() {
-        writeln!(out, "path: {}", paths.join(" "))?;
+        out.push(&format!("path: {}\n", paths.join(" ")));
     }
     if !filter.kinds.is_empty() {
-        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
+        out.push(&format!("kind: {}\n", filter.kinds.join(" ")));
     }
 
     let vocab = build_vocab(&search)?;
-    let per_query_limit = (limit / queries.len()).max(MIN_HITS_PER_QUERY.min(limit));
+    let mut defs = Vec::new();
     for (i, query) in queries.iter().enumerate() {
+        let mut header = format!("grep {:?} @ {}\n", query, git.short_sha());
         if i > 0 {
-            writeln!(out)?;
+            header.insert(0, '\n');
         }
-        writeln!(out, "grep {:?} @ {}", query, git.short_sha())?;
-        let outcome = search.grep(query, per_query_limit, &vocab, &filter)?;
+        if !out.push(&header) {
+            break;
+        }
+        let mut outcome = search.grep(query, RESULT_LIMIT, &vocab, &filter)?;
+        outcome
+            .matches
+            .sort_by_key(|candidate| !exact_match(&candidate.row, query));
         let typed: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         if outcome.terms != typed {
-            writeln!(out, "terms: {}", outcome.terms.join(" "))?;
+            out.push(&format!("terms: {}\n", outcome.terms.join(" ")));
         }
 
         if outcome.matches.is_empty() {
             if paths.is_empty() && filter.is_empty() {
-                writeln!(out, "\nNo definitions match those terms.")?;
+                out.push("\nNo definitions match those terms.\n");
             } else {
-                writeln!(
-                    out,
-                    "\nNo definitions match those terms within that scope; drop --path/--kind to widen."
-                )?;
+                out.push("\nNo definitions match those terms within that scope; drop --path/--kind to widen.\n");
             }
-            writeln!(
-                out,
+            out.push(
                 "Rephrase and retry once — use synonyms or identifier fragments \
                  from the code (e.g. \"throttle\" → \"rate limit\"). If the retry \
-                 also misses, fall back to text grep."
-            )?;
+                 also misses, fall back to text grep.\n",
+            );
             continue;
         }
 
-        let show_bodies = outcome.total <= BODY_LIMIT;
-        report_results(
-            &mut out,
-            &outcome,
-            (!show_bodies).then_some(&context_command),
-        )?;
-        if show_bodies {
-            let defs: Vec<Def> = outcome
-                .matches
-                .iter()
-                .take(BODY_LIMIT)
-                .map(|m| def_from(&m.row))
-                .collect();
-            writeln!(out)?;
-            write!(
-                out,
-                "{}",
-                context::render_bodies(search.client(), &git, &defs)?
-            )?;
+        for candidate in &outcome.matches {
+            let def = def_from(&candidate.row);
+            if defs.len() < BODY_LIMIT && !defs.contains(&def) {
+                defs.push(def);
+            }
+        }
+        let mut report = String::new();
+        report_results(&mut report, &outcome, Some(&context_command))?;
+        if !out.push(&report) {
+            break;
         }
     }
+    if !defs.is_empty() {
+        let bodies = context::render_bodies(
+            search.client(),
+            &git,
+            &defs,
+            out.remaining,
+            &context_command,
+        )?;
+        if bodies.is_empty() {
+            out.omitted = true;
+        }
+        out.push(&bodies);
+    }
+    print!("{}", out.finish());
     Ok(())
+}
+
+fn exact_match(row: &orbit_search::CorpusRow, query: &str) -> bool {
+    row.fqn.eq_ignore_ascii_case(query.trim())
+        || row
+            .fqn
+            .rsplit([':', '.', '#', '/'])
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case(query.trim()))
 }
 
 fn def_from(row: &orbit_search::CorpusRow) -> Def {
@@ -137,28 +191,27 @@ fn def_from(row: &orbit_search::CorpusRow) -> Def {
 }
 
 fn report_outline(
-    out: &mut impl Write,
+    out: &mut Output,
     search: &DuckDbSearch,
     header: &str,
     paths: &[String],
     filter: &RecallFilter,
     launcher: &str,
 ) -> Result<()> {
-    writeln!(out, "outline {} @ {header}", paths.join(" "))?;
+    out.push(&format!("outline {} @ {header}\n", paths.join(" ")));
     if !filter.kinds.is_empty() {
-        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
+        out.push(&format!("kind: {}\n", filter.kinds.join(" ")));
     }
     let rows = search.list_corpus(filter)?;
     if rows.is_empty() {
-        writeln!(
-            out,
-            "\nNo indexed definitions under that path. Paths are repo-relative, as printed by `{launcher} grep`."
-        )?;
+        out.push(&format!("\nNo indexed definitions under that path. Paths are repo-relative, as printed by `{launcher} grep`.\n"));
         return Ok(());
     }
-    writeln!(out, "\nDefinitions ({}):", rows.len())?;
+    out.push(&format!("\nDefinitions ({}):\n", rows.len()));
     for r in &rows {
-        writeln!(out, "  {}  [{}]  {}", r.fqn, r.kind, r.loc)?;
+        if !out.push(&format!("  {}  [{}]  {}\n", r.fqn, r.kind, r.loc)) {
+            break;
+        }
     }
     Ok(())
 }
@@ -177,7 +230,7 @@ fn report_results(
     out: &mut impl Write,
     outcome: &orbit_search::GrepOutcome,
     context_command: Option<&str>,
-) -> std::io::Result<()> {
+) -> std::fmt::Result {
     if let Some(command) = context_command.filter(|_| !outcome.matches.is_empty()) {
         write!(out, "Candidate context: {command} --")?;
         for candidate in outcome.matches.iter().take(BODY_LIMIT) {
@@ -190,28 +243,15 @@ fn report_results(
     for m in &outcome.matches {
         writeln!(out, "  {}  [{}]  {}", m.row.fqn, m.row.kind, m.row.loc)?;
     }
-    let hidden = outcome.total.saturating_sub(outcome.matches.len());
-    if hidden >= BROAD_HIDDEN_HITS {
-        writeln!(
-            out,
-            "  … {hidden} more — the query is broad; scope with --path <dir>/--kind <Kind> or use a more specific identifier"
-        )?;
-    } else if hidden > 0 {
-        writeln!(
-            out,
-            "  … {hidden} more (narrow with --path/--kind, or raise --limit)"
-        )?;
-    }
     Ok(())
 }
 
 const COMPOUND_TERM_HINT: usize = 5;
-const BROAD_HIDDEN_HITS: usize = 100;
 
 fn report_confidence(
     out: &mut impl Write,
     outcome: &orbit_search::GrepOutcome,
-) -> std::io::Result<()> {
+) -> std::fmt::Result {
     if outcome.terms.len() >= COMPOUND_TERM_HINT {
         writeln!(
             out,
@@ -252,7 +292,6 @@ mod tests {
         orbit_search::GrepOutcome {
             terms: Vec::new(),
             matches: Vec::new(),
-            total: 0,
             weak,
             unmatched_terms: unmatched.into_iter().map(String::from).collect(),
             term_anchors: Vec::new(),
@@ -261,9 +300,9 @@ mod tests {
 
     #[test]
     fn partial_anchor_note_lists_unmatched_terms_with_a_retry_instruction() {
-        let mut buf = Vec::new();
+        let mut buf = String::new();
         report_confidence(&mut buf, &outcome(vec!["throttle", "dlq"], false)).unwrap();
-        let text = String::from_utf8(buf).unwrap();
+        let text = buf;
         assert!(text.contains("no matches for: throttle, dlq"), "{text}");
         assert!(
             text.contains("retry once with a synonym or identifier"),
@@ -274,28 +313,13 @@ mod tests {
 
     #[test]
     fn weak_and_unmatched_notes_stack() {
-        let mut buf = Vec::new();
+        let mut buf = String::new();
         report_confidence(&mut buf, &outcome(vec!["throttle"], true)).unwrap();
-        let text = String::from_utf8(buf).unwrap();
+        let text = buf;
         assert!(text.contains("weak matches"), "{text}");
         assert!(text.contains("symbol names do not closely match"), "{text}");
         assert!(!text.contains("no term anchors"), "{text}");
         assert!(text.contains("no matches for: throttle"), "{text}");
-    }
-
-    #[test]
-    fn truncated_results_report_how_many_were_hidden() {
-        let mut o = outcome(Vec::new(), false);
-        o.total = 42;
-        let mut buf = Vec::new();
-        report_results(&mut buf, &o, None).unwrap();
-        let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("42 more (narrow"), "{text}");
-
-        o.total = 0;
-        let mut buf = Vec::new();
-        report_results(&mut buf, &o, None).unwrap();
-        assert!(!String::from_utf8(buf).unwrap().contains(" more"));
     }
 
     #[test]
@@ -321,13 +345,12 @@ mod tests {
             score: 0.0,
         })
         .collect();
-        o.total = o.matches.len();
-        let mut buf = Vec::new();
+        let mut buf = String::new();
         report_results(&mut buf, &o, Some("orbit context")).unwrap();
-        let text = String::from_utf8(buf).unwrap();
+        let text = buf;
         assert_eq!(
             text.lines().next().unwrap(),
-            "Candidate context: orbit context -- 'crate::Type::field' 'crate::module' 'crate::it'\\''s_a_function'"
+            "Candidate context: orbit context -- 'crate::Type::field' 'crate::module' 'crate::it'\\''s_a_function' 'crate::other'"
         );
         let nodes: Vec<_> = text.lines().filter(|line| line.starts_with("  ")).collect();
         assert_eq!(nodes.len(), o.matches.len());
@@ -338,21 +361,13 @@ mod tests {
             );
         }
 
-        let mut buf = Vec::new();
+        let mut buf = String::new();
         report_results(&mut buf, &o, None).unwrap();
-        assert!(
-            !String::from_utf8(buf)
-                .unwrap()
-                .contains("Candidate context:")
-        );
+        assert!(!buf.contains("Candidate context:"));
         o.matches.clear();
-        let mut buf = Vec::new();
+        let mut buf = String::new();
         report_results(&mut buf, &o, Some("orbit context")).unwrap();
-        assert!(
-            !String::from_utf8(buf)
-                .unwrap()
-                .contains("Candidate context:")
-        );
+        assert!(!buf.contains("Candidate context:"));
     }
 
     #[test]
@@ -370,7 +385,7 @@ mod tests {
 
     #[test]
     fn confident_full_anchor_prints_no_notes() {
-        let mut buf = Vec::new();
+        let mut buf = String::new();
         report_confidence(&mut buf, &outcome(Vec::new(), false)).unwrap();
         assert!(buf.is_empty());
     }

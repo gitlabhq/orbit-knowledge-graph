@@ -9,7 +9,6 @@ use crate::vocab::SearchVocab;
 pub struct GrepOutcome {
     pub terms: Vec<String>,
     pub matches: Vec<GrepMatch>,
-    pub total: usize,
     pub weak: bool,
     pub unmatched_terms: Vec<String>,
     pub term_anchors: Vec<(String, String)>,
@@ -187,7 +186,6 @@ pub fn grep<S: GrepSource>(
     Ok(GrepOutcome {
         terms,
         matches,
-        total: corpus.len(),
         weak,
         unmatched_terms: unmatched,
         term_anchors,
@@ -261,24 +259,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(outcome.matches.len(), 2);
-        assert_eq!(outcome.total, 2);
         assert_eq!(outcome.matches[0].row.id, HOOK_ID);
         assert!(!outcome.weak, "both terms fully anchor one row");
         assert!(outcome.unmatched_terms.is_empty());
-    }
-
-    #[test]
-    fn limit_trims_matches_but_total_reports_every_recalled_row() {
-        let outcome = grep(
-            &FakeRecallSource,
-            "commit",
-            1,
-            &test_vocab(),
-            &RecallFilter::default(),
-        )
-        .unwrap();
-        assert_eq!(outcome.matches.len(), 1);
-        assert_eq!(outcome.total, 2);
     }
 
     #[test]

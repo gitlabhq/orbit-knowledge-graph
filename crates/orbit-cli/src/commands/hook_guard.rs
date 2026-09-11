@@ -27,6 +27,8 @@ const COMMAND_WRAPPERS: &[&str] = &[
     "command", "env", "git", "nice", "nohup", "sudo", "time", "xargs",
 ];
 
+const ESCAPED_METACHARS: [(&str, &str); 3] = [("\\|", "\u{1}"), ("\\(", "\u{2}"), ("\\)", "\u{3}")];
+
 const SOURCE_EXTS: &[&str] = &[
     "py", "js", "cjs", "mjs", "ts", "tsx", "jsx", "vue", "svelte", "go", "rs", "java", "rb", "c",
     "h", "cpp", "hpp", "cc", "cs", "kt", "kts", "swift", "php", "scala", "lua", "sh", "pl",
@@ -59,6 +61,8 @@ pub(crate) fn run(kind: Kind) {
 #[derive(Debug, PartialEq, Eq)]
 enum Nudge {
     Search,
+    Usage { term: String },
+    InFile { term: String, path: String },
     Read { path: Option<String> },
 }
 
@@ -66,6 +70,15 @@ impl Nudge {
     fn text(&self) -> String {
         match self {
             Self::Search => spec::nudge_search().to_string(),
+            Self::Usage { term } => spec::nudge_usage().replace("{{term}}", term),
+            Self::InFile { term, path } => {
+                let path = workspace::absolutize(path.into())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| path.clone());
+                spec::nudge_in_file()
+                    .replace("{{term}}", term)
+                    .replace("{{path}}", &shell_quote(&path))
+            }
             Self::Read { path: Some(path) } => {
                 let Ok(path) = workspace::absolutize(path.into()) else {
                     return spec::nudge_read().to_string();
@@ -86,15 +99,14 @@ fn resolve(kind: Kind, call: &Value) -> Option<Nudge> {
                 .get("command")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            let is_pattern_tool = command.is_empty()
-                && tool_input
-                    .get("pattern")
-                    .and_then(Value::as_str)
-                    .is_some_and(|p| !p.is_empty());
-            if is_pattern_tool {
-                return Some(Nudge::Search);
+            let pattern = tool_input.get("pattern").and_then(Value::as_str);
+            if command.is_empty() && pattern.is_some_and(|p| !p.is_empty()) {
+                let path = tool_input.get("path").and_then(Value::as_str);
+                let pattern = mask_escapes(pattern.unwrap_or(""));
+                return Some(search_nudge(&pattern, path.into_iter()));
             }
-            source_read_nudge(command).or_else(|| invokes_search(command).then_some(Nudge::Search))
+            let command = mask_escapes(command);
+            source_read_nudge(&command).or_else(|| command_search_nudge(&command))
         }
         Kind::Read => {
             let path = tool_input
@@ -108,24 +120,91 @@ fn resolve(kind: Kind, call: &Value) -> Option<Nudge> {
     }
 }
 
-fn invokes_search(command: &str) -> bool {
-    command
-        .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(segment_invokes_search)
+fn mask_escapes(text: &str) -> String {
+    ESCAPED_METACHARS
+        .iter()
+        .fold(text.to_string(), |acc, (escaped, mask)| {
+            acc.replace(escaped, mask)
+        })
 }
 
-fn segment_invokes_search(segment: &str) -> bool {
-    for token in segment.split_whitespace() {
-        if token.starts_with('-') || token.contains('=') {
-            continue;
+fn invokes_search(command: &str) -> bool {
+    search_segments(command).next().is_some()
+}
+
+fn search_segments(command: &str) -> impl Iterator<Item = &str> {
+    command
+        .split(['|', ';', '&', '\n', '(', ')', '`'])
+        .filter(|segment| search_operands(segment).is_some())
+}
+
+fn search_operands(segment: &str) -> Option<Vec<&str>> {
+    let mut tokens = segment.split_whitespace();
+    let name = tokens
+        .by_ref()
+        .filter(|t| !t.starts_with('-') && !t.contains('='))
+        .map(basename)
+        .find(|name| !COMMAND_WRAPPERS.contains(name))?;
+    SEARCH_COMMANDS.contains(&name).then(|| {
+        let mut operands = Vec::new();
+        let mut explicit_pattern = None;
+        let mut tokens = tokens.peekable();
+        while let Some(token) = tokens.next() {
+            if matches!(token, "-e" | "--regexp") {
+                explicit_pattern = tokens.next();
+            } else if !token.starts_with('-') {
+                operands.push(token);
+            }
         }
-        let name = basename(token);
-        if COMMAND_WRAPPERS.contains(&name) {
-            continue;
+        if let Some(pattern) = explicit_pattern {
+            operands.insert(0, pattern);
         }
-        return SEARCH_COMMANDS.contains(&name);
+        operands
+    })
+}
+
+fn command_search_nudge(command: &str) -> Option<Nudge> {
+    let segment = search_segments(command).next()?;
+    let operands = search_operands(segment)?;
+    let mut operands = operands
+        .into_iter()
+        .skip_while(|t| t.chars().all(|c| c.is_ascii_digit()));
+    let pattern = operands.next().unwrap_or("");
+    Some(search_nudge(pattern, operands))
+}
+
+fn search_nudge<'a>(pattern: &str, targets: impl Iterator<Item = &'a str>) -> Nudge {
+    let targets: Vec<&str> = targets.map(|t| t.trim_matches(['\'', '"'])).collect();
+    let Some(term) = identifier_term(pattern) else {
+        return Nudge::Search;
+    };
+    match targets.as_slice() {
+        [path] if is_source_path(path) && !path.contains(['*', '?', '[', '{']) => Nudge::InFile {
+            term,
+            path: path.to_string(),
+        },
+        _ => Nudge::Usage { term },
     }
-    false
+}
+
+fn identifier_term(pattern: &str) -> Option<String> {
+    let quote = pattern.chars().next().filter(|c| matches!(c, '\'' | '"'));
+    if quote.is_some_and(|q| pattern.len() == 1 || !pattern.ends_with(q)) {
+        return None;
+    }
+    let is_identifier_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':');
+    pattern
+        .trim_matches(['\'', '"'])
+        .split(['|', '\u{1}'])
+        .map(strip_regex_anchors)
+        .find(|candidate| {
+            candidate
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && candidate.chars().all(is_identifier_char)
+        })
+        .map(str::to_string)
 }
 
 fn source_read_nudge(command: &str) -> Option<Nudge> {
@@ -162,6 +241,26 @@ fn source_read_nudge(command: &str) -> Option<Nudge> {
         })
 }
 
+fn strip_regex_anchors(alternative: &str) -> &str {
+    let mut candidate = alternative;
+    loop {
+        let trimmed = ["^", "\\b", "\\<", "(", "\u{2}"]
+            .iter()
+            .fold(candidate, |acc, anchor| {
+                acc.strip_prefix(anchor).unwrap_or(acc)
+            });
+        let trimmed = ["$", "\\b", "\\>", ")", "\u{3}", "(", "\u{2}"]
+            .iter()
+            .fold(trimmed, |acc, anchor| {
+                acc.strip_suffix(anchor).unwrap_or(acc)
+            });
+        if trimmed == candidate {
+            return candidate;
+        }
+        candidate = trimmed;
+    }
+}
+
 fn basename(token: &str) -> &str {
     token.rsplit('/').next().unwrap_or(token)
 }
@@ -181,10 +280,30 @@ fn is_source_path(path: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn usage(term: &str) -> Option<Nudge> {
+        Some(Nudge::Usage {
+            term: term.to_string(),
+        })
+    }
+
     #[test]
     fn grep_tool_pattern_nudges() {
         let call = json!({"tool_input": {"pattern": "fn main"}});
         assert_eq!(resolve(Kind::Search, &call), Some(Nudge::Search));
+        let call = json!({"tool_input": {"pattern": "NewSource", "path": "/repo"}});
+        assert_eq!(resolve(Kind::Search, &call), usage("NewSource"));
+        let call =
+            json!({"tool_input": {"pattern": "WithInsecureTLS\\(", "path": "/repo/internal"}});
+        assert_eq!(resolve(Kind::Search, &call), usage("WithInsecureTLS"));
+        let call =
+            json!({"tool_input": {"pattern": "Git", "path": "/repo/internal/config/storage.go"}});
+        assert_eq!(
+            resolve(Kind::Search, &call),
+            Some(Nudge::InFile {
+                term: "Git".into(),
+                path: "/repo/internal/config/storage.go".into()
+            })
+        );
     }
 
     #[test]
@@ -192,7 +311,6 @@ mod tests {
         for command in [
             "rg -n foo src/",
             "grep -r foo .",
-            "find . -name '*.rs'",
             "sudo rg foo",
             "xargs -n1 grep foo",
             "/usr/bin/rg foo",
@@ -201,12 +319,101 @@ mod tests {
             "RUST_LOG=debug rg foo",
         ] {
             let call = json!({"tool_input": {"command": command}});
+            assert_eq!(resolve(Kind::Search, &call), usage("foo"), "{command}");
+        }
+        for command in [
+            "find . -name '*.rs'",
+            "grep -rn 'TODO: fix' src/",
+            "rg '^\\s*$' src/",
+            "grep -rn 42 src/",
+            "grep -rn 'a.*b' src/",
+        ] {
+            let call = json!({"tool_input": {"command": command}});
             assert_eq!(
                 resolve(Kind::Search, &call),
                 Some(Nudge::Search),
                 "{command}"
             );
         }
+    }
+
+    #[test]
+    fn usage_searches_name_the_first_identifier_alternative() {
+        for (command, term) in [
+            (
+                "grep -rn \"git.NewSource\\|git.WithAuth\\|git.WithRef\" /app --include=*.go | grep -v _test.go",
+                "git.NewSource",
+            ),
+            (
+                "grep -rln \"insecure_skip_tls\\|ca_cert\" /app --include=*.go -i",
+                "insecure_skip_tls",
+            ),
+            ("rg -n 'WithInsecureTLS\\(' internal/", "WithInsecureTLS"),
+            ("grep -n -e Source -A 3 -r internal/storage", "Source"),
+            ("rg -A 3 Source internal/storage", "Source"),
+            (
+                "grep -rn \"TLS\\|CA\\|insecure\" -ri /app/internal/storage/fs/git/*_test.go",
+                "TLS",
+            ),
+        ] {
+            let call = json!({"tool_input": {"command": command}});
+            assert_eq!(resolve(Kind::Search, &call), usage(term), "{command}");
+        }
+    }
+
+    #[test]
+    fn single_source_file_searches_name_the_file() {
+        for (command, term, path) in [
+            (
+                "grep -n \"Git\" /app/internal/config/storage.go | head -80",
+                "Git",
+                "/app/internal/config/storage.go",
+            ),
+            (
+                "grep -n 'func\\|type' internal/cmd/grpc.go",
+                "func",
+                "internal/cmd/grpc.go",
+            ),
+            ("rg NewSource source.go", "NewSource", "source.go"),
+        ] {
+            let call = json!({"tool_input": {"command": command}});
+            let expected = Nudge::InFile {
+                term: term.into(),
+                path: path.into(),
+            };
+            assert_eq!(resolve(Kind::Search, &call), Some(expected), "{command}");
+        }
+        let call = json!({"tool_input": {"command": "grep -n Git go.mod"}});
+        assert_eq!(resolve(Kind::Search, &call), usage("Git"));
+    }
+
+    #[test]
+    fn specific_nudges_render_term_and_quoted_path() {
+        let text = Nudge::Usage {
+            term: "git.NewSource".into(),
+        }
+        .text();
+        assert!(
+            text.contains("`orbit context \"git.NewSource\" --related`"),
+            "{text}"
+        );
+        assert!(text.contains("`orbit grep \"git.NewSource\"`"), "{text}");
+        assert!(!text.contains("{{"), "{text}");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("it's.go");
+        std::fs::write(&path, "package x\n").unwrap();
+        let text = Nudge::InFile {
+            term: "Git".into(),
+            path: path.to_string_lossy().into_owned(),
+        }
+        .text();
+        let quoted = format!("'{}/it'\\''s.go'", dir.path().display());
+        assert!(text.contains(&format!("--file={quoted}")), "{text}");
+        assert!(
+            text.contains(&format!("`orbit grep \"Git\" --path {quoted}`")),
+            "{text}"
+        );
+        assert!(!text.contains("{{"), "{text}");
     }
 
     #[test]
@@ -301,7 +508,10 @@ mod tests {
             "cd src && cat router.rs | rg pattern",
         ] {
             let call = json!({"tool_input": {"command": command}});
-            assert_eq!(resolve(Kind::Search, &call), Some(Nudge::Search));
+            assert!(
+                matches!(resolve(Kind::Search, &call), Some(Nudge::Usage { .. })),
+                "{command}"
+            );
         }
     }
 
@@ -354,7 +564,7 @@ mod tests {
     #[test]
     fn missing_tool_input_falls_back_to_root() {
         let call = json!({"pattern": "foo"});
-        assert_eq!(resolve(Kind::Search, &call), Some(Nudge::Search));
+        assert_eq!(resolve(Kind::Search, &call), usage("foo"));
     }
 
     #[test]
