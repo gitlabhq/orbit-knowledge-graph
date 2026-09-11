@@ -1582,11 +1582,10 @@ pub(super) async fn aggregation_user_disconnected_scoped_node_rejects_at_compile
     );
 }
 
-pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestContext) {
+pub(super) async fn aggregation_over_shortest_path_rejects_at_compile(ctx: &TestContext) {
     let _ = ctx;
     let ontology = Arc::new(load_ontology());
-    // Reachability is satisfied through the `path` config, not only `relationships`.
-    compile(
+    let err = compile(
         r#"{
         "query_type": "aggregation",
         "nodes": [
@@ -1602,7 +1601,12 @@ pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestConte
         &ontology,
         &non_admin_ctx(),
     )
-    .expect("User reachable via path to a scoped Project must compile");
+    .expect_err("aggregation over a shortest path must reject");
+    assert!(
+        err.to_string()
+            .contains("aggregation over shortest paths is not supported"),
+        "{err}"
+    );
 }
 
 pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx: &TestContext) {

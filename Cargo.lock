@@ -5989,7 +5989,6 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "orbit-analytics",
- "orbit-fuzz",
  "orbit-migrations",
  "orbit-server",
  "orbit-server-config",

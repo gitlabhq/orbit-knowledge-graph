@@ -1,5 +1,5 @@
-# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_user_reachable_via_path_compiles
-description: User reachable via path config to a scoped Project compiles for non-admin
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::aggregation_over_shortest_path_rejects_at_compile
+description: Aggregation over a shortest path rejects at compile for both frontends
 
 query:
   json: |
@@ -18,4 +18,4 @@ query:
     MATCH path = ANY SHORTEST (u:User)-[*1..3]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN p, count(u) AS hit LIMIT 10
 
 expect:
-  compile_only: true
+  compile_error: "aggregation over shortest paths is not supported"
