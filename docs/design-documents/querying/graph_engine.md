@@ -66,12 +66,11 @@ Both frontends compile to parameterized ClickHouse SQL through shared passes.
 | 6 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
 | 7 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
 | 8 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
-| 9 | `partition` | Adds partition-pruning predicates derived from the traversal path scope |
-| 10 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
-| 11 | `check` | Verifies every namespaced graph-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
-| 12 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
-| 13 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
-| 14 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
+| 9 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
+| 10 | `check` | Verifies every namespaced graph-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
+| 11 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
+| 12 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
+| 13 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
 The planner emits ClickHouse SQL similar to these patterns:
 
