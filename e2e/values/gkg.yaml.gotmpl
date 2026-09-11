@@ -22,20 +22,19 @@ image:
   tag: {{ $gkgTag | quote }}
   pullPolicy: IfNotPresent
 
-# The chart-default `key` for each perKey entry matches the field names the
+# The chart-default `key` for each entry matches the field names the
 # e2e-bootstrap chart writes into gkg-secrets, so only secretName is set.
 secrets:
-  perKey:
-    gitlabJwtVerifyingKey:
-      secretName: "gkg-secrets"
-    gitlabJwtSigningKey:
-      secretName: "gkg-secrets"
-    datalakePassword:
-      secretName: "gkg-secrets"
-    graphPassword:
-      secretName: "gkg-secrets"
-    graphReadPassword:
-      secretName: "gkg-secrets"
+  gitlabJwtVerifyingKey:
+    secretName: "gkg-secrets"
+  gitlabJwtSigningKey:
+    secretName: "gkg-secrets"
+  datalakePassword:
+    secretName: "gkg-secrets"
+  graphPassword:
+    secretName: "gkg-secrets"
+  graphReadPassword:
+    secretName: "gkg-secrets"
 
 clickhouseSetup:
   enabled: true
@@ -63,6 +62,11 @@ webserver:
 
 indexer:
   enabled: true
+  # One universal pool: the suite is sized for a single indexer deployment.
+  pools:
+    sdlc: null
+    code: null
+    default: {}
   replicas: 1
   logLevel: "info"
   probes:
