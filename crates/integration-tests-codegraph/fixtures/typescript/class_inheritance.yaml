@@ -1,0 +1,62 @@
+name: "TypeScript: class inheritance and implements"
+pipeline: js
+fixtures:
+  - path: main.ts
+    content: |
+      interface Speakable {
+          speak(): string;
+      }
+
+      class Animal {
+          name: string = "";
+          greet(): string { return `I am ${this.name}`; }
+      }
+
+      class Dog extends Animal implements Speakable {
+          speak(): string { return "woof"; }
+          fetch(): void { this.greet(); }
+      }
+
+      class Puppy extends Dog {
+          play(): void {
+              this.speak();
+              this.greet();
+          }
+      }
+
+tests:
+  - name: All definitions with correct types
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.ts'
+        AND d.definition_type IN ['Interface', 'Class', 'Method']
+      RETURN d.name AS name, d.definition_type AS type
+      ORDER BY name
+    assert:
+      - { row_count: 8 }
+      - { unique: name }
+      - { row: { name: "Animal", type: "Class" } }
+      - { row: { name: "Dog", type: "Class" } }
+      - { row: { name: "Puppy", type: "Class" } }
+      - { row: { name: "Speakable", type: "Interface" } }
+      - { row: { name: "fetch", type: "Method" } }
+      - { row: { name: "greet", type: "Method" } }
+      - { row: { name: "play", type: "Method" } }
+      - { row: { name: "speak", type: "Method" } }
+
+  - name: Dog.fetch() does not resolve this.greet() cross-class
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'fetch' AND callee.name = 'greet' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: Puppy.play() does not resolve inherited this calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'play' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { empty: true }
