@@ -52,12 +52,8 @@ stages:
 
   - name: imports
     rules:
-      # from X import a, b (non-aliased names as leaves)
-      - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name)'
-        replace: '(__import (__source @$M) (__source_path @$M|to_rel(".")) $$$NAMES=>__name)'
-
-      # from X import a as b (aliased — keep __alias subtree via ->)
-      - match: '(import_from_statement module_name: $M $$$NAMES:aliased_import)'
+      # from X import a, b  /  from X import a as b  /  mixed
+      - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name|aliased_import)'
         replace: '(__import (__source @$M) (__source_path @$M|to_rel(".")) $$$NAMES->__name)'
 
       # from X import *

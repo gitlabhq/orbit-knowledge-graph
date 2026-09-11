@@ -466,13 +466,19 @@ fn item(c: &mut Ctx, toks: &[String], pos: &mut usize, field: u16) -> Pat {
         } else {
             (rest, None, false)
         };
-        let (n, kinds) = rest.split_once(':').map_or((rest, ""), |(n, k)| (n, k));
+        let (n, explicit_filter) = if let Some((n, k)) = rest.split_once(':') {
+            (n, Some(k))
+        } else {
+            (rest, None)
+        };
         let slot = c.slot(n);
-        c.filters[slot as usize] = kinds
-            .split('|')
-            .filter(|k| !k.is_empty())
-            .map(|k| c.intern_kind(k))
-            .collect();
+        if let Some(kinds) = explicit_filter {
+            c.filters[slot as usize] = kinds
+                .split('|')
+                .filter(|k| !k.is_empty())
+                .map(|k| c.intern_kind(k))
+                .collect();
+        }
         let rekind = rekind_str.map(|k| c.intern_kind(k));
         return Pat::Var {
             slot,
