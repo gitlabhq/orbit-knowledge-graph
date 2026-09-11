@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Regenerate the committed archive from the repository root with:
-# ./scripts/vendor-duckdb-fts-sources.sh
+# Regenerate the committed archive with:
+# ./scripts/duckdb/vendor-duckdb-fts-sources.sh
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
+cd "$REPO_ROOT"
 
 PIN="crates/duckdb-client/third_party/duckdb-fts-sources.PIN"
 ARCHIVE="crates/duckdb-client/third_party/duckdb-fts-sources.tar.gz"

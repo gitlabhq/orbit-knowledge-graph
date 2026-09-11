@@ -421,7 +421,7 @@ duckdb-fts-sources-sync-check:
   needs: []
   script:
     - apk add --no-cache bash git gzip tar
-    - bash ./scripts/check-duckdb-fts-sources-sync.sh
+    - bash ./scripts/duckdb/check-duckdb-fts-sources-sync.sh
 
 unused-deps-check:
   stage: lint

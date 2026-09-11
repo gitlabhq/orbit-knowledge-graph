@@ -159,7 +159,7 @@ The current implementation uses ClickHouse for remote graph storage and query ex
 - Code indexing progress is tracked in `code_indexing_checkpoint`.
 - The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
 
-Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline. Release binaries statically link DuckDB's full-text search extension; development builds load the pinned extension artifact at runtime.
+Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline. Release binaries statically link DuckDB's full-text search extension from a pinned source archive; development builds load the pinned extension artifact at runtime. Regenerate the source archive with `scripts/duckdb/vendor-duckdb-fts-sources.sh`.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 

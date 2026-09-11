@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
 PIN="crates/duckdb-client/third_party/duckdb-fts-sources.PIN"
 ARCHIVE="crates/duckdb-client/third_party/duckdb-fts-sources.tar.gz"
 DUCKDB_PIN=$(awk '$1 == "duckdb:" { print $2 }' config/versions.yaml)
@@ -19,6 +23,6 @@ if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
     exit 1
 fi
 
-./scripts/vendor-duckdb-fts-sources.sh "$WORK_DIR/duckdb-fts-sources.tar.gz"
+./scripts/duckdb/vendor-duckdb-fts-sources.sh "$WORK_DIR/duckdb-fts-sources.tar.gz"
 cmp "$ARCHIVE" "$WORK_DIR/duckdb-fts-sources.tar.gz"
 echo "$ARCHIVE matches its pinned upstream DuckDB and duckdb-fts revisions"
