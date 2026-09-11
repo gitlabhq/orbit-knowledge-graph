@@ -1406,70 +1406,51 @@ fn refresh_tracks_edits_renames_deletions_and_ignores() {
 }
 
 #[test]
-fn refresh_invalidates_relationships_until_full_index() {
-    let (repo, data) = context_repo();
-    let other = create_test_repo();
-    assert!(orbit_index(&other.path, data.path()));
+fn refresh_resolves_relationships_through_import_neighbors() {
+    let repo = create_test_repo();
+    let data = tempfile::TempDir::new().unwrap();
+    assert!(orbit_index(&repo.path, data.path()));
     let other_defs = orbit_sql(
-        "SELECT * FROM gl_definition WHERE file_path = 'src/main.py' ORDER BY ALL",
+        "SELECT * FROM gl_definition WHERE file_path = 'src/utils.py' ORDER BY ALL",
         data.path(),
     );
-    git(repo.path(), &["checkout", "-b", "refresh-branch"]);
     std::fs::write(
-        repo.path().join("src/lib.rs"),
-        "pub fn renamed() {}\npub fn caller() { renamed(); }\n",
+        repo.path.join("src/utils.py"),
+        "import os\n\ndef write_file(path):\n    pass\n\ndef read_file(path):\n    return open(path).read()\n",
     )
     .unwrap();
-    let (_, stderr, ok) = orbit(
-        repo.path(),
-        data.path(),
-        &["grep", "renamed", "--callers", "--tests"],
-    );
+    let (output, stderr, ok) = orbit(&repo.path, data.path(), &["grep", "read_file", "--callers"]);
+    assert!(ok, "{stderr}");
+    assert!(stderr.contains("import neighbor(s)"), "{stderr}");
+    assert!(!stderr.contains("stale"), "{stderr}");
     assert!(
-        !ok && stderr.contains("relationships incomplete"),
-        "{stderr}"
+        output.contains("run") && output.contains("[calls]"),
+        "{output}"
     );
-    let (output, stderr, ok) = orbit(
-        repo.path(),
-        data.path(),
-        &["sql", "SELECT count(*) AS n FROM gl_edge"],
-    );
-    assert!(
-        ok && stderr.contains("relationships incomplete") && output.contains('0'),
-        "{output}{stderr}"
-    );
-    let responses = mcp_roundtrip(
-        data.path(),
-        &[mcp_tool_call(
-            1,
-            "run_sql",
-            json!({"sql": ["SELECT 1 AS n"]}),
-        )],
-    );
-    assert!(
-        responses[0]["result"]["content"][1]["text"]
-            .as_str()
-            .unwrap()
-            .contains("relationships incomplete")
-    );
-    assert!(rows(&orbit_sql("SELECT path FROM gl_directory GROUP BY project_id, commit_sha, path HAVING count(*) > 1", data.path())).is_empty());
-    assert_eq!(
+    let (_, stderr, ok) = orbit(&repo.path, data.path(), &["grep", "hello", "--callers"]);
+    assert!(ok && !stderr.contains("refreshed"), "{stderr}");
+    assert!(rows(&orbit_sql("SELECT source_id, target_id, relationship_kind FROM gl_edge GROUP BY ALL HAVING count(*) > 1", data.path())).is_empty());
+    assert_ne!(
         other_defs,
         orbit_sql(
-            "SELECT * FROM gl_definition WHERE file_path = 'src/main.py' ORDER BY ALL",
+            "SELECT * FROM gl_definition WHERE file_path = 'src/utils.py' ORDER BY ALL",
             data.path()
         )
     );
-    assert!(orbit_index(repo.path(), data.path()));
-    let (output, stderr, ok) = orbit(
-        repo.path(),
-        data.path(),
-        &["grep", "renamed", "--callers", "--tests"],
-    );
+    std::fs::write(repo.path.join("src/notes.txt"), "docs\n").unwrap();
+    std::fs::write(
+        repo.path.join("src/main.py"),
+        "import notes\n\ndef fetch():\n    notes.read()\n",
+    )
+    .unwrap();
+    let (output, stderr, ok) = orbit(&repo.path, data.path(), &["grep", "fetch", "--callees"]);
     assert!(
-        ok && output.contains("caller") && !stderr.contains("relationships incomplete"),
+        ok && stderr.contains("relationships may be stale for src/main.py"),
         "{output}{stderr}"
     );
+    assert!(orbit_index(&repo.path, data.path()));
+    let (_, stderr, ok) = orbit(&repo.path, data.path(), &["grep", "fetch", "--callees"]);
+    assert!(ok && !stderr.contains("stale"), "{stderr}");
 }
 
 #[test]

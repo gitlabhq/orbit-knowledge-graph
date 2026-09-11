@@ -217,15 +217,16 @@ and automatic source output from `grep` show full current source labeled
 `ranges=unverified` rather than use stale ranges. Unsupported files also use this
 fallback. Test code is included.
 
-File refresh is not an incremental semantic graph: range-based IDs can change,
-and subset parsing cannot reconstruct connections from unchanged files. Before
-refresh, all project relationships are removed and an incompleteness marker is
-persisted in `_orbit_meta`, even if parsing later fails. Dedicated relationship
-lookups refuse results until a successful full `index` rebuild clears the marker.
-Full indexing retains its best-effort coverage semantics: ordinary skips and faults
-do not keep relationships invalidated, but fatal failures or unstable source do.
-SQL and repository maps warn about affected projects; MCP adds warning text
-alongside its unchanged JSON result. Other projects remain intact.
+Subset parsing only resolves relationships between files in the same parse run,
+so refresh widens the run to import neighbors: indexed files whose recorded
+imports mention a changed file's stem, and files a changed file's recorded
+imports mention. Edges whose source or target lives in a changed or deleted file
+are replaced from the fresh parse; edges between unchanged files are kept, and
+neighbor rows already present are not duplicated. When a fresh import points at a
+project file the indexer cannot parse, a stale marker naming the importing file is
+persisted in `_orbit_meta`. Relationship commands, SQL, and repository maps warn
+with that file list; MCP adds the warning alongside its unchanged JSON result. A
+full `index` clears the marker once source is stable. Other projects remain intact.
 
 Setup hooks route searches to `grep` and source reads to `context`. Known paths
 are absolute and shell-quoted; `context` resolves their internal dot segments.

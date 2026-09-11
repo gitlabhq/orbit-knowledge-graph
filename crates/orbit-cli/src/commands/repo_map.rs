@@ -162,9 +162,6 @@ pub(crate) fn run(
     let client = sql::open_graph(Some(db))?;
     map.preflight(&client)?;
     if let Some(warning) = crate::refresh::relationship_warning(&client, Some(git.project_id))? {
-        if matches!(command, RepoMapCommand::Extends { .. }) {
-            anyhow::bail!(warning);
-        }
         eprintln!("warning: {warning}");
     }
 
