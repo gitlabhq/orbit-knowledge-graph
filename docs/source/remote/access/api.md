@@ -61,8 +61,8 @@ Execute a graph query using the GitLab Orbit query DSL.
 The request body contains:
 
 - `query`: The GitLab Orbit query object.
-- `format`: Optional response format. Use `raw` for structured JSON, or `llm`
-  for compact text optimized for AI agents. Default: `llm`.
+- `response_format`: Optional response format. Use `raw` for structured JSON, or `llm`
+  for compact text optimized for AI agents. Default: `raw`.
 
 For example:
 
@@ -70,7 +70,7 @@ For example:
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{"query": <query_json>, "format": "raw"}' \
+  --data '{"query": <query_json>, "response_format": "raw"}' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
@@ -103,7 +103,7 @@ Put the request body in `request.json`:
     "aggregation_sort": "-failed_pipelines",
     "limit": 10
   },
-  "format": "raw"
+  "response_format": "raw"
 }
 ```
 

@@ -62,9 +62,9 @@ and every query is authorized through GitLab.
 
 Access is enforced in the following layers:
 
-- Organization isolation. A query only ever sees data in your own organization.
-- Hierarchical, role-based scoping. Results are limited to the groups, subgroups, and
-  projects where you hold the required role. Sibling groups stay out of scope.
+- Authorized namespace scope. Results are limited to the groups, subgroups, and
+  projects where you hold the required role. These namespaces can belong to more than
+  one organization, and sibling groups stay out of scope.
 - Checks on each result. Before results are returned, GitLab re-checks your permission on
   each item and removes anything you cannot access. This catches confidential items and
   runtime controls such as SAML group links and IP restrictions.

@@ -49,13 +49,13 @@ The JSON query schema supports four query types through a single unified structu
 | Field | Type | Description |
 |-------|------|-------------|
 | `query_type` | `string` | One of: `traversal`, `aggregation`, `path_finding`, `neighbors` |
-| `nodes` | `array` | Node selectors to match. Always required; single-node queries use a 1-element array |
+| `nodes` | `array` | 1-5 node selectors to match. Always required; single-node queries use a 1-element array |
 
 ### Optional Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `relationships` | `array` | Relationship traversals between nodes |
+| `relationships` | `array` | Up to 5 relationship selectors; `traversal` requires exactly one fewer relationship selector than node selectors (at most 4) |
 | `aggregations` | `array` | Aggregation specs (required when `query_type` is `aggregation`) |
 | `group_by` | `array` | Group keys for aggregation rows |
 | `path` | `object` | Path finding config (required when `query_type` is `path_finding`) |
@@ -68,7 +68,7 @@ The JSON query schema supports four query types through a single unified structu
 
 ## Node Selectors
 
-Each node selector specifies which graph nodes to match. All query types declare selectors in the `nodes` array; `neighbors` queries and single-entity `traversal` lookups use a 1-element array.
+Each node selector specifies which graph nodes to match. All query types declare between 1 and 5 selectors in the `nodes` array; `neighbors` queries and single-entity `traversal` lookups use a 1-element array.
 
 ```json
 {
@@ -130,7 +130,10 @@ Repeating an operator on one property takes an array of operator objects:
 
 ## Relationship Selectors
 
-Relationships connect nodes in the query:
+Relationships connect nodes in the query. The schema permits at most 5 relationship
+selectors. A `traversal` query requires exactly one fewer relationship selector than
+node selectors, so its chain has at most 4 relationship selectors. This shape limit
+is separate from each selector's `hops` range, whose upper bound is 3.
 
 ```json
 {
@@ -488,7 +491,7 @@ Security context is injected into all queries via `traversal_path` filtering:
 - Single path: `startsWith(traversal_path, "{path}")`
 - Multiple paths: Optimized with longest common prefix
 
-This filtering is applied to node tables (not edge tables) and injected into the WHERE clause for short-circuit filtering. Tables whose visibility is determined through relationships rather than path hierarchy (e.g., `gl_users`) are excluded from path-based filtering. Permission predicates are injected based on the caller's JWT, so the resulting query is still subject to the GitLab authorization model.
+This filtering is applied to every namespaced node and edge table scan and injected into the WHERE clause for short-circuit filtering. Global node tables declared by the ontology, such as `gl_user` and `gl_runner`, have no `traversal_path` column and are excluded from path-based filtering. Their results rely on Rails redaction, while joins through namespaced relationships retain path filtering. Permission predicates come from the caller's JWT, so the resulting query remains subject to the GitLab authorization model.
 
 ### Read-Only Execution
 

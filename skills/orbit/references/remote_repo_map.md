@@ -1,9 +1,9 @@
 # Orbit remote repo map reference
 
 `remote_repo_map.py` is the remote counterpart to the local
-[`glab orbit local repo-map`](local_repo_map.md) command. It maps source-code structure
+[`glab orbit repo-map`](local_repo_map.md) command. It maps source-code structure
 for any project indexed in Orbit Remote by shelling out to
-`glab orbit remote query`, so it does not require a local checkout or an Orbit
+`glab orbit query`, so it does not require a local checkout or an Orbit
 Local index.
 
 Use it when the user asks to inspect code shape in a GitLab project that is
@@ -23,14 +23,14 @@ Use the remote repo map when you need to:
 - Map types and callables under a path prefix with `api`.
 - Find callers of a method or function with `callers`.
 
-Prefer the local [`glab orbit local repo-map`](local_repo_map.md) command when you are already in a
+Prefer the local [`glab orbit repo-map`](local_repo_map.md) command when you are already in a
 checkout and need branch-local or unmerged code. Prefer paste-ready raw Orbit
 Remote JSON from [`recipes.md`](recipes.md) when the question is a single known
 entity lookup or a cross-domain SDLC query.
 
 ## Prerequisites
 
-- `glab` >= v1.94.0 authenticated against GitLab.com.
+- `glab` >= v1.117.0 authenticated against GitLab.com.
 - The `knowledge_graph` feature flag must be enabled for the user.
 - The target project and branch must be indexed in Orbit Remote.
 - The token must have access to the target project.

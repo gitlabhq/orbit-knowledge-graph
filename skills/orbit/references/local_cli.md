@@ -1,34 +1,34 @@
-# `glab orbit local` reference
+# `glab orbit` reference
 
-`glab orbit local` downloads, installs, and runs the Orbit local CLI binary
-(project: `gitlab-org/orbit/knowledge-graph`, package: `orbit-local`). The binary
-is managed for you — verified, cached in `<config-dir>/bin/orbit`, and kept up to
-date automatically.
+`glab orbit <command>` runs the Orbit CLI binary (project:
+`gitlab-org/orbit/knowledge-graph`, package: `orbit-local`). `glab` downloads,
+verifies, caches the binary in `<config-dir>/bin/orbit`, and keeps it up to date
+automatically.
 
 **Supported platforms:** macOS and Linux (x86_64 and aarch64). Windows is not
 supported (the binary is not published for Windows).
 
-See [`SKILL.md`](../SKILL.md) for a quick summary and when to prefer `local` over
-`remote`.
+See [`SKILL.md`](../SKILL.md) for the commands that use the local graph or Orbit
+Remote.
 
 ## First run / install
 
 ```bash
-# Download and install the managed binary, then run it
-glab orbit local
+# Show the glab wrapper help
+glab orbit
 
-# Install only (do not run)
-glab orbit local --install
+# Install the managed binary without running it
+glab orbit --install
 
 # Skip all confirmation prompts (for CI/scripts)
-glab orbit local --install --yes
+glab orbit --install --yes
 ```
 
 ## Update
 
 ```bash
 # Check for and install the latest compatible version
-glab orbit local --update
+glab orbit --update
 ```
 
 `--install` and `--update` are mutually exclusive; passing both returns an error.
@@ -36,19 +36,15 @@ glab orbit local --update
 ## Pass-through args
 
 All arguments that are not `--install`, `--update`, `--yes`/`-y`, or `--help` are
-passed directly to the Orbit local binary:
+passed directly to the Orbit binary:
 
 ```bash
-glab orbit local <subcommand> [flags...]
-glab orbit local --help           # shows this glab wrapper's help
-glab orbit local help             # shows the orbit binary's top-level help
-glab orbit local index --help     # shows orbit's help for the 'index' subcommand
+glab orbit <subcommand> [flags...]
+glab orbit --help           # shows this glab wrapper's help
+glab orbit help             # shows the orbit binary's top-level help
+glab orbit -- --help        # also shows the orbit binary's top-level help
+glab orbit index --help     # shows orbit's help for the 'index' subcommand
 ```
-
-> **Note:** `glab orbit local -- --help` does **not** show orbit's help. glab forwards
-> `--` and `--help` as-is, but orbit's argument parser treats `--` as end-of-flags and
-> then sees `--help` as an unknown subcommand name, resulting in an error. Use
-> `glab orbit local help` instead.
 
 ## Configuration
 
