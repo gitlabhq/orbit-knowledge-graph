@@ -30,7 +30,7 @@ When working with GitLab Orbit Remote, you might encounter the following issues.
 
 ## Exit code 2
 
-Symptoms: `glab orbit remote` commands exit with code 2.
+Symptoms: `glab orbit` remote commands exit with code 2.
 
 Cause: The `knowledge_graph` feature flag is not enabled for your
 namespace or instance.
@@ -40,7 +40,7 @@ Resolution: Contact your GitLab administrator to enable the
 
 ## Exit code 3
 
-Symptoms: `glab orbit remote` commands exit with code 3.
+Symptoms: `glab orbit` remote commands exit with code 3.
 
 Cause: You are not authenticated with the GitLab CLI.
 
