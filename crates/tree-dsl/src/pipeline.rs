@@ -22,6 +22,13 @@ use crate::lang::Lang;
 use crate::tree::Tree;
 use crate::{canonical, file_tree, linker, pattern, resolver};
 
+pub struct IndexResult {
+    pub trees: Vec<Tree>,
+    pub cross_edges: Vec<crate::tree::Edge>,
+    pub lang: Lang,
+    pub pipeline: Pipeline,
+}
+
 pub struct Pipeline {
     pub lang_id: SupportLang,
     pub rewrite_stages: Vec<Vec<crate::pattern::Rewrite>>,
@@ -57,13 +64,6 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
     tree.prune();
     tree.compact();
     tree
-}
-
-pub struct IndexResult {
-    pub trees: Vec<Tree>,
-    pub cross_edges: Vec<crate::tree::Edge>,
-    pub lang: Lang,
-    pub pipeline: Pipeline,
 }
 
 /// Unified indexing entrypoint. All files must be the same language.
