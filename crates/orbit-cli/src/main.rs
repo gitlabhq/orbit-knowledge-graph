@@ -186,7 +186,8 @@ struct IndexArgs {
     long_about = "Search the local graph for definitions that match plain words.\n\n\
                   Ranks definitions by how many query terms they match, then lists the \
                   connections of the top matches by graph proximity. Terms are plain \
-                  words, not regexes. Add --related-to, --callers, or --callees with a \
+                  words, not regexes, and matches are resolved definitions, not text \
+                  lines. Add --related-to, --callers, or --callees with a \
                   positional FQN to look up relationships. A target given after the \
                   flag wins over positional terms. --path and --kind filter the \
                   connected definitions, not the target."
@@ -230,8 +231,8 @@ struct GrepArgs {
 }
 
 const KIND_ARG_HELP: &str = "Only definitions of these types, as printed in grep's `[Kind]` \
-                             column. One kind or a comma-separated list such as `Class,Method`; \
-                             case-insensitive.";
+                             column. One kind or a comma-separated list such as `Class,Method` \
+                             (quoted `\"Class|Method\"` also works); case-insensitive.";
 
 #[derive(Debug, Clone, PartialEq)]
 struct Kinds(Vec<String>);
@@ -270,8 +271,8 @@ fn context_fqn_arg_help() -> String {
 }
 
 const CONTEXT_LONG_ABOUT: &str = "Print the source bodies of indexed definitions.\n\n\
-                                  Bodies come from the working tree, so several grep matches \
-                                  can be read in one call. A glob such as `crate::module::*` \
+                                  Bodies come from the working tree, so you can read several \
+                                  grep matches in one call. A glob such as `crate::module::*` \
                                   prints every match in file order. Use `--file` to read a \
                                   whole file as its definitions, or `--outline` to map a large \
                                   type before reading one method.";
@@ -295,7 +296,7 @@ fn parse_edge_kind(value: &str) -> Result<EdgeKind, String> {
 fn sql_long_about() -> String {
     format!(
         "Run a read-only SQL query against the local DuckDB graph.\n\n\
-         Tables are scoped to the current checkout's indexed commit, so queries need \
+         The current checkout's indexed commit scopes the tables, so queries need \
          no project_id or commit_sha predicates. `{} schema` lists the tables.",
         commands::setup::spec::launcher()
     )

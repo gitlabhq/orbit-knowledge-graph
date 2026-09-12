@@ -7,5 +7,5 @@ description: >-
 
   Accepts an array of DuckDB SQL statements. Each runs in order, and its rows
   land at the same index of the result array. Call `get_graph_schema` first if
-  you do not know the tables. Large result sets are rejected, so add `LIMIT`
+  you do not know the tables. Orbit rejects large result sets, so add `LIMIT`
   or narrow the projection.
