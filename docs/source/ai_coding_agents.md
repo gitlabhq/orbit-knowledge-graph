@@ -32,7 +32,7 @@ The skill works with both [GitLab Orbit Remote](remote/_index.md) and
 ## Prerequisites
 
 - [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) v1.117.0 or later. It
-  forwards `glab orbit <command>` to the Orbit binary it installs. If
+  forwards `glab orbit <command>` to the GitLab Orbit binary it installs. If
   `glab skills` or `glab orbit` is not recognized, update `glab` first.
 
 ## Install the skill
