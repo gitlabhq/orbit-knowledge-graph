@@ -37,9 +37,9 @@ pub fn resolve(
     let name_f = lang.fields.lookup("name") as u16;
     let left_f = lang.fields.lookup("left") as u16;
     let right_f = lang.fields.lookup("right") as u16;
-    let callee_f = lang.fields.lookup("callee") as u16;
-    let member_f = lang.fields.lookup("member") as u16;
-    let object_f = lang.fields.lookup("object") as u16;
+    let _callee_f = lang.fields.lookup("callee") as u16;
+    let _member_f = lang.fields.lookup("member") as u16;
+    let _object_f = lang.fields.lookup("object") as u16;
     let ret_type_f = lang.fields.lookup("return_type") as u16;
     let return_k = lang.lookup_kind("__return");
     let return_k_legacy = lang.kinds.lookup("return_statement") as u16;

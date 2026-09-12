@@ -294,17 +294,17 @@ impl Fold {
         }
     }
 
-    fn handle_call(&mut self, tree: &mut Tree, i: u32, lang: &Lang) {
+    fn handle_call(&mut self, tree: &mut Tree, i: u32) {
         let Some(callee) = child_node(tree, i, self.s.callee) else {
             return;
         };
         let Some(target) = read_target(tree, callee, &self.s) else {
             return;
         };
-        self.resolve_call(tree, target, self.enclosing(), lang);
+        self.resolve_call(tree, target, self.enclosing());
     }
 
-    fn handle_standalone_member(&mut self, tree: &mut Tree, i: u32, lang: &Lang) {
+    fn handle_standalone_member(&mut self, tree: &mut Tree, i: u32) {
         let obj = child_node(tree, i, self.s.object)
             .map(|o| tree.sym(o))
             .unwrap_or(0);
@@ -353,9 +353,9 @@ impl Fold {
 
     // ── Unified call resolution ──
 
-    fn resolve_call(&mut self, tree: &mut Tree, target: Target, from: u32, lang: &Lang) {
+    fn resolve_call(&mut self, tree: &mut Tree, target: Target, from: u32) {
         match target {
-            Target::Name(sym) => self.resolve_name_call(tree, sym, from, lang),
+            Target::Name(sym) => self.resolve_name_call(tree, sym, from),
             Target::Method { obj, method } => {
                 for pv in &self.ssa.read_variable(obj, self.cur) {
                     match pv {
@@ -385,7 +385,7 @@ impl Fold {
         }
     }
 
-    fn resolve_name_call(&mut self, tree: &mut Tree, sym: u32, from: u32, lang: &Lang) {
+    fn resolve_name_call(&mut self, tree: &mut Tree, sym: u32, from: u32) {
         let mut reaching = self.ssa.read_variable(sym, self.cur);
         if reaching.is_empty() {
             let wildcard = self.ssa.read_variable(self.wildcard, self.cur);
@@ -494,7 +494,7 @@ impl Fold {
                 }
                 let rt = reaching.iter().find_map(|pv| {
                     if let ParseValue::LocalDef(di) = pv {
-                        return_type_of_def(tree, self.defs[*di as usize], lang, &self.s)
+                        return_type_of_def(tree, self.defs[*di as usize], &self.s)
                     } else {
                         None
                     }
@@ -544,7 +544,7 @@ impl Fold {
                         if let Some(m) =
                             find_method(tree, &self.defs, self.defs[*cdi as usize], method, &self.s)
                         {
-                            if let Some(rt) = return_type_of_def(tree, m, lang, &self.s) {
+                            if let Some(rt) = return_type_of_def(tree, m, &self.s) {
                                 return Value::Type(rt);
                             }
                         }
@@ -650,7 +650,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             continue;
         }
         if k == f.s.call {
-            f.handle_call(tree, i, lang);
+            f.handle_call(tree, i);
             i += 1;
             continue;
         }
@@ -661,7 +661,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
                 0
             };
             if pk != f.s.call && pk != f.s.callee {
-                f.handle_standalone_member(tree, i, lang);
+                f.handle_standalone_member(tree, i);
             }
             i += 1;
             continue;
@@ -739,7 +739,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
 
 // ── Tree-walking helpers ──
 
-fn return_type_of_def(tree: &Tree, def: u32, lang: &Lang, s: &S) -> Option<u32> {
+fn return_type_of_def(tree: &Tree, def: u32, s: &S) -> Option<u32> {
     if let Some(rt) = child_sym(tree, def, s.return_type) {
         return Some(rt);
     }
