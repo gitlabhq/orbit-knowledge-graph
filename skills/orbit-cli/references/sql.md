@@ -2,7 +2,7 @@
 
 The local graph is a DuckDB database (`~/.orbit/graph.duckdb` by default) that
 you query with read-only SQL via `orbit sql` (or `glab orbit --yes sql`).
-Run `orbit schema [TABLE…]` to see live columns; the tables below are the ones
+Run `orbit schema [TABLE…]` to see live columns. The tables below are the ones
 you query directly (`_orbit_manifest` is bookkeeping).
 
 ## Tables
@@ -16,17 +16,14 @@ you query directly (`_orbit_manifest` is bookkeeping).
 | `gl_edge` | a relationship | `source_id`, `source_kind`, `relationship_kind`, `target_id`, `target_kind` |
 
 `relationship_kind` values: `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`,
-`EXTENDS`. Edges are id-to-id — join `source_id`/`target_id` back to
+`EXTENDS`. Edges are id-to-id. Join `source_id`/`target_id` back to
 `gl_definition.id` (or `gl_file.id`) to resolve names.
 
-`definition_type` values are **capitalized** (`Function`, `Method`,
+`definition_type` values are capitalized (`Function`, `Method`,
 `AssociatedFunction`, `Struct`, `Field`, `Variant`, `Module`, `Constant`, …).
 Lowercase filters return nothing.
 
 ## Recipes
-
-Pass SQL as an argument, or `-` to read from stdin. `-F json|ndjson|csv`
-switches output away from the default table.
 
 Definition-type histogram:
 
@@ -80,11 +77,6 @@ orbit sql "SELECT DISTINCT file_path FROM gl_imported_symbol
 
 ## Notes
 
-- Run from inside an indexed checkout, `orbit sql` scopes every table to that
-  repository's indexed commit (`gl_edge` to that commit's edges), so no
-  `project_id` or `commit_sha` predicate is needed. Pass `--all` to query
-  every indexed commit, or `--repo <path>` to scope to another checkout; only
-  then do the node tables' `commit_sha` columns matter. `gl_edge` has no
-  `commit_sha` - join back to a definition to scope edges by hand.
-- `orbit sql` is read-only; there is no write path into the graph other than
-  `index`.
+Tables are scoped to the current checkout's indexed commit, so no `commit_sha`
+predicate is needed unless you pass `--all`. `gl_edge` has no `commit_sha`, so
+join back to a definition to scope edges by hand.

@@ -2,11 +2,10 @@
 
 `glab orbit <command>` runs the Orbit CLI binary (project:
 `gitlab-org/orbit/knowledge-graph`, package: `orbit-local`). `glab` downloads,
-verifies, caches the binary in `<config-dir>/bin/orbit`, and keeps it up to date
-automatically.
+verifies, caches the binary in `<config-dir>/bin/orbit`, and keeps it up to date.
 
-**Supported platforms:** macOS and Linux (x86_64 and aarch64). Windows is not
-supported (the binary is not published for Windows).
+glab manages the binary on macOS and Linux (x86_64 and aarch64). On Windows,
+download the release archive by hand as the Orbit docs describe.
 
 See [`SKILL.md`](../SKILL.md) for guidance on using the local graph.
 
@@ -30,12 +29,12 @@ glab orbit --install --yes
 glab orbit --update
 ```
 
-`--install` and `--update` are mutually exclusive; passing both returns an error.
+`--install` and `--update` are mutually exclusive.
 
 ## Pass-through args
 
-All arguments that are not `--install`, `--update`, `--yes`/`-y`, or `--help` are
-passed directly to the Orbit binary:
+glab handles only `--install`, `--update`, `--yes`/`-y`, and `--help`. Every
+other argument goes straight to the Orbit binary.
 
 ```bash
 glab orbit <subcommand> [flags...]
@@ -49,12 +48,12 @@ glab orbit index --help     # shows orbit's help for the 'index' subcommand
 
 | Config key | Env var | Purpose |
 |---|---|---|
-| `orbit_local_auto_run` | — | When `true`, skip the "Run the Orbit local CLI?" confirmation prompt. |
-| `orbit_local_auto_download` | — | When `true`, skip the "Download the binary?" confirmation prompt. |
-| `orbit_local_binary_path` | `GLAB_ORBIT_LOCAL_BINARY_PATH` | Use a custom/local binary instead of the managed one. Skips download, version checks, and updates. |
-| `orbit_local_binary_version` | — | (managed by glab) Installed version; used to detect when updates are available. |
-| `orbit_local_binary_checksum` | — | (managed by glab) Checksum of the installed binary for integrity verification. |
-| `orbit_local_last_update_check` | — | (managed by glab) Timestamp of the last background update check. |
+| `orbit_local_auto_run` | none | When `true`, skip the "Run the Orbit local CLI?" confirmation prompt. |
+| `orbit_local_auto_download` | none | When `true`, skip the "Download the binary?" confirmation prompt. |
+| `orbit_local_binary_path` | `GLAB_ORBIT_LOCAL_BINARY_PATH` | Use a custom binary instead of the managed one. Skips download, version checks, and updates. |
+| `orbit_local_binary_version` | none | Managed by glab. Installed version, used to detect available updates. |
+| `orbit_local_binary_checksum` | none | Managed by glab. Checksum of the installed binary. |
+| `orbit_local_last_update_check` | none | Managed by glab. Timestamp of the last background update check. |
 
 Set config keys via `glab config set`:
 
@@ -64,26 +63,7 @@ glab config set orbit_local_auto_download true
 glab config set orbit_local_binary_path /path/to/custom/orbit
 ```
 
-## Binary subcommands and flags
-
-These belong to the `orbit` binary and are the same whether invoked directly or
-through `glab orbit`. Shared flag: `--db <PATH>` overrides the
-database (default `~/.orbit/graph.duckdb`).
-
-| Command | Flags |
-|---|---|
-| `index <PATH>` | `-t/--threads <N>` (0 = auto), `-s/--stats` (detailed timings), `-v/--verbose` (stderr logs), `--db` |
-| `sql [QUERY]` | positional `QUERY` or `-` for stdin, `-f/--file <PATH>`, `-F/--format table\|json\|ndjson\|csv` (default `table`), `--db` |
-| `schema [TABLE…]` | optional table names to scope output, `--raw` (JSON instead of table), `--db` |
-| `list` | `-F/--format …`, `--db` |
-| `mcp serve` | stateless MCP server over stdio (`run_sql`, `get_graph_schema`, `index`) |
-| `repo-map <SUBCOMMAND>` | high-level repo map; `--repo <PATH>` (default `.`), `--ext <EXT>`, `--db`; subcommands `overview`, `tree [PREFIX]`, `api PREFIX`, `class NAME`, `extends NAME`, `imports PATTERN` |
-| `skill [PATH]` | print the bundled, version-matched skill content; no arg prints `SKILL.md`, else a relative path such as `references/sql.md` |
-| `version` | prints the version string |
+## Binary help
 
 The skill content is embedded in the binary, so `orbit skill` serves a copy that
-matches the binary version regardless of how it was installed.
-
-`orbit help` shows the binary's top-level help; `orbit <cmd> --help` shows a
-subcommand's. Through the wrapper, both `glab orbit help` and
-`glab orbit -- --help` reach the binary help.
+matches the installed version. `orbit <cmd> --help` documents every flag.
