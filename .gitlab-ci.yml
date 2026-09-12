@@ -1327,11 +1327,6 @@ e2e-ha:
     E2E_SUFFIX: "-ha"
     # Quorum inserts make the initial Siphon snapshot merge about three times slower.
     E2E_INDEXING_BUDGET_MULTIPLIER: "5"
-  before_script:
-    - !reference [e2e, before_script]
-    # TEMPORARY until orbit-helm-charts!160 is released as 2.1.0: use the chart from its MR branch.
-    - git clone -q --depth 1 -b michaelangeloio/clickhouse-replicated https://gitlab.com/gitlab-org/orbit/orbit-helm-charts.git /tmp/orbit-helm-charts
-    - export E2E_GKG_CHART=/tmp/orbit-helm-charts/chart
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
