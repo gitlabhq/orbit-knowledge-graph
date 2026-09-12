@@ -147,6 +147,7 @@ pub enum Pat {
         field: u16,
         kind: Option<u16>,
         rekind: Option<u16>,
+        guard: Option<Box<Pat>>,
     },
     Var {
         slot: u16,
@@ -157,13 +158,6 @@ pub enum Pat {
 }
 
 pub enum Out {
-    Remove,
-    SetKind(u16),
-    SetText {
-        target: u16,
-        from: u16,
-        tf: Tf,
-    },
     Append {
         under: u16,
         each: u16,
@@ -336,6 +330,7 @@ fn visit_text_field_as_cap<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field:
         field,
         kind: None,
         rekind: None,
+        guard: None,
     }
 }
 
@@ -379,18 +374,28 @@ fn visit_cap_ref<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
         field,
         kind: None,
         rekind: Some(rekind),
+        guard: None,
     }
 }
 
 fn visit_capture<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat {
     let mut children = node.into_children();
     let name = children.next().unwrap().as_str();
-    let kind = children.next().map(|k| c.intern_kind(k.as_str()));
+    let mut kind = None;
+    let mut guard = None;
+    if let Some(filter) = children.next() {
+        match filter.as_rule() {
+            Rule::Ident => kind = Some(c.intern_kind(filter.as_str())),
+            Rule::Node => guard = Some(Box::new(visit_node(c, filter, 0))),
+            r => panic!("unexpected capture filter: {r:?}"),
+        }
+    }
     Pat::Cap {
         slot: c.slot(name),
         field,
         kind,
         rekind: None,
+        guard,
     }
 }
 
@@ -465,10 +470,19 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
     match p {
         Pat::Var { .. } => false,
         Pat::Cap {
-            slot, field, kind, ..
+            slot,
+            field,
+            kind,
+            guard,
+            ..
         } => {
             if !field_ok(*field) || kind.is_some_and(|k| k != n.kind) {
                 return false;
+            }
+            if let Some(g) = guard {
+                if !matches(t, i, g, caps) {
+                    return false;
+                }
             }
             caps[*slot as usize] = (i, t.hop(i));
             true
@@ -625,12 +639,6 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
             caps[0] = (i, t.hop(i));
             let root = t.nodes[i as usize];
             match &r.out {
-                Out::Remove => t.remove(i),
-                Out::SetKind(k) => t.set_kind(i, *k),
-                Out::SetText { target, from, tf } => {
-                    let sym = tf.apply_sym(t, lang, caps[*from as usize].0);
-                    t.set_text(caps[*target as usize].0, sym);
-                }
                 Out::Append {
                     under,
                     each,

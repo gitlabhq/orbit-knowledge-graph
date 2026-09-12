@@ -18,7 +18,7 @@ FieldChild = { Ident ~ ":" ~ SP? ~ Element }
 // @$NAME|tf  (text ref inside Node) or @$NAME->kind (child capture)
 TextField = { "@$" ~ Name ~ !Arrow ~ ("|" ~ TfChain)? }
 CapRef    = { "@$" ~ Name ~ Arrow ~ Ident }
-Capture   = { "$" ~ Name ~ (":" ~ Ident)? }
+Capture   = { "$" ~ Name ~ (":" ~ (Node | Ident))? }
 
 // $$$NAME:filter|filter->kind  or  $$$NAME:filter=>kind
 Variadic  = { "$$$" ~ Name ~ (":" ~ Filter)? ~ (Arrow ~ Ident)? }

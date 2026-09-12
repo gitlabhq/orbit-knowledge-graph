@@ -12,17 +12,9 @@ stages:
       - match: '(field_expression value: (self) field: $F)'
         replace: '(__ivar @$F)'
 
-      # Mark functions with &self as methods (for classify_methods)
-      - match: '(function_item parameters: (parameters (self_parameter)))'
-        append: '(__self_method)'
-
-      # Visibility modifier → __visibility
-      - match: '(visibility_modifier)'
-        set_kind: '__visibility'
-
-      # impl Trait for Type → __supertype on the impl
-      - match: '(impl_item trait: $T type: $TY)'
-        append: '(__supertype @$T)'
+      # Visibility modifier → __visibility (sym carries the text)
+      - match: '(visibility_modifier $$$V)'
+        replace: '(__visibility $$$V)'
 
       # struct/enum heritage via derive macros could go here
 
@@ -92,8 +84,12 @@ stages:
       - match: '(function_signature_item name: $N)'
         replace: '(__def (__defname @$N) (__deftype "Function"))'
 
-      # Functions
-      - match: '(function_item name: $N body: $B $$$ANN:__self_method|__visibility)'
+      # Functions — self_parameter detection folded in (most specific first)
+      - match: '(function_item name: $N parameters: (parameters (self_parameter)) body: $B $$$ANN:__visibility)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__self_method) (__scope) $$$ANN $B)'
+      - match: '(function_item name: $N parameters: (parameters (self_parameter)) body: $B)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__self_method) (__scope) $B)'
+      - match: '(function_item name: $N body: $B $$$ANN:__visibility)'
         replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $B)'
       - match: '(function_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $B)'
@@ -107,8 +103,10 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "Enum") (__scope) $B)'
       - match: '(trait_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Trait") (__scope) $B)'
-      - match: '(impl_item type: $T body: $B $$$ANN:__supertype)'
-        replace: '(__def (__defname @$T) (__deftype "Impl") (__scope) $$$ANN $B)'
+      - match: '(impl_item trait: $T type: $TY body: $B)'
+        replace: '(__def (__defname @$TY) (__deftype "Impl") (__scope) (__supertype @$T) $B)'
+      - match: '(impl_item type: $T body: $B)'
+        replace: '(__def (__defname @$T) (__deftype "Impl") (__scope) $B)'
 
 resolve:
   lookup_from:
@@ -117,9 +115,9 @@ resolve:
   stages:
     - name: crate_roots
       rules:
-        - match: '(__dir (__file "Cargo.toml"))'
-          append: '(__crate_root)'
-        - match: '(__dir (__file "lib.rs"))'
-          append: '(__source_root)'
-        - match: '(__dir (__file "main.rs"))'
-          append: '(__source_root)'
+        - match: '(__dir (__file "Cargo.toml") $$$REST)'
+          replace: '(__dir (__crate_root) (__file "Cargo.toml") $$$REST)'
+        - match: '(__dir (__file "lib.rs") $$$REST)'
+          replace: '(__dir (__source_root) (__file "lib.rs") $$$REST)'
+        - match: '(__dir (__file "main.rs") $$$REST)'
+          replace: '(__dir (__source_root) (__file "main.rs") $$$REST)'

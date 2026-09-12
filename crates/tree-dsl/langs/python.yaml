@@ -24,21 +24,17 @@ stages:
           kind: __supertype
           tf: 'field=function'
 
-      # __callable detection
-      - match: '(class_definition name: $N body: (block (function_definition name: (identifier "__call__"))))'
-        append: '(__callable "__call__")'
-
       # self.x / cls.x → __ivar
       - match: '(attribute object: (identifier "self") attribute: $A)'
         replace: '(__ivar @$A)'
       - match: '(attribute object: (identifier "cls") attribute: $A)'
         replace: '(__ivar @$A)'
 
-      # Aliased import: set sym to real name, append __alias
+      # Aliased import: capture real name as sym, alias as child
+      - match: '(aliased_import name: $N alias: $A)'
+        replace: '(aliased_import @$N (__alias @$A))'
       - match: '(aliased_import name: $N)'
-        set_text: '$N'
-      - match: '(aliased_import alias: $A)'
-        append: '(__alias @$A)'
+        replace: '(aliased_import @$N)'
 
   - name: retag-refs
     rules:
@@ -154,8 +150,10 @@ stages:
       - match: '(function_definition name: $N body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $B)'
 
-      # Classes (after functions so methods are canonical)
-      - match: '(class_definition name: $N body: $B $$$ANN:__callable|__supertype|__decorator)'
+      # Classes — __callable variant detects __call__ method (must precede generic)
+      - match: '(class_definition name: $N body: (block $CALL:(__def (__defname "__call__")) $$$BODY) $$$ANN:__supertype|__decorator)'
+        replace: '(__def (__defname @$N) (__deftype "Class") (__scope) (__callable "__call__") $$$ANN (block $CALL $$$BODY))'
+      - match: '(class_definition name: $N body: $B $$$ANN:__supertype|__decorator)'
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $$$ANN $B)'
 
 resolve:
@@ -165,15 +163,15 @@ resolve:
   stages:
     - name: packages
       rules:
-        - match: '(__dir (__file "__init__.py"))'
-          append: '(__package)'
-        - match: '(__dir (__file "__init__.pyi"))'
-          append: '(__package)'
+        - match: '(__dir (__file "__init__.py") $$$REST)'
+          replace: '(__dir (__package) (__file "__init__.py") $$$REST)'
+        - match: '(__dir (__file "__init__.pyi") $$$REST)'
+          replace: '(__dir (__package) (__file "__init__.pyi") $$$REST)'
     - name: roots
       climb:
         while: __package
         mark: __source_root
     - name: src_dirs
       rules:
-        - match: '(__dir "src")'
-          append: '(__source_root)'
+        - match: '(__dir "src" $$$REST)'
+          replace: '(__dir "src" (__source_root) $$$REST)'

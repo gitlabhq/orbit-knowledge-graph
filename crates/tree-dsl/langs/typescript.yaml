@@ -9,8 +9,8 @@ stages:
         replace: '(__return $$$VALS)'
 
       # Distinguish import type from import before rewriting
-      - match: '(import_statement (type))'
-        set_kind: 'import_type_statement'
+      - match: '(import_statement (type) $$$REST)'
+        replace: '(import_type_statement $$$REST)'
 
       # this.x → __ivar
       - match: '(member_expression object: (this) property: $P)'
@@ -27,11 +27,11 @@ stages:
           each: TYPES
           kind: __supertype
 
-      # Import alias: set import_specifier sym to real name, append __alias
+      # Import alias: capture real name as sym, alias as child
       - match: '(import_specifier name: $N alias: $A)'
-        set_text: '$N'
-      - match: '(import_specifier alias: $A)'
-        append: '(__alias @$A)'
+        replace: '(import_specifier @$N (__alias @$A))'
+      - match: '(import_specifier name: $N)'
+        replace: '(import_specifier @$N)'
 
   - name: retag-refs
     rules:
@@ -141,11 +141,11 @@ resolve:
   stages:
     - name: packages
       rules:
-        - match: '(__dir (__file "package.json"))'
-          append: '(__package_root)'
+        - match: '(__dir (__file "package.json") $$$REST)'
+          replace: '(__dir (__package_root) (__file "package.json") $$$REST)'
     - name: index_dirs
       rules:
-        - match: '(__dir (__file "index.ts"))'
-          append: '(__source_root)'
-        - match: '(__dir (__file "index.js"))'
-          append: '(__source_root)'
+        - match: '(__dir (__file "index.ts") $$$REST)'
+          replace: '(__dir (__source_root) (__file "index.ts") $$$REST)'
+        - match: '(__dir (__file "index.js") $$$REST)'
+          replace: '(__dir (__source_root) (__file "index.js") $$$REST)'
