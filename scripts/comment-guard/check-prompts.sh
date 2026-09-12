@@ -18,7 +18,7 @@ PATHS=(config/prompts config/setup/setup.yaml skills)
 is_prompt_file() {
     case "$1" in
         skills/orbit/references/query_language.md) return 1 ;;
-        config/prompts/*.yml|config/prompts/*/*.yml|config/prompts/*/*/*.yml|config/setup/setup.yaml|skills/*.md|skills/*/*.md|skills/*/*/*.md) return 0 ;;
+        config/prompts/*.yml|config/setup/setup.yaml|skills/*.md) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -30,6 +30,7 @@ if [ "${1:-}" = "--diff-base" ]; then
         git fetch origin "$base" --depth=1 2>/dev/null || true
         git cat-file -e "${base}^{commit}" 2>/dev/null || { echo "⚠️  prompt lint: diff-base $base is unreachable; the lint did not run."; exit 2; }
     fi
+    git merge-base "$base" HEAD >/dev/null 2>&1 || { echo "⚠️  prompt lint: no merge base with $base in this clone; the lint did not run."; exit 2; }
     mapfile -t candidates < <(git diff --name-only --diff-filter=d "${base}...HEAD" -- "${PATHS[@]}" | sort)
     scope="changed in this MR"
 elif [ "$#" -gt 0 ]; then
