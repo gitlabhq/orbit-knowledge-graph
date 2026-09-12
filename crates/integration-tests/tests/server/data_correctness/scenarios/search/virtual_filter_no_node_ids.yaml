@@ -15,4 +15,4 @@ query:
     }
 
 expect:
-  compile_error: true
+  compile_error: "node_ids"

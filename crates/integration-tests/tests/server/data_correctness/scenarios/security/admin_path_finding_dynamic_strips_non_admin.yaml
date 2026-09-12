@@ -17,3 +17,7 @@ query:
 expect:
   referential_integrity: true
   path_count: 1
+  nodes:
+    User:
+      ids: [1]
+      prop_absent: [is_admin, is_auditor]
