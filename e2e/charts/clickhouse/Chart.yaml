@@ -1,5 +1,5 @@
 apiVersion: v2
 name: clickhouse
-description: Single-node ClickHouse for e2e testing
+description: ClickHouse for e2e testing, one node or a replicated cluster with embedded Keeper
 type: application
-version: 0.5.1
+version: 0.6.0

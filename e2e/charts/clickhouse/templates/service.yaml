@@ -15,3 +15,24 @@ spec:
       targetPort: native
   selector:
     app: {{ .Release.Name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "clickhouse.headless" . }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: native
+      port: 9000
+    - name: keeper
+      port: 9181
+    - name: raft
+      port: 9234
+    - name: interserver
+      port: 9009
+  selector:
+    app: {{ .Release.Name }}
