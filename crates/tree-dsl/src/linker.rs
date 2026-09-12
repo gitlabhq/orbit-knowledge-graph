@@ -388,16 +388,6 @@ pub fn link(tree: &mut Tree, lang: &mut Lang) {
         ],
     };
 
-    let import_k = Canonical::Import as u16;
-    let import_type_k = Canonical::ImportType as u16;
-    let call_k = Canonical::Call as u16;
-    let member_k = Canonical::Member as u16;
-    let callee_k = Canonical::Callee as u16;
-    let binding_k = Canonical::Binding as u16;
-    let branch_k = Canonical::Branch as u16;
-    let arm_k = Canonical::Arm as u16;
-    let loop_k = Canonical::Loop as u16;
-
     let mut i = 0u32;
     let len = tree.nodes.len() as u32;
 
@@ -449,7 +439,7 @@ pub fn link(tree: &mut Tree, lang: &mut Lang) {
             }
         }
 
-        if k == import_k || k == import_type_k {
+        if k == Canonical::Import || k == Canonical::ImportType {
             f.handle_import(tree, i);
             i += n.size.max(1);
             continue;
@@ -459,33 +449,33 @@ pub fn link(tree: &mut Tree, lang: &mut Lang) {
             i += 1;
             continue;
         }
-        if k == call_k {
+        if k == Canonical::Call {
             f.handle_call(tree, i);
             i += 1;
             continue;
         }
-        if k == member_k {
+        if k == Canonical::Member {
             let pk = if n.parent != NONE {
                 tree.nodes[n.parent as usize].kind
             } else {
                 0
             };
-            if pk != call_k && pk != callee_k {
+            if pk != Canonical::Call && pk != Canonical::Callee {
                 f.handle_standalone_member(tree, i);
             }
             i += 1;
             continue;
         }
-        if k == binding_k {
+        if k == Canonical::Binding {
             f.handle_binding(tree, i);
             i += 1;
             continue;
         }
-        if k == branch_k {
+        if k == Canonical::Branch {
             let pre = f.cur;
             let arms: Vec<(u32, u32)> = tree
                 .children(i)
-                .filter(|&c| tree.kind(c) == arm_k)
+                .filter(|&c| tree.kind(c) == Canonical::Arm)
                 .map(|c| (c, c + tree.nodes[c as usize].size))
                 .collect();
             let entries: Vec<BlockId> = arms
@@ -503,7 +493,7 @@ pub fn link(tree: &mut Tree, lang: &mut Lang) {
             i += 1;
             continue;
         }
-        if k == loop_k {
+        if k == Canonical::Loop {
             let (h, _) = f.ssa.begin_loop(f.cur);
             f.cur = f.ssa.finish_loop(h, f.cur);
             i += 1;
@@ -522,15 +512,13 @@ pub fn link(tree: &mut Tree, lang: &mut Lang) {
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
 
-    let supertype_k = Canonical::SuperType as u16;
-    let decorator_k = Canonical::Decorator as u16;
     let mut meta: Vec<(u32, u32)> = Vec::new();
     for &dn in &f.defs {
         let syms: Vec<u32> = tree
             .children(dn)
             .filter(|&c| {
                 let ck = tree.kind(c);
-                (ck == supertype_k || ck == decorator_k) && tree.sym(c) != 0
+                (ck == Canonical::SuperType || ck == Canonical::Decorator) && tree.sym(c) != 0
             })
             .map(|c| tree.sym(c))
             .collect();
@@ -551,12 +539,9 @@ fn return_type_of_def(tree: &Tree, def: u32) -> Option<u32> {
     if let Some(rt) = child_sym(tree, def, Canonical::ReturnType) {
         return Some(rt);
     }
-    let return_k = Canonical::Return as u16;
-    let binding_k = Canonical::Binding as u16;
-
     let mut binds: Vec<(u32, u32)> = Vec::new();
     for d in tree.descendants(def) {
-        if tree.kind(d) == binding_k && tree.sym(d) != 0 {
+        if tree.kind(d) == Canonical::Binding && tree.sym(d) != 0 {
             let callee = child_node(tree, d, Canonical::Rhs)
                 .and_then(|rhs| child_node(tree, rhs, Canonical::Call))
                 .and_then(|c| child_node(tree, c, Canonical::Callee))
@@ -568,13 +553,12 @@ fn return_type_of_def(tree: &Tree, def: u32) -> Option<u32> {
         }
     }
 
-    let call_k = Canonical::Call as u16;
     for d in tree.descendants(def) {
-        if tree.kind(d) != return_k {
+        if tree.kind(d) != Canonical::Return {
             continue;
         }
         for c in tree.children(d) {
-            if tree.kind(c) == call_k {
+            if tree.kind(c) == Canonical::Call {
                 return child_node(tree, c, Canonical::Callee)
                     .map(|c2| tree.sym(c2))
                     .filter(|&v| v != 0);
@@ -594,13 +578,11 @@ fn return_type_of_def(tree: &Tree, def: u32) -> Option<u32> {
 }
 
 fn find_method(tree: &Tree, defs: &[u32], container: u32, name: u32) -> Option<u32> {
-    let deftype_k = Canonical::DefType as u16;
-    let supertype_k = Canonical::SuperType as u16;
     let mut search = vec![container];
     let mut si = 0;
     while si < search.len() {
         for d in tree.descendants(search[si]) {
-            if tree.kind(d) == deftype_k {
+            if tree.kind(d) == Canonical::DefType {
                 let m = tree.nodes[d as usize].parent;
                 if m != NONE && m != search[si] && def_name(tree, m) == name {
                     return Some(m);
@@ -608,7 +590,7 @@ fn find_method(tree: &Tree, defs: &[u32], container: u32, name: u32) -> Option<u
             }
         }
         for c in tree.children(search[si]) {
-            if tree.kind(c) == supertype_k && tree.sym(c) != 0 {
+            if tree.kind(c) == Canonical::SuperType && tree.sym(c) != 0 {
                 let sn = tree.sym(c);
                 for &dn in defs {
                     if def_name(tree, dn) == sn && !search.contains(&dn) {
@@ -623,9 +605,8 @@ fn find_method(tree: &Tree, defs: &[u32], container: u32, name: u32) -> Option<u
 }
 
 fn find_ivar_type(tree: &Tree, class: u32, attr: u32) -> Option<u32> {
-    let binding_k = Canonical::Binding as u16;
     for d in tree.descendants(class) {
-        if tree.kind(d) == binding_k
+        if tree.kind(d) == Canonical::Binding
             && child_node(tree, d, Canonical::Ivar).is_some_and(|iv| tree.sym(iv) == attr)
         {
             return child_node(tree, d, Canonical::Rhs)

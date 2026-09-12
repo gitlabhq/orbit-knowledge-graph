@@ -99,7 +99,7 @@ fn cmd_parse(
             print_tree(&tree, &lang);
         }
         Stage::Ast => {
-            let (pipeline, mut lang) = tree_dsl::run::Pipeline::for_lang(lang_id);
+            let (pipeline, mut lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
             let mut tree = tree_dsl::grammar::parse(&source, lang_id, &mut lang, &path);
             for stage in &pipeline.rewrite_stages {
                 tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, stage);

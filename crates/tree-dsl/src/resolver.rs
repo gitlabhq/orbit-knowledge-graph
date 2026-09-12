@@ -117,14 +117,12 @@ fn gather_imports(
     lookup_prefixes: &[String],
     external: &[String],
 ) -> (Vec<ImportReq>, Vec<Edge>) {
-    let import_k = C::Import as u16;
-    let import_type_k = C::ImportType as u16;
     let mut reqs: Vec<ImportReq> = Vec::new();
     let mut cross_edges = Vec::new();
 
     for (fi, tree) in trees.iter().enumerate() {
         for (i, n) in tree.nodes.iter().enumerate() {
-            if n.kind != import_k && n.kind != import_type_k {
+            if n.kind != C::Import && n.kind != C::ImportType {
                 continue;
             }
             let source_sym = tree
@@ -374,9 +372,6 @@ fn build_call_edges(
     reqs: &[ImportReq],
     visible: &[FxHashMap<u32, u32>],
 ) -> (Vec<Edge>, Vec<Edge>) {
-    let call_k = C::Call as u16;
-    let callee_k = C::Callee as u16;
-    let member_k = C::Member as u16;
     let mut module_call_edges = Vec::new();
     for req in reqs {
         let fi = req.fi;
@@ -408,16 +403,16 @@ fn build_call_edges(
 
             let caller = edge.from.node;
             for d in trees[fi].descendants(caller) {
-                if trees[fi].kind(d) != call_k {
+                if trees[fi].kind(d) != C::Call {
                     continue;
                 }
                 let callee_node = trees[fi]
                     .children(d)
-                    .find(|&c| trees[fi].kind(c) == callee_k);
+                    .find(|&c| trees[fi].kind(c) == C::Callee);
                 if let Some(cn) = callee_node
                     && let Some(mn) = trees[fi]
                         .children(cn)
-                        .find(|&c| trees[fi].kind(c) == member_k)
+                        .find(|&c| trees[fi].kind(c) == C::Member)
                 {
                     let member_sym = trees[fi].sym(mn);
                     if member_sym == 0 {
@@ -473,10 +468,10 @@ fn build_call_edges(
                 let caller_node = edge.from.node;
                 let mut matched = false;
                 for d in trees[ce.from.tree as usize].descendants(caller_node) {
-                    if trees[ce.from.tree as usize].kind(d) == call_k {
+                    if trees[ce.from.tree as usize].kind(d) == C::Call {
                         let callee = trees[ce.from.tree as usize]
                             .children(d)
-                            .find(|&c| trees[ce.from.tree as usize].kind(c) == callee_k)
+                            .find(|&c| trees[ce.from.tree as usize].kind(c) == C::Callee)
                             .map(|c| trees[ce.from.tree as usize].sym(c))
                             .unwrap_or(0);
                         if callee == target_name {
@@ -507,16 +502,6 @@ fn build_type_edges(
     cross_edges: &[Edge],
     visible: &[FxHashMap<u32, u32>],
 ) -> Vec<Edge> {
-    let return_type_k = C::ReturnType as u16;
-    let return_k = C::Return as u16;
-    let call_k = C::Call as u16;
-    let callee_k = C::Callee as u16;
-    let member_k = C::Member as u16;
-    let object_k = C::Object as u16;
-    let binding_k = C::Binding as u16;
-    let rhs_k = C::Rhs as u16;
-    let deftype_k = C::DefType as u16;
-
     let mut type_edges = Vec::new();
     for ce in call_edges {
         if ce.kind != EdgeKind::Calls {
@@ -529,17 +514,17 @@ fn build_type_edges(
 
         let return_type_sym = trees[target_fi]
             .children(target_node)
-            .find(|&c| trees[target_fi].kind(c) == return_type_k)
+            .find(|&c| trees[target_fi].kind(c) == C::ReturnType)
             .map(|c| trees[target_fi].sym(c))
             .filter(|&s| s != 0)
             .or_else(|| {
                 for d in trees[target_fi].descendants(target_node) {
-                    if trees[target_fi].nodes[d as usize].kind == return_k {
+                    if trees[target_fi].nodes[d as usize].kind == C::Return {
                         for c in trees[target_fi].children(d) {
-                            if trees[target_fi].kind(c) == call_k {
+                            if trees[target_fi].kind(c) == C::Call {
                                 return trees[target_fi]
                                     .children(c)
-                                    .find(|&c2| trees[target_fi].kind(c2) == callee_k)
+                                    .find(|&c2| trees[target_fi].kind(c2) == C::Callee)
                                     .map(|c2| trees[target_fi].sym(c2))
                                     .filter(|&s| s != 0);
                             }
@@ -581,18 +566,18 @@ fn build_type_edges(
 
         let mut bound_vars: Vec<u32> = Vec::new();
         for d in tree.descendants(caller_node) {
-            if tree.kind(d) != binding_k {
+            if tree.kind(d) != C::Binding {
                 continue;
             }
             let lhs = tree.sym(d);
             let rhs_call = tree
                 .children(d)
-                .find(|&c| tree.kind(c) == rhs_k)
-                .and_then(|rhs| tree.children(rhs).find(|&c| tree.kind(c) == call_k));
+                .find(|&c| tree.kind(c) == C::Rhs)
+                .and_then(|rhs| tree.children(rhs).find(|&c| tree.kind(c) == C::Call));
             if let Some(rn) = rhs_call {
                 let callee = tree
                     .children(rn)
-                    .find(|&c| tree.kind(c) == callee_k)
+                    .find(|&c| tree.kind(c) == C::Callee)
                     .map(|c| tree.sym(c))
                     .unwrap_or(0);
                 if callee == target_name_sym && lhs != 0 {
@@ -602,14 +587,14 @@ fn build_type_edges(
         }
 
         for d in tree.descendants(caller_node) {
-            if tree.kind(d) == call_k {
-                let callee_n = tree.children(d).find(|&c| tree.kind(c) == callee_k);
+            if tree.kind(d) == C::Call {
+                let callee_n = tree.children(d).find(|&c| tree.kind(c) == C::Callee);
                 let member_n =
-                    callee_n.and_then(|cn| tree.children(cn).find(|&c| tree.kind(c) == member_k));
+                    callee_n.and_then(|cn| tree.children(cn).find(|&c| tree.kind(c) == C::Member));
                 if let Some(mn) = member_n {
                     let obj_sym = tree
                         .children(mn)
-                        .find(|&c| tree.kind(c) == object_k)
+                        .find(|&c| tree.kind(c) == C::Object)
                         .map(|c| tree.sym(c))
                         .unwrap_or(0);
                     if !bound_vars.contains(&obj_sym) {
@@ -619,7 +604,7 @@ fn build_type_edges(
                     if mem_sym != 0 {
                         let mut found = false;
                         for cd in trees[type_fi].descendants(type_node) {
-                            if trees[type_fi].kind(cd) == deftype_k {
+                            if trees[type_fi].kind(cd) == C::DefType {
                                 let mn = trees[type_fi].nodes[cd as usize].parent;
                                 if mn != NONE && mn != type_node {
                                     let mname = name_sym(&trees[type_fi], mn);
@@ -651,7 +636,6 @@ fn follow_import_chain(
     wanted: u32,
     start_fi: usize,
 ) -> Vec<(usize, u32)> {
-    let import_k = C::Import as u16;
     let mut results: Vec<(usize, u32)> = Vec::new();
     let mut visited: Vec<(usize, u32)> = Vec::new();
     let mut stack: Vec<(usize, u32)> = vec![(start_fi, wanted)];
@@ -671,7 +655,7 @@ fn follow_import_chain(
 
         let tree = &trees[fi];
         for (ni, n) in tree.nodes.iter().enumerate() {
-            if n.kind != import_k {
+            if n.kind != C::Import {
                 continue;
             }
             for c in tree.children(ni as u32) {

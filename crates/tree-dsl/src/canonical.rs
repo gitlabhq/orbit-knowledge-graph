@@ -66,21 +66,31 @@ pub enum Canonical {
     Return,
 }
 
+impl From<Canonical> for u16 {
+    fn from(ck: Canonical) -> u16 {
+        ck as u16
+    }
+}
+
+impl PartialEq<Canonical> for u16 {
+    fn eq(&self, other: &Canonical) -> bool {
+        *self == *other as u16
+    }
+}
+
 pub fn is_canonical(kind: u16) -> bool {
     kind >= CANONICAL_BASE
 }
 
 pub fn child_sym(tree: &Tree, node: u32, ck: Canonical) -> Option<u32> {
-    let k = ck as u16;
     tree.children(node)
-        .find(|&c| tree.kind(c) == k)
+        .find(|&c| tree.kind(c) == ck)
         .map(|c| tree.sym(c))
         .filter(|&s| s != 0)
 }
 
 pub fn child_node(tree: &Tree, node: u32, ck: Canonical) -> Option<u32> {
-    let k = ck as u16;
-    tree.children(node).find(|&c| tree.kind(c) == k)
+    tree.children(node).find(|&c| tree.kind(c) == ck)
 }
 
 pub fn def_name(tree: &Tree, node: u32) -> u32 {
@@ -88,8 +98,6 @@ pub fn def_name(tree: &Tree, node: u32) -> u32 {
 }
 
 pub fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
-    let deftype_k = Canonical::DefType as u16;
-    let self_method_k = Canonical::SelfMethod as u16;
     let func = lang.syms.intern("Function");
     let method = lang.syms.intern("Method");
     let assoc_fn = lang.syms.intern("AssociatedFunction");
@@ -98,7 +106,7 @@ pub fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
     let trait_ = lang.syms.intern("Trait");
 
     for i in 0..tree.nodes.len() as u32 {
-        if tree.kind(i) != deftype_k || tree.sym(i) != func {
+        if tree.kind(i) != Canonical::DefType || tree.sym(i) != func {
             continue;
         }
         let def = tree.nodes[i as usize].parent;
@@ -113,7 +121,9 @@ pub fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
                     break;
                 }
                 if dt == impl_ || dt == trait_ {
-                    let has_self = tree.children(def).any(|c| tree.kind(c) == self_method_k);
+                    let has_self = tree
+                        .children(def)
+                        .any(|c| tree.kind(c) == Canonical::SelfMethod);
                     tree.nodes[i as usize].sym = if has_self { method } else { assoc_fn };
                     break;
                 }
