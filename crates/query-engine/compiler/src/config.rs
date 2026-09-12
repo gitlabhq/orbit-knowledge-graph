@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use ontology::Ontology;
+use ontology::introspection::{IntrospectionScope, SchemaResponse, build_schema_response};
 use orbit_server_config::QueryConfig;
 
 /// Pathfinding hard ceilings. Config can tighten but never exceed these.
@@ -18,7 +19,7 @@ use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
-use crate::passes::frontend;
+use crate::passes::frontend::{self, SchemaRequest};
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
@@ -35,6 +36,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     env {
         pub ontology: Arc<Ontology>,
         pub security_ctx: SecurityContext,
+        pub introspection_scope: IntrospectionScope,
     }
 
     state {
@@ -46,14 +48,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub query_config: QueryConfig,
         pub hydration_plan: HydrationPlan,
         pub output: CompiledQueryContext,
+        pub schema_request: SchemaRequest,
+        pub schema_response: SchemaResponse,
     }
 
     phases {
         json_dsl_parse {
             reads_env: [ontology]
-            mutates: [raw, input]
-        }
-        gql_parse {
             mutates: [raw, input]
         }
         validate {
@@ -103,6 +104,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [node, input]
             mutates: [result_ctx, query_config, hydration_plan, output]
         }
+        resolve_schema {
+            reads_env: [ontology, introspection_scope]
+            mutates: [schema_request, schema_response]
+        }
     }
 
     pipelines {
@@ -113,8 +118,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         clickhouse_gql {
             env: [ontology, security_ctx]
-            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
@@ -126,18 +131,17 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [raw, input]
             phases: [json_dsl_parse, validate, normalize]
         }
+        schema_call {
+            env: [ontology, introspection_scope]
+            state: [schema_request, schema_response]
+            phases: [resolve_schema]
+        }
     }
 }
 
 fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
     let raw = require(ctx.take_raw(), "raw")?;
     ctx.set_input(frontend::json_dsl::parse(&raw, ctx.ontology())?);
-    Ok(())
-}
-
-fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let raw = require(ctx.take_raw(), "raw")?;
-    ctx.set_input(frontend::gql::parse(&raw)?);
     Ok(())
 }
 
@@ -305,5 +309,25 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
         hydration,
         input,
     });
+    Ok(())
+}
+
+fn resolve_schema(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let request = require(ctx.take_schema_request(), "schema_request")?;
+    let scope = *ctx.introspection_scope();
+    let ontology = ctx.ontology();
+    let expand_nodes: Vec<String> = request.node.into_iter().collect();
+    if let Some(name) = expand_nodes.first()
+        && (name == "*"
+            || ontology.get_node(name).is_none()
+            || (scope == IntrospectionScope::Local
+                && !ontology.local_entity_names().contains(&name.as_str())))
+    {
+        return Err(QueryError::Validation(format!(
+            "schema node '{name}' is unknown or unavailable in this scope"
+        )));
+    }
+    let response = build_schema_response(ontology, scope, &expand_nodes);
+    ctx.set_schema_response(response);
     Ok(())
 }

@@ -251,7 +251,11 @@ fn hop_range(range: Range<'_>) -> Result<HopRange> {
 #[cfg(test)]
 mod tests {
     fn hash(query: &str) -> u64 {
-        super::super::parse(query).unwrap().compiler.query_hash
+        let crate::passes::frontend::Statement::Query(input) = super::super::parse(query).unwrap()
+        else {
+            panic!("expected a query: {query}");
+        };
+        input.compiler.query_hash
     }
 
     #[test]

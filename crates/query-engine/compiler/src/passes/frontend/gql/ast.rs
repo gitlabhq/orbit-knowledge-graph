@@ -3,6 +3,11 @@ use serde_json::Value;
 
 use crate::input::{Direction, FilterOp, OrderDirection, PropertyRef, TruncateUnit};
 
+pub(super) enum Statement<'i> {
+    Query(Box<Query<'i>>),
+    SchemaCall { node: Option<String> },
+}
+
 pub(super) struct Query<'i> {
     pub pattern: Pattern<'i>,
     pub predicates: Vec<Comparison<'i>>,

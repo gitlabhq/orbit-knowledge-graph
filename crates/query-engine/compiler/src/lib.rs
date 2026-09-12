@@ -79,33 +79,83 @@ pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
+use ontology::introspection::{IntrospectionScope, SchemaResponse};
+use passes::frontend::Statement;
 use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
-fn finish<C: config::CompilerCtx>(
+fn finish<C: config::CompilerCtx, T>(
     ctx: &mut C,
     run: impl FnOnce(&mut C) -> Result<()>,
-) -> Result<CompiledQueryContext> {
+    take: impl FnOnce(&mut C) -> Option<T>,
+) -> Result<T> {
     run(ctx)
         .and_then(|()| {
-            ctx.take_output().ok_or_else(|| {
+            take(ctx).ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })
         })
         .count_err()
 }
 
+#[derive(Debug)]
+pub enum PreparedStatement {
+    Query(Box<CompiledQueryContext>),
+    Schema(SchemaResponse),
+}
+
+/// Prepare one statement through the given frontend: a graph query runs that
+/// frontend's complete compilation pipeline; a schema call resolves ontology
+/// metadata within `scope` and never reads graph data.
+#[must_use = "the prepared statement should be used"]
+pub fn prepare(
+    raw: &str,
+    fe: Frontend,
+    ontology: &Ontology,
+    security_context: &SecurityContext,
+    scope: IntrospectionScope,
+) -> Result<PreparedStatement> {
+    let ontology = Arc::new(ontology.clone());
+    let query = |compiled| PreparedStatement::Query(Box::new(compiled));
+    match fe {
+        Frontend::JsonDsl => {
+            let mut ctx = config::ClickhouseJsonDslCtx::new(ontology, security_context.clone());
+            ctx.set_raw(raw.to_string());
+            finish(
+                &mut ctx,
+                config::run_clickhouse_json_dsl,
+                config::CompilerCtx::take_output,
+            )
+            .map(query)
+        }
+        Frontend::Gql => match passes::frontend::gql::parse(raw).count_err()? {
+            Statement::Query(input) => {
+                let mut ctx = config::ClickhouseGqlCtx::new(ontology, security_context.clone());
+                ctx.set_input(*input);
+                finish(
+                    &mut ctx,
+                    config::run_clickhouse_gql,
+                    config::CompilerCtx::take_output,
+                )
+                .map(query)
+            }
+            Statement::Schema(request) => {
+                let mut ctx = config::SchemaCallCtx::new(ontology, scope);
+                ctx.set_schema_request(request);
+                finish(
+                    &mut ctx,
+                    config::run_schema_call,
+                    config::CompilerCtx::take_schema_response,
+                )
+                .map(PreparedStatement::Schema)
+            }
+        },
+    }
+}
+
 /// Compile raw query text through the given frontend into a
-/// [`CompiledQueryContext`].
-///
-/// Each frontend is its own pipeline preset that differs only in the first
-/// phase, which lowers the raw text to [`Input`]. Everything after that is
-/// shared.
-///
-/// ```text
-/// raw → {json_dsl_parse | gql_parse} → Validate → Normalize → Restrict → Lower → Enforce → Security → Cursor → Check → HydratePlan → Settings → Codegen
-/// ```
+/// [`CompiledQueryContext`]. Schema calls are rejected; use [`prepare`].
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     raw: &str,
@@ -113,18 +163,12 @@ pub fn compile(
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let ontology = Arc::new(ontology.clone());
-    match fe {
-        Frontend::JsonDsl => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(ontology, ctx.clone());
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_json_dsl)
-        }
-        Frontend::Gql => {
-            let mut ctx = config::ClickhouseGqlCtx::new(ontology, ctx.clone());
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_gql)
-        }
+    match prepare(raw, fe, ontology, ctx, IntrospectionScope::All)? {
+        PreparedStatement::Query(compiled) => Ok(*compiled),
+        PreparedStatement::Schema(_) => Err(QueryError::Validation(
+            "schema calls are not graph queries; prepare the statement instead".into(),
+        ))
+        .count_err(),
     }
 }
 
@@ -207,18 +251,24 @@ mod tests {
     #[test]
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile("not json", Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
-            .expect_err("must reject");
-        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        assert!(
-            matches!(err, crate::error::QueryError::Parse(_)),
-            "expected Parse, got: {err:?}"
-        );
-        assert!(
-            after > before,
-            "count_err must run on parse errors (before={before}, after={after})"
-        );
+        for fe in [Frontend::JsonDsl, Frontend::Gql] {
+            let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+            let err =
+                compile("not a query", fe, &ONTOLOGY, &security_ctx()).expect_err("must reject");
+            let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+            assert!(
+                matches!(
+                    (fe, &err),
+                    (Frontend::JsonDsl, QueryError::Parse(_))
+                        | (Frontend::Gql, QueryError::Validation(_))
+                ),
+                "unexpected error: {err:?}"
+            );
+            assert!(
+                after > before,
+                "count_err must run on parse errors (before={before}, after={after})"
+            );
+        }
     }
 
     #[test]

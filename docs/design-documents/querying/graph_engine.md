@@ -54,11 +54,11 @@ The compiler supports two query frontends:
 ### Compiler pass pipeline
 
 Both frontends compile to parameterized ClickHouse SQL through shared passes.
-`crates/query-engine/compiler/src/config.rs` defines the `clickhouse_json_dsl` and `clickhouse_gql` presets, which differ only in the first phase:
+`crates/query-engine/compiler/src/config.rs` defines the `clickhouse_json_dsl` and `clickhouse_gql` presets plus the one-phase `schema_call` pipeline. `compiler::prepare` parses once and dispatches by statement: MATCH enters the shared graph passes, while `CALL db.schema(...)` resolves schema metadata without SQL.
 
 | # | Pass | Responsibility |
 |---|---|---|
-| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw text to `Input`; the JSON frontend also validates the JSON schemas and computes the cursor query hash |
+| 1 | `json_dsl_parse` or `gql::parse` | Lowers graph-query text to `Input`; the JSON frontend also validates the JSON schemas and computes the cursor query hash |
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
 | 4 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |

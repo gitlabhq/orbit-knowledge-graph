@@ -3,13 +3,13 @@
 ## Scope and terms
 
 The Orbit query frontend accepts a read-only graph language based on openCypher 9 syntax.
-It includes Orbit-specific restrictions and extensions and supports only the operations that Orbit's compiler can express.
+It includes Orbit-specific query restrictions, extensions, and schema discovery.
 
-The frontend is a compiler pipeline preset, `clickhouse_gql`. The JSON Query DSL remains the default for remote requests.
-This implementation does not change MCP tools, protocol messages, Rails, or glab.
+Queries use the compiler pipeline preset `clickhouse_gql`; schema calls use the `schema_call` pipeline. Remote query contracts remain JSON-only.
+This implementation does not change MCP tools, protocol messages, Rails, or CLI contracts.
 
 A **Pest pair** is a matched grammar rule and its source span.
-The frontend's **syntax tree** is the typed Rust form of one statement, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
+A query's **syntax tree** is its typed Rust form, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
 The compiler's **Input** contains node selectors, predicates, and the other logical query fields.
 
 ## Grammar source
@@ -28,18 +28,20 @@ Keywords are case insensitive; identifiers are case sensitive. Strings support M
 
 ```mermaid
 flowchart LR
-    Gql[Orbit query text] --> GqlParse[gql_parse]
+    Gql[Orbit statement text] --> GqlParse[gql::parse]
+    GqlParse -->|Statement::Query| Input[Compiler Input]
+    GqlParse -->|Statement::Schema| Resolve[resolve_schema]
+    Resolve --> Schema[SchemaResponse]
     JSON[JSON Query DSL] --> JsonDslParse[json_dsl_parse]
-    GqlParse --> Input[Compiler Input]
     JsonDslParse --> Input
     Input --> Validate[validate]
     Validate --> Pipeline[Shared compiler phases]
     Pipeline --> SQL[Parameterized ClickHouse SQL]
 ```
 
-Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and one phase in the pipeline declaration in `config.rs`.
-`json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes.
-`gql_parse` runs in two steps and never serializes a JSON query.
+Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and produces the language-neutral `Statement`: `Query(Box<Input>)` or `Schema(SchemaRequest)`.
+`json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes; JSON is query-only.
+`gql::parse` uses one anchored `Statement` grammar root to dispatch queries and schema calls. Query lowering runs in two steps and never serializes a JSON query.
 `syntax.rs` converts Pest pairs into the typed syntax tree with `pest_consume` methods.
 Fixed child shapes use `match_nodes!`; optional query clauses and relationship fields are consumed by rule without enumerating their combinations.
 The grammar enforces their order and cardinality, and the consumer rejects unexpected rules.
@@ -48,9 +50,10 @@ Lexical checks live here: identifier rules, string escapes, numeric ranges, `dat
 Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.
 Scalar values use the same value type as the compiler's filters.
 
-The `clickhouse_json_dsl` and `clickhouse_gql` presets differ only in that first phase. Both parse phases read the one `raw` state and write `Input`; `validate` and everything after it can reach only `Input`, so no shared phase can depend on the source language.
+The `clickhouse_json_dsl` preset includes parsing; `clickhouse_gql` starts from parsed Input. Both run the same complete `validate` through `codegen` phases, which cannot depend on the source language.
+The `schema_call` pipeline starts from a `SchemaRequest` and runs one `resolve_schema` phase, so another frontend can reuse it while owning its own syntax.
 
-`compiler::compile` takes the raw text and a `Frontend` and runs that frontend's preset.
+`compiler::prepare` parses once and selects the pipeline by statement kind. `compiler::compile` delegates to it with `IntrospectionScope::All`, returns `CompiledQueryContext`, and rejects schema calls with a client-safe error.
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
@@ -64,7 +67,23 @@ The hydration-only `compile_input` entry point is not used for query text.
 Filter maps become ordered predicate lists through one shared helper.
 This makes SQL and parameter ordering stable without changing filter meaning.
 
-## Supported statement
+## Statement preparation API
+
+`compiler::prepare(raw, Frontend::Gql, &ontology, &security_context, scope)` returns `PreparedStatement::Query(Box<CompiledQueryContext>)` or `PreparedStatement::Schema(SchemaResponse)`.
+MATCH runs the complete graph compilation pipeline. CALL returns ontology metadata with named `domains` and `edges` fields, without SQL or data reads.
+Zero arguments list node and relationship types. One string also shows that node's properties and incoming/outgoing relationships within the supplied `IntrospectionScope` (`All` or `Local`). Scope filters schema metadata, not graph-query authorization.
+
+```plaintext
+MATCH (n:User {id: 1}) RETURN n
+CALL db.schema()
+CALL db.schema('MergeRequest')
+```
+
+The `db.` prefix follows openCypher 9 procedure naming. `db.schema` is Orbit-defined, not an exact Neo4j builtin or an ISO catalog operation.
+Only case-sensitive `db.schema` is allowed; `resolve_schema` rejects unknown or scope-hidden nodes and `'*'` against the supplied ontology, and the grammar rejects extra arguments, parameters, YIELD, and query composition.
+`compiler::compile` remains query-only. A future raw-Cypher endpoint can dispatch both statements through `prepare`, but must authenticate before dispatch; no endpoint or transport is wired here.
+
+## Supported query statement
 
 ```plaintext
 MATCH pattern [WHERE predicates]

@@ -2,7 +2,8 @@ mod ast;
 mod lower;
 mod syntax;
 
-use crate::{Input, QueryError, Result};
+use crate::passes::frontend::{SchemaRequest, Statement};
+use crate::{QueryError, Result};
 use pest::Span;
 use pest::error::{ErrorVariant, LineColLocation};
 use pest_derive::Parser;
@@ -20,23 +21,33 @@ const INVARIANT_PREFIXES: [&str; 3] = [
     "pest_consume::parser",
 ];
 
-pub fn parse(query: &str) -> Result<Input> {
+pub fn parse(raw: &str) -> Result<Statement> {
+    Ok(match parse_statement(raw)? {
+        ast::Statement::Query(query) => Statement::Query(Box::new(lower::lower(raw, *query)?)),
+        ast::Statement::SchemaCall { node } => Statement::Schema(SchemaRequest { node }),
+    })
+}
+
+fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
+    check_bounds(raw)?;
+    let statement = <QueryParser as pest_consume::Parser>::parse(Rule::Statement, raw)
+        .map_err(|error| {
+            QueryError::Validation(format!(
+                "Orbit query syntax: {error}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported."
+            ))
+        })?
+        .single()
+        .expect("Statement produces one pair");
+    QueryParser::Statement(statement).map_err(syntax_error)
+}
+
+fn check_bounds(query: &str) -> Result<()> {
     if query.len() > MAX_QUERY_BYTES {
         return Err(QueryError::LimitExceeded(format!(
             "query must not exceed {MAX_QUERY_BYTES} bytes"
         )));
     }
-    check_nesting(query)?;
-    let statement = <QueryParser as pest_consume::Parser>::parse(Rule::Query, query)
-        .map_err(|error| {
-            QueryError::Validation(format!(
-                "Orbit query syntax: {error}\nExpected one MATCH ... [WHERE] RETURN [ORDER BY] [LIMIT] statement; only AND predicates, named nodes, and bounded paths are supported."
-            ))
-        })?
-        .single()
-        .expect("Query produces one pair");
-    let statement = QueryParser::Query(statement).map_err(syntax_error)?;
-    lower::lower(query, statement)
+    check_nesting(query)
 }
 
 fn check_nesting(query: &str) -> Result<()> {
