@@ -9,20 +9,14 @@ stages:
         replace: '(__return $$$VALS)'
 
       # Hoist decorators onto the inner def/class
-      - match: '(decorated_definition $$$DECOS:decorator definition: $D)'
-        append_under:
-          target: D
-          each: DECOS
-          kind: __decorator
-          tf: 'strip=@'
+      - match: '(decorator $N:identifier)'
+        replace: '(__decorator @$N)'
+      - match: '(decorated_definition $$$DECOS:__decorator definition: $D)'
+        replace: '$D { $$$DECOS }'
 
-      # Superclass list → __supertype children
-      - match: '(class_definition superclasses: (argument_list $$$SUPERS:identifier|attribute|call))'
-        append_under:
-          target: ROOT
-          each: SUPERS
-          kind: __supertype
-          tf: 'field=function'
+      # Superclass list → __supertype children on the class
+      - match: '(class_definition name: $N superclasses: (argument_list $$$SUPERS:identifier|attribute|call) $$$REST)'
+        replace: '(class_definition $N $$$SUPERS=>__supertype $$$REST)'
 
       # self.x / cls.x → __ivar
       - match: '(attribute object: (identifier "self") attribute: $A)'
@@ -142,10 +136,10 @@ stages:
       - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__deftype "Function") (__return_type? @$R) (__scope) $$$ANN $$$P $B)'
 
-      # Classes — descendant match detects __call__ method
-      - match: '(class_definition name: $N body: $B **/(__def (__defname "__call__")) $$$ANN:__supertype|__decorator)'
+      # Classes — variadic before body captures __supertype/__decorator
+      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")))'
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) (__callable "__call__") $$$ANN $B)'
-      - match: '(class_definition name: $N body: $B $$$ANN:__supertype|__decorator)'
+      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $$$ANN $B)'
 
 resolve:

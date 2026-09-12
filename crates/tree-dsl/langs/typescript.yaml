@@ -20,12 +20,9 @@ stages:
       - match: '(extends_clause value: $V)'
         replace: '(__supertype @$V)'
 
-      # implements clause → __supertype per type
-      - match: '(implements_clause $$$TYPES:type_identifier)'
-        append_under:
-          target: ROOT
-          each: TYPES
-          kind: __supertype
+      # implements clause → individual __supertype nodes
+      - match: '(implements_clause $$$TYPES:type_identifier $$$REST)'
+        replace: '(implements_clause $$$REST $$$TYPES=>__supertype)'
 
       # Import alias: capture real name as sym, alias as child
       - match: '(import_specifier name: $N alias: $A)'

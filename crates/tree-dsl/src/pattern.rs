@@ -160,17 +160,15 @@ pub enum Pat {
     },
     Not(Box<Pat>),
     Desc(Box<Pat>),
+    Spread {
+        slot: u16,
+        inject: Vec<Pat>,
+    },
 }
 
 const EMPTY_CAP: (u32, u32) = (NONE, NONE);
 
 pub enum Out {
-    Append {
-        under: u16,
-        each: u16,
-        kind: u16,
-        tf: Tf,
-    },
     Replace(Pat),
 }
 
@@ -280,6 +278,7 @@ fn visit_element<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
         Rule::CapRef => visit_cap_ref(c, node, field),
         Rule::Capture => visit_capture(c, node, field),
         Rule::TextField => visit_text_field_as_cap(c, node, field),
+        Rule::Spread => visit_spread(c, node),
         Rule::Negation => {
             let inner = node.into_children().next().unwrap();
             Pat::Not(Box::new(visit_element(c, inner, 0)))
@@ -411,6 +410,22 @@ fn visit_variadic<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> 
     }
 }
 
+fn visit_spread<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>) -> Pat {
+    let mut children = node.into_children();
+    let name = children.next().unwrap().as_str();
+    let slot = c.slot(name);
+    let inject: Vec<Pat> = children
+        .filter(|ch| {
+            matches!(
+                ch.as_rule(),
+                Rule::Node | Rule::Variadic | Rule::CapRef | Rule::Capture | Rule::Spread
+            )
+        })
+        .map(|ch| visit_element(c, ch, 0))
+        .collect();
+    Pat::Spread { slot, inject }
+}
+
 fn visit_cap_ref<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat {
     let mut children = node.into_children();
     let name = children.next().unwrap().as_str();
@@ -519,7 +534,7 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
     let n = t.node(i);
     let field_ok = |f: u16| f == 0 || f == n.field;
     match p {
-        Pat::Var { .. } => false,
+        Pat::Var { .. } | Pat::Spread { .. } => false,
         Pat::Not(_) | Pat::Desc(_) => false,
         Pat::Cap {
             slot,
@@ -757,17 +772,20 @@ fn materialize(
             }
             out[at].size = (out.len() - at) as u32;
         }
+        Pat::Spread { slot, inject } => {
+            if caps[*slot as usize] == EMPTY_CAP {
+                return;
+            }
+            let at = out.len();
+            copy_subtree(t, caps[*slot as usize].0, out, parent);
+            let root_idx = at as u32;
+            for kid in inject {
+                materialize(t, lang, kid, caps, filters, out, root_idx, span);
+            }
+            out[at].size = (out.len() - at) as u32;
+        }
         Pat::Not(_) | Pat::Desc(_) => {}
     }
-}
-
-enum Edit {
-    Remove(u32),
-    SetKind(u32, u16),
-    SetField(u32, u16),
-    SetText(u32, u32),
-    Append(u32, Node),
-    Replace(u32, u32, u32),
 }
 
 pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u32> {
@@ -783,56 +801,21 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
             }
             caps[0] = (i, t.hop(i));
             let root = t.nodes[i as usize];
-            match &r.out {
-                Out::Append {
-                    under,
-                    each,
-                    kind,
-                    tf,
-                } => {
-                    let items: Vec<(u32, u32, u32)> =
-                        elems(t, caps[*each as usize], &r.filters[*each as usize])
-                            .map(|e| {
-                                (
-                                    tf.apply_sym(t, lang, e),
-                                    t.nodes[e as usize].start,
-                                    t.nodes[e as usize].end,
-                                )
-                            })
-                            .collect();
-                    for (sym, start, end) in items {
-                        t.append(
-                            caps[*under as usize].0,
-                            Node {
-                                kind: *kind,
-                                named: true,
-                                synth: true,
-                                sym,
-                                start,
-                                end,
-                                size: 1,
-                                ..Default::default()
-                            },
-                        );
-                    }
-                }
-                Out::Replace(tpl) => {
-                    let s = buf.len() as u32;
-                    materialize(
-                        t,
-                        lang,
-                        tpl,
-                        &caps,
-                        &r.filters,
-                        &mut buf,
-                        NONE,
-                        (root.start, root.end),
-                    );
-                    let l = buf.len() as u32 - s;
-                    t.replace(i, &buf[s as usize..(s + l) as usize]);
-                    break;
-                }
-            }
+            let Out::Replace(tpl) = &r.out;
+            let s = buf.len() as u32;
+            materialize(
+                t,
+                lang,
+                tpl,
+                &caps,
+                &r.filters,
+                &mut buf,
+                NONE,
+                (root.start, root.end),
+            );
+            let l = buf.len() as u32 - s;
+            t.replace(i, &buf[s as usize..(s + l) as usize]);
+            break;
         }
     }
     t.compact()

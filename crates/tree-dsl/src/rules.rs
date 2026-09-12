@@ -20,7 +20,7 @@
 //! ```
 
 use crate::lang::Lang;
-use crate::pattern::{Out, Rewrite, Tf};
+use crate::pattern::{Out, Rewrite};
 
 #[derive(serde::Deserialize)]
 struct RuleFile {
@@ -69,17 +69,6 @@ struct Rule {
     pattern: String,
     #[serde(default)]
     replace: Option<String>,
-    #[serde(default)]
-    append_under: Option<AppendUnder>,
-}
-
-#[derive(serde::Deserialize)]
-struct AppendUnder {
-    target: String,
-    each: String,
-    kind: String,
-    #[serde(default)]
-    tf: Option<String>,
 }
 
 /// Compile a YAML rule file into stages of rewrites.
@@ -168,27 +157,6 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
         })];
     }
 
-    if let Some(ref au) = rule.append_under {
-        let target = au.target.clone();
-        let each = au.each.clone();
-        let kind = au.kind.clone();
-        let tf_spec = au.tf.clone();
-        return vec![Rewrite::new(lang, pat, move |c| {
-            let tf = match tf_spec.as_deref() {
-                None | Some("id") => Tf::Id,
-                Some(s) if s.starts_with("strip=") => Tf::Strip(s[6..].into()),
-                Some(s) if s.starts_with("field=") => Tf::Field(c.intern_field(&s[6..])),
-                Some(s) => panic!("unknown tf: {s}"),
-            };
-            Out::Append {
-                under: c.slot(&target),
-                each: c.slot(&each),
-                kind: c.intern_kind(&kind),
-                tf,
-            }
-        })];
-    }
-
     panic!("rule has no action: {:?}", pat);
 }
 
@@ -221,12 +189,8 @@ stages:
         replace: '(aliased_import @$N (__alias @$A))'
       - match: '(attribute object: (identifier "self") attribute: $A)'
         replace: '(__ivar @$A)'
-      - match: '(class_definition superclasses: (argument_list $$$SUPERS:identifier|attribute|call))'
-        append_under:
-          target: ROOT
-          each: SUPERS
-          kind: __supertype
-          tf: 'field=function'
+      - match: '(class_definition superclasses: (argument_list $$$SUPERS:identifier|attribute|call) $$$REST)'
+        replace: '(class_definition $$$REST $$$SUPERS=>__supertype)'
 
   - name: retag-refs
     rules:
