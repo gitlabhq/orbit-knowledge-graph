@@ -162,7 +162,7 @@ On the graph connection the switch does three things:
 1. Applies the quorum session settings below.
 1. Retries a request that fails with error 286 (`UNSATISFIED_QUORUM`), error 289 (`REPLICA_IS_NOT_IN_QUORUM`),
    a Keeper session error, a DDL that timed out waiting for a replica, a query cancelled by a replica
-   that shuts down, or a connection error.
+   that shuts down, a connection error, or a 5xx from the load balancer.
    The backoff is linear, 100 ms per attempt, capped at 1 s, up to 20 attempts.
    All of these errors are transient by design. Serialized quorum inserts collide.
    A sequential-consistency read can land on a replica that has not received the last quorum write.

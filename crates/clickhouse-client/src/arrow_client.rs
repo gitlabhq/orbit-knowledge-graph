@@ -8,6 +8,7 @@ use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::{StreamDecoder, StreamReader};
 use arrow_ipc::writer::StreamWriter;
 use bytes::Bytes;
+use circuit_breaker::CircuitBreakableError;
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
@@ -40,12 +41,7 @@ const REPLICATION_TRANSIENTS: [&str; 8] = [
 const QUORUM_RETRY_ATTEMPTS: u32 = 20;
 
 fn is_replication_transient(error: &ClickHouseError) -> bool {
-    if let ClickHouseError::Query(inner) | ClickHouseError::Insert(inner) = error
-        && matches!(
-            inner,
-            clickhouse::error::Error::Network(_) | clickhouse::error::Error::TimedOut
-        )
-    {
+    if error.is_transient() {
         return true;
     }
     let message = error.to_string();
@@ -767,6 +763,10 @@ mod tests {
         assert!(is_replication_transient(&ClickHouseError::Query(
             clickhouse::error::Error::Network(Box::new(std::io::Error::other("reset")))
         )));
+        assert!(is_replication_transient(&ClickHouseError::BadResponse {
+            status: 503,
+            body: "<html><body><h1>503 Service Unavailable</h1>".into(),
+        }));
         assert!(!is_replication_transient(&bad_response(
             "Code: 241. DB::Exception: Memory limit exceeded. (MEMORY_LIMIT_EXCEEDED)"
         )));
