@@ -40,6 +40,8 @@ spec:
         # Stream pabot's per-suite lines; ch-chaos.sh waits for the smoke suite.
         - name: PYTHONUNBUFFERED
           value: "1"
+        - name: INDEXING_BUDGET_MULTIPLIER
+          value: {{ .Values.indexingBudgetMultiplier | quote }}
         - name: GITLAB_URL
           value: "http://gitlab-webservice-default.{{ .Values.namespaces.gitlab }}.svc.cluster.local:8181"
         - name: GITLAB_ROOT_PAT

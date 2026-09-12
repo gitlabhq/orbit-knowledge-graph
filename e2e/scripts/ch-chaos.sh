@@ -25,7 +25,7 @@ case "$PHASE" in
   indexing)
     POD=clickhouse-2
     log "chaos: waiting for the robot pool to start"
-    wait_for_marker 120 'PASSED Tests.01 Setup And Smoke' $KC logs -n "$NS_GKG" job/e2e-robot-runner --tail=-1
+    wait_for_marker 240 'PASSED Tests.01 Setup And Smoke' $KC logs -n "$NS_GKG" job/e2e-robot-runner --tail=-1
     sleep 60
     ;;
   *) echo "unknown phase: $PHASE"; exit 1 ;;

@@ -1325,6 +1325,8 @@ e2e-ha:
   variables:
     E2E_CH_REPLICAS: "3"
     E2E_SUFFIX: "-ha"
+    # Quorum inserts make the initial Siphon snapshot merge about three times slower.
+    E2E_INDEXING_BUDGET_MULTIPLIER: "5"
   before_script:
     - !reference [e2e, before_script]
     # TEMPORARY until orbit-helm-charts!160 is released as 2.1.0: use the chart from its MR branch.
