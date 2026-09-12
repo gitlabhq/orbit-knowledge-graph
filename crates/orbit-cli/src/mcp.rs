@@ -73,7 +73,7 @@ impl OrbitLocalServer {
     pub fn new() -> Self {
         let mut tool_router = ToolRouter::new();
         for mut route in Self::tool_router() {
-            route.attr.description = Some(descriptions::mcp(route.name()).into());
+            route.attr.description = Some(descriptions::long(route.name()).into());
             tool_router.add_route(route);
         }
         Self { tool_router }
@@ -193,7 +193,7 @@ mod tests {
         for tool in &tools {
             assert_eq!(
                 tool.description.as_deref(),
-                Some(descriptions::mcp(&tool.name))
+                Some(descriptions::long(&tool.name))
             );
         }
     }

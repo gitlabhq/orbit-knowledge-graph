@@ -27,10 +27,6 @@ use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
-const SKILL_LONG_ABOUT: &str = "Print the bundled, version-matched orbit-cli skill content.\n\n\
-                                With no argument, prints SKILL.md (the manifest). Pass a relative path \
-                                such as `references/sql.md` or `references/repo_map.md` to print that file.";
-
 /// Per-file byte cap for local indexing; files above it are recorded as nodes
 /// but not loaded or parsed.
 const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
@@ -181,17 +177,7 @@ struct IndexArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("grep"))]
-#[command(
-    long_about = "Search the local graph for definitions that match plain words.\n\n\
-                  Ranks definitions by how many query terms they match, then lists the \
-                  connections of the top matches by graph proximity. Terms are plain \
-                  words, not regexes, and matches are resolved definitions, not text \
-                  lines. Add --related-to, --callers, or --callees with a \
-                  positional FQN to look up relationships. A target given after the \
-                  flag wins over positional terms. --path and --kind filter the \
-                  connected definitions, not the target."
-)]
+#[command(about = descriptions::short("grep"), long_about = descriptions::long("grep"))]
 struct GrepArgs {
     /// Plain-language queries, e.g. "NATS message publish"; several may be
     /// given and are searched in one call. Omit them with --path to list
@@ -270,13 +256,6 @@ fn context_fqn_arg_help() -> String {
     )
 }
 
-const CONTEXT_LONG_ABOUT: &str = "Print the source bodies of indexed definitions.\n\n\
-                                  Bodies come from the working tree, so you can read several \
-                                  grep matches in one call. A glob such as `crate::module::*` \
-                                  prints every match in file order. Use `--file` to read a \
-                                  whole file as its definitions, or `--outline` to map a large \
-                                  type before reading one method.";
-
 fn edge_kind_names() -> String {
     EdgeKind::iter()
         .map(|kind| kind.as_ref().to_lowercase())
@@ -303,8 +282,7 @@ fn sql_long_about() -> String {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = "Print the source bodies of definitions by fqn or unqualified name")]
-#[command(long_about = CONTEXT_LONG_ABOUT)]
+#[command(about = descriptions::short("context"), long_about = descriptions::long("context"))]
 struct ContextArgs {
     #[arg(value_name = "FQN", help = context_fqn_arg_help(), required_unless_present = "file")]
     fqn: Vec<String>,
@@ -483,23 +461,14 @@ struct ListArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("mcp_serve"))]
-#[command(long_about = "Serve the local graph to MCP-compatible AI agents.\n\n\
-                  Plug into editors that support MCP (Claude Code, Cursor, OpenCode, Codex) \
-                  so the agent can call `run_sql`, `get_graph_schema`, and `index`.")]
+#[command(about = descriptions::short("mcp_serve"), long_about = descriptions::long("mcp_serve"))]
 struct McpArgs {
     #[command(subcommand)]
     command: McpCommands,
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(name = "repo-map", about = descriptions::short("repo_map"))]
-#[command(
-    long_about = "Produce a high-level, LLM-oriented map of a locally indexed repository.\n\n\
-                   Scoped to the current commit; if it is not indexed, prints the index \
-                   command and exits. Running with no subcommand defaults to `overview`. \
-                   Drill down with `tree`, `api`, `class`, `extends`, and `imports`."
-)]
+#[command(name = "repo-map", about = descriptions::short("repo_map"), long_about = descriptions::long("repo_map"))]
 struct RepoMapArgs {
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -531,22 +500,13 @@ enum Commands {
     Mcp(McpArgs),
     #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
-    #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
+    #[command(about = descriptions::short("skill"), long_about = descriptions::long("skill"))]
     Skill {
         /// Skill file to print, relative to the skill root (default: SKILL.md).
         #[arg(value_name = "PATH")]
         path: Option<String>,
     },
-    /// Configure AI coding assistants to consult the graph.
-    #[command(
-        long_about = "Configure AI coding assistants to consult the graph.\n\n\
-                      Writes a managed section into each assistant's user-global \
-                      instruction file, or into the project with `--project` or `--dir`. \
-                      The section tells the assistant to query the graph before grepping \
-                      raw files. Claude Code and OpenCode also get nudge hooks. Existing \
-                      files get a one-time `.orbit-backup` sibling before the first change. \
-                      Re-running updates the section in place. `--remove` uninstalls."
-    )]
+    #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
     Setup {
         /// Assistants to configure. Required when installing. `--remove`
         /// without assistants removes the setup for all of them.

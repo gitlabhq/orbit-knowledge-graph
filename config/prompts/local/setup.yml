@@ -1,0 +1,13 @@
+name: setup
+version: 1.0.0
+short: Configure AI coding assistants to consult the graph
+description: >-
+  Configure AI coding assistants to consult the graph
+
+
+  Writes a managed section into each assistant's user-global instruction file,
+  or into the project with `--project` or `--dir`. The section tells the
+  assistant to query the graph before grepping raw files. Claude Code and
+  OpenCode also get nudge hooks. Existing files get a one-time `.orbit-backup`
+  sibling before the first change. Re-running updates the section in place.
+  `--remove` uninstalls.

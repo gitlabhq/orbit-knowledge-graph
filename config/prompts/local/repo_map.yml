@@ -1,3 +1,10 @@
 name: repo_map
-version: 1.1.0
+version: 1.2.0
 short: Print a compact map of an indexed repository for LLM use
+description: >-
+  Print a compact map of an indexed repository for LLM use
+
+
+  Scoped to the current commit; if it is not indexed, prints the index command
+  and exits. Running with no subcommand defaults to `overview`. Drill down with
+  `tree`, `api`, `class`, `extends`, and `imports`.
