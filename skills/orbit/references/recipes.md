@@ -75,7 +75,7 @@ Requires both `iid` and `project_id` filters (IID is only unique within a projec
 }
 ```
 
-## `traversal` (single-node) — find nodes matching filters
+## `traversal` (single-node): find nodes matching filters
 
 Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
 
@@ -133,7 +133,7 @@ project-scoped `iid`); look it up first with the
 }
 ```
 
-Apply the same filter when narrowing by status — for example, "failed
+Apply the same filter when narrowing by status, for example "failed
 pipelines for this MR":
 
 ```json orbit-query
@@ -155,9 +155,9 @@ pipelines for this MR":
 }
 ```
 
-Count by status with a single-node `aggregation` (keep the node count at
-one — adding `MergeRequest` or `Project` as extra nodes can change the
-underlying join shape and inflate the count):
+Count by status with a single-node `aggregation`. Keep the node count at
+one: adding `MergeRequest` or `Project` as extra nodes can change the
+underlying join shape and inflate the count.
 
 ```json orbit-query
 {
@@ -179,7 +179,7 @@ underlying join shape and inflate the count):
 ```
 
 If you only have the MR's `iid` and not its internal `id`, the equivalent
-two-node form via `TRIGGERED` works — still with the `source` filter on the
+two-node form via `TRIGGERED` works, still with the `source` filter on the
 Pipeline node:
 
 ```json orbit-query
@@ -217,7 +217,7 @@ Pipeline node:
 `MergeRequestDiffFile.old_path` is the preferred column for file
 lookups (`new_path` differs from `old_path` only on renames). Filtering
 and grouping by `old_path` keeps the same row identity across an MR's
-history — see the canonical field descriptions on
+history. See the canonical field descriptions on
 [`merge_request_diff_file.yaml`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/ontology/nodes/code_review/merge_request_diff_file.yaml):
 
 ```json orbit-query
@@ -251,7 +251,7 @@ history — see the canonical field descriptions on
 For "every subclass of `ApplicationRecord`" or "descendants of
 `Boards::BaseService`", traverse `Definition` via the `EXTENDS` edge
 (child → parent). `EXTENDS` is the single high-level inheritance edge in
-the ontology — the indexer collapses language-specific kinds (class
+the ontology. The indexer collapses language-specific kinds (class
 extension, interface implementation, Go struct embedding) into it.
 `Definition.fqn` is the fully qualified name (e.g.
 `Boards::BaseService`); use it instead of bare `name` when the parent
@@ -276,7 +276,7 @@ class is namespaced:
 }
 ```
 
-## `traversal` (multi-node) — start from nodes, follow relationships
+## `traversal` (multi-node): start from nodes, follow relationships
 
 List opened merge requests and their authors. Requires at least two nodes and
 one relationship:
@@ -297,7 +297,7 @@ one relationship:
 }
 ```
 
-## `order_by` — sort traversal results
+## `order_by`: sort traversal results
 
 Add `order_by` to any traversal. It is a string, `"node.property"` for ascending
 or `"-node.property"` (leading `-`) for descending, where `node` is the node `id`:
@@ -321,7 +321,7 @@ or `"-node.property"` (leading `-`) for descending, where `node` is the node `id
 
 ## Work items in a project
 
-GitLab issues, epics, tasks, and incidents are all the `WorkItem` entity — there
+GitLab issues, epics, tasks, and incidents are all the `WorkItem` entity. There
 is no `Issue` node. List the work items in a project via the `IN_PROJECT`
 (WorkItem → Project) edge. Filter `state` (`opened`/`closed`) or `work_item_type`
 (`issue`, `epic`, `task`, `incident`) as needed:
@@ -345,10 +345,10 @@ is no `Issue` node. List the work items in a project via the `IN_PROJECT`
 ```
 
 Swap the `IN_PROJECT` edge for `AUTHORED` (User → WorkItem) to list one user's
-work items, or feed the same nodes into an `aggregation` to count them — see the
-[group-and-count recipe](#aggregation--group-and-count).
+work items, or feed the same nodes into an `aggregation` to count them. See the
+[group-and-count recipe](#aggregation-group-and-count).
 
-## `neighbors` — nodes directly connected to a starting node
+## `neighbors`: nodes directly connected to a starting node
 
 Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
 
@@ -367,7 +367,7 @@ Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
 }
 ```
 
-## `aggregation` — group and count
+## `aggregation`: group and count
 
 Count open merge requests per project, highest first:
 
@@ -411,10 +411,10 @@ Count detected vulnerabilities by severity:
 }
 ```
 
-## `path_finding` — shortest path between nodes
+## `path_finding`: shortest path between nodes
 
 Shortest path from a group to a project (`max_depth` ≤ 3, server-enforced).
-`rel_types` is required when either endpoint uses `filters` — omitting it
+`rel_types` is required when either endpoint uses `filters`. Omitting it
 causes a server-side validation error.
 
 > **Pitfall:** `path_finding` follows `rel_types` only in their **defined
@@ -448,10 +448,10 @@ operator object whose keys AND-combine:
 | Operator                                   | Value type                   | Notes                             |
 |--------------------------------------------|------------------------------|-----------------------------------|
 | `eq`, `gt`, `lt`, `gte`, `lte`             | string / number / boolean    | comparison                        |
-| `in`                                       | array (1–100 items)          | membership                        |
+| `in`                                       | array (1 to 100 items)       | membership                        |
 | `contains`, `starts_with`, `ends_with`     | string (≤ 1024 chars)        | string ops                        |
 | `is_null`, `is_not_null`                   | boolean                      | `false` means the negation        |
-| `token_match`, `all_tokens`, `any_tokens`  | string                       | text-indexed properties only — see [`query_language.md`](query_language.md) |
+| `token_match`, `all_tokens`, `any_tokens`  | string                       | text-indexed properties only; see [`query_language.md`](query_language.md) |
 
 To repeat an operator on one property, use an array of operator objects:
 `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
@@ -507,8 +507,7 @@ result window is incomplete and any aggregate computed over it is too.
 
 ## More examples
 
-Production-grade query examples — more complex traversals and aggregations —
-live in the categorized corpus under [`fixtures/queries/corpus/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/fixtures/queries/corpus)
-in the `gitlab-org/orbit/knowledge-graph` repo (`sdlc.yaml`, `aggregation.yaml`,
-`code_graph.yaml`, and more). Treat those as the source of truth for idiomatic
-queries.
+More complex, production-grade query examples live in the categorized corpus
+under [`fixtures/queries/corpus/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/fixtures/queries/corpus):
+`sdlc.yaml`, `aggregation.yaml`, `code_graph.yaml`, and more. Treat those as
+the source of truth for idiomatic queries.

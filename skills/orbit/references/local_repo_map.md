@@ -1,168 +1,55 @@
 # Orbit repo map reference
 
-`orbit repo-map` builds a fast, hierarchical picture of a locally checked-out
-repository from the Orbit Local DuckDB property graph. Use it before planning a
-large code change, when first opening an unfamiliar repository, or when a
-directory-level map is more useful than reading files one by one.
+`glab orbit repo-map` builds a hierarchical picture of a locally checked-out repository from the Orbit Local DuckDB graph. Use it before you plan a large change or when you first open an unfamiliar repository. It beats reading files one by one when you need a directory-level map. It is a native subcommand of the managed binary, with no Python runtime or sidecar script.
 
-It is a native subcommand of the managed Orbit Local binary (run it via
-`glab orbit`) — no Python runtime and no sidecar script. It summarizes
-languages, top-level structure, key abstractions, definitions, per-file APIs,
-inheritance edges, and imports using Orbit Local's indexed `File`,
-`Definition`, `ImportedSymbol`, and relationship tables.
-
-## When to use it
-
-Use the repo map when you need to:
-
-- Orient yourself in an unfamiliar repository without opening dozens of files.
-- Decide where a new file, class, module, or crate should live.
-- Plan a refactor and identify important base classes, traits, interfaces, or
-  other abstractions before editing.
-- Compare the API shape of existing siblings before adding a new implementation.
-- Audit a whole layer, such as services, policies, workers, packages, or crates.
-
-Skip it when:
-
-- You already know the exact file to inspect; read the file directly.
-- The question is a targeted graph lookup such as "who calls X"; use a focused
-  Orbit Local SQL query instead.
-- The repository is not indexed and a simple file read or structural search is
-  enough.
+Skip it when you already know the exact file to read. For a targeted graph lookup such as "who calls X", use `glab orbit grep` instead. If the repository is not indexed, a file read is often enough.
 
 ## Prerequisites
 
-The target repository must be indexed by Orbit Local at the current commit.
-`repo-map` preflights this and prints the indexing command if the commit is
-missing:
+The repository must be indexed by Orbit Local at the current commit. `repo-map` checks this first and prints the index command if the commit is missing:
 
 ```bash
 glab orbit index .
 ```
 
-Orbit Local stores the graph in the local DuckDB database managed by
-`glab orbit`. See [`local_cli.md`](local_cli.md) for installation,
-configuration, and pass-through argument details.
-
 ## Invocation
 
-The map is scoped to the current commit of the repository. By default it uses
-the current directory; pass `--repo PATH` to point at another checkout:
+The map is scoped to the current commit. It uses the current directory by default; pass `--repo PATH` for another checkout. Pass `--ext` to limit output to some file extensions. The leading dot is optional, and the flag repeats or takes a comma-separated list.
 
 ```bash
 glab orbit --yes repo-map overview
-glab orbit --yes repo-map --repo ~/workspace/knowledge-graph overview
 glab orbit --yes repo-map --repo ~/workspace/knowledge-graph tree crates
 glab orbit --yes repo-map --repo ~/workspace/knowledge-graph api crates/orbit-cli
-glab orbit --yes repo-map --repo ~/workspace/knowledge-graph class Workspace
-glab orbit --yes repo-map --repo ~/workspace/knowledge-graph extends QueryCompiler
-glab orbit --yes repo-map --repo ~/workspace/knowledge-graph imports Workspace
-```
-
-With the standalone binary the prefix is just `orbit`:
-
-```bash
-orbit repo-map overview
-```
-
-To focus on one or more file extensions, pass `--ext`. Extensions may include
-or omit the leading dot and can be repeated or comma-separated:
-
-```bash
-glab orbit --yes repo-map --ext .rs overview
-glab orbit --yes repo-map --ext rs api crates/orbit-cli
 glab orbit --yes repo-map --ext rs,toml tree crates
 ```
 
+With the standalone binary the prefix is just `orbit`.
+
 ## Recommended workflow
 
-Start broad, then drill down once or twice. More than four runs for one planning
-task usually means the investigation has become enumeration instead of design.
+Start broad, then drill down once or twice. More than four runs for one planning task usually means the investigation has become enumeration instead of design.
 
 | Phase | Call | What it tells you |
 |---|---|---|
-| 1. Orient | `repo-map overview` | Languages, top directories, definition totals, key abstractions, most-imported defined symbols, and most-called callables |
-| 2. Locate | `repo-map tree PATH_PREFIX` | Types grouped by file under a subtree, without method-level noise |
-| 3. Drill in | `repo-map api PATH_PREFIX` | Types, callables, and extracted signature lines under a subtree |
-| 4. Focus | `repo-map class NAME` | One class/module/trait and its members, including same-named overrides |
-| 5. Check inheritance | `repo-map extends NAME` | Descendants of a base type through `EXTENDS` edges, up to depth 6 |
-| 6. Check imports | `repo-map imports PATTERN` | Files importing matching symbols or paths |
+| 1. Orient | `repo-map overview` | Languages over non-test files, definition totals, top-level structure, key abstractions by `EXTENDS` descendants, most-imported symbols, and most-called callables. Run once per session. |
+| 2. Locate | `repo-map tree PATH_PREFIX` | Type-like definitions grouped by file under a subtree, without signatures or members. Pass a prefix; the unscoped form is capped and too broad for large repositories. |
+| 3. Drill in | `repo-map api PATH_PREFIX` | Types, callables, and the first structural signature line of each, such as `fn ...` or `class X < Y`. Run it on a feature directory, package, or crate, never on the root. |
+| 4. Focus | `repo-map class NAME` | One class, module, or trait with its members and signatures. Same-named definitions in other namespaces appear together, which exposes override surfaces. |
+| 5. Check inheritance | `repo-map extends NAME` | Descendants of a base type through `EXTENDS` edges, up to depth 6. Use it to estimate the blast radius of a base change. |
+| 6. Check imports | `repo-map imports PATTERN` | Files that import symbols or paths matching `%PATTERN%`, with distinct importer counts. Best where Orbit Local indexes named imports. |
 
-## Subcommands
-
-### `overview` (default)
-
-Always run this first for a new repository or planning session. Omitting the
-subcommand runs `overview` automatically. It emits:
-
-- Language breakdown over non-test source files.
-- Definition totals by `definition_type`.
-- Top-level structure with file, type, and callable counts.
-- Key abstractions with the most descendants through `EXTENDS`.
-- Most-imported project-defined symbols.
-- Most-called callables using `CALLS` edge counts.
-
-Use `--ext` with `overview` when the user asks for a language-specific map, for
-example "only Rust files".
-
-### `tree [PATH_PREFIX]`
-
-Lists type-like definitions grouped by file: classes, structs, enums, traits,
-interfaces, modules, namespaces, records, and similar language constructs.
-This omits signatures and members, so it is useful for a quick "what lives
-under this directory?" pass.
-
-Pass a prefix for real use. Without a prefix the output is capped but usually
-too broad for a large repository.
-
-### `api PATH_PREFIX`
-
-Prints the richest directory-level view. For every type or callable under the
-prefix, it reads the source range recorded by Orbit Local and extracts the first
-structural signature line, such as `fn ...`, `class X < Y`, or `def foo`.
-
-Use this before adding a new sibling implementation so the new code follows the
-existing naming, inheritance, and method-shape conventions. Avoid running this
-on the repository root or a very broad directory; choose a feature directory,
-package, or crate.
-
-### `class FQN_OR_NAME`
-
-Finds definitions matching a fully qualified name or short name, then lists
-their members and extracted signatures. Same-named definitions in different
-namespaces or editions show up together, which is useful for finding override
-surfaces.
-
-### `extends NAME`
-
-Walks down the `EXTENDS` relationship from a base class, trait, interface, or
-struct up to depth 6. Use it to estimate the blast radius of a base abstraction
-change.
-
-### `imports PATTERN`
-
-Searches imported symbol names and import paths with `LIKE %PATTERN%`, returning
-matching symbols, paths, and distinct importer counts. This is best for
-language ecosystems where Orbit Local indexes named imports.
+Use `--ext` with `overview` when the user asks for a language-specific map. Use `api` before you add a sibling implementation, so the new code follows the existing naming and method shape.
 
 ## Output format and caveats
 
-Output is plain text tables with `path/to/file:line` locators that can be passed
-directly to file-reading tools.
+Output is plain text tables with `path/to/file:line` locators that file-reading tools accept directly.
 
-Signatures are extracted by reading source files and applying a language-neutral
-regular expression to a small window starting at the indexed `start_line`. If a
-signature cannot be extracted, the bare definition name is printed.
-
-The repo map is a planning aid over Orbit Local's Code Graph coverage.
+Signatures come from a language-neutral regular expression applied to a small window at the indexed `start_line`. If no signature matches, the bare definition name is printed. The repo map is a planning aid over Orbit Local's Code Graph coverage.
 
 ## Budget and anti-patterns
 
 - Run one `overview` per session unless the repository or branch changes.
 - Use two to four drill-down calls per planning task.
-- Do not run `api` on the repository root or a broad top-level directory in a
-  large monorepo.
-- Do not use the repo map for targeted call graph questions; run focused Orbit
-  Local SQL against `CALLS` instead.
-- Do not grep for definitions immediately after a repo map call; use the
-  returned file and line locators first.
+- Do not run `api` on the repository root or a broad top-level directory in a large monorepo.
+- Do not use the repo map for targeted call graph questions. Use `glab orbit grep "<fqn>" --callers` instead.
+- Do not grep for definitions right after a repo map call. Use the returned file and line locators first.
