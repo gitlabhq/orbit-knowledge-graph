@@ -163,6 +163,98 @@ Because inner nodes are processed first:
 - Use `$$$ANN:__decorator|__supertype` to capture markers created by earlier rules in the SAME stage
 - Use `**/pattern` to detect descendants without capturing them (e.g., `__call__` method detection)
 
+## Resolution
+
+After per-file rewriting and SSA linking, the resolver runs across all files to produce cross-file edges (Imports, Calls). This is a three-phase process.
+
+### Phase 1: File tree walk
+
+The resolver builds a synthetic tree from all file paths:
+
+```
+__root
+  __dir "src"
+    __file "main.py"
+    __dir "models"
+      __file "__init__.py"
+      __file "user.py"
+```
+
+The `resolve:` section in the language YAML runs rewrite rules on this file tree to mark source roots and package boundaries. Two mechanisms:
+
+**Rules** -- standard match/replace on file tree nodes:
+
+```yaml
+- match: '(__dir (__file "__init__.py") $$$REST)'
+  replace: '(__dir (__package) (__file "__init__.py") $$$REST)'
+```
+
+**Climb** -- walks up from marked nodes, propagating markers until a boundary:
+
+```yaml
+climb:
+  while: __package       # Keep climbing while parent has this marker
+  mark: __source_root    # Mark the highest qualifying ancestor
+```
+
+Climb finds source roots: the deepest directory from which imports should be resolved. For Python, it walks up through `__package` directories (those with `__init__.py`) and marks the top of the chain as `__source_root`.
+
+After the walk, `lookup_from: [__source_root]` tells the resolver which marked directories to use as import resolution prefixes. A project with `src/models/__init__.py` and `src/` marked as source root means `from models.user import User` resolves to `src/models/user.py`.
+
+### Phase 2: Import resolution
+
+For each `__import` / `__import_type` node in every file:
+
+1. Read `__source_path` to get the target path (already canonicalized by YAML transforms)
+2. Resolve relative paths (`./`, `../`) against the importing file's directory
+3. Look up the target in the file index (exact match, then with source root prefixes)
+4. For each `__name` child, find the matching definition in the target file's visible names
+5. Emit `Imports` edges from the `__name` node to the target definition
+
+Special cases:
+- **Wildcard imports** (`__name "*"`): import all visible names from the target
+- **Re-exports**: index files (e.g. `__init__.py`, `index.ts`) propagate names from their imports to their own visible namespace (3 rounds of propagation)
+- **Submodule resolution**: if `from foo import bar` doesn't find `bar` as a name in `foo`, check if `foo/bar` exists as a file
+- **Import chains**: follow re-export chains up to 10 hops to find the defining file
+- **Aliased imports**: `__alias` children on `__name` nodes map the alias sym to the original name for SSA resolution
+
+### Phase 3: Cross-file call and type edges
+
+After import edges are established:
+
+1. **Module-level calls**: for each intra-file `Imports` edge, scan the caller's descendants for `__call` nodes whose `__callee` → `__member` name matches a definition in the target file. Emit cross-file `Calls` edges.
+
+2. **Call edges through imports**: for each cross-file `Imports` edge, find intra-file `Imports` edges that reference the same import node and promote them to cross-file `Calls` edges.
+
+3. **Type-flow edges**: for each cross-file `Calls` edge, check if the target definition has a `__return_type` or a `__return → __call → __callee` chain. If the return type resolves to a class (in the same file or via imports), find bindings in the caller that capture the call result, then resolve method calls on those bindings to the return type's methods.
+
+### Resolve config reference
+
+```yaml
+resolve:
+  display_source: resolved     # "resolved" or "original"
+  lookup_from:
+    - __source_root             # Synthetic kinds marking resolution prefixes
+  external:
+    - flask                     # Module names that never resolve to local files
+  stages:
+    - name: packages
+      rules:
+        - match: '...'
+          replace: '...'
+    - name: roots
+      climb:
+        while: __package
+        mark: __source_root
+```
+
+| Field | Purpose |
+|-------|---------|
+| `display_source` | How `__source_path` is presented downstream. `resolved` converts via `fqn_separator`; `original` keeps the raw text. |
+| `lookup_from` | Synthetic marker kinds whose directories become import resolution prefixes. |
+| `external` | Root module names to skip (stdlib, third-party). Imports to these never resolve. |
+| `stages` | Ordered list of file-tree rewrite stages. Each is either `rules:` or `climb:`. |
+
 ## Canonical Alphabet
 
 After all rewrites and pruning, every surviving node has one of these kinds:
