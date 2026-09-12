@@ -111,6 +111,7 @@ pub fn build_refreshable_views(ontology: &Ontology) -> Vec<RefreshableView> {
 pub fn build_unversioned_definitions(
     ontology: &Ontology,
     all_table_names: &[String],
+    replicated: bool,
 ) -> Vec<UnversionedDefinition> {
     let mut definitions = Vec::new();
 
@@ -119,7 +120,10 @@ pub fn build_unversioned_definitions(
         .iter()
         .filter(|table| !table.versioned)
     {
-        let table = table_from_auxiliary(auxiliary_table);
+        let mut table = table_from_auxiliary(auxiliary_table);
+        if replicated {
+            table.engine = table.engine.replicated();
+        }
         definitions.push(UnversionedDefinition {
             entity_type: "TABLE".into(),
             name: table.name.clone(),
@@ -132,7 +136,11 @@ pub fn build_unversioned_definitions(
         .iter()
         .filter(|definition| !definition.versioned)
     {
-        let view = view_from_ontology(definition).with_schema_version_prefix("", all_table_names);
+        let mut view =
+            view_from_ontology(definition).with_schema_version_prefix("", all_table_names);
+        if replicated {
+            view.engine = view.engine.map(Engine::replicated);
+        }
         definitions.push(UnversionedDefinition {
             entity_type: "MATERIALIZED VIEW".into(),
             name: view.name.clone(),

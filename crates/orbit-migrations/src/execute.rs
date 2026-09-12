@@ -312,10 +312,11 @@ async fn clone_from_active(
         schema::clone_table_sql(source_name, target_name),
     )
     .await?;
-    run_ddl(
-        graph,
+    run_parameterized_query(
         target_name,
-        schema::attach_partitions_sql(source_name, target_name),
+        graph
+            .query(&schema::attach_partitions_sql(source_name, target_name))
+            .without_quorum_retry(),
     )
     .await
 }
