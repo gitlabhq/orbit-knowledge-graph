@@ -25,6 +25,7 @@ TELL_WORDS = {
     "delve", "leverage", "robust", "seamless", "seamlessly", "showcase",
     "crucial", "pivotal", "tapestry", "testament", "underscore", "underscores",
     "streamline", "comprehensive", "vibrant", "landscape", "foster", "elevate",
+    "utilize", "facilitate", "myriad", "ecosystem",
 }
 DASHES = "—–"
 SKIP_KEYS = {"name", "version", "variables", "license", "metadata"}
@@ -33,6 +34,8 @@ PLACEHOLDER_RE = re.compile(r"\{\{.*?\}\}")
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 LINK_TARGET_RE = re.compile(r"\]\([^)]*\)")
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+ABBREVIATION_RE = re.compile(r"\b(e\.g|i\.e|vs|etc)\.", re.I)
+LIST_ITEM_RE = re.compile(r"^\s*(?:[-*]|\d+\.)\s+")
 
 
 def yaml_units(text):
@@ -60,7 +63,7 @@ def yaml_units(text):
             style = value if value in ("|", "|-", ">", ">-") else None
             buf = [] if style or not value else [value]
             nested = not value and not style
-        elif key and nested and sub:
+        elif key and nested and sub and key not in SKIP_KEYS:
             name, value = sub.group(1), sub.group(2).strip()
             units[f"{key}.{name}"] = value.strip('"').strip("'")
         elif key and style and (line.startswith("  ") or not line.strip()):
@@ -82,13 +85,19 @@ def markdown_units(text):
                 units["frontmatter.description"] = desc
     body = re.sub(r"^```.*?^```\s*$", "", body, flags=re.S | re.M)
     body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
-    kept = []
+    paragraphs = []
+    open_paragraph = False
     for line in body.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith(("|", "#", "---")):
+            open_paragraph = False
             continue
-        kept.append(re.sub(r"^\s*(?:[-*]|\d+\.)\s+", "", line))
-    units["body"] = "\n".join(kept)
+        if LIST_ITEM_RE.match(line) or not open_paragraph:
+            paragraphs.append(LIST_ITEM_RE.sub("", line).strip())
+            open_paragraph = True
+        else:
+            paragraphs[-1] += " " + stripped
+    units["body"] = "\n".join(paragraphs)
     return units
 
 
@@ -96,7 +105,7 @@ def clean(text):
     text = PLACEHOLDER_RE.sub("", text)
     text = LINK_TARGET_RE.sub("]", text)
     text = INLINE_CODE_RE.sub("code", text)
-    return text
+    return ABBREVIATION_RE.sub(lambda m: m.group(1).replace(".", ""), text)
 
 
 def sentences(text):
@@ -156,7 +165,10 @@ def self_test():
     assert score_unit(bad)[3], "bad sample must fail"
     assert not score_unit(good)[3], f"good sample must pass: {score_unit(good)[3]}"
     assert yaml_units("name: x\nversion: 1.0.0\nshort: Short line\ndescription: >-\n  Short line\n\n\n  Folded\n  text.\n") == {"short": "Short line", "description": "Short line\nFolded text."}
-    assert markdown_units("---\nname: s\ndescription: Front desc.\n---\n# H\n\n- item one.\n\n```\ncode\n```\n| t |\n")["frontmatter.description"] == "Front desc."
+    md = markdown_units("---\nname: s\ndescription: Front desc.\n---\n# H\n\nA wrapped\nsentence.\n\n- item one.\n- item two,\n  continued.\n\n```\ncode\n```\n| t |\n")
+    assert md["frontmatter.description"] == "Front desc."
+    assert md["body"] == "A wrapped sentence.\nitem one.\nitem two, continued."
+    assert len(sentences("See e.g. the docs. Then stop.")) == 2
     print("self-test ok")
 
 
