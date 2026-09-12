@@ -22,7 +22,8 @@ use crate::visitor::{NodeExt, Requirement, ResponseView};
 use crate::{SeededColumnResolver, collect_subtest_results, load_ontology};
 
 pub use format::{
-    PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig, SecurityOverride,
+    PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig,
+    SecurityOverride,
 };
 
 use orbit_server::pipeline::HydrationStage;
@@ -192,12 +193,28 @@ async fn run_frontend(
             Arc::new(c)
         }
         Err(e) => match &expect.compile_error {
-            Some(format::CompileErrorExpect::Flag(true)) => return,
+            Some(format::CompileErrorExpect::Flag(true)) => {
+                let msg = e.to_string();
+                for banned in &expect.compile_error_not_contains {
+                    assert!(
+                        !msg.contains(banned.as_str()),
+                        "{label}: compile error must not contain '{banned}'\nerror: {msg}"
+                    );
+                }
+                return;
+            }
             Some(format::CompileErrorExpect::Substring(sub)) => {
+                let msg = e.to_string();
                 assert!(
-                    e.to_string().contains(sub.as_str()),
-                    "{label}: compile error '{e}' does not contain '{sub}'"
+                    msg.contains(sub.as_str()),
+                    "{label}: compile error '{msg}' does not contain '{sub}'"
                 );
+                for banned in &expect.compile_error_not_contains {
+                    assert!(
+                        !msg.contains(banned.as_str()),
+                        "{label}: compile error must not contain '{banned}'\nerror: {msg}"
+                    );
+                }
                 return;
             }
             _ => panic!("{label}: unexpected compile error: {e}"),
@@ -556,6 +573,13 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     for (kind, count) in &expect.edge_count {
         view.assert_edge_count(kind, *count);
     }
+    if let Some(n) = expect.total_edge_count {
+        assert_eq!(
+            view.response.edges.len(),
+            n,
+            "{label}: total edge count mismatch"
+        );
+    }
     for (group_key, ge) in &expect.groups {
         if let (Some(entity), Some(order)) = (&ge.entity, &ge.order) {
             view.assert_group_node_order(group_key, entity, order);
@@ -611,6 +635,75 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if let Some(n) = expect.path_count {
         let pids = view.path_ids();
         assert_eq!(pids.len(), n, "{label}: path count mismatch");
+    }
+    if !expect.path_destinations.is_empty() {
+        let pids = view.path_ids();
+        let mut actual: std::collections::BTreeMap<String, Vec<i64>> =
+            std::collections::BTreeMap::new();
+        for &pid in pids.iter() {
+            if let Some(last) = view.path(pid).last() {
+                actual.entry(last.to.clone()).or_default().push(last.to_id);
+            }
+        }
+        for vals in actual.values_mut() {
+            vals.sort();
+            vals.dedup();
+        }
+        for (entity, expected_ids) in &expect.path_destinations {
+            let mut expected = expected_ids.clone();
+            expected.sort();
+            let got = actual.get(entity).cloned().unwrap_or_default();
+            assert_eq!(
+                got, expected,
+                "{label}: path destinations for {entity} mismatch"
+            );
+        }
+    }
+    if !expect.path_edges.is_empty() {
+        let pids = view.path_ids();
+        assert_eq!(
+            pids.len(),
+            expect.path_edges.len(),
+            "{label}: path_edges count ({}) != actual path count ({})",
+            expect.path_edges.len(),
+            pids.len()
+        );
+        for (i, (&pid, expected_edges)) in pids.iter().zip(&expect.path_edges).enumerate() {
+            let actual = view.path(pid);
+            assert_eq!(
+                actual.len(),
+                expected_edges.len(),
+                "{label}: path {i} edge count mismatch"
+            );
+            for (j, (edge, exp)) in actual.iter().zip(expected_edges).enumerate() {
+                if let Some(ref from) = exp.from {
+                    assert_eq!(&edge.from, from, "{label}: path {i} edge {j} from entity");
+                }
+                if let Some(from_id) = exp.from_id {
+                    assert_eq!(edge.from_id, from_id, "{label}: path {i} edge {j} from_id");
+                }
+                if let Some(ref t) = exp.edge_type {
+                    assert_eq!(&edge.edge_type, t, "{label}: path {i} edge {j} type");
+                }
+                if let Some(ref to) = exp.to {
+                    assert_eq!(&edge.to, to, "{label}: path {i} edge {j} to entity");
+                }
+                if let Some(to_id) = exp.to_id {
+                    assert_eq!(edge.to_id, to_id, "{label}: path {i} edge {j} to_id");
+                }
+            }
+        }
+    }
+    for banned in &expect.path_endpoint_absent {
+        for edge in &view.response.edges {
+            if edge.path_id.is_some() {
+                assert_ne!(
+                    &edge.to, banned,
+                    "{label}: path edge must not target {banned} (got {}->{} via {})",
+                    edge.from_id, edge.to_id, edge.edge_type
+                );
+            }
+        }
     }
     if expect.referential_integrity {
         view.assert_referential_integrity();

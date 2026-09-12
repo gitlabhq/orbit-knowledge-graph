@@ -20,4 +20,4 @@ query:
 
 expect:
   compile_only: true
-  sql_contains: ["startsWith"]
+  sql_contains: ["startsWith", "1/100/", "1/102/"]
