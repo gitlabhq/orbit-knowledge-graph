@@ -183,20 +183,13 @@ struct IndexArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("grep"))]
 #[command(
-    long_about = "Search the local graph for definitions matching plain-language terms.\n\n\
-                  Ranks indexed definitions by how many distinct query terms they \
-                  match, then shows the most relevant connections to the top matches, \
-                  ranked by graph proximity. Matches resolved definitions, not text \
-                  lines; takes plain words, not regexes. Add --related-to, --callers, \
-                  or --callees to a positional FQN for relationship lookups. An \
-                  explicit target after the flag takes precedence over positional \
-                  terms. Targets accept FQNs, unique unqualified tails, or globs; \
-                  --path and --kind filter connected definitions, not the target. \
-                  --kind takes one comma-separated list, e.g. `Class,Method`.\n\n\
-                  When the output notes unmatched terms or weak matches, read the \
-                  top matches first — they are often still right. Retry with a \
-                  synonym or identifier fragment only if they look off, then fall \
-                  back to text grep."
+    long_about = "Search the local graph for definitions that match plain words.\n\n\
+                  Ranks definitions by how many query terms they match, then lists the \
+                  connections of the top matches by graph proximity. Terms are plain \
+                  words, not regexes. Add --related-to, --callers, or --callees with a \
+                  positional FQN to look up relationships. A target given after the \
+                  flag wins over positional terms. --path and --kind filter the \
+                  connected definitions, not the target."
 )]
 struct GrepArgs {
     /// Plain-language queries, e.g. "NATS message publish"; several may be
@@ -209,7 +202,7 @@ struct GrepArgs {
     relations: RelationArgs,
 
     /// Print the source bodies of the top three matches even when the search
-    /// is broad; searches with three or fewer hits include bodies automatically.
+    /// is broad. Searches with three or fewer hits include bodies automatically.
     #[arg(long, requires = "query", conflicts_with = "relation_target")]
     body: bool,
 
@@ -228,16 +221,17 @@ struct GrepArgs {
     #[arg(long, value_name = "PATH")]
     path: Vec<String>,
 
-    /// Only search definitions of these types, as printed in grep's `[Kind]`
-    /// column: one kind or a comma-separated list such as `Class,Method`
-    /// (`"Class|Method"` also works when quoted); case-insensitive.
-    #[arg(long, value_name = "KINDS", value_parser = parse_kinds)]
+    #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
     kind: Option<Kinds>,
 
     /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
+
+const KIND_ARG_HELP: &str = "Only definitions of these types, as printed in grep's `[Kind]` \
+                             column. One kind or a comma-separated list such as `Class,Method`; \
+                             case-insensitive.";
 
 #[derive(Debug, Clone, PartialEq)]
 struct Kinds(Vec<String>);
@@ -261,37 +255,26 @@ fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
 
 fn fqn_arg_help() -> String {
     format!(
-        "Fully qualified name as printed by `{} grep`, its unqualified tail such as \
-         `Type::method` when that names one definition, or a glob such as `crate::module::*`.",
+        "Fully qualified name as printed by `{} grep`, a unique unqualified tail such as \
+         `Type::method`, or a glob such as `crate::module::*`.",
         commands::setup::spec::launcher()
     )
 }
 
 fn context_fqn_arg_help() -> String {
     format!(
-        "Fully qualified names as printed by `{} grep`, their unqualified tails such as \
-         `Type::method` when that names one definition, or globs such as \
-         `crate::module::*` to print every definition they match. Several may be given at once.",
+        "Fully qualified names as printed by `{} grep`, unique unqualified tails such as \
+         `Type::method`, or globs such as `crate::module::*`. Several may be given.",
         commands::setup::spec::launcher()
     )
 }
 
-fn context_long_about() -> String {
-    format!(
-        "Print the full source body of indexed definitions.\n\n\
-         Takes one or more fully qualified names as printed by `{launcher} grep`, or \
-         their unqualified tails such as `Type::method` when that names one definition, \
-         and prints each definition's source lines from the working tree, so following \
-         up on several grep matches takes one command and no file read. A glob fqn such as \
-         `crate::module::*` prints every matching definition in file order, \
-         `--file <path>` alone prints a whole file as its definitions plus the \
-         lines between them, and `<name> --file <path>` prints that definition \
-         from that file by bare name, so whole-module reading needs no file read \
-         either. `--outline` prints each definition's signature and nested members \
-         without bodies, so large types can be mapped before reading one method.",
-        launcher = commands::setup::spec::launcher()
-    )
-}
+const CONTEXT_LONG_ABOUT: &str = "Print the source bodies of indexed definitions.\n\n\
+                                  Bodies come from the working tree, so several grep matches \
+                                  can be read in one call. A glob such as `crate::module::*` \
+                                  prints every match in file order. Use `--file` to read a \
+                                  whole file as its definitions, or `--outline` to map a large \
+                                  type before reading one method.";
 
 fn edge_kind_names() -> String {
     EdgeKind::iter()
@@ -312,31 +295,26 @@ fn parse_edge_kind(value: &str) -> Result<EdgeKind, String> {
 fn sql_long_about() -> String {
     format!(
         "Run a read-only SQL query against the local DuckDB graph.\n\n\
-         Tables are pre-filtered to the current checkout's indexed commit, so ad-hoc \
-         SQL needs no project_id or commit_sha predicates; --all queries every indexed \
-         commit and --repo <path> scopes to another checkout. `{} schema` lists the tables.",
+         Tables are scoped to the current checkout's indexed commit, so queries need \
+         no project_id or commit_sha predicates. `{} schema` lists the tables.",
         commands::setup::spec::launcher()
     )
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = "Print the full source bodies of definitions by fqn or unqualified name")]
-#[command(long_about = context_long_about())]
+#[command(about = "Print the source bodies of definitions by fqn or unqualified name")]
+#[command(long_about = CONTEXT_LONG_ABOUT)]
 struct ContextArgs {
     #[arg(value_name = "FQN", help = context_fqn_arg_help(), required_unless_present = "file")]
     fqn: Vec<String>,
 
     /// Restrict to this file (repo-relative or absolute). Alone, prints every
-    /// indexed definition in the file in order with the lines between them;
-    /// with FQNs, also accepts bare definition names.
+    /// indexed definition in the file with the lines between them. With FQNs,
+    /// also accepts bare definition names.
     #[arg(long, value_name = "PATH", visible_alias = "path")]
     file: Option<String>,
 
-    /// Only print definitions of these types, as printed in grep's `[Kind]`
-    /// column: one kind or a comma-separated list such as `Class,Method`
-    /// (`"Class|Method"` also works when quoted); case-insensitive.
-    /// Narrows a glob or --file and disambiguates a bare name.
-    #[arg(long, value_name = "KINDS", value_parser = parse_kinds)]
+    #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = format!("{KIND_ARG_HELP} Narrows a glob or --file and disambiguates a bare name."))]
     kind: Option<Kinds>,
 
     /// Print signatures and nested members instead of full bodies.
@@ -562,15 +540,14 @@ enum Commands {
     #[command(
         long_about = "Configure AI coding assistants to consult the graph.\n\n\
                       Writes a managed section into each assistant's user-global \
-                      instruction file (default) or the project's with `--project`/`--dir`, \
-                      telling the assistant to prefer graph queries over grepping raw files, \
-                      plus nudge hooks where the platform supports them (Claude Code, \
-                      OpenCode). Pre-existing files get a one-time `.orbit-backup` sibling \
-                      before their first modification. Re-running updates the section in \
-                      place; `--remove` uninstalls."
+                      instruction file, or into the project with `--project` or `--dir`. \
+                      The section tells the assistant to query the graph before grepping \
+                      raw files. Claude Code and OpenCode also get nudge hooks. Existing \
+                      files get a one-time `.orbit-backup` sibling before the first change. \
+                      Re-running updates the section in place. `--remove` uninstalls."
     )]
     Setup {
-        /// Assistants to configure. Required when installing; `--remove`
+        /// Assistants to configure. Required when installing. `--remove`
         /// without assistants removes the setup for all of them.
         #[arg(value_name = "ASSISTANT", value_parser = commands::setup::assistant_value_parser(), required_unless_present = "remove")]
         assistants: Vec<String>,
