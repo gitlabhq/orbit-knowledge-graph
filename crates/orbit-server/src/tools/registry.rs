@@ -108,36 +108,7 @@ pub struct ToolRegistry;
 
 impl ToolRegistry {
     pub fn get_all_tools() -> Vec<ToolDefinition> {
-        vec![
-            Self::query_graph(),
-            Self::get_graph_schema(),
-            Self::list_commands(),
-            Self::invoke_command(),
-        ]
-    }
-
-    fn query_graph() -> ToolDefinition {
-        ToolDefinition {
-            name: "query_graph".into(),
-            description: prompt("tools/query_graph").description().into(),
-            parameters: json!({
-                "type": "object",
-                "required": ["query"],
-                "properties": {
-                    "query": params::query(),
-                    "format": params::format()
-                },
-                "additionalProperties": false
-            }),
-        }
-    }
-
-    fn get_graph_schema() -> ToolDefinition {
-        ToolDefinition {
-            name: "get_graph_schema".into(),
-            description: prompt("tools/get_graph_schema").description().into(),
-            parameters: params::get_graph_schema_parameters(),
-        }
+        vec![Self::list_commands(), Self::invoke_command()]
     }
 
     fn list_commands() -> ToolDefinition {
@@ -180,11 +151,35 @@ pub struct CommandRegistry;
 impl CommandRegistry {
     pub fn get_all_commands() -> Vec<ToolDefinition> {
         vec![
-            ToolRegistry::query_graph(),
-            ToolRegistry::get_graph_schema(),
+            Self::query_graph(),
+            Self::get_graph_schema(),
             Self::get_query_dsl(),
             Self::get_response_format(),
         ]
+    }
+
+    fn query_graph() -> ToolDefinition {
+        ToolDefinition {
+            name: "query_graph".into(),
+            description: prompt("tools/query_graph").description().into(),
+            parameters: json!({
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": params::query(),
+                    "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_graph_schema() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_graph_schema".into(),
+            description: prompt("tools/get_graph_schema").description().into(),
+            parameters: params::get_graph_schema_parameters(),
+        }
     }
 
     fn get_query_dsl() -> ToolDefinition {
@@ -245,7 +240,7 @@ mod tests {
     #[test]
     fn all_tools_have_valid_schemas() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 2);
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -266,10 +261,7 @@ mod tests {
     #[test]
     fn expected_tools_are_registered() {
         let names: Vec<String> = all_tools().into_iter().map(|t| t.name).collect();
-        assert!(names.contains(&"query_graph".into()));
-        assert!(names.contains(&"get_graph_schema".into()));
-        assert!(names.contains(&"list_commands".into()));
-        assert!(names.contains(&"invoke_command".into()));
+        assert_eq!(names, ["list_commands", "invoke_command"]);
     }
 
     #[test]
