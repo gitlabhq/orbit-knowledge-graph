@@ -4,8 +4,8 @@
 `gitlab-org/orbit/knowledge-graph`, package: `orbit-local`). `glab` downloads,
 verifies, caches the binary in `<config-dir>/bin/orbit`, and keeps it up to date.
 
-glab manages the binary on macOS and Linux (x86_64 and aarch64). On Windows,
-download the release archive by hand as the Orbit docs describe.
+glab manages the binary on macOS, Linux, and Windows (x86_64 and aarch64;
+Windows ships x86_64 only).
 
 See [`SKILL.md`](../SKILL.md) for guidance on using the local graph.
 
@@ -29,7 +29,7 @@ glab orbit --install --yes
 glab orbit --update
 ```
 
-`--install` and `--update` are mutually exclusive.
+`--install` and `--update` are mutually exclusive. Passing both is an error.
 
 ## Pass-through args
 
@@ -66,4 +66,4 @@ glab config set orbit_local_binary_path /path/to/custom/orbit
 ## Binary help
 
 The skill content is embedded in the binary, so `orbit skill` serves a copy that
-matches the installed version. `orbit <cmd> --help` documents every flag.
+matches the installed version.

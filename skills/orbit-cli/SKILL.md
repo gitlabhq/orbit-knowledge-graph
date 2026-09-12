@@ -1,18 +1,11 @@
 ---
 name: orbit-cli
 description: >
-  Index and query a LOCAL checkout of a repository offline with the Orbit CLI
-  (the `orbit` binary, run directly or via `glab orbit`). It builds a
-  DuckDB property graph from the working tree. Use grep for definitions and
-  relationships, context for source bodies, and read-only SQL for aggregations.
-  Use when the request targets the current checkout, working tree, or a
-  branch that is not pushed/indexed remotely, or is explicitly offline/local:
-  index this repo locally, who calls X in my checkout, list definitions in a
-  file, generate a repo map of a local checkout, run SQL over the local code
-  graph, or serve the local graph over MCP. For queries against already-indexed
-  production data in GitLab (a project such as gitlab-org/gitlab, cross-project
-  blast radius, contributor or merge-request aggregation) use the `orbit` skill;
-  for single-entity GitLab lookups or write operations use `glab`.
+  Index and query a local checkout offline with the Orbit CLI (`orbit`, or
+  `glab orbit`). Use grep for definitions and callers, context for source
+  bodies, SQL for aggregation, and repo-map for orientation. Use it for the
+  working tree or an unpushed branch. For indexed GitLab data use the `orbit`
+  skill. For single-entity lookups or writes use `glab`.
 version: 0.6.0
 license: MIT
 metadata:
@@ -64,8 +57,8 @@ flags, config keys, and pass-through rules: [`references/cli.md`](references/cli
   Join back to `gl_definition` on `id` to resolve names.
 - The graph is per-commit. The node tables carry `commit_sha`; `gl_edge` does
   not, so join back to a definition to scope edges. Re-run `index` after
-  checking out a different commit. The default database is
-  `~/.orbit/graph.duckdb` (override with `--db`).
+  checking out a different commit.
+- The default database is `~/.orbit/graph.duckdb`. Override it with `--db`.
 
 ## Definitions and relationships
 
