@@ -80,9 +80,7 @@ log "Syncing siphon CDC tables from SSOT"
 BOOTSTRAP_PID=$!
 "$E2E_DIR/scripts/patch-ch-dicts.sh" &
 DICTS_PID=$!
-"$E2E_DIR/scripts/ch-chaos.sh" migration &
-CHAOS_PID=$!
-trap 'kill "$BOOTSTRAP_PID" "$DICTS_PID" "$CHAOS_PID" 2>/dev/null || true' EXIT
+trap 'kill "$BOOTSTRAP_PID" "$DICTS_PID" 2>/dev/null || true' EXIT
 
 log "Deploying via helmfile"
 cd "$E2E_DIR"
@@ -93,9 +91,10 @@ helmfile --file helmfile.yaml.gotmpl sync
 POST_SYNC_FAILED=0
 wait "$BOOTSTRAP_PID" || { log "bootstrap-instance.sh failed"; POST_SYNC_FAILED=1; }
 wait "$DICTS_PID" || { log "patch-ch-dicts.sh failed"; POST_SYNC_FAILED=1; }
-wait "$CHAOS_PID" || { log "ch-chaos.sh migration failed"; POST_SYNC_FAILED=1; }
 trap - EXIT
 [ "$POST_SYNC_FAILED" -eq 0 ]
+
+"$E2E_DIR/scripts/ch-chaos.sh" backfill
 
 log "Setup complete (SHA: $E2E_SHA)"
 log "Run: E2E_SHA=$E2E_SHA scripts/test.sh"

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Kill one ClickHouse replica while the stack is busy, then wait for it to rejoin.
-# Usage: ch-chaos.sh migration|indexing   (no-op unless E2E_CH_REPLICAS > 1)
+# Usage: ch-chaos.sh backfill|indexing   (no-op unless E2E_CH_REPLICAS > 1)
+# A DDL issued while a replica is down blocks for distributed_ddl_task_timeout and
+# fails, so the first kill runs after the GitLab migrations and dictionary patches.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-PHASE="${1:?usage: ch-chaos.sh migration|indexing}"
+PHASE="${1:?usage: ch-chaos.sh backfill|indexing}"
 [[ "${E2E_CH_REPLICAS:-1}" -gt 1 ]] || exit 0
 
 wait_for_marker() {
@@ -17,10 +19,8 @@ wait_for_marker() {
 }
 
 case "$PHASE" in
-  migration)
+  backfill)
     POD=clickhouse-1
-    log "chaos: waiting for the dispatcher to start the schema migration"
-    wait_for_marker 240 '"creating table"' $KC logs -n "$NS_GKG" deploy/gkg-dispatcher --tail=200
     ;;
   indexing)
     POD=clickhouse-2
