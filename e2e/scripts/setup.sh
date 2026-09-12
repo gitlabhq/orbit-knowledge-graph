@@ -94,5 +94,7 @@ wait "$DICTS_PID" || { log "patch-ch-dicts.sh failed"; POST_SYNC_FAILED=1; }
 trap - EXIT
 [ "$POST_SYNC_FAILED" -eq 0 ]
 
+"$E2E_DIR/scripts/ch-chaos.sh" backfill
+
 log "Setup complete (SHA: $E2E_SHA)"
 log "Run: E2E_SHA=$E2E_SHA scripts/test.sh"

@@ -3,6 +3,11 @@ image:
   tag: "26.6"
   pullPolicy: IfNotPresent
 
+# 1 = a single node with plain engines. 3 = three replicas that each run an
+# embedded Keeper node; the setup job then creates the databases with the
+# Replicated engine ON CLUSTER and the ClusterIP service spreads requests.
+replicas: 1
+
 password: "e2e-clickhouse-password"
 
 users:
@@ -11,7 +16,9 @@ users:
   gitlab:
     password: "e2e-gitlab-ch-password"
 
-initdbScripts: {}
+databases:
+  datalake: datalake
+  graph: gkg
 
 persistence:
   enabled: true

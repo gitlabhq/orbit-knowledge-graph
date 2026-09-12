@@ -121,6 +121,8 @@ healthCheck:
 
 {{ $chHost := env "E2E_CH_HOST" | default (printf "clickhouse.e2e-%s-clickhouse.svc.cluster.local" $sha) }}
 clickhouse:
+  ha:
+    enabled: {{ gt (env "E2E_CH_REPLICAS" | default "1" | atoi) 1 }}
   datalake:
     host: {{ $chHost }}
     httpPort: 8123
