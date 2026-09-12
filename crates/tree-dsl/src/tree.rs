@@ -220,15 +220,55 @@ impl Tree {
 
     pub fn replace(&mut self, i: u32, sub: &[Node]) {
         let old = self.nodes[i as usize].size as usize;
-        if sub.len() > old {
-            let field = self.nodes[i as usize].field;
-            self.remove(i);
-            let start = self.insert_buf.borrow().len();
-            self.insert_before(i, sub);
-            self.insert_buf.borrow_mut()[start].field = field;
-            return;
-        }
         let (parent, field) = (self.nodes[i as usize].parent, self.nodes[i as usize].field);
+
+        if sub.len() > old {
+            let extra = sub.len() - old;
+            // Mark old subtree dead
+            for j in i..(i + old as u32) {
+                self.nodes[j as usize].dead = true;
+            }
+            // Splice: insert extra slots at i, shifting everything after
+            self.nodes
+                .splice(i as usize..i as usize, vec![Node::default(); extra]);
+            let shift = extra as u32;
+            // Fix parent pointers for nodes shifted by the splice
+            for j in (i as usize + sub.len())..self.nodes.len() {
+                let p = self.nodes[j].parent;
+                if p != NONE && p >= i {
+                    self.nodes[j].parent = p + shift;
+                }
+            }
+            // Fix size of ancestors that span across the splice point
+            let mut p = parent;
+            while p != NONE {
+                self.nodes[p as usize].size += shift;
+                p = self.nodes[p as usize].parent;
+            }
+            // Fix edge node refs
+            for edge in self.edges.iter_mut() {
+                if edge.from.node >= i {
+                    edge.from.node += shift;
+                }
+                if edge.to.node >= i {
+                    edge.to.node += shift;
+                }
+            }
+            // Fix pending appends
+            for a in self.appends.borrow_mut().iter_mut() {
+                if a.0 >= i {
+                    a.0 += shift;
+                }
+            }
+            // Fix pending inserts
+            for ins in self.inserts.borrow_mut().iter_mut() {
+                if ins.0 >= i {
+                    ins.0 += shift;
+                }
+            }
+        }
+
+        // Write replacement nodes in-place
         for (k, mut n) in sub.iter().copied().enumerate() {
             n.parent = if n.parent == NONE {
                 parent
@@ -238,6 +278,7 @@ impl Tree {
             if k == 0 {
                 n.field = field;
             }
+            n.dead = false;
             self.nodes[i as usize + k] = n;
         }
         if sub.len() < old {

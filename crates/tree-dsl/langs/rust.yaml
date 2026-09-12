@@ -59,8 +59,10 @@ stages:
   - name: classify
     rules:
       # Bindings
+      - match: '(let_declaration pattern: $N value: $V:__call)'
+        replace: '(__binding @$N (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V)'
-        replace: '(__binding @$N $V)'
+        replace: '(__binding @$N (__rhs @$V))'
       - match: '(let_declaration pattern: $N)'
         replace: '(__binding @$N)'
       - match: '(const_item name: $N)'

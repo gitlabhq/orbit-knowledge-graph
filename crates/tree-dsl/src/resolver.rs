@@ -31,6 +31,7 @@ pub fn resolve(
     let k_member = lang.lookup_kind("__member");
     let k_object = lang.lookup_kind("__object");
     let k_binding = lang.lookup_kind("__binding");
+    let k_rhs = lang.lookup_kind("__rhs");
     let k_defname = lang.lookup_kind("__defname");
     let k_return_type = lang.lookup_kind("__return_type");
     let name_f = lang.fields.lookup("name") as u16;
@@ -119,6 +120,7 @@ pub fn resolve(
         k_member,
         k_object,
         k_binding,
+        k_rhs,
         ret_type_f,
         return_k,
         k_defname,
@@ -603,6 +605,7 @@ fn build_type_edges(
     k_member: u16,
     k_object: u16,
     k_binding: u16,
+    k_rhs: u16,
     ret_type_f: u16,
     return_k: u16,
     k_defname: u16,
@@ -711,7 +714,8 @@ fn build_type_edges(
             };
             let rhs_call = tree
                 .children(d)
-                .find(|&c| tree.kind(c) == k_call)
+                .find(|&c| tree.kind(c) == k_rhs)
+                .and_then(|rhs| tree.children(rhs).find(|&c| tree.kind(c) == k_call))
                 .or_else(|| {
                     tree.child_by_field(d, right_f)
                         .filter(|&r| tree.kind(r) == k_call)

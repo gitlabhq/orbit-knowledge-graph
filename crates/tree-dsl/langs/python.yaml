@@ -92,19 +92,27 @@ stages:
       - match: '(typed_parameter $C:identifier)'
         replace: '(__binding @$C)'
 
-      # Bindings
+      # Bindings — RHS wrapped in __rhs for canonical containment
+      - match: '(assignment left: $N:__ivar right: $R:__call)'
+        replace: '(__binding $N (__rhs $R))'
       - match: '(assignment left: $N:__ivar right: $R)'
-        replace: '(__binding $N $R)'
+        replace: '(__binding $N (__rhs @$R))'
+      - match: '(assignment left: $N right: $R:__call)'
+        replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment left: $N right: $R)'
-        replace: '(__binding @$N $R)'
+        replace: '(__binding @$N (__rhs @$R))'
       - match: '(assignment left: $N:__ivar)'
         replace: '(__binding $N)'
       - match: '(assignment left: $N)'
         replace: '(__binding @$N)'
+      - match: '(augmented_assignment left: $N right: $R:__call)'
+        replace: '(__binding @$N (__rhs $R))'
       - match: '(augmented_assignment left: $N right: $R)'
-        replace: '(__binding @$N $R)'
+        replace: '(__binding @$N (__rhs @$R))'
+      - match: '(named_expression name: $N value: $V:__call)'
+        replace: '(__binding @$N (__rhs $V))'
       - match: '(named_expression name: $N value: $V)'
-        replace: '(__binding @$N $V)'
+        replace: '(__binding @$N (__rhs @$V))'
 
       # Branches
       - match: '(if_statement condition: $COND consequence: $C $$$ALTS:elif_clause|else_clause)'

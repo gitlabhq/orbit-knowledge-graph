@@ -49,19 +49,22 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
     tree.compact();
     classify_methods(&mut tree, lang);
     ssa_fold(&mut tree, lang);
-    prune(&mut tree);
+    prune(&mut tree, lang);
     tree.compact();
     tree
 }
 
-fn prune(tree: &mut Tree) {
+fn prune(tree: &mut Tree, lang: &Lang) {
     for i in 0..tree.nodes.len() {
-        if tree.nodes[i].dead {
+        if tree.nodes[i].dead || i == 0 {
             continue;
         }
-        if !tree.nodes[i].named && tree.nodes[i].size == 1 {
-            tree.nodes[i].dead = true;
+        tree.nodes[i].field = 0;
+        if Lang::is_synth_name(lang.kind_name(tree.nodes[i].kind)) {
+            continue;
         }
+        tree.nodes[i].dead = true;
+        tree.nodes[i].size = 1;
     }
 }
 
@@ -128,6 +131,7 @@ struct Syns {
     r#loop: u16,
     scope: u16,
     arm: u16,
+    rhs: u16,
     ret: u16,
 }
 
@@ -155,6 +159,7 @@ impl Syns {
             r#loop: s("__loop"),
             scope: s("__scope"),
             arm: s("__arm"),
+            rhs: s("__rhs"),
             ret: s("__return"),
         }
     }
@@ -797,26 +802,28 @@ fn classify_rhs(
         }
     }
 
-    let Some(rn) = tree.child_by_field(node, f.right).or_else(|| {
-        tree.children(node).find(|&c| {
-            let ck = tree.kind(c);
-            ck != syns.ivar
-                && ck != syns.deftype
-                && ck != syns.defname
-                && ck != syns.binding
-                && ck != syns.scope
-                && ck != syns.callee
-                && tree.nodes[c as usize].named
+    // Find RHS: canonical __rhs child, or legacy right: field
+    let rhs_node = synth_child_node(tree, node, syns.rhs);
+    let rn = rhs_node
+        .and_then(|rhs| {
+            // __rhs with __call child → the call is the RHS
+            synth_child_node(tree, rhs, syns.call).or(Some(rhs))
         })
-    }) else {
+        .or_else(|| tree.child_by_field(node, f.right));
+    let Some(rn) = rn else {
         return Value::Opaque;
     };
 
     if tree.kind(rn) != syns.call {
-        // Bare identifier on RHS → alias
-        if !tree.nodes[rn as usize].synth && tree.sym(rn) != 0 && tree.children(rn).next().is_none()
-        {
-            return Value::Alias(tree.sym(rn));
+        // __rhs "name" or bare identifier → alias
+        let alias_sym = if rhs_node.is_some() {
+            // Canonical: sym is on __rhs itself
+            rhs_node.map(|r| tree.sym(r)).unwrap_or(0)
+        } else {
+            tree.sym(rn)
+        };
+        if alias_sym != 0 {
+            return Value::Alias(alias_sym);
         }
         return Value::Opaque;
     }
@@ -1008,9 +1015,8 @@ fn infer_return_type(
                     .map(|c| tree.sym(c))
                     .unwrap_or(0)
             };
-            let rhs_call = tree
-                .children(d)
-                .find(|&c| tree.kind(c) == syns.call)
+            let rhs_call = synth_child_node(tree, d, syns.rhs)
+                .and_then(|rhs| synth_child_node(tree, rhs, syns.call))
                 .or_else(|| {
                     tree.child_by_field(d, f.right)
                         .filter(|&r| tree.kind(r) == syns.call)
@@ -1069,9 +1075,8 @@ fn find_ivar_type(
                     .is_some_and(|ln| tree.kind(ln) == syns.ivar && tree.sym(ln) == attr_sym)
             };
             if ivar_match {
-                let rhs_call = tree
-                    .children(d)
-                    .find(|&c| tree.kind(c) == syns.call)
+                let rhs_call = synth_child_node(tree, d, syns.rhs)
+                    .and_then(|rhs| synth_child_node(tree, rhs, syns.call))
                     .or_else(|| {
                         tree.child_by_field(d, f.right)
                             .filter(|&r| tree.kind(r) == syns.call)
