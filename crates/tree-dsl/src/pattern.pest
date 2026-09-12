@@ -1,27 +1,33 @@
 // S-expression pattern grammar for tree-dsl rewrite rules.
 //
-// Match patterns:   (kind "lit"? field: $Cap $$$Var:filter children...)
-// Templates:        (__kind @$Cap|tf (__child @$Ref->__rekind) $$$Var->__name)
+// Match patterns:   (kind "lit"? field: $Cap $$$Var:filter !neg **/desc)
+// Templates:        (__kind @$Cap|tf (__child? @$Ref->__rekind) $$$Var->__name)
 
 Pattern  =  { SOI ~ SP? ~ Element ~ SP? ~ EOI }
-Element  = _{ Node | Variadic | CapRef | Capture }
+Element  = _{ Node | Variadic | CapRef | Capture | Negation | Descendant }
 
 // ── S-expression node ──────────────────────────────────────────────
 
-Node     =  { "(" ~ SP? ~ Ident ~ (SP? ~ Content)* ~ SP? ~ ")" }
-Content  = _{ Quoted | TextField | FieldChild | Element }
+Node     =  { "(" ~ SP? ~ Ident ~ Opt? ~ (SP? ~ Content)* ~ SP? ~ ")" }
+Content  = _{ Quoted | TextField | FieldChild | Negation | Descendant | Element }
 
-FieldChild = { Ident ~ ":" ~ SP? ~ Element }
+FieldChild = { Ident ~ ":" ~ Opt? ~ SP? ~ Element }
 
 // ── Captures and variadics ─────────────────────────────────────────
 
 // @$NAME|tf  (text ref inside Node) or @$NAME->kind (child capture)
 TextField = { "@$" ~ Name ~ !Arrow ~ ("|" ~ TfChain)? }
 CapRef    = { "@$" ~ Name ~ Arrow ~ Ident }
-Capture   = { "$" ~ Name ~ (":" ~ (Node | Ident))? }
+Capture   = { "$" ~ Name ~ Opt? ~ (":" ~ (Node | Ident))? }
 
-// $$$NAME:filter|filter->kind  or  $$$NAME:filter=>kind
-Variadic  = { "$$$" ~ Name ~ (":" ~ Filter)? ~ (Arrow ~ Ident)? }
+// $$$NAME:filter|filter->kind  or  $$$NAME:filter=>kind  or  $$$NAME:(guard)
+Variadic  = { "$$$" ~ Name ~ (":" ~ (Node | Filter))? ~ (Arrow ~ Ident)? }
+
+// ── Match-side assertions ──────────────────────────────────────────
+
+Negation   = { "!" ~ Element }
+Descendant = { "**/" ~ Element }
+Opt        = { "?" }
 
 Arrow     = @{ "=>" | "->" }
 Filter    =  { Ident ~ ("|" ~ Ident)* }

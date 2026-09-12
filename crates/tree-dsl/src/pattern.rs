@@ -141,6 +141,7 @@ pub enum Pat {
         field: u16,
         text: Text,
         kids: Vec<Pat>,
+        optional: bool,
     },
     Cap {
         slot: u16,
@@ -148,14 +149,20 @@ pub enum Pat {
         kind: Option<u16>,
         rekind: Option<u16>,
         guard: Option<Box<Pat>>,
+        optional: bool,
     },
     Var {
         slot: u16,
         field: u16,
         rekind: Option<u16>,
         leaf_only: bool,
+        guard: Option<Box<Pat>>,
     },
+    Not(Box<Pat>),
+    Desc(Box<Pat>),
 }
+
+const EMPTY_CAP: (u32, u32) = (NONE, NONE);
 
 pub enum Out {
     Append {
@@ -273,6 +280,14 @@ fn visit_element<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
         Rule::CapRef => visit_cap_ref(c, node, field),
         Rule::Capture => visit_capture(c, node, field),
         Rule::TextField => visit_text_field_as_cap(c, node, field),
+        Rule::Negation => {
+            let inner = node.into_children().next().unwrap();
+            Pat::Not(Box::new(visit_element(c, inner, 0)))
+        }
+        Rule::Descendant => {
+            let inner = node.into_children().next().unwrap();
+            Pat::Desc(Box::new(visit_element(c, inner, 0)))
+        }
         r => panic!("unexpected rule in element: {r:?}"),
     }
 }
@@ -283,9 +298,11 @@ fn visit_node<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat 
 
     let mut kids = Vec::new();
     let mut text = Text::Any;
+    let mut optional = false;
 
     for child in children {
         match child.as_rule() {
+            Rule::Opt => optional = true,
             Rule::Quoted => {
                 text = Text::Lit(c.lang.syms.intern(quoted_inner(&child)));
             }
@@ -296,7 +313,25 @@ fn visit_node<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat 
             Rule::FieldChild => {
                 let mut fc = child.into_children();
                 let f = c.intern_field(fc.next().unwrap().as_str());
-                kids.push(visit_element(c, fc.next().unwrap(), f));
+                let next = fc.next().unwrap();
+                let (opt, elem) = if next.as_rule() == Rule::Opt {
+                    (true, fc.next().unwrap())
+                } else {
+                    (false, next)
+                };
+                let mut pat = visit_element(c, elem, f);
+                if opt {
+                    set_optional(&mut pat);
+                }
+                kids.push(pat);
+            }
+            Rule::Negation => {
+                let inner = child.into_children().next().unwrap();
+                kids.push(Pat::Not(Box::new(visit_element(c, inner, 0))));
+            }
+            Rule::Descendant => {
+                let inner = child.into_children().next().unwrap();
+                kids.push(Pat::Desc(Box::new(visit_element(c, inner, 0))));
             }
             Rule::Node | Rule::Variadic | Rule::CapRef | Rule::Capture => {
                 kids.push(visit_element(c, child, 0));
@@ -310,6 +345,14 @@ fn visit_node<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat 
         field,
         text,
         kids,
+        optional,
+    }
+}
+
+fn set_optional(pat: &mut Pat) {
+    match pat {
+        Pat::Cap { optional, .. } | Pat::Node { optional, .. } => *optional = true,
+        _ => panic!("optional (?) only valid on captures and nodes"),
     }
 }
 
@@ -331,6 +374,7 @@ fn visit_text_field_as_cap<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field:
         kind: None,
         rekind: None,
         guard: None,
+        optional: false,
     }
 }
 
@@ -340,6 +384,7 @@ fn visit_variadic<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> 
 
     let mut leaf_only = false;
     let mut rekind = None;
+    let mut guard = None;
 
     for child in children {
         match child.as_rule() {
@@ -350,6 +395,7 @@ fn visit_variadic<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> 
                     .collect();
                 c.apply_filter(slot, filter);
             }
+            Rule::Node => guard = Some(Box::new(visit_node(c, child, 0))),
             Rule::Arrow => leaf_only = child.as_str() == "=>",
             Rule::Ident => rekind = Some(c.intern_kind(child.as_str())),
             r => panic!("unexpected child in Variadic: {r:?}"),
@@ -361,6 +407,7 @@ fn visit_variadic<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> 
         field,
         rekind,
         leaf_only,
+        guard,
     }
 }
 
@@ -375,6 +422,7 @@ fn visit_cap_ref<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
         kind: None,
         rekind: Some(rekind),
         guard: None,
+        optional: false,
     }
 }
 
@@ -383,10 +431,12 @@ fn visit_capture<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
     let name = children.next().unwrap().as_str();
     let mut kind = None;
     let mut guard = None;
-    if let Some(filter) = children.next() {
-        match filter.as_rule() {
-            Rule::Ident => kind = Some(c.intern_kind(filter.as_str())),
-            Rule::Node => guard = Some(Box::new(visit_node(c, filter, 0))),
+    let mut optional = false;
+    for child in children {
+        match child.as_rule() {
+            Rule::Opt => optional = true,
+            Rule::Ident => kind = Some(c.intern_kind(child.as_str())),
+            Rule::Node => guard = Some(Box::new(visit_node(c, child, 0))),
             r => panic!("unexpected capture filter: {r:?}"),
         }
     }
@@ -396,6 +446,7 @@ fn visit_capture<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
         kind,
         rekind: None,
         guard,
+        optional,
     }
 }
 
@@ -469,6 +520,7 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
     let field_ok = |f: u16| f == 0 || f == n.field;
     match p {
         Pat::Var { .. } => false,
+        Pat::Not(_) | Pat::Desc(_) => false,
         Pat::Cap {
             slot,
             field,
@@ -492,6 +544,7 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
             field,
             text,
             kids,
+            ..
         } => {
             if n.kind != *kind || !field_ok(*field) {
                 return false;
@@ -504,24 +557,78 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
             let end = t.hop(i);
             let mut c = live(t, i + 1, end);
             for (k, kid) in kids.iter().enumerate() {
-                if let Pat::Var { slot, .. } = kid {
-                    let start = c;
-                    while c < end && !kids.get(k + 1).is_some_and(|nx| matches(t, c, nx, caps)) {
+                match kid {
+                    Pat::Var { slot, guard, .. } => {
+                        let start = c;
+                        while c < end && !kids.get(k + 1).is_some_and(|nx| matches(t, c, nx, caps))
+                        {
+                            c = live(t, t.hop(c), end);
+                        }
+                        if let Some(g) = guard {
+                            let range = (start, c);
+                            let filtered: Vec<u32> = elems(t, range, &[])
+                                .filter(|&e| matches(t, e, g, caps))
+                                .collect();
+                            caps[*slot as usize] = if filtered.is_empty() {
+                                EMPTY_CAP
+                            } else {
+                                (start, c)
+                            };
+                        } else {
+                            caps[*slot as usize] = (start, c);
+                        }
+                    }
+                    Pat::Not(inner) => {
+                        let mut scan = c;
+                        while scan < end {
+                            if matches(t, scan, inner, caps) {
+                                return false;
+                            }
+                            scan = live(t, t.hop(scan), end);
+                        }
+                    }
+                    Pat::Desc(inner) => {
+                        let mut found = false;
+                        for d in t.descendants(i) {
+                            if d != i && matches(t, d, inner, caps) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            return false;
+                        }
+                    }
+                    _ => {
+                        while c < end && !matches(t, c, kid, caps) {
+                            c = live(t, t.hop(c), end);
+                        }
+                        if c >= end {
+                            if is_optional(kid) {
+                                mark_empty(kid, caps);
+                                continue;
+                            }
+                            return false;
+                        }
                         c = live(t, t.hop(c), end);
                     }
-                    caps[*slot as usize] = (start, c);
-                } else {
-                    while c < end && !matches(t, c, kid, caps) {
-                        c = live(t, t.hop(c), end);
-                    }
-                    if c >= end {
-                        return false;
-                    }
-                    c = live(t, t.hop(c), end);
                 }
             }
             true
         }
+    }
+}
+
+fn is_optional(p: &Pat) -> bool {
+    matches!(
+        p,
+        Pat::Cap { optional: true, .. } | Pat::Node { optional: true, .. }
+    )
+}
+
+fn mark_empty(p: &Pat, caps: &mut [(u32, u32)]) {
+    if let Pat::Cap { slot, .. } = p {
+        caps[*slot as usize] = EMPTY_CAP;
     }
 }
 
@@ -542,6 +649,9 @@ fn materialize(
             rekind,
             ..
         } => {
+            if caps[*slot as usize] == EMPTY_CAP {
+                return;
+            }
             let at = out.len();
             copy_subtree(t, caps[*slot as usize].0, out, parent);
             if *field != 0 {
@@ -556,9 +666,21 @@ fn materialize(
             slot,
             rekind,
             leaf_only,
+            guard,
             ..
         } => {
-            for e in elems(t, caps[*slot as usize], &filters[*slot as usize]) {
+            let cap = caps[*slot as usize];
+            if cap == EMPTY_CAP {
+                return;
+            }
+            let filter = &filters[*slot as usize];
+            let mut scratch = vec![(0u32, 0u32); caps.len()];
+            for e in elems(t, cap, filter) {
+                if let Some(g) = guard {
+                    if !matches(t, e, g, &mut scratch) {
+                        continue;
+                    }
+                }
                 let at = out.len();
                 if *leaf_only {
                     let n = t.node(e);
@@ -590,12 +712,28 @@ fn materialize(
             field,
             text,
             kids,
+            optional,
         } => {
+            if *optional {
+                let has_content = kids.iter().any(|k| match k {
+                    Pat::Cap { slot, .. } => caps[*slot as usize] != EMPTY_CAP,
+                    Pat::Var { slot, .. } => caps[*slot as usize] != EMPTY_CAP,
+                    _ => true,
+                });
+                if !has_content {
+                    return;
+                }
+            }
             let at = out.len();
             let sym = match text {
                 Text::Any => 0,
                 Text::Lit(s) => *s,
-                Text::From(slot, tf) => tf.apply_sym(t, lang, caps[*slot as usize].0),
+                Text::From(slot, tf) => {
+                    if caps[*slot as usize] == EMPTY_CAP {
+                        return;
+                    }
+                    tf.apply_sym(t, lang, caps[*slot as usize].0)
+                }
             };
             out.push(Node {
                 kind: *kind,
@@ -613,6 +751,7 @@ fn materialize(
             }
             out[at].size = (out.len() - at) as u32;
         }
+        Pat::Not(_) | Pat::Desc(_) => {}
     }
 }
 
