@@ -660,6 +660,14 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         }
     }
     if !expect.path_edges.is_empty() {
+        for (pi, path_exp) in expect.path_edges.iter().enumerate() {
+            for (ei, edge_exp) in path_exp.iter().enumerate() {
+                assert!(
+                    edge_exp.has_assertions(),
+                    "{label}: path_edges[{pi}][{ei}] has no assertions (all fields omitted)"
+                );
+            }
+        }
         let pids = view.path_ids();
         assert_eq!(
             pids.len(),
@@ -668,14 +676,36 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             expect.path_edges.len(),
             pids.len()
         );
-        for (i, (&pid, expected_edges)) in pids.iter().zip(&expect.path_edges).enumerate() {
-            let actual = view.path(pid);
+        // Sort both actual paths and expected paths by destination ID
+        // so the zip is deterministic regardless of path_ids() ordering.
+        let mut actual_paths: Vec<_> = pids
+            .iter()
+            .map(|&pid| {
+                let edges = view.path(pid);
+                let dest_id = edges.last().map_or(0, |e| e.to_id);
+                (dest_id, edges)
+            })
+            .collect();
+        actual_paths.sort_by_key(|(dest, _)| *dest);
+        let mut expected_indexed: Vec<_> = expect
+            .path_edges
+            .iter()
+            .enumerate()
+            .map(|(i, edges)| {
+                let dest_id = edges.last().and_then(|e| e.to_id).unwrap_or(0);
+                (dest_id, i, edges)
+            })
+            .collect();
+        expected_indexed.sort_by_key(|(dest, _, _)| *dest);
+        for (i, ((_, actual), (_, _, expected_edges))) in
+            actual_paths.iter().zip(&expected_indexed).enumerate()
+        {
             assert_eq!(
                 actual.len(),
                 expected_edges.len(),
                 "{label}: path {i} edge count mismatch"
             );
-            for (j, (edge, exp)) in actual.iter().zip(expected_edges).enumerate() {
+            for (j, (edge, exp)) in actual.iter().zip(*expected_edges).enumerate() {
                 if let Some(ref from) = exp.from {
                     assert_eq!(&edge.from, from, "{label}: path {i} edge {j} from entity");
                 }
@@ -690,6 +720,13 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 }
                 if let Some(to_id) = exp.to_id {
                     assert_eq!(edge.to_id, to_id, "{label}: path {i} edge {j} to_id");
+                }
+                if let Some(step) = exp.step {
+                    assert_eq!(
+                        edge.step,
+                        Some(step),
+                        "{label}: path {i} edge {j} step"
+                    );
                 }
             }
         }

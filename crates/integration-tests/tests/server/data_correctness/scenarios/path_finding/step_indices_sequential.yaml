@@ -17,5 +17,5 @@ expect:
   referential_integrity: true
   path_count: 1
   path_edges:
-    - - { from: User, from_id: 1, type: MEMBER_OF }
-      - { type: CONTAINS, to: Project, to_id: 1000 }
+    - [{ from: User, from_id: 1, type: MEMBER_OF, step: 0 },
+       { type: CONTAINS, to: Project, to_id: 1000, step: 1 }]

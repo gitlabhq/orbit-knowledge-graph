@@ -19,7 +19,7 @@ expect:
   path_destinations:
     Project: [1000, 1004]
   path_edges:
-    - - { from: User, from_id: 1, type: MEMBER_OF }
-      - { type: CONTAINS, to: Project }
-    - - { from: User, from_id: 1, type: MEMBER_OF }
-      - { type: CONTAINS, to: Project }
+    - [{ from: User, from_id: 1, type: MEMBER_OF },
+       { type: CONTAINS, to: Project }]
+    - [{ from: User, from_id: 1, type: MEMBER_OF },
+       { type: CONTAINS, to: Project }]

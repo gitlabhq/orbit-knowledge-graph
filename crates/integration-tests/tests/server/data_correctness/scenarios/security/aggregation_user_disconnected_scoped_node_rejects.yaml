@@ -15,5 +15,6 @@ query:
     }
 
 expect:
-  # Rust test also asserts !msg.contains("target@example.com") (negative, not expressible here)
   compile_error: "globally-scoped"
+  compile_error_not_contains:
+    - "target@example.com"

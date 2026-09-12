@@ -293,4 +293,17 @@ pub struct PathEdgeExpect {
     pub to: Option<String>,
     #[serde(default)]
     pub to_id: Option<i64>,
+    #[serde(default)]
+    pub step: Option<usize>,
+}
+
+impl PathEdgeExpect {
+    pub fn has_assertions(&self) -> bool {
+        self.from.is_some()
+            || self.from_id.is_some()
+            || self.edge_type.is_some()
+            || self.to.is_some()
+            || self.to_id.is_some()
+            || self.step.is_some()
+    }
 }

@@ -23,5 +23,5 @@ expect:
   path_destinations:
     MergeRequest: [2000, 2001]
   path_edges:
-    - - { from: User, from_id: 1, type: AUTHORED, to: MergeRequest }
-    - - { from: User, from_id: 1, type: AUTHORED, to: MergeRequest }
+    - [{ from: User, from_id: 1, type: AUTHORED, to: MergeRequest }]
+    - [{ from: User, from_id: 1, type: AUTHORED, to: MergeRequest }]
