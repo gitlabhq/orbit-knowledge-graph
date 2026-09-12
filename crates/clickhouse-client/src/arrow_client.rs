@@ -27,13 +27,15 @@ use crate::error::ClickHouseError;
 /// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
 
-const REPLICATION_TRANSIENTS: [&str; 6] = [
+const REPLICATION_TRANSIENTS: [&str; 8] = [
     "UNSATISFIED_QUORUM",
     "REPLICA_IS_NOT_IN_QUORUM",
     "Session expired",
     "Connection loss",
     "Operation timeout",
     "is not finished on",
+    "QUERY_WAS_CANCELLED",
+    "NETWORK_ERROR",
 ];
 const QUORUM_RETRY_ATTEMPTS: u32 = 20;
 
@@ -754,6 +756,8 @@ mod tests {
             "Code: 289. DB::Exception: Replica doesn't have part. (REPLICA_IS_NOT_IN_QUORUM)",
             "Code: 999. Coordination::Exception: Session expired. (KEEPER_EXCEPTION)",
             "Code: 159. DB::Exception: ReplicatedDatabase DDL task /clickhouse/databases/gkg/log/query-0000000007 is not finished on 1 of 3 hosts",
+            "Code: 394. DB::Exception: Query was cancelled. (QUERY_WAS_CANCELLED)",
+            "Code: 210. DB::NetException: I/O error: Broken pipe, while writing to socket. (NETWORK_ERROR)",
         ] {
             assert!(
                 is_replication_transient(&bad_response(message)),

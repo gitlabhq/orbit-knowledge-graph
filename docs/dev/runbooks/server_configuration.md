@@ -161,7 +161,8 @@ On the graph connection the switch does three things:
 1. Prefixes `Replicated` onto every `*MergeTree` engine in DDL, the same rewrite GitLab Rails applies on a `Replicated` database. A `Replicated` database replicates metadata only; without replicated table engines, rows stay on the replica that took the write. ClickHouse takes the ZooKeeper path and replica name from the server settings `default_replica_path` and `default_replica_name`, so the DDL carries no customer macros.
 1. Applies the quorum session settings below.
 1. Retries a request that fails with error 286 (`UNSATISFIED_QUORUM`), error 289 (`REPLICA_IS_NOT_IN_QUORUM`),
-   a Keeper session error, a DDL that timed out waiting for a replica, or a connection error.
+   a Keeper session error, a DDL that timed out waiting for a replica, a query cancelled by a replica
+   that shuts down, or a connection error.
    The backoff is linear, 100 ms per attempt, capped at 1 s, up to 20 attempts.
    All of these errors are transient by design. Serialized quorum inserts collide.
    A sequential-consistency read can land on a replica that has not received the last quorum write.
