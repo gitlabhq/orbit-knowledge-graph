@@ -6,7 +6,7 @@
 # Modes:
 #   check-prompts.sh                       # whole tree
 #   check-prompts.sh FILE...               # explicit files (lefthook staged_files)
-#   check-prompts.sh --diff-base <sha>     # files changed since <sha> (MR pipelines)
+#   check-prompts.sh --diff-base <sha>     # files the MR changed; head is CI_MERGE_REQUEST_SOURCE_BRANCH_SHA or HEAD
 #
 # Exit codes: 1 when any unit fails a gate, 2 when the diff base is unreachable,
 # 0 on a clean run. Blocking-ness lives in CI allow_failure and lefthook config.
@@ -30,8 +30,9 @@ if [ "${1:-}" = "--diff-base" ]; then
         git fetch origin "$base" --depth=1 2>/dev/null || true
         git cat-file -e "${base}^{commit}" 2>/dev/null || { echo "⚠️  prompt lint: diff-base $base is unreachable; the lint did not run."; exit 2; }
     fi
-    git merge-base "$base" HEAD >/dev/null 2>&1 || { echo "⚠️  prompt lint: no merge base with $base in this clone; the lint did not run."; exit 2; }
-    mapfile -t candidates < <(git diff --name-only --diff-filter=d "${base}...HEAD" -- "${PATHS[@]}" | sort)
+    head="${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-HEAD}"
+    git merge-base "$base" "$head" >/dev/null 2>&1 || { echo "⚠️  prompt lint: no merge base with $base in this clone; the lint did not run."; exit 2; }
+    mapfile -t candidates < <(git diff --name-only --diff-filter=d "$base" "$head" -- "${PATHS[@]}" | sort)
     scope="changed in this MR"
 elif [ "$#" -gt 0 ]; then
     candidates=("$@")
