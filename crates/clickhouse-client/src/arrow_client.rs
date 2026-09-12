@@ -27,16 +27,25 @@ use crate::error::ClickHouseError;
 /// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
 
-const REPLICATION_TRANSIENTS: [&str; 5] = [
+const REPLICATION_TRANSIENTS: [&str; 6] = [
     "UNSATISFIED_QUORUM",
     "REPLICA_IS_NOT_IN_QUORUM",
     "Session expired",
     "Connection loss",
     "Operation timeout",
+    "is not finished on",
 ];
 const QUORUM_RETRY_ATTEMPTS: u32 = 20;
 
 fn is_replication_transient(error: &ClickHouseError) -> bool {
+    if let ClickHouseError::Query(inner) | ClickHouseError::Insert(inner) = error
+        && matches!(
+            inner,
+            clickhouse::error::Error::Network(_) | clickhouse::error::Error::TimedOut
+        )
+    {
+        return true;
+    }
     let message = error.to_string();
     REPLICATION_TRANSIENTS
         .iter()
@@ -744,12 +753,16 @@ mod tests {
             "Code: 286. DB::Exception: Quorum for previous write has not been satisfied yet. (UNSATISFIED_QUORUM)",
             "Code: 289. DB::Exception: Replica doesn't have part. (REPLICA_IS_NOT_IN_QUORUM)",
             "Code: 999. Coordination::Exception: Session expired. (KEEPER_EXCEPTION)",
+            "Code: 159. DB::Exception: ReplicatedDatabase DDL task /clickhouse/databases/gkg/log/query-0000000007 is not finished on 1 of 3 hosts",
         ] {
             assert!(
                 is_replication_transient(&bad_response(message)),
                 "{message}"
             );
         }
+        assert!(is_replication_transient(&ClickHouseError::Query(
+            clickhouse::error::Error::Network(Box::new(std::io::Error::other("reset")))
+        )));
         assert!(!is_replication_transient(&bad_response(
             "Code: 241. DB::Exception: Memory limit exceeded. (MEMORY_LIMIT_EXCEEDED)"
         )));
