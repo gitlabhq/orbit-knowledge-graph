@@ -768,7 +768,7 @@ mod tests {
             body: "<html><body><h1>503 Service Unavailable</h1>".into(),
         }));
         assert!(!is_replication_transient(&bad_response(
-            "Code: 241. DB::Exception: Memory limit exceeded. (MEMORY_LIMIT_EXCEEDED)"
+            "Code: 60. DB::Exception: Table gkg.missing does not exist. (UNKNOWN_TABLE)"
         )));
     }
 
