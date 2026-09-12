@@ -494,7 +494,7 @@ impl ArrowQuery {
         // scope and its summary can be read once the body is drained.
         tokio::spawn(async move {
             let mut decoder = StreamDecoder::new();
-            loop {
+            'body: loop {
                 match cursor.next().await {
                     Ok(Some(chunk)) => {
                         let mut buffer = ArrowBuffer::from(chunk.as_ref());
@@ -502,7 +502,7 @@ impl ArrowQuery {
                             match decoder.decode(&mut buffer) {
                                 Ok(Some(batch)) => {
                                     if tx.send(Ok(batch)).await.is_err() {
-                                        return;
+                                        break 'body;
                                     }
                                 }
                                 Ok(None) => break,

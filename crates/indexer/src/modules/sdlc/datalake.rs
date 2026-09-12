@@ -9,6 +9,9 @@ use serde_json::Value;
 use thiserror::Error;
 use tracing::debug;
 
+use super::PAGE_BYTE_BUDGET;
+use orbit_utils::arrow::batch_slice_bytes;
+
 #[derive(Debug, Error)]
 pub(crate) enum DatalakeError {
     #[error("query failed: {0}")]
@@ -149,12 +152,18 @@ impl DatalakeQuery for Datalake {
             .map_err(|e| DatalakeError::Query(e.to_string()))?;
 
         let mut batches = Vec::new();
+        let mut bytes = 0;
         while let Some(result) = stream.next().await {
             let batch = result.map_err(|e| DatalakeError::Query(e.to_string()))?;
             if batch.num_rows() > 0 {
+                bytes += batch_slice_bytes(&batch);
                 batches.push(batch);
+                if bytes >= PAGE_BYTE_BUDGET {
+                    break;
+                }
             }
         }
+        drop(stream);
 
         let scan_stats = summary
             .await

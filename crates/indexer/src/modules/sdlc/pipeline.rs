@@ -16,6 +16,7 @@ use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
 use crate::retry::{Backoff, LocalRetry, Step, drive_with};
 
+use super::PAGE_BYTE_BUDGET;
 use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
@@ -23,6 +24,7 @@ use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::durability::RunDurability;
 use orbit_server_config::DatalakeRetryConfig;
+use orbit_utils::arrow::batch_slice_bytes;
 
 const MAX_RETRIES: u32 = 3;
 
@@ -35,6 +37,18 @@ const DATALAKE_EXTRACT_RETRY: LocalRetry = LocalRetry {
     ]),
     max_attempts: MAX_RETRIES + 1,
 };
+
+const ADAPTIVE_MIN_ROWS: u64 = 1_000;
+
+fn next_page_limit(current: u64, plan_limit: u64, rows: u64, bytes: u64) -> u64 {
+    if bytes >= PAGE_BYTE_BUDGET {
+        rows.max(ADAPTIVE_MIN_ROWS).min(plan_limit)
+    } else if current < plan_limit && bytes.saturating_mul(2) < PAGE_BYTE_BUDGET {
+        current.saturating_mul(2).min(plan_limit)
+    } else {
+        current
+    }
+}
 
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
 /// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
@@ -87,10 +101,7 @@ impl Page {
     }
 
     fn bytes(&self) -> u64 {
-        self.batches
-            .iter()
-            .map(|b| b.get_array_memory_size() as u64)
-            .sum()
+        self.batches.iter().map(batch_slice_bytes).sum()
     }
 }
 
@@ -135,7 +146,7 @@ impl Pipeline {
         &self,
         context: &PipelineContext,
         plan: &Plan,
-        base_query: PreparedQuery,
+        mut base_query: PreparedQuery,
         position_key: &str,
         window: WindowBounds,
         durability: RunDurability,
@@ -151,6 +162,7 @@ impl Pipeline {
         let transform = self.registry.build(plan)?;
         let outputs = transform.outputs().to_vec();
         let params = base_query.params();
+        let plan_limit = base_query.batch_size();
         let mut stats = PipelineStats::default();
 
         let mut page = self
@@ -179,7 +191,14 @@ impl Pipeline {
                     .expect("non-empty page has a last block"),
                 &plan.sort_key,
             )?;
-            let has_more = rows_in_page >= base_query.batch_size();
+            let has_more =
+                rows_in_page >= base_query.batch_size() || bytes_in_page >= PAGE_BYTE_BUDGET;
+            base_query.set_batch_size(next_page_limit(
+                base_query.batch_size(),
+                plan_limit,
+                rows_in_page,
+                bytes_in_page,
+            ));
 
             let transform_start = Instant::now();
             let grouped = self

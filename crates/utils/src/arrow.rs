@@ -706,6 +706,18 @@ fn date_to_string(d: Option<chrono::NaiveDate>) -> ColumnValue {
 ///   26.x rejects `utf8_view` in Arrow IPC).
 /// - Dictionary-encodes `Utf8` columns named in `dict_columns` to
 ///   `Dictionary<Int32, Utf8>` for smaller IPC payloads.
+pub fn batch_slice_bytes(batch: &RecordBatch) -> u64 {
+    batch
+        .columns()
+        .iter()
+        .map(|column| {
+            let data = column.to_data();
+            data.get_slice_memory_size()
+                .unwrap_or_else(|_| data.get_array_memory_size()) as u64
+        })
+        .sum()
+}
+
 pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<String>) {
     let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
 

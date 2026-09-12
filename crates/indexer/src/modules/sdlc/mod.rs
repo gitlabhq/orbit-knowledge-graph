@@ -31,6 +31,7 @@ use pipeline::Pipeline;
 use tracing::info;
 
 const SDLC_CONCURRENCY_GROUP: &str = IndexerModule::Sdlc.concurrency_group();
+pub(in crate::modules::sdlc) const PAGE_BYTE_BUDGET: u64 = 2 << 30;
 
 pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
