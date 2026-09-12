@@ -31,6 +31,12 @@ pre-commit:
     - name: narration
       run: ./scripts/comment-guard/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
+    - name: prompts
+      run: ./scripts/comment-guard/check-prompts.sh {staged_files} || true
+      glob:
+        - "config/prompts/**/*.yml"
+        - "config/setup/setup.yaml"
+        - "skills/**/*.md"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md
       glob:
