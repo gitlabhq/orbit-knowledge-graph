@@ -140,19 +140,13 @@ stages:
       - match: '(generator_expression)'
         replace: '(__loop)'
 
-      # Functions — typed parameters hoisted as __binding, first-match-wins
-      - match: '(function_definition name: $N return_type: $R parameters: (parameters $$$P:__binding) body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__return_type @$R) (__scope) $$$ANN $$$P $B)'
-      - match: '(function_definition name: $N parameters: (parameters $$$P:__binding) body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $$$P $B)'
-      - match: '(function_definition name: $N return_type: $R body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__return_type @$R) (__scope) $$$ANN $B)'
-      - match: '(function_definition name: $N body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $B)'
+      # Functions — optionals collapse return_type and typed params variants
+      - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__return_type? @$R) (__scope) $$$ANN $$$P $B)'
 
-      # Classes — __callable variant detects __call__ method (must precede generic)
-      - match: '(class_definition name: $N body: (block $CALL:(__def (__defname "__call__")) $$$BODY) $$$ANN:__supertype|__decorator)'
-        replace: '(__def (__defname @$N) (__deftype "Class") (__scope) (__callable "__call__") $$$ANN (block $CALL $$$BODY))'
+      # Classes — descendant match detects __call__ method
+      - match: '(class_definition name: $N body: $B **/(__def (__defname "__call__")) $$$ANN:__supertype|__decorator)'
+        replace: '(__def (__defname @$N) (__deftype "Class") (__scope) (__callable "__call__") $$$ANN $B)'
       - match: '(class_definition name: $N body: $B $$$ANN:__supertype|__decorator)'
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $$$ANN $B)'
 

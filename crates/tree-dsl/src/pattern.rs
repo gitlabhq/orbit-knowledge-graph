@@ -600,12 +600,14 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
                         }
                     }
                     _ => {
+                        let saved = c;
                         while c < end && !matches(t, c, kid, caps) {
                             c = live(t, t.hop(c), end);
                         }
                         if c >= end {
                             if is_optional(kid) {
                                 mark_empty(kid, caps);
+                                c = saved;
                                 continue;
                             }
                             return false;
@@ -715,12 +717,16 @@ fn materialize(
             optional,
         } => {
             if *optional {
-                let has_content = kids.iter().any(|k| match k {
-                    Pat::Cap { slot, .. } => caps[*slot as usize] != EMPTY_CAP,
-                    Pat::Var { slot, .. } => caps[*slot as usize] != EMPTY_CAP,
-                    _ => true,
-                });
-                if !has_content {
+                let text_empty =
+                    matches!(text, Text::From(slot, _) if caps[*slot as usize] == EMPTY_CAP);
+                let kids_empty = kids.is_empty()
+                    || kids.iter().all(|k| match k {
+                        Pat::Cap { slot, .. } | Pat::Var { slot, .. } => {
+                            caps[*slot as usize] == EMPTY_CAP
+                        }
+                        _ => false,
+                    });
+                if text_empty || (kids_empty && matches!(text, Text::Any)) {
                     return;
                 }
             }

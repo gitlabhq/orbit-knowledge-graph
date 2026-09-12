@@ -78,21 +78,17 @@ stages:
       - match: '(loop_expression body: $B)'
         replace: '(__loop $B)'
 
-      # Trait method signatures (no body)
-      - match: '(function_signature_item name: $N parameters: (parameters (self_parameter)))'
+      # Trait method signatures (no body) — self variant first
+      - match: '(function_signature_item name: $N **/(self_parameter))'
         replace: '(__def (__defname @$N) (__deftype "Function") (__self_method))'
       - match: '(function_signature_item name: $N)'
         replace: '(__def (__defname @$N) (__deftype "Function"))'
 
-      # Functions — self_parameter detection folded in (most specific first)
-      - match: '(function_item name: $N parameters: (parameters (self_parameter)) body: $B $$$ANN:__visibility)'
+      # Functions — self variant first, then generic
+      - match: '(function_item name: $N **/(self_parameter) body: $B $$$ANN:__visibility)'
         replace: '(__def (__defname @$N) (__deftype "Function") (__self_method) (__scope) $$$ANN $B)'
-      - match: '(function_item name: $N parameters: (parameters (self_parameter)) body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__self_method) (__scope) $B)'
       - match: '(function_item name: $N body: $B $$$ANN:__visibility)'
         replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $B)'
-      - match: '(function_item name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $B)'
 
       # Containers (after functions)
       - match: '(struct_item name: $N body: $B)'
