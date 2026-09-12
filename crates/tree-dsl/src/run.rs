@@ -466,7 +466,19 @@ impl Fold {
         }
         let sym = tree.sym(rhs);
         if sym != 0 {
-            Value::Alias(sym)
+            let is_class = self.ssa.read_variable(sym, self.cur).iter().any(|pv| {
+                if let ParseValue::LocalDef(di) = pv {
+                    child_sym(tree, self.defs[*di as usize], self.s.deftype)
+                        .is_some_and(|dt| dt == self.class_sym)
+                } else {
+                    false
+                }
+            });
+            if is_class {
+                Value::Type(sym)
+            } else {
+                Value::Alias(sym)
+            }
         } else {
             Value::Opaque
         }

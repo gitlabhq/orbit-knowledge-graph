@@ -87,8 +87,12 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "Lambda") $R)'
       - match: '(assignment left: $N type: $T:type)'
         replace: '(__def (__defname @$N) (__deftype "Field"))'
+      - match: '(typed_default_parameter name: $N type: (type $T))'
+        replace: '(__binding @$N (__rhs @$T))'
       - match: '(typed_default_parameter name: $N)'
         replace: '(__binding @$N)'
+      - match: '(typed_parameter $C:identifier type: (type $T))'
+        replace: '(__binding @$C (__rhs @$T))'
       - match: '(typed_parameter $C:identifier)'
         replace: '(__binding @$C)'
 
@@ -140,7 +144,11 @@ stages:
       - match: '(generator_expression)'
         replace: '(__loop)'
 
-      # Functions (after bindings/control-flow so body is canonical)
+      # Functions — typed parameters hoisted as __binding, first-match-wins
+      - match: '(function_definition name: $N return_type: $R parameters: (parameters $$$P:__binding) body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__return_type @$R) (__scope) $$$ANN $$$P $B)'
+      - match: '(function_definition name: $N parameters: (parameters $$$P:__binding) body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $$$P $B)'
       - match: '(function_definition name: $N return_type: $R body: $B $$$ANN:__decorator)'
         replace: '(__def (__defname @$N) (__deftype "Function") (__return_type @$R) (__scope) $$$ANN $B)'
       - match: '(function_definition name: $N body: $B $$$ANN:__decorator)'
