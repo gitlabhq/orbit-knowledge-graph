@@ -35,7 +35,7 @@ use crate::proto::{
     get_graph_schema_response, get_query_dsl_response, get_response_format_response,
     invoke_agent_command_response,
 };
-use crate::tools::{AgentCommand, ExecutorError, ToolService, V2CommandRegistry, V2ToolRegistry};
+use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
@@ -150,7 +150,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
-        let tools = V2ToolRegistry::get_all_tools()
+        let tools = ToolRegistry::get_all_tools()
             .into_iter()
             .map(proto_tool_definition)
             .collect();
@@ -177,7 +177,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             "Listing agent commands for user"
         );
 
-        let all_commands = V2CommandRegistry::get_all_commands();
+        let all_commands = CommandRegistry::get_all_commands();
         let commands: Vec<_> = if requested.is_empty() {
             all_commands
         } else {
