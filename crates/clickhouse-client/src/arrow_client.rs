@@ -27,8 +27,6 @@ use crate::error::ClickHouseError;
 /// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
 
-/// 286: serialized quorum inserts collided; 289: the replica missed the last quorum write;
-/// the Keeper texts cover a coordination leader election while a replica is down.
 const REPLICATION_TRANSIENTS: [&str; 5] = [
     "UNSATISFIED_QUORUM",
     "REPLICA_IS_NOT_IN_QUORUM",
