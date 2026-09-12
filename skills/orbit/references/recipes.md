@@ -507,8 +507,7 @@ result window is incomplete and any aggregate computed over it is too.
 
 ## More examples
 
-Production-grade query examples, with more complex traversals and aggregations,
-live in the categorized corpus under [`fixtures/queries/corpus/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/fixtures/queries/corpus)
-in the `gitlab-org/orbit/knowledge-graph` repo (`sdlc.yaml`, `aggregation.yaml`,
-`code_graph.yaml`, and more). Treat those as the source of truth for idiomatic
-queries.
+More complex, production-grade query examples live in the categorized corpus
+under [`fixtures/queries/corpus/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/fixtures/queries/corpus):
+`sdlc.yaml`, `aggregation.yaml`, `code_graph.yaml`, and more. Treat those as
+the source of truth for idiomatic queries.
