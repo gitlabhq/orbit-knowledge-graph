@@ -16,4 +16,4 @@ query:
     }
 
 expect:
-  compile_error: true
+  compile_error: "is_auditor"

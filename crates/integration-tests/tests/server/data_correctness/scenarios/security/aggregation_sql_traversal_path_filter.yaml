@@ -20,4 +20,4 @@ query:
 
 expect:
   compile_only: true
-  sql_contains: ["startsWith", "traversal_path"]
+  sql_contains: ["startsWith", "traversal_path", "1/100/"]

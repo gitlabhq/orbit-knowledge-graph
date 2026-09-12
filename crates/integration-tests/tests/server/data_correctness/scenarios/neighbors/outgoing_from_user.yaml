@@ -19,6 +19,7 @@ expect:
       ids: [100, 102]
       rows:
         - { id: 100, name: Public Group }
+        - { id: 102, name: Internal Group }
     MergeRequest:
       ids: [2000, 2001, 2002]
     Note:

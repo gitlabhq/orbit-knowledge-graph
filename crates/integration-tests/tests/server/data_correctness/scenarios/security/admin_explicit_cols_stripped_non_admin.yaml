@@ -17,5 +17,6 @@ expect:
   nodes:
     User:
       ids: [1]
-      prop_present: [username]
+      rows:
+        - { id: 1, username: alice }
       prop_absent: [is_admin, is_auditor]

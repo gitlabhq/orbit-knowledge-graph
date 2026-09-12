@@ -16,3 +16,5 @@ query:
 expect:
   referential_integrity: true
   path_count: 3
+  path_destinations:
+    Project: [1000, 1002, 1004]
