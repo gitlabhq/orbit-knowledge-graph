@@ -56,6 +56,17 @@ static LANG_CONFIG: std::sync::LazyLock<LangConfig> = std::sync::LazyLock::new(|
     serde_yaml::from_str(yaml).expect("failed to parse languages.yaml")
 });
 
+pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
+    match lang_id {
+        SupportLang::Python => Some(include_str!("../langs/python.yaml")),
+        SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript => {
+            Some(include_str!("../langs/typescript.yaml"))
+        }
+        SupportLang::Rust => Some(include_str!("../langs/rust.yaml")),
+        _ => None,
+    }
+}
+
 impl SupportLang {
     pub fn from_extension(ext: &str) -> Option<Self> {
         for (lang, entry) in &LANG_CONFIG.languages {

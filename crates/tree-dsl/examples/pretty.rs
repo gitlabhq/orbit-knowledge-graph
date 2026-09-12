@@ -7,9 +7,9 @@
 
 use std::io::IsTerminal;
 
+use tree_dsl::Pipeline;
 use tree_dsl::grammar::{self, SupportLang};
 use tree_dsl::lang::Lang;
-use tree_dsl::run::Pipeline;
 use tree_dsl::tree::pretty_print;
 
 fn main() {
@@ -58,7 +58,7 @@ fn main() {
         }
         "ssa" => {
             let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
-            let tree = tree_dsl::run::process_file("test", &source, &mut lang, &pipeline);
+            let tree = tree_dsl::pipeline::process_file("test", &source, &mut lang, &pipeline);
             println!("{}", pretty_print(&tree, &lang, color));
             if !tree.edges.is_empty() {
                 println!("edges:");

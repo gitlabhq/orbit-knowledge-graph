@@ -39,7 +39,7 @@ struct Sk {
 
 impl Sk {
     fn new(lang: &Lang) -> Self {
-        let s = |n: &str| lang.kinds.lookup(n) as u16;
+        let s = |n: &str| lang.lookup_kind(n);
         Self {
             deftype: s("__deftype"),
             defname: s("__defname"),
@@ -427,7 +427,7 @@ fn build_imports(
     let use_resolved =
         resolve_config.display_source == tree_dsl::file_tree::DisplaySource::Resolved;
     let fqn_sep = support_lang.fqn_separator();
-    let source_path_k = lang.kinds.lookup("__source_path") as u16;
+    let source_path_k = lang.lookup_kind("__source_path");
     let (mut id_b, mut fp_b, mut it_b, mut path_b, mut name_b, mut alias_b) = (
         Int64Builder::new(),
         StringBuilder::new(),

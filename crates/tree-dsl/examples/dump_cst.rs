@@ -1,6 +1,6 @@
+use tree_dsl::Pipeline;
 use tree_dsl::grammar::{self, SupportLang};
 use tree_dsl::lang::Lang;
-use tree_dsl::run::Pipeline;
 
 fn main() {
     let lang_id = match std::env::args().nth(2).as_deref() {
@@ -36,7 +36,7 @@ fn main() {
             }
         }
         if stage == "ssa" {
-            let tree = tree_dsl::run::process_file("test", &source, &mut lang, &pipeline);
+            let tree = tree_dsl::pipeline::process_file("test", &source, &mut lang, &pipeline);
             dump(&tree, &lang);
             for e in &tree.edges {
                 let from_s = lang.syms.resolve(tree.nodes[e.from.node as usize].sym);

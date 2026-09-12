@@ -191,6 +191,23 @@ impl Tree {
         }
     }
 
+    pub fn is(&self, i: u32, ck: crate::canonical::Canonical) -> bool {
+        self.nodes[i as usize].kind == ck as u16
+    }
+
+    pub fn prune(&mut self) {
+        for i in 1..self.nodes.len() {
+            self.nodes[i].field = 0;
+            if self.nodes[i].dead {
+                continue;
+            }
+            if !crate::canonical::is_canonical(self.nodes[i].kind) {
+                self.nodes[i].dead = true;
+                self.nodes[i].size = 1;
+            }
+        }
+    }
+
     pub fn remove(&mut self, i: u32) {
         self.nodes[i as usize].dead = true;
     }

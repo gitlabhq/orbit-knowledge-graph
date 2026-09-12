@@ -46,14 +46,22 @@ impl Lang {
         Lang::default()
     }
 
-    /// Register a kind name and return its ID. Use `is_synth_name()` to check
-    /// whether a kind name represents a synthetic node.
     pub fn intern_kind(&mut self, s: &str) -> u16 {
-        self.kinds.intern(s) as u16
+        if let Ok(ck) = s.parse::<crate::canonical::Canonical>() {
+            return ck as u16;
+        }
+        let id = self.kinds.intern(s) as u16;
+        debug_assert!(
+            id < crate::canonical::CANONICAL_BASE,
+            "dynamic kind ID {id} collides with canonical range"
+        );
+        id
     }
 
-    /// Look up a kind by name without inserting. Returns 0 if not found.
     pub fn lookup_kind(&self, s: &str) -> u16 {
+        if let Ok(ck) = s.parse::<crate::canonical::Canonical>() {
+            return ck as u16;
+        }
         self.kinds.lookup(s) as u16
     }
 
@@ -62,12 +70,18 @@ impl Lang {
     }
 
     pub fn kind_name(&self, k: u16) -> &str {
-        self.kinds.resolve(k as u32)
-    }
-
-    /// Whether a kind name represents a synthetic node (starts with `__`).
-    pub fn is_synth_name(s: &str) -> bool {
-        s.starts_with("__")
+        if crate::canonical::is_canonical(k) {
+            use strum::IntoEnumIterator;
+            for ck in crate::canonical::Canonical::iter() {
+                if ck as u16 == k {
+                    let s: &'static str = ck.into();
+                    return s;
+                }
+            }
+            "__unknown"
+        } else {
+            self.kinds.resolve(k as u32)
+        }
     }
 
     pub fn field_name(&self, f: u16) -> &str {

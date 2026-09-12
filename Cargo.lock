@@ -13589,6 +13589,7 @@ dependencies = [
  "smallvec",
  "smol_str",
  "stacker",
+ "strum 0.28.0",
  "termtree",
  "tree-sitter",
  "tree-sitter-bash",
