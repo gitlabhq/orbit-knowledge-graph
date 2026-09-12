@@ -13,13 +13,16 @@ as a unit (see *Removing the gates* below). Task #2933.
 | `check-narration.sh` | Wrapper for the narration scorer: whole-tree, explicit-files (`{staged_files}`), and MR-diff-scoped (`--diff-base <sha>`) modes. |
 | `score_description.py` | MR-description headline-section scorer (word / code-span / bare-identifier caps). |
 | `check-mr-description.sh` | Reads the description from the predefined `CI_MERGE_REQUEST_DESCRIPTION` variable and runs the scorer. |
+| `prompt_score.py` | Prompt prose scorer for `config/prompts/**/*.yml`, `config/setup/setup.yaml`, and `skills/**/*.md`: longest sentence, average sentence length, Flesch-Kincaid grade, dashes, tell words. Dependency-free Python; `--self-test` runs its fixtures. |
+| `check-prompts.sh` | Wrapper for the prompt scorer: whole-tree, explicit-files (`{staged_files}`), and MR-diff-scoped (`--diff-base <sha>`) modes. |
 | `narration-comments.yml` | Lower-precision ast-grep-native fallback for the `block_label` half (see below). Committed for documentation / ast-grep-only setups; **not** the active gate. |
 
 ## Where the gates run
 
 - **lefthook** `pre-commit` job `narration` (advisory; prints warnings, does not
   block — `|| true` in `lefthook.yml`).
-- **CI** jobs `lint:narration` and `lint:mr-description`, defined in
+- **lefthook** `pre-commit` job `prompts` (advisory, same `|| true` pattern).
+- **CI** jobs `lint:narration`, `lint:mr-description`, and `lint:prompts`, defined in
   [`.gitlab/ci/comment-guard.yml`](../../.gitlab/ci/comment-guard.yml). Both use
   `allow_failure: true` (yellow/advisory). In merge-request pipelines the
   narration job scopes to lines the MR added (`--diff-base`).

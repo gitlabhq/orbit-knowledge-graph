@@ -52,3 +52,24 @@ lint:mr-description:
   script:
     - apk add --no-cache bash
     - bash ./scripts/comment-guard/check-mr-description.sh
+
+# Prompt prose gate. Scores the agent-facing text (config/prompts, the setup
+# block, the skills) on sentence length, grade, dashes, and tell words.
+# Scoped to files the MR changed; whole tree on main.
+lint:prompts:
+  stage: lint
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  allow_failure: true
+  script:
+    - apk add --no-cache bash git
+    - |
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        bash ./scripts/comment-guard/check-prompts.sh --diff-base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      else
+        bash ./scripts/comment-guard/check-prompts.sh
+      fi
