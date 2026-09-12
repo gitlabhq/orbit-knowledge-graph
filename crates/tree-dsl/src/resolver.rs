@@ -674,8 +674,13 @@ fn build_type_edges(
         if resolved_fi.is_none() {
             for ce2 in cross_edges {
                 if ce2.from.tree as usize == target_fi && ce2.kind == EdgeKind::Imports {
-                    let dn =
-                        name_sym(&trees[ce2.to.tree as usize], ce2.to.node, name_f, left_f, k_defname);
+                    let dn = name_sym(
+                        &trees[ce2.to.tree as usize],
+                        ce2.to.node,
+                        name_f,
+                        left_f,
+                        k_defname,
+                    );
                     if dn == ret_sym {
                         resolved_fi = Some(ce2.to.tree as usize);
                         resolved_node = Some(ce2.to.node);
@@ -694,9 +699,7 @@ fn build_type_edges(
 
         let mut bound_vars: Vec<u32> = Vec::new();
         for d in tree.descendants(caller_node) {
-            if tree.kind(d) != k_binding
-                && !tree.children(d).any(|c| tree.kind(c) == k_binding)
-            {
+            if tree.kind(d) != k_binding && !tree.children(d).any(|c| tree.kind(c) == k_binding) {
                 continue;
             }
             let lhs = if tree.kind(d) == k_binding && tree.sym(d) != 0 {
@@ -746,7 +749,8 @@ fn build_type_edges(
                             if trees[type_fi].kind(cd) == k_deftype {
                                 let mn = trees[type_fi].nodes[cd as usize].parent;
                                 if mn != NONE && mn != type_node {
-                                    let mname = name_sym(&trees[type_fi], mn, name_f, left_f, k_defname);
+                                    let mname =
+                                        name_sym(&trees[type_fi], mn, name_f, left_f, k_defname);
                                     if mname == mem_sym && !found {
                                         type_edges.push(Edge::new(
                                             caller_fi,

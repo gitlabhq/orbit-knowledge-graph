@@ -693,17 +693,13 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             continue;
         }
 
-        if k == state.syns.binding
-            || tree.children(i).any(|c| tree.kind(c) == state.syns.binding)
-        {
+        if k == state.syns.binding || tree.children(i).any(|c| tree.kind(c) == state.syns.binding) {
             state.handle_binding(tree, i, lang);
             i += 1;
             continue;
         }
 
-        if k == state.syns.branch
-            || tree.children(i).any(|c| tree.kind(c) == state.syns.branch)
-        {
+        if k == state.syns.branch {
             let pre = state.cur_block;
             let arm_kinds = find_arm_children(tree, i, lang, &state.syns);
             let arm_blocks: Vec<BlockId> = arm_kinds
@@ -722,9 +718,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             i += 1;
             continue;
         }
-        if k == state.syns.r#loop
-            || tree.children(i).any(|c| tree.kind(c) == state.syns.r#loop)
-        {
+        if k == state.syns.r#loop {
             let (h, _) = state.ssa.begin_loop(state.cur_block);
             state.cur_block = state.ssa.finish_loop(h, state.cur_block);
             i += 1;
@@ -1006,9 +1000,7 @@ fn infer_return_type(
 
     let mut local_binds: Vec<(u32, u32)> = Vec::new();
     for d in tree.descendants(def_node) {
-        if tree.kind(d) == syns.binding
-            || tree.children(d).any(|c| tree.kind(c) == syns.binding)
-        {
+        if tree.kind(d) == syns.binding || tree.children(d).any(|c| tree.kind(c) == syns.binding) {
             let lhs = if tree.kind(d) == syns.binding && tree.sym(d) != 0 {
                 tree.sym(d)
             } else {
@@ -1034,9 +1026,7 @@ fn infer_return_type(
 
     for d in tree.descendants(def_node) {
         let dk = tree.nodes[d as usize].kind;
-        if (syns.ret != 0 && dk == syns.ret)
-            || (return_k_legacy != 0 && dk == return_k_legacy)
-        {
+        if (syns.ret != 0 && dk == syns.ret) || (return_k_legacy != 0 && dk == return_k_legacy) {
             for c in tree.children(d) {
                 if tree.kind(c) == syns.call {
                     return synth_child_node(tree, c, syns.callee)
@@ -1069,9 +1059,7 @@ fn find_ivar_type(
     f: &Fields,
 ) -> Option<u32> {
     for d in tree.descendants(class_node) {
-        if tree.kind(d) == syns.binding
-            || tree.children(d).any(|c| tree.kind(c) == syns.binding)
-        {
+        if tree.kind(d) == syns.binding || tree.children(d).any(|c| tree.kind(c) == syns.binding) {
             let ivar_match = if tree.kind(d) == syns.binding {
                 synth_child_node(tree, d, syns.ivar)
                     .filter(|&iv| tree.sym(iv) == attr_sym)
