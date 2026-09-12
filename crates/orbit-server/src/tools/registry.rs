@@ -1,11 +1,7 @@
-use std::sync::Arc;
-
-use ontology::Ontology;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::prompt;
-use super::schema::condensed_query_schema;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
@@ -111,7 +107,7 @@ pub(super) mod params {
 pub struct ToolRegistry;
 
 impl ToolRegistry {
-    pub fn get_all_tools(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
+    pub fn get_all_tools() -> Vec<ToolDefinition> {
         vec![
             Self::query_graph(),
             Self::get_graph_schema(),
@@ -120,19 +116,10 @@ impl ToolRegistry {
         ]
     }
 
-    pub(super) fn query_graph() -> ToolDefinition {
-        // Inline TOON kept for back-compat (one release cycle); a follow-up
-        // strips it once `get_query_dsl` adoption is verified.
-        let base_description = prompt("tools/query_graph").description();
-
-        let description = match condensed_query_schema() {
-            Ok(schema) => format!("{}\n\n<toon>\n{}\n</toon>", base_description, schema),
-            Err(_) => base_description.to_string(),
-        };
-
+    fn query_graph() -> ToolDefinition {
         ToolDefinition {
             name: "query_graph".into(),
-            description,
+            description: prompt("tools/query_graph").description().into(),
             parameters: json!({
                 "type": "object",
                 "required": ["query"],
@@ -145,7 +132,7 @@ impl ToolRegistry {
         }
     }
 
-    pub(super) fn get_graph_schema() -> ToolDefinition {
+    fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
             description: prompt("tools/get_graph_schema").description().into(),
@@ -191,7 +178,7 @@ impl ToolRegistry {
 pub struct CommandRegistry;
 
 impl CommandRegistry {
-    pub fn get_all_commands(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
+    pub fn get_all_commands() -> Vec<ToolDefinition> {
         vec![
             ToolRegistry::query_graph(),
             ToolRegistry::get_graph_schema(),
@@ -232,19 +219,13 @@ impl CommandRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::{V2CommandRegistry, V2ToolRegistry};
 
     fn all_tools() -> Vec<ToolDefinition> {
-        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        ToolRegistry::get_all_tools(&ontology)
+        ToolRegistry::get_all_tools()
     }
 
     fn all_commands() -> Vec<ToolDefinition> {
-        V2CommandRegistry::get_all_commands()
-    }
-
-    fn all_v2_tools() -> Vec<ToolDefinition> {
-        V2ToolRegistry::get_all_tools()
+        CommandRegistry::get_all_commands()
     }
 
     fn find_tool(name: &str) -> ToolDefinition {
@@ -292,15 +273,6 @@ mod tests {
     }
 
     #[test]
-    fn expected_v2_tools_are_registered() {
-        let names: Vec<String> = all_v2_tools().into_iter().map(|t| t.name).collect();
-        assert!(names.contains(&"query_graph".into()));
-        assert!(names.contains(&"get_graph_schema".into()));
-        assert!(names.contains(&"list_commands".into()));
-        assert!(names.contains(&"invoke_command".into()));
-    }
-
-    #[test]
     fn expected_commands_are_registered() {
         let names: Vec<String> = all_commands().into_iter().map(|t| t.name).collect();
         assert!(names.contains(&"query_graph".into()));
@@ -326,7 +298,6 @@ mod tests {
     fn list_commands_description_includes_command_summaries() {
         for tool in all_tools()
             .into_iter()
-            .chain(all_v2_tools())
             .filter(|tool| tool.name == "list_commands")
         {
             for (name, summary) in command_summaries() {
@@ -345,23 +316,25 @@ mod tests {
     }
 
     #[test]
-    fn all_commands_have_short_descriptions() {
-        for command in &all_commands() {
+    fn descriptions_are_short_and_carry_no_schema() {
+        for definition in all_tools().into_iter().chain(all_commands()) {
             assert!(
-                !command.description.is_empty(),
+                !definition.description.is_empty(),
                 "{} missing description",
-                command.name
+                definition.name
             );
+            if definition.name != "list_commands" {
+                assert!(
+                    definition.description.len() < 400,
+                    "{} description is too long",
+                    definition.name
+                );
+            }
             assert!(
-                command.description.len() < 400,
-                "{} command description is too long",
-                command.name
-            );
-            assert!(
-                !command.description.contains("<toon>")
-                    && !command.description.contains("Query DSL Schema"),
-                "{} should keep large schemas out of the command description",
-                command.name
+                !definition.description.contains("<toon>")
+                    && !definition.description.contains("Query DSL Schema"),
+                "{} should keep large schemas out of the description",
+                definition.name
             );
         }
     }
@@ -418,20 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn query_graph_description_still_embeds_dsl_for_back_compat() {
-        // Issue #553 added `get_query_dsl` so MCP clients that truncate
-        // descriptions can still find the grammar. We keep the inline TOON
-        // in the description for one release cycle so existing consumers
-        // do not break. A follow-up MR strips it once adoption is verified.
-        let tool = find_tool("query_graph");
-        assert!(tool.description.contains("query_type"));
-        assert!(tool.description.contains("traversal"));
-        assert!(tool.description.contains("<toon>"));
-    }
-
-    #[test]
     fn query_graph_excludes_ontology_data() {
-        // The embedded DSL describes query shape, not ontology entities.
         let tool = find_command("query_graph");
         assert!(!tool.description.contains("username"));
         assert!(!tool.description.contains("AUTHORED"));
@@ -445,7 +405,6 @@ mod tests {
 
     #[test]
     fn get_graph_schema_has_no_include_param() {
-        // back-compat: clients on get_graph_schema must keep the old shape
         let tool = find_command("get_graph_schema");
         let props = tool.parameters["properties"]
             .as_object()
@@ -475,7 +434,6 @@ mod tests {
     fn list_commands_accepts_optional_format() {
         for tool in all_tools()
             .into_iter()
-            .chain(all_v2_tools())
             .filter(|tool| tool.name == "list_commands")
         {
             let format = &tool.parameters["properties"]["format"];
