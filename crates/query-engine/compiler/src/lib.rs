@@ -69,7 +69,7 @@ pub use passes::codegen::{
     ddl::generate_local_tables,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
-pub use passes::frontend::Frontend;
+pub use passes::frontend::{Frontend, gql};
 pub use passes::hydrate::{
     DynamicEntityColumns, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
@@ -96,16 +96,6 @@ fn finish<C: config::CompilerCtx>(
         .count_err()
 }
 
-/// Compile raw query text through the given frontend into a
-/// [`CompiledQueryContext`].
-///
-/// Each frontend is its own pipeline preset that differs only in the first
-/// phase, which lowers the raw text to [`Input`]. Everything after that is
-/// shared.
-///
-/// ```text
-/// raw → {json_dsl_parse | gql_parse} → Validate → Normalize → Restrict → Lower → Enforce → Security → Cursor → Check → HydratePlan → Settings → Codegen
-/// ```
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     raw: &str,
@@ -113,18 +103,14 @@ pub fn compile(
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let ontology = Arc::new(ontology.clone());
     match fe {
         Frontend::JsonDsl => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(ontology, ctx.clone());
+            let mut ctx =
+                config::ClickhouseJsonDslCtx::new(Arc::new(ontology.clone()), ctx.clone());
             ctx.set_raw(raw.to_string());
             finish(&mut ctx, config::run_clickhouse_json_dsl)
         }
-        Frontend::Gql => {
-            let mut ctx = config::ClickhouseGqlCtx::new(ontology, ctx.clone());
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_gql)
-        }
+        Frontend::Gql => gql::compile_query(gql::parse(raw).count_err()?, ontology, ctx),
     }
 }
 
@@ -207,18 +193,24 @@ mod tests {
     #[test]
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile("not json", Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
-            .expect_err("must reject");
-        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        assert!(
-            matches!(err, crate::error::QueryError::Parse(_)),
-            "expected Parse, got: {err:?}"
-        );
-        assert!(
-            after > before,
-            "count_err must run on parse errors (before={before}, after={after})"
-        );
+        for fe in [Frontend::JsonDsl, Frontend::Gql] {
+            let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+            let err =
+                compile("not a query", fe, &ONTOLOGY, &security_ctx()).expect_err("must reject");
+            let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+            assert!(
+                matches!(
+                    (fe, &err),
+                    (Frontend::JsonDsl, QueryError::Parse(_))
+                        | (Frontend::Gql, QueryError::Validation(_))
+                ),
+                "unexpected error: {err:?}"
+            );
+            assert!(
+                after > before,
+                "count_err must run on parse errors (before={before}, after={after})"
+            );
+        }
     }
 
     #[test]

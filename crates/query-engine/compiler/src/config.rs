@@ -53,9 +53,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [ontology]
             mutates: [raw, input]
         }
-        gql_parse {
-            mutates: [raw, input]
-        }
         validate {
             reads_env: [ontology]
             mutates: [input]
@@ -113,8 +110,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         clickhouse_gql {
             env: [ontology, security_ctx]
-            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
@@ -132,12 +129,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
 fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
     let raw = require(ctx.take_raw(), "raw")?;
     ctx.set_input(frontend::json_dsl::parse(&raw, ctx.ontology())?);
-    Ok(())
-}
-
-fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let raw = require(ctx.take_raw(), "raw")?;
-    ctx.set_input(frontend::gql::parse(&raw)?);
     Ok(())
 }
 

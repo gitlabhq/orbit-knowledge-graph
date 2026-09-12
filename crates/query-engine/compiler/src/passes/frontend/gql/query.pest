@@ -1,4 +1,6 @@
-Query = { SOI ~ SP? ~ Match ~ SP? ~ Return ~ (SP ~ Order)? ~ (SP ~ (Limit | Page))? ~ (SP ~ Debug)? ~ SP? ~ ";"? ~ SP? ~ EOI }
+Statement = { SOI ~ SP? ~ (Query | SchemaCall) ~ SP? ~ ";"? ~ SP? ~ EOI }
+Query = { Match ~ SP? ~ Return ~ (SP ~ Order)? ~ (SP ~ (Limit | Page))? ~ (SP ~ Debug)? }
+SchemaCall = { ^"CALL" ~ SP ~ "db.schema" ~ SP? ~ "(" ~ SP? ~ (StringLiteral ~ SP?)? ~ ")" }
 Match = { ^"MATCH" ~ SP? ~ Pattern ~ (SP? ~ Where)? }
 Pattern = { ShortestPattern | PatternElement }
 ShortestPattern = { Variable ~ SP? ~ "=" ~ SP? ~ ^"shortestPath" ~ SP? ~ "(" ~ SP? ~ PatternElement ~ SP? ~ ")" }
