@@ -197,9 +197,6 @@ impl Tree {
     pub fn set_kind(&mut self, i: u32, k: u16) {
         self.nodes[i as usize].kind = k;
     }
-    pub fn set_field(&mut self, i: u32, f: u16) {
-        self.nodes[i as usize].field = f;
-    }
     pub fn set_text(&mut self, i: u32, sym: u32) {
         self.nodes[i as usize].sym = sym;
     }

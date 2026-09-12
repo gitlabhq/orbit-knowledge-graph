@@ -236,6 +236,7 @@ struct Fold {
     def_stack: Vec<(Option<u32>, u32, BlockId)>,
     branch_stack: Vec<BranchFrame>,
     wildcard: u32,
+    class_sym: u32,
     containers: Vec<u32>,
 }
 
@@ -328,7 +329,7 @@ impl Fold {
         }
     }
 
-    fn handle_binding(&mut self, tree: &Tree, i: u32, lang: &Lang) {
+    fn handle_binding(&mut self, tree: &Tree, i: u32) {
         let lhs = tree.sym(i);
         if lhs == 0 {
             return;
@@ -339,7 +340,7 @@ impl Fold {
         if self.ssa.has_variable_in_block(lhs, self.cur) {
             self.cur = self.ssa.add_sealed_successor(self.cur);
         }
-        let val = self.classify_rhs(tree, i, lang);
+        let val = self.classify_rhs(tree, i);
         self.ssa.write_variable(lhs, self.cur, val);
         if let Some(br) = self.branch_stack.last_mut() {
             for (idx, &(start, end)) in br.arms.iter().enumerate() {
@@ -451,14 +452,14 @@ impl Fold {
 
     // ── RHS classification ──
 
-    fn classify_rhs(&mut self, tree: &Tree, node: u32, lang: &Lang) -> Value {
+    fn classify_rhs(&mut self, tree: &Tree, node: u32) -> Value {
         let Some(rhs) = child_node(tree, node, self.s.rhs) else {
             return Value::Opaque;
         };
         if let Some(call) = child_node(tree, rhs, self.s.call) {
             if let Some(callee) = child_node(tree, call, self.s.callee) {
                 if let Some(target) = read_target(tree, callee, &self.s) {
-                    return self.value_from_target(tree, target, node, lang);
+                    return self.value_from_target(tree, target, node);
                 }
             }
             return Value::Opaque;
@@ -471,20 +472,14 @@ impl Fold {
         }
     }
 
-    fn value_from_target(
-        &mut self,
-        tree: &Tree,
-        target: Target,
-        binding: u32,
-        lang: &Lang,
-    ) -> Value {
+    fn value_from_target(&mut self, tree: &Tree, target: Target, binding: u32) -> Value {
         match target {
             Target::Name(sym) => {
                 let reaching = self.ssa.read_variable(sym, self.cur);
                 let is_class = reaching.iter().any(|pv| {
                     if let ParseValue::LocalDef(di) = pv {
                         child_sym(tree, self.defs[*di as usize], self.s.deftype)
-                            .is_some_and(|dt| lang.syms.resolve(dt) == "Class")
+                            .is_some_and(|dt| dt == self.class_sym)
                     } else {
                         false
                     }
@@ -507,7 +502,7 @@ impl Fold {
                             .position(|&dn| def_name(tree, dn, &self.s) == rt_sym);
                         if let Some(di) = found {
                             if child_sym(tree, self.defs[di], self.s.deftype)
-                                .is_some_and(|dt| lang.syms.resolve(dt) == "Class")
+                                .is_some_and(|dt| dt == self.class_sym)
                             {
                                 Value::Type(rt_sym)
                             } else {
@@ -577,6 +572,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
         def_stack: vec![(None, u32::MAX, entry)],
         branch_stack: Vec::new(),
         wildcard: lang.syms.intern("*"),
+        class_sym: lang.syms.intern("Class"),
         containers: vec![
             lang.syms.intern("Class"),
             lang.syms.intern("Impl"),
@@ -667,7 +663,7 @@ fn ssa_fold(tree: &mut Tree, lang: &mut Lang) {
             continue;
         }
         if k == f.s.binding {
-            f.handle_binding(tree, i, lang);
+            f.handle_binding(tree, i);
             i += 1;
             continue;
         }

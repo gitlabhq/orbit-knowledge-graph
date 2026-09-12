@@ -159,10 +159,6 @@ pub enum Pat {
 pub enum Out {
     Remove,
     SetKind(u16),
-    Retag {
-        kind: u16,
-        fields: Vec<(u16, u16)>,
-    },
     SetText {
         target: u16,
         from: u16,
@@ -631,12 +627,6 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
             match &r.out {
                 Out::Remove => t.remove(i),
                 Out::SetKind(k) => t.set_kind(i, *k),
-                Out::Retag { kind, fields } => {
-                    t.set_kind(i, *kind);
-                    for (slot, f) in fields {
-                        t.set_field(caps[*slot as usize].0, *f);
-                    }
-                }
                 Out::SetText { target, from, tf } => {
                     let sym = tf.apply_sym(t, lang, caps[*from as usize].0);
                     t.set_text(caps[*target as usize].0, sym);

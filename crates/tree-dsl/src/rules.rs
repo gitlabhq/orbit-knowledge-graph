@@ -79,8 +79,6 @@ struct Rule {
     #[serde(default)]
     set_kind: Option<String>,
     #[serde(default)]
-    retag: Option<RetagSpec>,
-    #[serde(default)]
     remove: Option<bool>,
 }
 
@@ -89,12 +87,6 @@ struct Rule {
 enum StringOrList {
     Single(String),
     List(Vec<String>),
-}
-
-#[derive(serde::Deserialize)]
-struct RetagSpec {
-    kind: String,
-    fields: std::collections::HashMap<String, String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -209,23 +201,6 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
         let tpl = tpl.clone();
         return vec![Rewrite::new(lang, pat, move |c| {
             Out::Replace(c.template(&tpl))
-        })];
-    }
-
-    if let Some(ref spec) = rule.retag {
-        let kind_str = spec.kind.clone();
-        let field_pairs: Vec<(String, String)> = spec
-            .fields
-            .iter()
-            .map(|(slot, field)| (slot.clone(), field.clone()))
-            .collect();
-        return vec![Rewrite::new(lang, pat, move |c| {
-            let kind = c.intern_kind(&kind_str);
-            let fields = field_pairs
-                .iter()
-                .map(|(s, f)| (c.slot(s), c.intern_field(f)))
-                .collect();
-            Out::Retag { kind, fields }
         })];
     }
 
@@ -421,23 +396,6 @@ stages:
     }
 
     #[test]
-    fn load_retag_rule() {
-        let yaml = r#"
-stages:
-  - name: retag
-    rules:
-      - match: '(attribute object: $O attribute: $M)'
-        retag:
-          kind: __member
-          fields: { O: object, M: member }
-"#;
-        let mut lang = Lang::new();
-        let stages = load_rules(yaml, &mut lang);
-        assert_eq!(stages.len(), 1);
-        assert_eq!(stages[0].len(), 1);
-    }
-
-    #[test]
     fn load_replace_rule() {
         let yaml = r#"
 stages:
@@ -473,16 +431,10 @@ stages:
           kind: __supertype
           tf: 'field=function'
 
-  - name: retag
+  - name: retag-refs
     rules:
       - match: '(attribute object: $O attribute: $M)'
-        retag:
-          kind: __member
-          fields: { O: object, M: member }
-      - match: '(call function: $F arguments: $A)'
-        retag:
-          kind: __call
-          fields: { F: callee, A: args }
+        replace: '(__member @$M (__object @$O))'
 
   - name: classify
     rules:
