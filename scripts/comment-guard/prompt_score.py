@@ -44,8 +44,11 @@ def yaml_units(text):
 
     def flush():
         if key and key not in SKIP_KEYS and buf:
-            joiner = "\n" if style and style.startswith("|") else " "
-            value = joiner.join(line.strip() for line in buf if line.strip()) if joiner == " " else "\n".join(buf)
+            if style and style.startswith("|"):
+                value = "\n".join(buf)
+            else:
+                paragraphs = "\n".join(line.strip() for line in buf).split("\n\n")
+                value = "\n".join(" ".join(p.split()) for p in paragraphs)
             units[key] = value.strip().strip('"').strip("'")
 
     for line in text.splitlines():
@@ -152,7 +155,7 @@ def self_test():
     good = "Query the graph before shell grep. Use one to three identifier keywords. Cite file and line."
     assert score_unit(bad)[3], "bad sample must fail"
     assert not score_unit(good)[3], f"good sample must pass: {score_unit(good)[3]}"
-    assert yaml_units("name: x\nversion: 1.0.0\nshort: Short line\ndescription: >-\n  Folded\n  text.\n") == {"short": "Short line", "description": "Folded text."}
+    assert yaml_units("name: x\nversion: 1.0.0\nshort: Short line\ndescription: >-\n  Short line\n\n\n  Folded\n  text.\n") == {"short": "Short line", "description": "Short line\nFolded text."}
     assert markdown_units("---\nname: s\ndescription: Front desc.\n---\n# H\n\n- item one.\n\n```\ncode\n```\n| t |\n")["frontmatter.description"] == "Front desc."
     print("self-test ok")
 
