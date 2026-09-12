@@ -94,10 +94,8 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "Property"))'
 
       # Control flow
-      - match: '(if_statement condition: $COND consequence: $C alternative: $A)'
-        replace: '(__branch $COND (__arm $C) (__arm $A))'
-      - match: '(if_statement condition: $COND consequence: $C)'
-        replace: '(__branch $COND (__arm $C))'
+      - match: '(if_statement condition: $COND consequence: $C alternative:? $A)'
+        replace: '(__branch $COND (__arm $C) (__arm? $A))'
       - match: '(switch_statement value: $V body: $B)'
         replace: '(__branch $V $B)'
       - match: '(ternary_expression condition: $COND consequence: $C alternative: $A)'

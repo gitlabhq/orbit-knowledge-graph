@@ -117,8 +117,6 @@ stages:
       # Branches
       - match: '(if_statement condition: $COND consequence: $C $$$ALTS:elif_clause|else_clause)'
         replace: '(__branch $COND (__arm $C) $$$ALTS->__arm)'
-      - match: '(if_statement condition: $COND consequence: $C)'
-        replace: '(__branch $COND (__arm $C))'
       - match: '(try_statement body: $B $$$ALTS:except_clause|finally_clause)'
         replace: '(__branch (__arm $B) $$$ALTS->__arm)'
       - match: '(match_statement subject: $S body: (block $$$CASES:case_clause))'

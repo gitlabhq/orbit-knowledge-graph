@@ -65,10 +65,8 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "TypeAlias"))'
 
       # Control flow
-      - match: '(if_expression condition: $COND consequence: $C alternative: $A)'
-        replace: '(__branch $COND (__arm $C) (__arm $A))'
-      - match: '(if_expression condition: $COND consequence: $C)'
-        replace: '(__branch $COND (__arm $C))'
+      - match: '(if_expression condition: $COND consequence: $C alternative:? $A)'
+        replace: '(__branch $COND (__arm $C) (__arm? $A))'
       - match: '(match_expression value: $V body: $B)'
         replace: '(__branch $V $B)'
       - match: '(for_expression body: $B)'
@@ -91,10 +89,8 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $B)'
 
       # Containers (after functions)
-      - match: '(struct_item name: $N body: $B)'
+      - match: '(struct_item name: $N body:? $B)'
         replace: '(__def (__defname @$N) (__deftype "Struct") (__scope) $B)'
-      - match: '(struct_item name: $N)'
-        replace: '(__def (__defname @$N) (__deftype "Struct") (__scope))'
       - match: '(enum_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Enum") (__scope) $B)'
       - match: '(trait_item name: $N body: $B)'
