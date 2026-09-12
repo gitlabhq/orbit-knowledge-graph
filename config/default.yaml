@@ -49,7 +49,7 @@ datalake:
   database: default
   username: default
   # password: ""
-  quorum_writes: false
+  replicated: false
   session_settings: {}
   insert_settings: {}
   profiling:
@@ -64,7 +64,7 @@ graph:
   database: default
   username: default
   # password: ""
-  quorum_writes: false
+  replicated: false
   # Universal graph defaults, also set by the Helm chart in production.
   session_settings:
     max_query_size: "10485760"
