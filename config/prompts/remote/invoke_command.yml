@@ -1,9 +1,8 @@
 name: invoke_command
-version: 1.0.2
+version: 1.1.0
 description: >-
-  Invoke a discovered Orbit command for code structure, relationship traversal,
-  blast radius, cross-entity or cross-project joins, or grouped aggregation. Do
-  not use this for single-entity lookups, simple lists or counts, or writes that
-  ordinary GitLab tools handle directly. This is a wrapper tool: keep
-  only command_name and parameters at the top level, and put downstream command
-  inputs inside parameters.
+  Run an Orbit command found with list_commands. Use it for code structure,
+  relationship traversal, blast radius, joins across entities or projects, and
+  grouped counts. Do not use it for one known entity, a plain list or count, or
+  writes that normal GitLab tools handle. Keep only command_name and parameters
+  at the top level. Put the command's own inputs inside parameters.
