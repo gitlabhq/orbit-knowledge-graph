@@ -78,6 +78,9 @@ pub struct QueryExpect {
     pub compile_only: bool,
     #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
+    /// Assert error message does NOT contain these substrings.
+    #[serde(default)]
+    pub compile_error_not_contains: Vec<String>,
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
@@ -107,9 +110,24 @@ pub struct QueryExpect {
     pub sql_contains: Vec<String>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
+    /// Assert total edge count across all types.
+    #[serde(default)]
+    pub total_edge_count: Option<usize>,
     /// Assert the number of paths returned by a path_finding query.
     #[serde(default)]
     pub path_count: Option<usize>,
+    /// Assert path destinations: `{ Project: [1000, 1004] }`.
+    /// Collects the `to_id` of the last edge in each path, grouped by
+    /// `to` entity type. Compared as sorted sets.
+    #[serde(default)]
+    pub path_destinations: BTreeMap<String, Vec<i64>>,
+    /// Assert per-path edge structure: each entry is one path's edges
+    /// in step order. `{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100 }`
+    #[serde(default)]
+    pub path_edges: Vec<Vec<PathEdgeExpect>>,
+    /// Assert entities that must NOT appear as path edge endpoints.
+    #[serde(default)]
+    pub path_endpoint_absent: Vec<String>,
     #[serde(default)]
     pub referential_integrity: bool,
     #[serde(default)]
@@ -223,7 +241,11 @@ impl QueryExpect {
             || self.empty_aggregation
             || self.row_count.is_some()
             || !self.row_values.is_empty()
+            || self.total_edge_count.is_some()
             || self.path_count.is_some()
+            || !self.path_destinations.is_empty()
+            || !self.path_edges.is_empty()
+            || !self.path_endpoint_absent.is_empty()
             || self.referential_integrity
             || self.has_more.is_some();
         assert!(
@@ -255,4 +277,20 @@ impl QueryExpect {
 pub enum CompileErrorExpect {
     Flag(bool),
     Substring(String),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PathEdgeExpect {
+    #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
+    pub from_id: Option<i64>,
+    #[serde(rename = "type")]
+    #[serde(default)]
+    pub edge_type: Option<String>,
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub to_id: Option<i64>,
 }
