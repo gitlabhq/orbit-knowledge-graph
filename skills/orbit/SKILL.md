@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the single `glab orbit` CLI to query hosted GitLab data or index and query local repositories. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.26.5
+version: 0.27.0
 license: MIT
 metadata:
   audience: developers
@@ -11,60 +11,38 @@ metadata:
 
 # Orbit skill
 
-Query **GitLab Orbit** (previously GitLab Knowledge Graph) through the single,
-flat `glab orbit` command tree (requires glab v1.117.0+). Hosted commands handle
-authentication, response framing, and exit codes; local commands use the managed
-binary and local DuckDB graph.
+Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab orbit` command tree. It needs glab v1.117.0 or later. Hosted commands handle authentication, response framing, and exit codes. Local commands use the managed binary and the local DuckDB graph.
 
 ## Prerequisites
 
-If `glab orbit` commands fail (command not found, auth errors, feature-flag
-exit codes), work through the first-run setup checklist in
-[`references/prerequisites.md`](references/prerequisites.md).
+If a `glab orbit` command fails with "command not found", an auth error, or a feature-flag exit code, work through the [first-run setup](references/troubleshooting.md#first-run-setup).
 
 ## Discovery
 
-`glab orbit help` and `glab orbit <command> --help` are the authoritative
-usage references. For entity properties, prefer the recipes in
-[`references/recipes.md`](references/recipes.md) over schema introspection —
-they already encode the columns and filters known to work.
+`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. For entity properties, prefer the recipes in [`references/recipes.md`](references/recipes.md) over schema introspection. They already encode the columns and filters known to work.
 
-If you must introspect, call `glab orbit ontology <Entity…>` with explicit
-entity names — always pass the entity names you need rather than the unscoped
-form, which returns ~17 KB+ of output. Call the ontology command at most once
-per session; the ontology does not change mid-session. Use `glab orbit dsl` for
-the full DSL JSON Schema. The ontology command returns an object with a `nodes` array and does
-not accept `--jq`; pipe its output into `jq` instead. Per-node
-`outgoing_edges`/`incoming_edges` are arrays of **strings** (edge type names),
-not objects:
+If you must introspect, call `glab orbit ontology <Entity...>` with explicit entity names. The unscoped form returns about 17 KB of output. Call it at most once per session, because the ontology does not change mid-session. `glab orbit dsl` prints the full DSL JSON Schema. The ontology command returns an object with a `nodes` array and does not accept `--jq`, so pipe into `jq`. Per-node `outgoing_edges` and `incoming_edges` are arrays of edge type names, not objects:
 
 ```shell
 glab orbit ontology Project |
   jq '.nodes[] | select(.name == "Project") | .properties'
 ```
 
-Each `glab orbit query` has fixed per-call overhead. Prefer one
-`aggregation` query over N traversal queries for "how many X grouped by Y", and
-batch related lookups.
+Each `glab orbit query` has fixed per-call overhead. Prefer one `aggregation` query over N traversal queries for "how many X grouped by Y", and batch related lookups.
 
-When editing Orbit docs or skills, fence executable query JSON as
-`json orbit-query` so docs smoke tests run it.
+When editing Orbit docs or skills, fence executable query JSON as `json orbit-query` so docs smoke tests run it.
 
 ## Running a query
 
-Write the request body to a file and pass it to `glab orbit query`.
-Default output is `llm` (compact, agent-friendly); pass
-`--response-format raw` to pipe into `jq`. Endpoints are user-scoped — do
-**not** pass `-R owner/repo`.
+Write the request body to a file and pass it to `glab orbit query`. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
-Many filters need a numeric project ID. For the repository you are in, let
-`glab` resolve it from the Git remote rather than querying for it:
+Many filters need a numeric project ID. For the repository you are in, let `glab` resolve it from the Git remote.
 
 ```shell
 PROJECT_ID=$(glab api projects/:fullpath | jq -r '.id')
 ```
 
-Put the request body in `/tmp/q.json`:
+Put the request body in `/tmp/q.json`.
 
 ```json orbit-query
 {
@@ -89,102 +67,50 @@ Put the request body in `/tmp/q.json`:
 glab orbit query /tmp/q.json
 ```
 
-`filters` is an **object keyed by property name** — not an array. Use either
-shorthand equality (`{"state": "opened"}`) or the operator form
-(`{"iid": {"eq": 1216}}`). Operators: `eq`, `gt`, `lt`, `gte`,
-`lte`, `in`, `contains`, `starts_with`, `ends_with`, `is_null`, `is_not_null`,
-plus text-token operators (`token_match`, `all_tokens`, `any_tokens`) for
-text-indexed properties — see [`query_language.md`](references/query_language.md).
-
-All queries declare node selectors in the `nodes` array — a 1-element array
-for `neighbors` and single-node `traversal`; multi-node `traversal`,
-`aggregation`, and `path_finding` add `relationships`.
-
-- For multi-hop **traversal** edges, set `relationships[].hops` to an
-  inclusive `[min, max]` pair (`"hops": [1, 3]`; `[2, 2]` for exactly 2).
-  Omitted means `[1, 1]`. Max 3.
-- For **path_finding** queries, set `path.max_depth` inside the required
-  `path` sub-object. Max 3. `hops` does not apply to `path_finding`.
-  When endpoints use filters, include `path.rel_types` to bound fan-out;
-  path_finding follows edges only in their schema direction (see
-  [recipe pitfall](references/recipes.md#path_finding--shortest-path-between-nodes)).
+`filters` is an object keyed by property name, not an array. Every query declares its node selectors in the `nodes` array. Filter operators, multi-hop `hops`, and `path_finding` limits are in [`references/query_language.md`](references/query_language.md). Paste-ready shapes for each `query_type` are in [`references/recipes.md`](references/recipes.md).
 
 ## Common pitfalls
 
-Read [`references/recipes.md`](references/recipes.md) before constructing a
-query — the same question often has one canonical paste-ready shape and several
-wrong-looking-correct ones. Four traps recur:
+Read the recipes before you construct a query. The same question often has one canonical shape and several wrong shapes that look correct. Four traps recur:
 
-- **"Pipelines for a merge request" requires `Pipeline.source =
-  "merge_request_event"`.** Both `Pipeline.merge_request_id` and the
-  `MergeRequest --TRIGGERED--> Pipeline` edge return parent *and* downstream
-  child pipelines (`source = "parent_pipeline"`). Apply the
-  `source = "merge_request_event"` filter (or the
-  [canonical recipe](references/recipes.md#pipelines-that-ran-for-one-merge-request))
-  to match the MR **Pipelines** tab.
-- **Prefer single-node queries when you can bound the target entity directly.**
-  Adding nodes/relationships only to "anchor" a query (joining `Project` +
-  `MergeRequest` + `Pipeline` when you already know `merge_request_id`) can
-  change the row shape and skew `aggregation` counts. If `recipes.md` shows a
-  single-node form, use it.
-- **`HAS_LATEST_DIFF` vs `HAS_DIFF` for file history.** `HAS_LATEST_DIFF`
-  points only at the **most recent** diff snapshot of an MR. "Every MR that ever
-  touched this file" needs `HAS_DIFF` (all snapshots) — `HAS_LATEST_DIFF` here
-  can substantially undercount long-lived files. See
-  [recipe](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
-- **GitLab issues, epics, tasks, and incidents are the `WorkItem` entity, not
-  `Issue`.** Modern GitLab unifies these under work items, and Orbit follows the
-  same model: there is no `Issue` node, so `entity: "Issue"` is rejected. Query
-  `WorkItem` for any of them (see
-  [recipe](references/recipes.md#work-items-in-a-project)).
+- Pipelines for a merge request need the `source = "merge_request_event"` filter. See [the recipe](references/recipes.md#pipelines-that-ran-for-one-merge-request).
+- Prefer a single-node query when you can bound the target entity directly. Extra anchor nodes can change the row shape and skew `aggregation` counts.
+- File history needs `HAS_DIFF`, not `HAS_LATEST_DIFF`. See [the recipe](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
+- Issues, epics, tasks, and incidents are the `WorkItem` entity. There is no `Issue` node. See [the recipe](references/recipes.md#work-items-in-a-project).
 
 ## Iteration budget
 
-A single user question should resolve in **at most 5 query attempts**. Tweaking
-only `limit`/`columns` is not progress; changing `entity`, relationship type, or
-a `filter` is. Validation errors (HTTP 400) count toward the budget. If you
-exceed 5 without converging, **give up loudly**: report the shapes you tried,
-what failed, and the next step — do not keep iterating or inflate a partial
-answer. Full rules:
-[`references/troubleshooting.md`](references/troubleshooting.md#iteration-budget-rules).
+Resolve a user question in at most 5 query attempts. Changing only `limit` or `columns` is not progress. Changing `entity`, the relationship type, or a `filter` is. Validation errors count toward the budget. After 5 attempts, stop and report the shapes you tried, what failed, and the next step. Full rules: [`references/troubleshooting.md`](references/troubleshooting.md#iteration-budget-rules).
 
 ## Reporting results
 
-Orbit answers are graph queries against ClickHouse, not an authoritative source
-of truth. Always **surface known coverage gaps inline** (e.g. `HAS_LATEST_DIFF`
-vs `HAS_DIFF`, time-bounded aggregates) and **show the query body** so the user
-can audit it. Do not add a "Methodology" header that implies rigor the data
-lacks. Full guidance and worked examples:
-[`references/reporting.md`](references/reporting.md).
+Orbit answers are graph queries against ClickHouse, not an authoritative source of truth. Surface known coverage gaps inline, and show the query body so the user can audit it. Do not add a "Methodology" header that implies rigor the data lacks. Full guidance: [`references/reporting.md`](references/reporting.md).
 
 ## Repository map helpers
 
-For code-structure orientation before planning a change, use `glab orbit
-repo-map` for an uncommitted or branch-local checkout, or the bundled remote
-helper script (path relative to this skill root, not the user's current repo)
-for a project already indexed in Orbit Remote. See the repository-map rows in
-[References](#references) below.
+For code-structure orientation before you plan a change, use `glab orbit repo-map` on a local checkout. For a project already indexed in Orbit Remote, use the bundled remote helper script. The script path is relative to this skill root, not the user's repository. See the repository-map rows in [References](#references).
 
 ## Managed CLI
 
-`glab orbit` downloads and runs the managed Orbit binary (macOS/Linux only,
-x86_64/aarch64). The command determines the backend: `index`, `grep`, `context`,
-`sql`, `schema`, `list`, `mcp`, and `repo-map` use the local graph, while
-`query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` use Orbit
-Remote. Install or update it with `glab orbit --install` or `glab orbit
---update`. Full configuration and pass-through details:
-[`references/local_cli.md`](references/local_cli.md).
+`glab orbit` downloads, verifies, and runs the Orbit binary from the `orbit-local` package (macOS and Linux, x86_64 and aarch64). The command selects the backend. `index`, `grep`, `context`, `sql`, `schema`, `list`, `mcp`, and `repo-map` use the local graph. `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` use Orbit Remote.
+
+glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. `glab orbit --help` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
+
+```bash
+glab orbit --install --yes   # install without running
+glab orbit --update          # install the latest compatible version
+```
+
+Skip the confirmation prompts for good with `glab config set orbit_local_auto_run true` and `glab config set orbit_local_auto_download true`. Point glab at your own build with `glab config set orbit_local_binary_path /path/to/orbit` or the `GLAB_ORBIT_LOCAL_BINARY_PATH` env var. That skips download, version checks, and updates.
 
 ## References
 
 | Topic | Location |
 |---|---|
-| First-run setup checklist (install, auth, feature flag) | [`references/prerequisites.md`](references/prerequisites.md) |
+| First-run setup, exit codes, errors, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
 | Full DSL reference | [`references/query_language.md`](references/query_language.md) |
 | Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
-| Reporting results & coverage caveats | [`references/reporting.md`](references/reporting.md) |
+| Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |
 | Local repository map command (`glab orbit repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Remote repository map helper | [`references/remote_repo_map.md`](references/remote_repo_map.md) |
-| CLI exit codes (1-5), errors, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
-| Managed CLI flags, config keys & pass-through args | [`references/local_cli.md`](references/local_cli.md) |
 | Maintaining this skill (contributing, doc sync) | [`references/maintaining.md`](references/maintaining.md) |

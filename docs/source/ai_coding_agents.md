@@ -31,9 +31,9 @@ The skill works with both [GitLab Orbit Remote](remote/_index.md) and
 
 ## Prerequisites
 
-- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) v1.95.0 or later,
-  which introduced `glab skills install`. If the subcommand is not recognized,
-  update `glab` first.
+- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) v1.117.0 or later.
+  Older versions lack `glab skills install` or the flat `glab orbit` commands.
+  If either is not recognized, update `glab` first.
 
 ## Install the skill
 
