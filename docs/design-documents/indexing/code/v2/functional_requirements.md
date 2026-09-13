@@ -24,6 +24,28 @@ Example payloads show only the fields relevant to each scenario.
 | Push to search | The time from a GitLab push to its changes becoming queryable in Orbit. |
 | Gitaly | The Git service from which Orbit reads repository data. |
 
+## High-Level Product Contract
+
+Orbit's Code Indexing service must support both content matching and code graph queries, as described in the [motivation](motivation.md).
+
+From a query perspective:
+
+- Users must be able to **query definitions and relationships** through the same index that supports content search.
+- Users must be able to **find exact code matches** in the repository versions they select and may read.
+- Orbit must support **text**, **regex**, and **ast-grep structural search**.
+- Orbit must support optional file content filters in graph queries.
+- Users must be able to **combine content filters and code graph relationships** in one query.
+- Users must be able to **search across branches, tags, and commits**, including a specific commit in a specific project.
+- These scenarios must be available through the UI, Orbit CLI, and query API (Open-Cypher/GQL).
+
+For indexing and access:
+
+- Repository changes must use **incremental indexing** for both content and the code graph.
+- Orbit must **minimize push-to-search delay** and **expose indexing progress**.
+- Search and indexing must **impose minimal load on Gitaly**.
+- GitLab **authorization** must apply throughout the corpus and every product surface.
+- Each top-level namespace must have a **strict data boundary** within its Organization.
+
 ## Authorization and Namespace Isolation
 
 GitLab Rails owns access decisions. The trusted caller must supply authenticated traversal-path grants for each query.
@@ -101,28 +123,6 @@ Both requests return the same denial payload. Neither request may read data from
   "status": "access_denied"
 }
 ```
-
-## High-Level Product Contract
-
-Orbit's Code Indexing service must support both content matching and code graph queries, as described in the [motivation](motivation.md).
-
-From a query perspective:
-
-- Users must be able to **query definitions and relationships** through the same index that supports content search.
-- Users must be able to **find exact code matches** in the repository versions they select and may read.
-- Orbit must support **text**, **regex**, and **ast-grep structural search**.
-- Orbit must support optional file content filters in graph queries.
-- Users must be able to **combine content filters and code graph relationships** in one query.
-- Users must be able to **search across branches, tags, and commits**, including a specific commit in a specific project.
-- These scenarios must be available through the UI, Orbit CLI, and query API (Open-Cypher/GQL).
-
-For indexing and access:
-
-- Repository changes must use **incremental indexing** for both content and the code graph.
-- Orbit must **minimize push-to-search delay** and **expose indexing progress**.
-- Search and indexing must **impose minimal load on Gitaly**.
-- GitLab **authorization** must apply throughout the corpus and every product surface.
-- Each top-level namespace must have a **strict data boundary** within its Organization.
 
 ## Querying Behavior
 
