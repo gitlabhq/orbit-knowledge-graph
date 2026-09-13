@@ -39,6 +39,19 @@ const DATALAKE_EXTRACT_RETRY: LocalRetry = LocalRetry {
 };
 
 const ADAPTIVE_MIN_ROWS: u64 = 1_000;
+const TARGET_BLOCK_BYTES: u64 = 64 << 20;
+const CLICKHOUSE_DEFAULT_MAX_BLOCK_SIZE: u64 = 65_409;
+
+fn block_size_for(rows: u64, bytes: u64, floor: u64) -> Option<u64> {
+    if rows == 0 || bytes == 0 {
+        return None;
+    }
+    let fit = TARGET_BLOCK_BYTES.saturating_mul(rows) / bytes;
+    if fit >= CLICKHOUSE_DEFAULT_MAX_BLOCK_SIZE {
+        return None;
+    }
+    Some(fit.max(floor))
+}
 
 fn next_page_limit(current: u64, plan_limit: u64, rows: u64, bytes: u64, truncated: bool) -> u64 {
     if truncated {
@@ -165,12 +178,14 @@ impl Pipeline {
         let params = base_query.params();
         let plan_limit = base_query.batch_size();
         let mut stats = PipelineStats::default();
+        let mut block_size = None;
 
         let mut page = self
             .extract_batch(
                 transform.name(),
                 &self.page_sql(&base_query, &plan.sort_key, &cursor)?,
                 params.clone(),
+                block_size,
             )
             .await?;
         stats.extract_ms += page.extract_elapsed.as_millis() as u64;
@@ -200,6 +215,11 @@ impl Pipeline {
                 bytes_in_page,
                 page.truncated,
             ));
+            block_size = block_size_for(
+                rows_in_page,
+                bytes_in_page,
+                self.retry_config.halving_min_block_size,
+            );
 
             let transform_start = Instant::now();
             let grouped = self
@@ -247,7 +267,7 @@ impl Pipeline {
                 let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor)?;
                 let (write_result, extract_result) = tokio::join!(
                     drain_writes,
-                    self.extract_batch(transform.name(), &next_sql, params.clone()),
+                    self.extract_batch(transform.name(), &next_sql, params.clone(), block_size),
                 );
                 (write_result?, Some(extract_result?))
             } else {
@@ -354,10 +374,11 @@ impl Pipeline {
         transform_name: &str,
         sql: &str,
         params: Value,
+        block_size: Option<u64>,
     ) -> Result<Page, HandlerError> {
         drive_with(
             &DATALAKE_EXTRACT_RETRY,
-            None::<u64>,
+            block_size,
             |block_size, attempt| {
                 let query_start = Instant::now();
                 let fut = self
@@ -1259,6 +1280,17 @@ mod tests {
             next_page_limit(500_000, 500_000, 3, PAGE_BYTE_BUDGET, true),
             ADAPTIVE_MIN_ROWS
         );
+    }
+
+    #[test]
+    fn block_size_follows_the_previous_page_row_width() {
+        assert_eq!(block_size_for(500_000, 100 << 20, 1_024), None);
+        assert_eq!(
+            block_size_for(196_227, 1_780 << 20, 1_024),
+            Some(TARGET_BLOCK_BYTES * 196_227 / (1_780 << 20))
+        );
+        assert_eq!(block_size_for(10, 10 << 30, 1_024), Some(1_024));
+        assert_eq!(block_size_for(0, 0, 1_024), None);
     }
 
     #[test]
