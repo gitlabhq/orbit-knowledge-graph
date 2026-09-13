@@ -722,11 +722,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                     assert_eq!(edge.to_id, to_id, "{label}: path {i} edge {j} to_id");
                 }
                 if let Some(step) = exp.step {
-                    assert_eq!(
-                        edge.step,
-                        Some(step),
-                        "{label}: path {i} edge {j} step"
-                    );
+                    assert_eq!(edge.step, Some(step), "{label}: path {i} edge {j} step");
                 }
             }
         }
