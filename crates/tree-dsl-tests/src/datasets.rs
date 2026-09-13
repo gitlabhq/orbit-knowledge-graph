@@ -71,7 +71,9 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
                     }
                     imports.insert((fi, imp.index()), imp_ids);
                 }
-            } else if nr.is(C::Import) || nr.is(C::ImportType) {
+            } else if (nr.is(C::Import) || nr.is(C::ImportType))
+                && !nr.parent().is_some_and(|p| p.is(C::ModuleExport))
+            {
                 let name_nodes: Vec<u32> = nr
                     .children()
                     .filter(|c| c.is(C::Name) && c.sym() != 0)
@@ -411,7 +413,9 @@ fn build_imports(
         let fp = lang.syms.resolve(tree.root().sym()).to_string();
         for i in 0..tree.len() {
             let nr = tree.cursor(i);
-            if !(nr.is(C::Import) || nr.is(C::ImportType)) {
+            if !(nr.is(C::Import) || nr.is(C::ImportType))
+                || nr.parent().is_some_and(|p| p.is(C::ModuleExport))
+            {
                 continue;
             }
             let Some(imp_ids) = ids.imports.get(&(fi, i)) else {
@@ -558,6 +562,7 @@ fn build_file_edges(
                     dk.append_value("Defines");
                 }
             } else if (nr.is(C::Import) || nr.is(C::ImportType))
+                && !nr.parent().is_some_and(|p| p.is(C::ModuleExport))
                 && let Some(iids) = ids.imports.get(&(fi, i))
             {
                 for &iid in iids {
