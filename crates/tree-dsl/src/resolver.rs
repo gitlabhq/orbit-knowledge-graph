@@ -149,7 +149,7 @@ fn gather_imports(
                     target_path,
                 });
             } else {
-                for c in cur.children().filter(|c| c.is(C::Name) && c.sym() != 0) {
+                for c in cur.names() {
                     let submod = format!("{target_path}/{}", lang.syms.resolve(c.sym()));
                     if let Some(sub_fi) = resolve_path(&submod, file_index, lookup_prefixes) {
                         cross_edges.push(Edge::new(fi, i as u32, sub_fi, 0, EdgeKind::Imports));
@@ -276,7 +276,7 @@ fn build_import_edges(
     for req in reqs {
         let (fi, tfi) = (req.fi, req.target_fi);
         let import = corpus.jump(fi as u32, req.node);
-        for c in import.children().filter(|c| c.is(C::Name) && c.sym() != 0) {
+        for c in import.names() {
             let ns = c.sym();
             let name_str = lang.syms.resolve(ns);
             if name_str == "*" {

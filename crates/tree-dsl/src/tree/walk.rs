@@ -220,6 +220,11 @@ impl<'a> Cursor<'a> {
         self.children().any(|n| n.is(ck))
     }
 
+    /// Children that are __name nodes with nonzero sym.
+    pub fn names(&self) -> impl Iterator<Item = Cursor<'a>> {
+        self.children().filter(|c| c.is(C::Name) && c.sym() != 0)
+    }
+
     // ── Descendant queries ──
 
     pub fn find_desc(&self, pred: impl Fn(Cursor<'a>) -> bool) -> Option<Cursor<'a>> {
