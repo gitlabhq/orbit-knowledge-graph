@@ -205,44 +205,45 @@ impl Fold {
         let d = tree.cursor(def);
         d.child_sym(C::ReturnType).or_else(|| {
             let mut binds: Vec<(u32, u32)> = Vec::new();
-            for desc in d.descendants() {
-                if desc.is(C::Binding) && desc.sym() != 0 {
-                    let callee = desc
-                        .child(C::Rhs)
-                        .and_then(|rhs| rhs.child(C::Call))
-                        .and_then(|c| c.child(C::Callee))
-                        .map(|c| c.sym())
-                        .unwrap_or(0);
-                    if callee != 0 {
-                        binds.push((desc.sym(), callee));
-                    }
+            let mut result = None;
+            d.descend(|n| -> Step<u32> {
+                if n.is(C::Def) && n.index() != def {
+                    return Step::Over;
                 }
-            }
-            d.descend(|n| {
-                if n.is(C::Return) {
+                if n.is(C::Binding) && n.sym() != 0 {
+                    if let Some(callee) = n
+                        .child(C::Rhs)
+                        .and_then(|r| r.child(C::Call))
+                        .and_then(|c| c.child_sym(C::Callee))
+                    {
+                        binds.push((n.sym(), callee));
+                    }
+                    return Step::Over;
+                }
+                if n.is(C::Return) && result.is_none() {
                     for ch in n.children() {
                         if ch.is(C::Call) {
                             if let Some(s) = ch.child_sym(C::Callee) {
-                                return Step::Out(s);
+                                result = Some(s);
                             }
+                            break;
                         }
-                        let sym = ch.sym();
-                        if sym != 0 {
-                            for &(lhs, callee) in &binds {
-                                if lhs == sym {
-                                    return Step::Out(callee);
-                                }
-                            }
-                            return Step::Out(sym);
+                        if ch.sym() != 0 {
+                            result = Some(
+                                binds
+                                    .iter()
+                                    .find(|(l, _)| *l == ch.sym())
+                                    .map(|(_, c)| *c)
+                                    .unwrap_or(ch.sym()),
+                            );
+                            break;
                         }
                     }
+                    return Step::Over;
                 }
-                if n.is(C::Def) && n.index() != def {
-                    Step::Over
-                } else {
-                    Step::Into
-                }
-            })
+                Step::Into
+            });
+            result
         })
     }
 

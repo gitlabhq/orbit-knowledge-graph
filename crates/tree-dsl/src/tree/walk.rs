@@ -35,6 +35,12 @@ impl<'a> Cursor<'a> {
         &self.trees[self.fi as usize]
     }
 
+    /// Access the underlying tree slice (for raw node access in edge filtering).
+    #[inline]
+    pub fn trees_ref(&self) -> &'a [Tree] {
+        self.trees
+    }
+
     // ── Properties ──
 
     #[inline]
