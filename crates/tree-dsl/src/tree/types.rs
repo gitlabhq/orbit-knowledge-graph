@@ -186,6 +186,15 @@ impl Tree {
         self.edges_cell.get_mut()
     }
 
+    /// Remap all sym IDs using the given table. Used after merging per-thread interners.
+    pub fn remap_syms(&mut self, remap: &[u32]) {
+        for n in &mut self.nodes {
+            if n.sym != 0 && (n.sym as usize) < remap.len() {
+                n.sym = remap[n.sym as usize];
+            }
+        }
+    }
+
     pub fn prune(&mut self) {
         for i in 1..self.nodes.len() {
             self.nodes[i].field = 0;

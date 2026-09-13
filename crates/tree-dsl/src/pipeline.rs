@@ -93,23 +93,39 @@ pub fn process_file_timed(
 /// Unified indexing entrypoint. All files must be the same language.
 pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
     let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
-    let mut trees: Vec<Tree> = Vec::new();
-    let mut phase_totals = [std::time::Duration::ZERO; 4];
-    for (path, content) in files {
-        if SupportLang::from_path(path).is_some() {
-            let (tree, times) = process_file_timed(path, content, &mut lang, &pipeline);
-            trees.push(tree);
-            for (i, t) in times.iter().enumerate() {
-                phase_totals[i] += *t;
-            }
-        }
+
+    let parseable: Vec<&(String, String)> = files
+        .iter()
+        .filter(|(p, _)| SupportLang::from_path(p).is_some())
+        .collect();
+
+    let t0 = std::time::Instant::now();
+
+    // Parallel parse: each thread gets a forked Lang with shared kinds/fields + own syms
+    let results: Vec<(Tree, Lang)> = {
+        use rayon::prelude::*;
+        parseable
+            .par_iter()
+            .map(|(path, content)| {
+                let mut thread_lang = lang.thread_fork();
+                let tree = process_file(path, content, &mut thread_lang, &pipeline);
+                (tree, thread_lang)
+            })
+            .collect()
+    };
+
+    // Merge per-thread syms back into the main Lang and remap tree sym IDs
+    let mut trees: Vec<Tree> = Vec::with_capacity(results.len());
+    for (mut tree, thread_lang) in results {
+        let remap = lang.thread_merge(&thread_lang);
+        tree.remap_syms(&remap);
+        trees.push(tree);
     }
+
     eprintln!(
-        "[phases] parse={:.2}s rewrite={:.2}s link={:.2}s prune={:.2}s",
-        phase_totals[0].as_secs_f64(),
-        phase_totals[1].as_secs_f64(),
-        phase_totals[2].as_secs_f64(),
-        phase_totals[3].as_secs_f64(),
+        "[parse] {} files in {:.2}s",
+        trees.len(),
+        t0.elapsed().as_secs_f64()
     );
     let file_paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
     let walk = file_tree::walk(&file_paths, &mut lang, &pipeline.resolve);

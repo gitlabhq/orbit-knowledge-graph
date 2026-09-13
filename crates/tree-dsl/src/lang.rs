@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Interner {
     map: FxHashMap<Box<str>, u32>,
     names: Vec<Box<str>>,
@@ -31,6 +31,18 @@ impl Interner {
 
     pub fn len(&self) -> u32 {
         self.names.len() as u32
+    }
+
+    /// Merge another interner into self, returning a remap table.
+    /// remap[old_id] = new_id in self's address space.
+    pub fn merge(&mut self, other: &Interner) -> Vec<u32> {
+        let mut remap = vec![0u32; other.names.len() + 1];
+        for (i, name) in other.names.iter().enumerate() {
+            let old_id = (i + 1) as u32;
+            let new_id = self.intern(name);
+            remap[old_id as usize] = new_id;
+        }
+        remap
     }
 }
 
@@ -86,5 +98,20 @@ impl Lang {
 
     pub fn field_name(&self, f: u16) -> &str {
         self.fields.resolve(f as u32)
+    }
+
+    /// Create a per-thread Lang that shares kinds/fields and pre-populated syms.
+    /// Pre-populating syms ensures pattern-compiled literal IDs stay valid.
+    pub fn thread_fork(&self) -> Lang {
+        Lang {
+            kinds: self.kinds.clone(),
+            fields: self.fields.clone(),
+            syms: self.syms.clone(),
+        }
+    }
+
+    /// Merge a per-thread Lang's syms back, returning a sym remap table.
+    pub fn thread_merge(&mut self, other: &Lang) -> Vec<u32> {
+        self.syms.merge(&other.syms)
     }
 }

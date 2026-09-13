@@ -32,6 +32,7 @@ serde_yaml = "0.9"
 stacker = "0.1"
 rustc-hash = "2"
 strum = { workspace = true }
+rayon = { workspace = true }
 termtree = "1.0"
 pest = { workspace = true }
 pest_derive = { workspace = true }
