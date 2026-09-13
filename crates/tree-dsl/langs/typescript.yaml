@@ -110,9 +110,14 @@ stages:
       - match: '(do_statement body: $B)'
         replace: '(__loop $B)'
 
-      # Functions
+      # Abstract method signatures (no body)
+      - match: '(abstract_method_signature name: $N)'
+        replace: '(__def (__defname @$N) (__deftype "Function"))'
+      # Functions — static before generic
       - match: '(function_declaration name: $N body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $B)'
+      - match: '(method_definition **/(static) name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) (__static) $B)'
       - match: '(method_definition name: $N body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $B)'
       - match: '(generator_function_declaration name: $N body: $B)'

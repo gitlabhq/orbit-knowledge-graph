@@ -386,24 +386,13 @@ fn build_imports(
                 })
                 .collect();
 
-            let has_alias = names.iter().any(|(_, a)| *a != 0);
-            let is_wildcard = names.len() == 1 && lang.syms.resolve(names[0].0) == "*";
             let source_eq_name = names.len() == 1 && names[0].0 == source_sym;
-            let label = if is_wildcard {
-                "WildcardImport"
-            } else if has_alias {
-                "AliasedImport"
-            } else if names.is_empty() || source_eq_name {
-                "Import"
-            } else {
-                "FromImport"
-            };
 
             if names.is_empty() {
                 let iid = imp_ids[0];
                 id_b.append_value(iid);
                 fp_b.append_value(&fp);
-                it_b.append_value(label);
+                it_b.append_value("Import");
                 path_b.append_value(source_str);
                 name_b.append_null();
                 alias_b.append_null();
@@ -418,9 +407,21 @@ fn build_imports(
             } else {
                 for (ni, &(ns, als)) in names.iter().enumerate() {
                     let iid = imp_ids[ni];
+                    let name_text = lang.syms.resolve(ns);
+                    let per_name_label = if name_text == "*" && als != 0 {
+                        "NamespaceImport"
+                    } else if name_text == "*" {
+                        "WildcardImport"
+                    } else if name_text == "default" {
+                        "DefaultImport"
+                    } else if source_eq_name {
+                        "Import"
+                    } else {
+                        "NamedImport"
+                    };
                     id_b.append_value(iid);
                     fp_b.append_value(&fp);
-                    it_b.append_value(label);
+                    it_b.append_value(per_name_label);
                     path_b.append_value(source_str);
                     if ns != 0 {
                         name_b.append_value(lang.syms.resolve(ns));

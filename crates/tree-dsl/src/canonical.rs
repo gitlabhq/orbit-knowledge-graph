@@ -64,6 +64,12 @@ pub enum Canonical {
     Loop,
     #[strum(serialize = "__return")]
     Return,
+    #[strum(serialize = "__static")]
+    Static,
+    #[strum(serialize = "__cjs_require")]
+    CjsRequire,
+    #[strum(serialize = "__module_export")]
+    ModuleExport,
 }
 
 impl From<Canonical> for u16 {
@@ -85,6 +91,7 @@ pub fn is_canonical(kind: u16) -> bool {
 pub fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
     let func = lang.syms.intern("Function");
     let method = lang.syms.intern("Method");
+    let static_method = lang.syms.intern("StaticMethod");
     let assoc_fn = lang.syms.intern("AssociatedFunction");
     let class = lang.syms.intern("Class");
     let impl_ = lang.syms.intern("Impl");
@@ -98,11 +105,12 @@ pub fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
         if def == NONE {
             continue;
         }
+        let is_static = tree.cursor(def).has(Canonical::Static);
         let mut p = tree.nodes[def as usize].parent;
         while p != NONE {
             if let Some(dt) = tree.cursor(p).child_sym(Canonical::DefType) {
                 if dt == class {
-                    tree.nodes[i as usize].sym = method;
+                    tree.nodes[i as usize].sym = if is_static { static_method } else { method };
                     break;
                 }
                 if dt == impl_ || dt == trait_ {
