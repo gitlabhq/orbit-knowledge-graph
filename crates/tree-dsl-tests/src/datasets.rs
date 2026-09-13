@@ -48,6 +48,29 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
             if nr.has(C::DefType) {
                 next_def += 1;
                 defs.insert((fi, i), next_def);
+            } else if nr.is(C::ModuleExport) {
+                for imp in nr.children().filter(|c| c.is(C::Import)) {
+                    for name in imp.names() {
+                        next_def += 1;
+                        defs.insert((fi, name.index()), next_def);
+                    }
+                    let name_nodes: Vec<u32> = imp
+                        .children()
+                        .filter(|c| c.is(C::Name) && c.sym() != 0)
+                        .map(|c| c.index())
+                        .collect();
+                    let count = name_nodes.len().max(1);
+                    let imp_ids: Vec<i64> = (0..count)
+                        .map(|_| {
+                            next_imp += 1;
+                            next_imp
+                        })
+                        .collect();
+                    for (ni, &name_node) in name_nodes.iter().enumerate() {
+                        import_by_name.insert((fi, name_node), imp_ids[ni]);
+                    }
+                    imports.insert((fi, imp.index()), imp_ids);
+                }
             } else if nr.is(C::Import) || nr.is(C::ImportType) {
                 let name_nodes: Vec<u32> = nr
                     .children()
@@ -279,6 +302,35 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<Recor
             eb_b.append_value(nr.end() as i64);
             sc_b.append_value(0);
             ec_b.append_value(0);
+        }
+    }
+    for (fi, tree) in trees.iter().enumerate() {
+        let path = lang.syms.resolve(tree.root().sym()).to_string();
+        for i in 0..tree.len() {
+            let nr = tree.cursor(i);
+            if !nr.is(C::ModuleExport) {
+                continue;
+            }
+            for imp in nr.children().filter(|c| c.is(C::Import)) {
+                for name in imp.names() {
+                    let ns = name.sym();
+                    let alias = name.child_sym(C::Alias).unwrap_or(0);
+                    let display = if alias != 0 { alias } else { ns };
+                    if let Some(&did) = ids.defs.get(&(fi, name.index())) {
+                        id_b.append_value(did);
+                        fp_b.append_value(&path);
+                        fqn_b.append_value(lang.syms.resolve(display));
+                        name_b.append_value(lang.syms.resolve(display));
+                        dt_b.append_value("ModuleExport");
+                        sl_b.append_value(nr.start() as i64);
+                        el_b.append_value(nr.end() as i64);
+                        sb_b.append_value(nr.start() as i64);
+                        eb_b.append_value(nr.end() as i64);
+                        sc_b.append_value(0);
+                        ec_b.append_value(0);
+                    }
+                }
+            }
         }
     }
     for (fi, tree) in trees.iter().enumerate() {

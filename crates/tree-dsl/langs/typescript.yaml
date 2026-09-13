@@ -76,7 +76,7 @@ stages:
 
       # export { A, B } from './source' — re-export with source
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
-        replace: '(__import (__source @$S) (__source_path @$S) $$$SPECS->__name)'
+        replace: '(__module_export (__import (__source @$S) (__source_path @$S) $$$SPECS->__name))'
 
       # export { A, B } — local re-export (no source)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier))'
@@ -150,6 +150,10 @@ stages:
       # export const X = ... → promote binding to Variable def
       - match: '(export_statement (lexical_declaration $B:__binding))'
         replace: '(export_statement (__def (__defname @$B) (__deftype "Variable")))'
+
+      # Each __name child in a __module_export → __def with ModuleExport
+      - match: '(__module_export (__import $$$REST) (__name $N))'
+        replace: '(__module_export (__import $$$REST) (__def (__defname @$N) (__deftype "ModuleExport")))'
 
 resolve:
   lookup_from:
