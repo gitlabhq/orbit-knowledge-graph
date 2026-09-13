@@ -112,6 +112,15 @@ impl Fold {
         if let Some(&(Some(parent), _, _)) = self.def_stack.last() {
             tree.add_edge(parent, i, EdgeKind::Defines);
         }
+        for st in c.children().filter(|ch| ch.is(C::SuperType) && ch.sym() != 0) {
+            let st_sym = st.sym();
+            for &dn in &self.defs {
+                if tree.cursor(dn).child_sym(C::DefName) == Some(st_sym) {
+                    tree.add_edge(i, dn, EdgeKind::Extends);
+                    break;
+                }
+            }
+        }
         if c.has(C::Scope) {
             self.def_stack.push((Some(i), end, parent_block));
         }
@@ -553,7 +562,7 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
         for c in tree
             .cursor(dn)
             .children()
-            .filter(|c| (c.is(C::SuperType) || c.is(C::Decorator)) && c.sym() != 0)
+            .filter(|c| c.is(C::Decorator) && c.sym() != 0)
         {
             for pv in &f.ssa.read_variable(c.sym(), entry) {
                 if let ParseValue::LocalDef(di) = pv {

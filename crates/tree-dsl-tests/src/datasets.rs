@@ -544,6 +544,7 @@ fn build_def2def(
             let label = match edge.kind {
                 tree_dsl::tree::EdgeKind::Calls => "Calls",
                 tree_dsl::tree::EdgeKind::Defines => "Defines",
+                tree_dsl::tree::EdgeKind::Extends => "Extends",
                 _ => continue,
             };
             if let (Some(&from), Some(&to)) = (
@@ -561,6 +562,7 @@ fn build_def2def(
         let label = match ce.kind {
             tree_dsl::tree::EdgeKind::Calls => "Calls",
             tree_dsl::tree::EdgeKind::Defines => "Defines",
+            tree_dsl::tree::EdgeKind::Extends => "Extends",
             _ => continue,
         };
         if let (Some(&from), Some(&to)) = (

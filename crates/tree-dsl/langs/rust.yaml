@@ -93,6 +93,8 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "Struct") (__scope) $B)'
       - match: '(enum_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Enum") (__scope) $B)'
+      - match: '(trait_item name: $N bounds: (trait_bounds $$$SUPERS:type_identifier) body: $B)'
+        replace: '(__def (__defname @$N) (__deftype "Trait") (__scope) $$$SUPERS=>__supertype $B)'
       - match: '(trait_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Trait") (__scope) $B)'
       - match: '(impl_item trait: $T type: $TY body: $B)'

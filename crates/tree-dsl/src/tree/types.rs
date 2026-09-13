@@ -8,6 +8,7 @@ pub enum EdgeKind {
     Calls = 1,
     Defines = 2,
     Imports = 3,
+    Extends = 4,
 }
 
 impl EdgeKind {
@@ -16,6 +17,7 @@ impl EdgeKind {
             Self::Calls => "Calls",
             Self::Defines => "Defines",
             Self::Imports => "Imports",
+            Self::Extends => "Extends",
         }
     }
 }
