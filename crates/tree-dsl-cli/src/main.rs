@@ -124,12 +124,7 @@ fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
             continue;
         }
 
-        let kind_name = lang.kinds.resolve(n.kind as u32);
-        let kind_display = if n.synth {
-            format!("__{kind_name}")
-        } else {
-            kind_name.to_string()
-        };
+        let kind_display = lang.kind_name(n.kind).to_string();
 
         let field_str = if n.field != 0 {
             format!(" field={}", lang.fields.resolve(n.field as u32))
@@ -170,6 +165,9 @@ fn print_edges(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
 fn node_label(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang, node: u32) -> String {
     if node == 0 {
         return "<root>".to_string();
+    }
+    if node as usize >= tree.nodes.len() {
+        return format!("?{node}");
     }
     for c in tree.children(node) {
         let cn = tree.node(c);
