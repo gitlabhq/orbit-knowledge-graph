@@ -24,6 +24,84 @@ Example payloads show only the fields relevant to each scenario.
 | Push to search | The time from a GitLab push to its changes becoming queryable in Orbit. |
 | Gitaly | The Git service from which Orbit reads repository data. |
 
+## Authorization and Namespace Isolation
+
+GitLab Rails owns access decisions. The trusted caller must supply authenticated traversal-path grants for each query.
+Orbit must validate and enforce those grants, plus any required resource-level checks.
+A project filter, blob hash, graph node ID, or cursor must never grant access by itself.
+
+| Scenario | Required result |
+| --- | --- |
+| Query with missing, invalid, or expired credentials. | Deny access before reading protected data. |
+| Query with a subgroup-only grant. | Restrict candidate selection to authorized projects before matching or graph traversal. Shared storage blocks must not widen access. |
+| Query content or graph data across several authorized top-level namespaces. | Apply each namespace's storage and access boundary before combining results. |
+| Query metadata, counts, refs, or diagnostics. | Apply the same permissions as source and graph results. Do not reveal private names, paths, or counts. |
+| Query shared content through an unauthorized project. | Deny access. Knowing the blob hash or reading an authorized copy must not expose other owners. |
+| Lose access while paging. | Recheck permissions before reading the next page. Remove or reject access to the revoked scope. |
+| Transfer a project to another top-level namespace. | Revoke old-scope access before publishing new ownership. Update graph ownership and affected relationships. Old cursors and caches must not restore access. |
+| Delete a project or namespace. | Remove access to its content, graph, and metadata, including relationships to deleted nodes. Preserve unrelated projects and their graph records. |
+| Use credentials scoped to namespace A against namespace B. | Storage must reject the access, even if a query or worker selects the wrong data. |
+
+These boundaries must cover indexes, source bytes, metadata, caches, work queues, temporary files, backups, and cleanup.
+Any shared content service must enforce project-level access before fetching or serving bytes, including cached bytes.
+Permission changes must take effect within a defined maximum delay. Stored snapshots must not bypass current permissions.
+
+### Example: a cursor cannot preserve revoked access
+
+**Given**
+
+The trusted caller initially supplies the grant below. It permits access to project 43, `group-a/team/api`, but not project 84, `group-b/api`.
+
+```yaml
+trusted_caller:
+  traversal_paths: ["1/10/20/"]
+```
+
+**Query**
+
+```json
+{
+  "project_id": 43,
+  "text": "payment"
+}
+```
+
+**Example payload: first page**
+
+The authorized search returns a page with a continuation token.
+
+```json
+{
+  "next_cursor": "opaque-token-1"
+}
+```
+
+**Action and next queries**
+
+Revoke access to project 43. Once revocation takes effect, the trusted caller supplies no grants for either request below.
+
+```yaml
+trusted_caller:
+  traversal_paths: []
+```
+
+```json
+[
+  { "project_id": 43, "text": "payment", "cursor": "opaque-token-1" },
+  { "project_path": "group-b/api", "text": "payment" }
+]
+```
+
+**Example payload**
+
+Both requests return the same denial payload. Neither request may read data from the revoked or unauthorized scope.
+
+```json
+{
+  "status": "access_denied"
+}
+```
+
 ## High-Level Product Contract
 
 Orbit's Code Indexing service must support both content matching and code graph queries, as described in the [motivation](motivation.md).
@@ -669,84 +747,6 @@ An expired token or unavailable saved view requires a restart. These alternative
   { "status": "restart_required", "reason": "token_expired" },
   { "status": "restart_required", "reason": "view_unavailable" }
 ]
-```
-
-## Authorization and Namespace Isolation
-
-GitLab Rails owns access decisions. The trusted caller must supply authenticated traversal-path grants for each query.
-Orbit must validate and enforce those grants, plus any required resource-level checks.
-A project filter, blob hash, graph node ID, or cursor must never grant access by itself.
-
-| Scenario | Required result |
-| --- | --- |
-| Query with missing, invalid, or expired credentials. | Deny access before reading protected data. |
-| Query with a subgroup-only grant. | Restrict candidate selection to authorized projects before matching or graph traversal. Shared storage blocks must not widen access. |
-| Query content or graph data across several authorized top-level namespaces. | Apply each namespace's storage and access boundary before combining results. |
-| Query metadata, counts, refs, or diagnostics. | Apply the same permissions as source and graph results. Do not reveal private names, paths, or counts. |
-| Query shared content through an unauthorized project. | Deny access. Knowing the blob hash or reading an authorized copy must not expose other owners. |
-| Lose access while paging. | Recheck permissions before reading the next page. Remove or reject access to the revoked scope. |
-| Transfer a project to another top-level namespace. | Revoke old-scope access before publishing new ownership. Update graph ownership and affected relationships. Old cursors and caches must not restore access. |
-| Delete a project or namespace. | Remove access to its content, graph, and metadata, including relationships to deleted nodes. Preserve unrelated projects and their graph records. |
-| Use credentials scoped to namespace A against namespace B. | Storage must reject the access, even if a query or worker selects the wrong data. |
-
-These boundaries must cover indexes, source bytes, metadata, caches, work queues, temporary files, backups, and cleanup.
-Any shared content service must enforce project-level access before fetching or serving bytes, including cached bytes.
-Permission changes must take effect within a defined maximum delay. Stored snapshots must not bypass current permissions.
-
-### Example: a cursor cannot preserve revoked access
-
-**Given**
-
-The trusted caller initially supplies the grant below. It permits access to project 43, `group-a/team/api`, but not project 84, `group-b/api`.
-
-```yaml
-trusted_caller:
-  traversal_paths: ["1/10/20/"]
-```
-
-**Query**
-
-```json
-{
-  "project_id": 43,
-  "text": "payment"
-}
-```
-
-**Example payload: first page**
-
-The authorized search returns a page with a continuation token.
-
-```json
-{
-  "next_cursor": "opaque-token-1"
-}
-```
-
-**Action and next queries**
-
-Revoke access to project 43. Once revocation takes effect, the trusted caller supplies no grants for either request below.
-
-```yaml
-trusted_caller:
-  traversal_paths: []
-```
-
-```json
-[
-  { "project_id": 43, "text": "payment", "cursor": "opaque-token-1" },
-  { "project_path": "group-b/api", "text": "payment" }
-]
-```
-
-**Example payload**
-
-Both requests return the same denial payload. Neither request may read data from the revoked or unauthorized scope.
-
-```json
-{
-  "status": "access_denied"
-}
 ```
 
 ## Incremental Indexing and Push to Search
