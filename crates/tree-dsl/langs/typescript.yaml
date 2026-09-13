@@ -68,7 +68,7 @@ stages:
 
       # import * as ns from './source'
       - match: '(import_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))'
-        replace: '(__import (__source @$S) (__source_path @$S) (__name @$N))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N)))'
 
       # import defaultExport from './source'
       - match: '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
@@ -82,9 +82,13 @@ stages:
       - match: '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
         replace: '(__import (__source @$S) (__source_path @$S) (__cjs_require) (__name "default" (__alias @$N)))'
 
-      # export { A, B } from './source' — re-export with source
+      # export { A, B } from './source' — named re-export with source (before star)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) $$$SPECS->__name))'
+
+      # export * from './source' — star re-export (no export_clause)
+      - match: '(export_statement source: (string $S:string_fragment))'
+        replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*")))'
 
       # export { A, B } — local re-export (no source)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier))'
@@ -155,13 +159,13 @@ stages:
 
   - name: exports
     rules:
+      # export default function/class → mark the def as default export
+      - match: '(export_statement **/(default) (__def $$$CHILDREN))'
+        replace: '(export_statement (__def (__default_export "default") $$$CHILDREN))'
+
       # export const X = ... → promote binding to Variable def
       - match: '(export_statement (lexical_declaration $B:__binding))'
         replace: '(export_statement (__def (__defname @$B) (__deftype "Variable")))'
-
-      # Each __name child in a __module_export → __def with ModuleExport
-      - match: '(__module_export (__import $$$REST) (__name $N))'
-        replace: '(__module_export (__import $$$REST) (__def (__defname @$N) (__deftype "ModuleExport")))'
 
 resolve:
   parse_files:

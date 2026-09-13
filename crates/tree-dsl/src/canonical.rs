@@ -70,6 +70,8 @@ pub enum Canonical {
     CjsRequire,
     #[strum(serialize = "__module_export")]
     ModuleExport,
+    #[strum(serialize = "__default_export")]
+    DefaultExport,
     #[strum(serialize = "__obj")]
     Obj,
     #[strum(serialize = "__arr")]

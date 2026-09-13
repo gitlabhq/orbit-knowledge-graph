@@ -104,6 +104,9 @@ fn build_visible_names(trees: &[Tree]) -> VisibleMap {
                     if let Some(ns) = c.child_sym(C::DefName) {
                         names.insert(ns, (fi, i));
                     }
+                    if let Some(ds) = c.child_sym(C::DefaultExport) {
+                        names.insert(ds, (fi, i));
+                    }
                 }
             }
             names
