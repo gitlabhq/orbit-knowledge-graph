@@ -494,15 +494,22 @@ impl ArrowQuery {
         // scope and its summary can be read once the body is drained.
         tokio::spawn(async move {
             let mut decoder = StreamDecoder::new();
-            'body: loop {
+            let mut summary_tx = Some(summary_tx);
+            loop {
                 match cursor.next().await {
                     Ok(Some(chunk)) => {
+                        if let Some(summary_tx) = summary_tx.take() {
+                            let _ = summary_tx.send(cursor.summary().cloned());
+                        }
+                        if tx.is_closed() {
+                            continue;
+                        }
                         let mut buffer = ArrowBuffer::from(chunk.as_ref());
                         while !buffer.is_empty() {
                             match decoder.decode(&mut buffer) {
                                 Ok(Some(batch)) => {
                                     if tx.send(Ok(batch)).await.is_err() {
-                                        break 'body;
+                                        break;
                                     }
                                 }
                                 Ok(None) => break,
@@ -520,7 +527,9 @@ impl ArrowQuery {
                     }
                 }
             }
-            let _ = summary_tx.send(cursor.summary().cloned());
+            if let Some(summary_tx) = summary_tx.take() {
+                let _ = summary_tx.send(cursor.summary().cloned());
+            }
         });
 
         Ok((ReceiverStream::new(rx).boxed(), summary_rx))
