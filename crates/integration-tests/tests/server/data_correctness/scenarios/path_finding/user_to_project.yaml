@@ -26,3 +26,6 @@ expect:
     Project:
       rows:
         - { id: 1000 }
+  path_edges:
+    - - { from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100 }
+      - { type: CONTAINS, to: Project, to_id: 1000 }

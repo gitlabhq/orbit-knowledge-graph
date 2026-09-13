@@ -17,8 +17,11 @@ Feature Flags Are Enabled
 
 Orbit Is Healthy
     [Documentation]    Wait for all components (GKG, Siphon, NATS, ClickHouse) to report healthy.
+    ...                The Siphon producer is not ready while it merges the initial snapshots,
+    ...                so the wait scales with the indexing budget.
     [Tags]    smoke
-    Wait Until Keyword Succeeds    30s    2s    Orbit Status Is Healthy
+    ${health_wait}=    Scaled Timeout    120s
+    Wait Until Keyword Succeeds    ${health_wait}    5s    Orbit Status Is Healthy
 
 User Data Is Available Via Orbit Query
     [Documentation]    Verify the full pipeline: PG → Siphon → ClickHouse → GKG indexer → Orbit API.

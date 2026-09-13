@@ -1,0 +1,63 @@
+{{- $replicated := include "clickhouse.replicated" . }}
+{{- $headless := include "clickhouse.headless" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-setup
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  setup.sql: |
+    {{- range $name := list .Values.databases.datalake .Values.databases.graph }}
+    {{ include "clickhouse.createDatabase" (list $ $name) }}
+    {{- end }}
+    CREATE USER IF NOT EXISTS siphon IDENTIFIED BY {{ .Values.users.siphon.password | squote }};
+    CREATE USER IF NOT EXISTS gitlab IDENTIFIED BY {{ .Values.users.gitlab.password | squote }};
+    GRANT ALL ON `{{ .Values.databases.datalake }}`.* TO siphon;
+    GRANT ALL ON `{{ .Values.databases.datalake }}`.* TO gitlab;
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-setup
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: setup
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              {{- range $i := until (int .Values.replicas) }}
+              until clickhouse-client --host {{ $.Release.Name }}-{{ $i }}.{{ $headless }} --user default --password "$CLICKHOUSE_PASSWORD" --query "SELECT 1" >/dev/null 2>&1; do sleep 2; done
+              {{- end }}
+              for attempt in $(seq 1 30); do
+                clickhouse-client --host {{ .Release.Name }} --user default --password "$CLICKHOUSE_PASSWORD" --multiquery < /setup/setup.sql && break
+                [ "$attempt" -lt 30 ] || exit 1
+                sleep 5
+              done
+              echo "clickhouse setup complete"
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              value: {{ .Values.password | quote }}
+          volumeMounts:
+            - name: setup
+              mountPath: /setup
+              readOnly: true
+      volumes:
+        - name: setup
+          configMap:
+            name: {{ .Release.Name }}-setup

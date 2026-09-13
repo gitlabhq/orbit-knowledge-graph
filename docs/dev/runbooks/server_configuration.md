@@ -122,6 +122,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `datalake.username` | `default` | Auth user |
 | `datalake.password` | None | Auth password |
 | `datalake.session_settings` | `{}` | ClickHouse session-level settings (e.g., `max_execution_time`, `max_query_size`) |
+| `datalake.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
 ### Graph
 
@@ -133,38 +134,63 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.password` | None | Auth password |
 | `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
 | `graph.insert_settings` | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
-| `graph.quorum_writes` | `false` | Replicated-cluster mode; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
+| `graph.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
 ### Self-managed replicated clusters
 
-Set `graph.quorum_writes: true` when the graph points at a self-managed `ReplicatedMergeTree` cluster with more than one replica. Leave it `false` on ClickHouse Cloud, where SharedMergeTree already writes with quorum.
+Set `replicated: true` on a connection that points at a self-managed ClickHouse cluster with more than one replica. Leave it `false` on a single node and on ClickHouse Cloud, where SharedMergeTree replicates and writes with quorum by itself.
 
 ```yaml
+datalake:
+  replicated: true
 graph:
-  quorum_writes: true
+  replicated: true
 ```
 
-There is no equivalent setting for the datalake. GKG writes to its own graph tables and reads everything else, so the datalake is Siphon's to configure. To make datalake reads error out on a lagging replica instead of returning stale Siphon rows, put `select_sequential_consistency` in `datalake.session_settings` yourself.
+The Helm chart sets both from one value, `clickhouse.ha.enabled: true`.
 
-The flag applies four session settings:
+The database must use the `Replicated` database engine, created by the ClickHouse administrator:
+
+```sql
+CREATE DATABASE orbit ON CLUSTER '{cluster}'
+ENGINE = Replicated('/clickhouse/databases/orbit', '{shard}', '{replica}');
+```
+
+On the graph connection the switch does three things:
+
+1. Prefixes `Replicated` onto every `*MergeTree` engine in DDL, the same rewrite GitLab Rails applies on a `Replicated` database. A `Replicated` database replicates metadata only; without replicated table engines, rows stay on the replica that took the write. ClickHouse takes the ZooKeeper path and replica name from the server settings `default_replica_path` and `default_replica_name`, so the DDL carries no customer macros.
+1. Applies the quorum session settings below.
+1. Retries a request that fails with error 286 (`UNSATISFIED_QUORUM`), error 289 (`REPLICA_IS_NOT_IN_QUORUM`),
+   a Keeper session error, a DDL that timed out waiting for a replica, a query cancelled by a replica
+   that shuts down, a connection error, or a 5xx from the load balancer.
+   The backoff is linear, 100 ms per attempt, capped at 1 s, up to 20 attempts.
+   All of these errors are transient by design. Serialized quorum inserts collide.
+   A sequential-consistency read can land on a replica that has not received the last quorum write.
+   A Keeper leader election after a node loss expires open sessions for a few seconds.
+   A replica that goes away mid-request drops the connection, and a DDL issued in that window waits
+   `distributed_ddl_task_timeout` for it before it fails.
+   A lagging replica catches up within seconds, and a load balancer that spreads requests moves the retry
+   to another replica.
+
+On the datalake connection only the session settings and the retry apply. GitLab Orbit never runs DDL on the datalake.
 
 | Setting | Value | Reason |
 |---------|-------|--------|
-| `insert_quorum` | `auto` | Majority quorum that tracks replica count. A fixed number stops being a majority once replicas are added. |
+| `insert_quorum` | `auto` | Majority quorum that tracks the replica count. A fixed number stops being a majority once replicas are added. |
 | `insert_quorum_parallel` | `0` | Required for `select_sequential_consistency` to take effect. Serializes quorum inserts per table. |
 | `select_sequential_consistency` | `1` | A read on a lagging replica errors instead of returning stale rows. |
-| `async_insert` | `0` | ClickHouse rejects an async insert that also carries `insert_quorum`, and servers since 26.x default `async_insert` on — every quorum insert would fail with `UNSUPPORTED_PARAMETER`. Client-sent async-insert settings are additionally suppressed. |
+| `async_insert` | `0` | ClickHouse rejects an async insert that also carries `insert_quorum`, and servers since 26.x default `async_insert` on. Client-sent async-insert settings are also suppressed. |
 
 Anything set in `session_settings` wins over these, so you can still pin a fixed quorum size:
 
 ```yaml
 graph:
-  quorum_writes: true
+  replicated: true
   session_settings:
     insert_quorum: "2"
 ```
 
-Expect three costs. Writes create more parts and more merge work, because async inserts were what coalesced our many small per-page writes and each one now becomes its own part. Write throughput drops, because `insert_quorum_parallel: 0` serializes quorum inserts per table. And reads can fail with error 289, `REPLICA_IS_NOT_IN_QUORUM`, which is the point of the setting: retry against another replica.
+Expect two costs. Writes create more parts and more merge work, because async inserts coalesced the many small per-page writes and each one now becomes its own part. Write throughput drops, because `insert_quorum_parallel: 0` serializes quorum inserts per table.
 
 ### Profiling (debug)
 

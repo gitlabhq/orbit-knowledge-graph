@@ -1,18 +1,21 @@
+use std::future::Future;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use arrow::buffer::Buffer as ArrowBuffer;
 use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::{StreamDecoder, StreamReader};
 use arrow_ipc::writer::StreamWriter;
 use bytes::Bytes;
+use circuit_breaker::CircuitBreakableError;
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
-use futures::stream;
 use futures::stream::BoxStream;
 use orbit_utils::clickhouse::{ChScalar, ChType};
 use serde::Serialize;
 use serde_json::Value;
+use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::SyncIoBridge;
@@ -25,6 +28,57 @@ use crate::error::ClickHouseError;
 /// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
 
+const REPLICATION_TRANSIENTS: [&str; 11] = [
+    "UNSATISFIED_QUORUM",
+    "REPLICA_IS_NOT_IN_QUORUM",
+    "Session expired",
+    "Connection loss",
+    "Operation timeout",
+    "is not finished on",
+    "QUERY_WAS_CANCELLED",
+    "NETWORK_ERROR",
+    "502 Bad Gateway",
+    "503 Service Unavailable",
+    "504 Gateway Time-out",
+];
+const QUORUM_RETRY_ATTEMPTS: u32 = 20;
+
+fn is_replication_transient(error: &ClickHouseError) -> bool {
+    if error.is_transient() {
+        return true;
+    }
+    let message = error.to_string();
+    REPLICATION_TRANSIENTS
+        .iter()
+        .any(|text| message.contains(text))
+}
+
+fn quorum_backoff(attempt: u32) -> Duration {
+    let base = (100 * u64::from(attempt)).min(1000);
+    Duration::from_millis(base + rand::random_range(0..=base / 4))
+}
+
+async fn retry_quorum_conflicts<T, F, Fut>(enabled: bool, mut op: F) -> Result<T, ClickHouseError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, ClickHouseError>>,
+{
+    let mut attempt = 0;
+    loop {
+        match op().await {
+            Err(error)
+                if enabled
+                    && attempt < QUORUM_RETRY_ATTEMPTS
+                    && is_replication_transient(&error) =>
+            {
+                attempt += 1;
+                tokio::time::sleep(quorum_backoff(attempt)).await;
+            }
+            result => return result,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
@@ -32,6 +86,7 @@ pub struct ArrowClickHouseClient {
     database: String,
     insert_settings: std::collections::HashMap<String, String>,
     quorum_writes: bool,
+    replicated: bool,
 }
 
 impl ArrowClickHouseClient {
@@ -68,7 +123,13 @@ impl ArrowClickHouseClient {
             database: database.to_string(),
             insert_settings: insert_settings.clone(),
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
+            replicated: false,
         }
+    }
+
+    pub fn with_replicated(mut self, replicated: bool) -> Self {
+        self.replicated = replicated;
+        self
     }
 
     pub fn database(&self) -> &str {
@@ -79,9 +140,15 @@ impl ArrowClickHouseClient {
         self.quorum_writes
     }
 
+    /// The connection points at a self-managed cluster with more than one replica.
+    pub fn is_replicated(&self) -> bool {
+        self.replicated
+    }
+
     pub fn query(&self, sql: &str) -> ArrowQuery {
         ArrowQuery {
             inner: self.client.query(sql),
+            retry_quorum_conflicts: self.quorum_writes,
         }
     }
 
@@ -134,13 +201,6 @@ impl ArrowClickHouseClient {
 
     pub async fn query_arrow(&self, sql: &str) -> Result<Vec<RecordBatch>, ClickHouseError> {
         self.query(sql).fetch_arrow().await
-    }
-
-    pub async fn query_arrow_stream(
-        &self,
-        sql: &str,
-    ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        self.query(sql).fetch_arrow_stream().await
     }
 
     pub async fn insert_arrow(
@@ -209,7 +269,18 @@ impl ArrowClickHouseClient {
         if batches.is_empty() {
             return Ok(());
         }
+        if !self.quorum_writes {
+            return self.stream_insert(table, sql, batches).await;
+        }
+        retry_quorum_conflicts(true, || self.stream_insert(table, sql, batches.clone())).await
+    }
 
+    async fn stream_insert(
+        &self,
+        table: &str,
+        sql: &str,
+        batches: Vec<RecordBatch>,
+    ) -> Result<(), ClickHouseError> {
         let schema = batches[0].schema();
         let options =
             arrow_ipc::writer::IpcWriteOptions::try_new(8, false, arrow_ipc::MetadataVersion::V5)
@@ -338,6 +409,27 @@ impl std::fmt::Debug for ArrowClickHouseClient {
 
 pub struct ArrowQuery {
     pub(crate) inner: Query,
+    retry_quorum_conflicts: bool,
+}
+
+type FirstChunk = (clickhouse::query::BytesCursor, Option<Bytes>);
+
+/// A quorum conflict arrives with the first chunk, before any rows, so only that read retries.
+async fn open_cursor(query: Query) -> Result<FirstChunk, ClickHouseError> {
+    let mut cursor = query
+        .fetch_bytes("ArrowStream")
+        .map_err(ClickHouseError::Query)?;
+    let first = cursor.next().await.map_err(ClickHouseError::Query)?;
+    Ok((cursor, first))
+}
+
+async fn collect_bytes(query: Query) -> Result<(Vec<u8>, Option<QuerySummary>), ClickHouseError> {
+    let (mut cursor, first) = open_cursor(query).await?;
+    let mut buffer = first.map(|chunk| chunk.to_vec()).unwrap_or_default();
+    while let Some(chunk) = cursor.next().await.map_err(ClickHouseError::Query)? {
+        buffer.extend(chunk);
+    }
+    Ok((buffer, cursor.summary().cloned()))
 }
 
 impl ArrowQuery {
@@ -351,8 +443,24 @@ impl ArrowQuery {
         self
     }
 
+    /// For statements that are not idempotent, such as `ATTACH PARTITION ... FROM`.
+    pub fn without_quorum_retry(mut self) -> Self {
+        self.retry_quorum_conflicts = false;
+        self
+    }
+
     pub async fn execute(self) -> Result<(), ClickHouseError> {
-        self.inner.execute().await.map_err(ClickHouseError::Query)
+        if !self.retry_quorum_conflicts {
+            return self.inner.execute().await.map_err(ClickHouseError::Query);
+        }
+        retry_quorum_conflicts(true, || async {
+            self.inner
+                .clone()
+                .execute()
+                .await
+                .map_err(ClickHouseError::Query)
+        })
+        .await
     }
 
     pub async fn fetch_arrow(self) -> Result<Vec<RecordBatch>, ClickHouseError> {
@@ -360,90 +468,53 @@ impl ArrowQuery {
         Ok(batches)
     }
 
-    /// Like `fetch_arrow`, but also returns the `X-ClickHouse-Summary` header
-    /// parsed as a `QuerySummary` (if the server sent one).
     pub async fn fetch_arrow_with_summary(
         self,
     ) -> Result<(Vec<RecordBatch>, Option<QuerySummary>), ClickHouseError> {
-        let mut cursor = self
-            .inner
-            .fetch_bytes("ArrowStream")
-            .map_err(ClickHouseError::Query)?;
-
-        let mut buffer = Vec::new();
-        loop {
-            match cursor.next().await {
-                Ok(Some(chunk)) => buffer.extend(chunk),
-                Ok(None) => break,
-                Err(e) => return Err(ClickHouseError::Query(e)),
-            }
-        }
-
-        let summary = cursor.summary().cloned();
+        let (buffer, summary) = retry_quorum_conflicts(self.retry_quorum_conflicts, || {
+            collect_bytes(self.inner.clone())
+        })
+        .await?;
 
         if buffer.is_empty() {
             return Ok((Vec::new(), summary));
         }
 
-        let data_cursor = Cursor::new(buffer);
-        let reader =
-            StreamReader::try_new(data_cursor, None).map_err(ClickHouseError::ArrowDecode)?;
-
+        let reader = StreamReader::try_new(Cursor::new(buffer), None)
+            .map_err(ClickHouseError::ArrowDecode)?;
         let batches: Result<Vec<_>, _> = reader
             .map(|result| result.map_err(ClickHouseError::ArrowDecode))
             .collect();
         Ok((batches?, summary))
     }
 
-    pub async fn fetch_arrow_stream(
-        self,
-    ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        let mut cursor = self
-            .inner
-            .fetch_bytes("ArrowStream")
-            .map_err(ClickHouseError::Query)?;
-
-        let mut buffer = Vec::new();
-        loop {
-            match cursor.next().await {
-                Ok(Some(chunk)) => buffer.extend(chunk),
-                Ok(None) => break,
-                Err(e) => return Err(ClickHouseError::Query(e)),
-            }
-        }
-
-        if buffer.is_empty() {
-            return Ok(Box::pin(stream::empty()) as BoxStream<'static, _>);
-        }
-
-        let data_cursor = Cursor::new(buffer);
-        let reader =
-            StreamReader::try_new(data_cursor, None).map_err(ClickHouseError::ArrowDecode)?;
-
-        let batch_iter = reader.map(|result| result.map_err(ClickHouseError::ArrowDecode));
-        Ok(Box::pin(stream::iter(batch_iter)))
-    }
-
-    pub async fn fetch_arrow_streamed(
+    async fn open_cursor(
         mut self,
         max_block_size: Option<u64>,
-    ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
+    ) -> Result<FirstChunk, ClickHouseError> {
         if let Some(max_block_size) = max_block_size {
             self.inner = self
                 .inner
                 .with_setting("max_block_size", max_block_size.to_string());
         }
+        retry_quorum_conflicts(self.retry_quorum_conflicts, || {
+            open_cursor(self.inner.clone())
+        })
+        .await
+    }
 
-        let cursor = self
-            .inner
-            .fetch_bytes("ArrowStream")
-            .map_err(ClickHouseError::Query)?;
+    pub async fn fetch_arrow_streamed(
+        self,
+        max_block_size: Option<u64>,
+    ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
+        let (cursor, first) = self.open_cursor(max_block_size).await?;
 
         let handle = tokio::runtime::Handle::current();
         let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
 
         tokio::task::spawn_blocking(move || {
-            let bridge = SyncIoBridge::new_with_handle(cursor, handle);
+            let body = Cursor::new(first.unwrap_or_default()).chain(cursor);
+            let bridge = SyncIoBridge::new_with_handle(body, handle);
             let reader = match StreamReader::try_new(bridge, None) {
                 Ok(reader) => reader,
                 Err(err) => {
@@ -464,10 +535,8 @@ impl ArrowQuery {
         Ok(ReceiverStream::new(rx).boxed())
     }
 
-    /// Like [`fetch_arrow_streamed`](Self::fetch_arrow_streamed), but also yields the
-    /// `X-ClickHouse-Summary` over a `oneshot` once drained (it arrives after the body).
     pub async fn fetch_arrow_streamed_with_summary(
-        mut self,
+        self,
         max_block_size: Option<u64>,
     ) -> Result<
         (
@@ -476,36 +545,23 @@ impl ArrowQuery {
         ),
         ClickHouseError,
     > {
-        if let Some(max_block_size) = max_block_size {
-            self.inner = self
-                .inner
-                .with_setting("max_block_size", max_block_size.to_string());
-        }
-
-        let mut cursor = self
-            .inner
-            .fetch_bytes("ArrowStream")
-            .map_err(ClickHouseError::Query)?;
+        let (mut cursor, first) = self.open_cursor(max_block_size).await?;
 
         let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
         let (summary_tx, summary_rx) = oneshot::channel();
 
-        // Decode off the async cursor (not via `SyncIoBridge`) so it stays in
-        // scope and its summary can be read once the body is drained.
         tokio::spawn(async move {
             let mut decoder = StreamDecoder::new();
             let mut summary_tx = Some(summary_tx);
+            let mut next = Ok(first);
             loop {
-                match cursor.next().await {
+                match next {
                     Ok(Some(chunk)) => {
                         if let Some(summary_tx) = summary_tx.take() {
                             let _ = summary_tx.send(cursor.summary().cloned());
                         }
-                        if tx.is_closed() {
-                            continue;
-                        }
                         let mut buffer = ArrowBuffer::from(chunk.as_ref());
-                        while !buffer.is_empty() {
+                        while !tx.is_closed() && !buffer.is_empty() {
                             match decoder.decode(&mut buffer) {
                                 Ok(Some(batch)) => {
                                     if tx.send(Ok(batch)).await.is_err() {
@@ -526,6 +582,7 @@ impl ArrowQuery {
                         return;
                     }
                 }
+                next = cursor.next().await;
             }
             if let Some(summary_tx) = summary_tx.take() {
                 let _ = summary_tx.send(cursor.summary().cloned());
@@ -536,9 +593,6 @@ impl ArrowQuery {
     }
 }
 
-/// Write target for `StreamWriter` that allows draining the accumulated bytes
-/// between IPC message writes. Uses `Arc<Mutex<_>>` so the buffer remains
-/// accessible while `StreamWriter` owns the writer.
 #[derive(Clone)]
 struct DrainableWriter(Arc<Mutex<Vec<u8>>>);
 
@@ -687,6 +741,72 @@ mod tests {
     fn quorum_writes_detected_from_insert_settings() {
         let client = client_with_insert_settings(insert_quorum_setting());
         assert!(client.has_quorum_writes());
+    }
+
+    #[test]
+    fn replicated_is_off_by_default() {
+        let client = client_with_insert_settings(HashMap::new());
+        assert!(!client.is_replicated());
+        assert!(client.with_replicated(true).is_replicated());
+    }
+
+    fn bad_response(message: &str) -> ClickHouseError {
+        ClickHouseError::Query(clickhouse::error::Error::BadResponse(message.to_string()))
+    }
+
+    #[test]
+    fn replication_transients_cover_quorum_and_keeper_errors() {
+        for message in [
+            "Code: 286. DB::Exception: Quorum for previous write has not been satisfied yet. (UNSATISFIED_QUORUM)",
+            "Code: 289. DB::Exception: Replica doesn't have part. (REPLICA_IS_NOT_IN_QUORUM)",
+            "Code: 999. Coordination::Exception: Session expired. (KEEPER_EXCEPTION)",
+            "Code: 159. DB::Exception: ReplicatedDatabase DDL task /clickhouse/databases/gkg/log/query-0000000007 is not finished on 1 of 3 hosts",
+            "Code: 394. DB::Exception: Query was cancelled. (QUERY_WAS_CANCELLED)",
+            "Code: 210. DB::NetException: I/O error: Broken pipe, while writing to socket. (NETWORK_ERROR)",
+            "<html><body><h1>503 Service Unavailable</h1>\nNo server is available to handle this request.\n</body></html>",
+        ] {
+            assert!(
+                is_replication_transient(&bad_response(message)),
+                "{message}"
+            );
+        }
+        assert!(is_replication_transient(&ClickHouseError::Query(
+            clickhouse::error::Error::Network(Box::new(std::io::Error::other("reset")))
+        )));
+        assert!(is_replication_transient(&ClickHouseError::BadResponse {
+            status: 503,
+            body: "<html><body><h1>503 Service Unavailable</h1>".into(),
+        }));
+        assert!(!is_replication_transient(&bad_response(
+            "Code: 60. DB::Exception: Table gkg.missing does not exist. (UNKNOWN_TABLE)"
+        )));
+    }
+
+    #[tokio::test]
+    async fn quorum_conflicts_retry_until_success() {
+        let attempts = std::sync::atomic::AtomicU32::new(0);
+        let result = retry_quorum_conflicts(true, || async {
+            let n = attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n < 3 {
+                Err(bad_response("(UNSATISFIED_QUORUM)"))
+            } else {
+                Ok(n)
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn quorum_conflicts_surface_when_retries_are_disabled() {
+        let attempts = std::sync::atomic::AtomicU32::new(0);
+        let result: Result<(), _> = retry_quorum_conflicts(false, || async {
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(bad_response("(REPLICA_IS_NOT_IN_QUORUM)"))
+        })
+        .await;
+        assert!(is_replication_transient(&result.unwrap_err()));
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
