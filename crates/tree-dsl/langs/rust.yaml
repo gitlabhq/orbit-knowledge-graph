@@ -103,6 +103,9 @@ stages:
         replace: '(__def (__defname @$T) (__deftype "Impl") (__scope) $B)'
 
 resolve:
+  parse_files:
+    - name: "Cargo.toml"
+      format: toml
   lookup_from:
     - __source_root
     - __crate_root

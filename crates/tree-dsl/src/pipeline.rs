@@ -128,7 +128,7 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
         t0.elapsed().as_secs_f64()
     );
     let file_paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
-    let walk = file_tree::walk(&file_paths, &mut lang, &pipeline.resolve);
+    let walk = file_tree::walk(&file_paths, files, &mut lang, &pipeline.resolve);
     let cross_edges = resolver::resolve(
         &mut trees,
         &mut lang,

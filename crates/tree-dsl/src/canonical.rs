@@ -70,6 +70,18 @@ pub enum Canonical {
     CjsRequire,
     #[strum(serialize = "__module_export")]
     ModuleExport,
+    #[strum(serialize = "__obj")]
+    Obj,
+    #[strum(serialize = "__arr")]
+    Arr,
+    #[strum(serialize = "__field")]
+    ConfigField,
+    #[strum(serialize = "__str")]
+    Str,
+    #[strum(serialize = "__num")]
+    ConfigNum,
+    #[strum(serialize = "__bool")]
+    ConfigBool,
 }
 
 impl From<Canonical> for u16 {

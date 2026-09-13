@@ -32,12 +32,20 @@ struct RuleFile {
 #[derive(serde::Deserialize)]
 struct ResolveSection {
     #[serde(default)]
+    parse_files: Vec<ParseFileEntry>,
+    #[serde(default)]
     lookup_from: Vec<String>,
     #[serde(default)]
     external: Vec<String>,
     #[serde(default)]
     display_source: Option<String>,
     stages: Vec<ResolveStageSpec>,
+}
+
+#[derive(serde::Deserialize)]
+struct ParseFileEntry {
+    name: String,
+    format: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -99,8 +107,20 @@ pub fn load_lang(
 }
 
 fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tree::ResolveConfig {
-    use crate::file_tree::ResolveStage;
+    use crate::file_tree::{ParseFileSpec, ParseFormat, ResolveStage};
 
+    let parse_files = section
+        .parse_files
+        .iter()
+        .map(|pf| ParseFileSpec {
+            name: pf.name.clone(),
+            format: match pf.format.as_str() {
+                "json" => ParseFormat::Json,
+                "toml" => ParseFormat::Toml,
+                other => panic!("unknown parse_files format: {other}"),
+            },
+        })
+        .collect();
     let stages = section
         .stages
         .iter()
@@ -130,6 +150,7 @@ fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tre
         .collect();
     crate::file_tree::ResolveConfig {
         stages,
+        parse_files,
         lookup_from,
         external: section.external.clone(),
         display_source: match section.display_source.as_deref() {

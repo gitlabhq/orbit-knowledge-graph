@@ -19,15 +19,23 @@ pub enum ResolveStage {
     Climb { while_kind: u16, mark_kind: u16 },
 }
 
+#[derive(Clone)]
+pub struct ParseFileSpec {
+    pub name: String,
+    pub format: ParseFormat,
+}
+
+#[derive(Clone, Copy)]
+pub enum ParseFormat {
+    Json,
+    Toml,
+}
+
 pub struct ResolveConfig {
     pub stages: Vec<ResolveStage>,
-    /// Synthetic kinds whose marked nodes provide resolution prefixes.
+    pub parse_files: Vec<ParseFileSpec>,
     pub lookup_from: Vec<u16>,
-    /// Module names that should never resolve to local files (e.g. stdlib).
     pub external: Vec<String>,
-    /// How to display the import source path.
-    /// "resolved" (default): use the resolved path converted via fqn_separator.
-    /// "original": use the original __source text as-is.
     pub display_source: DisplaySource,
 }
 
@@ -42,6 +50,7 @@ impl Default for ResolveConfig {
     fn default() -> Self {
         Self {
             stages: vec![],
+            parse_files: vec![],
             lookup_from: vec![],
             external: vec![],
             display_source: DisplaySource::Original,
@@ -50,14 +59,20 @@ impl Default for ResolveConfig {
 }
 
 /// Build a file tree from paths, run resolve stages, return results.
-pub fn walk(paths: &[String], lang: &mut Lang, config: &ResolveConfig) -> WalkResult {
+/// `files` provides content for config files listed in `parse_files`.
+pub fn walk(
+    paths: &[String],
+    files: &[(String, String)],
+    lang: &mut Lang,
+    config: &ResolveConfig,
+) -> WalkResult {
     if config.stages.is_empty() && config.lookup_from.is_empty() {
         return WalkResult {
             lookup_prefixes: vec![],
         };
     }
 
-    let mut tree = build_file_tree(paths, lang);
+    let mut tree = build_file_tree(paths, files, lang, &config.parse_files);
 
     for stage in &config.stages {
         match stage {
@@ -83,13 +98,18 @@ pub fn walk(paths: &[String], lang: &mut Lang, config: &ResolveConfig) -> WalkRe
     }
 }
 
-fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
+fn build_file_tree(
+    paths: &[String],
+    files: &[(String, String)],
+    lang: &mut Lang,
+    parse_files: &[ParseFileSpec],
+) -> Tree {
     let root_kind = lang.intern_kind("__root");
     let dir_kind = lang.intern_kind("__dir");
     let file_kind = lang.intern_kind("__file");
 
-    // Collect unique directory segments and files into a trie-like structure.
-    // Key: parent path (empty = root), Value: (segment_name, is_file)
+    let file_contents: FxHashMap<&str, &str> = files.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+
     let mut children: FxHashMap<String, Vec<(String, bool)>> = FxHashMap::default();
 
     for path in paths {
@@ -109,12 +129,10 @@ fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
         }
     }
 
-    // Sort children for deterministic output.
     for v in children.values_mut() {
         v.sort();
     }
 
-    // Build nodes via DFS from root.
     let mut nodes: Vec<Node> = Vec::new();
     let root_idx = nodes.len() as u32;
     nodes.push(Node {
@@ -130,6 +148,8 @@ fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
         parent_path: &str,
         parent_idx: u32,
         children: &FxHashMap<String, Vec<(String, bool)>>,
+        file_contents: &FxHashMap<&str, &str>,
+        parse_files: &[ParseFileSpec],
         nodes: &mut Vec<Node>,
         lang: &mut Lang,
         dir_kind: u16,
@@ -150,24 +170,156 @@ fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
                 size: 0,
                 ..Default::default()
             });
-            if !is_file {
+            if *is_file {
+                if let Some(spec) = parse_files.iter().find(|pf| pf.name == *segment) {
+                    let full_path = if parent_path.is_empty() {
+                        segment.clone()
+                    } else {
+                        format!("{parent_path}/{segment}")
+                    };
+                    if let Some(content) = file_contents.get(full_path.as_str()) {
+                        inline_config(content, spec.format, idx, nodes, lang);
+                    }
+                }
+            } else {
                 let child_path = if parent_path.is_empty() {
                     segment.clone()
                 } else {
                     format!("{parent_path}/{segment}")
                 };
-                add_children(&child_path, idx, children, nodes, lang, dir_kind, file_kind);
+                add_children(
+                    &child_path, idx, children, file_contents, parse_files,
+                    nodes, lang, dir_kind, file_kind,
+                );
             }
             nodes[idx as usize].size = (nodes.len() as u32) - idx;
         }
     }
 
     add_children(
-        "", root_idx, &children, &mut nodes, lang, dir_kind, file_kind,
+        "", root_idx, &children, &file_contents, parse_files,
+        &mut nodes, lang, dir_kind, file_kind,
     );
     nodes[root_idx as usize].size = nodes.len() as u32;
 
     Tree::from_nodes(nodes)
+}
+
+fn inline_config(
+    content: &str,
+    format: ParseFormat,
+    parent: u32,
+    nodes: &mut Vec<Node>,
+    lang: &mut Lang,
+) {
+    let value: serde_json::Value = match format {
+        ParseFormat::Json => match serde_json::from_str(content) {
+            Ok(v) => v,
+            Err(_) => return,
+        },
+        ParseFormat::Toml => match toml::from_str::<toml::Value>(content) {
+            Ok(tv) => toml_to_json(tv),
+            Err(_) => return,
+        },
+    };
+    emit_json_value(&value, parent, nodes, lang);
+}
+
+fn toml_to_json(v: toml::Value) -> serde_json::Value {
+    match v {
+        toml::Value::String(s) => serde_json::Value::String(s),
+        toml::Value::Integer(i) => serde_json::json!(i),
+        toml::Value::Float(f) => serde_json::json!(f),
+        toml::Value::Boolean(b) => serde_json::Value::Bool(b),
+        toml::Value::Datetime(d) => serde_json::Value::String(d.to_string()),
+        toml::Value::Array(a) => {
+            serde_json::Value::Array(a.into_iter().map(toml_to_json).collect())
+        }
+        toml::Value::Table(t) => {
+            serde_json::Value::Object(t.into_iter().map(|(k, v)| (k, toml_to_json(v))).collect())
+        }
+    }
+}
+
+fn emit_json_value(
+    val: &serde_json::Value,
+    parent: u32,
+    nodes: &mut Vec<Node>,
+    lang: &mut Lang,
+) {
+    use crate::canonical::Canonical as C;
+
+    match val {
+        serde_json::Value::Object(map) => {
+            let idx = nodes.len() as u32;
+            nodes.push(Node {
+                kind: C::Obj.into(),
+                named: true,
+                parent,
+                size: 0,
+                ..Default::default()
+            });
+            for (key, child) in map {
+                let fidx = nodes.len() as u32;
+                nodes.push(Node {
+                    kind: C::ConfigField.into(),
+                    named: true,
+                    parent: idx,
+                    sym: lang.syms.intern(key),
+                    size: 0,
+                    ..Default::default()
+                });
+                emit_json_value(child, fidx, nodes, lang);
+                nodes[fidx as usize].size = (nodes.len() as u32) - fidx;
+            }
+            nodes[idx as usize].size = (nodes.len() as u32) - idx;
+        }
+        serde_json::Value::Array(arr) => {
+            let idx = nodes.len() as u32;
+            nodes.push(Node {
+                kind: C::Arr.into(),
+                named: true,
+                parent,
+                size: 0,
+                ..Default::default()
+            });
+            for child in arr {
+                emit_json_value(child, idx, nodes, lang);
+            }
+            nodes[idx as usize].size = (nodes.len() as u32) - idx;
+        }
+        serde_json::Value::String(s) => {
+            nodes.push(Node {
+                kind: C::Str.into(),
+                named: true,
+                parent,
+                sym: lang.syms.intern(s),
+                size: 1,
+                ..Default::default()
+            });
+        }
+        serde_json::Value::Number(n) => {
+            nodes.push(Node {
+                kind: C::ConfigNum.into(),
+                named: true,
+                parent,
+                sym: lang.syms.intern(&n.to_string()),
+                size: 1,
+                ..Default::default()
+            });
+        }
+        serde_json::Value::Bool(b) => {
+            nodes.push(Node {
+                kind: C::ConfigBool.into(),
+                named: true,
+                parent,
+                sym: lang.syms.intern(if *b { "true" } else { "false" }),
+                size: 1,
+                ..Default::default()
+            });
+        }
+        serde_json::Value::Null => {}
+    }
 }
 
 /// Walk up from each node with `while_kind`, mark the first ancestor without it.

@@ -34,6 +34,8 @@ rustc-hash = "2"
 strum = { workspace = true }
 rayon = { workspace = true }
 termtree = "1.0"
+serde_json = { workspace = true }
+toml = { workspace = true }
 pest = { workspace = true }
 pest_derive = { workspace = true }
 pest_consume = { workspace = true }

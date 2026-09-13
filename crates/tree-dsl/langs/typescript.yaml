@@ -164,9 +164,19 @@ stages:
         replace: '(__module_export (__import $$$REST) (__def (__defname @$N) (__deftype "ModuleExport")))'
 
 resolve:
+  parse_files:
+    - name: "tsconfig.json"
+      format: json
+    - name: "package.json"
+      format: json
   lookup_from:
     - __source_root
   stages:
+    - name: config
+      rules:
+        # tsconfig baseUrl → source root
+        - match: '(__file "tsconfig.json" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" (__str $V)) $$$REST))) $$$OUTER)'
+          replace: '(__file "tsconfig.json" (__source_root @$V|strip_prefix("./")) $$$OUTER)'
     - name: packages
       rules:
         - match: '(__dir (__file "package.json") $$$REST)'
