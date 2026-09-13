@@ -692,7 +692,14 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             .iter()
             .enumerate()
             .map(|(i, edges)| {
-                let dest_id = edges.last().and_then(|e| e.to_id).unwrap_or(0);
+                let dest_id = edges.last().and_then(|e| e.to_id).unwrap_or_else(|| {
+                    assert!(
+                        expect.path_edges.len() == 1,
+                        "{label}: path_edges[{i}] must set to_id on its last edge \
+                         when more than one path is expected"
+                    );
+                    0
+                });
                 (dest_id, i, edges)
             })
             .collect();
