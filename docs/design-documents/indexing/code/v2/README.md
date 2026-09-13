@@ -9,5 +9,8 @@ Orbit has reached critical mass on Code Indexing on ClickHouse in .com productio
 
 We've broken down the document into the following sections:
 - [Motivation](./motivation.md)
-- [Branch & Commit Indexing](./branch_and_commit_indexing.md)
+- [Functional Requirements](./functional_requirements.md)
 - [Architecture](./architecture.md)
+- [Branch & Commit Indexing](./branch_and_commit_indexing.md)
+- [Content Search](./content_search.md)
+- [Code Graph](./code_graph.md)
