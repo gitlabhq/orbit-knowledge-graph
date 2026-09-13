@@ -800,8 +800,9 @@ pub use crate::arrow_logical_bytes::{
 mod tests {
     use super::*;
     use arrow::array::{
-        Int64Builder, ListBuilder, StringBuilder, StructBuilder, TimestampMicrosecondArray,
-        TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
+        Int64Array, Int64Builder, ListBuilder, StringBuilder, StructBuilder,
+        TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+        TimestampSecondArray,
     };
     use arrow::datatypes::{DataType, Field, Int64Type, Schema, UInt64Type};
     use std::sync::Arc;
@@ -1377,5 +1378,17 @@ mod tests {
         let schema = batch.schema();
         let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert_eq!(names, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn batch_slice_bytes_counts_only_the_referenced_slice() {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, false)]));
+        let values: Vec<i64> = (0..1000).collect();
+        let batch = RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(values))]).unwrap();
+        let half = batch.slice(0, 500);
+
+        assert_eq!(batch_slice_bytes(&batch), 8000);
+        assert_eq!(batch_slice_bytes(&half), 4000);
+        assert!(half.get_array_memory_size() as u64 > 4000);
     }
 }

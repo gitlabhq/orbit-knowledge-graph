@@ -1241,4 +1241,33 @@ mod tests {
             "written bytes reflect the batch size"
         );
     }
+
+    #[test]
+    fn next_page_limit_shrinks_to_the_rows_that_fit_the_budget() {
+        assert_eq!(
+            next_page_limit(500_000, 500_000, 134_000, PAGE_BYTE_BUDGET),
+            134_000
+        );
+        assert_eq!(
+            next_page_limit(500_000, 500_000, 3, PAGE_BYTE_BUDGET * 2),
+            ADAPTIVE_MIN_ROWS
+        );
+    }
+
+    #[test]
+    fn next_page_limit_grows_back_only_while_pages_stay_small() {
+        assert_eq!(
+            next_page_limit(134_000, 500_000, 134_000, PAGE_BYTE_BUDGET / 4),
+            268_000
+        );
+        assert_eq!(
+            next_page_limit(300_000, 500_000, 300_000, PAGE_BYTE_BUDGET / 4),
+            500_000
+        );
+        assert_eq!(
+            next_page_limit(134_000, 500_000, 134_000, PAGE_BYTE_BUDGET / 2),
+            134_000
+        );
+        assert_eq!(next_page_limit(500_000, 500_000, 500_000, 1), 500_000);
+    }
 }
