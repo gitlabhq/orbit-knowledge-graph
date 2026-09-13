@@ -1,7 +1,7 @@
 use crate::canonical::Canonical as C;
 use crate::lang::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{Cursor, EdgeKind, Step, Tree};
+use crate::tree::{Cursor, EdgeKind, Step, Tree, infer_return_type};
 
 struct Fold {
     ssa: SsaEngine,
@@ -201,70 +201,15 @@ impl Fold {
         })
     }
 
-    fn infer_return_type(&self, tree: &Tree, def: u32) -> Option<u32> {
-        let d = tree.cursor(def);
-        d.child_sym(C::ReturnType).or_else(|| {
-            let mut binds: Vec<(u32, u32)> = Vec::new();
-            let mut result = None;
-            d.descend(|n| -> Step<u32> {
-                if n.is(C::Def) && n.index() != def {
-                    return Step::Over;
-                }
-                if n.is(C::Binding) && n.sym() != 0 {
-                    if let Some(callee) = n
-                        .child(C::Rhs)
-                        .and_then(|r| r.child(C::Call))
-                        .and_then(|c| c.child_sym(C::Callee))
-                    {
-                        binds.push((n.sym(), callee));
-                    }
-                    return Step::Over;
-                }
-                if n.is(C::Return) && result.is_none() {
-                    for ch in n.children() {
-                        if ch.is(C::Call) {
-                            if let Some(s) = ch.child_sym(C::Callee) {
-                                result = Some(s);
-                            }
-                            break;
-                        }
-                        if ch.sym() != 0 {
-                            result = Some(
-                                binds
-                                    .iter()
-                                    .find(|(l, _)| *l == ch.sym())
-                                    .map(|(_, c)| *c)
-                                    .unwrap_or(ch.sym()),
-                            );
-                            break;
-                        }
-                    }
-                    return Step::Over;
-                }
-                Step::Into
-            });
-            result
-        })
-    }
-
     fn find_method_in(&self, tree: &Tree, container: u32, name: u32) -> Option<u32> {
         let mut search = vec![container];
         let mut si = 0;
         while si < search.len() {
-            let cls = tree.cursor(search[si]);
-            if let Some(m) = cls.descend(|n| {
-                if n.is(C::DefType) {
-                    if let Some(p) = n.parent() {
-                        if p.index() != search[si] && p.child_sym(C::DefName) == Some(name) {
-                            return Step::Out(p.index());
-                        }
-                    }
-                }
-                Step::Into
-            }) {
-                return Some(m);
+            if let Some(m) = crate::tree::find_method_in(tree.cursor(search[si]), name) {
+                return Some(m.index());
             }
-            for c in cls
+            for c in tree
+                .cursor(search[si])
                 .children()
                 .filter(|c| c.is(C::SuperType) && c.sym() != 0)
             {
@@ -392,7 +337,7 @@ impl Fold {
         }
         let rt = reaching.iter().find_map(|pv| {
             if let ParseValue::LocalDef(di) = pv {
-                self.infer_return_type(tree, self.defs[*di as usize])
+                infer_return_type(tree.cursor(self.defs[*di as usize]))
             } else {
                 None
             }
@@ -441,7 +386,7 @@ impl Fold {
         for cpv in &self.ssa.read_variable(ts, self.cur) {
             if let ParseValue::LocalDef(cdi) = cpv {
                 if let Some(m) = self.find_method_in(tree, self.defs[*cdi as usize], method) {
-                    if let Some(rt) = self.infer_return_type(tree, m) {
+                    if let Some(rt) = infer_return_type(tree.cursor(m)) {
                         return Value::Type(rt);
                     }
                 }

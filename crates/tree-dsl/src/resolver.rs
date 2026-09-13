@@ -5,7 +5,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::canonical::Canonical as C;
 use crate::grammar::SupportLang;
 use crate::lang::Lang;
-use crate::tree::{Cursor, Edge, EdgeKind, NodeRef, Step, Tree};
+use crate::tree::{Cursor, Edge, EdgeKind, NodeRef, Step, Tree, find_method_in, infer_return_type};
 
 pub struct ResolveResult {
     pub cross_edges: Vec<Edge>,
@@ -451,64 +451,6 @@ fn build_type_edges(
         }
     }
     type_edges
-}
-
-fn infer_return_type(def: Cursor) -> Option<u32> {
-    def.child_sym(C::ReturnType).or_else(|| {
-        let mut binds: Vec<(u32, u32)> = Vec::new();
-        let mut result = None;
-        def.descend(|n| -> Step<u32> {
-            if n.is(C::Def) && n.index() != def.index() {
-                return Step::Over;
-            }
-            if n.is(C::Binding) && n.sym() != 0 {
-                if let Some(callee) = n
-                    .child(C::Rhs)
-                    .and_then(|r| r.child(C::Call))
-                    .and_then(|c| c.child_sym(C::Callee))
-                {
-                    binds.push((n.sym(), callee));
-                }
-                return Step::Over;
-            }
-            if n.is(C::Return) && result.is_none() {
-                for ch in n.children() {
-                    if ch.is(C::Call) {
-                        if let Some(s) = ch.child_sym(C::Callee) {
-                            result = Some(s);
-                        }
-                        break;
-                    }
-                    if ch.sym() != 0 {
-                        result = Some(
-                            binds
-                                .iter()
-                                .find(|(l, _)| *l == ch.sym())
-                                .map(|(_, c)| *c)
-                                .unwrap_or(ch.sym()),
-                        );
-                        break;
-                    }
-                }
-                return Step::Over;
-            }
-            Step::Into
-        });
-        result
-    })
-}
-
-fn find_method_in(class: Cursor, name: u32) -> Option<Cursor> {
-    class.descend(|n| {
-        if n.is(C::DefType) {
-            if let Some(p) = n.parent() {
-                if p.index() != class.index() && p.child_sym(C::DefName) == Some(name) {
-                    return Step::Out(p);
-                }
-            }
-        }
-        Step::Into
-    })
 }
 
 fn resolve_type(

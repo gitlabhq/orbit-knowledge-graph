@@ -237,6 +237,70 @@ impl<'a> Cursor<'a> {
     }
 }
 
+// ── Shared tree queries ──
+
+use crate::canonical::Canonical as C;
+
+/// Infer return type from annotation or body scan. Skips nested defs.
+pub fn infer_return_type(def: Cursor) -> Option<u32> {
+    def.child_sym(C::ReturnType).or_else(|| {
+        let mut binds: Vec<(u32, u32)> = Vec::new();
+        let mut result = None;
+        def.descend(|n| -> Step<u32> {
+            if n.is(C::Def) && n.index() != def.index() {
+                return Step::Over;
+            }
+            if n.is(C::Binding) && n.sym() != 0 {
+                if let Some(callee) = n
+                    .child(C::Rhs)
+                    .and_then(|r| r.child(C::Call))
+                    .and_then(|c| c.child_sym(C::Callee))
+                {
+                    binds.push((n.sym(), callee));
+                }
+                return Step::Over;
+            }
+            if n.is(C::Return) && result.is_none() {
+                for ch in n.children() {
+                    if ch.is(C::Call) {
+                        if let Some(s) = ch.child_sym(C::Callee) {
+                            result = Some(s);
+                        }
+                        break;
+                    }
+                    if ch.sym() != 0 {
+                        result = Some(
+                            binds
+                                .iter()
+                                .find(|(l, _)| *l == ch.sym())
+                                .map(|(_, c)| *c)
+                                .unwrap_or(ch.sym()),
+                        );
+                        break;
+                    }
+                }
+                return Step::Over;
+            }
+            Step::Into
+        });
+        result
+    })
+}
+
+/// Find a method by name in a class. Searches DefType descendants.
+pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
+    class.descend(|n| {
+        if n.is(C::DefType) {
+            if let Some(p) = n.parent() {
+                if p.index() != class.index() && p.child_sym(C::DefName) == Some(name) {
+                    return Step::Out(p);
+                }
+            }
+        }
+        Step::Into
+    })
+}
+
 // ── Tree entry points ──
 
 impl Tree {
