@@ -37,6 +37,13 @@ pub(crate) struct ScanStats {
     pub scanned_bytes: u64,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct FetchedPage {
+    pub batches: Vec<RecordBatch>,
+    pub scan_stats: ScanStats,
+    pub truncated: bool,
+}
+
 #[async_trait]
 pub(crate) trait DatalakeQuery: Send + Sync {
     async fn query_arrow(
@@ -61,9 +68,12 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         sql: &str,
         params: Value,
         max_block_size: Option<u64>,
-    ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
+    ) -> Result<FetchedPage, DatalakeError> {
         let batches = self.query_batches(sql, params, max_block_size).await?;
-        Ok((batches, ScanStats::default()))
+        Ok(FetchedPage {
+            batches,
+            ..FetchedPage::default()
+        })
     }
 }
 
@@ -136,7 +146,7 @@ impl DatalakeQuery for Datalake {
         sql: &str,
         params: Value,
         max_block_size: Option<u64>,
-    ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
+    ) -> Result<FetchedPage, DatalakeError> {
         let mut query = self.build_query(sql, params);
         if max_block_size.is_some() {
             // Retry after a datalake failure (the Arrow 2GB overflow): byte-cap
@@ -153,15 +163,19 @@ impl DatalakeQuery for Datalake {
 
         let mut batches = Vec::new();
         let mut bytes = 0;
+        let mut truncated = false;
         while let Some(result) = stream.next().await {
             let batch = result.map_err(|e| DatalakeError::Query(e.to_string()))?;
-            if batch.num_rows() > 0 {
-                bytes += batch_slice_bytes(&batch);
-                batches.push(batch);
-                if bytes >= PAGE_BYTE_BUDGET {
-                    break;
-                }
+            if batch.num_rows() == 0 {
+                continue;
             }
+            let batch_bytes = batch_slice_bytes(&batch);
+            if !batches.is_empty() && bytes + batch_bytes > PAGE_BYTE_BUDGET {
+                truncated = true;
+                break;
+            }
+            bytes += batch_bytes;
+            batches.push(batch);
         }
         drop(stream);
 
@@ -172,7 +186,11 @@ impl DatalakeQuery for Datalake {
             .map(scan_stats_from_summary)
             .unwrap_or_default();
 
-        Ok((batches, scan_stats))
+        Ok(FetchedPage {
+            batches,
+            scan_stats,
+            truncated,
+        })
     }
 }
 

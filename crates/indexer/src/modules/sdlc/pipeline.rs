@@ -17,7 +17,7 @@ use crate::observer::{IndexingMode, IndexingObserver};
 use crate::retry::{Backoff, LocalRetry, Step, drive_with};
 
 use super::PAGE_BYTE_BUDGET;
-use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
+use super::datalake::{DatalakeQuery, FetchedPage, ScanStats, is_arrow_string_overflow};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
@@ -40,8 +40,8 @@ const DATALAKE_EXTRACT_RETRY: LocalRetry = LocalRetry {
 
 const ADAPTIVE_MIN_ROWS: u64 = 1_000;
 
-fn next_page_limit(current: u64, plan_limit: u64, rows: u64, bytes: u64) -> u64 {
-    if bytes >= PAGE_BYTE_BUDGET {
+fn next_page_limit(current: u64, plan_limit: u64, rows: u64, bytes: u64, truncated: bool) -> u64 {
+    if truncated {
         rows.max(ADAPTIVE_MIN_ROWS).min(plan_limit)
     } else if current < plan_limit && bytes.saturating_mul(2) < PAGE_BYTE_BUDGET {
         current.saturating_mul(2).min(plan_limit)
@@ -89,6 +89,7 @@ struct Page {
     batches: Vec<RecordBatch>,
     scan_stats: ScanStats,
     extract_elapsed: Duration,
+    truncated: bool,
 }
 
 impl Page {
@@ -191,13 +192,13 @@ impl Pipeline {
                     .expect("non-empty page has a last block"),
                 &plan.sort_key,
             )?;
-            let has_more =
-                rows_in_page >= base_query.batch_size() || bytes_in_page >= PAGE_BYTE_BUDGET;
+            let has_more = rows_in_page >= base_query.batch_size() || page.truncated;
             base_query.set_batch_size(next_page_limit(
                 base_query.batch_size(),
                 plan_limit,
                 rows_in_page,
                 bytes_in_page,
+                page.truncated,
             ));
 
             let transform_start = Instant::now();
@@ -366,12 +367,13 @@ impl Pipeline {
                 let retry_config = &self.retry_config;
                 async move {
                     match fut.await {
-                        Ok((batches, scan_stats)) => {
+                        Ok(FetchedPage {
+                            batches,
+                            scan_stats,
+                            truncated,
+                        }) => {
                             let extract_elapsed = query_start.elapsed();
-                            let bytes: u64 = batches
-                                .iter()
-                                .map(|b| b.get_array_memory_size() as u64)
-                                .sum();
+                            let bytes: u64 = batches.iter().map(batch_slice_bytes).sum();
                             metrics.record_datalake_query(
                                 transform_name,
                                 extract_elapsed.as_secs_f64(),
@@ -381,6 +383,7 @@ impl Pipeline {
                                 batches,
                                 scan_stats,
                                 extract_elapsed,
+                                truncated,
                             })
                         }
                         Err(err) => {
@@ -1173,13 +1176,17 @@ mod tests {
             _sql: &str,
             _params: Value,
             _max_block_size: Option<u64>,
-        ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
+        ) -> Result<FetchedPage, DatalakeError> {
             let mut calls = self.calls.lock().unwrap();
             *calls += 1;
             if *calls == 1 {
-                Ok((vec![test_batch(self.rows)], self.scan_stats))
+                Ok(FetchedPage {
+                    batches: vec![test_batch(self.rows)],
+                    scan_stats: self.scan_stats,
+                    truncated: false,
+                })
             } else {
-                Ok((vec![], ScanStats::default()))
+                Ok(FetchedPage::default())
             }
         }
     }
@@ -1245,11 +1252,11 @@ mod tests {
     #[test]
     fn next_page_limit_shrinks_to_the_rows_that_fit_the_budget() {
         assert_eq!(
-            next_page_limit(500_000, 500_000, 134_000, PAGE_BYTE_BUDGET),
+            next_page_limit(500_000, 500_000, 134_000, PAGE_BYTE_BUDGET - 1, true),
             134_000
         );
         assert_eq!(
-            next_page_limit(500_000, 500_000, 3, PAGE_BYTE_BUDGET * 2),
+            next_page_limit(500_000, 500_000, 3, PAGE_BYTE_BUDGET, true),
             ADAPTIVE_MIN_ROWS
         );
     }
@@ -1257,17 +1264,20 @@ mod tests {
     #[test]
     fn next_page_limit_grows_back_only_while_pages_stay_small() {
         assert_eq!(
-            next_page_limit(134_000, 500_000, 134_000, PAGE_BYTE_BUDGET / 4),
+            next_page_limit(134_000, 500_000, 134_000, PAGE_BYTE_BUDGET / 4, false),
             268_000
         );
         assert_eq!(
-            next_page_limit(300_000, 500_000, 300_000, PAGE_BYTE_BUDGET / 4),
+            next_page_limit(300_000, 500_000, 300_000, PAGE_BYTE_BUDGET / 4, false),
             500_000
         );
         assert_eq!(
-            next_page_limit(134_000, 500_000, 134_000, PAGE_BYTE_BUDGET / 2),
+            next_page_limit(134_000, 500_000, 134_000, PAGE_BYTE_BUDGET / 2, false),
             134_000
         );
-        assert_eq!(next_page_limit(500_000, 500_000, 500_000, 1), 500_000);
+        assert_eq!(
+            next_page_limit(500_000, 500_000, 500_000, 1, false),
+            500_000
+        );
     }
 }
