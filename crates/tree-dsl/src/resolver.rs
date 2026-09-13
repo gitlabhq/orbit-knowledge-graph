@@ -390,7 +390,7 @@ fn build_call_edges(
             }
         }
 
-        for edge in &trees[fi].edges {
+        for edge in trees[fi].edges().iter() {
             if edge.kind != EdgeKind::Imports {
                 continue;
             }
@@ -446,7 +446,7 @@ fn build_call_edges(
             .map(|(sym, _)| *sym)
             .unwrap_or(0);
 
-        for edge in &trees[ce.from.tree as usize].edges {
+        for edge in trees[ce.from.tree as usize].edges().iter() {
             if edge.kind != EdgeKind::Imports {
                 continue;
             }

@@ -86,7 +86,7 @@ impl Fold {
         }
     }
 
-    fn handle_def(&mut self, tree: &mut Tree, i: u32, end: u32) {
+    fn handle_def(&mut self, tree: &Tree, i: u32, end: u32) {
         let name = def_name(tree, i);
         if name == 0 {
             return;
@@ -106,7 +106,7 @@ impl Fold {
         }
     }
 
-    fn handle_call(&mut self, tree: &mut Tree, i: u32) {
+    fn handle_call(&mut self, tree: &Tree, i: u32) {
         let Some(callee) = child_node(tree, i, Canonical::Callee) else {
             return;
         };
@@ -116,7 +116,7 @@ impl Fold {
         self.resolve_call(tree, target, self.enclosing());
     }
 
-    fn handle_standalone_member(&mut self, tree: &mut Tree, i: u32) {
+    fn handle_standalone_member(&mut self, tree: &Tree, i: u32) {
         let obj = child_node(tree, i, Canonical::Object)
             .map(|o| tree.sym(o))
             .unwrap_or(0);
@@ -163,7 +163,7 @@ impl Fold {
         }
     }
 
-    fn resolve_call(&mut self, tree: &mut Tree, target: Target, from: u32) {
+    fn resolve_call(&mut self, tree: &Tree, target: Target, from: u32) {
         match target {
             Target::Name(sym) => self.resolve_name_call(tree, sym, from),
             Target::Method { obj, method } => {
@@ -195,7 +195,7 @@ impl Fold {
         }
     }
 
-    fn resolve_name_call(&mut self, tree: &mut Tree, sym: u32, from: u32) {
+    fn resolve_name_call(&mut self, tree: &Tree, sym: u32, from: u32) {
         let mut reaching = self.ssa.read_variable(sym, self.cur);
         if reaching.is_empty() {
             let wildcard = self.ssa.read_variable(self.wildcard, self.cur);
@@ -227,7 +227,7 @@ impl Fold {
         }
     }
 
-    fn resolve_method(&mut self, tree: &mut Tree, type_sym: u32, method_sym: u32, from: u32) {
+    fn resolve_method(&mut self, tree: &Tree, type_sym: u32, method_sym: u32, from: u32) {
         for cpv in &self.ssa.read_variable(type_sym, self.cur) {
             if let ParseValue::LocalDef(cdi) = cpv {
                 if let Some(m) = find_method(tree, &self.defs, self.defs[*cdi as usize], method_sym)
@@ -238,7 +238,7 @@ impl Fold {
         }
     }
 
-    fn emit_edge(&self, tree: &mut Tree, pv: &ParseValue, from: u32) {
+    fn emit_edge(&self, tree: &Tree, pv: &ParseValue, from: u32) {
         match pv {
             ParseValue::LocalDef(di) => {
                 tree.add_edge(from, self.defs[*di as usize], EdgeKind::Calls)
@@ -364,7 +364,7 @@ impl Fold {
     }
 }
 
-pub fn link(tree: &mut Tree, lang: &mut Lang) {
+pub fn link(tree: &Tree, lang: &mut Lang) {
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
     ssa.seal_block(entry);

@@ -614,7 +614,7 @@ fn build_file_edges(
                 }
             }
         }
-        for edge in &tree.edges {
+        for edge in tree.edges().iter() {
             if edge.from.node == 0
                 && edge.kind == tree_dsl::tree::EdgeKind::Calls
                 && let Some(&tid) = ids.defs.get(&(fi, edge.to.node))
@@ -639,7 +639,7 @@ fn build_def2def(
         StringBuilder::new(),
     );
     for (fi, tree) in trees.iter().enumerate() {
-        for edge in &tree.edges {
+        for edge in tree.edges().iter() {
             let label = match edge.kind {
                 tree_dsl::tree::EdgeKind::Calls => "Calls",
                 tree_dsl::tree::EdgeKind::Defines => "Defines",
@@ -693,7 +693,7 @@ fn build_def2imp(
         .map(|ce| (ce.from.tree as usize, ce.from.node))
         .collect();
     for (fi, tree) in trees.iter().enumerate() {
-        for edge in &tree.edges {
+        for edge in tree.edges().iter() {
             if edge.kind != tree_dsl::tree::EdgeKind::Imports {
                 continue;
             }

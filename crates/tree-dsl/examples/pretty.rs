@@ -60,9 +60,9 @@ fn main() {
             let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
             let tree = tree_dsl::pipeline::process_file("test", &source, &mut lang, &pipeline);
             println!("{}", pretty_print(&tree, &lang, color));
-            if !tree.edges.is_empty() {
+            if !tree.edges().is_empty() {
                 println!("edges:");
-                for e in &tree.edges {
+                for e in tree.edges().iter() {
                     let from = lang.syms.resolve(tree.nodes[e.from.node as usize].sym);
                     let to = lang.syms.resolve(tree.nodes[e.to.node as usize].sym);
                     println!(

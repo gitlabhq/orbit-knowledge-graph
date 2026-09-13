@@ -92,7 +92,7 @@ impl Edge {
 #[derive(Default)]
 pub struct Tree {
     pub nodes: Vec<Node>,
-    pub edges: Vec<Edge>,
+    pub(crate) edges_cell: RefCell<Vec<Edge>>,
     pub label: String,
     pub(crate) next_id: u32,
     pub(crate) spare: Vec<Node>,
@@ -172,14 +172,22 @@ impl Tree {
         })
     }
 
-    pub fn add_edge(&mut self, from: u32, to: u32, kind: EdgeKind) {
-        if !self
-            .edges
+    pub fn add_edge(&self, from: u32, to: u32, kind: EdgeKind) {
+        let mut edges = self.edges_cell.borrow_mut();
+        if !edges
             .iter()
             .any(|e| e.from.node == from && e.to.node == to && e.kind == kind)
         {
-            self.edges.push(Edge::local(from, to, kind));
+            edges.push(Edge::local(from, to, kind));
         }
+    }
+
+    pub fn edges(&self) -> std::cell::Ref<'_, Vec<Edge>> {
+        self.edges_cell.borrow()
+    }
+
+    pub fn edges_mut(&mut self) -> &mut Vec<Edge> {
+        self.edges_cell.get_mut()
     }
 
     pub fn prune(&mut self) {

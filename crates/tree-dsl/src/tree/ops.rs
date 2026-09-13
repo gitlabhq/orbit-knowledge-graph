@@ -51,7 +51,7 @@ impl Tree {
                 self.nodes[p as usize].size += shift;
                 p = self.nodes[p as usize].parent;
             }
-            for edge in self.edges.iter_mut() {
+            for edge in self.edges_mut().iter_mut() {
                 if edge.from.node >= i {
                     edge.from.node += shift;
                 }
@@ -167,7 +167,7 @@ impl Tree {
         }
         self.spare = old;
         self.nodes = new;
-        for edge in &mut self.edges {
+        for edge in self.edges_mut().iter_mut() {
             if let Some(&new_from) = remap.get(edge.from.node as usize)
                 && new_from != NONE
             {

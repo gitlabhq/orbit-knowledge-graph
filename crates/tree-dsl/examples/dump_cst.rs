@@ -38,7 +38,7 @@ fn main() {
         if stage == "ssa" {
             let tree = tree_dsl::pipeline::process_file("test", &source, &mut lang, &pipeline);
             dump(&tree, &lang);
-            for e in &tree.edges {
+            for e in tree.edges().iter() {
                 let from_s = lang.syms.resolve(tree.nodes[e.from.node as usize].sym);
                 let to_s = lang.syms.resolve(tree.nodes[e.to.node as usize].sym);
                 let from = if from_s.len() > 30 {

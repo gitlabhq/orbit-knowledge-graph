@@ -60,7 +60,7 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
     }
     tree.compact();
     canonical::classify_methods(&mut tree, lang);
-    linker::link(&mut tree, lang);
+    linker::link(&tree, lang);
     tree.prune();
     tree.compact();
     tree
