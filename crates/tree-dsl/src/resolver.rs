@@ -28,7 +28,10 @@ pub fn resolve(
 
     for req in &reqs {
         let resolved_sym = lang.syms.intern(&req.target_path);
-        let sp_idx = trees[req.fi].cursor(req.node).child(C::SourcePath).map(|n| n.index());
+        let sp_idx = trees[req.fi]
+            .cursor(req.node)
+            .child(C::SourcePath)
+            .map(|n| n.index());
         if let Some(sn) = sp_idx {
             trees[req.fi].nodes[sn as usize].sym = resolved_sym;
         }

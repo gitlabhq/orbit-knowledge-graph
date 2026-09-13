@@ -163,6 +163,16 @@ impl Fold {
 
     // ── Helpers ──
 
+    fn is_class_def(&self, tree: &Tree, def: u32) -> bool {
+        tree.cursor(def)
+            .child_sym(C::DefType)
+            .is_some_and(|dt| dt == self.class_sym)
+    }
+
+    fn is_class_pv(&self, tree: &Tree, pv: &ParseValue) -> bool {
+        matches!(pv, ParseValue::LocalDef(di) if self.is_class_def(tree, self.defs[*di as usize]))
+    }
+
     fn enclosing_class(&self, tree: &Tree, node: u32) -> Option<u32> {
         let c = tree.cursor(node);
         let check = |n: Cursor| {
@@ -359,16 +369,12 @@ impl Fold {
         }
         let sym = rhs.sym();
         if sym != 0 {
-            let is_class = self.ssa.read_variable(sym, self.cur).iter().any(|pv| {
-                if let ParseValue::LocalDef(di) = pv {
-                    tree.cursor(self.defs[*di as usize])
-                        .child_sym(C::DefType)
-                        .is_some_and(|dt| dt == self.class_sym)
-                } else {
-                    false
-                }
-            });
-            if is_class {
+            if self
+                .ssa
+                .read_variable(sym, self.cur)
+                .iter()
+                .any(|pv| self.is_class_pv(tree, pv))
+            {
                 Value::Type(sym)
             } else {
                 Value::Alias(sym)
@@ -380,16 +386,7 @@ impl Fold {
 
     fn value_from_name_call(&mut self, tree: &Tree, sym: u32) -> Value {
         let reaching = self.ssa.read_variable(sym, self.cur);
-        let is_class = reaching.iter().any(|pv| {
-            if let ParseValue::LocalDef(di) = pv {
-                tree.cursor(self.defs[*di as usize])
-                    .child_sym(C::DefType)
-                    .is_some_and(|dt| dt == self.class_sym)
-            } else {
-                false
-            }
-        });
-        if is_class {
+        if reaching.iter().any(|pv| self.is_class_pv(tree, pv)) {
             return Value::Type(sym);
         }
         let rt = reaching.iter().find_map(|pv| {
@@ -405,18 +402,10 @@ impl Fold {
                     .defs
                     .iter()
                     .position(|&dn| tree.cursor(dn).child_sym(C::DefName).unwrap_or(0) == rt_sym);
-                if let Some(di) = found {
-                    if tree
-                        .cursor(self.defs[di])
-                        .child_sym(C::DefType)
-                        .is_some_and(|dt| dt == self.class_sym)
-                    {
-                        Value::Type(rt_sym)
-                    } else {
-                        Value::LocalDef(di as u32)
-                    }
-                } else {
-                    Value::Type(rt_sym)
+                match found {
+                    Some(di) if self.is_class_def(tree, self.defs[di]) => Value::Type(rt_sym),
+                    Some(di) => Value::LocalDef(di as u32),
+                    None => Value::Type(rt_sym),
                 }
             }
             None => Value::Opaque,
