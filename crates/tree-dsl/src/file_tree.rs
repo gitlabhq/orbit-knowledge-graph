@@ -175,10 +175,10 @@ fn climb(tree: &mut Tree, while_kind: u16, mark_kind: u16) {
     let mut marked: Vec<u32> = Vec::new();
 
     for i in 0..tree.len() {
-        if !tree.nr(i).children().any(|c| c.kind() == while_kind) {
+        if !tree.cursor(i).children().any(|c| c.kind() == while_kind) {
             continue;
         }
-        if let Some(target) = tree.nr(i).ascend(|anc| {
+        if let Some(target) = tree.cursor(i).ascend(|anc| {
             if anc.children().any(|c| c.kind() == while_kind) {
                 Step::Into
             } else {
@@ -214,7 +214,7 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
     let root_node_kind = lang.lookup_kind("__root");
     let mut paths = Vec::new();
     for i in 0..tree.len() {
-        let nr = tree.nr(i);
+        let nr = tree.cursor(i);
         if nr.kind() == root_node_kind {
             continue;
         }
@@ -232,8 +232,8 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
 fn node_path(tree: &Tree, node: u32, lang: &Lang) -> String {
     let dir_kind = lang.lookup_kind("__dir");
     let root_kind = lang.lookup_kind("__root");
-    let mut parts: Vec<String> = std::iter::once(tree.nr(node))
-        .chain(tree.nr(node).ancestors())
+    let mut parts: Vec<String> = std::iter::once(tree.cursor(node))
+        .chain(tree.cursor(node).ancestors())
         .take_while(|n| n.kind() != root_kind)
         .filter(|n| n.kind() == dir_kind && n.sym() != 0)
         .map(|n| lang.syms.resolve(n.sym()).to_string())
@@ -250,7 +250,7 @@ fn collect_packages(tree: &Tree, lang: &Lang) -> Vec<String> {
     }
     let mut pkgs = Vec::new();
     for i in 0..tree.len() {
-        if tree.nr(i).children().any(|c| c.kind() == pkg_kind) {
+        if tree.cursor(i).children().any(|c| c.kind() == pkg_kind) {
             pkgs.push(node_path(tree, i, lang));
         }
     }

@@ -100,13 +100,13 @@ pub fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
         }
         let mut p = tree.nodes[def as usize].parent;
         while p != NONE {
-            if let Some(dt) = tree.nr(p).child_sym(Canonical::DefType) {
+            if let Some(dt) = tree.cursor(p).child_sym(Canonical::DefType) {
                 if dt == class {
                     tree.nodes[i as usize].sym = method;
                     break;
                 }
                 if dt == impl_ || dt == trait_ {
-                    let has_self = tree.nr(def).has(Canonical::SelfMethod);
+                    let has_self = tree.cursor(def).has(Canonical::SelfMethod);
                     tree.nodes[i as usize].sym = if has_self { method } else { assoc_fn };
                     break;
                 }

@@ -134,10 +134,6 @@ impl Tree {
         lang.syms.resolve(self.nodes[i as usize].sym)
     }
 
-    pub fn is(&self, i: u32, ck: crate::canonical::Canonical) -> bool {
-        self.nodes[i as usize].kind == ck as u16
-    }
-
     pub fn parent(&self, i: u32) -> Option<u32> {
         let p = self.nodes[i as usize].parent;
         (p != NONE).then_some(p)

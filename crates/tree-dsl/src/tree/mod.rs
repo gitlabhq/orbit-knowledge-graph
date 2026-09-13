@@ -5,4 +5,4 @@ mod walk;
 
 pub use display::pretty_print;
 pub use types::*;
-pub use walk::{NR, Step};
+pub use walk::{Cursor, Step};

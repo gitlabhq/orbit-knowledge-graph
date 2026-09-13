@@ -41,7 +41,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
             modules.insert(fi, next_mod);
         }
         for i in 0..tree.len() {
-            let nr = tree.nr(i);
+            let nr = tree.cursor(i);
             if nr.is_dead() {
                 continue;
             }
@@ -128,7 +128,7 @@ fn def_fqn(tree: &Tree, node: u32, lang: &Lang) -> String {
     );
 
     let mut parts = Vec::new();
-    for a in std::iter::once(tree.nr(node)).chain(tree.nr(node).ancestors()) {
+    for a in std::iter::once(tree.cursor(node)).chain(tree.cursor(node).ancestors()) {
         if a.has(C::DefType) || a.index() == 0 {
             let name = if a.index() == 0 && skip_root {
                 String::new()
@@ -261,7 +261,7 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<Recor
     for (fi, tree) in trees.iter().enumerate() {
         let path = lang.syms.resolve(tree.root().sym()).to_string();
         for i in 0..tree.len() {
-            let nr = tree.nr(i);
+            let nr = tree.cursor(i);
             if !nr.has(C::DefType) {
                 continue;
             }
@@ -358,7 +358,7 @@ fn build_imports(
     for (fi, tree) in trees.iter().enumerate() {
         let fp = lang.syms.resolve(tree.root().sym()).to_string();
         for i in 0..tree.len() {
-            let nr = tree.nr(i);
+            let nr = tree.cursor(i);
             if !(nr.is(C::Import) || nr.is(C::ImportType)) {
                 continue;
             }
@@ -497,7 +497,7 @@ fn build_file_edges(
     for (fi, tree) in trees.iter().enumerate() {
         let fid = fi as i64 + 1;
         for i in 0..tree.len() {
-            let nr = tree.nr(i);
+            let nr = tree.cursor(i);
             if nr.has(C::DefType) {
                 if let Some(&did) = ids.defs.get(&(fi, i)) {
                     ds.append_value(fid);

@@ -33,7 +33,7 @@ pub fn resolve(
     for req in &reqs {
         let resolved_sym = lang.syms.intern(&req.target_path);
         let sp = trees[req.fi]
-            .nr(req.node)
+            .cursor(req.node)
             .child(C::SourcePath)
             .map(|n| n.index());
         if let Some(sn) = sp {
@@ -98,7 +98,7 @@ fn build_visible_names(trees: &[Tree]) -> Vec<FxHashMap<u32, u32>> {
             if n.dead {
                 continue;
             }
-            let nr = tree.nr(i as u32);
+            let nr = tree.cursor(i as u32);
             if !nr.has(C::DefType) {
                 continue;
             }
@@ -126,7 +126,7 @@ fn gather_imports(
             if n.kind != C::Import && n.kind != C::ImportType {
                 continue;
             }
-            let source_sym = tree.nr(i as u32).child_sym(C::SourcePath).unwrap_or(0);
+            let source_sym = tree.cursor(i as u32).child_sym(C::SourcePath).unwrap_or(0);
             if source_sym == 0 {
                 continue;
             }
@@ -166,7 +166,7 @@ fn gather_imports(
                     target_path,
                 });
             } else {
-                for c in tree.nr(i as u32).children() {
+                for c in tree.cursor(i as u32).children() {
                     if !c.is(C::Name) || c.sym() == 0 {
                         continue;
                     }
@@ -227,7 +227,7 @@ fn propagate_reexports(
                 continue;
             }
             let tree = &trees[req.fi];
-            for c in tree.nr(req.node).children() {
+            for c in tree.cursor(req.node).children() {
                 if !c.is(C::Name) {
                     continue;
                 }
@@ -301,7 +301,7 @@ fn build_import_edges(
         let i = req.node;
         let tfi = req.target_fi;
         let tree = &trees[fi];
-        for c in tree.nr(i).children() {
+        for c in tree.cursor(i).children() {
             if !c.is(C::Name) {
                 continue;
             }
@@ -410,7 +410,7 @@ fn build_call_edges(
             }
 
             let caller = edge.from.node;
-            for d in tree.nr(caller).descendants() {
+            for d in tree.cursor(caller).descendants() {
                 if !d.is(C::Call) {
                     continue;
                 }
@@ -468,7 +468,7 @@ fn build_call_edges(
             if is_wildcard && target_name != 0 {
                 let caller_node = edge.from.node;
                 let mut matched = false;
-                for d in from_tree.nr(caller_node).descendants() {
+                for d in from_tree.cursor(caller_node).descendants() {
                     if d.is(C::Call) {
                         let callee = d.child_sym(C::Callee).unwrap_or(0);
                         if callee == target_name {
@@ -509,7 +509,7 @@ fn build_type_edges(
         let target_fi = ce.to.tree as usize;
         let target_node = ce.to.node;
 
-        let target_nr = trees[target_fi].nr(target_node);
+        let target_nr = trees[target_fi].cursor(target_node);
         let return_type_sym = target_nr.child_sym(C::ReturnType).or_else(|| {
             for d in target_nr.descendants() {
                 if d.is(C::Return) {
@@ -535,7 +535,7 @@ fn build_type_edges(
             for ce2 in cross_edges {
                 if ce2.from.tree as usize == target_fi && ce2.kind == EdgeKind::Imports {
                     let dn = trees[ce2.to.tree as usize]
-                        .nr(ce2.to.node)
+                        .cursor(ce2.to.node)
                         .child_sym(C::DefName)
                         .unwrap_or(0);
                     if dn == ret_sym {
@@ -553,12 +553,12 @@ fn build_type_edges(
 
         let tree = &trees[caller_fi];
         let target_name_sym = trees[target_fi]
-            .nr(target_node)
+            .cursor(target_node)
             .child_sym(C::DefName)
             .unwrap_or(0);
 
         let mut bound_vars: Vec<u32> = Vec::new();
-        for d in tree.nr(caller_node).descendants() {
+        for d in tree.cursor(caller_node).descendants() {
             if !d.is(C::Binding) {
                 continue;
             }
@@ -572,7 +572,7 @@ fn build_type_edges(
             }
         }
 
-        for d in tree.nr(caller_node).descendants() {
+        for d in tree.cursor(caller_node).descendants() {
             if !d.is(C::Call) {
                 continue;
             }
@@ -585,7 +585,7 @@ fn build_type_edges(
                 let mem_sym = mn.sym();
                 if mem_sym != 0 {
                     let mut found = false;
-                    for cd in trees[type_fi].nr(type_node).descendants() {
+                    for cd in trees[type_fi].cursor(type_node).descendants() {
                         if cd.is(C::DefType) {
                             if let Some(p) = cd.parent() {
                                 if p.index() != type_node {
@@ -640,7 +640,7 @@ fn follow_import_chain(
             if n.kind != C::Import {
                 continue;
             }
-            for c in tree.nr(ni as u32).children() {
+            for c in tree.cursor(ni as u32).children() {
                 if !c.is(C::Name) {
                     continue;
                 }
