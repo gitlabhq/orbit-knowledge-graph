@@ -156,11 +156,11 @@ fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
 }
 
 fn print_edges(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
-    if tree.edges.is_empty() {
+    if tree.edges().is_empty() {
         return;
     }
     println!("edges:");
-    for e in &tree.edges {
+    for e in tree.edges().iter() {
         let from = node_label(tree, lang, e.from.node);
         let to = node_label(tree, lang, e.to.node);
         println!("  {} --[{}]--> {}", from, edge_name(e.kind), to);
@@ -229,13 +229,13 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
         let imports = tree.nodes.iter().filter(|n| n.kind == import_k).count();
         total_defs += defs;
         total_imports += imports;
-        total_intra_edges += tree.edges.len();
+        total_intra_edges += tree.edges().len();
         println!(
             "{}: {} defs, {} imports, {} edges",
             path,
             defs,
             imports,
-            tree.edges.len()
+            tree.edges().len()
         );
     }
 
