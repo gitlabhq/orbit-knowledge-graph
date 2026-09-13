@@ -1,47 +1,7 @@
-use crate::canonical::Canonical;
+use crate::canonical::Canonical as C;
 use crate::lang::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{EdgeKind, Tree};
-
-enum Target {
-    Name(u32),
-    Method { obj: u32, method: u32 },
-    SelfMethod { attr: u32, method: u32 },
-    SelfDirect(u32),
-}
-
-fn read_target(tree: &Tree, callee: u32) -> Option<Target> {
-    let nr = tree.cursor(callee);
-    if let Some(member) = nr.child(Canonical::Member) {
-        let method = member.sym();
-        let obj = member.child(Canonical::Object);
-        let ivar = obj.and_then(|o| o.child(Canonical::Ivar));
-        let obj_sym = ivar
-            .map(|iv| iv.sym())
-            .or_else(|| obj.map(|o| o.sym()))
-            .unwrap_or(0);
-        if ivar.is_some() {
-            Some(Target::SelfMethod {
-                attr: obj_sym,
-                method,
-            })
-        } else {
-            Some(Target::Method {
-                obj: obj_sym,
-                method,
-            })
-        }
-    } else if let Some(ivar) = nr.child(Canonical::Ivar) {
-        Some(Target::SelfDirect(ivar.sym()))
-    } else {
-        let sym = nr.sym();
-        if sym != 0 {
-            Some(Target::Name(sym))
-        } else {
-            None
-        }
-    }
-}
+use crate::tree::{Cursor, EdgeKind, Step, Tree};
 
 struct Fold {
     ssa: SsaEngine,
@@ -73,14 +33,14 @@ impl Fold {
 
     fn handle_import(&mut self, tree: &Tree, i: u32) {
         for c in tree.cursor(i).children() {
-            if c.is(Canonical::Name) && c.sym() != 0 {
+            if c.is(C::Name) && c.sym() != 0 {
                 let sym = c.sym();
                 self.import_count += 1;
                 self.imports.push(c.index());
                 self.import_names.push(sym);
                 self.ssa
                     .write_variable(sym, self.cur, Value::ImportRef(self.import_count - 1));
-                if let Some(alias) = c.child_sym(Canonical::Alias) {
+                if let Some(alias) = c.child_sym(C::Alias) {
                     if alias != sym {
                         self.ssa.write_variable(
                             alias,
@@ -94,7 +54,7 @@ impl Fold {
     }
 
     fn handle_def(&mut self, tree: &Tree, i: u32, end: u32) {
-        let name = tree.cursor(i).child_sym(Canonical::DefName).unwrap_or(0);
+        let name = tree.cursor(i).child_sym(C::DefName).unwrap_or(0);
         if name == 0 {
             return;
         }
@@ -108,25 +68,54 @@ impl Fold {
         if let Some(&(Some(parent), _, _)) = self.def_stack.last() {
             tree.add_edge(parent, i, EdgeKind::Defines);
         }
-        if tree.cursor(i).has(Canonical::Scope) {
+        if tree.cursor(i).has(C::Scope) {
             self.def_stack.push((Some(i), end, parent_block));
         }
     }
 
     fn handle_call(&mut self, tree: &Tree, i: u32) {
-        let Some(callee) = tree.cursor(i).child(Canonical::Callee) else {
-            return;
+        let callee = match tree.cursor(i).child(C::Callee) {
+            Some(c) => c,
+            None => return,
         };
-        let Some(target) = read_target(tree, callee.index()) else {
-            return;
-        };
-        self.resolve_call(tree, target, self.enclosing());
+        let from = self.enclosing();
+
+        if let Some(member) = callee.child(C::Member) {
+            let method = member.sym();
+            if let Some(ivar) = member.child(C::Object).and_then(|o| o.child(C::Ivar)) {
+                if let Some(cls) = self.enclosing_class(tree, from) {
+                    if let Some(ts) = self.ivar_type(tree, cls, ivar.sym()) {
+                        self.resolve_type_method(tree, ts, method, from);
+                    }
+                }
+            } else {
+                let obj = member.child(C::Object).map(|o| o.sym()).unwrap_or(0);
+                for pv in &self.ssa.read_variable(obj, self.cur) {
+                    match pv {
+                        ParseValue::Type(ts) if *ts != 0 => {
+                            self.resolve_type_method(tree, *ts, method, from);
+                        }
+                        _ => self.emit_pv(tree, pv, from),
+                    }
+                }
+            }
+        } else if let Some(ivar) = callee.child(C::Ivar) {
+            if ivar.sym() != 0 {
+                if let Some(cls) = self.enclosing_class(tree, from) {
+                    if let Some(m) = self.find_method_in(tree, cls, ivar.sym()) {
+                        tree.add_edge(from, m, EdgeKind::Calls);
+                    }
+                }
+            }
+        } else if callee.sym() != 0 {
+            self.resolve_name(tree, callee.sym(), from);
+        }
     }
 
     fn handle_standalone_member(&mut self, tree: &Tree, i: u32) {
         let obj = tree
             .cursor(i)
-            .child(Canonical::Object)
+            .child(C::Object)
             .map(|o| o.sym())
             .unwrap_or(0);
         let method = tree.sym(i);
@@ -142,7 +131,7 @@ impl Fold {
                     }
                 }
                 ParseValue::Type(ts) if *ts != 0 && method != 0 => {
-                    self.resolve_method(tree, *ts, method, from);
+                    self.resolve_type_method(tree, *ts, method, from);
                 }
                 _ => {}
             }
@@ -154,7 +143,7 @@ impl Fold {
         if lhs == 0 {
             return;
         }
-        if tree.cursor(i).has(Canonical::Ivar) {
+        if tree.cursor(i).has(C::Ivar) {
             return;
         }
         if self.ssa.has_variable_in_block(lhs, self.cur) {
@@ -172,45 +161,127 @@ impl Fold {
         }
     }
 
-    fn resolve_call(&mut self, tree: &Tree, target: Target, from: u32) {
-        match target {
-            Target::Name(sym) => self.resolve_name_call(tree, sym, from),
-            Target::Method { obj, method } => {
-                for pv in &self.ssa.read_variable(obj, self.cur) {
-                    match pv {
-                        ParseValue::Type(ts) if *ts != 0 => {
-                            self.resolve_method(tree, *ts, method, from);
-                        }
-                        _ => self.emit_edge(tree, pv, from),
-                    }
-                }
-            }
-            Target::SelfMethod { attr, method } => {
-                if let Some(cls) = find_enclosing_class(tree, from, &self.containers) {
-                    if let Some(ts) = find_ivar_type(tree, cls, attr) {
-                        self.resolve_method(tree, ts, method, from);
-                    }
-                }
-            }
-            Target::SelfDirect(method) => {
-                if method != 0 {
-                    if let Some(cls) = find_enclosing_class(tree, from, &self.containers) {
-                        if let Some(m) = find_method(tree, &self.defs, cls, method) {
-                            tree.add_edge(from, m, EdgeKind::Calls);
-                        }
-                    }
-                }
-            }
+    // ── Helpers ──
+
+    fn enclosing_class(&self, tree: &Tree, node: u32) -> Option<u32> {
+        let c = tree.cursor(node);
+        let check =
+            |n: Cursor| n.child_sym(C::DefType).is_some_and(|dt| self.containers.contains(&dt));
+        if check(c) {
+            Some(node)
+        } else {
+            c.enclosing(check).map(|n| n.index())
         }
     }
 
-    fn resolve_name_call(&mut self, tree: &Tree, sym: u32, from: u32) {
+    fn ivar_type(&self, tree: &Tree, class: u32, attr: u32) -> Option<u32> {
+        tree.cursor(class).descend(|n| {
+            if n.is(C::Binding)
+                && n.child(C::Ivar).is_some_and(|iv| iv.sym() == attr)
+            {
+                if let Some(s) = n
+                    .child(C::Rhs)
+                    .and_then(|r| r.child(C::Call))
+                    .and_then(|c| c.child_sym(C::Callee))
+                {
+                    return Step::Out(s);
+                }
+            }
+            Step::Into
+        })
+    }
+
+    fn infer_return_type(&self, tree: &Tree, def: u32) -> Option<u32> {
+        let d = tree.cursor(def);
+        d.child_sym(C::ReturnType).or_else(|| {
+            let mut binds: Vec<(u32, u32)> = Vec::new();
+            for desc in d.descendants() {
+                if desc.is(C::Binding) && desc.sym() != 0 {
+                    let callee = desc
+                        .child(C::Rhs)
+                        .and_then(|rhs| rhs.child(C::Call))
+                        .and_then(|c| c.child(C::Callee))
+                        .map(|c| c.sym())
+                        .unwrap_or(0);
+                    if callee != 0 {
+                        binds.push((desc.sym(), callee));
+                    }
+                }
+            }
+            d.descend(|n| {
+                if n.is(C::Return) {
+                    for ch in n.children() {
+                        if ch.is(C::Call) {
+                            if let Some(s) = ch.child_sym(C::Callee) {
+                                return Step::Out(s);
+                            }
+                        }
+                        let sym = ch.sym();
+                        if sym != 0 {
+                            for &(lhs, callee) in &binds {
+                                if lhs == sym {
+                                    return Step::Out(callee);
+                                }
+                            }
+                            return Step::Out(sym);
+                        }
+                    }
+                }
+                if n.is(C::Def) && n.index() != def {
+                    Step::Over
+                } else {
+                    Step::Into
+                }
+            })
+        })
+    }
+
+    fn find_method_in(&self, tree: &Tree, container: u32, name: u32) -> Option<u32> {
+        let mut search = vec![container];
+        let mut si = 0;
+        while si < search.len() {
+            let cls = tree.cursor(search[si]);
+            if let Some(m) = cls.descend(|n| {
+                if n.is(C::DefType) {
+                    if let Some(p) = n.parent() {
+                        if p.index() != search[si]
+                            && p.child_sym(C::DefName) == Some(name)
+                        {
+                            return Step::Out(p.index());
+                        }
+                    }
+                }
+                Step::Into
+            }) {
+                return Some(m);
+            }
+            for c in cls
+                .children()
+                .filter(|c| c.is(C::SuperType) && c.sym() != 0)
+            {
+                let sn = c.sym();
+                for &dn in &self.defs {
+                    if tree.cursor(dn).child_sym(C::DefName) == Some(sn)
+                        && !search.contains(&dn)
+                    {
+                        search.push(dn);
+                    }
+                }
+            }
+            si += 1;
+        }
+        None
+    }
+
+    // ── Resolution ──
+
+    fn resolve_name(&mut self, tree: &Tree, sym: u32, from: u32) {
         let mut reaching = self.ssa.read_variable(sym, self.cur);
         if reaching.is_empty() {
             let wildcard = self.ssa.read_variable(self.wildcard, self.cur);
             if !wildcard.is_empty() {
                 for pv in &wildcard {
-                    self.emit_edge(tree, pv, from);
+                    self.emit_pv(tree, pv, from);
                 }
                 reaching = wildcard;
             }
@@ -222,9 +293,9 @@ impl Fold {
                         if let ParseValue::LocalDef(cdi) = cpv {
                             let target = self.defs[*cdi as usize];
                             if let Some(callable) =
-                                tree.cursor(target).child_sym(Canonical::Callable)
+                                tree.cursor(target).child_sym(C::Callable)
                             {
-                                if let Some(m) = find_method(tree, &self.defs, target, callable) {
+                                if let Some(m) = self.find_method_in(tree, target, callable) {
                                     tree.add_edge(from, m, EdgeKind::Calls);
                                 }
                             } else {
@@ -233,15 +304,16 @@ impl Fold {
                         }
                     }
                 }
-                _ => self.emit_edge(tree, pv, from),
+                _ => self.emit_pv(tree, pv, from),
             }
         }
     }
 
-    fn resolve_method(&mut self, tree: &Tree, type_sym: u32, method_sym: u32, from: u32) {
+    fn resolve_type_method(&mut self, tree: &Tree, type_sym: u32, method_sym: u32, from: u32) {
         for cpv in &self.ssa.read_variable(type_sym, self.cur) {
             if let ParseValue::LocalDef(cdi) = cpv {
-                if let Some(m) = find_method(tree, &self.defs, self.defs[*cdi as usize], method_sym)
+                if let Some(m) =
+                    self.find_method_in(tree, self.defs[*cdi as usize], method_sym)
                 {
                     tree.add_edge(from, m, EdgeKind::Calls);
                 }
@@ -249,7 +321,7 @@ impl Fold {
         }
     }
 
-    fn emit_edge(&self, tree: &Tree, pv: &ParseValue, from: u32) {
+    fn emit_pv(&self, tree: &Tree, pv: &ParseValue, from: u32) {
         match pv {
             ParseValue::LocalDef(di) => {
                 tree.add_edge(from, self.defs[*di as usize], EdgeKind::Calls)
@@ -263,15 +335,32 @@ impl Fold {
         }
     }
 
+    // ── RHS classification ──
+
     fn classify_rhs(&mut self, tree: &Tree, node: u32) -> Value {
         let nr = tree.cursor(node);
-        let Some(rhs) = nr.child(Canonical::Rhs) else {
+        let Some(rhs) = nr.child(C::Rhs) else {
             return Value::Opaque;
         };
-        if let Some(call) = rhs.child(Canonical::Call) {
-            if let Some(callee) = call.child(Canonical::Callee) {
-                if let Some(target) = read_target(tree, callee.index()) {
-                    return self.value_from_target(tree, target, node);
+        if let Some(call) = rhs.child(C::Call) {
+            if let Some(callee) = call.child(C::Callee) {
+                if let Some(member) = callee.child(C::Member) {
+                    let method = member.sym();
+                    let obj_cursor = member.child(C::Object);
+                    let ivar = obj_cursor.and_then(|o| o.child(C::Ivar));
+                    let obj_sym = ivar
+                        .map(|iv| iv.sym())
+                        .or_else(|| obj_cursor.map(|o| o.sym()))
+                        .unwrap_or(0);
+                    let is_ivar = ivar.is_some();
+                    return self.value_from_method_call(tree, obj_sym, method, node, is_ivar);
+                } else if callee.child(C::Ivar).is_some() {
+                    return Value::Opaque;
+                } else {
+                    let sym = callee.sym();
+                    if sym != 0 {
+                        return self.value_from_name_call(tree, sym);
+                    }
                 }
             }
             return Value::Opaque;
@@ -281,7 +370,7 @@ impl Fold {
             let is_class = self.ssa.read_variable(sym, self.cur).iter().any(|pv| {
                 if let ParseValue::LocalDef(di) = pv {
                     tree.cursor(self.defs[*di as usize])
-                        .child_sym(Canonical::DefType)
+                        .child_sym(C::DefType)
                         .is_some_and(|dt| dt == self.class_sym)
                 } else {
                     false
@@ -297,85 +386,90 @@ impl Fold {
         }
     }
 
-    fn value_from_target(&mut self, tree: &Tree, target: Target, binding: u32) -> Value {
-        match target {
-            Target::Name(sym) => {
-                let reaching = self.ssa.read_variable(sym, self.cur);
-                let is_class = reaching.iter().any(|pv| {
-                    if let ParseValue::LocalDef(di) = pv {
-                        tree.cursor(self.defs[*di as usize])
-                            .child_sym(Canonical::DefType)
-                            .is_some_and(|dt| dt == self.class_sym)
-                    } else {
-                        false
-                    }
+    fn value_from_name_call(&mut self, tree: &Tree, sym: u32) -> Value {
+        let reaching = self.ssa.read_variable(sym, self.cur);
+        let is_class = reaching.iter().any(|pv| {
+            if let ParseValue::LocalDef(di) = pv {
+                tree.cursor(self.defs[*di as usize])
+                    .child_sym(C::DefType)
+                    .is_some_and(|dt| dt == self.class_sym)
+            } else {
+                false
+            }
+        });
+        if is_class {
+            return Value::Type(sym);
+        }
+        let rt = reaching.iter().find_map(|pv| {
+            if let ParseValue::LocalDef(di) = pv {
+                self.infer_return_type(tree, self.defs[*di as usize])
+            } else {
+                None
+            }
+        });
+        match rt {
+            Some(rt_sym) => {
+                let found = self.defs.iter().position(|&dn| {
+                    tree.cursor(dn).child_sym(C::DefName).unwrap_or(0) == rt_sym
                 });
-                if is_class {
-                    return Value::Type(sym);
+                if let Some(di) = found {
+                    if tree
+                        .cursor(self.defs[di])
+                        .child_sym(C::DefType)
+                        .is_some_and(|dt| dt == self.class_sym)
+                    {
+                        Value::Type(rt_sym)
+                    } else {
+                        Value::LocalDef(di as u32)
+                    }
+                } else {
+                    Value::Type(rt_sym)
                 }
-                let rt = reaching.iter().find_map(|pv| {
-                    if let ParseValue::LocalDef(di) = pv {
-                        return_type_of_def(tree, self.defs[*di as usize])
+            }
+            None => Value::Opaque,
+        }
+    }
+
+    fn value_from_method_call(
+        &mut self,
+        tree: &Tree,
+        obj: u32,
+        method: u32,
+        binding: u32,
+        is_ivar: bool,
+    ) -> Value {
+        let obj_type = if is_ivar {
+            self.enclosing_class(tree, binding)
+                .and_then(|cls| self.ivar_type(tree, cls, obj))
+        } else if obj != 0 {
+            self.ssa
+                .read_variable(obj, self.cur)
+                .iter()
+                .find_map(|pv| {
+                    if let ParseValue::Type(ts) = pv {
+                        Some(*ts)
                     } else {
                         None
                     }
-                });
-                match rt {
-                    Some(rt_sym) => {
-                        let found = self.defs.iter().position(|&dn| {
-                            tree.cursor(dn).child_sym(Canonical::DefName).unwrap_or(0) == rt_sym
-                        });
-                        if let Some(di) = found {
-                            if tree
-                                .cursor(self.defs[di])
-                                .child_sym(Canonical::DefType)
-                                .is_some_and(|dt| dt == self.class_sym)
-                            {
-                                Value::Type(rt_sym)
-                            } else {
-                                Value::LocalDef(di as u32)
-                            }
-                        } else {
-                            Value::Type(rt_sym)
-                        }
-                    }
-                    None => Value::Opaque,
-                }
-            }
-            Target::Method { obj, method } | Target::SelfMethod { attr: obj, method } => {
-                let is_ivar = std::matches!(target, Target::SelfMethod { .. });
-                let obj_type = if is_ivar {
-                    find_enclosing_class(tree, binding, &self.containers)
-                        .and_then(|cls| find_ivar_type(tree, cls, obj))
-                } else if obj != 0 {
-                    self.ssa.read_variable(obj, self.cur).iter().find_map(|pv| {
-                        if let ParseValue::Type(ts) = pv {
-                            Some(*ts)
-                        } else {
-                            None
-                        }
-                    })
-                } else {
-                    None
-                };
-                let Some(ts) = obj_type else {
-                    return Value::Opaque;
-                };
-                for cpv in &self.ssa.read_variable(ts, self.cur) {
-                    if let ParseValue::LocalDef(cdi) = cpv {
-                        if let Some(m) =
-                            find_method(tree, &self.defs, self.defs[*cdi as usize], method)
-                        {
-                            if let Some(rt) = return_type_of_def(tree, m) {
-                                return Value::Type(rt);
-                            }
-                        }
+                })
+        } else {
+            None
+        };
+        let Some(ts) = obj_type else {
+            return Value::Opaque;
+        };
+        for cpv in &self.ssa.read_variable(ts, self.cur) {
+            if let ParseValue::LocalDef(cdi) = cpv {
+                if let Some(m) =
+                    self.find_method_in(tree, self.defs[*cdi as usize], method)
+                {
+                    if let Some(rt) = self.infer_return_type(tree, m) {
+                        return Value::Type(rt);
                     }
                 }
-                Value::Opaque
             }
-            Target::SelfDirect(_) => Value::Opaque,
         }
+        Value::Opaque
     }
 }
 
@@ -454,40 +548,40 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
             }
         }
 
-        if k == Canonical::Import || k == Canonical::ImportType {
+        if k == C::Import || k == C::ImportType {
             f.handle_import(tree, i);
             i += n.size.max(1);
             continue;
         }
-        if tree.cursor(i).child_sym(Canonical::DefType).is_some() {
+        if tree.cursor(i).child_sym(C::DefType).is_some() {
             f.handle_def(tree, i, end);
             i += 1;
             continue;
         }
-        if k == Canonical::Call {
+        if k == C::Call {
             f.handle_call(tree, i);
             i += 1;
             continue;
         }
-        if k == Canonical::Member {
+        if k == C::Member {
             let pk = tree.cursor(i).parent().map_or(0, |p| p.kind());
-            if pk != Canonical::Call && pk != Canonical::Callee {
+            if pk != C::Call && pk != C::Callee {
                 f.handle_standalone_member(tree, i);
             }
             i += 1;
             continue;
         }
-        if k == Canonical::Binding {
+        if k == C::Binding {
             f.handle_binding(tree, i);
             i += 1;
             continue;
         }
-        if k == Canonical::Branch {
+        if k == C::Branch {
             let pre = f.cur;
             let arms: Vec<(u32, u32)> = tree
                 .cursor(i)
                 .children()
-                .filter(|c| c.is(Canonical::Arm))
+                .filter(|c| c.is(C::Arm))
                 .map(|c| (c.index(), c.index() + c.size()))
                 .collect();
             let entries: Vec<BlockId> = arms
@@ -505,7 +599,7 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
             i += 1;
             continue;
         }
-        if k == Canonical::Loop {
+        if k == C::Loop {
             let (h, _) = f.ssa.begin_loop(f.cur);
             f.cur = f.ssa.finish_loop(h, f.cur);
             i += 1;
@@ -529,7 +623,7 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
         let syms: Vec<u32> = tree
             .cursor(dn)
             .children()
-            .filter(|c| (c.is(Canonical::SuperType) || c.is(Canonical::Decorator)) && c.sym() != 0)
+            .filter(|c| (c.is(C::SuperType) || c.is(C::Decorator)) && c.sym() != 0)
             .map(|c| c.sym())
             .collect();
         for sym in syms {
@@ -542,113 +636,5 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
     }
     for (from, to) in meta {
         tree.add_edge(from, to, EdgeKind::Calls);
-    }
-}
-
-fn return_type_of_def(tree: &Tree, def: u32) -> Option<u32> {
-    if let Some(rt) = tree.cursor(def).child_sym(Canonical::ReturnType) {
-        return Some(rt);
-    }
-    let mut binds: Vec<(u32, u32)> = Vec::new();
-    for d in tree.cursor(def).descendants() {
-        if d.is(Canonical::Binding) && d.sym() != 0 {
-            let callee = d
-                .child(Canonical::Rhs)
-                .and_then(|rhs| rhs.child(Canonical::Call))
-                .and_then(|c| c.child(Canonical::Callee))
-                .map(|c| c.sym())
-                .unwrap_or(0);
-            if callee != 0 {
-                binds.push((d.sym(), callee));
-            }
-        }
-    }
-
-    for d in tree.cursor(def).descendants() {
-        if !d.is(Canonical::Return) {
-            continue;
-        }
-        for c in d.children() {
-            if c.is(Canonical::Call) {
-                return c
-                    .child(Canonical::Callee)
-                    .map(|c2| c2.sym())
-                    .filter(|&v| v != 0);
-            }
-            let sym = c.sym();
-            if sym != 0 {
-                for &(lhs, callee) in &binds {
-                    if lhs == sym {
-                        return Some(callee);
-                    }
-                }
-                return Some(sym);
-            }
-        }
-    }
-    None
-}
-
-fn find_method(tree: &Tree, defs: &[u32], container: u32, name: u32) -> Option<u32> {
-    let mut search = vec![container];
-    let mut si = 0;
-    while si < search.len() {
-        for d in tree.cursor(search[si]).descendants() {
-            if d.is(Canonical::DefType) {
-                if let Some(m) = d.parent() {
-                    if m.index() != search[si]
-                        && m.child_sym(Canonical::DefName).unwrap_or(0) == name
-                    {
-                        return Some(m.index());
-                    }
-                }
-            }
-        }
-        for c in tree.cursor(search[si]).children() {
-            if c.is(Canonical::SuperType) && c.sym() != 0 {
-                let sn = c.sym();
-                for &dn in defs {
-                    if tree.cursor(dn).child_sym(Canonical::DefName).unwrap_or(0) == sn
-                        && !search.contains(&dn)
-                    {
-                        search.push(dn);
-                    }
-                }
-            }
-        }
-        si += 1;
-    }
-    None
-}
-
-fn find_ivar_type(tree: &Tree, class: u32, attr: u32) -> Option<u32> {
-    for d in tree.cursor(class).descendants() {
-        if d.is(Canonical::Binding) && d.child(Canonical::Ivar).is_some_and(|iv| iv.sym() == attr) {
-            return d
-                .child(Canonical::Rhs)
-                .and_then(|rhs| rhs.child(Canonical::Call))
-                .and_then(|c| c.child(Canonical::Callee))
-                .map(|c| c.sym())
-                .filter(|&v| v != 0);
-        }
-    }
-    None
-}
-
-fn find_enclosing_class(tree: &Tree, node: u32, containers: &[u32]) -> Option<u32> {
-    let check = |n| {
-        tree.cursor(n)
-            .child_sym(Canonical::DefType)
-            .is_some_and(|dt| containers.contains(&dt))
-    };
-    if check(node) {
-        Some(node)
-    } else {
-        tree.cursor(node)
-            .enclosing(|n| {
-                n.child_sym(Canonical::DefType)
-                    .is_some_and(|dt| containers.contains(&dt))
-            })
-            .map(|n| n.index())
     }
 }
