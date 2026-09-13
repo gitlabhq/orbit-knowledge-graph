@@ -5,7 +5,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::canonical::Canonical as C;
 use crate::grammar::SupportLang;
 use crate::lang::Lang;
-use crate::tree::{Cursor, Edge, EdgeKind, NodeRef, Step, Tree, find_method_in, infer_return_type};
+use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
+
+type VisibleMap = Vec<FxHashMap<u32, (usize, u32)>>;
 
 pub struct ResolveResult {
     pub cross_edges: Vec<Edge>,
@@ -23,10 +25,9 @@ pub fn resolve(
     let mut visible = build_visible_names(trees);
     let (reqs, mut cross_edges) =
         gather_imports(trees, lang, &file_index, lookup_prefixes, external);
-    let (reexports, ambiguous) =
+    let ambiguous =
         propagate_reexports(trees, lang, &reqs, &mut visible, support_lang, index_names);
 
-    // Writeback resolved paths (only mutation after this point)
     for req in &reqs {
         let resolved_sym = lang.syms.intern(&req.target_path);
         let sp_idx = trees[req.fi]
@@ -38,7 +39,6 @@ pub fn resolve(
         }
     }
 
-    // All read-only from here. Create corpus cursor for cross-tree navigation.
     let root = Cursor::new(trees, 0, 0);
 
     let import_edges = build_import_edges(
@@ -46,7 +46,6 @@ pub fn resolve(
         lang,
         &reqs,
         &visible,
-        &reexports,
         &ambiguous,
         support_lang,
         index_names,
@@ -90,10 +89,11 @@ fn build_file_index(
     idx
 }
 
-fn build_visible_names(trees: &[Tree]) -> Vec<FxHashMap<u32, u32>> {
+fn build_visible_names(trees: &[Tree]) -> VisibleMap {
     trees
         .iter()
-        .map(|tree| {
+        .enumerate()
+        .map(|(fi, tree)| {
             let mut names = FxHashMap::default();
             for i in 0..tree.len() {
                 if tree.nodes[i as usize].dead {
@@ -102,7 +102,7 @@ fn build_visible_names(trees: &[Tree]) -> Vec<FxHashMap<u32, u32>> {
                 let c = tree.cursor(i);
                 if c.has(C::DefType) {
                     if let Some(ns) = c.child_sym(C::DefName) {
-                        names.insert(ns, i);
+                        names.insert(ns, (fi, i));
                     }
                 }
             }
@@ -188,17 +188,13 @@ fn propagate_reexports(
     trees: &[Tree],
     lang: &Lang,
     reqs: &[ImportReq],
-    visible: &mut [FxHashMap<u32, u32>],
+    visible: &mut VisibleMap,
     support_lang: SupportLang,
     index_names: &[String],
-) -> (
-    FxHashMap<(usize, u32), (usize, u32)>,
-    FxHashSet<(usize, u32)>,
-) {
-    let mut reexports: FxHashMap<(usize, u32), (usize, u32)> = FxHashMap::default();
+) -> FxHashSet<(usize, u32)> {
     let mut ambiguous: FxHashSet<(usize, u32)> = FxHashSet::default();
     for _round in 0..3 {
-        let mut new_exports = Vec::new();
+        let mut new_exports: Vec<(usize, u32, usize, u32)> = Vec::new();
         for req in reqs {
             let path = lang.syms.resolve(trees[req.fi].root().sym());
             let stem = support_lang.strip_extension(path);
@@ -215,29 +211,17 @@ fn propagate_reexports(
             {
                 let ns = c.sym();
                 if lang.syms.resolve(ns) == "*" {
-                    for (&ds, &dn) in &visible[req.target_fi] {
+                    let target_entries: Vec<_> =
+                        visible[req.target_fi].iter().map(|(&s, &v)| (s, v)).collect();
+                    for (ds, (tfi, tn)) in target_entries {
                         if !visible[req.fi].contains_key(&ds) {
-                            new_exports.push((req.fi, ds, req.target_fi, dn));
+                            new_exports.push((req.fi, ds, tfi, tn));
                         }
                     }
-                    let re: Vec<_> = reexports
-                        .iter()
-                        .filter(|((fi, _), _)| *fi == req.target_fi)
-                        .map(|((_, s), (tfi, tn))| (*s, *tfi, *tn))
-                        .collect();
-                    for (s, tfi, tn) in re {
-                        if !visible[req.fi].contains_key(&s) {
-                            new_exports.push((req.fi, s, tfi, tn));
-                        }
-                    }
-                } else if let Some(&dn) = visible[req.target_fi].get(&ns) {
+                } else if let Some(&(tfi, tn)) = visible[req.target_fi].get(&ns) {
                     if !visible[req.fi].contains_key(&ns) {
-                        new_exports.push((req.fi, ns, req.target_fi, dn));
+                        new_exports.push((req.fi, ns, tfi, tn));
                     }
-                } else if let Some(&(tfi, tn)) = reexports.get(&(req.target_fi, ns))
-                    && !visible[req.fi].contains_key(&ns)
-                {
-                    new_exports.push((req.fi, ns, tfi, tn));
                 }
             }
         }
@@ -245,18 +229,16 @@ fn propagate_reexports(
             break;
         }
         for (fi, ns, tfi, tn) in new_exports {
-            if let Some(&existing) = visible[fi].get(&ns) {
-                let (efi, en) = reexports.get(&(fi, ns)).copied().unwrap_or((fi, existing));
+            if let Some(&(efi, en)) = visible[fi].get(&ns) {
                 if efi != tfi || en != tn {
                     ambiguous.insert((fi, ns));
                 }
                 continue;
             }
-            visible[fi].insert(ns, tn);
-            reexports.insert((fi, ns), (tfi, tn));
+            visible[fi].insert(ns, (tfi, tn));
         }
     }
-    (reexports, ambiguous)
+    ambiguous
 }
 
 // ── Edge-building functions: receive a corpus Cursor, no raw &[Tree] ──
@@ -265,8 +247,7 @@ fn build_import_edges(
     corpus: Cursor,
     lang: &Lang,
     reqs: &[ImportReq],
-    visible: &[FxHashMap<u32, u32>],
-    reexports: &FxHashMap<(usize, u32), (usize, u32)>,
+    visible: &VisibleMap,
     ambiguous: &FxHashSet<(usize, u32)>,
     support_lang: SupportLang,
     index_names: &[String],
@@ -280,9 +261,8 @@ fn build_import_edges(
             let ns = c.sym();
             let name_str = lang.syms.resolve(ns);
             if name_str == "*" {
-                for (&dn, &dnode) in &visible[tfi] {
+                for (&dn, &(rfi, rn)) in &visible[tfi] {
                     if !ambiguous.contains(&(tfi, dn)) {
-                        let (rfi, rn) = reexports.get(&(tfi, dn)).copied().unwrap_or((tfi, dnode));
                         edges.push(c.edge_to(c.jump(rfi as u32, rn), EdgeKind::Imports));
                     }
                 }
@@ -291,15 +271,16 @@ fn build_import_edges(
             if ambiguous.contains(&(tfi, ns)) {
                 continue;
             }
-            if let Some(&(rfi, rn)) = reexports.get(&(tfi, ns)) {
+            if let Some(&(rfi, rn)) = visible[tfi].get(&ns) {
                 edges.push(c.edge_to(c.jump(rfi as u32, rn), EdgeKind::Imports));
-            } else if let Some(&dn) = visible[tfi].get(&ns) {
-                edges.push(c.edge_to(c.jump(tfi as u32, dn), EdgeKind::Imports));
             } else {
                 let results = follow_import_chain(corpus, reqs, visible, ns, tfi);
                 if results.len() == 1 {
                     edges.push(
-                        c.edge_to(c.jump(results[0].0 as u32, results[0].1), EdgeKind::Imports),
+                        c.edge_to(
+                            c.jump(results[0].0 as u32, results[0].1),
+                            EdgeKind::Imports,
+                        ),
                     );
                 } else {
                     let tgt = corpus.jump(tfi as u32, 0);
@@ -324,7 +305,7 @@ fn build_call_edges(
     lang: &Lang,
     cross_edges: &[Edge],
     reqs: &[ImportReq],
-    visible: &[FxHashMap<u32, u32>],
+    visible: &VisibleMap,
 ) -> (Vec<Edge>, Vec<Edge>) {
     let mut module_calls = Vec::new();
     for req in reqs {
@@ -355,9 +336,10 @@ fn build_call_edges(
                     let ms = mn.sym();
                     if ms != 0 {
                         for &tfi in &target_files {
-                            if let Some(&dn) = visible[tfi].get(&ms) {
+                            if let Some(&(dfi, dn)) = visible[tfi].get(&ms) {
                                 module_calls.push(
-                                    caller.edge_to(caller.jump(tfi as u32, dn), EdgeKind::Calls),
+                                    caller
+                                        .edge_to(caller.jump(dfi as u32, dn), EdgeKind::Calls),
                                 );
                                 break;
                             }
@@ -372,7 +354,7 @@ fn build_call_edges(
     for ce in cross_edges.iter().filter(|e| e.kind == EdgeKind::Imports) {
         let target_name = visible[ce.to.tree as usize]
             .iter()
-            .find(|(_, n)| **n == ce.to.node)
+            .find(|(_, (vfi, vn))| *vfi == ce.to.tree as usize && *vn == ce.to.node)
             .map(|(s, _)| *s)
             .unwrap_or(0);
         let ft = &corpus.trees_ref()[ce.from.tree as usize];
@@ -408,7 +390,7 @@ fn build_type_edges(
     corpus: Cursor,
     call_edges: &[Edge],
     cross_edges: &[Edge],
-    visible: &[FxHashMap<u32, u32>],
+    visible: &VisibleMap,
 ) -> Vec<Edge> {
     let mut type_edges = Vec::new();
     for ce in call_edges.iter().filter(|e| e.kind == EdgeKind::Calls) {
@@ -457,11 +439,11 @@ fn resolve_type(
     ret_sym: u32,
     target_fi: usize,
     corpus: Cursor,
-    visible: &[FxHashMap<u32, u32>],
+    visible: &VisibleMap,
     cross_edges: &[Edge],
 ) -> Option<(usize, u32)> {
-    if let Some(&cn) = visible[target_fi].get(&ret_sym) {
-        return Some((target_fi, cn));
+    if let Some(&loc) = visible[target_fi].get(&ret_sym) {
+        return Some(loc);
     }
     for ce in cross_edges {
         if ce.from.tree as usize == target_fi && ce.kind == EdgeKind::Imports {
@@ -476,7 +458,7 @@ fn resolve_type(
 fn follow_import_chain(
     corpus: Cursor,
     reqs: &[ImportReq],
-    visible: &[FxHashMap<u32, u32>],
+    visible: &VisibleMap,
     wanted: u32,
     start_fi: usize,
 ) -> Vec<(usize, u32)> {
@@ -488,9 +470,9 @@ fn follow_import_chain(
             continue;
         }
         visited.push((fi, ws));
-        if let Some(&dn) = visible[fi].get(&ws) {
-            if !results.contains(&(fi, dn)) {
-                results.push((fi, dn));
+        if let Some(&loc) = visible[fi].get(&ws) {
+            if !results.contains(&loc) {
+                results.push(loc);
             }
             continue;
         }
