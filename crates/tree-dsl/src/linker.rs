@@ -3,9 +3,9 @@ use crate::lang::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tree::{Cursor, EdgeKind, Step, Tree, infer_return_type};
 
-// ── Resolved: what a symbol maps to after SSA resolution ──
+// ── Linked: what a symbol maps to after SSA resolution ──
 
-enum Resolved {
+enum Linked {
     Def(u32),
     Import(u32),
     Type(u32),
@@ -41,26 +41,26 @@ impl Fold {
 
     // ── SSA resolution: translate ParseValue → concrete node indices ──
 
-    fn resolve(&mut self, sym: u32) -> Vec<Resolved> {
+    fn lookup(&mut self, sym: u32) -> Vec<Linked> {
         self.ssa
             .read_variable(sym, self.cur)
             .iter()
             .filter_map(|pv| match pv {
-                ParseValue::LocalDef(di) => Some(Resolved::Def(self.defs[*di as usize])),
+                ParseValue::LocalDef(di) => Some(Linked::Def(self.defs[*di as usize])),
                 ParseValue::ImportRef(ii) => {
-                    self.imports.get(*ii as usize).map(|&n| Resolved::Import(n))
+                    self.imports.get(*ii as usize).map(|&n| Linked::Import(n))
                 }
-                ParseValue::Type(ts) if *ts != 0 => Some(Resolved::Type(*ts)),
+                ParseValue::Type(ts) if *ts != 0 => Some(Linked::Type(*ts)),
                 _ => None,
             })
             .collect()
     }
 
-    fn emit(&self, tree: &Tree, r: &Resolved, from: u32) {
+    fn emit(&self, tree: &Tree, r: &Linked, from: u32) {
         match r {
-            Resolved::Def(node) => tree.add_edge(from, *node, EdgeKind::Calls),
-            Resolved::Import(node) => tree.add_edge(from, *node, EdgeKind::Imports),
-            Resolved::Type(_) => {}
+            Linked::Def(node) => tree.add_edge(from, *node, EdgeKind::Calls),
+            Linked::Import(node) => tree.add_edge(from, *node, EdgeKind::Imports),
+            Linked::Type(_) => {}
         }
     }
 
@@ -68,10 +68,10 @@ impl Fold {
         tree.cursor(node).child_sym(C::DefType) == Some(self.class_sym)
     }
 
-    fn any_class(&self, tree: &Tree, resolved: &[Resolved]) -> bool {
+    fn any_class(&self, tree: &Tree, resolved: &[Linked]) -> bool {
         resolved
             .iter()
-            .any(|r| matches!(r, Resolved::Def(n) if self.is_class(tree, *n)))
+            .any(|r| matches!(r, Linked::Def(n) if self.is_class(tree, *n)))
     }
 
     // ── Handlers ──
@@ -164,10 +164,10 @@ impl Fold {
         }
         let method = tree.sym(i);
         let from = self.enclosing();
-        for r in self.resolve(obj) {
+        for r in self.lookup(obj) {
             match r {
-                Resolved::Type(ts) if method != 0 => self.resolve_method(tree, ts, method, from),
-                Resolved::Import(node) => tree.add_edge(from, node, EdgeKind::Imports),
+                Linked::Type(ts) if method != 0 => self.resolve_method(tree, ts, method, from),
+                Linked::Import(node) => tree.add_edge(from, node, EdgeKind::Imports),
                 _ => {}
             }
         }
@@ -196,27 +196,27 @@ impl Fold {
     // ── Resolution ──
 
     fn resolve_obj(&mut self, tree: &Tree, obj: u32, method: u32, from: u32) {
-        for r in self.resolve(obj) {
+        for r in self.lookup(obj) {
             match r {
-                Resolved::Type(ts) => self.resolve_method(tree, ts, method, from),
+                Linked::Type(ts) => self.resolve_method(tree, ts, method, from),
                 _ => self.emit(tree, &r, from),
             }
         }
     }
 
     fn resolve_name(&mut self, tree: &Tree, sym: u32, from: u32) {
-        let mut targets = self.resolve(sym);
+        let mut targets = self.lookup(sym);
         if targets.is_empty() {
-            targets = self.resolve(self.wildcard);
+            targets = self.lookup(self.wildcard);
             for r in &targets {
                 self.emit(tree, r, from);
             }
         }
         for r in &targets {
             match r {
-                Resolved::Type(ts) => {
-                    for inner in self.resolve(*ts) {
-                        if let Resolved::Def(target) = inner {
+                Linked::Type(ts) => {
+                    for inner in self.lookup(*ts) {
+                        if let Linked::Def(target) = inner {
                             if let Some(callable) = tree.cursor(target).child_sym(C::Callable) {
                                 if let Some(m) = self.find_method_in(tree, target, callable) {
                                     tree.add_edge(from, m, EdgeKind::Calls);
@@ -233,8 +233,8 @@ impl Fold {
     }
 
     fn resolve_method(&mut self, tree: &Tree, type_sym: u32, method: u32, from: u32) {
-        for r in self.resolve(type_sym) {
-            if let Resolved::Def(cls) = r {
+        for r in self.lookup(type_sym) {
+            if let Linked::Def(cls) = r {
                 if let Some(m) = self.find_method_in(tree, cls, method) {
                     tree.add_edge(from, m, EdgeKind::Calls);
                 }
@@ -324,7 +324,7 @@ impl Fold {
 
         let sym = rhs.sym();
         if sym != 0 {
-            let r = self.resolve(sym);
+            let r = self.lookup(sym);
             if self.any_class(tree, &r) {
                 Value::Type(sym)
             } else {
@@ -336,12 +336,12 @@ impl Fold {
     }
 
     fn value_from_name(&mut self, tree: &Tree, sym: u32) -> Value {
-        let resolved = self.resolve(sym);
+        let resolved = self.lookup(sym);
         if self.any_class(tree, &resolved) {
             return Value::Type(sym);
         }
         for r in &resolved {
-            if let Resolved::Def(node) = r {
+            if let Linked::Def(node) = r {
                 if let Some(rt) = infer_return_type(tree.cursor(*node)) {
                     return self.classify_return(tree, rt);
                 }
@@ -362,8 +362,8 @@ impl Fold {
             self.enclosing_class(tree, binding)
                 .and_then(|cls| self.ivar_type(tree, cls, obj))
         } else if obj != 0 {
-            self.resolve(obj).into_iter().find_map(|r| {
-                if let Resolved::Type(ts) = r {
+            self.lookup(obj).into_iter().find_map(|r| {
+                if let Linked::Type(ts) = r {
                     Some(ts)
                 } else {
                     None
@@ -375,8 +375,8 @@ impl Fold {
         let Some(ts) = obj_type else {
             return Value::Opaque;
         };
-        for r in self.resolve(ts) {
-            if let Resolved::Def(cls) = r {
+        for r in self.lookup(ts) {
+            if let Linked::Def(cls) = r {
                 if let Some(m) = self.find_method_in(tree, cls, method) {
                     if let Some(rt) = infer_return_type(tree.cursor(m)) {
                         return Value::Type(rt);
