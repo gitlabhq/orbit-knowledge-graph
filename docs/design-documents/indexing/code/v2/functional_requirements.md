@@ -3,35 +3,10 @@
 This document defines what Orbit Code Indexing and its query API must do.
 It describes required behavior, independent of the database and storage design.
 
-All API fixtures in this document are pseudocode. They show required behavior, not the final API syntax or field names.
+All API and event fixtures in this document are pseudocode. They show required behavior, not the final API syntax or field names.
 Example payloads show only the fields relevant to each scenario.
 
-## Table of Contents
-
-- [Terms](#terms).
-- [High-Level Product Contract](#high-level-product-contract).
-- [Querying Behavior](#querying-behavior).
-  - [Code graph and combined queries](#code-graph-and-combined-queries).
-  - [Graph filtering by file content](#graph-filtering-by-file-content).
-  - [Example: file content selects graph results](#example-file-content-selects-graph-results).
-  - [Example: content and graph queries](#example-content-and-graph-queries).
-  - [Content search types](#content-search-types).
-  - [Filters across projects](#filters-across-projects).
-  - [Queries scoped to one project](#queries-scoped-to-one-project).
-  - [Example: cross-project and single-project filters](#example-cross-project-and-single-project-filters).
-  - [Result selection](#result-selection).
-- [Branches, Tags, Commits, and Coverage](#branches-tags-commits-and-coverage).
-  - [Example: tag selection](#example-tag-selection).
-  - [Example: exact commit behavior](#example-exact-commit-behavior).
-- [Results and Pagination](#results-and-pagination).
-  - [Example: paging during an update](#example-paging-during-an-update).
-- [Authorization and Namespace Isolation](#authorization-and-namespace-isolation).
-  - [Example: a cursor cannot preserve revoked access](#example-a-cursor-cannot-preserve-revoked-access).
-- [Incremental Indexing and Push to Search](#incremental-indexing-and-push-to-search).
-  - [Example: a force push reuses unchanged content](#example-a-force-push-reuses-unchanged-content).
-- [Minimal Load on Gitaly](#minimal-load-on-gitaly).
-  - [Example: queries do not depend on Gitaly](#example-queries-do-not-depend-on-gitaly).
-- [Operating Limits](#operating-limits).
+[[_TOC_]]
 
 ## Terms
 
@@ -58,7 +33,7 @@ From a query perspective:
 - Users must be able to **query definitions and relationships** through the same index that supports content search.
 - Users must be able to **find exact code matches** in the repository versions they select and may read.
 - Orbit must support **text**, **regex**, and **ast-grep structural search**.
-- Orbit must filter graph queries by file content search results.
+- Orbit must support optional file content filters in graph queries.
 - Users must be able to **combine content filters and code graph relationships** in one query.
 - Users must be able to **search across branches, tags, and commits**, including a specific commit in a specific project.
 - These scenarios must be available through the UI, Orbit CLI, and query API (Open-Cypher/GQL).
@@ -102,19 +77,21 @@ Unless a branch, tag, or commit is selected, Orbit must query each project's ind
 
 ### Graph filtering by file content
 
-Orbit must use file content search results to constrain graph queries in the same request.
-Callers must not need to find or supply file IDs first.
-This must support exact text, regex, and structural search with the project, revision, language, and path filters defined below.
+- Orbit can optionally use file content search results to constrain graph queries in the same request.
+- When callers supply a content filter, Orbit must apply it without requiring file IDs first.
+- Supplied filters must support exact text, regex, and structural search with the project, revision, language, and path filters defined below.
 
-| Scenario | Required result |
+| Condition | Required result |
 | --- | --- |
-| Filter File nodes by content containing X. | Return only files with a verified content match, even when content is not requested as an output field. |
-| Filter a File node within a larger graph query. | Constrain that node to matching files. Return only graph rows that satisfy both the content filter and the requested relationships. |
-| Traverse from content-matched files to their definitions or relationships. | Use only matching files as the starting set. Returned nodes must satisfy the requested traversal and permissions. |
-| Search for text absent from every file in the selected scope. | Return zero graph results when the search is complete. Never ignore the content filter. |
-| Search a fixture with both matching and nonmatching files. | Keep only matches and graph results reached through them. A matching file must not cause unrelated files to qualify. |
-| Count or page graph results with a content filter. | Apply content filtering before graph result sorting, limits, counts, and pagination. Evaluate the full selected scope, not just an unfiltered page. |
-| Fail to evaluate the content filter. | Return an explicit error or incomplete status. Never substitute unfiltered graph results or claim a complete empty result. |
+| No file content filter is supplied. | Evaluate the graph query without requiring a content match. Apply its project, revision, and access scope. |
+| A file content filter is supplied. | Apply it to the selected File nodes. Do not treat a supplied filter as optional during execution. |
+| The filter selects File nodes by content containing X. | Return only files with a verified content match, even when content is not requested as an output field. |
+| The filter selects a File node within a larger graph query. | Constrain that node to matching files. Return only graph rows that satisfy both the content filter and the requested relationships. |
+| The query traverses from content-matched files. | Use only matching files as the starting set. Returned nodes must satisfy the requested traversal and permissions. |
+| The filter has no matches in the fully searched scope. | Return zero graph results when the search is complete. Never ignore the content filter. |
+| A supplied filter matches only some files in the scope. | Keep only matches and graph results reached through them. A matching file must not cause unrelated files to qualify. |
+| The query counts or pages results with a content filter. | Apply content filtering before graph result sorting, limits, counts, and pagination. Evaluate the full selected scope, not just an unfiltered page. |
+| The supplied filter cannot be fully evaluated. | Return an explicit error or incomplete status. Never substitute unfiltered graph results or claim a complete empty result. |
 
 File matches and graph nodes must use the same authorized project-and-commit context within the search snapshot.
 Filtering by whole-file content differs from filtering within a definition's source range. Both operations must be supported.
@@ -195,6 +172,36 @@ The response excludes `sharpen_shears`. Only the file containing `water_beds` ma
   "project_id": 42,
   "commit": "A",
   "function_definitions": []
+}
+```
+
+**Query: no content filter**
+
+Omit the content filter and select definitions from all files in the authorized project and commit.
+
+```json
+{
+  "project_id": 42,
+  "commit": "A",
+  "graph": {
+    "from": "files",
+    "relationship": "contains",
+    "return": "function_definitions"
+  }
+}
+```
+
+**Example payload**
+
+```json
+{
+  "status": "complete",
+  "project_id": 42,
+  "commit": "A",
+  "function_definitions": [
+    { "name": "water_beds", "file": "src/irrigation.rs", "range": { "start_line": 2, "end_line": 2 } },
+    { "name": "sharpen_shears", "file": "src/tools.rs", "range": { "start_line": 1, "end_line": 1 } }
+  ]
 }
 ```
 
@@ -285,8 +292,9 @@ Candidate filtering must not discard valid matches, including patterns with litt
 
 ### Filters across projects
 
-These filters must work across accessible projects and within a single project.
-They must compose with each content search type. Project and revision scope must also apply to code graph and combined queries.
+- These filters must work across accessible projects and within a single project.
+- They must compose with each content search type.
+- Project and revision scope must also apply to code graph and combined queries.
 
 | Filter | Scenario | Required result |
 | --- | --- | --- |
@@ -471,8 +479,10 @@ Shared stored content must preserve every authorized project, file, branch, tag,
 ## Branches, Tags, Commits, and Coverage
 
 Orbit must support selecting any branch, tag, or commit, including non-default branches and commits outside the default branch history.
-The configured indexing and retention policy determines which revisions are queryable, as described in [branch and commit indexing](commits_and_branches_indexing.md).
-Orbit must expose that coverage and identify requests outside it. A retention limit must never cause a different revision to be searched.
+
+- The configured indexing and retention policy determines which revisions are queryable, as described in [branch and commit indexing](commits_and_branches_indexing.md).
+- Orbit must expose that coverage and identify requests outside it.
+- A retention limit must never cause a different revision to be searched.
 
 A search across projects, branches, or tags must pin every selected project-and-commit pair and its matching content and graph data.
 Any relationship across projects must use those pinned revisions. Pagination must preserve the full selection.
@@ -741,9 +751,11 @@ Both requests return the same denial payload. Neither request may read data from
 
 ## Incremental Indexing and Push to Search
 
-Repository changes must update affected content, definitions, and relationships. They must not rebuild the whole repository index.
-Unchanged source can still need relationship updates when a changed definition affects its callers or imports.
-Orbit must recompute those affected relationships while reusing unchanged source bytes and valid parse results.
+Repository changes must update affected content, definitions, and relationships upon event delivery from GitLab.
+
+- They must not rebuild the whole repository index.
+- Unchanged source can still need relationship updates when a changed definition affects its callers or imports.
+- Orbit must recompute those affected relationships while reusing unchanged source bytes and valid parse results.
 Resolved relationships may be reused only when their resolution context remains valid.
 
 | Scenario | Required result |
@@ -760,24 +772,24 @@ Resolved relationships may be reused only when their resolution context remains 
 | Index many projects while queries and compaction run. | Maintain query correctness and indexing progress within resource budgets. Large projects must not block every other project. |
 | Restart an Orbit worker. | Recover from durable state. Local cache loss must not require a full repository refetch. |
 
-Initial indexing and repair of lost or incompatible data may require rebuilding affected records.
-Orbit must expose the reason and scope. Routine pushes and transient source failures must not use that path.
-Push-to-search reporting must cover discovery, preparation, queueing, publication, and reader visibility.
+> [!NOTE]
+> - Initial indexing and repair of lost or incompatible data may require rebuilding affected records.
+>- Orbit must expose the reason and scope.
+>- Routine pushes and transient source failures must not use that path.
+>- Push-to-search reporting must cover discovery, preparation, queueing, publication, and reader visibility.
 
-### Example: a force push reuses unchanged content
+### Example: search results after a force push
 
 **Given**
 
-Project 42, `shop/api`, has commit A indexed and retained. Only `src/checkout.rs` has different bytes in commit B.
-A and B need not share ancestry. Blob 4 is not yet stored.
+Project 42, `shop/api`, has commit A indexed and retained. A force push replaces it with commit B on `main`.
+A and B need not share ancestry. Only `src/checkout.rs` changes.
 
-| File | Commit A | Commit B. |
+| File | Commit A | Commit B |
 | --- | --- | --- |
-| `src/checkout.rs` | `blob-1` | `blob-4` |
-| `src/config.rs` | `blob-2` | `blob-2` |
-| `README.md` | `blob-3` | `blob-3` |
-
-Commit B renames the exported definition `charge`. The unchanged configuration file still imports its old name.
+| `src/checkout.rs` | Exports `charge`. | Exports `charge_card`. |
+| `src/config.rs` | Imports `charge` from `checkout`. | Unchanged. |
+| `README.md` | Project documentation. | Unchanged. |
 
 **Action**
 
@@ -791,29 +803,50 @@ Commit B renames the exported definition `charge`. The unchanged configuration f
 }
 ```
 
-**Example payload**
+**Queries**
 
-This payload shows the indexing outcome, including work counters and graph changes.
+After commit B is indexed, query the configuration file's imports at both commits.
 
 ```json
-{
-  "project_id": 42,
-  "content_commit": "B",
-  "fetched_blobs": ["blob-4"],
-  "parsed_blobs": ["blob-4"],
-  "reused_parse_blobs": ["blob-2", "blob-3"],
-  "full_repository_rebuild": false,
-  "retained_commits": ["A"],
-  "graph": {
+[
+  {
+    "project_id": 42,
+    "commit": "A",
+    "graph": { "file": "src/config.rs", "relationship": "imports", "include_unresolved": true }
+  },
+  {
+    "project_path": "shop/api",
     "commit": "B",
-    "removed_relationships": [
-      { "from": "src/config.rs", "kind": "imports", "to": "charge" }
+    "graph": { "file": "src/config.rs", "relationship": "imports", "include_unresolved": true }
+  }
+]
+```
+
+**Example payload**
+
+Commit A retains its resolved import. At B, the same import is unresolved because the exported name changed.
+
+```json
+[
+  {
+    "status": "complete",
+    "project_id": 42,
+    "commit": "A",
+    "relationships": [
+      { "from": "src/config.rs", "kind": "imports", "to": { "file": "src/checkout.rs", "name": "charge" } }
     ],
+    "unresolved_references": []
+  },
+  {
+    "status": "complete",
+    "project_id": 42,
+    "commit": "B",
+    "relationships": [],
     "unresolved_references": [
       { "file": "src/config.rs", "name": "charge" }
     ]
   }
-}
+]
 ```
 
 ## Minimal Load on Gitaly
@@ -865,9 +898,150 @@ Both queries report complete coverage at commit B. Each query must make zero Git
 }
 ```
 
+## Edge Cases
+
+Orbit must handle these events without waiting for another push.
+These cases apply to content search, graph queries, and combined queries under the same authorization and retention rules.
+Event delivery and recovery must meet the operating limits below. Recovery must respect Gitaly budgets and reuse stored content.
+
+### Git and reference events
+
+| Event or scenario | Required result |
+| --- | --- |
+| Push to the default branch. | Update the selected commit, content, and graph together. A query must not combine old content with new relationships. |
+| Create or push to a non-default branch. | Discover and index the branch under the configured revision policy. Do not require a default-branch push. |
+| Create, move, or delete a tag. | Update tag selection and coverage, including annotated tags. Reuse already indexed target commits and blobs. |
+| Delete a branch or tag without a replacement commit. | Remove the reference from new searches. Preserve commits still covered by retention or other references. Do not interpret deletion as an empty commit. |
+| Delete and recreate a reference with the same name. | Use the new reference target. A delayed delete or update from its previous lifetime must not remove or restore the wrong target. |
+| Force-push to unrelated history or an older commit. | Reconcile the selected tree without requiring a fast-forward diff. A valid rollback must work even when its commit is older. |
+| Change the default branch without pushing code. | New unqualified searches select the new default branch. Report pending coverage if needed. Do not silently keep searching the former default. |
+| A branch and tag have the same name. | Keep their types and targets separate during event processing, storage, and queries. |
+| One push changes several references. | Process every affected reference. Combining work must not lose a deletion, another branch, or history required by retention. |
+| A merge, mirror update, import, or repository restore changes refs. | Apply the same revision and indexing rules as a push. Do not depend on a particular user interface or Git transport. |
+| Delete the default branch while other branches remain. | Report the missing default branch for unqualified searches. Keep explicit searches of surviving branches available. |
+| Rewrite the default branch or a non-default branch. | Apply the configured commit-retention policy consistently. The indexing path must not silently discard retained history. |
+| Observe an unborn repository, an empty committed tree, or a source outage. | Distinguish these states. An empty committed tree removes stale matches at that revision. An outage must not erase published data. |
+| An empty repository receives its first commit. | Discover the new content. A previous empty result or indexing checkpoint must not prevent indexing. |
+| Delete the last branch while tags or retained commits remain. | Report the missing branch without removing searchable tag targets or retained history. |
+
+### Project, namespace, and access changes
+
+Lifecycle changes must take effect without a source-code change.
+
+| Event or scenario | Required result |
+| --- | --- |
+| Create, fork, or import a project with existing history. | Discover it within an enabled scope without requiring a later push. Apply its own project identity, permissions, and revision coverage. |
+| Rename a project or an ancestor group. | Resolve the new full project path to the same project ID. Refresh result paths without fetching unchanged source content again. |
+| Reuse an old project path for another project. | New searches resolve its current project ID. Existing cursors must not switch to the new project or inherit its permissions. |
+| Transfer a project within a top-level namespace. | Refresh traversal paths and group-filter membership. Remove access through old grants that no longer apply. |
+| Transfer a project or group across top-level namespaces. | Apply the destination boundary to every affected project and graph relationship. Old tasks, caches, and cursors must not publish or serve old-scope data. |
+| Change project or ancestor namespace visibility, membership, or repository access. | Apply current GitLab permissions to content, graph data, counts, and later pages. Do not wait for re-indexing to revoke access. |
+| Archive or unarchive a project or group. | Keep retained content searchable when GitLab permits access. Archival alone must not act as repository deletion. Resume required updates after unarchiving. |
+| Delete a project or namespace while indexing runs. | Remove query access and prevent unfinished work from restoring data. Complete stored-data cleanup under the deletion policy without removing other owners' content. |
+| Enable Orbit for a namespace that already contains projects. | Discover existing projects and configured revisions. Report indexing progress without requiring new pushes. |
+| Disable and later re-enable Orbit for a namespace. | Stop serving the disabled scope. On re-enablement, recheck ownership and permissions, then reconcile missed changes before claiming current coverage. |
+
+### Event delivery and recovery
+
+| Event or scenario | Required result |
+| --- | --- |
+| Receive duplicate or out-of-order events. | Apply each change safely and converge on the current reference state. Event arrival order and commit age must not determine which state wins. |
+| Miss events during an outage or exceed event retention. | Detect and repair the gap without waiting for another push. Reconcile metadata and fetch only missing content. Expose recovery progress. |
+| Run initial indexing while references keep changing. | Preserve changes received during the initial scan. Do not mark the project current until the scan and later changes are reconciled. |
+| Receive a task before its commit is readable from the source. | Retry within the source budget and report pending coverage. Do not substitute the current branch tip or mark the task complete. |
+| A required commit disappears from the source before indexing. | Report unavailable revision coverage. Do not claim complete history or substitute another commit. Continue recovery for revisions still available. |
+| Stop a reference listing early or receive a source error. | Keep the last complete reference set and report incomplete coverage. Do not infer that omitted projects, branches, or tags were deleted. |
+| A worker is busy or another worker owns the same indexing work. | Keep the newest required change pending or retry it. Contention must not discard the only signal for that change. |
+| A worker loses ownership or finishes after a newer update. | Prevent it from replacing newer published state, even if the commit SHA is unchanged. Recover unfinished work without duplicate publication. |
+| A queued task contains an old traversal path or project path. | Recheck current project identity, ownership, and eligibility before publication. Reject obsolete work that would restore deleted or unauthorized data. |
+| Exhaust retries or encounter an invalid event. | Expose the failure and affected coverage. Support recovery without a new push. Do not report successful indexing. |
+| Fail partway through content, graph, or metadata publication. | Keep the last complete view queryable, subject to current permissions. Resume safely without exposing a mixed revision. |
+
+### Example: a delayed delete cannot remove a recreated tag
+
+**Given**
+
+Project 42 has indexed commits A and B. Tag `v1.0` originally points to A.
+
+**Action**
+
+The event versions below belong to this reference. Delivery occurs in the order shown.
+
+```json
+[
+  { "project_id": 42, "tag": "v1.0", "event": "create", "version": 3, "commit": "B" },
+  { "project_id": 42, "tag": "v1.0", "event": "delete", "version": 2 }
+]
+```
+
+**Query**
+
+```json
+{
+  "project_id": 42,
+  "tag": "v1.0",
+  "text": "payment"
+}
+```
+
+**Example payload**
+
+The delayed deletion must not remove the recreated tag or restore its former target.
+
+```json
+{
+  "status": "complete",
+  "project_id": 42,
+  "tag": "v1.0",
+  "commit": "B"
+}
+```
+
+### Example: a default-branch change needs no push
+
+**Given**
+
+Project 42 has two indexed branches. `main` points to commit A, and `release/2.0` points to commit B.
+The default branch is `main`.
+
+**Action**
+
+```json
+{
+  "event": "default_branch_changed",
+  "project_id": 42,
+  "default_branch": "release/2.0"
+}
+```
+
+**Query**
+
+After Orbit processes the change, start a search without a revision selector.
+
+```json
+{
+  "project_id": 42,
+  "text": "payment"
+}
+```
+
+**Example payload**
+
+No push or source-content fetch is needed because commit B is already indexed.
+
+```json
+{
+  "status": "complete",
+  "project_id": 42,
+  "branch": "release/2.0",
+  "commit": "B"
+}
+```
+
 ## Operating Limits
 
 The production contract must define maximum revocation delay, push-to-search targets, and query limits.
 It must also define Gitaly request, byte-rate, and concurrency budgets.
+Define maximum delays for lifecycle-event processing, missed-event detection, recovery, and stored-data deletion. These must apply even when no new push occurs.
 Each limit must have an owner, a configured value or service-level target, and a verification workload.
 Orbit must expose when it exceeds a target or reaches a limit. These values must be set before production acceptance.
