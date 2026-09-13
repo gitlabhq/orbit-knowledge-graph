@@ -165,8 +165,10 @@ impl Fold {
 
     fn enclosing_class(&self, tree: &Tree, node: u32) -> Option<u32> {
         let c = tree.cursor(node);
-        let check =
-            |n: Cursor| n.child_sym(C::DefType).is_some_and(|dt| self.containers.contains(&dt));
+        let check = |n: Cursor| {
+            n.child_sym(C::DefType)
+                .is_some_and(|dt| self.containers.contains(&dt))
+        };
         if check(c) {
             Some(node)
         } else {
@@ -176,9 +178,7 @@ impl Fold {
 
     fn ivar_type(&self, tree: &Tree, class: u32, attr: u32) -> Option<u32> {
         tree.cursor(class).descend(|n| {
-            if n.is(C::Binding)
-                && n.child(C::Ivar).is_some_and(|iv| iv.sym() == attr)
-            {
+            if n.is(C::Binding) && n.child(C::Ivar).is_some_and(|iv| iv.sym() == attr) {
                 if let Some(s) = n
                     .child(C::Rhs)
                     .and_then(|r| r.child(C::Call))
@@ -244,9 +244,7 @@ impl Fold {
             if let Some(m) = cls.descend(|n| {
                 if n.is(C::DefType) {
                     if let Some(p) = n.parent() {
-                        if p.index() != search[si]
-                            && p.child_sym(C::DefName) == Some(name)
-                        {
+                        if p.index() != search[si] && p.child_sym(C::DefName) == Some(name) {
                             return Step::Out(p.index());
                         }
                     }
@@ -261,9 +259,7 @@ impl Fold {
             {
                 let sn = c.sym();
                 for &dn in &self.defs {
-                    if tree.cursor(dn).child_sym(C::DefName) == Some(sn)
-                        && !search.contains(&dn)
-                    {
+                    if tree.cursor(dn).child_sym(C::DefName) == Some(sn) && !search.contains(&dn) {
                         search.push(dn);
                     }
                 }
@@ -292,9 +288,7 @@ impl Fold {
                     for cpv in &self.ssa.read_variable(*ts, self.cur) {
                         if let ParseValue::LocalDef(cdi) = cpv {
                             let target = self.defs[*cdi as usize];
-                            if let Some(callable) =
-                                tree.cursor(target).child_sym(C::Callable)
-                            {
+                            if let Some(callable) = tree.cursor(target).child_sym(C::Callable) {
                                 if let Some(m) = self.find_method_in(tree, target, callable) {
                                     tree.add_edge(from, m, EdgeKind::Calls);
                                 }
@@ -312,9 +306,7 @@ impl Fold {
     fn resolve_type_method(&mut self, tree: &Tree, type_sym: u32, method_sym: u32, from: u32) {
         for cpv in &self.ssa.read_variable(type_sym, self.cur) {
             if let ParseValue::LocalDef(cdi) = cpv {
-                if let Some(m) =
-                    self.find_method_in(tree, self.defs[*cdi as usize], method_sym)
-                {
+                if let Some(m) = self.find_method_in(tree, self.defs[*cdi as usize], method_sym) {
                     tree.add_edge(from, m, EdgeKind::Calls);
                 }
             }
@@ -409,9 +401,10 @@ impl Fold {
         });
         match rt {
             Some(rt_sym) => {
-                let found = self.defs.iter().position(|&dn| {
-                    tree.cursor(dn).child_sym(C::DefName).unwrap_or(0) == rt_sym
-                });
+                let found = self
+                    .defs
+                    .iter()
+                    .position(|&dn| tree.cursor(dn).child_sym(C::DefName).unwrap_or(0) == rt_sym);
                 if let Some(di) = found {
                     if tree
                         .cursor(self.defs[di])
@@ -442,16 +435,13 @@ impl Fold {
             self.enclosing_class(tree, binding)
                 .and_then(|cls| self.ivar_type(tree, cls, obj))
         } else if obj != 0 {
-            self.ssa
-                .read_variable(obj, self.cur)
-                .iter()
-                .find_map(|pv| {
-                    if let ParseValue::Type(ts) = pv {
-                        Some(*ts)
-                    } else {
-                        None
-                    }
-                })
+            self.ssa.read_variable(obj, self.cur).iter().find_map(|pv| {
+                if let ParseValue::Type(ts) = pv {
+                    Some(*ts)
+                } else {
+                    None
+                }
+            })
         } else {
             None
         };
@@ -460,9 +450,7 @@ impl Fold {
         };
         for cpv in &self.ssa.read_variable(ts, self.cur) {
             if let ParseValue::LocalDef(cdi) = cpv {
-                if let Some(m) =
-                    self.find_method_in(tree, self.defs[*cdi as usize], method)
-                {
+                if let Some(m) = self.find_method_in(tree, self.defs[*cdi as usize], method) {
                     if let Some(rt) = self.infer_return_type(tree, m) {
                         return Value::Type(rt);
                     }
