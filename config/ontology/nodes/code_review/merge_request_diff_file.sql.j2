@@ -53,3 +53,4 @@ SELECT
   _batch._deleted AS _deleted
 FROM _batch
 LEFT JOIN _e0 ON _batch.merge_request_diff_id = _e0.id
+ORDER BY traversal_path, merge_request_diff_id, relative_order

@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 97
+  scope: none
+  note: >-
+    Outer ORDER BY on the lookup extracts (generated and the two authored
+    templates) so pages stream in sort-key order; extracted rows and graph rows remain
+    byte-identical.
 - version: 96
   scope: none
   note: >-

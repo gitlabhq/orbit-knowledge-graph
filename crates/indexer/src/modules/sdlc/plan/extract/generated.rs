@@ -193,9 +193,10 @@ fn render_with_lookups(
         format!("FROM _batch\n{}", join_clauses.join("\n"))
     };
     let sql = format!(
-        "WITH\n  {}\nSELECT\n  {}\n{from_clause}",
+        "WITH\n  {}\nSELECT\n  {}\n{from_clause}\nORDER BY {}",
         ctes.join(",\n  "),
         final_cols.join(",\n  "),
+        declaration.order_by.join(", "),
     );
     sql
 }
