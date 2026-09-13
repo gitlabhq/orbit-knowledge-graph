@@ -11,7 +11,7 @@ GitLab Orbit first launched in May 2026 to users after 3 months of developement.
 >
 >For simplicity's sake, let's say we want to keep an active code index for branches that are considered "active". This would require us to index (300,000 definitions *4000 branches) = 1.2 billion definitions and (1,000,000 relationships* 4000 branches) = 4 billion relationships just for the GitLab monolith. This is simply not feasible if we extrapolate this to all the repositories in `.com`. 
 
-In the initial design, we already had identified S3 as a potential candidate to scale the system beyond what we can do with ClickHouse. 
+In the initial design, we also identified Object Storage as the right candidate to scale the system beyond what we can do with ClickHouse. 
 >After the initial deployment, metrics and customer feedback will determine whether branch-level indexing is worth the storage and compute cost. The approach below outlines one viable path.
 >
 >As stated above GitLab has the concept of a branch being "active" or "stale". An active branch is one that has been committed to within the last 3 months. A stale branch is one that has not been committed to in the last 3 months.
@@ -26,26 +26,77 @@ In the initial design, we already had identified S3 as a potential candidate to 
 
 Additionally, models of today are largely trained on `grep` and content matching tools. Orbit v1 does not have a way to search physical content of files. In our [evaluations](https://gitlab.com/gitlab-org/orbit/orbit-evals-harness) and work with [orbit ask](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/2329), we've found that a combination of both standard content matching and code graph capabilities are required to fall into the standard training distribution and achieve maximum effectiveness.
 
+## Data store considerations
 
-## Why not Zoekt? Why not ClickHouse or Elasticsearch?
+### Why not ClickHouse
 
-### ClickHouse limitations
+Why not ClickHouse can be broken down into the following points: 
+1. The code graph write pattern is delete-heavy and ClickHouse merges cannot keep up at current scale, 
+2. Branches and commits multiply that scale by orders of magnitude, 
+3. ClickHouse full-text search does not hold at group-wide scope or with scoring, and 
+4. It is serverful, so RPS does not scale linearly.
 
-ClickHouse is made for append only, quick updates workflow. It is not designed for heavy churn on historical data. In the past 3 months of operating in production, we have reached a scale of 50B rows and already are experiencing the pain of updating and deleting data in ClickHouse. 
+#### Code indexing is delete-heavy, ClickHouse is not
 
-Here are some examples of issues we are seeing:
-- ReplacingMergeTree not rewriting big parts, meaning some duplicate row stay forever.
-- ReplacingMergeTree does not autormatically delete rows, we need to run complex deletion strategies at scale which is limiting.
+ClickHouse is built for append-heavy analytics. Code indexing is the opposite. In the current design, every push replaces a project's whole graph, so we delete the old graph and insert the new one. We are at about 50 billion rows across the graph (12 billion in the code edge table alone) in production. Deletes are where it hurts:
 
-### Zoekt Limitations
+- ReplacingMergeTree stops merging large parts.
+- ReplacingMergeTree does not delete rows for us. 
 
-Few things that come to mind:
-- We need fine grained access control to the data, and for the database to respect authz rules of the box. 
-- Zoekt is written in Go, and we are using Rust. 
+Even if we move to an append-only model with commits & branches, we still need to clean up old revisions. While sharding buys time, it is not a fix.
+
+#### Branches and commits multiply the problem
+
+When we look at the monolith, 300,000 definitions times 4,000 active branches is 1.2 billion definitions and 4 billion relationships. Additionally, the monolith has 46,685 branches, and 3,586 of them (7.7%) had a push in the last 30 days. If we extrapolate this to `.com`, node and edge counts head into the hundreds of billions and some projects need 1000x the storage they use today.
+
+#### Testing blob storage in ClickHouse
+
+We conducted a [benchmark](https://gitlab.com/gitlab-org/orbit/experiments/orbit-next/-/blob/main/docs/clickhouse/code-search-benchmark.md) where we loaded blobs into ClickHouse. High level details:
+
+- We used ClickHouse Cloud 26.4.1, 2 replicas at 30 vCPU / 120 GiB each. 
+
+- We stored blobs once with `text` and `ngrambf_v1` indexes, plus a `refs` table mapping (project, ref, path) to a blob. 
+- The data consisted of 3,351 projects, 33.4 million refs, 1.92 million blobs, 5.67 GiB after 17.4x dedup. 
+ 
+While single query latency looked ok, we can observe that throughput becomes an issue:
+
+| Profile | Peak RPS | p50 | p99 |
+|---|---|---|---|
+| BEST (light, narrow) | ~81 | 171 ms | 420 ms |
+| REALISTIC | ~27 | 307-699 ms | 5-7 s |
+| WORST (all heavy) | ~3 | 1.3-2.7 s | 4-6 s |
+
+It saturated at about 16 concurrent queries, with Group-level trigram queries topped out around 2 RPS. 
+
+#### ClickHouse limitations for what we need
+
+Additional limitations:
+- ClickHouse can't run `ast-grep` queries, regex only accelerates when there's a literal substring to pull out.
 - We need to be able to co-locate graph data with trigrams and content in the same database.
-- Zoekt is costly to run and maintain and is not a good fit for our use case.
-- We want to own the vertical stack and not rely on external services.
+- We need to be mindful of operational overhead and COGS when scaling to content, branches and commits.
+
+### Why not Zoekt
+
+Why not Zoekt can be broken down into the following points:
+- It indexes only the default branch, and branches and commits are our top customer ask,
+- It is memory-resident and stateful,
+- We need graph data, trigrams and content in one store with authz baked into the layout,
+- Most of the logic around archive fetching, locking, task queues, backfill is already built for Orbit, which is 90% of the Zoekt code.
+
+#### Memory-resident and stateful
+
+Zoekt keeps its index and cache in RAM on PVCs with mmap, and a central coordinator pins repos to nodes. On `.com` it sits on 60 to 80 TiB and the trigram index runs about 3x the corpus. We want an SSD cache in front of object storage and stateless workers to reduce COGS.
+
+#### Zoekt limitations for what we need
+
+Additional limitations:
+- We need fine grained access control to the data, and for the database to respect authz rules out of the box. Zoekt is not built that way.
+- Zoekt is written in Go, and we are using Rust.
+- We need to co-locate graph data with trigrams and content in the same database. Zoekt has trigrams and content only, no graph and no `ast-grep`.
+- We don't want to require customers to deploy and operate Zoekt to use Orbit. Orbit must own the vertical stack and not rely on external services.
+
+Zoekt does not go away. Orbit code indexing will ship as another engine and a alternative path for large Zoekt users.
 
 ## We're betting on Cloud-native Object Storage (e.g. S3, GCS, Minio)
 
-As you may have guessed by now, we're betting on S3. Recent advancements in S3 storage and querying engines make querying from cold storage very efficient. Furthermore, since its S3, we can easilly scale horizontally and replace the graphs without creating a noisy neighbours problem on the database.
+As you may have guessed by now, we're betting on Object Storage. Recent advancements in Object Storage storage and querying engines make querying from cold storage very efficient. Furthermore, since its Object Storage, we can scale horizontally and replace the graphs without creating a noisy neighbours problem on the database.
