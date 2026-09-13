@@ -255,7 +255,7 @@ impl Rewrite {
 use pest_derive::Parser;
 
 #[derive(Parser)]
-#[grammar = "pattern.pest"]
+#[grammar = "src/dsl/pattern.pest"]
 struct PatParser;
 
 #[pest_consume::parser]
