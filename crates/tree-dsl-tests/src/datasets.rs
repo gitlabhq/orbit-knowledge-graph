@@ -293,17 +293,19 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<Recor
             let did = ids.defs[&(fi, i)];
             let name_sym = nr.child_sym(C::DefName).unwrap_or(0);
             let deftype_sym = nr.child_sym(C::DefType).unwrap_or(0);
+            let dn = nr.child(C::DefName);
+            let name_cur = dn.unwrap_or(nr);
             id_b.append_value(did);
             fp_b.append_value(&path);
             fqn_b.append_value(def_fqn(tree, i, lang));
             name_b.append_value(lang.syms.resolve(name_sym));
             dt_b.append_value(lang.syms.resolve(deftype_sym));
-            sl_b.append_value(nr.start() as i64);
-            el_b.append_value(nr.end() as i64);
-            sb_b.append_value(nr.start() as i64);
-            eb_b.append_value(nr.end() as i64);
-            sc_b.append_value(0);
-            ec_b.append_value(0);
+            sl_b.append_value(name_cur.start_row() as i64 + 1);
+            el_b.append_value(name_cur.end_row() as i64 + 1);
+            sb_b.append_value(name_cur.start() as i64);
+            eb_b.append_value(name_cur.end() as i64);
+            sc_b.append_value(name_cur.start_col() as i64 + 1);
+            ec_b.append_value(name_cur.end_col() as i64 + 1);
         }
     }
     for (fi, tree) in trees.iter().enumerate() {

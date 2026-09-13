@@ -89,6 +89,26 @@ impl<'a> Cursor<'a> {
     }
 
     #[inline]
+    pub fn start_row(&self) -> u32 {
+        self.tree().nodes[self.idx as usize].start_row
+    }
+
+    #[inline]
+    pub fn start_col(&self) -> u32 {
+        self.tree().nodes[self.idx as usize].start_col
+    }
+
+    #[inline]
+    pub fn end_row(&self) -> u32 {
+        self.tree().nodes[self.idx as usize].end_row
+    }
+
+    #[inline]
+    pub fn end_col(&self) -> u32 {
+        self.tree().nodes[self.idx as usize].end_col
+    }
+
+    #[inline]
     pub fn is_dead(&self) -> bool {
         self.tree().nodes[self.idx as usize].dead
     }

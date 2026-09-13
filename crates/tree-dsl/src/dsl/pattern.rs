@@ -714,6 +714,10 @@ fn materialize(
                         parent,
                         start: n.start,
                         end: n.end,
+                        start_row: n.start_row,
+                        start_col: n.start_col,
+                        end_row: n.end_row,
+                        end_col: n.end_col,
                         ..Default::default()
                     });
                 } else {
@@ -756,6 +760,13 @@ fn materialize(
                     tf.apply_sym(t, lang, caps[*slot as usize].0)
                 }
             };
+            let pos_src = match text {
+                Text::From(slot, _) if caps[*slot as usize] != EMPTY_CAP => {
+                    caps[*slot as usize].0
+                }
+                _ => caps[0].0,
+            };
+            let src = t.node(pos_src);
             out.push(Node {
                 kind: *kind,
                 field: *field,
@@ -765,6 +776,10 @@ fn materialize(
                 parent,
                 start: span.0,
                 end: span.1,
+                start_row: src.start_row,
+                start_col: src.start_col,
+                end_row: src.end_row,
+                end_col: src.end_col,
                 ..Default::default()
             });
             for k in kids {
@@ -813,6 +828,7 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
                 NONE,
                 (root.start, root.end),
             );
+
             let l = buf.len() as u32 - s;
             t.replace(i, &buf[s as usize..(s + l) as usize]);
             break;

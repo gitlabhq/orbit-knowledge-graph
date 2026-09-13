@@ -192,6 +192,8 @@ fn from_tree_sitter(
             0
         };
 
+        let sp = ts.start_position();
+        let ep = ts.end_position();
         nodes.push(Node {
             kind,
             field,
@@ -204,6 +206,10 @@ fn from_tree_sitter(
             sym,
             start: ts.start_byte() as u32,
             end: ts.end_byte() as u32,
+            start_row: sp.row as u32,
+            start_col: sp.column as u32,
+            end_row: ep.row as u32,
+            end_col: ep.column as u32,
         });
 
         if cursor.goto_first_child() {
