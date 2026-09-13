@@ -445,6 +445,7 @@ fn build_imports(
                 .collect();
 
             let source_eq_name = names.len() == 1 && names[0].0 == source_sym;
+            let is_cjs = nr.children().any(|c| c.is(C::CjsRequire));
 
             if names.is_empty() {
                 let iid = imp_ids[0];
@@ -466,7 +467,9 @@ fn build_imports(
                 for (ni, &(ns, als)) in names.iter().enumerate() {
                     let iid = imp_ids[ni];
                     let name_text = lang.syms.resolve(ns);
-                    let per_name_label = if name_text == "*" && als != 0 {
+                    let per_name_label = if is_cjs {
+                        "CjsRequire"
+                    } else if name_text == "*" && als != 0 {
                         "NamespaceImport"
                     } else if name_text == "*" {
                         "WildcardImport"

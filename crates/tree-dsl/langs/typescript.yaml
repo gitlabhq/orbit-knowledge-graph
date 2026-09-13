@@ -74,6 +74,14 @@ stages:
       - match: '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
 
+      # const { a, b } = require('./source') — CJS destructured require
+      - match: '(variable_declarator name: (object_pattern $$$NAMES:shorthand_property_identifier_pattern) value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__cjs_require) $$$NAMES=>__name)'
+
+      # const x = require('./source') — CJS namespace require
+      - match: '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__cjs_require) (__name "default" (__alias @$N)))'
+
       # export { A, B } from './source' — re-export with source
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) $$$SPECS->__name))'

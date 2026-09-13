@@ -102,7 +102,7 @@ languages:
     fqn_separator: "."
 
   typescript:
-    extensions: [ts]
+    extensions: [ts, mts, cts]
     aliases: [ts, typescript]
     grammar: tree-sitter-typescript
     fqn_separator: "::"
