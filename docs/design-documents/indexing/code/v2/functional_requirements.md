@@ -568,7 +568,6 @@ Any relationship across projects must use those pinned revisions. Pagination mus
 Tag selection must support lightweight and annotated tags that resolve to commits. Reject tags that do not resolve to a commit with a clear error.
 Tag queries search the resolved repository tree. They do not search tag messages.
 
-
 | Scenario | Required result |
 | --- | --- |
 | Query a branch or tag that moved or was deleted after the search started. | Continue the original search at its resolved commit. New searches must use current revision coverage and report deleted references as missing. |
@@ -773,10 +772,41 @@ Resolved relationships may be reused only when their resolution context remains 
 | Restart an Orbit worker. | Recover from durable state. Local cache loss must not require a full repository refetch. |
 
 > [!NOTE]
+>
 > - Initial indexing and repair of lost or incompatible data may require rebuilding affected records.
->- Orbit must expose the reason and scope.
->- Routine pushes and transient source failures must not use that path.
->- Push-to-search reporting must cover discovery, preparation, queueing, publication, and reader visibility.
+> - Orbit must expose the reason and scope.
+> - Routine pushes and transient source failures must not use that path.
+> - Push-to-search reporting must cover discovery, preparation, queueing, publication, and reader visibility.
+
+### Backfill order and default coverage
+
+Initial indexing and background rebuilds must prioritize ready work in this order:
+
+1. Recent pushes, including pushes to branches or tags.
+2. Default branches, regardless of recent activity.
+3. Other eligible branches and tags.
+4. Older commits, up to the configured depth.
+
+Requirements:
+- New pushes must take priority over queued background work. Preserve required commits and reference changes when combining tasks.
+- Blocked or large projects must not stop unrelated projects from progressing.
+- Inactive projects must still make progress under sustained push load.
+
+For backfill coverage:
+- Default coverage must include the default branch and branches with a commit in the past 30 days.
+- Index older commits up to a configurable depth. 
+- We will follow the activity window in [branch and commit indexing](commits_and_branches_indexing.md).
+- Depth limits must not remove indexed commits still protected by retention.
+
+On status:
+- Report default-branch readiness and full configured coverage separately. 
+- Do not claim full completion when only default branches are ready.
+
+| Scenario | Required result |
+| --- | --- |
+| Queue default branches, other branches, tags, and older commits. | Prioritize default branches, then other eligible branches and tags, then older commits. |
+| Receive a push while bulk history work is queued. | Prioritize the pushed revision and its required records. Preserve completed work and unrelated retained history. |
+| Keep receiving pushes while inactive projects await indexing. | Preserve background progress within resource budgets. Do not postpone inactive projects forever. |
 
 ### Example: search results after a force push
 
