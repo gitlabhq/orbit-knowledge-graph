@@ -5,74 +5,24 @@ use arrow_56::array::{ArrayBuilder, BooleanBuilder, Int64Builder, StringBuilder}
 use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
 
+use tree_dsl::canonical::Canonical as C;
 use tree_dsl::grammar::SupportLang;
 use tree_dsl::lang::Lang;
 use tree_dsl::tree::Tree;
 
 pub type LanceDatasets = HashMap<String, RecordBatch>;
 
-// ── Synthetic helpers ──
-
-fn synth_sym(tree: &Tree, node: u32, kind: u16) -> u32 {
-    tree.children(node)
-        .find(|&c| tree.kind(c) == kind)
-        .map(|c| tree.sym(c))
-        .unwrap_or(0)
-}
-
-fn has_synth(tree: &Tree, node: u32, kind: u16) -> bool {
-    tree.children(node).any(|c| tree.kind(c) == kind)
-}
-
-// ── Synthetic kind cache ──
-
-struct Sk {
-    deftype: u16,
-    defname: u16,
-    import: u16,
-    import_type: u16,
-    source: u16,
-    name: u16,
-    alias: u16,
-    type_only: u16,
-}
-
-impl Sk {
-    fn new(lang: &Lang) -> Self {
-        let s = |n: &str| lang.lookup_kind(n);
-        Self {
-            deftype: s("__deftype"),
-            defname: s("__defname"),
-            import: s("__import"),
-            import_type: s("__import_type"),
-            source: s("__source"),
-            name: s("__name"),
-            alias: s("__alias"),
-            type_only: s("__type_only"),
-        }
-    }
-
-    fn is_def(&self, tree: &Tree, node: u32) -> bool {
-        has_synth(tree, node, self.deftype)
-    }
-
-    fn is_import(&self, tree: &Tree, node: u32) -> bool {
-        let k = tree.nodes[node as usize].kind;
-        k == self.import || k == self.import_type
-    }
-}
-
 // ── ID assignment ──
 
 pub struct IdMaps {
     pub defs: HashMap<(usize, u32), i64>,
     pub imports: HashMap<(usize, u32), Vec<i64>>,
-    /// Maps (file_index, __name_node) → single import ID
+    /// Maps (file_index, __name_node) -> single import ID
     pub import_by_name: HashMap<(usize, u32), i64>,
     pub modules: HashMap<usize, i64>,
 }
 
-fn assign_ids(trees: &[Tree], lang: &Lang, sk: &Sk) -> IdMaps {
+fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
     let mut defs = HashMap::new();
     let mut imports = HashMap::new();
     let mut import_by_name = HashMap::new();
@@ -82,7 +32,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang, sk: &Sk) -> IdMaps {
     let mut next_mod: i64 = 900_000;
 
     for (fi, tree) in trees.iter().enumerate() {
-        let path = lang.syms.resolve(tree.nodes[0].sym);
+        let path = lang.syms.resolve(tree.root().sym());
         if matches!(
             SupportLang::from_path(path),
             Some(SupportLang::JavaScript | SupportLang::TypeScript | SupportLang::Tsx)
@@ -90,18 +40,19 @@ fn assign_ids(trees: &[Tree], lang: &Lang, sk: &Sk) -> IdMaps {
             next_mod += 1;
             modules.insert(fi, next_mod);
         }
-        for (i, n) in tree.nodes.iter().enumerate() {
-            if n.dead {
+        for i in 0..tree.len() {
+            let nr = tree.nr(i);
+            if nr.is_dead() {
                 continue;
             }
-            let node = i as u32;
-            if sk.is_def(tree, node) {
+            if nr.has(C::DefType) {
                 next_def += 1;
-                defs.insert((fi, node), next_def);
-            } else if sk.is_import(tree, node) {
-                let name_nodes: Vec<u32> = tree
-                    .children(node)
-                    .filter(|&c| tree.kind(c) == sk.name && tree.sym(c) != 0)
+                defs.insert((fi, i), next_def);
+            } else if nr.is(C::Import) || nr.is(C::ImportType) {
+                let name_nodes: Vec<u32> = nr
+                    .children()
+                    .filter(|c| c.is(C::Name) && c.sym() != 0)
+                    .map(|c| c.index())
                     .collect();
                 let count = name_nodes.len().max(1);
                 let ids: Vec<i64> = (0..count)
@@ -113,7 +64,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang, sk: &Sk) -> IdMaps {
                 for (ni, &name_node) in name_nodes.iter().enumerate() {
                     import_by_name.insert((fi, name_node), ids[ni]);
                 }
-                imports.insert((fi, node), ids);
+                imports.insert((fi, i), ids);
             }
         }
     }
@@ -134,16 +85,15 @@ pub fn to_datasets(
     support_lang: SupportLang,
     resolve_config: &tree_dsl::file_tree::ResolveConfig,
 ) -> anyhow::Result<LanceDatasets> {
-    let sk = Sk::new(lang);
-    let ids = assign_ids(trees, lang, &sk);
+    let ids = assign_ids(trees, lang);
     let mut ds = HashMap::new();
     ds.insert("File".into(), build_files(trees, lang)?);
-    ds.insert("Definition".into(), build_defs(trees, lang, &ids, &sk)?);
+    ds.insert("Definition".into(), build_defs(trees, lang, &ids)?);
     ds.insert(
         "ImportedSymbol".into(),
-        build_imports(trees, lang, &ids, &sk, support_lang, resolve_config)?,
+        build_imports(trees, lang, &ids, support_lang, resolve_config)?,
     );
-    let (f2d, f2i) = build_file_edges(trees, &ids, &sk);
+    let (f2d, f2i) = build_file_edges(trees, &ids);
     ds.insert("FileToDefinition".into(), f2d?);
     ds.insert("FileToImportedSymbol".into(), f2i?);
     ds.insert(
@@ -163,37 +113,10 @@ pub fn to_datasets(
 
 // ── FQN builder ──
 
-fn def_name_sym(tree: &Tree, node: u32, name_f: u16, left_f: u16, defname_k: u16) -> u32 {
-    let s = tree
-        .child_by_field(node, name_f)
-        .or_else(|| {
-            if left_f != 0 {
-                tree.child_by_field(node, left_f)
-            } else {
-                None
-            }
-        })
-        .map(|c| tree.sym(c))
-        .unwrap_or(0);
-    if s != 0 {
-        return s;
-    }
-    if defname_k != 0 {
-        tree.children(node)
-            .find(|&c| tree.kind(c) == defname_k)
-            .map(|c| tree.sym(c))
-            .unwrap_or(0)
-    } else {
-        0
-    }
-}
-
-fn def_fqn(tree: &Tree, node: u32, lang: &Lang, sk: &Sk) -> String {
-    let path_str = lang.syms.resolve(tree.nodes[0].sym).to_string();
+fn def_fqn(tree: &Tree, node: u32, lang: &Lang) -> String {
+    let path_str = lang.syms.resolve(tree.root().sym()).to_string();
     let lang_id = SupportLang::from_path(&path_str);
     let sep = lang_id.map(|l| l.fqn_separator()).unwrap_or(".");
-    let name_f = lang.fields.lookup("name") as u16;
-    let left_f = lang.fields.lookup("left") as u16;
     let skip_root = matches!(
         lang_id,
         Some(
@@ -205,14 +128,12 @@ fn def_fqn(tree: &Tree, node: u32, lang: &Lang, sk: &Sk) -> String {
     );
 
     let mut parts = Vec::new();
-    let mut n = node;
-    loop {
-        let nd = &tree.nodes[n as usize];
-        if sk.is_def(tree, n) || n == 0 {
-            let name = if n == 0 && skip_root {
+    for a in std::iter::once(tree.nr(node)).chain(tree.nr(node).ancestors()) {
+        if a.has(C::DefType) || a.index() == 0 {
+            let name = if a.index() == 0 && skip_root {
                 String::new()
-            } else if n == 0 {
-                let path = lang.syms.resolve(nd.sym).to_string();
+            } else if a.index() == 0 {
+                let path = lang.syms.resolve(a.sym()).to_string();
                 let stem = lang_id.map(|l| l.strip_extension(&path)).unwrap_or(&path);
                 let collapsed = if stem.ends_with("/__init__") || stem == "__init__" {
                     stem.strip_suffix("/__init__").unwrap_or("").to_string()
@@ -234,19 +155,12 @@ fn def_fqn(tree: &Tree, node: u32, lang: &Lang, sk: &Sk) -> String {
                 };
                 collapsed.replace('/', sep)
             } else {
-                let sym = def_name_sym(tree, n, name_f, left_f, sk.defname);
+                let sym = a.child_sym(C::DefName).unwrap_or(0);
                 lang.syms.resolve(sym).to_string()
             };
             if !name.is_empty() {
                 parts.push(name);
             }
-        }
-        if n == 0 {
-            break;
-        }
-        n = nd.parent;
-        if n == u32::MAX {
-            break;
         }
     }
     parts.reverse();
@@ -293,7 +207,7 @@ fn build_files(trees: &[Tree], lang: &Lang) -> anyhow::Result<RecordBatch> {
         StringBuilder::with_capacity(n, n * 8),
     );
     for (i, tree) in trees.iter().enumerate() {
-        let path = lang.syms.resolve(tree.nodes[0].sym);
+        let path = lang.syms.resolve(tree.root().sym());
         id_b.append_value(i as i64 + 1);
         path_b.append_value(path);
         let filename = path.rsplit('/').next().unwrap_or(path);
@@ -327,7 +241,7 @@ fn build_files(trees: &[Tree], lang: &Lang) -> anyhow::Result<RecordBatch> {
     )
 }
 
-fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps, sk: &Sk) -> anyhow::Result<RecordBatch> {
+fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<RecordBatch> {
     let (mut id_b, mut fp_b, mut fqn_b, mut name_b, mut dt_b) = (
         Int64Builder::new(),
         StringBuilder::new(),
@@ -343,36 +257,33 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps, sk: &Sk) -> anyhow::Res
         Int64Builder::new(),
         Int64Builder::new(),
     );
-    let name_f = lang.fields.lookup("name") as u16;
 
     for (fi, tree) in trees.iter().enumerate() {
-        let path = lang.syms.resolve(tree.nodes[0].sym).to_string();
-        for (i, n) in tree.nodes.iter().enumerate() {
-            let node = i as u32;
-            if !sk.is_def(tree, node) {
+        let path = lang.syms.resolve(tree.root().sym()).to_string();
+        for i in 0..tree.len() {
+            let nr = tree.nr(i);
+            if !nr.has(C::DefType) {
                 continue;
             }
-            let did = ids.defs[&(fi, node)];
-            let left_f = lang.fields.lookup("left") as u16;
-            let name_sym = def_name_sym(tree, node, name_f, left_f, sk.defname);
-            let deftype_sym = synth_sym(tree, node, sk.deftype);
+            let did = ids.defs[&(fi, i)];
+            let name_sym = nr.child_sym(C::DefName).unwrap_or(0);
+            let deftype_sym = nr.child_sym(C::DefType).unwrap_or(0);
             id_b.append_value(did);
             fp_b.append_value(&path);
-            fqn_b.append_value(def_fqn(tree, node, lang, sk));
+            fqn_b.append_value(def_fqn(tree, i, lang));
             name_b.append_value(lang.syms.resolve(name_sym));
             dt_b.append_value(lang.syms.resolve(deftype_sym));
-            sl_b.append_value(n.start as i64);
-            el_b.append_value(n.end as i64);
-            sb_b.append_value(n.start as i64);
-            eb_b.append_value(n.end as i64);
+            sl_b.append_value(nr.start() as i64);
+            el_b.append_value(nr.end() as i64);
+            sb_b.append_value(nr.start() as i64);
+            eb_b.append_value(nr.end() as i64);
             sc_b.append_value(0);
             ec_b.append_value(0);
         }
     }
-    // Module defs (non-Python)
     for (fi, tree) in trees.iter().enumerate() {
         if let Some(&mid) = ids.modules.get(&fi) {
-            let path = lang.syms.resolve(tree.nodes[0].sym).to_string();
+            let path = lang.syms.resolve(tree.root().sym()).to_string();
             id_b.append_value(mid);
             fp_b.append_value(&path);
             fqn_b.append_value(&path);
@@ -420,14 +331,12 @@ fn build_imports(
     trees: &[Tree],
     lang: &Lang,
     ids: &IdMaps,
-    sk: &Sk,
     support_lang: SupportLang,
     resolve_config: &tree_dsl::file_tree::ResolveConfig,
 ) -> anyhow::Result<RecordBatch> {
     let use_resolved =
         resolve_config.display_source == tree_dsl::file_tree::DisplaySource::Resolved;
     let fqn_sep = support_lang.fqn_separator();
-    let source_path_k = lang.lookup_kind("__source_path");
     let (mut id_b, mut fp_b, mut it_b, mut path_b, mut name_b, mut alias_b) = (
         Int64Builder::new(),
         StringBuilder::new(),
@@ -447,41 +356,33 @@ fn build_imports(
     );
 
     for (fi, tree) in trees.iter().enumerate() {
-        let fp = lang.syms.resolve(tree.nodes[0].sym).to_string();
-        for (i, n) in tree.nodes.iter().enumerate() {
-            let node = i as u32;
-            if !sk.is_import(tree, node) {
+        let fp = lang.syms.resolve(tree.root().sym()).to_string();
+        for i in 0..tree.len() {
+            let nr = tree.nr(i);
+            if !(nr.is(C::Import) || nr.is(C::ImportType)) {
                 continue;
             }
-            let Some(imp_ids) = ids.imports.get(&(fi, node)) else {
+            let Some(imp_ids) = ids.imports.get(&(fi, i)) else {
                 continue;
             };
 
-            let source_sym = synth_sym(tree, node, sk.source);
-            let source_str = if use_resolved && source_path_k != 0 {
-                let sp_sym = synth_sym(tree, node, source_path_k);
-                if sp_sym != 0 {
-                    lang.syms.resolve(sp_sym).replace('/', fqn_sep)
-                } else {
-                    lang.syms.resolve(source_sym).to_string()
-                }
+            let source_sym = nr.child_sym(C::Source).unwrap_or(0);
+            let source_str = if use_resolved {
+                nr.child_sym(C::SourcePath)
+                    .map(|sp| lang.syms.resolve(sp).replace('/', fqn_sep))
+                    .unwrap_or_else(|| lang.syms.resolve(source_sym).to_string())
             } else {
                 lang.syms.resolve(source_sym).to_string()
             };
             let source_str = source_str.as_str();
-            let is_type_only = tree.nodes[node as usize].kind == sk.import_type;
+            let is_type_only = nr.is(C::ImportType);
 
-            // Collect __name children with optional __alias (skip empty syms)
-            let names: Vec<(u32, u32)> = tree
-                .children(node)
-                .filter(|&c| tree.kind(c) == sk.name && tree.sym(c) != 0)
+            let names: Vec<(u32, u32)> = nr
+                .children()
+                .filter(|c| c.is(C::Name) && c.sym() != 0)
                 .map(|c| {
-                    let alias = tree
-                        .children(c)
-                        .find(|&gc| tree.kind(gc) == sk.alias)
-                        .map(|gc| tree.sym(gc))
-                        .unwrap_or(0);
-                    (tree.sym(c), alias)
+                    let alias = c.child_sym(C::Alias).unwrap_or(0);
+                    (c.sym(), alias)
                 })
                 .collect();
 
@@ -508,10 +409,10 @@ fn build_imports(
                 alias_b.append_null();
                 to_b.append_value(is_type_only);
                 ht_b.append_value(false);
-                sl_b.append_value(n.start as i64);
-                el_b.append_value(n.end as i64);
-                sb_b.append_value(n.start as i64);
-                eb_b.append_value(n.end as i64);
+                sl_b.append_value(nr.start() as i64);
+                el_b.append_value(nr.end() as i64);
+                sb_b.append_value(nr.start() as i64);
+                eb_b.append_value(nr.end() as i64);
                 sc_b.append_value(0);
                 ec_b.append_value(0);
             } else {
@@ -533,10 +434,10 @@ fn build_imports(
                     }
                     to_b.append_value(is_type_only);
                     ht_b.append_value(false);
-                    sl_b.append_value(n.start as i64);
-                    el_b.append_value(n.end as i64);
-                    sb_b.append_value(n.start as i64);
-                    eb_b.append_value(n.end as i64);
+                    sl_b.append_value(nr.start() as i64);
+                    el_b.append_value(nr.end() as i64);
+                    sb_b.append_value(nr.start() as i64);
+                    eb_b.append_value(nr.end() as i64);
                     sc_b.append_value(0);
                     ec_b.append_value(0);
                 }
@@ -582,7 +483,6 @@ fn build_imports(
 fn build_file_edges(
     trees: &[Tree],
     ids: &IdMaps,
-    sk: &Sk,
 ) -> (anyhow::Result<RecordBatch>, anyhow::Result<RecordBatch>) {
     let (mut ds, mut dt, mut dk) = (
         Int64Builder::new(),
@@ -596,16 +496,16 @@ fn build_file_edges(
     );
     for (fi, tree) in trees.iter().enumerate() {
         let fid = fi as i64 + 1;
-        for (i, _n) in tree.nodes.iter().enumerate() {
-            let node = i as u32;
-            if sk.is_def(tree, node) {
-                if let Some(&did) = ids.defs.get(&(fi, node)) {
+        for i in 0..tree.len() {
+            let nr = tree.nr(i);
+            if nr.has(C::DefType) {
+                if let Some(&did) = ids.defs.get(&(fi, i)) {
                     ds.append_value(fid);
                     dt.append_value(did);
                     dk.append_value("Defines");
                 }
-            } else if sk.is_import(tree, node)
-                && let Some(iids) = ids.imports.get(&(fi, node))
+            } else if (nr.is(C::Import) || nr.is(C::ImportType))
+                && let Some(iids) = ids.imports.get(&(fi, i))
             {
                 for &iid in iids {
                     is.append_value(fid);
@@ -703,13 +603,11 @@ fn build_def2imp(
             let Some(&caller_id) = ids.defs.get(&(fi, edge.from.node)) else {
                 continue;
             };
-            // edge.to is now a __name node — look up its specific import ID
             if let Some(&iid) = ids.import_by_name.get(&(fi, edge.to.node)) {
                 s.append_value(caller_id);
                 t.append_value(iid);
                 k.append_value("Calls");
             } else if let Some(iids) = ids.imports.get(&(fi, edge.to.node)) {
-                // Fallback: edge.to is __import node (wildcard case)
                 for &iid in iids {
                     s.append_value(caller_id);
                     t.append_value(iid);

@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 
 use crate::lang::Lang;
 use crate::pattern::{self, Rewrite};
-use crate::tree::{NONE, Node, Tree};
+use crate::tree::{NONE, Node, Step, Tree};
 
 /// Result of walking the file tree.
 pub struct WalkResult {
@@ -174,19 +174,19 @@ fn build_file_tree(paths: &[String], lang: &mut Lang) -> Tree {
 fn climb(tree: &mut Tree, while_kind: u16, mark_kind: u16) {
     let mut marked: Vec<u32> = Vec::new();
 
-    for i in 0..tree.nodes.len() as u32 {
-        if !tree.children(i).any(|c| tree.kind(c) == while_kind) {
+    for i in 0..tree.len() {
+        if !tree.nr(i).children().any(|c| c.kind() == while_kind) {
             continue;
         }
-        let mut node = tree.nodes[i as usize].parent;
-        while node != NONE {
-            if tree.children(node).any(|c| tree.kind(c) == while_kind) {
-                node = tree.nodes[node as usize].parent;
+        if let Some(target) = tree.nr(i).ascend(|anc| {
+            if anc.children().any(|c| c.kind() == while_kind) {
+                Step::Into
             } else {
-                if !marked.contains(&node) {
-                    marked.push(node);
-                }
-                break;
+                Step::Out(anc.index())
+            }
+        }) {
+            if !marked.contains(&target) {
+                marked.push(target);
             }
         }
     }
@@ -213,14 +213,12 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
     }
     let root_node_kind = lang.lookup_kind("__root");
     let mut paths = Vec::new();
-    for i in 0..tree.nodes.len() as u32 {
-        if tree.nodes[i as usize].kind == root_node_kind {
+    for i in 0..tree.len() {
+        let nr = tree.nr(i);
+        if nr.kind() == root_node_kind {
             continue;
         }
-        let has_marker = markers
-            .iter()
-            .any(|&mk| tree.children(i).any(|c| tree.kind(c) == mk));
-        if has_marker {
+        if nr.children().any(|c| markers.contains(&c.kind())) {
             let path = node_path(tree, i, lang);
             if !paths.contains(&path) {
                 paths.push(path);
@@ -231,20 +229,15 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
 }
 
 /// Reconstruct the full path of a directory node by walking up parent pointers.
-fn node_path(tree: &Tree, mut node: u32, lang: &Lang) -> String {
+fn node_path(tree: &Tree, node: u32, lang: &Lang) -> String {
     let dir_kind = lang.lookup_kind("__dir");
     let root_kind = lang.lookup_kind("__root");
-    let mut parts = Vec::new();
-    while node != NONE {
-        let n = &tree.nodes[node as usize];
-        if n.kind == root_kind {
-            break;
-        }
-        if n.kind == dir_kind && n.sym != 0 {
-            parts.push(lang.syms.resolve(n.sym).to_string());
-        }
-        node = n.parent;
-    }
+    let mut parts: Vec<String> = std::iter::once(tree.nr(node))
+        .chain(tree.nr(node).ancestors())
+        .take_while(|n| n.kind() != root_kind)
+        .filter(|n| n.kind() == dir_kind && n.sym() != 0)
+        .map(|n| lang.syms.resolve(n.sym()).to_string())
+        .collect();
     parts.reverse();
     parts.join("/")
 }
@@ -256,8 +249,8 @@ fn collect_packages(tree: &Tree, lang: &Lang) -> Vec<String> {
         return vec![];
     }
     let mut pkgs = Vec::new();
-    for i in 0..tree.nodes.len() as u32 {
-        if tree.children(i).any(|c| tree.kind(c) == pkg_kind) {
+    for i in 0..tree.len() {
+        if tree.nr(i).children().any(|c| c.kind() == pkg_kind) {
             pkgs.push(node_path(tree, i, lang));
         }
     }

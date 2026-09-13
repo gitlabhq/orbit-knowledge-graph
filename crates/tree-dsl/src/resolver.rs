@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::canonical::Canonical as C;
 use crate::grammar::SupportLang;
 use crate::lang::Lang;
-use crate::tree::{Edge, EdgeKind, NONE, NodeRef, Tree};
+use crate::tree::{Edge, EdgeKind, NodeRef, Tree};
 
 pub struct ResolveResult {
     pub cross_edges: Vec<Edge>,
@@ -32,10 +32,11 @@ pub fn resolve(
 
     for req in &reqs {
         let resolved_sym = lang.syms.intern(&req.target_path);
-        let sp_node = trees[req.fi]
-            .children(req.node)
-            .find(|&c| trees[req.fi].is(c, C::SourcePath));
-        if let Some(sn) = sp_node {
+        let sp = trees[req.fi]
+            .nr(req.node)
+            .child(C::SourcePath)
+            .map(|n| n.index());
+        if let Some(sn) = sp {
             trees[req.fi].nodes[sn as usize].sym = resolved_sym;
         }
     }
@@ -97,11 +98,11 @@ fn build_visible_names(trees: &[Tree]) -> Vec<FxHashMap<u32, u32>> {
             if n.dead {
                 continue;
             }
-            if !tree.children(i as u32).any(|c| tree.is(c, C::DefType)) {
+            let nr = tree.nr(i as u32);
+            if !nr.has(C::DefType) {
                 continue;
             }
-            let ns = name_sym(tree, i as u32);
-            if ns != 0 {
+            if let Some(ns) = nr.child_sym(C::DefName) {
                 names.insert(ns, i as u32);
             }
         }
@@ -125,11 +126,7 @@ fn gather_imports(
             if n.kind != C::Import && n.kind != C::ImportType {
                 continue;
             }
-            let source_sym = tree
-                .children(i as u32)
-                .find(|&c| tree.is(c, C::SourcePath))
-                .map(|c| tree.sym(c))
-                .unwrap_or(0);
+            let source_sym = tree.nr(i as u32).child_sym(C::SourcePath).unwrap_or(0);
             if source_sym == 0 {
                 continue;
             }
@@ -169,12 +166,11 @@ fn gather_imports(
                     target_path,
                 });
             } else {
-                let tree = &trees[fi];
-                for c in tree.children(i as u32) {
-                    if !tree.is(c, C::Name) || tree.sym(c) == 0 {
+                for c in tree.nr(i as u32).children() {
+                    if !c.is(C::Name) || c.sym() == 0 {
                         continue;
                     }
-                    let name_str = lang.syms.resolve(tree.sym(c));
+                    let name_str = lang.syms.resolve(c.sym());
                     let submod = format!("{target_path}/{name_str}");
                     let sub_fi = file_index.get(&submod).copied().or_else(|| {
                         for prefix in lookup_prefixes.iter() {
@@ -231,11 +227,11 @@ fn propagate_reexports(
                 continue;
             }
             let tree = &trees[req.fi];
-            for c in tree.children(req.node) {
-                if !tree.is(c, C::Name) {
+            for c in tree.nr(req.node).children() {
+                if !c.is(C::Name) {
                     continue;
                 }
-                let name_sym = tree.sym(c);
+                let name_sym = c.sym();
                 if name_sym == 0 {
                     continue;
                 }
@@ -305,11 +301,11 @@ fn build_import_edges(
         let i = req.node;
         let tfi = req.target_fi;
         let tree = &trees[fi];
-        for c in tree.children(i) {
-            if !tree.is(c, C::Name) {
+        for c in tree.nr(i).children() {
+            if !c.is(C::Name) {
                 continue;
             }
-            let name_sym = tree.sym(c);
+            let name_sym = c.sym();
             if name_sym == 0 {
                 continue;
             }
@@ -324,7 +320,13 @@ fn build_import_edges(
                         .get(&(tfi, def_name))
                         .copied()
                         .unwrap_or((tfi, def_node));
-                    edges.push(Edge::new(fi, c, real_fi, real_node, EdgeKind::Imports));
+                    edges.push(Edge::new(
+                        fi,
+                        c.index(),
+                        real_fi,
+                        real_node,
+                        EdgeKind::Imports,
+                    ));
                 }
                 continue;
             }
@@ -334,18 +336,24 @@ fn build_import_edges(
             }
 
             if let Some(&(re_fi, re_node)) = reexports.get(&(tfi, name_sym)) {
-                edges.push(Edge::new(fi, c, re_fi, re_node, EdgeKind::Imports));
+                edges.push(Edge::new(fi, c.index(), re_fi, re_node, EdgeKind::Imports));
                 continue;
             }
             if let Some(&def_node) = visible[tfi].get(&name_sym) {
-                edges.push(Edge::new(fi, c, tfi, def_node, EdgeKind::Imports));
+                edges.push(Edge::new(fi, c.index(), tfi, def_node, EdgeKind::Imports));
                 continue;
             }
 
             let results = follow_import_chain(trees, reqs, visible, name_sym, tfi);
             if results.len() == 1 {
                 let (def_fi, def_node) = results[0];
-                edges.push(Edge::new(fi, c, def_fi, def_node, EdgeKind::Imports));
+                edges.push(Edge::new(
+                    fi,
+                    c.index(),
+                    def_fi,
+                    def_node,
+                    EdgeKind::Imports,
+                ));
                 continue;
             }
 
@@ -357,7 +365,7 @@ fn build_import_edges(
             {
                 let submod_path = format!("{target_dir}/{name_str}");
                 if let Some(&sub_fi) = file_index.get(&submod_path) {
-                    edges.push(Edge::new(fi, c, sub_fi, 0, EdgeKind::Imports));
+                    edges.push(Edge::new(fi, c.index(), sub_fi, 0, EdgeKind::Imports));
                 }
             }
         }
@@ -376,12 +384,13 @@ fn build_call_edges(
     for req in reqs {
         let fi = req.fi;
         let import_node = req.node;
+        let tree = &trees[fi];
 
         let mut target_files = vec![req.target_fi];
         for ce in cross_edges {
             if ce.from.tree as usize == fi
                 && (ce.from.node == import_node
-                    || trees[fi].nodes[ce.from.node as usize].parent == import_node)
+                    || tree.nodes[ce.from.node as usize].parent == import_node)
                 && ce.kind == EdgeKind::Imports
             {
                 if !target_files.contains(&(ce.to.tree as usize)) {
@@ -390,31 +399,25 @@ fn build_call_edges(
             }
         }
 
-        for edge in trees[fi].edges().iter() {
+        for edge in tree.edges().iter() {
             if edge.kind != EdgeKind::Imports {
                 continue;
             }
             let edge_target = edge.to.node;
-            if edge_target != import_node
-                && trees[fi].nodes[edge_target as usize].parent != import_node
+            if edge_target != import_node && tree.nodes[edge_target as usize].parent != import_node
             {
                 continue;
             }
 
             let caller = edge.from.node;
-            for d in trees[fi].descendants(caller) {
-                if trees[fi].kind(d) != C::Call {
+            for d in tree.nr(caller).descendants() {
+                if !d.is(C::Call) {
                     continue;
                 }
-                let callee_node = trees[fi]
-                    .children(d)
-                    .find(|&c| trees[fi].kind(c) == C::Callee);
-                if let Some(cn) = callee_node
-                    && let Some(mn) = trees[fi]
-                        .children(cn)
-                        .find(|&c| trees[fi].kind(c) == C::Member)
+                if let Some(cn) = d.child(C::Callee)
+                    && let Some(mn) = cn.child(C::Member)
                 {
-                    let member_sym = trees[fi].sym(mn);
+                    let member_sym = mn.sym();
                     if member_sym == 0 {
                         continue;
                     }
@@ -446,34 +449,28 @@ fn build_call_edges(
             .map(|(sym, _)| *sym)
             .unwrap_or(0);
 
-        for edge in trees[ce.from.tree as usize].edges().iter() {
+        let from_tree = &trees[ce.from.tree as usize];
+        for edge in from_tree.edges().iter() {
             if edge.kind != EdgeKind::Imports {
                 continue;
             }
             let edge_import = edge.to.node;
-            let import_parent = trees[ce.from.tree as usize].nodes[ce.from.node as usize].parent;
+            let import_parent = from_tree.nodes[ce.from.node as usize].parent;
             let matches_import = edge_import == ce.from.node
                 || edge_import == import_parent
-                || trees[ce.from.tree as usize].nodes[edge_import as usize].parent == import_parent;
+                || from_tree.nodes[edge_import as usize].parent == import_parent;
             if !matches_import {
                 continue;
             }
 
-            let is_wildcard = lang
-                .syms
-                .resolve(trees[ce.from.tree as usize].sym(ce.from.node))
-                == "*";
+            let is_wildcard = lang.syms.resolve(from_tree.sym(ce.from.node)) == "*";
 
             if is_wildcard && target_name != 0 {
                 let caller_node = edge.from.node;
                 let mut matched = false;
-                for d in trees[ce.from.tree as usize].descendants(caller_node) {
-                    if trees[ce.from.tree as usize].kind(d) == C::Call {
-                        let callee = trees[ce.from.tree as usize]
-                            .children(d)
-                            .find(|&c| trees[ce.from.tree as usize].kind(c) == C::Callee)
-                            .map(|c| trees[ce.from.tree as usize].sym(c))
-                            .unwrap_or(0);
+                for d in from_tree.nr(caller_node).descendants() {
+                    if d.is(C::Call) {
+                        let callee = d.child_sym(C::Callee).unwrap_or(0);
                         if callee == target_name {
                             matched = true;
                             break;
@@ -512,27 +509,17 @@ fn build_type_edges(
         let target_fi = ce.to.tree as usize;
         let target_node = ce.to.node;
 
-        let return_type_sym = trees[target_fi]
-            .children(target_node)
-            .find(|&c| trees[target_fi].kind(c) == C::ReturnType)
-            .map(|c| trees[target_fi].sym(c))
-            .filter(|&s| s != 0)
-            .or_else(|| {
-                for d in trees[target_fi].descendants(target_node) {
-                    if trees[target_fi].nodes[d as usize].kind == C::Return {
-                        for c in trees[target_fi].children(d) {
-                            if trees[target_fi].kind(c) == C::Call {
-                                return trees[target_fi]
-                                    .children(c)
-                                    .find(|&c2| trees[target_fi].kind(c2) == C::Callee)
-                                    .map(|c2| trees[target_fi].sym(c2))
-                                    .filter(|&s| s != 0);
-                            }
-                        }
+        let target_nr = trees[target_fi].nr(target_node);
+        let return_type_sym = target_nr.child_sym(C::ReturnType).or_else(|| {
+            for d in target_nr.descendants() {
+                if d.is(C::Return) {
+                    if let Some(call) = d.child(C::Call) {
+                        return call.child_sym(C::Callee);
                     }
                 }
-                None
-            });
+            }
+            None
+        });
 
         let Some(ret_sym) = return_type_sym else {
             continue;
@@ -547,7 +534,10 @@ fn build_type_edges(
         if resolved_fi.is_none() {
             for ce2 in cross_edges {
                 if ce2.from.tree as usize == target_fi && ce2.kind == EdgeKind::Imports {
-                    let dn = name_sym(&trees[ce2.to.tree as usize], ce2.to.node);
+                    let dn = trees[ce2.to.tree as usize]
+                        .nr(ce2.to.node)
+                        .child_sym(C::DefName)
+                        .unwrap_or(0);
                     if dn == ret_sym {
                         resolved_fi = Some(ce2.to.tree as usize);
                         resolved_node = Some(ce2.to.node);
@@ -562,58 +552,50 @@ fn build_type_edges(
         };
 
         let tree = &trees[caller_fi];
-        let target_name_sym = name_sym(&trees[target_fi], target_node);
+        let target_name_sym = trees[target_fi]
+            .nr(target_node)
+            .child_sym(C::DefName)
+            .unwrap_or(0);
 
         let mut bound_vars: Vec<u32> = Vec::new();
-        for d in tree.descendants(caller_node) {
-            if tree.kind(d) != C::Binding {
+        for d in tree.nr(caller_node).descendants() {
+            if !d.is(C::Binding) {
                 continue;
             }
-            let lhs = tree.sym(d);
-            let rhs_call = tree
-                .children(d)
-                .find(|&c| tree.kind(c) == C::Rhs)
-                .and_then(|rhs| tree.children(rhs).find(|&c| tree.kind(c) == C::Call));
+            let lhs = d.sym();
+            let rhs_call = d.child(C::Rhs).and_then(|rhs| rhs.child(C::Call));
             if let Some(rn) = rhs_call {
-                let callee = tree
-                    .children(rn)
-                    .find(|&c| tree.kind(c) == C::Callee)
-                    .map(|c| tree.sym(c))
-                    .unwrap_or(0);
+                let callee = rn.child_sym(C::Callee).unwrap_or(0);
                 if callee == target_name_sym && lhs != 0 {
                     bound_vars.push(lhs);
                 }
             }
         }
 
-        for d in tree.descendants(caller_node) {
-            if tree.kind(d) == C::Call {
-                let callee_n = tree.children(d).find(|&c| tree.kind(c) == C::Callee);
-                let member_n =
-                    callee_n.and_then(|cn| tree.children(cn).find(|&c| tree.kind(c) == C::Member));
-                if let Some(mn) = member_n {
-                    let obj_sym = tree
-                        .children(mn)
-                        .find(|&c| tree.kind(c) == C::Object)
-                        .map(|c| tree.sym(c))
-                        .unwrap_or(0);
-                    if !bound_vars.contains(&obj_sym) {
-                        continue;
-                    }
-                    let mem_sym = tree.sym(mn);
-                    if mem_sym != 0 {
-                        let mut found = false;
-                        for cd in trees[type_fi].descendants(type_node) {
-                            if trees[type_fi].kind(cd) == C::DefType {
-                                let mn = trees[type_fi].nodes[cd as usize].parent;
-                                if mn != NONE && mn != type_node {
-                                    let mname = name_sym(&trees[type_fi], mn);
+        for d in tree.nr(caller_node).descendants() {
+            if !d.is(C::Call) {
+                continue;
+            }
+            let member_n = d.child(C::Callee).and_then(|cn| cn.child(C::Member));
+            if let Some(mn) = member_n {
+                let obj_sym = mn.child_sym(C::Object).unwrap_or(0);
+                if !bound_vars.contains(&obj_sym) {
+                    continue;
+                }
+                let mem_sym = mn.sym();
+                if mem_sym != 0 {
+                    let mut found = false;
+                    for cd in trees[type_fi].nr(type_node).descendants() {
+                        if cd.is(C::DefType) {
+                            if let Some(p) = cd.parent() {
+                                if p.index() != type_node {
+                                    let mname = p.child_sym(C::DefName).unwrap_or(0);
                                     if mname == mem_sym && !found {
                                         type_edges.push(Edge::new(
                                             caller_fi,
                                             caller_node,
                                             type_fi,
-                                            mn,
+                                            p.index(),
                                             EdgeKind::Calls,
                                         ));
                                         found = true;
@@ -658,16 +640,12 @@ fn follow_import_chain(
             if n.kind != C::Import {
                 continue;
             }
-            for c in tree.children(ni as u32) {
-                if !tree.is(c, C::Name) {
+            for c in tree.nr(ni as u32).children() {
+                if !c.is(C::Name) {
                     continue;
                 }
-                let import_name = tree.sym(c);
-                let alias_sym = tree
-                    .children(c)
-                    .find(|&gc| tree.is(gc, C::Alias))
-                    .map(|gc| tree.sym(gc))
-                    .unwrap_or(0);
+                let import_name = c.sym();
+                let alias_sym = c.child_sym(C::Alias).unwrap_or(0);
 
                 let matches = import_name == wanted_sym || alias_sym == wanted_sym;
                 if !matches {
@@ -696,13 +674,6 @@ struct ImportReq {
     node: u32,
     target_fi: usize,
     target_path: String,
-}
-
-fn name_sym(tree: &Tree, node: u32) -> u32 {
-    tree.children(node)
-        .find(|&c| tree.is(c, C::DefName))
-        .map(|c| tree.sym(c))
-        .unwrap_or(0)
 }
 
 fn resolve_relative(current_file: &str, source: &str) -> String {
