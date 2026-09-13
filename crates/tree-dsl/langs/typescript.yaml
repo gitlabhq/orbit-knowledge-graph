@@ -30,6 +30,12 @@ stages:
       - match: '(import_specifier name: $N)'
         replace: '(import_specifier @$N)'
 
+      # Export specifier alias
+      - match: '(export_specifier name: $N alias: $A)'
+        replace: '(export_specifier @$N (__alias @$A))'
+      - match: '(export_specifier name: $N)'
+        replace: '(export_specifier @$N)'
+
   - name: retag-refs
     rules:
       - match: '(member_expression object: $O:__ivar property: $M)'
@@ -68,9 +74,13 @@ stages:
       - match: '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
 
-      # import * as ns from './source'
-      - match: '(import_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))'
-        replace: '(__import (__source @$S) (__source_path @$S) (__name @$N))'
+      # export { A, B } from './source' — re-export with source
+      - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
+        replace: '(__import (__source @$S) (__source_path @$S) $$$SPECS->__name)'
+
+      # export { A, B } — local re-export (no source)
+      - match: '(export_statement (export_clause $$$SPECS:export_specifier))'
+        replace: '(export_statement $$$SPECS)'
 
 
 
@@ -134,6 +144,12 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $$$ANN $B)'
       - match: '(abstract_class_declaration name: $N body: $B $$$ANN:__supertype)'
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $$$ANN $B)'
+
+  - name: exports
+    rules:
+      # export const X = ... → promote binding to Variable def
+      - match: '(export_statement (lexical_declaration $B:__binding))'
+        replace: '(export_statement (__def (__defname @$B) (__deftype "Variable")))'
 
 resolve:
   lookup_from:
