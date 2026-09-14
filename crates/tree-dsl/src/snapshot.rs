@@ -39,6 +39,7 @@ impl IndexResult {
             cross_edges: snap.cross_edges,
             lang: Lang::from(snap.lang),
             pipeline,
+            timings: Default::default(),
         })
     }
 

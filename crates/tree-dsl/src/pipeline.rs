@@ -27,6 +27,13 @@ pub struct IndexResult {
     pub cross_edges: Vec<crate::tree::Edge>,
     pub lang: Lang,
     pub pipeline: Pipeline,
+    pub timings: IndexTimings,
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct IndexTimings {
+    pub parse_s: f64,
+    pub resolve_s: f64,
 }
 
 pub struct Pipeline {
@@ -90,6 +97,8 @@ pub fn process_file_timed(
 
 /// Unified indexing entrypoint. All files must be the same language.
 pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
+    use std::time::Instant;
+
     let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
 
     let parseable: Vec<&(String, String)> = files
@@ -97,9 +106,8 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
         .filter(|(p, _)| SupportLang::from_path(p).is_some())
         .collect();
 
-    let t0 = std::time::Instant::now();
+    let t0 = Instant::now();
 
-    // Parallel parse: each thread gets a forked Lang with shared kinds/fields + own syms
     let results: Vec<(Tree, Lang)> = {
         use rayon::prelude::*;
         parseable
@@ -112,7 +120,6 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
             .collect()
     };
 
-    // Merge per-thread syms back into the main Lang and remap tree sym IDs
     let mut trees: Vec<Tree> = Vec::with_capacity(results.len());
     for (mut tree, thread_lang) in results {
         let remap = lang.thread_merge(&thread_lang);
@@ -120,11 +127,9 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
         trees.push(tree);
     }
 
-    eprintln!(
-        "[parse] {} files in {:.2}s",
-        trees.len(),
-        t0.elapsed().as_secs_f64()
-    );
+    let parse_s = t0.elapsed().as_secs_f64();
+    let t1 = Instant::now();
+
     let file_paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
     let walk = file_tree::walk(&file_paths, files, &mut lang, &pipeline.resolve);
     let cross_edges = resolver::resolve(
@@ -135,14 +140,15 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
         &pipeline.resolve.external,
     )
     .cross_edges;
-    if !cross_edges.is_empty() {
-        eprintln!("[resolver] {} cross-edges", cross_edges.len());
-    }
+
+    let resolve_s = t1.elapsed().as_secs_f64();
+
     IndexResult {
         trees,
         cross_edges,
         lang,
         pipeline,
+        timings: IndexTimings { parse_s, resolve_s },
     }
 }
 

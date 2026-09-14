@@ -15,16 +15,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BIN="$REPO_ROOT/../../target/release/tree-dsl"
 
 if [ ! -f "$BIN" ]; then
-  echo "Building tree-dsl (release)..." >&2
-  cargo build --release -p tree-dsl --manifest-path "$REPO_ROOT/../../Cargo.toml" >&2
+  echo "Building tree-dsl-cli (release)..." >&2
+  cargo build --release -p tree-dsl-cli --manifest-path "$REPO_ROOT/../../Cargo.toml" >&2
   if [ $? -ne 0 ]; then
-    echo '{"error": "Failed to build tree-dsl"}' >&2
+    echo '{"error": "Failed to build tree-dsl-cli"}' >&2
     exit 1
   fi
 fi
 
-# Start the process in the background; bench output goes to stderr
-"$BIN" --bench "$1" 2>/tmp/tree_dsl_bench_stderr.txt &
+"$BIN" index "$1" 2>/tmp/tree_dsl_bench_stderr.txt &
 PROCESS_PID=$!
 
 # Wait a moment for the process to start

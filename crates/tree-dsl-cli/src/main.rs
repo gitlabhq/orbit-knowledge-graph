@@ -300,48 +300,25 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
     let result = tree_dsl::index(lang_id, &files);
     let elapsed = t0.elapsed();
 
-    let deftype_k = result.lang.lookup_kind("__deftype");
-    let import_k = result.lang.lookup_kind("__import");
     let mut total_defs = 0usize;
     let mut total_imports = 0usize;
     let mut total_intra_edges = 0usize;
 
     for tree in &result.trees {
-        let path = result.lang.syms.resolve(tree.nodes[0].sym);
-        let defs = tree.nodes.iter().filter(|n| n.kind == deftype_k).count();
-        let imports = tree.nodes.iter().filter(|n| n.kind == import_k).count();
-        total_defs += defs;
-        total_imports += imports;
-        total_intra_edges += tree.edges().len();
-        println!(
-            "{}: {} defs, {} imports, {} edges",
-            path,
-            defs,
-            imports,
-            tree.edges().len()
-        );
-    }
-
-    if !result.cross_edges.is_empty() {
-        println!();
-        println!("cross-file edges: {}", result.cross_edges.len());
-        for ce in &result.cross_edges {
-            let from_path = result
-                .lang
-                .syms
-                .resolve(result.trees[ce.from.tree as usize].nodes[0].sym);
-            let to_path = result
-                .lang
-                .syms
-                .resolve(result.trees[ce.to.tree as usize].nodes[0].sym);
-            let from = node_label(
-                &result.trees[ce.from.tree as usize],
-                &result.lang,
-                ce.from.node,
-            );
-            let to = node_label(&result.trees[ce.to.tree as usize], &result.lang, ce.to.node);
-            println!("  {}:{} --> {}:{}", from_path, from, to_path, to);
+        for i in 0..tree.len() {
+            let c = tree.cursor(i);
+            if c.is_dead() {
+                continue;
+            }
+            if tree_dsl::canonical::has_def_type(c) {
+                total_defs += 1;
+            } else if c.is(tree_dsl::canonical::Canonical::Import)
+                || c.is(tree_dsl::canonical::Canonical::ImportType)
+            {
+                total_imports += 1;
+            }
         }
+        total_intra_edges += tree.edges().len();
     }
 
     eprintln!();
@@ -351,7 +328,9 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
     eprintln!("imports:      {}", total_imports);
     eprintln!("intra edges:  {}", total_intra_edges);
     eprintln!("cross edges:  {}", result.cross_edges.len());
-    eprintln!("time:         {:.2}s", elapsed.as_secs_f64());
+    eprintln!("parse:        {:.2}s", result.timings.parse_s);
+    eprintln!("resolve:      {:.2}s", result.timings.resolve_s);
+    eprintln!("total:        {:.2}s", elapsed.as_secs_f64());
     Ok(())
 }
 
