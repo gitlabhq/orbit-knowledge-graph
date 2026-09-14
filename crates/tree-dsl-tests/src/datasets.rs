@@ -20,6 +20,14 @@ fn flavor_display<'a>(def: tree_dsl::tree::Cursor, dtk: C, lang: &'a Lang) -> &'
             }
         }
     }
+    if dtk == C::Function {
+        if let Some(parent) = def.parent() {
+            let pk = canonical::def_type_of(parent);
+            if pk == Some(C::ImplBlock) || pk == Some(C::Trait) {
+                return "AssociatedFunction";
+            }
+        }
+    }
     dtk.display_name()
 }
 
