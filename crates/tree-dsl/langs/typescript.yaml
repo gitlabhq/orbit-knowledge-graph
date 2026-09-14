@@ -7,10 +7,10 @@ stages:
     rules:
 
 
-      # Constructor parameter property with typed binding
-      - match: '(required_parameter pattern: $N type: (type_annotation $T:type_identifier))'
+      # Constructor parameter property (only when accessibility_modifier present)
+      - match: '(required_parameter **/(accessibility_modifier) pattern: $N type: (type_annotation $T:type_identifier))'
         replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
-      - match: '(required_parameter pattern: $N)'
+      - match: '(required_parameter **/(accessibility_modifier) pattern: $N)'
         replace: '(__def (__defname @$N) (__property))'
 
       - match: '(return_statement $$$VALS)'

@@ -358,7 +358,14 @@ impl Fold {
             return Value::Opaque;
         }
 
-        let sym = rhs.sym();
+        let sym = if rhs.sym() != 0 {
+            rhs.sym()
+        } else {
+            rhs.children()
+                .find(|c| c.sym() != 0)
+                .map(|c| c.sym())
+                .unwrap_or(0)
+        };
         if sym != 0 {
             let r = self.lookup(sym);
             if self.any_class(tree, &r) {
