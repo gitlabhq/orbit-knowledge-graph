@@ -18,9 +18,16 @@ impl QueryParser {
         Ok(())
     }
 
-    pub(super) fn Query(input: Node) -> Result<Query> {
+    pub(super) fn Statement(input: Node) -> Result<Statement> {
         Ok(match_nodes!(input.into_children();
-            [Match((pattern, predicates)), Return(projections), clauses.., EOI(_)] => {
+            [Query(query), EOI(_)] => Statement::Query(Box::new(query)),
+            [SchemaCall(call), EOI(_)] => call,
+        ))
+    }
+
+    fn Query(input: Node) -> Result<Query> {
+        Ok(match_nodes!(input.into_children();
+            [Match((pattern, predicates)), Return(projections), clauses..] => {
                 let mut query = Query {
                     pattern, predicates, projections, order: None, limit: None, debug: false,
                 };
@@ -35,6 +42,14 @@ impl QueryParser {
                 query
             },
         ))
+    }
+
+    fn SchemaCall(input: Node) -> Result<Statement> {
+        let node = match_nodes!(input.into_children();
+            [] => None,
+            [literal] => Some(string(&literal)?),
+        );
+        Ok(Statement::SchemaCall { node })
     }
 
     fn Match(input: Node) -> Result<(Pattern, Vec<Comparison>)> {

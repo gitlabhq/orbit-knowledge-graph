@@ -136,8 +136,9 @@ fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let raw = require(ctx.take_raw(), "raw")?;
-    ctx.set_input(frontend::gql::parse(&raw)?);
+    if let Some(raw) = ctx.take_raw() {
+        ctx.set_input(frontend::gql::parse(&raw)?);
+    }
     Ok(())
 }
 
