@@ -170,6 +170,34 @@ pub(crate) fn run(
     Ok(())
 }
 
+fn test_query(query: &str) -> bool {
+    const TEST_TOKENS: &[&str] = &["test", "tests", "spec", "stub", "mock", "fake", "fixture"];
+    query
+        .split_whitespace()
+        .flat_map(|term| term.rsplit(['.', ':', '/']).next())
+        .flat_map(|name| {
+            let mut tokens = Vec::new();
+            let mut current = String::new();
+            for c in name.chars() {
+                if c == '_'
+                    || (c.is_ascii_uppercase()
+                        && current
+                            .chars()
+                            .last()
+                            .is_some_and(|p| p.is_ascii_lowercase()))
+                {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                if c != '_' {
+                    current.push(c.to_ascii_lowercase());
+                }
+            }
+            tokens.push(current);
+            tokens
+        })
+        .any(|token| TEST_TOKENS.contains(&token.as_str()))
+}
+
 fn exact_match(row: &orbit_search::CorpusRow, query: &str) -> bool {
     row.fqn.eq_ignore_ascii_case(query.trim())
         || row

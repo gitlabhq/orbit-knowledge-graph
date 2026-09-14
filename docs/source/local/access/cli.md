@@ -166,15 +166,13 @@ working.
 It returns the top ten ranked matches without parent or file quotas.
 Use one concept per query, such as `orbit grep "rate limit"`. Inspect weak or
 unmatched candidates with `context` before retrying; **weak matches** does not
-mean every term failed to match. A single identifier with no matching name
-starts with `No definition named ...`, so a name that does not exist yet is
-answered on the first line. Test, fixture, mock, and generated files are included
-automatically when the query looks like a test name; use `--path` for an explicit
-test-directory search.
+mean every term failed to match. Test, fixture, mock, and generated files are
+included automatically when the query looks like a test name; use `--path` for
+an explicit test-directory search.
 
 Read known definitions directly with `orbit context <fqn>`, or use
 `context --file <path>` for a file overview with imports and definition
-signatures. A path given as a positional argument is treated as `--file`. Numbered source lines are verbatim working-tree text. Strip `NN|`
+signatures. Numbered source lines are verbatim working-tree text. Strip `NN|`
 and reuse them for edits instead of rereading the file with raw tools. Start implementing
 once the edit point is clear; follow identifiers only for remaining questions
 and batch independent lookups. `grep` includes source for the first five matches, including weak matches,
