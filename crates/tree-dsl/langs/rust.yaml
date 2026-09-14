@@ -69,7 +69,7 @@ stages:
 
       # Control flow
       - match: '(if_expression condition: $COND consequence: $C alternative:? $A)'
-        replace: '(__ssa_branch $COND (__ssa_arm $C) (__arm? $A))'
+        replace: '(__ssa_branch $COND (__ssa_arm $C) (__ssa_arm? $A))'
       - match: '(match_expression value: $V body: $B)'
         replace: '(__ssa_branch $V $B)'
       - match: '(for_expression body: $B)'

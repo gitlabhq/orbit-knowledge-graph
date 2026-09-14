@@ -136,7 +136,7 @@ stages:
 
       # Control flow
       - match: '(if_statement condition: $COND consequence: $C alternative:? $A)'
-        replace: '(__ssa_branch $COND (__ssa_arm $C) (__arm? $A))'
+        replace: '(__ssa_branch $COND (__ssa_arm $C) (__ssa_arm? $A))'
       - match: '(switch_statement value: $V body: $B)'
         replace: '(__ssa_branch $V $B)'
       - match: '(ternary_expression condition: $COND consequence: $C alternative: $A)'
