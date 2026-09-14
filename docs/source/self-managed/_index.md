@@ -98,7 +98,17 @@ GitLab reaches the webserver over gRPC.
 
 ## Known limitations
 
-GitLab Orbit does not run on a GitLab Geo secondary site. No FIPS-compliant builds are available.
+GitLab Orbit does not run on a GitLab Geo secondary site.
+
+## Cryptographic module
+
+The GitLab Orbit server image links the AWS-LC FIPS cryptographic module and runs all TLS
+connections (gRPC from GitLab, ClickHouse, NATS) and JWT verification inside it. The server
+refuses to start when the module is not in FIPS mode. The linked module is
+[AWS-LC-FIPS 4](https://github.com/aws/aws-lc/blob/main/crypto/fipsmodule/FIPS.md), which is
+in process at the NIST Cryptographic Module Validation Program. There is no separate FIPS image:
+every published tag carries the same module. The `orbit` command line tool for local indexing
+does not link the module.
 
 Redundancy and recovery for GitLab Orbit are not documented. GitLab Orbit holds no data of its own, so if
 you lose the graph database, you can rebuild it by indexing again.

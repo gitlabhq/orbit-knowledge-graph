@@ -96,6 +96,8 @@ stages:
     MISE_DISABLE_TOOLS: lefthook
   before_script:
     - mise install
+    # Build scripts run outside the repo, where mise shims cannot resolve tool versions.
+    - eval "$(mise env -s bash)"
 
 .sccache-template:
   variables:
@@ -106,6 +108,7 @@ stages:
     DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
     - mise install
+    - eval "$(mise env -s bash)"
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
         export RUSTC_WRAPPER="sccache"
@@ -460,6 +463,20 @@ lint-check:
     - sccache --show-stats || true
 
 # Security Stage
+
+# Every server binary must link the AWS-LC FIPS module and nothing else for TLS.
+fips-check:
+  stage: security
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - ./scripts/check-fips-graph.sh
+    - cargo build -p orbit-server --locked
+    - ./scripts/check-fips-binary.sh target/debug/gkg-server
+    - sccache --show-stats || true
 
 cargo-audit:
   stage: security

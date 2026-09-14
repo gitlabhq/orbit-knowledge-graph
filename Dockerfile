@@ -4,6 +4,10 @@ FROM registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:late
 WORKDIR /build
 COPY . .
 
+# Picks up tools the builder image does not carry yet (mise.toml is the source of truth).
+# `mise exec` below puts them on PATH for cargo build scripts, which run outside /build.
+RUN CI=true MISE_DISABLE_TOOLS=lefthook mise install
+
 ARG SCCACHE_GCS_BUCKET=gl-knowledgegraph-sccache
 ENV CARGO_INCREMENTAL=0
 
@@ -18,14 +22,18 @@ RUN --mount=type=secret,id=sccache_gcs_key \
     fi && \
     export RUSTC_WRAPPER="$SCCACHE_BIN" && \
     "$SCCACHE_BIN" --start-server || true && \
-    cargo build --release -p orbit-server --locked && \
+    mise exec -- cargo build --release -p orbit-server --locked && \
     "$SCCACHE_BIN" --show-stats || true && \
+    ./scripts/check-fips-binary.sh target/release/gkg-server && \
     cp target/release/gkg-server /gkg-server
 
 FROM registry.access.redhat.com/ubi10/ubi-minimal:10.1
 
 ARG GKG_VERSION=dev
 ENV GKG_VERSION=$GKG_VERSION
+
+LABEL com.gitlab.image.fips="true" \
+      com.gitlab.fips.module="AWS-LC"
 
 WORKDIR /app
 
