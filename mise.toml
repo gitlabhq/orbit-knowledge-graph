@@ -358,6 +358,80 @@ description = "Bump a pinned Iglu schema version (e.g. mise iglu:bump -- orbit_q
 run = "bash ./scripts/iglu/check.sh"
 description = "Verify pinned Iglu schemas exist locally and match live Iglu"
 
+[tasks."vendor"]
+run = '''
+set -euo pipefail
+NAME="${1:?usage: mise vendor <name>}"
+VERSIONS_FILE="$(pwd)/config/versions.yaml"
+VENDOR_DIR_REL=$(yq ".vendored.$NAME.vendor_dir" "$VERSIONS_FILE")
+SCRIPT=$(yq ".vendored.$NAME.vendor_script" "$VERSIONS_FILE")
+VERSION=$(yq ".vendored.$NAME.version // \"\"" "$VERSIONS_FILE")
+if [[ "$SCRIPT" == "null" ]]; then echo "No vendor_script for $NAME" >&2; exit 1; fi
+if [[ ! -x "$SCRIPT" ]]; then echo "$SCRIPT is not executable" >&2; exit 1; fi
+export VENDOR_NAME="$NAME"
+export VENDOR_VERSIONS_FILE="$VERSIONS_FILE"
+export VENDOR_DIR="$(pwd)/$VENDOR_DIR_REL"
+export VENDOR_VERSION="$VERSION"
+PRE_SHA=$(shasum -a 256 "$VERSIONS_FILE" | awk '{print $1}')
+bash "$SCRIPT"
+if [[ ! -d "$VENDOR_DIR" ]] || [[ -z "$(ls -A "$VENDOR_DIR")" ]]; then
+    echo "Postcondition failed: $VENDOR_DIR is empty after vendor_script" >&2; exit 1
+fi
+yq '.' "$VERSIONS_FILE" > /dev/null 2>&1 || { echo "Postcondition failed: versions.yaml is not valid YAML" >&2; exit 1; }
+'''
+description = "Run a vendored dependency's vendor_script (e.g. mise vendor -- duckdb)"
+usage = 'arg "<name>"'
+
+[tasks."vendor:all"]
+run = '''
+set -euo pipefail
+VERSIONS_FILE="$(pwd)/config/versions.yaml"
+for NAME in $(yq '.vendored | keys | .[]' "$VERSIONS_FILE"); do
+    SCRIPT=$(yq ".vendored.$NAME.vendor_script" "$VERSIONS_FILE")
+    [[ "$SCRIPT" == "null" ]] && continue
+    echo "=== Vendoring $NAME ==="
+    mise run vendor -- "$NAME"
+done
+'''
+description = "Run vendor_script for every vendored dependency that has one"
+
+[tasks."check:vendored"]
+run = '''
+set -euo pipefail
+NAME="${1:?usage: mise check:vendored <name>}"
+VERSIONS_FILE="$(pwd)/config/versions.yaml"
+VENDOR_DIR_REL=$(yq ".vendored.$NAME.vendor_dir" "$VERSIONS_FILE")
+SCRIPT=$(yq ".vendored.$NAME.check_script" "$VERSIONS_FILE")
+VERSION=$(yq ".vendored.$NAME.version // \"\"" "$VERSIONS_FILE")
+if [[ "$SCRIPT" == "null" ]]; then echo "No check_script for $NAME" >&2; exit 1; fi
+if [[ ! -x "$SCRIPT" ]]; then echo "$SCRIPT is not executable" >&2; exit 1; fi
+export VENDOR_NAME="$NAME"
+export VENDOR_VERSIONS_FILE="$VERSIONS_FILE"
+export VENDOR_DIR="$(pwd)/$VENDOR_DIR_REL"
+export VENDOR_VERSION="$VERSION"
+PRE_SHA=$(shasum -a 256 "$VERSIONS_FILE" | awk '{print $1}')
+bash "$SCRIPT"
+POST_SHA=$(shasum -a 256 "$VERSIONS_FILE" | awk '{print $1}')
+if [[ "$PRE_SHA" != "$POST_SHA" ]]; then
+    echo "Postcondition failed: check_script modified $VERSIONS_FILE (must be read-only)" >&2; exit 1
+fi
+'''
+description = "Run a vendored dependency's check_script (e.g. mise check:vendored -- duckdb)"
+usage = 'arg "<name>"'
+
+[tasks."check:vendored:all"]
+run = '''
+set -euo pipefail
+VERSIONS_FILE="$(pwd)/config/versions.yaml"
+for NAME in $(yq '.vendored | keys | .[]' "$VERSIONS_FILE"); do
+    SCRIPT=$(yq ".vendored.$NAME.check_script" "$VERSIONS_FILE")
+    [[ "$SCRIPT" == "null" ]] && continue
+    echo "=== Checking $NAME ==="
+    mise run check:vendored -- "$NAME"
+done
+'''
+description = "Run check_script for every vendored dependency that has one"
+
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
