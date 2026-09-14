@@ -817,6 +817,7 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
         if t.nodes[i as usize].dead {
             continue;
         }
+
         for r in rules {
             if !matches(t, i, &r.pat, &mut caps) {
                 continue;

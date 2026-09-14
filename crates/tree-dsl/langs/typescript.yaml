@@ -5,6 +5,8 @@
 stages:
   - name: normalize
     rules:
+
+
       - match: '(return_statement $$$VALS)'
         replace: '(__return $$$VALS)'
 
