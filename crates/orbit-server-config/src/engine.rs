@@ -368,6 +368,7 @@ pub struct CodeBackfillSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
     pub publish_window: usize,
+    pub stale_sweeps_per_tick: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -582,6 +583,8 @@ mod tests {
         assert_eq!(tasks.global.schedule.cron.expression(), "0 */1 * * * *");
         assert_eq!(tasks.namespace.schedule.cron.expression(), "*/30 * * * * *");
         assert_eq!(tasks.namespace.sweep_interval_secs, 3600);
+        assert_eq!(tasks.code_backfill.publish_window, 200_000);
+        assert_eq!(tasks.code_backfill.stale_sweeps_per_tick, 10);
         assert_eq!(
             tasks.table_cleanup.schedule.cron.expression(),
             "0 0 3 * * 0"

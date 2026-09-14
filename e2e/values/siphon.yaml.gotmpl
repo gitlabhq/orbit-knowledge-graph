@@ -84,6 +84,12 @@ appConfigDefaults:
     insert_batch_size: 10000
     max_open_conns: 5
     max_idle_conns: 3
+{{ if gt (env "E2E_CH_REPLICAS" | default "1" | atoi) 1 }}
+    connection_settings:
+      insert_quorum: "auto"
+      insert_quorum_parallel: "0"
+      async_insert: "0"
+{{ end }}
 
 deploymentProfiles:
   producer:

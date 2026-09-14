@@ -1,6 +1,17 @@
 use super::*;
 use serde_json::Value;
 
+fn service_without_schema() -> OrbitServiceImpl {
+    OrbitServiceImpl::new(
+        Arc::new(mock_validator()),
+        Arc::new(ActiveSchema::default()),
+        &test_config(),
+        ClusterHealthChecker::default().into_arc(),
+        60,
+        Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
+    )
+}
+
 async fn command_response(
     command_name: &str,
     parameters_json: &str,
@@ -119,6 +130,47 @@ async fn unknown_commands_return_not_found() {
 async fn commands_reject_malformed_json() {
     let error = command_response("get_graph_schema", "{").await.unwrap_err();
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
+}
+
+#[tokio::test]
+async fn static_commands_succeed_without_an_active_schema() {
+    let service = service_without_schema();
+
+    for command_name in ["get_query_dsl", "get_response_format"] {
+        let response = service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                command_name: command_name.into(),
+                parameters_json: "{}".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let Some(invoke_agent_command_response::Content::FormattedText(text)) = response.content
+        else {
+            panic!("expected formatted command response for {command_name}");
+        };
+        assert!(!text.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn graph_schema_commands_validate_before_requiring_an_active_schema() {
+    let service = service_without_schema();
+
+    for (parameters, expected_code) in [
+        ("{", tonic::Code::InvalidArgument),
+        (r#"{"expand_nodes":"User"}"#, tonic::Code::InvalidArgument),
+        ("{}", tonic::Code::Unavailable),
+    ] {
+        let error = service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                command_name: "get_graph_schema".into(),
+                parameters_json: parameters.into(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), expected_code, "{parameters}");
+    }
 }
 
 #[tokio::test]
@@ -301,7 +353,7 @@ async fn test_expand_all_wildcard() {
 async fn schema_rpc_and_command_use_the_supplied_ontology() {
     let service = OrbitServiceImpl::new(
         Arc::new(mock_validator()),
-        Arc::new(Ontology::new().with_nodes(["CustomNode"])),
+        ActiveSchema::pinned(Arc::new(Ontology::new().with_nodes(["CustomNode"]))),
         &test_config(),
         ClusterHealthChecker::default().into_arc(),
         60,

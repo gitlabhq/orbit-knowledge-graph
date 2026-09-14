@@ -20,3 +20,6 @@ expect:
     User:
       filters:
         username: { eq: alice }
+  path_edges:
+    - - { from: User, from_id: 1, type: MEMBER_OF }
+      - { type: CONTAINS, to: Project, to_id: 1004 }

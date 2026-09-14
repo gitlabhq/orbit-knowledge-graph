@@ -41,10 +41,10 @@ orbit help
 You can also install from npm with `npm install -g @gitlab/orbit`.
 
 If you already use the GitLab CLI (`glab`), you can instead install a managed
-binary with `glab orbit local --install`. That binary is invoked as
-`glab orbit local <command>` rather than `orbit` directly - see
-[Use GitLab Orbit Local with glab](glab.md). `glab orbit local` forwards every
-command to the binary unchanged, so `glab orbit local grep` runs `orbit grep`.
+binary with `glab orbit --install`. That binary is invoked as
+`glab orbit <command>` rather than `orbit` directly - see
+[Use GitLab Orbit Local with glab](glab.md). `glab orbit` forwards every
+command to the binary unchanged, so `glab orbit grep` runs `orbit grep`.
 
 ### Build from source
 
@@ -280,6 +280,6 @@ GitLab Orbit Local does not consume GitLab Credits. All processing is local.
 
 - [Connect via MCP](mcp.md) - connect Claude Code, Codex, and other agents to
   the local graph.
-- [Use GitLab Orbit Local with glab](glab.md) - call the CLI through `glab orbit local`.
+- [Use GitLab Orbit Local with glab](glab.md) - call the CLI through `glab orbit`.
 - [Schema reference](../../remote/schema.md) - available node types and properties.
 - [Cookbook](../../remote/cookbook.md) - copy-paste queries for common use cases.

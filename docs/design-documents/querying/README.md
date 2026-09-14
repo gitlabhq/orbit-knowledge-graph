@@ -90,5 +90,5 @@ flowchart LR
 ## Additional Notes
 
 - All query paths reuse the shared ontology and query infrastructure from `config/ontology/`, `config/schemas/graph_query.schema.json`, and the `query-engine/*` crates, so code and namespace graphs adhere to the same entity and relationship definitions.
-- SQL generation is guard-railed: hop limits (max three for namespace traversals), explicit relationship lists, and schema-driven validation prevent runaway queries.
+- SQL generation is guard-railed: traversal shape limits, a maximum of three hops per relationship selector, a path-finding depth cap of three, explicit relationship lists, and schema-driven validation prevent runaway queries.
 - The response format is defined by [ADR 004](../decisions/004_unified_response_schema.md). Every query returns a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` payload with deduplicated entity objects and instance-level edges. `format_version` is a semver string (the `raw_output_format` pin in `config/versions.yaml`) so consumers can detect breaking changes. Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output. Proto-level metadata (row count, generated SQL, pagination info, format name + version) travels alongside the JSON payload in `QueryMetadata`.

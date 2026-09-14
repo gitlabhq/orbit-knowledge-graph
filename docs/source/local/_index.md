@@ -45,7 +45,7 @@ the Query DSL instead. No GitLab account or network connection is required.
 | Method | Description |
 |---|---|
 | [The GitLab Orbit CLI (`orbit`)](access/cli.md) | Run the `orbit` binary directly to index and query |
-| [The GitLab CLI (`glab`)](access/glab.md) | Drive GitLab Orbit Local through `glab orbit local` |
+| [The GitLab CLI (`glab`)](access/glab.md) | Drive GitLab Orbit Local through `glab orbit` |
 | [MCP](access/mcp.md) | Expose the local graph to Claude Code, Codex, and other agents |
 
 ## Billing

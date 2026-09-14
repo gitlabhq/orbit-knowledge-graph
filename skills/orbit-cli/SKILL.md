@@ -1,8 +1,8 @@
 ---
 name: orbit-cli
 description: >
-  Index and query a LOCAL checkout of a repository offline with the Orbit local
-  CLI (the `orbit` binary, run directly or via `glab orbit local`). It builds a
+  Index and query a LOCAL checkout of a repository offline with the Orbit CLI
+  (the `orbit` binary, run directly or via `glab orbit`). It builds a
   DuckDB property graph from the working tree. Use grep for definitions and
   relationships, context for source bodies, and read-only SQL for aggregations.
   Use when the request targets the current checkout, working tree, or a
@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.2
+version: 0.5.3
 license: MIT
 metadata:
   audience: developers
@@ -33,15 +33,15 @@ working tree; use the `orbit` skill for production data.
 ## Invocation
 
 The binary is `orbit`. This skill writes commands as `orbit <subcommand>`. When
-you reach it through glab, prefix with `glab orbit local` and add `--yes` to
-skip the download/run prompts in non-interactive shells:
+you reach it through glab, prefix with `glab orbit` and add `--yes` to skip the
+download/run prompts in non-interactive shells:
 
 ```bash
-orbit index .                     # bundled binary
-glab orbit local --yes index .    # same, via the glab wrapper
+orbit index .                  # bundled binary
+glab orbit --yes index .       # same, via the glab wrapper
 ```
 
-`glab orbit local --install --yes` installs/updates the managed binary. Full
+`glab orbit --install --yes` installs or updates the managed binary. Full
 wrapper flags, config keys, and pass-through rules:
 [`references/cli.md`](references/cli.md).
 

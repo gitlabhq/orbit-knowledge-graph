@@ -7,10 +7,12 @@ license = "LicenseRef-EE"
 [features]
 # Compile DuckDB from C++ source for a fully static, self-contained binary.
 # Use for Docker/release builds: cargo build --release --features duckdb-client/bundled
-bundled = ["duckdb/bundled"]
+bundled = ["static-fts"]
+static-fts = ["duckdb/bundled", "libduckdb-sys/bundled"]
 
 [dependencies]
 duckdb = { workspace = true }
+libduckdb-sys = { workspace = true }
 arrow = { workspace = true }
 code-graph = { path = "../code-graph" }
 orbit-search = { path = "../orbit-search" }
@@ -23,12 +25,18 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [build-dependencies]
+cc = { workspace = true }
+flate2 = { workspace = true }
 orbit-versions = { path = "../orbit-versions" }
 sha2 = { workspace = true }
+tar = { workspace = true }
 ureq = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

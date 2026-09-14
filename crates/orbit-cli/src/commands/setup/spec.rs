@@ -32,7 +32,7 @@ static TEXTS: LazyLock<SetupTexts> = LazyLock::new(|| {
 });
 
 pub(crate) const DIRECT_LAUNCHER: &str = "orbit";
-pub(crate) const GLAB_LAUNCHER: &str = "glab orbit local";
+pub(crate) const GLAB_LAUNCHER: &str = "glab orbit";
 
 pub(crate) fn launcher() -> &'static str {
     static LAUNCHER: LazyLock<&'static str> = LazyLock::new(|| {
@@ -274,7 +274,7 @@ mod tests {
     fn launcher_substitution_renders_both_distributions() {
         for (launcher, expected) in [
             (DIRECT_LAUNCHER, "`orbit grep"),
-            (GLAB_LAUNCHER, "`glab orbit local grep"),
+            (GLAB_LAUNCHER, "`glab orbit grep"),
         ] {
             let rendered = render_instructions(launcher);
             assert!(rendered.contains(expected), "{launcher}: {rendered}");

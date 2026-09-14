@@ -17,4 +17,5 @@ expect:
   nodes:
     User:
       ids: [1]
-      prop_present: [is_admin, is_auditor]
+      rows:
+        - { id: 1, is_admin: false, is_auditor: false }

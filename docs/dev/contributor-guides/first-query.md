@@ -7,11 +7,11 @@ account.
 
 You need:
 
-- `glab` 1.94 or later.
+- `glab` 1.117 or later.
 - Any local Git repository with source files.
 
 The examples use `orbit` directly after installation. If you prefer to stay
-inside `glab`, replace `orbit` with `glab orbit local` in each command.
+inside `glab`, replace `orbit` with `glab orbit` in each command.
 
 The current Orbit Local command queries the local DuckDB graph with SQL. The
 Orbit Remote Query DSL is linked at the end after the local graph concepts are
@@ -22,7 +22,7 @@ familiar.
 Install the managed Orbit Local binary:
 
 ```shell
-glab orbit local --install --yes
+glab orbit --install --yes
 ```
 
 Verify that the binary is available:
@@ -216,7 +216,7 @@ between them.
 - [Orbit Local schema reference](../../source/local/schema.md) for the four
   local node types and their properties.
 - [Orbit Local access methods](../../source/local/getting-started.md) for
-  direct `orbit`, `glab orbit local`, and MCP usage.
+  direct `orbit`, `glab orbit`, and MCP usage.
 - [Orbit query language reference](../../source/remote/queries/query-language.md)
   for the Query DSL used by Orbit Remote and agent-facing graph queries.
 - [Cookbook](../../source/remote/cookbook.md) for copy-paste query ideas.

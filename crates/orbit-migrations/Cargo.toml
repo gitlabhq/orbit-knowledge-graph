@@ -9,6 +9,7 @@ arrow = { workspace = true }
 async-nats = { workspace = true }
 bytes = { workspace = true }
 clickhouse-client = { workspace = true }
+futures = { workspace = true }
 ontology = { path = "../ontology" }
 nats-client = { path = "../nats-client" }
 orbit-versions = { path = "../orbit-versions" }

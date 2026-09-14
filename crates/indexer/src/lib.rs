@@ -304,12 +304,18 @@ pub async fn run_dispatcher(
         &campaign,
     )
     .await?;
+    if let Err(error) = catalog.sync_active_version(&graph).await {
+        warn!(%error, "active version not mirrored at startup; retried every completion tick");
+    }
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
 
     match schema::version::read_active_version(&graph).await {
         Ok(Some(active_version)) if active_version == *schema::version::SCHEMA_VERSION => {
             {
-                let graph_schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
+                let graph_schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
+                    &ontology,
+                    graph.is_replicated(),
+                );
                 if let Err(error) =
                     orbit_migrations::execute::create_unversioned_definitions(&graph, &graph_schema)
                         .await
@@ -377,6 +383,7 @@ pub async fn run_dispatcher(
                 &modules::code::config::CodeTableNames::from_ontology(&ontology)
                     .expect("code tables must resolve from the archived ontology"),
                 checkpoint_store.clone(),
+                config.schedule.tasks.code_backfill.stale_sweeps_per_tick,
             ),
             config.schedule.tasks.code_backfill.clone(),
         )),

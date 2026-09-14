@@ -142,17 +142,17 @@ orbit help
 If you already have [`glab`](https://gitlab.com/gitlab-org/cli) installed:
 
 ```shell
-glab orbit local --install
+glab orbit --install
 ```
 
 Verify:
 
 ```shell
-glab orbit local help
+glab orbit help
 ```
 
-See the [`glab orbit local` reference](https://docs.gitlab.com/cli/orbit/local/)
-for details.
+See the [`glab orbit` reference](https://docs.gitlab.com/cli/orbit/) for
+details.
 
 {{< /tab >}}
 
@@ -162,8 +162,8 @@ for details.
 
 | Method | Best for | Setup |
 |---|---|---|
-| [The GitLab Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | One-line installer or `glab orbit local --install` |
-| [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit local --install` |
+| [The GitLab Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | One-line installer or `glab orbit --install` |
+| [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit --install` |
 | [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `claude mcp add orbit-cli -- orbit mcp serve` |
 
 All three read the same local graph. GitLab Orbit Local is queried with DuckDB SQL;
@@ -172,16 +172,16 @@ the structured JSON query DSL is [GitLab Orbit Remote](../remote/_index.md) only
 ## 60-second quickstart
 
 > [!note]
-> `glab orbit local` wraps the managed `orbit` binary. The binary downloads,
+> `glab orbit` wraps the managed `orbit` binary. The binary downloads,
 > is checksum-verified, and stays up to date on first use. Requires `glab`
-> 1.94 or later. To run the binary directly instead, see
+> 1.117 or later. To run the binary directly instead, see
 > [Use the `orbit` CLI directly](access/cli.md).
 
 Index a repository and inspect what GitLab Orbit found:
 
 ```shell
-glab orbit local index /path/to/your/repo
-glab orbit local schema
+glab orbit index /path/to/your/repo
+glab orbit schema
 ```
 
 That builds a local DuckDB graph at `~/.orbit/graph.duckdb` and prints every

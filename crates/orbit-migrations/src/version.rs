@@ -7,6 +7,8 @@ use orbit_utils::arrow::ArrowUtils;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::schema::Engine;
+
 pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| orbit_versions::VERSIONS.schema);
 
 const CREATE_VERSION_TABLE: &str = "\
@@ -14,7 +16,7 @@ CREATE TABLE IF NOT EXISTS gkg_schema_version (
     version UInt32,
     status Enum8('active' = 1, 'migrating' = 2, 'retired' = 3, 'dropped' = 4),
     created_at DateTime DEFAULT now()
-) ENGINE = ReplacingMergeTree(created_at)
+) ENGINE = {engine}
 ORDER BY (version)";
 
 const READ_ACTIVE_VERSION: &str = "\
@@ -58,7 +60,16 @@ pub fn prefixed_table_name(table: &str, schema_version: u32) -> String {
 }
 
 pub async fn ensure_version_table(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionError> {
-    graph.execute(CREATE_VERSION_TABLE).await?;
+    let mut engine = Engine {
+        name: "ReplacingMergeTree".into(),
+        args: vec!["created_at".into()],
+    };
+    if graph.is_replicated() {
+        engine = engine.replicated();
+    }
+    graph
+        .execute(&CREATE_VERSION_TABLE.replace("{engine}", &engine.to_engine_sql()))
+        .await?;
     Ok(())
 }
 

@@ -12,4 +12,5 @@ query:
 expect:
   skip_requirements: [node_ids]
   node_count: 0
+  total_edge_count: 0
 

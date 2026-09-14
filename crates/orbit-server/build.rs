@@ -110,10 +110,9 @@ fn validate_named_queries() {
     let queries = named_queries::NamedQueries::load_from_dir(&dir)
         .unwrap_or_else(|e| panic!("named queries failed to load: {e}"));
 
-    let values = named_queries::BindingValues { current_user_id: 1 };
     for query in queries.iter() {
         let rendered = query
-            .render(&values, &query.example_parameters())
+            .render_example()
             .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
         if let Err(e) = compiler::compile(&rendered, compiler::Frontend::JsonDsl, &ontology, &ctx) {
             panic!("named query `{}` failed to compile: {e}", query.name);

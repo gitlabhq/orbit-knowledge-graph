@@ -1,3 +1,4 @@
+pub mod active_schema;
 pub mod analytics;
 pub mod auth;
 mod billing_adapter;
@@ -10,8 +11,6 @@ pub mod health_check;
 pub mod pipeline;
 pub mod proto;
 pub mod redaction;
-pub mod schema_watcher;
-mod serving_schema;
 pub mod shutdown;
 pub mod tls;
 pub mod tools;

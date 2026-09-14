@@ -14,8 +14,9 @@ pub struct SchemaConfig {
     #[schemars(range(min = 2))]
     pub max_retained_versions: u32,
 
-    /// How often the webserver polls `gkg_schema_version` for the active
-    /// version, in seconds. Must be at least 1.
+    /// How long the webserver waits before retrying a failed snapshot install
+    /// or reopening a lost active-version watch, in seconds. Also the base
+    /// backoff of the indexer readiness gate. Must be at least 1.
     #[schemars(range(min = 1))]
     pub version_poll_interval_secs: u64,
 

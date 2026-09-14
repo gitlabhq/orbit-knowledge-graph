@@ -139,16 +139,32 @@ pub struct UnversionedDefinition {
 
 impl GraphSchema {
     pub fn from_ontology(ontology: &Ontology) -> Self {
-        let tables = translate::build_all_tables(ontology);
+        Self::from_ontology_replicated(ontology, false)
+    }
+
+    /// `replicated` renders every MergeTree engine as its `Replicated*` variant for a
+    /// self-managed cluster; a `Replicated` database replicates DDL only.
+    pub fn from_ontology_replicated(ontology: &Ontology, replicated: bool) -> Self {
+        let mut tables = translate::build_all_tables(ontology);
+        let mut views = translate::build_views(ontology, &tables);
+        if replicated {
+            for table in &mut tables {
+                table.engine = table.engine.clone().replicated();
+            }
+            for view in &mut views {
+                view.engine = view.engine.take().map(Engine::replicated);
+            }
+        }
         let all_table_names = translate::collect_all_table_names(ontology);
 
         Self {
-            views: translate::build_views(ontology, &tables),
+            views,
             dictionaries: translate::build_dictionaries(ontology),
             refreshable_views: translate::build_refreshable_views(ontology),
             unversioned_definitions: translate::build_unversioned_definitions(
                 ontology,
                 &all_table_names,
+                replicated,
             ),
             tables,
         }
@@ -303,6 +319,16 @@ impl Projection {
 }
 
 impl Engine {
+    pub fn replicated(mut self) -> Self {
+        if self.name.ends_with("MergeTree")
+            && !self.name.starts_with("Replicated")
+            && !self.name.starts_with("Shared")
+        {
+            self.name.insert_str(0, "Replicated");
+        }
+        self
+    }
+
     pub(crate) fn to_engine_sql(&self) -> String {
         if self.args.is_empty() {
             self.name.clone()
@@ -471,4 +497,69 @@ fn quote_identifier(name: &str) -> String {
 
 fn quote_sql_literal(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn merge_tree_engines(schema: &GraphSchema) -> Vec<String> {
+        schema
+            .tables
+            .iter()
+            .map(|table| table.engine.name.clone())
+            .chain(
+                schema
+                    .views
+                    .iter()
+                    .filter_map(|view| view.engine.as_ref().map(|engine| engine.name.clone())),
+            )
+            .filter(|name| name.ends_with("MergeTree"))
+            .collect()
+    }
+
+    #[test]
+    fn replicated_prefixes_merge_tree_engines_only() {
+        let engine = Engine::replacing_merge_tree().replicated();
+        assert_eq!(engine.name, "ReplicatedReplacingMergeTree");
+        assert_eq!(engine.replicated().name, "ReplicatedReplacingMergeTree");
+        for name in ["Null", "SharedMergeTree", "Dictionary"] {
+            let engine = Engine {
+                name: name.into(),
+                args: vec![],
+            };
+            assert_eq!(engine.replicated().name, name);
+        }
+    }
+
+    #[test]
+    fn replicated_schema_renders_replicated_engines_everywhere() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let plain = GraphSchema::from_ontology(&ontology);
+        let replicated = GraphSchema::from_ontology_replicated(&ontology, true);
+
+        assert!(!merge_tree_engines(&plain).is_empty());
+        assert!(
+            merge_tree_engines(&plain)
+                .iter()
+                .all(|name| !name.starts_with("Replicated"))
+        );
+        assert!(
+            merge_tree_engines(&replicated)
+                .iter()
+                .all(|name| name.starts_with("Replicated"))
+        );
+        for table in &replicated.tables {
+            assert!(table.to_create_sql("v1_").contains("ENGINE = Replicated"));
+        }
+        for definition in &replicated.unversioned_definitions {
+            assert!(
+                !definition.create_statement.contains("ENGINE = ")
+                    || !definition.create_statement.contains("MergeTree")
+                    || definition.create_statement.contains("ENGINE = Replicated"),
+                "{}",
+                definition.name
+            );
+        }
+    }
 }

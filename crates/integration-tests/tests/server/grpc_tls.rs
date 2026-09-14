@@ -1,6 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
+use orbit_server::active_schema::ActiveSchema;
 use orbit_server::auth::JwtValidator;
 use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::grpc::GrpcServer;
@@ -37,7 +38,7 @@ fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> G
     GrpcServer::new(
         addr,
         validator,
-        ontology,
+        ActiveSchema::pinned(ontology),
         &clickhouse_config,
         cluster_health,
         tls_config,

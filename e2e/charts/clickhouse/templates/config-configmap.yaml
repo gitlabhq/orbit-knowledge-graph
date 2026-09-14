@@ -1,3 +1,4 @@
+{{- $headless := include "clickhouse.headless" . }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,3 +34,59 @@ data:
             </default>
         </profiles>
     </clickhouse>
+  {{- if include "clickhouse.replicated" . }}
+  cluster.xml: |
+    <?xml version="1.0"?>
+    <clickhouse>
+        <interserver_http_host from_env="INTERSERVER_HOST"/>
+        <keeper_server>
+            <tcp_port>9181</tcp_port>
+            <server_id from_env="KEEPER_SERVER_ID"/>
+            <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+            <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+            <raft_configuration>
+                {{- range $i := until (int .Values.replicas) }}
+                <server>
+                    <id>{{ $i }}</id>
+                    <hostname>{{ $.Release.Name }}-{{ $i }}.{{ $headless }}</hostname>
+                    <port>9234</port>
+                </server>
+                {{- end }}
+            </raft_configuration>
+        </keeper_server>
+        <zookeeper>
+            {{- range $i := until (int .Values.replicas) }}
+            <node>
+                <host>{{ $.Release.Name }}-{{ $i }}.{{ $headless }}</host>
+                <port>9181</port>
+            </node>
+            {{- end }}
+        </zookeeper>
+        <remote_servers replace="replace">
+            <default>
+                <shard>
+                    <internal_replication>true</internal_replication>
+                    {{- range $i := until (int .Values.replicas) }}
+                    <replica>
+                        <host>{{ $.Release.Name }}-{{ $i }}.{{ $headless }}</host>
+                        <port>9000</port>
+                    </replica>
+                    {{- end }}
+                </shard>
+            </default>
+        </remote_servers>
+        <macros>
+            <cluster>default</cluster>
+            <shard>01</shard>
+            <replica from_env="POD_NAME"/>
+        </macros>
+        <user_directories replace="replace">
+            <users_xml>
+                <path>users.xml</path>
+            </users_xml>
+            <replicated>
+                <zookeeper_path>/clickhouse/access</zookeeper_path>
+            </replicated>
+        </user_directories>
+    </clickhouse>
+  {{- end }}

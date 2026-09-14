@@ -15,3 +15,6 @@ query:
 
 expect:
   compile_error: true
+  compile_error_not_contains:
+    - v2_gl_user
+    - "victim@example.com"

@@ -21,4 +21,4 @@ query:
     }
 
 expect:
-  compile_error: true
+  compile_error: "traversal_path"

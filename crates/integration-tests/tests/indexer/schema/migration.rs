@@ -1119,7 +1119,7 @@ impl MigrationScenario {
         let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
             self.ctx.config.build_client(),
         )));
-        CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store)
+        CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store, 10)
             .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
             .await
             .expect("sweep failed");

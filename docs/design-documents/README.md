@@ -29,7 +29,7 @@ A secure query layer on top of the graph lets developers and AI agents query tha
   - **`Indexer`** (`gkg-server --mode Indexer`): Runs the shared indexing engine, consumes SDLC and code indexing requests from NATS JetStream, and writes graph data into ClickHouse.
   - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. It also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle, including ontology archive publication.
   - **`HealthCheck`** (`gkg-server --mode HealthCheck`): Aggregates cluster health by probing Kubernetes deployments and ClickHouse instances, and exposes the result on a single `/health` endpoint.
-- **Orbit Local's `orbit` CLI**, which parses a local repository, stores its code graph in DuckDB, accepts read-only DuckDB SQL, and serves local MCP tools over stdio. `glab orbit local` installs and runs this binary.
+- **The `orbit` CLI**, which exposes one flat command tree. Local commands parse repositories, store code graphs in DuckDB, accept read-only DuckDB SQL, and serve MCP tools over stdio; hosted commands query Orbit Remote. `glab orbit` installs and runs this binary.
 - **UI and product experiences**, which consume Orbit Remote through GitLab APIs and the GitLab Duo Agent Platform.
 
 ```mermaid
@@ -159,7 +159,7 @@ The current implementation uses ClickHouse for remote graph storage and query ex
 - Code indexing progress is tracked in `code_indexing_checkpoint`.
 - The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
 
-Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline.
+Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline. Release binaries statically link DuckDB's full-text search extension from a pinned source archive; development builds load the pinned extension artifact at runtime. Regenerate the source archive with `scripts/duckdb/vendor-duckdb-fts-sources.sh`.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 

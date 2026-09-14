@@ -12,19 +12,25 @@ const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 
 pub struct DuckDbClient {
     conn: duckdb::Connection,
+    // Fields drop in declaration order, so the connection closes before its database owner.
+    #[cfg(feature = "static-fts")]
+    _database: crate::static_fts::OwnedDatabase,
 }
 
 /// DuckDB emits `IO Error: Could not set lock on file` when another
-/// process holds the write lock, surfaced as a generic `duckdb::Error`
-/// with the message embedded.
-fn is_lock_error(e: &duckdb::Error) -> bool {
+/// process holds the write lock, surfaced with the message embedded.
+fn is_lock_error(e: &impl std::fmt::Display) -> bool {
     let msg = e.to_string().to_ascii_lowercase();
     msg.contains("could not set lock") || msg.contains("lock on file")
 }
 
 impl DuckDbClient {
-    /// Loads a DuckDB extension vendored by build.rs; never touches the network.
+    /// Loads a vendored DuckDB extension without network access. With `static-fts`, FTS is
+    /// linked when the database opens, so loading it is a no-op.
     pub fn load_extension(&self, name: &str) -> Result<()> {
+        if cfg!(feature = "static-fts") && name == "fts" {
+            return Ok(());
+        }
         let &(_, gz) = BUNDLED_EXTENSIONS
             .iter()
             .find(|(n, _)| *n == name)
@@ -76,16 +82,13 @@ impl DuckDbClient {
 
         let mut backoff = INITIAL_BACKOFF;
         for attempt in 0..=MAX_OPEN_RETRIES {
-            let config = duckdb::Config::default()
-                .access_mode(duckdb::AccessMode::ReadWrite)
-                .map_err(|e| DuckDbError::Schema(e.to_string()))?;
-            match duckdb::Connection::open_with_flags(path, config) {
-                Ok(conn) => return Ok(Self { conn }),
+            match Self::open_once(path, duckdb::AccessMode::ReadWrite) {
+                Ok(client) => return Ok(client),
                 Err(e) if attempt < MAX_OPEN_RETRIES && is_lock_error(&e) => {
                     std::thread::sleep(backoff);
                     backoff = (backoff * 2).min(Duration::from_secs(5));
                 }
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(e),
             }
         }
         unreachable!()
@@ -99,24 +102,38 @@ impl DuckDbClient {
         }
 
         for attempt in 0..=5 {
-            let config = duckdb::Config::default()
-                .access_mode(duckdb::AccessMode::ReadOnly)
-                .map_err(|e| DuckDbError::Schema(e.to_string()))?;
-            match duckdb::Connection::open_with_flags(path, config) {
-                Ok(conn) => return Ok(Self { conn }),
+            match Self::open_once(path, duckdb::AccessMode::ReadOnly) {
+                Ok(client) => return Ok(client),
                 Err(e) if attempt < 5 && is_lock_error(&e) => {
                     std::thread::sleep(Duration::from_millis(50));
                 }
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(e),
             }
         }
         unreachable!()
     }
 
+    #[cfg(not(feature = "static-fts"))]
+    fn open_once(path: &Path, access_mode: duckdb::AccessMode) -> Result<Self> {
+        let config = duckdb::Config::default()
+            .access_mode(access_mode)
+            .map_err(|e| DuckDbError::Schema(e.to_string()))?;
+        let conn = duckdb::Connection::open_with_flags(path, config)?;
+        Ok(Self { conn })
+    }
+
+    #[cfg(feature = "static-fts")]
+    fn open_once(path: &Path, access_mode: duckdb::AccessMode) -> Result<Self> {
+        let (conn, database) = crate::static_fts::open(path, access_mode)?;
+        Ok(Self {
+            conn,
+            _database: database,
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn open_in_memory() -> Result<Self> {
-        let conn = duckdb::Connection::open_in_memory()?;
-        Ok(Self { conn })
+        Self::open_once(Path::new(":memory:"), duckdb::AccessMode::ReadWrite)
     }
 
     /// The DDL is typically generated from the ontology via
@@ -309,6 +326,10 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 );";
 
     const TEST_TABLES: &[&str] = &["gl_directory", "gl_file", "gl_edge"];
+    #[cfg(feature = "static-fts")]
+    const STATIC_LOCK_PATH_ENV: &str = "ORBIT_TEST_STATIC_LOCK_PATH";
+    #[cfg(feature = "static-fts")]
+    const STATIC_LOCK_READY_ENV: &str = "ORBIT_TEST_STATIC_LOCK_READY";
 
     fn file_schema() -> Arc<Schema> {
         Arc::new(Schema::new(vec![
@@ -515,5 +536,97 @@ CREATE TABLE IF NOT EXISTS gl_edge (
             .downcast_ref::<Int64Array>()
             .unwrap();
         assert_eq!(count.value(0), 0);
+    }
+
+    #[cfg(feature = "static-fts")]
+    #[test]
+    fn static_lock_holder_process() {
+        let Some(path) = std::env::var_os(STATIC_LOCK_PATH_ENV) else {
+            return;
+        };
+        let ready = std::env::var_os(STATIC_LOCK_READY_ENV).unwrap();
+        let client =
+            DuckDbClient::open_once(Path::new(&path), duckdb::AccessMode::ReadWrite).unwrap();
+        client
+            .execute("CREATE TABLE lock_holder(id BIGINT)", &[])
+            .unwrap();
+        std::fs::write(ready, []).unwrap();
+        std::io::Read::read_to_end(&mut std::io::stdin(), &mut Vec::new()).unwrap();
+    }
+
+    #[cfg(feature = "static-fts")]
+    #[test]
+    fn static_open_preserves_duckdb_lock_error_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("locked.duckdb");
+        let ready = dir.path().join("locked.ready");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "client::tests::static_lock_holder_process",
+                "--nocapture",
+            ])
+            .env(STATIC_LOCK_PATH_ENV, &path)
+            .env(STATIC_LOCK_READY_ENV, &ready)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "lock holder exited early"
+            );
+            assert!(
+                std::time::Instant::now() < deadline,
+                "lock holder timed out"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let second = DuckDbClient::open_once(&path, duckdb::AccessMode::ReadWrite);
+        drop(child.stdin.take());
+        assert!(child.wait().unwrap().success());
+        let error = second
+            .err()
+            .expect("second process should fail while the first holds the lock");
+        assert!(is_lock_error(&error), "unexpected error: {error}");
+    }
+
+    #[cfg(feature = "static-fts")]
+    #[test]
+    fn static_fts_indexes_and_searches_documents() {
+        let client = DuckDbClient::open_in_memory().unwrap();
+        client.load_extension("fts").unwrap();
+        client
+            .execute("CREATE TABLE documents(id BIGINT, body VARCHAR)", &[])
+            .unwrap();
+        client
+            .execute(
+                "INSERT INTO documents VALUES (1, 'graph search'), (2, 'query compiler')",
+                &[],
+            )
+            .unwrap();
+        client
+            .execute(
+                "PRAGMA create_fts_index('documents', 'id', 'body', overwrite=1)",
+                &[],
+            )
+            .unwrap();
+
+        let batches = client
+            .query_arrow(
+                "SELECT CAST(id AS BIGINT) AS id
+                 FROM documents
+                 WHERE fts_main_documents.match_bm25(id, 'graph') IS NOT NULL",
+            )
+            .unwrap();
+        let ids = batches[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        assert_eq!(ids.values(), &[1]);
     }
 }

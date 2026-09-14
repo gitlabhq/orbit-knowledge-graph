@@ -11,7 +11,7 @@ use toon_format::{EncodeOptions, encode};
 
 use super::registry::ToolDefinition;
 use super::schema::{condensed_query_schema, query_dsl_version, raw_query_schema};
-use super::{V2CommandRegistry, V2ToolRegistry};
+use super::{CommandRegistry, ToolRegistry};
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
@@ -95,9 +95,9 @@ pub struct ToolService {
 
 impl Default for ToolService {
     fn default() -> Self {
-        let definitions = V2CommandRegistry::get_all_commands()
+        let definitions = CommandRegistry::get_all_commands()
             .into_iter()
-            .chain(V2ToolRegistry::get_all_tools());
+            .chain(ToolRegistry::get_all_tools());
 
         let mut schemas = HashMap::new();
         for definition in definitions {

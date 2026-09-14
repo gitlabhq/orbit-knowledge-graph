@@ -167,7 +167,7 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
         session_settings: std::collections::HashMap::new(),
-        quorum_writes: false,
+        replicated: false,
         insert_settings: std::collections::HashMap::new(),
         profiling: orbit_server_config::AppConfig::embedded_defaults()
             .graph
@@ -274,27 +274,28 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
 
     // preferred_block_size_bytes=0 reproduces the incident profile; the default
     // of 1MB would mask the bug.
-    let mut without_cap = client
+    let without_cap = client
         .query(sql)
         .with_setting("max_memory_usage", "0")
         .with_setting("preferred_block_size_bytes", "0")
         .fetch_arrow_streamed(Some(8_000))
-        .await
-        .expect("query opens");
-    let mut overflowed = false;
-    while let Some(batch) = without_cap.next().await {
-        if let Err(err) = batch {
-            assert!(
-                err.to_string().contains("cannot contain more than"),
-                "expected the Arrow 2GB overflow, got: {err}"
-            );
-            overflowed = true;
-            break;
+        .await;
+    let overflow = match without_cap {
+        Err(err) => err,
+        Ok(mut stream) => {
+            let mut first_error = None;
+            while let Some(batch) = stream.next().await {
+                if let Err(err) = batch {
+                    first_error = Some(err);
+                    break;
+                }
+            }
+            first_error.expect("a reduced row cap alone must still overflow on a >2GB block")
         }
-    }
+    };
     assert!(
-        overflowed,
-        "a reduced row cap alone must still overflow on a >2GB block"
+        overflow.to_string().contains("cannot contain more than"),
+        "expected the Arrow 2GB overflow, got: {overflow}"
     );
 
     let mut with_cap = client
@@ -321,7 +322,7 @@ async fn connection_failure_returns_error() {
         username: "default".to_string(),
         password: None,
         session_settings: std::collections::HashMap::new(),
-        quorum_writes: false,
+        replicated: false,
         insert_settings: std::collections::HashMap::new(),
         profiling: orbit_server_config::AppConfig::embedded_defaults()
             .graph
