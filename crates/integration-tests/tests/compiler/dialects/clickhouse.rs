@@ -1576,7 +1576,13 @@ fn gql_prepares_queries_and_scoped_schema() {
             assert_eq!(node["name"], name);
             assert!(!node["props"].as_array().unwrap().is_empty());
             assert!(!response.edges.is_empty());
-            assert!(!response.edges.iter().any(|edge| edge == "CALLS"));
+            assert!(response.edges.iter().all(|edge| {
+                ontology
+                    .get_edge(edge)
+                    .unwrap()
+                    .iter()
+                    .any(|edge| edge.source_kind == name || edge.target_kind == name)
+            }));
         } else {
             assert_eq!(
                 serde_json::to_value(response).unwrap(),
