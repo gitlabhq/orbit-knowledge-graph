@@ -35,7 +35,7 @@ tests:
   - name: "C3: from imports exist"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.import_type = 'FromImport'
+      WHERE i.import_type = 'NamedImport'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 3 } }

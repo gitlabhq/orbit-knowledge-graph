@@ -508,6 +508,8 @@ fn build_imports(
                         "WildcardImport"
                     } else if name_text == "default" {
                         "DefaultImport"
+                    } else if als != 0 {
+                        "AliasedImport"
                     } else if source_eq_name {
                         "Import"
                     } else {
@@ -517,7 +519,7 @@ fn build_imports(
                     fp_b.append_value(&fp);
                     it_b.append_value(per_name_label);
                     path_b.append_value(source_str);
-                    if ns != 0 && name_text != "*" {
+                    if ns != 0 && !(name_text == "*" && als != 0) {
                         name_b.append_value(name_text);
                     } else {
                         name_b.append_null();
