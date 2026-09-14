@@ -74,6 +74,9 @@ pub struct RedactionConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
+    /// Run the query N times and assert all responses are identical.
+    #[serde(default)]
+    pub repeat_count: Option<usize>,
     #[serde(default)]
     pub compile_only: bool,
     #[serde(default)]

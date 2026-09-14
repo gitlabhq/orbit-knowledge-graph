@@ -250,6 +250,25 @@ async fn run_frontend(
 
     let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
 
+    if let Some(n) = expect.repeat_count {
+        assert!(n >= 2, "{label}: repeat_count must be >= 2");
+        let baseline_node_ids = canonical_ids(&resp);
+        let baseline_edges = canonical_edges(&resp);
+        for run in 2..=n {
+            let rerun = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
+            assert_eq!(
+                baseline_node_ids,
+                canonical_ids(&rerun),
+                "{label}: run {run}/{n} returned different node IDs"
+            );
+            assert_eq!(
+                baseline_edges,
+                canonical_edges(&rerun),
+                "{label}: run {run}/{n} returned different edges"
+            );
+        }
+    }
+
     let response: query_engine::formatters::GraphResponse =
         serde_json::from_value(resp).expect("response should deserialize");
     let view = ResponseView::for_query(&compiled.input, response);
@@ -985,6 +1004,55 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
         "path_finding" => Some(Requirement::PathFinding),
         _ => None,
     }
+}
+
+fn canonical_ids(resp: &serde_json::Value) -> Vec<(String, i64)> {
+    let mut ids: Vec<(String, i64)> = resp["nodes"]
+        .as_array()
+        .map(|nodes| {
+            nodes
+                .iter()
+                .map(|n| {
+                    let entity = n["entity_type"].as_str().unwrap_or("").to_owned();
+                    let id = n["id"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .or_else(|| n["id"].as_i64())
+                        .unwrap_or(0);
+                    (entity, id)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.sort();
+    ids
+}
+
+fn canonical_edges(resp: &serde_json::Value) -> Vec<(String, i64, i64)> {
+    let mut edges: Vec<(String, i64, i64)> = resp["edges"]
+        .as_array()
+        .map(|edges| {
+            edges
+                .iter()
+                .map(|e| {
+                    let kind = e["type"].as_str().unwrap_or("").to_owned();
+                    let from = e["from_id"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .or_else(|| e["from_id"].as_i64())
+                        .unwrap_or(0);
+                    let to = e["to_id"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .or_else(|| e["to_id"].as_i64())
+                        .unwrap_or(0);
+                    (kind, from, to)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    edges.sort();
+    edges
 }
 
 #[cfg(test)]
