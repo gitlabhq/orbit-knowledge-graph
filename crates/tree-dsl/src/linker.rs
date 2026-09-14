@@ -22,6 +22,7 @@ struct Fold {
     def_stack: Vec<(Option<u32>, u32, BlockId)>,
     branch_stack: Vec<BranchFrame>,
     wildcard: u32,
+    loop_stack: Vec<(BlockId, u32)>,
 }
 
 struct BranchFrame {
@@ -40,7 +41,7 @@ impl Fold {
     // ── SSA resolution: translate ParseValue → concrete node indices ──
 
     fn lookup(&mut self, sym: u32) -> Vec<Linked> {
-        self.ssa
+        let result: Vec<Linked> = self.ssa
             .read_variable(sym, self.cur)
             .iter()
             .filter_map(|pv| match pv {
@@ -51,7 +52,23 @@ impl Fold {
                 ParseValue::Type(ts) if *ts != 0 => Some(Linked::Type(*ts)),
                 _ => None,
             })
-            .collect()
+            .collect();
+        if result.is_empty() {
+            let entry = BlockId(0);
+            return self.ssa
+                .read_variable(sym, entry)
+                .iter()
+                .filter_map(|pv| match pv {
+                    ParseValue::LocalDef(di) => Some(Linked::Def(self.defs[*di as usize])),
+                    ParseValue::ImportRef(ii) => {
+                        self.imports.get(*ii as usize).map(|&n| Linked::Import(n))
+                    }
+                    ParseValue::Type(ts) if *ts != 0 => Some(Linked::Type(*ts)),
+                    _ => None,
+                })
+                .collect();
+        }
+        result
     }
 
     fn emit(&self, tree: &Tree, r: &Linked, from: u32) {
@@ -200,6 +217,7 @@ impl Fold {
             self.cur = self.ssa.add_sealed_successor(self.cur);
         }
         let val = self.classify_rhs(tree, i);
+
         self.ssa.write_variable(lhs, self.cur, val);
         if let Some(br) = self.branch_stack.last_mut() {
             for (idx, &(start, end)) in br.arms.iter().enumerate() {
@@ -338,9 +356,9 @@ impl Fold {
     fn classify_rhs(&mut self, tree: &Tree, node: u32) -> Value {
         let c = tree.cursor(node);
         let Some(rhs) = c.child(C::Rhs) else {
+
             return Value::Opaque;
         };
-
         if let Some(callee) = rhs.child(C::Call).and_then(|call| call.child(C::Callee)) {
             if let Some(member) = callee.child(C::Member) {
                 let method = member.sym();
@@ -461,6 +479,7 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
         def_stack: vec![(None, u32::MAX, entry)],
         branch_stack: Vec::new(),
         wildcard: lang.syms.intern("*"),
+        loop_stack: Vec::new(),
     };
 
     let mut i = 0u32;
@@ -503,6 +522,11 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
             } else {
                 break;
             }
+        }
+
+        while f.loop_stack.last().is_some_and(|&(_, end)| i >= end) {
+            let (header, end) = f.loop_stack.pop().unwrap();
+            f.cur = f.ssa.finish_loop(header, f.cur);
         }
 
         if let Some(br) = f.branch_stack.last() {
@@ -567,8 +591,10 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
             continue;
         }
         if k == C::Loop {
-            let (h, _) = f.ssa.begin_loop(f.cur);
-            f.cur = f.ssa.finish_loop(h, f.cur);
+            let (header, body) = f.ssa.begin_loop(f.cur);
+            f.loop_stack.push((header, tree.hop(i)));
+            f.cur = body;
+
             i += 1;
             continue;
         }
