@@ -190,8 +190,12 @@ run = [
 ]
 description = "Run clippy lint checks and fix applicable issues"
 
+[tasks."lint:newlines"]
+run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --exclude-files docs-locale"
+description = "Check trailing newline formatting in the codebase"
+
 [tasks."fix:newlines"]
-run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --fix"
+run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --exclude-files docs-locale --fix"
 description = "Fix newlines formatting in the codebase"
 
 [tasks."local:index:repo"]
