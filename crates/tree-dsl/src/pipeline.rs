@@ -108,23 +108,28 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
 
     let t0 = Instant::now();
 
-    let results: Vec<(Tree, Lang)> = {
+    let chunks: Vec<(Vec<Tree>, Lang)> = {
         use rayon::prelude::*;
         parseable
             .par_iter()
-            .map(|(path, content)| {
-                let mut thread_lang = lang.thread_fork();
-                let tree = process_file(path, content, &mut thread_lang, &pipeline);
-                (tree, thread_lang)
-            })
+            .fold(
+                || (Vec::new(), lang.thread_fork()),
+                |(mut trees, mut tl), (path, content)| {
+                    let tree = process_file(path, content, &mut tl, &pipeline);
+                    trees.push(tree);
+                    (trees, tl)
+                },
+            )
             .collect()
     };
 
-    let mut trees: Vec<Tree> = Vec::with_capacity(results.len());
-    for (mut tree, thread_lang) in results {
-        let remap = lang.thread_merge(&thread_lang);
-        tree.remap_syms(&remap);
-        trees.push(tree);
+    let mut trees: Vec<Tree> = Vec::with_capacity(parseable.len());
+    for (mut chunk_trees, chunk_lang) in chunks {
+        let remap = lang.thread_merge(&chunk_lang);
+        for tree in &mut chunk_trees {
+            tree.remap_syms(&remap);
+        }
+        trees.extend(chunk_trees);
     }
 
     let parse_s = t0.elapsed().as_secs_f64();
