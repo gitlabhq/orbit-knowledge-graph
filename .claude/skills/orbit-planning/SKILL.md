@@ -7,7 +7,8 @@ description: >-
   conforming to the planning doctrine. Use when labeling new or old issues or
   MRs, adding or marking deliverables on the roadmap, creating or repurposing
   epics, triaging the backlog, or any "add the appropriate labels" request.
-version: 1.0.0
+version: 1.0.1
+allowed-tools: Read, Bash(glab *)
 ---
 
 # Orbit planning: labels, epics, roadmap
@@ -301,9 +302,9 @@ Legacy, still live, never apply to new items:
 
 ## Conventions
 
-Open every comment posted to a GitLab issue/MR/epic with `> from agent` on
-its own line. Before bulk changes (more than ~20 items), state the plan and
-counts first. Record label and epic decisions in the portal repo's
+Follow the host repository's `AGENTS.md` for comment formatting. Before bulk
+changes (more than ~20 items), state the plan and counts first. Record label
+and epic decisions in the portal repo's
 `docs/label-taxonomy-and-epic-cleanup.md`. Rename GKG or Knowledge Graph to
 Orbit in any title you touch, keeping literal code identifiers
 (gkg-webserver, GKG_INDEXER, backticked flag names) intact.
