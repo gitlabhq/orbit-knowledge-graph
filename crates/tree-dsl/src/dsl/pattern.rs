@@ -152,6 +152,7 @@ pub enum Pat {
         rekind: Option<u16>,
         guard: Option<Box<Pat>>,
         optional: bool,
+        named_only: bool,
     },
     Var {
         slot: u16,
@@ -159,6 +160,7 @@ pub enum Pat {
         rekind: Option<u16>,
         leaf_only: bool,
         guard: Option<Box<Pat>>,
+        named_only: bool,
     },
     Not(Box<Pat>),
     Desc(Box<Pat>),
@@ -385,6 +387,7 @@ fn visit_text_field_as_cap<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field:
         rekind: None,
         guard: None,
         optional: false,
+        named_only: false,
     }
 }
 
@@ -395,15 +398,18 @@ fn visit_variadic<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> 
     let mut leaf_only = false;
     let mut rekind = None;
     let mut guard = None;
+    let mut named_only = false;
 
     for child in children {
         match child.as_rule() {
             Rule::Filter => {
-                let filter: Vec<u16> = child
-                    .into_children()
-                    .map(|k| c.intern_kind(k.as_str()))
-                    .collect();
-                c.apply_filter(slot, filter);
+                let kinds: Vec<&str> = child.clone().into_children().map(|k| k.as_str()).collect();
+                if kinds == ["_*_named"] {
+                    named_only = true;
+                } else {
+                    let filter: Vec<u16> = kinds.iter().map(|k| c.intern_kind(k)).collect();
+                    c.apply_filter(slot, filter);
+                }
             }
             Rule::Node => guard = Some(Box::new(visit_node(c, child, 0))),
             Rule::Arrow => leaf_only = child.as_str() == "=>",
@@ -418,6 +424,7 @@ fn visit_variadic<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> 
         rekind,
         leaf_only,
         guard,
+        named_only,
     }
 }
 
@@ -449,6 +456,7 @@ fn visit_cap_ref<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
         rekind: Some(rekind),
         guard: None,
         optional: false,
+        named_only: false,
     }
 }
 
@@ -458,9 +466,11 @@ fn visit_capture<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
     let mut kind = None;
     let mut guard = None;
     let mut optional = false;
+    let mut named_only = false;
     for child in children {
         match child.as_rule() {
             Rule::Opt => optional = true,
+            Rule::Ident if child.as_str() == "_*_named" => named_only = true,
             Rule::Ident => kind = Some(c.intern_kind(child.as_str())),
             Rule::Node => guard = Some(Box::new(visit_node(c, child, 0))),
             r => panic!("unexpected capture filter: {r:?}"),
@@ -472,6 +482,7 @@ fn visit_capture<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
         kind,
         rekind: None,
         guard,
+        named_only,
         optional,
     }
 }
@@ -553,9 +564,13 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
             field,
             kind,
             guard,
+            named_only,
             ..
         } => {
             if !field_ok(*field) || kind.is_some_and(|k| k != n.kind) {
+                return false;
+            }
+            if *named_only && !n.named {
                 return false;
             }
             if let Some(g) = guard {
@@ -697,6 +712,7 @@ fn materialize(
             rekind,
             leaf_only,
             guard,
+            named_only,
             ..
         } => {
             let cap = caps[*slot as usize];
@@ -706,6 +722,9 @@ fn materialize(
             let filter = &filters[*slot as usize];
             let mut scratch = vec![(0u32, 0u32); caps.len()];
             for e in elems(t, cap, filter) {
+                if *named_only && !t.node(e).named {
+                    continue;
+                }
                 if let Some(g) = guard {
                     if !matches(t, e, g, &mut scratch) {
                         continue;

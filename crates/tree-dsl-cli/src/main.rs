@@ -29,6 +29,26 @@ enum Commands {
         #[arg(long, default_value = "tagged")]
         stage: Stage,
     },
+    /// Apply rewrite rules and print the result
+    Rewrite {
+        /// File to parse (omit for stdin)
+        file: Option<String>,
+        /// Read source from stdin
+        #[arg(long)]
+        stdin: bool,
+        /// Override language detection
+        #[arg(short, long)]
+        lang: Option<String>,
+        /// Match pattern(s), paired with --replace
+        #[arg(long, short)]
+        r#match: Vec<String>,
+        /// Replace template(s), paired with --match
+        #[arg(long, short)]
+        replace: Vec<String>,
+        /// Apply language rewrites first ("all" or stage index), then apply the rules
+        #[arg(long)]
+        after: Option<String>,
+    },
     /// Index files and print the graph
     Index {
         /// File or directory to index
@@ -66,6 +86,14 @@ fn main() -> anyhow::Result<()> {
             lang,
             stage,
         } => cmd_parse(file, stdin, lang, stage),
+        Commands::Rewrite {
+            file,
+            stdin,
+            lang,
+            r#match,
+            replace,
+            after,
+        } => cmd_rewrite(file, stdin, lang, r#match, replace, after),
         Commands::Index { path, lang } => cmd_index(&path, lang),
         Commands::Test { file, inline } => cmd_test(file, inline),
     }
@@ -112,6 +140,63 @@ fn cmd_parse(
             print_edges(&tree, &lang);
         }
     }
+    Ok(())
+}
+
+fn cmd_rewrite(
+    file: Option<String>,
+    stdin: bool,
+    lang_override: Option<String>,
+    patterns: Vec<String>,
+    templates: Vec<String>,
+    after: Option<String>,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        patterns.len() == templates.len(),
+        "--match and --replace must be provided in equal pairs ({} vs {})",
+        patterns.len(),
+        templates.len()
+    );
+
+    let (path, source) = if stdin || file.is_none() {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        let name = file.as_deref().unwrap_or("<stdin>");
+        (name.to_string(), buf)
+    } else {
+        let p = file.as_deref().unwrap();
+        (p.to_string(), std::fs::read_to_string(p)?)
+    };
+
+    let lang_id = resolve_lang(lang_override.as_deref(), Some(&path));
+    let (pipeline, mut lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
+    let mut tree = tree_dsl::grammar::parse(&source, lang_id, &mut lang, &path);
+
+    if let Some(ref stop) = after {
+        let limit: usize = if stop == "all" {
+            pipeline.rewrite_stages.len()
+        } else {
+            stop.parse().unwrap_or(pipeline.rewrite_stages.len())
+        };
+        for stage in pipeline.rewrite_stages.iter().take(limit) {
+            tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, stage);
+        }
+    }
+
+    let rules: Vec<_> = patterns
+        .iter()
+        .zip(templates.iter())
+        .map(|(pat, tpl)| {
+            let tpl = tpl.clone();
+            tree_dsl::pattern::Rewrite::new(&mut lang, pat, move |c| {
+                tree_dsl::pattern::Out::Replace(c.template(&tpl))
+            })
+        })
+        .collect();
+    tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, &rules);
+
+    print_tree(&tree, &lang);
     Ok(())
 }
 

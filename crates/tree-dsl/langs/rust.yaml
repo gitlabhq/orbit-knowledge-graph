@@ -53,7 +53,9 @@ stages:
 
   - name: classify
     rules:
-      # Bindings
+      # Bindings — expression-position branch hoisting (if/else)
+      - match: '(let_declaration pattern: $N value: (__ssa_branch $COND (__ssa_arm (block $$$CB $C:_*_named)) (__ssa_arm (else_clause (block $$$AB $A:_*_named)))))'
+        replace: '(__ssa_branch $COND (__ssa_arm $$$CB:_*_named (__binding @$N (__rhs @$C))) (__ssa_arm $$$AB:_*_named (__binding @$N (__rhs @$A))))'
       - match: '(let_declaration pattern: $N value: $V:__call)'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V)'

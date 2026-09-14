@@ -46,7 +46,7 @@ LegacyVal = @{ (!(" " | "\t" | "|" | ")") ~ ANY)+ }
 
 // ── Leaves ─────────────────────────────────────────────────────────
 
-Ident     = @{ (ASCII_ALPHANUMERIC | "_" | ".")+ }
+Ident     = @{ (ASCII_ALPHANUMERIC | "_" | "." | "*")+ }
 Name      = @{ (ASCII_ALPHANUMERIC | "_")+ }
 Quoted    = ${ "\"" ~ Inner ~ "\"" }
 Inner     = @{ (!("\"") ~ ANY)* }
