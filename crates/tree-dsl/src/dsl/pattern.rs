@@ -833,7 +833,7 @@ fn materialize(
     }
 }
 
-pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u32> {
+pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) {
     let mut caps = vec![(0u32, 0u32); rules.iter().map(|r| r.nslots).max().unwrap_or(1)];
     let mut buf: Vec<Node> = Vec::new();
     for i in (0..t.nodes.len() as u32).rev() {
@@ -879,6 +879,6 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
             break;
         }
     }
-    t.compact()
+    t.compact();
 }
 

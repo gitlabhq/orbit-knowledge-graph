@@ -102,6 +102,7 @@ pub struct Tree {
     pub label: String,
     pub(crate) next_id: u32,
     pub(crate) spare: Vec<Node>,
+    pub(crate) remap_buf: Vec<u32>,
     pub(crate) appends: RefCell<Vec<(u32, Node)>>,
     pub(crate) inserts: RefCell<Vec<(u32, u32, u32)>>,
     pub(crate) insert_buf: RefCell<Vec<Node>>,
@@ -115,6 +116,7 @@ impl Clone for Tree {
             label: self.label.clone(),
             next_id: self.next_id,
             spare: Vec::new(),
+            remap_buf: Vec::new(),
             appends: RefCell::new(Vec::new()),
             inserts: RefCell::new(Vec::new()),
             insert_buf: RefCell::new(Vec::new()),
@@ -160,6 +162,7 @@ impl Tree {
 
     pub fn release_buffers(&mut self) {
         self.spare = Vec::new();
+        self.remap_buf = Vec::new();
         self.appends = RefCell::new(Vec::new());
         self.inserts = RefCell::new(Vec::new());
         self.insert_buf = RefCell::new(Vec::new());

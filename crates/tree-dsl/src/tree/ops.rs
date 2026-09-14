@@ -110,7 +110,7 @@ impl Tree {
         }
     }
 
-    pub fn compact(&mut self) -> Vec<u32> {
+    pub fn compact(&mut self) {
         let mut appends = self.appends.take();
         let mut inserts = self.inserts.take();
         let insert_buf = self.insert_buf.take();
@@ -119,7 +119,10 @@ impl Tree {
         let old = std::mem::take(&mut self.nodes);
         let mut new = std::mem::take(&mut self.spare);
         new.clear();
-        let mut remap = vec![NONE; old.len()];
+        new.reserve(old.len());
+        let mut remap = std::mem::take(&mut self.remap_buf);
+        remap.clear();
+        remap.resize(old.len(), NONE);
         let mut open: Vec<(u32, u32, u32)> = Vec::new();
         let (mut i, mut ip) = (0u32, 0usize);
         loop {
@@ -179,6 +182,6 @@ impl Tree {
                 edge.to.node = new_to;
             }
         }
-        remap
+        self.remap_buf = remap;
     }
 }
