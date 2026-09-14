@@ -77,6 +77,8 @@ struct Rule {
     pattern: String,
     #[serde(default)]
     replace: Option<String>,
+    #[serde(default, rename = "where")]
+    where_clause: Option<String>,
 }
 
 /// Compile a YAML rule file into stages of rewrites.
@@ -173,12 +175,37 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
 
     if let Some(ref tpl) = rule.replace {
         let tpl = tpl.clone();
-        return vec![Rewrite::new(lang, pat, move |c| {
-            Out::Replace(c.template(&tpl))
-        })];
+        let mut rw = Rewrite::new(lang, pat, move |c| Out::Replace(c.template(&tpl)));
+        if let Some(ref wc) = rule.where_clause {
+            rw.guards = parse_where_clause(wc, &rw.slots);
+        }
+        return vec![rw];
     }
 
     panic!("rule has no action: {:?}", pat);
+}
+
+fn parse_where_clause(clause: &str, slots: &std::collections::HashMap<Box<str>, u16>) -> Vec<(u16, u16, bool)> {
+    clause
+        .split("&&")
+        .map(|part| {
+            let part = part.trim();
+            let (a, b, eq) = if let Some((l, r)) = part.split_once("==") {
+                (l.trim(), r.trim(), true)
+            } else if let Some((l, r)) = part.split_once("!=") {
+                (l.trim(), r.trim(), false)
+            } else {
+                panic!("invalid where clause: {part}");
+            };
+            let sa = slots
+                .get(a.trim_start_matches('$'))
+                .unwrap_or_else(|| panic!("unknown capture in where: {a}"));
+            let sb = slots
+                .get(b.trim_start_matches('$'))
+                .unwrap_or_else(|| panic!("unknown capture in where: {b}"));
+            (*sa, *sb, eq)
+        })
+        .collect()
 }
 
 #[cfg(test)]

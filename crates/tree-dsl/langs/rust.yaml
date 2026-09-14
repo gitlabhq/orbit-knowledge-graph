@@ -106,8 +106,17 @@ stages:
         replace: '(__def (__defname @$N) (__trait) $$$SUPERS=>__supertype $B)'
       - match: '(trait_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__trait) $B)'
+      # Blanket impl: impl<T> Trait for T — type matches type param, skip defname
+      - match: '(impl_item **/(type_parameter $TP) trait: $T type: $TY body: $B)'
+        where: '$TY == $TP'
+        replace: '(__def (__impl) (__supertype @$T) $B)'
+      # Generic impl: impl<T> Trait for Wrapper<T>
+      - match: '(impl_item trait: $T type: (generic_type type: $TY) body: $B)'
+        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) $B)'
       - match: '(impl_item trait: $T type: $TY body: $B)'
         replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) $B)'
+      - match: '(impl_item type: (generic_type type: $T) body: $B)'
+        replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
       - match: '(impl_item type: $T body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
 

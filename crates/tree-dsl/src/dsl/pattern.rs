@@ -177,6 +177,8 @@ pub struct Rewrite {
     pub out: Out,
     pub nslots: usize,
     pub filters: Vec<Vec<u16>>,
+    pub guards: Vec<(u16, u16, bool)>,
+    pub slots: HashMap<Box<str>, u16>,
 }
 
 pub struct Ctx<'l, P: Phase> {
@@ -242,8 +244,15 @@ impl Rewrite {
             pat,
             out,
             nslots,
+            slots: tc.slots.clone(),
             filters: tc.filters,
+            guards: vec![],
         }
+    }
+
+    pub fn with_guards(mut self, guards: Vec<(u16, u16, bool)>) -> Self {
+        self.guards = guards;
+        self
     }
 }
 
@@ -813,6 +822,20 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
                 continue;
             }
             caps[0] = (i, t.hop(i));
+            if !r.guards.is_empty() {
+                let mut guard_ok = true;
+                for &(a, b, eq) in &r.guards {
+                    let sym_a = t.sym(caps[a as usize].0);
+                    let sym_b = t.sym(caps[b as usize].0);
+                    if (sym_a == sym_b) != eq {
+                        guard_ok = false;
+                        break;
+                    }
+                }
+                if !guard_ok {
+                    continue;
+                }
+            }
             let root = t.nodes[i as usize];
             let Out::Replace(tpl) = &r.out;
             let s = buf.len() as u32;
