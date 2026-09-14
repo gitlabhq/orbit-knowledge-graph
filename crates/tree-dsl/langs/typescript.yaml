@@ -14,7 +14,7 @@ stages:
         replace: '(__def (__defname @$N) (__property))'
 
       - match: '(return_statement $$$VALS)'
-        replace: '(__return $$$VALS)'
+        replace: '(__ssa_return $$$VALS)'
 
       # Distinguish import type from import before rewriting
       - match: '(import_statement (type) $$$REST)'
@@ -132,23 +132,23 @@ stages:
 
       # Control flow
       - match: '(if_statement condition: $COND consequence: $C alternative:? $A)'
-        replace: '(__branch $COND (__arm $C) (__arm? $A))'
+        replace: '(__ssa_branch $COND (__ssa_arm $C) (__arm? $A))'
       - match: '(switch_statement value: $V body: $B)'
-        replace: '(__branch $V $B)'
+        replace: '(__ssa_branch $V $B)'
       - match: '(ternary_expression condition: $COND consequence: $C alternative: $A)'
-        replace: '(__branch $COND (__arm $C) (__arm $A))'
+        replace: '(__ssa_branch $COND (__ssa_arm $C) (__ssa_arm $A))'
       - match: '(try_statement body: $B $$$ALTS:catch_clause|finally_clause)'
-        replace: '(__branch (__arm $B) $$$ALTS->__arm)'
+        replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
 
       # Loops
       - match: '(for_statement body: $B)'
-        replace: '(__loop $B)'
+        replace: '(__ssa_loop $B)'
       - match: '(for_in_statement body: $B)'
-        replace: '(__loop $B)'
+        replace: '(__ssa_loop $B)'
       - match: '(while_statement body: $B)'
-        replace: '(__loop $B)'
+        replace: '(__ssa_loop $B)'
       - match: '(do_statement body: $B)'
-        replace: '(__loop $B)'
+        replace: '(__ssa_loop $B)'
 
       # Abstract method signatures (no body)
       - match: '(abstract_method_signature name: $N)'

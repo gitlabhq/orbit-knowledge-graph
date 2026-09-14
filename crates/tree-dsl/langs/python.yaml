@@ -6,7 +6,7 @@ stages:
     rules:
       # return expr → __return
       - match: '(return_statement $$$VALS)'
-        replace: '(__return $$$VALS)'
+        replace: '(__ssa_return $$$VALS)'
 
       # Hoist decorators onto the inner def/class
       - match: '(decorator $N:identifier)'
@@ -81,11 +81,11 @@ stages:
       - match: '(assignment left: $N type: $T:type)'
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(typed_default_parameter name: $N type: (type $T))'
-        replace: '(__binding @$N (__rhs @$T))'
+        replace: '(__binding @$N (__ssa_typed @$T))'
       - match: '(typed_default_parameter name: $N)'
         replace: '(__binding @$N)'
       - match: '(typed_parameter $C:identifier type: (type $T))'
-        replace: '(__binding @$C (__rhs @$T))'
+        replace: '(__binding @$C (__ssa_typed @$T))'
       - match: '(typed_parameter $C:identifier)'
         replace: '(__binding @$C)'
 
@@ -96,7 +96,7 @@ stages:
         replace: '(__binding $N (__rhs @$R))'
       - match: '(assignment left: $N right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
-      - match: '(assignment left: $N right: $R:__loop)'
+      - match: '(assignment left: $N right: $R:__ssa_loop)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment left: $N right: $R)'
         replace: '(__binding @$N (__rhs @$R))'
@@ -115,35 +115,35 @@ stages:
 
       # Branches
       - match: '(if_statement condition: $COND consequence: $C $$$ALTS:elif_clause|else_clause)'
-        replace: '(__branch $COND (__arm $C) $$$ALTS->__arm)'
+        replace: '(__ssa_branch $COND (__ssa_arm $C) $$$ALTS->__ssa_arm)'
       - match: '(try_statement body: $B $$$ALTS:except_clause|finally_clause)'
-        replace: '(__branch (__arm $B) $$$ALTS->__arm)'
+        replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
       - match: '(match_statement subject: $S body: (block $$$CASES:case_clause))'
-        replace: '(__branch $S $$$CASES->__arm)'
+        replace: '(__ssa_branch $S $$$CASES->__ssa_arm)'
       - match: '(conditional_expression)'
-        replace: '(__branch)'
+        replace: '(__ssa_branch)'
 
       # Loops
       - match: '(for_statement body: $B)'
-        replace: '(__loop $B)'
+        replace: '(__ssa_loop $B)'
       - match: '(while_statement body: $B)'
-        replace: '(__loop $B)'
+        replace: '(__ssa_loop $B)'
       - match: '(list_comprehension $$$BODY)'
-        replace: '(__loop $$$BODY)'
+        replace: '(__ssa_loop $$$BODY)'
       - match: '(set_comprehension $$$BODY)'
-        replace: '(__loop $$$BODY)'
+        replace: '(__ssa_loop $$$BODY)'
       - match: '(dictionary_comprehension $$$BODY)'
-        replace: '(__loop $$$BODY)'
+        replace: '(__ssa_loop $$$BODY)'
       - match: '(generator_expression $$$BODY)'
-        replace: '(__loop $$$BODY)'
+        replace: '(__ssa_loop $$$BODY)'
 
       # Methods — has self parameter (before generic function rule)
       - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__method) (__self_method) (__return_type? @$R) $$$ANN $$$P $B)'
+        replace: '(__def (__defname @$N) (__method) (__self_method) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
 
       # Functions — no self parameter
       - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__function) (__return_type? @$R) $$$ANN $$$P $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
 
       # Classes — variadic before body captures __supertype/__decorator
       - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")))'

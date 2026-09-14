@@ -214,7 +214,11 @@ impl Fold {
         if self.ssa.has_variable_in_block(lhs, self.cur) {
             self.cur = self.ssa.add_sealed_successor(self.cur);
         }
-        let val = self.classify_rhs(tree, i);
+        let val = if let Some(ts) = tree.cursor(i).child_sym(C::SsaTyped) {
+            Value::Type(ts)
+        } else {
+            self.classify_rhs(tree, i)
+        };
 
         self.ssa.write_variable(lhs, self.cur, val);
         if let Some(br) = self.branch_stack.last_mut() {
@@ -581,12 +585,12 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
             i += 1;
             continue;
         }
-        if k == C::Branch {
+        if k == C::SsaBranch {
             let pre = f.cur;
             let arms: Vec<(u32, u32)> = tree
                 .cursor(i)
                 .children()
-                .filter(|c| c.is(C::Arm))
+                .filter(|c| c.is(C::SsaArm))
                 .map(|c| (c.index(), c.index() + c.size()))
                 .collect();
             let entries: Vec<BlockId> = arms
@@ -604,7 +608,7 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
             i += 1;
             continue;
         }
-        if k == C::Loop {
+        if k == C::SsaLoop {
             let (header, body) = f.ssa.begin_loop(f.cur);
             f.loop_stack.push((header, tree.hop(i)));
             f.cur = body;

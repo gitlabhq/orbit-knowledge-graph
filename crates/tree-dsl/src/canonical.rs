@@ -18,8 +18,8 @@ pub enum Canonical {
     Def = CANONICAL_BASE,
     #[strum(serialize = "__defname")]
     DefName,
-    #[strum(serialize = "__return_type")]
-    ReturnType,
+    #[strum(serialize = "__ssa_return_type")]
+    SsaReturnType,
     #[strum(serialize = "__supertype")]
     SuperType,
     #[strum(serialize = "__decorator")]
@@ -56,14 +56,16 @@ pub enum Canonical {
     Binding,
     #[strum(serialize = "__rhs")]
     Rhs,
-    #[strum(serialize = "__branch")]
-    Branch,
-    #[strum(serialize = "__arm")]
-    Arm,
-    #[strum(serialize = "__loop")]
-    Loop,
-    #[strum(serialize = "__return")]
-    Return,
+    #[strum(serialize = "__ssa_branch")]
+    SsaBranch,
+    #[strum(serialize = "__ssa_arm")]
+    SsaArm,
+    #[strum(serialize = "__ssa_loop")]
+    SsaLoop,
+    #[strum(serialize = "__ssa_return")]
+    SsaReturn,
+    #[strum(serialize = "__ssa_typed")]
+    SsaTyped,
     #[strum(serialize = "__cjs_require")]
     CjsRequire,
     #[strum(serialize = "__module_export")]

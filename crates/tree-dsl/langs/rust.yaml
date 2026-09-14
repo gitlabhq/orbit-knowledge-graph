@@ -6,7 +6,7 @@ stages:
   - name: normalize
     rules:
       - match: '(return_expression $$$VALS)'
-        replace: '(__return $$$VALS)'
+        replace: '(__ssa_return $$$VALS)'
 
       # self.field → __ivar
       - match: '(field_expression value: (self) field: $F)'
@@ -69,15 +69,15 @@ stages:
 
       # Control flow
       - match: '(if_expression condition: $COND consequence: $C alternative:? $A)'
-        replace: '(__branch $COND (__arm $C) (__arm? $A))'
+        replace: '(__ssa_branch $COND (__ssa_arm $C) (__arm? $A))'
       - match: '(match_expression value: $V body: $B)'
-        replace: '(__branch $V $B)'
+        replace: '(__ssa_branch $V $B)'
       - match: '(for_expression body: $B)'
-        replace: '(__loop $B)'
+        replace: '(__ssa_loop $B)'
       - match: '(while_expression body: $B)'
-        replace: '(__loop $B)'
+        replace: '(__ssa_loop $B)'
       - match: '(loop_expression body: $B)'
-        replace: '(__loop $B)'
+        replace: '(__ssa_loop $B)'
 
       # Trait method signatures (no body) — self variant first
       - match: '(function_signature_item name: $N **/(self_parameter))'

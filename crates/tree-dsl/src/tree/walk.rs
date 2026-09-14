@@ -268,7 +268,7 @@ use crate::canonical::Canonical as C;
 
 /// Infer return type from annotation or body scan. Skips nested defs.
 pub fn infer_return_type(def: Cursor) -> Option<u32> {
-    def.child_sym(C::ReturnType).or_else(|| {
+    def.child_sym(C::SsaReturnType).or_else(|| {
         let mut binds: Vec<(u32, u32)> = Vec::new();
         let mut result = None;
         def.descend(|n| -> Step<u32> {
@@ -285,7 +285,7 @@ pub fn infer_return_type(def: Cursor) -> Option<u32> {
                 }
                 return Step::Over;
             }
-            if n.is(C::Return) && result.is_none() {
+            if n.is(C::SsaReturn) && result.is_none() {
                 for ch in n.children() {
                     if ch.is(C::Call) {
                         if let Some(s) = ch.child_sym(C::Callee) {
