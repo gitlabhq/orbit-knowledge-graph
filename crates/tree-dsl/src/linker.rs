@@ -3,8 +3,6 @@ use crate::lang::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tree::{Cursor, EdgeKind, Step, Tree, infer_return_type};
 
-// ── Linked: what a symbol maps to after SSA resolution ──
-
 enum Linked {
     Def(u32),
     Import(u32),
@@ -38,59 +36,132 @@ impl Fold {
         self.def_stack.last().and_then(|&(d, _, _)| d).unwrap_or(0)
     }
 
-    // ── SSA resolution: translate ParseValue → concrete node indices ──
+    // ── Walk ──
 
-    fn lookup(&mut self, sym: u32) -> Vec<Linked> {
-        let result: Vec<Linked> = self.ssa
-            .read_variable(sym, self.cur)
-            .iter()
-            .filter_map(|pv| match pv {
-                ParseValue::LocalDef(di) => Some(Linked::Def(self.defs[*di as usize])),
-                ParseValue::ImportRef(ii) => {
-                    self.imports.get(*ii as usize).map(|&n| Linked::Import(n))
-                }
-                ParseValue::Type(ts) if *ts != 0 => Some(Linked::Type(*ts)),
-                _ => None,
-            })
-            .collect();
-        if result.is_empty() {
-            let entry = BlockId(0);
-            return self.ssa
-                .read_variable(sym, entry)
-                .iter()
-                .filter_map(|pv| match pv {
-                    ParseValue::LocalDef(di) => Some(Linked::Def(self.defs[*di as usize])),
-                    ParseValue::ImportRef(ii) => {
-                        self.imports.get(*ii as usize).map(|&n| Linked::Import(n))
-                    }
-                    ParseValue::Type(ts) if *ts != 0 => Some(Linked::Type(*ts)),
-                    _ => None,
-                })
-                .collect();
+    fn walk_range(&mut self, tree: &Tree, start: u32, range_end: u32) {
+        let mut i = start;
+        while i < range_end {
+            let n = tree.nodes[i as usize];
+            if n.dead {
+                i += n.size.max(1);
+                continue;
+            }
+            self.close_scopes(i);
+            self.enter_arm(i);
+            i += self.dispatch(tree, i);
         }
-        result
     }
 
-    fn emit(&self, tree: &Tree, r: &Linked, from: u32) {
-        match r {
-            Linked::Def(node) => {
-                if crate::canonical::is_callable_def(tree.cursor(*node)) {
-                    tree.add_edge(from, *node, EdgeKind::Calls);
+    fn close_scopes(&mut self, i: u32) {
+        while self.def_stack.len() > 1 {
+            let &(_, e, saved) = self.def_stack.last().unwrap();
+            if i >= e {
+                self.def_stack.pop();
+                self.cur = saved;
+            } else {
+                break;
+            }
+        }
+        while let Some(br) = self.branch_stack.last() {
+            if i >= br.end {
+                let mut preds = br.exits.clone();
+                preds.push(br.pre);
+                let br_end = br.end;
+                self.cur = self.ssa.add_sealed_join(preds);
+                self.branch_stack.pop();
+                if let Some(outer) = self.branch_stack.last_mut() {
+                    for (idx, &(a, b)) in outer.arms.iter().enumerate() {
+                        if br_end > a && br_end <= b {
+                            outer.exits[idx] = self.cur;
+                            break;
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        while self.loop_stack.last().is_some_and(|&(_, end)| i >= end) {
+            let (header, _) = self.loop_stack.pop().unwrap();
+            self.cur = self.ssa.finish_loop(header, self.cur);
+        }
+    }
+
+    fn enter_arm(&mut self, i: u32) {
+        if let Some(br) = self.branch_stack.last() {
+            for (idx, &(a, b)) in br.arms.iter().enumerate() {
+                if i >= a && i < b {
+                    self.cur = br.entries[idx];
+                    break;
                 }
             }
-            Linked::Import(node) => tree.add_edge(from, *node, EdgeKind::Imports),
-            Linked::Type(_) => {}
         }
     }
 
-    fn is_class(&self, tree: &Tree, node: u32) -> bool {
-        crate::canonical::def_type_of(tree.cursor(node)) == Some(C::Class)
+    fn dispatch(&mut self, tree: &Tree, i: u32) -> u32 {
+        let n = &tree.nodes[i as usize];
+        let k = n.kind;
+        let size = n.size;
+
+        if k == C::Import || k == C::ImportType {
+            self.handle_import(tree, i);
+            return size.max(1);
+        }
+        if crate::canonical::has_def_type(tree.cursor(i)) {
+            self.handle_def(tree, i, i + size);
+            return 1;
+        }
+        if k == C::Call {
+            self.handle_call(tree, i);
+            return 1;
+        }
+        if k == C::Member {
+            if tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Call
+                && tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Callee
+            {
+                self.handle_standalone_member(tree, i);
+            }
+            return 1;
+        }
+        if k == C::Binding {
+            if self.handle_binding(tree, i) {
+                return size.max(1);
+            }
+            return 1;
+        }
+        if k == C::SsaBranch {
+            self.open_branch(tree, i, i + size);
+            return 1;
+        }
+        if k == C::SsaLoop {
+            let (header, body) = self.ssa.begin_loop(self.cur);
+            self.loop_stack.push((header, tree.hop(i)));
+            self.cur = body;
+            return 1;
+        }
+        1
     }
 
-    fn any_class(&self, tree: &Tree, resolved: &[Linked]) -> bool {
-        resolved
+    fn open_branch(&mut self, tree: &Tree, i: u32, end: u32) {
+        let pre = self.cur;
+        let arms: Vec<(u32, u32)> = tree
+            .cursor(i)
+            .children()
+            .filter(|c| c.is(C::SsaArm))
+            .map(|c| (c.index(), c.index() + c.size()))
+            .collect();
+        let entries: Vec<BlockId> = arms
             .iter()
-            .any(|r| matches!(r, Linked::Def(n) if self.is_class(tree, *n)))
+            .map(|_| self.ssa.add_sealed_successor(pre))
+            .collect();
+        let exits = entries.clone();
+        self.branch_stack.push(BranchFrame {
+            arms,
+            entries,
+            exits,
+            pre,
+            end,
+        });
     }
 
     // ── Handlers ──
@@ -216,62 +287,67 @@ impl Fold {
         }
 
         let c = tree.cursor(i);
+
         if let Some(rhs) = c.child(C::Rhs) {
             if let Some(branch) = rhs.child(C::SsaBranch) {
                 self.walk_branch_binding(tree, branch, lhs);
                 self.update_branch_exit(i);
                 return true;
             }
-            let rhs_start = rhs.index() + 1;
-            let rhs_end = rhs.index() + rhs.size();
-            if self.has_nested_ssa(tree, rhs_start, rhs_end) {
-                self.walk_range(tree, rhs_start, rhs_end);
-                let tail_sym = self.tail_sym(rhs);
-                let val = if tail_sym != 0 {
-                    let r = self.lookup(tail_sym);
-                    if self.any_class(tree, &r) {
-                        Value::Type(tail_sym)
-                    } else {
-                        Value::Alias(tail_sym)
-                    }
-                } else {
-                    Value::Opaque
-                };
-                self.ssa.write_variable(lhs, self.cur, val);
-                self.update_branch_exit(i);
-                return true;
-            }
+
+            let rhs_idx = rhs.index();
+            let rhs_end = rhs_idx + rhs.size();
+            self.walk_range(tree, rhs_idx + 1, rhs_end);
+
+            let val = self.classify_rhs_value(tree, rhs, i);
+            self.ssa.write_variable(lhs, self.cur, val);
+            self.update_branch_exit(i);
+            return true;
         }
 
         let val = if let Some(ts) = c.child_sym(C::SsaTyped) {
             Value::Type(ts)
         } else {
-            self.classify_rhs(tree, i)
+            Value::Opaque
         };
 
         self.ssa.write_variable(lhs, self.cur, val);
         self.update_branch_exit(i);
-        false
+        true
     }
 
-    fn update_branch_exit(&mut self, i: u32) {
-        if let Some(br) = self.branch_stack.last_mut() {
-            for (idx, &(start, end)) in br.arms.iter().enumerate() {
-                if i >= start && i < end {
-                    br.exits[idx] = self.cur;
-                    break;
-                }
-            }
+    fn classify_rhs_value(&mut self, tree: &Tree, rhs: Cursor<'_>, binding: u32) -> Value {
+        if let Some(ts) = tree.cursor(binding).child_sym(C::SsaTyped) {
+            return Value::Type(ts);
         }
-    }
 
-    fn tail_sym(&self, node: Cursor<'_>) -> u32 {
-        let last = node.children().filter(|c| c.named()).last();
-        match last {
-            Some(c) if c.size() == 1 && c.sym() != 0 => c.sym(),
-            Some(c) if c.size() > 1 => self.tail_sym(c),
-            Some(c) => c.sym(),
-            None => node.sym(),
+        if let Some(callee) = rhs.child(C::Call).and_then(|call| call.child(C::Callee)) {
+            if let Some(member) = callee.child(C::Member) {
+                let method = member.sym();
+                let obj_node = member.child(C::Object);
+                let ivar = obj_node.and_then(|o| o.child(C::Ivar));
+                let obj_sym = ivar.or(obj_node).map(|n| n.sym()).unwrap_or(0);
+                return self.value_from_method(tree, obj_sym, method, binding, ivar.is_some());
+            }
+            if callee.child(C::Ivar).is_some() {
+                return Value::Opaque;
+            }
+            if callee.sym() != 0 {
+                return self.value_from_name(tree, callee.sym());
+            }
+            return Value::Opaque;
+        }
+
+        let sym = self.tail_sym(rhs);
+        if sym != 0 {
+            let r = self.lookup(sym);
+            if self.any_class(tree, &r) {
+                Value::Type(sym)
+            } else {
+                Value::Alias(sym)
+            }
+        } else {
+            Value::Opaque
         }
     }
 
@@ -282,9 +358,7 @@ impl Fold {
         for arm in branch.children().filter(|c| c.is(C::SsaArm)) {
             let block = self.ssa.add_sealed_successor(pre);
             self.cur = block;
-            let arm_start = arm.index() + 1;
-            let arm_end = arm.index() + arm.size();
-            self.walk_range(tree, arm_start, arm_end);
+            self.walk_range(tree, arm.index() + 1, arm.index() + arm.size());
             let sym = self.tail_sym(arm);
             if sym != 0 {
                 let val = {
@@ -303,21 +377,80 @@ impl Fold {
         self.cur = self.ssa.add_sealed_join(exits);
     }
 
-    fn has_nested_ssa(&self, tree: &Tree, start: u32, end: u32) -> bool {
-        let mut i = start;
-        while i < end {
-            let n = &tree.nodes[i as usize];
-            if n.dead {
-                i += n.size.max(1);
-                continue;
-            }
-            let k = n.kind;
-            if k == C::Binding || k == C::SsaBranch || k == C::SsaLoop {
-                return true;
-            }
-            i += 1;
+    fn tail_sym(&self, node: Cursor<'_>) -> u32 {
+        let last = node.children().filter(|c| c.named()).last();
+        match last {
+            Some(c) if c.size() == 1 && c.sym() != 0 => c.sym(),
+            Some(c) if c.size() > 1 => self.tail_sym(c),
+            Some(c) => c.sym(),
+            None => node.sym(),
         }
-        false
+    }
+
+    fn update_branch_exit(&mut self, i: u32) {
+        if let Some(br) = self.branch_stack.last_mut() {
+            for (idx, &(start, end)) in br.arms.iter().enumerate() {
+                if i >= start && i < end {
+                    br.exits[idx] = self.cur;
+                    break;
+                }
+            }
+        }
+    }
+
+    // ── SSA resolution ──
+
+    fn lookup(&mut self, sym: u32) -> Vec<Linked> {
+        let result: Vec<Linked> = self.ssa
+            .read_variable(sym, self.cur)
+            .iter()
+            .filter_map(|pv| match pv {
+                ParseValue::LocalDef(di) => Some(Linked::Def(self.defs[*di as usize])),
+                ParseValue::ImportRef(ii) => {
+                    self.imports.get(*ii as usize).map(|&n| Linked::Import(n))
+                }
+                ParseValue::Type(ts) if *ts != 0 => Some(Linked::Type(*ts)),
+                _ => None,
+            })
+            .collect();
+        if result.is_empty() {
+            let entry = BlockId(0);
+            return self.ssa
+                .read_variable(sym, entry)
+                .iter()
+                .filter_map(|pv| match pv {
+                    ParseValue::LocalDef(di) => Some(Linked::Def(self.defs[*di as usize])),
+                    ParseValue::ImportRef(ii) => {
+                        self.imports.get(*ii as usize).map(|&n| Linked::Import(n))
+                    }
+                    ParseValue::Type(ts) if *ts != 0 => Some(Linked::Type(*ts)),
+                    _ => None,
+                })
+                .collect();
+        }
+        result
+    }
+
+    fn emit(&self, tree: &Tree, r: &Linked, from: u32) {
+        match r {
+            Linked::Def(node) => {
+                if crate::canonical::is_callable_def(tree.cursor(*node)) {
+                    tree.add_edge(from, *node, EdgeKind::Calls);
+                }
+            }
+            Linked::Import(node) => tree.add_edge(from, *node, EdgeKind::Imports),
+            Linked::Type(_) => {}
+        }
+    }
+
+    fn is_class(&self, tree: &Tree, node: u32) -> bool {
+        crate::canonical::def_type_of(tree.cursor(node)) == Some(C::Class)
+    }
+
+    fn any_class(&self, tree: &Tree, resolved: &[Linked]) -> bool {
+        resolved
+            .iter()
+            .any(|r| matches!(r, Linked::Def(n) if self.is_class(tree, *n)))
     }
 
     // ── Resolution ──
@@ -442,50 +575,6 @@ impl Fold {
         None
     }
 
-    // ── RHS classification ──
-
-    fn classify_rhs(&mut self, tree: &Tree, node: u32) -> Value {
-        let c = tree.cursor(node);
-        let Some(rhs) = c.child(C::Rhs) else {
-            return Value::Opaque;
-        };
-        if let Some(callee) = rhs.child(C::Call).and_then(|call| call.child(C::Callee)) {
-            if let Some(member) = callee.child(C::Member) {
-                let method = member.sym();
-                let obj_node = member.child(C::Object);
-                let ivar = obj_node.and_then(|o| o.child(C::Ivar));
-                let obj_sym = ivar.or(obj_node).map(|n| n.sym()).unwrap_or(0);
-                return self.value_from_method(tree, obj_sym, method, node, ivar.is_some());
-            }
-            if callee.child(C::Ivar).is_some() {
-                return Value::Opaque;
-            }
-            if callee.sym() != 0 {
-                return self.value_from_name(tree, callee.sym());
-            }
-            return Value::Opaque;
-        }
-
-        let sym = if rhs.sym() != 0 {
-            rhs.sym()
-        } else {
-            rhs.children()
-                .find(|c| c.sym() != 0)
-                .map(|c| c.sym())
-                .unwrap_or(0)
-        };
-        if sym != 0 {
-            let r = self.lookup(sym);
-            if self.any_class(tree, &r) {
-                Value::Type(sym)
-            } else {
-                Value::Alias(sym)
-            }
-        } else {
-            Value::Opaque
-        }
-    }
-
     fn value_from_name(&mut self, tree: &Tree, sym: u32) -> Value {
         let resolved = self.lookup(sym);
         if self.any_class(tree, &resolved) {
@@ -565,133 +654,6 @@ fn root_object_sym(member: crate::tree::Cursor) -> u32 {
         return root_object_sym(inner);
     }
     0
-}
-
-// ── SSA fold main loop ──
-
-impl Fold {
-    fn walk_range(&mut self, tree: &Tree, start: u32, range_end: u32) {
-        let mut i = start;
-
-        while i < range_end {
-            let n = tree.nodes[i as usize];
-            if n.dead {
-                i += n.size.max(1);
-                continue;
-            }
-            let k = n.kind;
-            let end = i + n.size;
-
-            while self.def_stack.len() > 1 {
-                let &(_, e, saved) = self.def_stack.last().unwrap();
-                if i >= e {
-                    self.def_stack.pop();
-                    self.cur = saved;
-                } else {
-                    break;
-                }
-            }
-
-            while let Some(br) = self.branch_stack.last() {
-                if i >= br.end {
-                    let mut preds = br.exits.clone();
-                    preds.push(br.pre);
-                    let br_end = br.end;
-                    self.cur = self.ssa.add_sealed_join(preds);
-                    self.branch_stack.pop();
-                    if let Some(outer) = self.branch_stack.last_mut() {
-                        for (idx, &(a, b)) in outer.arms.iter().enumerate() {
-                            if br_end > a && br_end <= b {
-                                outer.exits[idx] = self.cur;
-                                break;
-                            }
-                        }
-                    }
-                } else {
-                    break;
-                }
-            }
-
-            while self.loop_stack.last().is_some_and(|&(_, end)| i >= end) {
-                let (header, _end) = self.loop_stack.pop().unwrap();
-                self.cur = self.ssa.finish_loop(header, self.cur);
-            }
-
-            if let Some(br) = self.branch_stack.last() {
-                for (idx, &(a, b)) in br.arms.iter().enumerate() {
-                    if i >= a && i < b {
-                        self.cur = br.entries[idx];
-                        break;
-                    }
-                }
-            }
-
-            if k == C::Import || k == C::ImportType {
-                self.handle_import(tree, i);
-                i += n.size.max(1);
-                continue;
-            }
-            if crate::canonical::has_def_type(tree.cursor(i)) {
-                self.handle_def(tree, i, end);
-                i += 1;
-                continue;
-            }
-            if k == C::Call {
-                self.handle_call(tree, i);
-                i += 1;
-                continue;
-            }
-            if k == C::Member {
-                if tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Call
-                    && tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Callee
-                {
-                    self.handle_standalone_member(tree, i);
-                }
-                i += 1;
-                continue;
-            }
-            if k == C::Binding {
-                let walked = self.handle_binding(tree, i);
-                if walked {
-                    i += n.size.max(1);
-                } else {
-                    i += 1;
-                }
-                continue;
-            }
-            if k == C::SsaBranch {
-                let pre = self.cur;
-                let arms: Vec<(u32, u32)> = tree
-                    .cursor(i)
-                    .children()
-                    .filter(|c| c.is(C::SsaArm))
-                    .map(|c| (c.index(), c.index() + c.size()))
-                    .collect();
-                let entries: Vec<BlockId> = arms
-                    .iter()
-                    .map(|_| self.ssa.add_sealed_successor(pre))
-                    .collect();
-                let exits = entries.clone();
-                self.branch_stack.push(BranchFrame {
-                    arms,
-                    entries,
-                    exits,
-                    pre,
-                    end,
-                });
-                i += 1;
-                continue;
-            }
-            if k == C::SsaLoop {
-                let (header, body) = self.ssa.begin_loop(self.cur);
-                self.loop_stack.push((header, tree.hop(i)));
-                self.cur = body;
-                i += 1;
-                continue;
-            }
-            i += 1;
-        }
-    }
 }
 
 pub fn link(tree: &Tree, lang: &mut Lang) {
