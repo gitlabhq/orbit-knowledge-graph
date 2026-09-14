@@ -25,6 +25,7 @@ pub fn resolve(
     let mut visible = build_visible_names(trees);
     let (reqs, mut cross_edges) =
         gather_imports(trees, lang, &file_index, lookup_prefixes, external);
+
     let ambiguous =
         propagate_reexports(trees, lang, &reqs, &mut visible, support_lang, index_names);
 
@@ -102,6 +103,7 @@ fn build_visible_names(trees: &[Tree]) -> VisibleMap {
                 let c = tree.cursor(i);
                 if crate::canonical::has_def_type(c) {
                     if let Some(ns) = c.child_sym(C::DefName) {
+
                         names.insert(ns, (fi, i));
                     }
                     if let Some(ds) = c.child_sym(C::DefaultExport) {
@@ -200,7 +202,8 @@ fn propagate_reexports(
         let mut new_exports: Vec<(usize, u32, usize, u32)> = Vec::new();
         for req in reqs {
             let path = lang.syms.resolve(trees[req.fi].root().sym());
-            let stem = support_lang.strip_extension(path);
+            let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
+            let stem = file_lang.strip_extension(path);
             if !index_names
                 .iter()
                 .any(|idx| stem.ends_with(&format!("/{idx}")) || stem == idx.as_str())
@@ -213,6 +216,7 @@ fn propagate_reexports(
                 .filter(|c| c.is(C::Name) && c.sym() != 0)
             {
                 let ns = c.sym();
+
                 if lang.syms.resolve(ns) == "*" {
                     let target_entries: Vec<_> = visible[req.target_fi]
                         .iter()
@@ -367,6 +371,7 @@ fn build_call_edges(
             }
             let ei = edge.to.node;
             if ei != ce.from.node
+                && ft.nodes[ei as usize].parent != ce.from.node
                 && ei != import_parent
                 && ft.nodes[ei as usize].parent != import_parent
             {
