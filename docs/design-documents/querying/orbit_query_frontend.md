@@ -71,6 +71,8 @@ This makes SQL and parameter ordering stable without changing filter meaning.
 
 ## Statement preparation API
 
+Here, preparation means compiling a graph query or resolving schema metadata. It does not create a reusable database prepared statement.
+
 `compiler::gql::prepare(raw, &ontology, &security_context, scope)` returns `gql::PreparedStatement::Query(Box<CompiledQueryContext>)` or `gql::PreparedStatement::Schema(SchemaResponse)`.
 MATCH runs the complete graph compilation pipeline. CALL returns ontology metadata with named `domains` and `edges` fields, without SQL or data reads.
 Zero arguments list all node and relationship types within the supplied `IntrospectionScope` (`All` or `Local`).
