@@ -884,10 +884,7 @@ fn eval_filter_predicate(
 fn try_expand_repeat(obj: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
     let pattern = obj.get("repeat")?.as_str()?;
     let count = obj.get("count")?.as_u64()? as usize;
-    let suffix = obj
-        .get("suffix")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let suffix = obj.get("suffix").and_then(|v| v.as_str()).unwrap_or("");
     Some(format!("{}{suffix}", pattern.repeat(count)))
 }
 
