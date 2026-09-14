@@ -8,7 +8,7 @@ pub(crate) fn short(name: &str) -> &'static str {
     prompt(name).short()
 }
 
-pub(crate) fn mcp(name: &str) -> &'static str {
+pub(crate) fn long(name: &str) -> &'static str {
     prompt(name).description()
 }
 
