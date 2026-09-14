@@ -7,7 +7,9 @@ use std::sync::Arc;
 use crate::config::{self, CompilerCtx as _};
 use crate::metrics::CountErr;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
-use ontology::introspection::{IntrospectionScope, SchemaResponse, build_schema_response};
+use ontology::introspection::{
+    IntrospectionScope, SchemaResponse, build_node_schema_response, build_schema_response,
+};
 use pest::Span;
 use pest::error::{ErrorVariant, LineColLocation};
 use pest_derive::Parser;
@@ -75,18 +77,19 @@ fn resolve_schema(
     ontology: &Ontology,
     scope: IntrospectionScope,
 ) -> Result<SchemaResponse> {
-    let expand_nodes: Vec<String> = node.into_iter().collect();
-    if let Some(name) = expand_nodes.first()
-        && (name == "*"
-            || ontology.get_node(name).is_none()
-            || (scope == IntrospectionScope::Local
-                && !ontology.local_entity_names().contains(&name.as_str())))
+    let Some(name) = node else {
+        return Ok(build_schema_response(ontology, scope, &[]));
+    };
+    if name == "*"
+        || ontology.get_node(&name).is_none()
+        || (scope == IntrospectionScope::Local
+            && !ontology.local_entity_names().contains(&name.as_str()))
     {
         return Err(QueryError::Validation(format!(
             "schema node '{name}' is unknown or unavailable in this scope"
         )));
     }
-    Ok(build_schema_response(ontology, scope, &expand_nodes))
+    Ok(build_node_schema_response(ontology, scope, &name))
 }
 
 fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {

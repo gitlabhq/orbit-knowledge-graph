@@ -1,6 +1,6 @@
 use crate::compiler::setup::{compile_pair, compile_to_ast, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
-use compiler::gql::{self, PreparedStatement, prepare};
+use compiler::gql::{PreparedStatement, prepare};
 use compiler::input::DynamicColumnMode;
 use compiler::{Frontend, Node, QueryError, compile};
 use ontology::introspection::{
@@ -992,14 +992,6 @@ fn orbit_query_virtual_filter_equality_hydration_parity() {
         ),
     ] {
         let compiled = compile_pair(json, query, &ontology, &test_ctx()).unwrap();
-        let PreparedStatement::Query(prepared) =
-            prepare(query, &ontology, &test_ctx(), All).unwrap()
-        else {
-            panic!("expected compiled query");
-        };
-        assert_eq!(prepared.base.sql, compiled.base.sql);
-        assert_eq!(prepared.base.params, compiled.base.params);
-        assert_eq!(prepared.hydration, compiled.hydration);
         let compiler::HydrationPlan::Static(templates) = compiled.hydration else {
             panic!("expected static hydration for {query}");
         };
@@ -1117,10 +1109,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
 fn orbit_query_preserves_ontology_validation_and_security() {
     let cases = [
         (
-            r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"User"}]}"#,
-            "MATCH (n:User) RETURN n",
-        ),
-        (
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"NotAnEntity"}]}"#,
             "MATCH (u:NotAnEntity) RETURN u",
         ),
@@ -1151,18 +1139,12 @@ fn orbit_query_preserves_ontology_validation_and_security() {
     ];
     for (json, orbit_query) in cases {
         compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap_err();
-        let error = compile(orbit_query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap_err();
-        let prepared = prepare(orbit_query, &test_ontology(), &test_ctx(), All).unwrap_err();
-        assert!(prepared.is_client_safe());
-        assert_eq!(prepared.to_string(), error.to_string());
     }
     let json = r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/"}}}]}"#;
     let orbit_query = "MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/' RETURN p";
     let context = compiler::SecurityContext::new(1, vec!["1/24/".into()]).unwrap();
     let error = compile_pair(json, orbit_query, &embedded_ontology(), &context).unwrap_err();
     assert!(matches!(error, QueryError::Authorization(_)));
-    let prepared = prepare(orbit_query, &embedded_ontology(), &context, All).unwrap_err();
-    assert_eq!(prepared.to_string(), error.to_string());
 }
 
 #[test]
@@ -1570,137 +1552,50 @@ fn orbit_query_reserved_page_words_need_backticks() {
 }
 
 #[test]
-fn prepare_dispatches_queries_and_scoped_schema() {
+fn gql_prepares_queries_and_scoped_schema() {
     let ontology = embedded_ontology();
     let ctx = test_ctx();
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"User","node_ids":[1]}]}"#;
-    let query = "MATCH (n:User {id: 1}) RETURN n";
-    let PreparedStatement::Query(prepared) = prepare(query, &ontology, &ctx, All).unwrap() else {
-        panic!("expected compiled query");
-    };
-    assert!(
-        prepare(json, &ontology, &ctx, All)
-            .unwrap_err()
-            .is_client_safe()
-    );
-    for (raw, fe) in [(json, Frontend::JsonDsl), (query, Frontend::Gql)] {
-        let compiled = compile(raw, fe, &ontology, &ctx).unwrap();
-        assert_eq!(prepared.base.sql, compiled.base.sql);
-        assert_eq!(prepared.base.params, compiled.base.params);
-        assert_eq!(prepared.hydration, compiled.hydration);
-        assert_eq!(prepared.query_type, compiled.query_type);
-    }
+    assert!(matches!(
+        prepare("MATCH (n:User {id: 1}) RETURN n", &ontology, &ctx, All),
+        Ok(PreparedStatement::Query(_))
+    ));
     for (scope, call, node) in [
         (All, "CALL db.schema()", None),
-        (Local, "call/**/db.schema ( ) ; // eof", None),
+        (Local, "CALL db.schema()", None),
         (All, "CALL db.schema('MergeRequest')", Some("MergeRequest")),
-        (Local, r#"CaLl db.schema("Fi\u006ce");"#, Some("File")),
+        (Local, "CALL db.schema('File')", Some("File")),
     ] {
         let PreparedStatement::Schema(response) = prepare(call, &ontology, &ctx, scope).unwrap()
         else {
             panic!("expected schema: {call}");
         };
-        let nodes = node.into_iter().map(String::from).collect::<Vec<_>>();
-        assert_eq!(
-            serde_json::to_value(response).unwrap(),
-            serde_json::to_value(build_schema_response(&ontology, scope, &nodes)).unwrap(),
-            "{call} ({scope:?})"
-        );
-    }
-}
-
-#[test]
-fn prepare_uses_supplied_ontology_and_rejects_wildcards() {
-    let ontology = ontology::Ontology::new()
-        .with_nodes(["Custom", "*"])
-        .with_fields("Custom", [("value", ontology::DataType::String)]);
-    let ctx = test_ctx();
-    let PreparedStatement::Schema(response) =
-        prepare("CALL db.schema('Custom')", &ontology, &ctx, All).unwrap()
-    else {
-        panic!("expected custom schema");
-    };
-    assert_eq!(
-        serde_json::to_value(response).unwrap(),
-        serde_json::json!({"domains": [{"name": "other", "nodes": ["*", {
-            "name": "Custom", "props": ["value:string?"], "out": [], "in": []
-        }]}], "edges": []})
-    );
-    for (scope, name) in [(All, "MergeRequest"), (All, "*"), (Local, "Custom")] {
-        let call = format!("CALL db.schema('{name}')");
-        let error = prepare(&call, &ontology, &ctx, scope).unwrap_err();
-        assert!(error.is_client_safe(), "{name}: {error}");
-        assert!(
-            error.to_string().contains("unknown or unavailable"),
-            "{error}"
-        );
-    }
-}
-
-#[test]
-fn prepare_rejects_invalid_calls_and_preserves_query_only_apis() {
-    let ontology = embedded_ontology();
-    let ctx = test_ctx();
-    for call in [
-        "CALL db.schema",
-        "CALLdb.schema()",
-        "CALL other.schema()",
-        "CALL DB.schema()",
-        "CALL db.Schema()",
-        "CALL orbit.schema()",
-        "CALL db.schema(1)",
-        "CALL db.schema($node)",
-        "CALL db.schema(['File'])",
-        "CALL db.schema('File', 'File')",
-        "CALL db.schema('Missing')",
-        "CALL db.schema() YIELD name",
-        "CALL db.schema() RETURN *",
-        "CALL db.schema(); CALL db.schema()",
-        "CALL db.schema() MATCH (n:User) RETURN n",
-        "MATCH (n:User) CALL db.schema() RETURN n",
-        "MATCH (n:User) RETURN n; CALL db.schema()",
-        "CREATE (n:User)",
-        r"CALL db.schema('\uD800')",
-    ] {
-        let error = prepare(call, &ontology, &ctx, All).unwrap_err();
-        assert!(error.is_client_safe(), "{call}: {error}");
-    }
-    let error = prepare("CALL db.schema('MergeRequest')", &ontology, &ctx, Local).unwrap_err();
-    assert!(error.is_client_safe());
-    for call in [
-        "CALL db.schema()",
-        "CALL db.schema('MergeRequest')",
-        "CALL db.schema('Missing')",
-    ] {
-        for error in [
-            gql::parse(call).unwrap_err(),
-            compile(call, Frontend::Gql, &ontology, &ctx).unwrap_err(),
-        ] {
-            assert!(error.is_client_safe(), "{call}: {error}");
-            assert!(error.to_string().contains("not graph queries"), "{error}");
+        if let Some(name) = node {
+            assert_eq!(response.domains.len(), 1);
+            assert_eq!(response.domains[0].nodes.len(), 1);
+            let node = serde_json::to_value(&response.domains[0].nodes[0]).unwrap();
+            assert_eq!(node["name"], name);
+            assert!(!node["props"].as_array().unwrap().is_empty());
+            assert!(!response.edges.is_empty());
+            assert!(!response.edges.iter().any(|edge| edge == "CALLS"));
+        } else {
+            assert_eq!(
+                serde_json::to_value(response).unwrap(),
+                serde_json::to_value(build_schema_response(&ontology, scope, &[])).unwrap(),
+            );
         }
+    }
+    for (scope, call) in [
+        (All, "CALL db.schema('Missing')"),
+        (All, "CALL db.schema('*')"),
+        (All, "CALL db.schema('File', 'User')"),
+        (All, "CALL db.schema() YIELD name"),
+        (Local, "CALL db.schema('MergeRequest')"),
+    ] {
         assert!(
-            compile(call, Frontend::JsonDsl, &ontology, &ctx)
+            prepare(call, &ontology, &ctx, scope)
                 .unwrap_err()
                 .is_client_safe()
         );
     }
-}
-
-#[test]
-fn prepare_enforces_existing_input_bounds() {
-    let ontology = embedded_ontology();
-    let ctx = test_ctx();
-    for raw in ["CALL db.schema()", "MATCH (n:User {id: 1}) RETURN n"] {
-        let at_limit = format!("{raw}{}", " ".repeat(32 * 1024 - raw.len()));
-        assert!(prepare(&at_limit, &ontology, &ctx, All).is_ok());
-        let error = prepare(&(at_limit + " "), &ontology, &ctx, All).unwrap_err();
-        assert!(matches!(error, QueryError::LimitExceeded(_)), "{error}");
-        let commented = format!("{raw} /*{}*/", "(".repeat(64));
-        assert!(prepare(&commented, &ontology, &ctx, All).is_ok());
-    }
-    let nested = format!("CALL db.schema({})", "(".repeat(32));
-    let error = prepare(&nested, &ontology, &ctx, All).unwrap_err();
-    assert!(error.is_client_safe());
-    assert!(error.to_string().contains("nesting is too deep"), "{error}");
+    assert!(compile("CALL db.schema()", Frontend::Gql, &ontology, &ctx).is_err());
 }

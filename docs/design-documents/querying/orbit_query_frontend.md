@@ -72,7 +72,10 @@ This makes SQL and parameter ordering stable without changing filter meaning.
 
 `compiler::gql::prepare(raw, &ontology, &security_context, scope)` returns `gql::PreparedStatement::Query(Box<CompiledQueryContext>)` or `gql::PreparedStatement::Schema(SchemaResponse)`.
 MATCH runs the complete graph compilation pipeline. CALL returns ontology metadata with named `domains` and `edges` fields, without SQL or data reads.
-Zero arguments list node and relationship types. One string also shows that node's properties and incoming/outgoing relationships within the supplied `IntrospectionScope` (`All` or `Local`). Scope filters schema metadata, not graph-query authorization.
+Zero arguments list all node and relationship types within the supplied `IntrospectionScope` (`All` or `Local`).
+One string filters the response to that node: `domains` contains only its domain and expanded node, including properties and incoming/outgoing relationships.
+The `edges` list contains only relationship types with a connection to that node within the selected scope. Other nodes and domains are omitted.
+Scope filters schema metadata, not graph-query authorization. Existing schema tools keep their expansion behavior; this node filter applies only to GQL calls.
 
 ```plaintext
 MATCH (n:User {id: 1}) RETURN n
