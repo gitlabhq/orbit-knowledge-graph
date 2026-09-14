@@ -6444,7 +6444,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=b6732368fc4d29bb25106629935c5bcfd87b4e1a#b6732368fc4d29bb25106629935c5bcfd87b4e1a"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=ed732331343cd9657e9de4a1976d3e224bd051ab#ed732331343cd9657e9de4a1976d3e224bd051ab"
 dependencies = [
  "axum",
  "futures-util",
@@ -6475,14 +6475,13 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=b6732368fc4d29bb25106629935c5bcfd87b4e1a#b6732368fc4d29bb25106629935c5bcfd87b4e1a"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=ed732331343cd9657e9de4a1976d3e224bd051ab#ed732331343cd9657e9de4a1976d3e224bd051ab"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "parking_lot",
  "rand 0.10.2",
  "reqwest 0.12.28",
- "rustls",
  "serde",
  "serde_json",
  "tokio",
@@ -6494,7 +6493,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=b6732368fc4d29bb25106629935c5bcfd87b4e1a#b6732368fc4d29bb25106629935c5bcfd87b4e1a"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=ed732331343cd9657e9de4a1976d3e224bd051ab#ed732331343cd9657e9de4a1976d3e224bd051ab"
 
 [[package]]
 name = "lance"

@@ -629,6 +629,8 @@ async fn main() -> Result<()> {
 
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
 
+    // labkit-events ships no TLS provider; the tracker below builds an HTTPS client.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let tracker = telemetry::resolve_from_env().build_tracker();
     if let Some(tracker) = &tracker {
         telemetry::emit_command_event(
