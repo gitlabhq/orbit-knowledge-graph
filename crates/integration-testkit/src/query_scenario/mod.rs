@@ -154,15 +154,14 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
             eprintln!("    {name}: skipping unknown query language '{frontend_key}'");
             continue;
         };
-        let label = format!("{name} [{frontend_key}]");
         run_frontend(
             &ctx,
-            frontend,
+            (frontend, frontend_key),
             query_str,
             &security,
             &redaction,
             &scenario.expect,
-            &label,
+            name,
         )
         .await;
     }
@@ -170,21 +169,21 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 
 async fn run_frontend(
     ctx: &TestContext,
-    frontend: Frontend,
+    (frontend, frontend_key): (Frontend, &str),
     query: &str,
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
-    label: &str,
+    name: &str,
 ) {
+    let label = &format!("{name} [{frontend_key}]");
     let ontology = Arc::new(load_ontology());
 
     let compiled = match compile(query, frontend, &ontology, security) {
         Ok(c) => {
-            let expects_error = matches!(
+            let expects_error = !matches!(
                 expect.compile_error,
-                Some(format::CompileErrorExpect::Flag(true))
-                    | Some(format::CompileErrorExpect::Substring(_))
+                None | Some(format::CompileErrorExpect::Flag(false))
             );
             assert!(
                 !expects_error,
@@ -193,9 +192,18 @@ async fn run_frontend(
             Arc::new(c)
         }
         Err(e) => match &expect.compile_error {
-            Some(format::CompileErrorExpect::Flag(true)) => {
+            None | Some(format::CompileErrorExpect::Flag(false)) => {
+                panic!("{label}: unexpected compile error: {e}")
+            }
+            Some(expected) => {
                 let msg = e.to_string();
-                for banned in &expect.compile_error_not_contains {
+                if let Some(sub) = expected.substring_for(frontend_key) {
+                    assert!(
+                        msg.contains(sub),
+                        "{label}: compile error '{msg}' does not contain '{sub}'"
+                    );
+                }
+                for banned in expect.compile_error_not_contains.banned_for(frontend_key) {
                     assert!(
                         !msg.contains(banned.as_str()),
                         "{label}: compile error must not contain '{banned}'\nerror: {msg}"
@@ -203,21 +211,6 @@ async fn run_frontend(
                 }
                 return;
             }
-            Some(format::CompileErrorExpect::Substring(sub)) => {
-                let msg = e.to_string();
-                assert!(
-                    msg.contains(sub.as_str()),
-                    "{label}: compile error '{msg}' does not contain '{sub}'"
-                );
-                for banned in &expect.compile_error_not_contains {
-                    assert!(
-                        !msg.contains(banned.as_str()),
-                        "{label}: compile error must not contain '{banned}'\nerror: {msg}"
-                    );
-                }
-                return;
-            }
-            _ => panic!("{label}: unexpected compile error: {e}"),
         },
     };
 

@@ -17,6 +17,8 @@ query:
     MATCH (u:User {email: 'target@example.com'}), (g:Group) RETURN g, count(u) AS hit LIMIT 1
 
 expect:
-  compile_error: "globally-scoped"
+  compile_error:
+    json: "globally-scoped"
+    gql: "Orbit query syntax"
   compile_error_not_contains:
-    - "target@example.com"
+    json: ["target@example.com"]
