@@ -651,6 +651,12 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if expect.empty_aggregation {
         view.assert_empty_aggregation();
     }
+    for (name, node_dot_prop) in &expect.group_columns {
+        let (node, property) = node_dot_prop.split_once('.').unwrap_or_else(|| {
+            panic!("{label}: group_columns value must be 'node.property', got '{node_dot_prop}'")
+        });
+        view.assert_group_column(name, node, property);
+    }
     if let Some(n) = expect.path_count {
         let pids = view.path_ids();
         assert_eq!(pids.len(), n, "{label}: path count mismatch");
@@ -875,6 +881,16 @@ fn eval_filter_predicate(
     }
 }
 
+fn try_expand_repeat(obj: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    let pattern = obj.get("repeat")?.as_str()?;
+    let count = obj.get("count")?.as_u64()? as usize;
+    let suffix = obj
+        .get("suffix")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    Some(format!("{}{suffix}", pattern.repeat(count)))
+}
+
 fn assert_property(
     node: &dyn NodeExt,
     prop: &str,
@@ -885,6 +901,12 @@ fn assert_property(
 ) {
     match expected {
         serde_json::Value::String(s) => node.assert_str(prop, s),
+        serde_json::Value::Object(m) if m.contains_key("repeat") => {
+            let expanded = try_expand_repeat(m).unwrap_or_else(|| {
+                panic!("{label}: {entity}/{id}.{prop}: invalid repeat object, expected {{repeat: \"str\", count: N}}")
+            });
+            node.assert_str(prop, &expanded);
+        }
         serde_json::Value::Number(n) if n.is_i64() => {
             node.assert_i64(prop, n.as_i64().unwrap());
         }

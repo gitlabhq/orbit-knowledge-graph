@@ -109,6 +109,11 @@ pub struct QueryExpect {
     /// Assert values on rows by index: `[{index: 0, col: val}]`
     #[serde(default)]
     pub row_values: Vec<BTreeMap<String, serde_json::Value>>,
+    /// Assert group column metadata: `{ v_severity: "v.severity" }` verifies
+    /// the response declares a group column named `v_severity` backed by
+    /// node `v`, property `severity`.
+    #[serde(default)]
+    pub group_columns: BTreeMap<String, String>,
     #[serde(default)]
     pub sql_contains: Vec<String>,
     #[serde(default)]
@@ -241,6 +246,7 @@ impl QueryExpect {
             || !self.edge_absent.is_empty()
             || !self.edge_count.is_empty()
             || !self.groups.is_empty()
+            || !self.group_columns.is_empty()
             || self.empty_aggregation
             || self.row_count.is_some()
             || !self.row_values.is_empty()
