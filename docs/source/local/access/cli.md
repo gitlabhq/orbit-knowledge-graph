@@ -168,7 +168,9 @@ Use one concept per query, such as `orbit grep "rate limit"`. Inspect weak or
 unmatched candidates with `context` before retrying; **weak matches** does not
 mean every term failed to match. A single identifier with no matching name
 starts with `No definition named ...`, so a name that does not exist yet is
-answered on the first line.
+answered on the first line. Test, fixture, mock, and generated files are included
+automatically when the query looks like a test name; use `--path` for an explicit
+test-directory search.
 
 Read known definitions directly with `orbit context <fqn>`, or use
 `context --file <path>` for a file overview with imports and definition

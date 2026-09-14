@@ -76,6 +76,7 @@ pub(crate) fn run(
     filter: RecallFilter,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
+    let include_tests = queries.iter().any(|q| test_query(q));
     if let Some(query) = queries.iter().find(|q| content_words(q).is_empty()) {
         anyhow::bail!(
             "no usable search terms in query: {query:?} — to list every definition in a \
@@ -85,7 +86,7 @@ pub(crate) fn run(
     }
 
     let context_command = context_command(launcher, repo.as_deref(), db.as_deref());
-    let (git, search) = local::open(repo, db, &paths)?;
+    let (git, search) = local::open(repo, db, &paths, include_tests)?;
 
     let mut out = Output::new();
     if queries.is_empty() {

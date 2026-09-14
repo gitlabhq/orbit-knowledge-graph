@@ -9,9 +9,16 @@ pub(super) fn open(
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     paths: &[String],
+    include_tests: bool,
 ) -> Result<(workspace::GitInfo, DuckDbSearch)> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
-    let search = DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, paths)?;
+    let search = DuckDbSearch::scoped(
+        client,
+        git.project_id,
+        &git.commit_sha,
+        paths,
+        include_tests,
+    )?;
     Ok((git, search))
 }
 
@@ -85,7 +92,7 @@ mod tests {
                 )
                 .unwrap();
             let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
-            DuckDbSearch::scoped(self.client, 7, "sha", &paths).unwrap()
+            DuckDbSearch::scoped(self.client, 7, "sha", &paths, false).unwrap()
         }
     }
 
