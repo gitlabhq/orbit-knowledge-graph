@@ -56,6 +56,9 @@ enum Commands {
         /// Override language detection
         #[arg(short, long)]
         lang: Option<String>,
+        /// Skip saving the serialized graph
+        #[arg(long)]
+        no_save: bool,
     },
     /// Run a YAML test suite
     #[cfg(feature = "test-runner")]
@@ -95,7 +98,7 @@ fn main() -> anyhow::Result<()> {
             replace,
             after,
         } => cmd_rewrite(file, stdin, lang, r#match, replace, after),
-        Commands::Index { path, lang } => cmd_index(&path, lang),
+        Commands::Index { path, lang, no_save } => cmd_index(&path, lang, no_save),
         #[cfg(feature = "test-runner")]
         Commands::Test { file, inline } => cmd_test(file, inline),
     }
@@ -282,7 +285,7 @@ fn edge_name(kind: EdgeKind) -> &'static str {
 
 // ── index ──
 
-fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
+fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow::Result<()> {
     let t0 = Instant::now();
 
     let p = Path::new(path);
@@ -334,20 +337,22 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
     eprintln!("resolve:      {:.2}s", result.timings.resolve_s);
     eprintln!("total:        {:.2}s", elapsed.as_secs_f64());
 
-    let graphs_dir = dirs::home_dir()
-        .unwrap_or_else(|| Path::new(".").to_path_buf())
-        .join(".orbit/var/graphs");
-    std::fs::create_dir_all(&graphs_dir)?;
-    let name = Path::new(path)
-        .file_name()
-        .unwrap_or(std::ffi::OsStr::new("graph"))
-        .to_string_lossy();
-    let snap_path = graphs_dir.join(format!("{name}.bin"));
-    let t_save = Instant::now();
-    result.save(&snap_path)?;
-    let save_s = t_save.elapsed().as_secs_f64();
-    let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
-    eprintln!("saved:        {} ({:.1} MB, {:.2}s)", snap_path.display(), size_mb, save_s);
+    if !no_save {
+        let graphs_dir = dirs::home_dir()
+            .unwrap_or_else(|| Path::new(".").to_path_buf())
+            .join(".orbit/var/graphs");
+        std::fs::create_dir_all(&graphs_dir)?;
+        let name = Path::new(path)
+            .file_name()
+            .unwrap_or(std::ffi::OsStr::new("graph"))
+            .to_string_lossy();
+        let snap_path = graphs_dir.join(format!("{name}.bin"));
+        let t_save = Instant::now();
+        result.save(&snap_path)?;
+        let save_s = t_save.elapsed().as_secs_f64();
+        let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
+        eprintln!("saved:        {} ({:.1} MB, {:.2}s)", snap_path.display(), size_mb, save_s);
+    }
     Ok(())
 }
 

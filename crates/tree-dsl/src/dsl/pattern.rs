@@ -609,13 +609,12 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
                         }
                         if let Some(g) = guard {
                             let range = (start, c);
-                            let filtered: Vec<u32> = elems(t, range, &[])
-                                .filter(|&e| matches(t, e, g, caps))
-                                .collect();
-                            caps[*slot as usize] = if filtered.is_empty() {
-                                EMPTY_CAP
-                            } else {
+                            let any_match = elems(t, range, &[])
+                                .any(|e| matches(t, e, g, caps));
+                            caps[*slot as usize] = if any_match {
                                 (start, c)
+                            } else {
+                                EMPTY_CAP
                             };
                         } else {
                             caps[*slot as usize] = (start, c);
@@ -876,6 +875,7 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) {
 
             let l = buf.len() as u32 - s;
             t.replace(i, &buf[s as usize..(s + l) as usize]);
+            buf.clear();
             break;
         }
     }
