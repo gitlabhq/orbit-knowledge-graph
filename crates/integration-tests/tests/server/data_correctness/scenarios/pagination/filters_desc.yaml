@@ -20,7 +20,8 @@ query:
 
 expect:
   pages:
-    - nodes:
+    - node_count: 2
+      nodes:
         WorkItem:
           order: [4010]
           filters:
@@ -29,7 +30,8 @@ expect:
       edge_exists:
         AUTHORED: [[7, 4010]]
       has_more: true
-    - nodes:
+    - node_count: 2
+      nodes:
         WorkItem:
           order: [4003]
           filters:
@@ -38,7 +40,8 @@ expect:
       edge_exists:
         AUTHORED: [[3, 4003]]
       has_more: true
-    - nodes:
+    - node_count: 2
+      nodes:
         WorkItem:
           order: [4000]
           filters:

@@ -250,6 +250,25 @@ async fn run_frontend(
 
     let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
 
+    if let Some(n) = expect.repeat_count {
+        assert!(n >= 2, "{label}: repeat_count must be >= 2");
+        let baseline_node_ids = canonical_ids(&resp);
+        let baseline_edges = canonical_edges(&resp);
+        for run in 2..=n {
+            let rerun = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
+            assert_eq!(
+                baseline_node_ids,
+                canonical_ids(&rerun),
+                "{label}: run {run}/{n} returned different node IDs"
+            );
+            assert_eq!(
+                baseline_edges,
+                canonical_edges(&rerun),
+                "{label}: run {run}/{n} returned different edges"
+            );
+        }
+    }
+
     let response: query_engine::formatters::GraphResponse =
         serde_json::from_value(resp).expect("response should deserialize");
     let view = ResponseView::for_query(&compiled.input, response);
@@ -335,9 +354,6 @@ async fn run_pages(
         }
 
         apply_expect(&view, page_expect, &page_label);
-        if page_expect.node_count.is_none() {
-            view.assert_node_count(view.node_count());
-        }
 
         match next_cursor {
             Some(cursor) => query_str = with_after(frontend, base_query.trim_end(), &cursor),
@@ -486,6 +502,11 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 .get("id")
                 .and_then(|v| v.as_i64())
                 .unwrap_or_else(|| panic!("{label}: node {entity} row missing integer 'id'"));
+            let prop_count = row.keys().filter(|k| *k != "id").count();
+            assert!(
+                prop_count > 0,
+                "{label}: node {entity}/{id} row has no property assertions (only 'id')"
+            );
             let found = view
                 .find_node(entity, id)
                 .unwrap_or_else(|| panic!("{label}: node {entity}/{id} not found"));
@@ -632,6 +653,12 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if expect.empty_aggregation {
         view.assert_empty_aggregation();
     }
+    for (name, node_dot_prop) in &expect.group_columns {
+        let (node, property) = node_dot_prop.split_once('.').unwrap_or_else(|| {
+            panic!("{label}: group_columns value must be 'node.property', got '{node_dot_prop}'")
+        });
+        view.assert_group_column(name, node, property);
+    }
     if let Some(n) = expect.path_count {
         let pids = view.path_ids();
         assert_eq!(pids.len(), n, "{label}: path count mismatch");
@@ -776,6 +803,13 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             "{label}: has_more mismatch"
         );
     }
+    let has_edge_assertions = !expect.edges.is_empty()
+        || !expect.edge_exists.is_empty()
+        || !expect.edge_absent.is_empty()
+        || !expect.edge_count.is_empty();
+    if has_edge_assertions && !view.response.edges.is_empty() {
+        view.assert_all_edge_types_covered();
+    }
 }
 
 fn eval_filter_predicate(
@@ -856,6 +890,13 @@ fn eval_filter_predicate(
     }
 }
 
+fn try_expand_repeat(obj: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    let pattern = obj.get("repeat")?.as_str()?;
+    let count = obj.get("count")?.as_u64()? as usize;
+    let suffix = obj.get("suffix").and_then(|v| v.as_str()).unwrap_or("");
+    Some(format!("{}{suffix}", pattern.repeat(count)))
+}
+
 fn assert_property(
     node: &dyn NodeExt,
     prop: &str,
@@ -866,6 +907,12 @@ fn assert_property(
 ) {
     match expected {
         serde_json::Value::String(s) => node.assert_str(prop, s),
+        serde_json::Value::Object(m) if m.contains_key("repeat") => {
+            let expanded = try_expand_repeat(m).unwrap_or_else(|| {
+                panic!("{label}: {entity}/{id}.{prop}: invalid repeat object, expected {{repeat: \"str\", count: N}}")
+            });
+            node.assert_str(prop, &expanded);
+        }
         serde_json::Value::Number(n) if n.is_i64() => {
             node.assert_i64(prop, n.as_i64().unwrap());
         }
@@ -985,6 +1032,61 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
         "path_finding" => Some(Requirement::PathFinding),
         _ => None,
     }
+}
+
+fn canonical_ids(resp: &serde_json::Value) -> Vec<(String, i64)> {
+    let mut ids: Vec<(String, i64)> = resp["nodes"]
+        .as_array()
+        .map(|nodes| {
+            nodes
+                .iter()
+                .map(|n| {
+                    let entity = n["entity_type"].as_str().unwrap_or("").to_owned();
+                    let id = n["id"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .or_else(|| n["id"].as_i64())
+                        .unwrap_or_else(|| {
+                            panic!("determinism check: node missing numeric 'id': {n}")
+                        });
+                    (entity, id)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.sort();
+    ids
+}
+
+fn canonical_edges(resp: &serde_json::Value) -> Vec<(String, i64, i64)> {
+    let mut edges: Vec<(String, i64, i64)> = resp["edges"]
+        .as_array()
+        .map(|edges| {
+            edges
+                .iter()
+                .map(|e| {
+                    let kind = e["type"].as_str().unwrap_or("").to_owned();
+                    let from = e["from_id"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .or_else(|| e["from_id"].as_i64())
+                        .unwrap_or_else(|| {
+                            panic!("determinism check: edge missing numeric 'from_id': {e}")
+                        });
+                    let to = e["to_id"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .or_else(|| e["to_id"].as_i64())
+                        .unwrap_or_else(|| {
+                            panic!("determinism check: edge missing numeric 'to_id': {e}")
+                        });
+                    (kind, from, to)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    edges.sort();
+    edges
 }
 
 #[cfg(test)]
