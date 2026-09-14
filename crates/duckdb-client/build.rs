@@ -48,14 +48,20 @@ fn main() {
         .unwrap_or_else(|| panic!("no DuckDB extension platform for target {target}"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    let vendor_dir = duckdb
-        .vendor_dir
-        .as_deref()
-        .expect("vendored.duckdb.vendor_dir missing");
+    let repo_root = Path::new(env!("VERSIONS_FILE"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("cannot derive repo root from VERSIONS_FILE");
+    let vendor_dir = repo_root.join(
+        duckdb
+            .vendor_dir
+            .as_deref()
+            .expect("vendored.duckdb.vendor_dir missing"),
+    );
 
     let mut entries = String::new();
     if env::var_os("CARGO_FEATURE_STATIC_FTS").is_some() {
-        build_static_fts(&out_dir, extensions, vendor_dir);
+        build_static_fts(&out_dir, extensions, &vendor_dir);
     } else {
         for (name, ext) in extensions {
             let binaries = ext
@@ -95,7 +101,7 @@ fn main() {
 fn build_static_fts(
     out_dir: &Path,
     extensions: &std::collections::BTreeMap<String, orbit_versions::Extension>,
-    vendor_dir: &str,
+    vendor_dir: &Path,
 ) {
     let fts = extensions
         .get("fts")
@@ -108,7 +114,7 @@ fn build_static_fts(
         .as_ref()
         .expect("vendored.duckdb.extensions.fts.source_revision missing");
 
-    let archive = Path::new(vendor_dir).join("duckdb-fts-sources.tar.gz");
+    let archive = vendor_dir.join("duckdb-fts-sources.tar.gz");
     assert_eq!(
         sha256_of(&archive).as_deref(),
         Some(expected_sha),
