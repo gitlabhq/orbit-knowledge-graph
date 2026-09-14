@@ -61,13 +61,14 @@ fn main() {
 
     let mut entries = String::new();
     if env::var_os("CARGO_FEATURE_STATIC_FTS").is_some() {
-        build_static_fts(&out_dir, extensions, &vendor_dir);
+        let source_root =
+            verify_and_extract_source_archive("fts", extensions, &vendor_dir, &out_dir);
+        compile_fts(&source_root);
     } else {
         for (name, ext) in extensions {
-            let binaries = ext
-                .binaries
-                .as_ref()
-                .unwrap_or_else(|| panic!("vendored.duckdb.extensions.{name}.binaries missing"));
+            let Some(binaries) = &ext.binaries else {
+                continue;
+            };
             let Some(expected) = binaries.get(platform) else {
                 continue;
             };
@@ -98,30 +99,30 @@ fn main() {
     .unwrap();
 }
 
-fn build_static_fts(
-    out_dir: &Path,
+fn verify_and_extract_source_archive(
+    name: &str,
     extensions: &std::collections::BTreeMap<String, orbit_versions::Extension>,
     vendor_dir: &Path,
-) {
-    let fts = extensions
-        .get("fts")
-        .expect("vendored.duckdb.extensions.fts missing");
-    let expected_sha = fts
-        .source_archive_sha256
-        .as_deref()
-        .expect("vendored.duckdb.extensions.fts.source_archive_sha256 missing");
-    fts.source_revision
+    out_dir: &Path,
+) -> PathBuf {
+    let ext = extensions
+        .get(name)
+        .unwrap_or_else(|| panic!("vendored.duckdb.extensions.{name} missing"));
+    let expected_sha = ext.source_archive_sha256.as_deref().unwrap_or_else(|| {
+        panic!("vendored.duckdb.extensions.{name}.source_archive_sha256 missing")
+    });
+    ext.source_revision
         .as_ref()
-        .expect("vendored.duckdb.extensions.fts.source_revision missing");
+        .unwrap_or_else(|| panic!("vendored.duckdb.extensions.{name}.source_revision missing"));
 
-    let archive = vendor_dir.join("duckdb-fts-sources.tar.gz");
+    let archive = vendor_dir.join(format!("duckdb-{name}-sources.tar.gz"));
     assert_eq!(
         sha256_of(&archive).as_deref(),
         Some(expected_sha),
-        "vendored FTS source archive does not match source_archive_sha256 in config/versions.yaml"
+        "vendored {name} source archive does not match source_archive_sha256 in config/versions.yaml"
     );
 
-    let source_root = out_dir.join("duckdb-fts-sources");
+    let source_root = out_dir.join(format!("duckdb-{name}-sources"));
     if source_root.exists() {
         fs::remove_dir_all(&source_root).unwrap();
     }
@@ -131,6 +132,11 @@ fn build_static_fts(
     .unpack(out_dir)
     .unwrap();
 
+    println!("cargo:rerun-if-changed={}", archive.display());
+    source_root
+}
+
+fn compile_fts(source_root: &Path) {
     let fts_dir = source_root.join("fts");
     let snowball = source_root.join("snowball");
     let mut sources = vec![
@@ -150,7 +156,6 @@ fn build_static_fts(
     sources.push(PathBuf::from("src/static_fts.cpp"));
 
     println!("cargo:rerun-if-changed=src/static_fts.cpp");
-    println!("cargo:rerun-if-changed={}", archive.display());
 
     let mut build = cc::Build::new();
     build
