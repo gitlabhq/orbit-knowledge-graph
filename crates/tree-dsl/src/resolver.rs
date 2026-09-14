@@ -272,9 +272,13 @@ fn build_import_edges(
             let ns = c.sym();
             let name_str = lang.syms.resolve(ns);
             if name_str == "*" {
-                for (&dn, &(rfi, rn)) in &visible[tfi] {
-                    if !ambiguous.contains(&(tfi, dn)) {
-                        edges.push(c.edge_to(c.jump(rfi as u32, rn), EdgeKind::Imports));
+                if c.child_sym(C::Alias).is_some() {
+                    edges.push(c.edge_to(c.jump(tfi as u32, 0), EdgeKind::Imports));
+                } else {
+                    for (&dn, &(rfi, rn)) in &visible[tfi] {
+                        if !ambiguous.contains(&(tfi, dn)) {
+                            edges.push(c.edge_to(c.jump(rfi as u32, rn), EdgeKind::Imports));
+                        }
                     }
                 }
                 continue;

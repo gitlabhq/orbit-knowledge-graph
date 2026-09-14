@@ -133,9 +133,14 @@ pub fn to_datasets(
     let mut ds = HashMap::new();
     ds.insert("File".into(), build_files(trees, lang)?);
     ds.insert("Definition".into(), build_defs(trees, lang, &ids)?);
+    let resolved_imports: std::collections::HashSet<(usize, u32)> = cross_edges
+        .iter()
+        .filter(|e| e.kind == tree_dsl::tree::EdgeKind::Imports)
+        .map(|e| (e.from.tree as usize, e.from.node))
+        .collect();
     ds.insert(
         "ImportedSymbol".into(),
-        build_imports(trees, lang, &ids, support_lang, resolve_config)?,
+        build_imports(trees, lang, &ids, support_lang, resolve_config, &resolved_imports)?,
     );
     let (f2d, f2i) = build_file_edges(trees, &ids);
     ds.insert("FileToDefinition".into(), f2d?);
@@ -416,6 +421,7 @@ fn build_imports(
     ids: &IdMaps,
     support_lang: SupportLang,
     resolve_config: &tree_dsl::file_tree::ResolveConfig,
+    resolved_imports: &std::collections::HashSet<(usize, u32)>,
 ) -> anyhow::Result<RecordBatch> {
     let use_resolved =
         resolve_config.display_source == tree_dsl::file_tree::DisplaySource::Resolved;
@@ -462,12 +468,12 @@ fn build_imports(
             let source_str = source_str.as_str();
             let is_type_only = nr.is(C::ImportType);
 
-            let names: Vec<(u32, u32)> = nr
+            let names: Vec<(u32, u32, u32)> = nr
                 .children()
                 .filter(|c| c.is(C::Name) && c.sym() != 0)
                 .map(|c| {
                     let alias = c.child_sym(C::Alias).unwrap_or(0);
-                    (c.sym(), alias)
+                    (c.sym(), alias, c.index())
                 })
                 .collect();
 
@@ -483,7 +489,7 @@ fn build_imports(
                 name_b.append_null();
                 alias_b.append_null();
                 to_b.append_value(is_type_only);
-                ht_b.append_value(false);
+                ht_b.append_value(resolved_imports.contains(&(fi, i)));
                 sl_b.append_value(nr.start() as i64);
                 el_b.append_value(nr.end() as i64);
                 sb_b.append_value(nr.start() as i64);
@@ -491,7 +497,7 @@ fn build_imports(
                 sc_b.append_value(0);
                 ec_b.append_value(0);
             } else {
-                for (ni, &(ns, als)) in names.iter().enumerate() {
+                for (ni, &(ns, als, name_idx)) in names.iter().enumerate() {
                     let iid = imp_ids[ni];
                     let name_text = lang.syms.resolve(ns);
                     let per_name_label = if is_cjs {
@@ -511,8 +517,8 @@ fn build_imports(
                     fp_b.append_value(&fp);
                     it_b.append_value(per_name_label);
                     path_b.append_value(source_str);
-                    if ns != 0 {
-                        name_b.append_value(lang.syms.resolve(ns));
+                    if ns != 0 && name_text != "*" {
+                        name_b.append_value(name_text);
                     } else {
                         name_b.append_null();
                     }
@@ -522,7 +528,7 @@ fn build_imports(
                         alias_b.append_null();
                     }
                     to_b.append_value(is_type_only);
-                    ht_b.append_value(false);
+                    ht_b.append_value(resolved_imports.contains(&(fi, name_idx)));
                     sl_b.append_value(nr.start() as i64);
                     el_b.append_value(nr.end() as i64);
                     sb_b.append_value(nr.start() as i64);
@@ -725,7 +731,11 @@ fn build_imp2def(
         if ce.kind != tree_dsl::tree::EdgeKind::Imports {
             continue;
         }
-        let Some(&target_id) = ids.defs.get(&(ce.to.tree as usize, ce.to.node)) else {
+        let target_id = if let Some(&did) = ids.defs.get(&(ce.to.tree as usize, ce.to.node)) {
+            did
+        } else if ce.to.node == 0 {
+            if let Some(&mid) = ids.modules.get(&(ce.to.tree as usize)) { mid } else { continue; }
+        } else {
             continue;
         };
         let key = (ce.from.tree as usize, ce.from.node);

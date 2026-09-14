@@ -72,6 +72,10 @@ stages:
       - match: '(import_type_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import_type (__source @$S) (__source_path @$S) $$$SPECS->__name)'
 
+      # import defaultExport, { named } from './source' — combined default + named (before individual rules)
+      - match: '(import_statement (import_clause $N:identifier $$$REST (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)) $$$SPECS->__name)'
+
       # import { a, b } from './source'
       - match: '(import_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) $$$SPECS->__name)'
