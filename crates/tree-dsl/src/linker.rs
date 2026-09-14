@@ -206,21 +206,55 @@ impl Fold {
         }
     }
 
-    fn handle_binding(&mut self, tree: &Tree, i: u32) {
+    fn handle_binding(&mut self, tree: &Tree, i: u32) -> bool {
         let lhs = tree.sym(i);
         if lhs == 0 || tree.cursor(i).has(C::Ivar) {
-            return;
+            return false;
         }
         if self.ssa.has_variable_in_block(lhs, self.cur) {
             self.cur = self.ssa.add_sealed_successor(self.cur);
         }
-        let val = if let Some(ts) = tree.cursor(i).child_sym(C::SsaTyped) {
+
+        let c = tree.cursor(i);
+        if let Some(rhs) = c.child(C::Rhs) {
+            if let Some(branch) = rhs.child(C::SsaBranch) {
+                self.walk_branch_binding(tree, branch, lhs);
+                self.update_branch_exit(i);
+                return true;
+            }
+            let rhs_start = rhs.index() + 1;
+            let rhs_end = rhs.index() + rhs.size();
+            if self.has_nested_ssa(tree, rhs_start, rhs_end) {
+                self.walk_range(tree, rhs_start, rhs_end);
+                let tail_sym = self.tail_sym(rhs);
+                let val = if tail_sym != 0 {
+                    let r = self.lookup(tail_sym);
+                    if self.any_class(tree, &r) {
+                        Value::Type(tail_sym)
+                    } else {
+                        Value::Alias(tail_sym)
+                    }
+                } else {
+                    Value::Opaque
+                };
+                self.ssa.write_variable(lhs, self.cur, val);
+                self.update_branch_exit(i);
+                return true;
+            }
+        }
+
+        let val = if let Some(ts) = c.child_sym(C::SsaTyped) {
             Value::Type(ts)
         } else {
             self.classify_rhs(tree, i)
         };
 
         self.ssa.write_variable(lhs, self.cur, val);
+        self.update_branch_exit(i);
+        false
+    }
+
+    fn update_branch_exit(&mut self, i: u32) {
         if let Some(br) = self.branch_stack.last_mut() {
             for (idx, &(start, end)) in br.arms.iter().enumerate() {
                 if i >= start && i < end {
@@ -229,6 +263,61 @@ impl Fold {
                 }
             }
         }
+    }
+
+    fn tail_sym(&self, node: Cursor<'_>) -> u32 {
+        let last = node.children().filter(|c| c.named()).last();
+        match last {
+            Some(c) if c.size() == 1 && c.sym() != 0 => c.sym(),
+            Some(c) if c.size() > 1 => self.tail_sym(c),
+            Some(c) => c.sym(),
+            None => node.sym(),
+        }
+    }
+
+    fn walk_branch_binding(&mut self, tree: &Tree, branch: Cursor<'_>, lhs: u32) {
+        let pre = self.cur;
+        let mut exits = Vec::new();
+
+        for arm in branch.children().filter(|c| c.is(C::SsaArm)) {
+            let block = self.ssa.add_sealed_successor(pre);
+            self.cur = block;
+            let arm_start = arm.index() + 1;
+            let arm_end = arm.index() + arm.size();
+            self.walk_range(tree, arm_start, arm_end);
+            let sym = self.tail_sym(arm);
+            if sym != 0 {
+                let val = {
+                    let r = self.lookup(sym);
+                    if self.any_class(tree, &r) {
+                        Value::Type(sym)
+                    } else {
+                        Value::Alias(sym)
+                    }
+                };
+                self.ssa.write_variable(lhs, self.cur, val);
+            }
+            exits.push(self.cur);
+        }
+
+        self.cur = self.ssa.add_sealed_join(exits);
+    }
+
+    fn has_nested_ssa(&self, tree: &Tree, start: u32, end: u32) -> bool {
+        let mut i = start;
+        while i < end {
+            let n = &tree.nodes[i as usize];
+            if n.dead {
+                i += n.size.max(1);
+                continue;
+            }
+            let k = n.kind;
+            if k == C::Binding || k == C::SsaBranch || k == C::SsaLoop {
+                return true;
+            }
+            i += 1;
+        }
+        false
     }
 
     // ── Resolution ──
@@ -358,7 +447,6 @@ impl Fold {
     fn classify_rhs(&mut self, tree: &Tree, node: u32) -> Value {
         let c = tree.cursor(node);
         let Some(rhs) = c.child(C::Rhs) else {
-
             return Value::Opaque;
         };
         if let Some(callee) = rhs.child(C::Call).and_then(|call| call.child(C::Callee)) {
@@ -481,6 +569,131 @@ fn root_object_sym(member: crate::tree::Cursor) -> u32 {
 
 // ── SSA fold main loop ──
 
+impl Fold {
+    fn walk_range(&mut self, tree: &Tree, start: u32, range_end: u32) {
+        let mut i = start;
+
+        while i < range_end {
+            let n = tree.nodes[i as usize];
+            if n.dead {
+                i += n.size.max(1);
+                continue;
+            }
+            let k = n.kind;
+            let end = i + n.size;
+
+            while self.def_stack.len() > 1 {
+                let &(_, e, saved) = self.def_stack.last().unwrap();
+                if i >= e {
+                    self.def_stack.pop();
+                    self.cur = saved;
+                } else {
+                    break;
+                }
+            }
+
+            while let Some(br) = self.branch_stack.last() {
+                if i >= br.end {
+                    let mut preds = br.exits.clone();
+                    preds.push(br.pre);
+                    let br_end = br.end;
+                    self.cur = self.ssa.add_sealed_join(preds);
+                    self.branch_stack.pop();
+                    if let Some(outer) = self.branch_stack.last_mut() {
+                        for (idx, &(a, b)) in outer.arms.iter().enumerate() {
+                            if br_end > a && br_end <= b {
+                                outer.exits[idx] = self.cur;
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            while self.loop_stack.last().is_some_and(|&(_, end)| i >= end) {
+                let (header, _end) = self.loop_stack.pop().unwrap();
+                self.cur = self.ssa.finish_loop(header, self.cur);
+            }
+
+            if let Some(br) = self.branch_stack.last() {
+                for (idx, &(a, b)) in br.arms.iter().enumerate() {
+                    if i >= a && i < b {
+                        self.cur = br.entries[idx];
+                        break;
+                    }
+                }
+            }
+
+            if k == C::Import || k == C::ImportType {
+                self.handle_import(tree, i);
+                i += n.size.max(1);
+                continue;
+            }
+            if crate::canonical::has_def_type(tree.cursor(i)) {
+                self.handle_def(tree, i, end);
+                i += 1;
+                continue;
+            }
+            if k == C::Call {
+                self.handle_call(tree, i);
+                i += 1;
+                continue;
+            }
+            if k == C::Member {
+                if tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Call
+                    && tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Callee
+                {
+                    self.handle_standalone_member(tree, i);
+                }
+                i += 1;
+                continue;
+            }
+            if k == C::Binding {
+                let walked = self.handle_binding(tree, i);
+                if walked {
+                    i += n.size.max(1);
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            if k == C::SsaBranch {
+                let pre = self.cur;
+                let arms: Vec<(u32, u32)> = tree
+                    .cursor(i)
+                    .children()
+                    .filter(|c| c.is(C::SsaArm))
+                    .map(|c| (c.index(), c.index() + c.size()))
+                    .collect();
+                let entries: Vec<BlockId> = arms
+                    .iter()
+                    .map(|_| self.ssa.add_sealed_successor(pre))
+                    .collect();
+                let exits = entries.clone();
+                self.branch_stack.push(BranchFrame {
+                    arms,
+                    entries,
+                    exits,
+                    pre,
+                    end,
+                });
+                i += 1;
+                continue;
+            }
+            if k == C::SsaLoop {
+                let (header, body) = self.ssa.begin_loop(self.cur);
+                self.loop_stack.push((header, tree.hop(i)));
+                self.cur = body;
+                i += 1;
+                continue;
+            }
+            i += 1;
+        }
+    }
+}
+
 pub fn link(tree: &Tree, lang: &mut Lang) {
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
@@ -500,124 +713,7 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
         loop_stack: Vec::new(),
     };
 
-    let mut i = 0u32;
-    let len = tree.len();
-
-    while i < len {
-        let n = tree.nodes[i as usize];
-        if n.dead {
-            i += n.size.max(1);
-            continue;
-        }
-        let k = n.kind;
-        let end = i + n.size;
-
-        while f.def_stack.len() > 1 {
-            let &(_, e, saved) = f.def_stack.last().unwrap();
-            if i >= e {
-                f.def_stack.pop();
-                f.cur = saved;
-            } else {
-                break;
-            }
-        }
-
-        while let Some(br) = f.branch_stack.last() {
-            if i >= br.end {
-                let mut preds = br.exits.clone();
-                preds.push(br.pre);
-                let br_end = br.end;
-                f.cur = f.ssa.add_sealed_join(preds);
-                f.branch_stack.pop();
-                if let Some(outer) = f.branch_stack.last_mut() {
-                    for (idx, &(a, b)) in outer.arms.iter().enumerate() {
-                        if br_end > a && br_end <= b {
-                            outer.exits[idx] = f.cur;
-                            break;
-                        }
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-
-        while f.loop_stack.last().is_some_and(|&(_, end)| i >= end) {
-            let (header, end) = f.loop_stack.pop().unwrap();
-            f.cur = f.ssa.finish_loop(header, f.cur);
-        }
-
-        if let Some(br) = f.branch_stack.last() {
-            for (idx, &(a, b)) in br.arms.iter().enumerate() {
-                if i >= a && i < b {
-                    f.cur = br.entries[idx];
-                    break;
-                }
-            }
-        }
-
-        if k == C::Import || k == C::ImportType {
-            f.handle_import(tree, i);
-            i += n.size.max(1);
-            continue;
-        }
-        if crate::canonical::has_def_type(tree.cursor(i)) {
-            f.handle_def(tree, i, end);
-            i += 1;
-            continue;
-        }
-        if k == C::Call {
-            f.handle_call(tree, i);
-            i += 1;
-            continue;
-        }
-        if k == C::Member {
-            if tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Call
-                && tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Callee
-            {
-                f.handle_standalone_member(tree, i);
-            }
-            i += 1;
-            continue;
-        }
-        if k == C::Binding {
-            f.handle_binding(tree, i);
-            i += 1;
-            continue;
-        }
-        if k == C::SsaBranch {
-            let pre = f.cur;
-            let arms: Vec<(u32, u32)> = tree
-                .cursor(i)
-                .children()
-                .filter(|c| c.is(C::SsaArm))
-                .map(|c| (c.index(), c.index() + c.size()))
-                .collect();
-            let entries: Vec<BlockId> = arms
-                .iter()
-                .map(|_| f.ssa.add_sealed_successor(pre))
-                .collect();
-            let exits = entries.clone();
-            f.branch_stack.push(BranchFrame {
-                arms,
-                entries,
-                exits,
-                pre,
-                end,
-            });
-            i += 1;
-            continue;
-        }
-        if k == C::SsaLoop {
-            let (header, body) = f.ssa.begin_loop(f.cur);
-            f.loop_stack.push((header, tree.hop(i)));
-            f.cur = body;
-
-            i += 1;
-            continue;
-        }
-        i += 1;
-    }
+    f.walk_range(tree, 0, tree.len());
 
     while !f.branch_stack.is_empty() {
         let br = f.branch_stack.pop().unwrap();
@@ -625,7 +721,6 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
         preds.push(br.pre);
         let _ = f.ssa.add_sealed_join(preds);
     }
-
 
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();

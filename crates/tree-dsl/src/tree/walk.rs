@@ -69,6 +69,11 @@ impl<'a> Cursor<'a> {
     }
 
     #[inline]
+    pub fn named(&self) -> bool {
+        self.tree().nodes[self.idx as usize].named
+    }
+
+    #[inline]
     pub fn size(&self) -> u32 {
         self.tree().nodes[self.idx as usize].size
     }
