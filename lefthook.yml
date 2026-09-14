@@ -25,6 +25,7 @@ pre-commit:
       glob: "**/*.rs"
     - name: newlines
       run: mise run lint:newlines
+      glob: "**/*.{rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs}"
     # Advisory/non-blocking: narration lint prints warnings but must not block
     # the commit. The script exits non-zero on findings; `|| true` absorbs that
     # exit at the config level so lefthook treats the job as passed. (Lefthook
