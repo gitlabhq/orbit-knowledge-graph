@@ -440,6 +440,14 @@ fmt-check:
   script:
     - cargo fmt --all -- --check
 
+newline-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-only-rules
+  script:
+    - mise run lint:newlines
+
 lint-check:
   stage: lint
   extends:

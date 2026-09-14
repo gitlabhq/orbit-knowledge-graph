@@ -23,6 +23,8 @@ pre-commit:
     - name: fmt
       run: mise run lint:fmt
       glob: "**/*.rs"
+    - name: newlines
+      run: mise run lint:newlines
     # Advisory/non-blocking: narration lint prints warnings but must not block
     # the commit. The script exits non-zero on findings; `|| true` absorbs that
     # exit at the config level so lefthook treats the job as passed. (Lefthook
