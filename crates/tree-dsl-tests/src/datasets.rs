@@ -5,12 +5,23 @@ use arrow_56::array::{ArrayBuilder, BooleanBuilder, Int64Builder, StringBuilder}
 use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
 
-use tree_dsl::canonical::Canonical as C;
+use tree_dsl::canonical::{self, Canonical as C};
 use tree_dsl::grammar::SupportLang;
 use tree_dsl::lang::Lang;
 use tree_dsl::tree::Tree;
 
 pub type LanceDatasets = HashMap<String, RecordBatch>;
+
+fn flavor_display<'a>(def: tree_dsl::tree::Cursor, dtk: C, lang: &'a Lang) -> &'a str {
+    for c in def.children() {
+        if let Some(ck) = C::try_from_u16(c.kind()) {
+            if ck.is_flavor() && c.sym() != 0 {
+                return lang.syms.resolve(c.sym());
+            }
+        }
+    }
+    dtk.display_name()
+}
 
 // ── ID assignment ──
 
@@ -45,7 +56,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
             if nr.is_dead() {
                 continue;
             }
-            if nr.has(C::DefType) {
+            if canonical::has_def_type(nr) {
                 next_def += 1;
                 defs.insert((fi, i), next_def);
             } else if nr.is(C::ModuleExport) {
@@ -154,7 +165,7 @@ fn def_fqn(tree: &Tree, node: u32, lang: &Lang) -> String {
 
     let mut parts = Vec::new();
     for a in std::iter::once(tree.cursor(node)).chain(tree.cursor(node).ancestors()) {
-        if a.has(C::DefType) || a.index() == 0 {
+        if canonical::has_def_type(a) || a.index() == 0 {
             let name = if a.index() == 0 && skip_root {
                 String::new()
             } else if a.index() == 0 {
@@ -287,19 +298,19 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<Recor
         let path = lang.syms.resolve(tree.root().sym()).to_string();
         for i in 0..tree.len() {
             let nr = tree.cursor(i);
-            if !nr.has(C::DefType) {
+            let Some(dtk) = canonical::def_type_of(nr) else {
                 continue;
-            }
+            };
             let did = ids.defs[&(fi, i)];
             let name_sym = nr.child_sym(C::DefName).unwrap_or(0);
-            let deftype_sym = nr.child_sym(C::DefType).unwrap_or(0);
+            let display = flavor_display(nr, dtk, lang);
             let dn = nr.child(C::DefName);
             let name_cur = dn.unwrap_or(nr);
             id_b.append_value(did);
             fp_b.append_value(&path);
             fqn_b.append_value(def_fqn(tree, i, lang));
             name_b.append_value(lang.syms.resolve(name_sym));
-            dt_b.append_value(lang.syms.resolve(deftype_sym));
+            dt_b.append_value(display);
             sl_b.append_value(name_cur.start_row() as i64 + 1);
             el_b.append_value(name_cur.end_row() as i64 + 1);
             sb_b.append_value(name_cur.start() as i64);
@@ -560,7 +571,7 @@ fn build_file_edges(
         let fid = fi as i64 + 1;
         for i in 0..tree.len() {
             let nr = tree.cursor(i);
-            if nr.has(C::DefType) {
+            if canonical::has_def_type(nr) {
                 if let Some(&did) = ids.defs.get(&(fi, i)) {
                     ds.append_value(fid);
                     dt.append_value(did);

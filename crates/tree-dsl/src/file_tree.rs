@@ -108,7 +108,10 @@ fn build_file_tree(
     let dir_kind = lang.intern_kind("__dir");
     let file_kind = lang.intern_kind("__file");
 
-    let file_contents: FxHashMap<&str, &str> = files.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let file_contents: FxHashMap<&str, &str> = files
+        .iter()
+        .map(|(p, c)| (p.as_str(), c.as_str()))
+        .collect();
 
     let mut children: FxHashMap<String, Vec<(String, bool)>> = FxHashMap::default();
 
@@ -188,8 +191,15 @@ fn build_file_tree(
                     format!("{parent_path}/{segment}")
                 };
                 add_children(
-                    &child_path, idx, children, file_contents, parse_files,
-                    nodes, lang, dir_kind, file_kind,
+                    &child_path,
+                    idx,
+                    children,
+                    file_contents,
+                    parse_files,
+                    nodes,
+                    lang,
+                    dir_kind,
+                    file_kind,
                 );
             }
             nodes[idx as usize].size = (nodes.len() as u32) - idx;
@@ -197,8 +207,15 @@ fn build_file_tree(
     }
 
     add_children(
-        "", root_idx, &children, &file_contents, parse_files,
-        &mut nodes, lang, dir_kind, file_kind,
+        "",
+        root_idx,
+        &children,
+        &file_contents,
+        parse_files,
+        &mut nodes,
+        lang,
+        dir_kind,
+        file_kind,
     );
     nodes[root_idx as usize].size = nodes.len() as u32;
 
@@ -241,12 +258,7 @@ fn toml_to_json(v: toml::Value) -> serde_json::Value {
     }
 }
 
-fn emit_json_value(
-    val: &serde_json::Value,
-    parent: u32,
-    nodes: &mut Vec<Node>,
-    lang: &mut Lang,
-) {
+fn emit_json_value(val: &serde_json::Value, parent: u32, nodes: &mut Vec<Node>, lang: &mut Lang) {
     use crate::canonical::Canonical as C;
 
     match val {

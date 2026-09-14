@@ -1,29 +1,29 @@
-use crate::lang::Lang;
-use crate::tree::{NONE, Tree};
-
 pub const CANONICAL_BASE: u16 = 0xE000;
 
 #[repr(u16)]
 #[derive(
-    Clone, Copy, PartialEq, Eq, Hash, strum::EnumIter, strum::EnumString, strum::IntoStaticStr,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::EnumIter,
+    strum::EnumString,
+    strum::IntoStaticStr,
+    strum::EnumProperty,
 )]
 pub enum Canonical {
+    // ── Structural ──
     #[strum(serialize = "__def")]
     Def = CANONICAL_BASE,
     #[strum(serialize = "__defname")]
     DefName,
-    #[strum(serialize = "__deftype")]
-    DefType,
-    #[strum(serialize = "__scope")]
-    Scope,
     #[strum(serialize = "__return_type")]
     ReturnType,
     #[strum(serialize = "__supertype")]
     SuperType,
     #[strum(serialize = "__decorator")]
     Decorator,
-    #[strum(serialize = "__self_method")]
-    SelfMethod,
     #[strum(serialize = "__callable")]
     Callable,
     #[strum(serialize = "__visibility")]
@@ -64,14 +64,14 @@ pub enum Canonical {
     Loop,
     #[strum(serialize = "__return")]
     Return,
-    #[strum(serialize = "__static")]
-    Static,
     #[strum(serialize = "__cjs_require")]
     CjsRequire,
     #[strum(serialize = "__module_export")]
     ModuleExport,
     #[strum(serialize = "__default_export")]
     DefaultExport,
+
+    // ── Config inlining ──
     #[strum(serialize = "__obj")]
     Obj,
     #[strum(serialize = "__arr")]
@@ -84,6 +84,107 @@ pub enum Canonical {
     ConfigNum,
     #[strum(serialize = "__bool")]
     ConfigBool,
+
+    // ── Def-type kinds ──
+    #[strum(
+        serialize = "__function",
+        props(
+            def_type = "true",
+            callable = "true",
+            scoped = "true",
+            display = "Function"
+        )
+    )]
+    Function,
+    #[strum(
+        serialize = "__method",
+        props(
+            def_type = "true",
+            callable = "true",
+            scoped = "true",
+            display = "Method"
+        )
+    )]
+    Method,
+    #[strum(
+        serialize = "__class",
+        props(
+            def_type = "true",
+            callable = "true",
+            scoped = "true",
+            display = "Class"
+        )
+    )]
+    Class,
+    #[strum(
+        serialize = "__struct",
+        props(def_type = "true", scoped = "true", display = "Struct")
+    )]
+    Struct,
+    #[strum(
+        serialize = "__impl",
+        props(def_type = "true", scoped = "true", display = "Impl")
+    )]
+    ImplBlock,
+    #[strum(
+        serialize = "__trait",
+        props(def_type = "true", scoped = "true", display = "Trait")
+    )]
+    Trait,
+    #[strum(
+        serialize = "__interface",
+        props(def_type = "true", display = "Interface")
+    )]
+    Interface,
+    #[strum(
+        serialize = "__enum",
+        props(def_type = "true", scoped = "true", display = "Enum")
+    )]
+    Enum,
+    #[strum(
+        serialize = "__variable",
+        props(def_type = "true", display = "Variable")
+    )]
+    Variable,
+    #[strum(
+        serialize = "__constant",
+        props(def_type = "true", display = "Constant")
+    )]
+    Constant,
+    #[strum(
+        serialize = "__static_constant",
+        props(def_type = "true", display = "Static")
+    )]
+    StaticConstant,
+    #[strum(
+        serialize = "__type_alias",
+        props(def_type = "true", display = "TypeAlias")
+    )]
+    TypeAlias,
+    #[strum(
+        serialize = "__property",
+        props(def_type = "true", display = "Property")
+    )]
+    Property,
+    #[strum(
+        serialize = "__lambda",
+        props(def_type = "true", callable = "true", display = "Lambda")
+    )]
+    Lambda,
+    #[strum(serialize = "__field_def", props(def_type = "true", display = "Field"))]
+    FieldDef,
+
+    // ── Flavors ──
+    #[strum(serialize = "__async", props(flavor = "true"))]
+    Async,
+    #[strum(serialize = "__static", props(flavor = "true"))]
+    Static,
+    #[strum(serialize = "__abstract", props(flavor = "true"))]
+    Abstract,
+    #[strum(serialize = "__generator", props(flavor = "true"))]
+    Generator,
+    #[strum(serialize = "__self_method", props(flavor = "true"))]
+    SelfMethod,
 }
 
 impl From<Canonical> for u16 {
@@ -102,38 +203,55 @@ pub fn is_canonical(kind: u16) -> bool {
     kind >= CANONICAL_BASE
 }
 
-pub fn classify_methods(tree: &mut Tree, lang: &mut Lang) {
-    let func = lang.syms.intern("Function");
-    let method = lang.syms.intern("Method");
-    let static_method = lang.syms.intern("StaticMethod");
-    let assoc_fn = lang.syms.intern("AssociatedFunction");
-    let class = lang.syms.intern("Class");
-    let impl_ = lang.syms.intern("Impl");
-    let trait_ = lang.syms.intern("Trait");
-
-    for i in 0..tree.nodes.len() as u32 {
-        if tree.kind(i) != Canonical::DefType || tree.sym(i) != func {
-            continue;
-        }
-        let def = tree.nodes[i as usize].parent;
-        if def == NONE {
-            continue;
-        }
-        let is_static = tree.cursor(def).has(Canonical::Static);
-        let mut p = tree.nodes[def as usize].parent;
-        while p != NONE {
-            if let Some(dt) = tree.cursor(p).child_sym(Canonical::DefType) {
-                if dt == class {
-                    tree.nodes[i as usize].sym = if is_static { static_method } else { method };
-                    break;
-                }
-                if dt == impl_ || dt == trait_ {
-                    let has_self = tree.cursor(def).has(Canonical::SelfMethod);
-                    tree.nodes[i as usize].sym = if has_self { method } else { assoc_fn };
-                    break;
-                }
-            }
-            p = tree.nodes[p as usize].parent;
-        }
+impl Canonical {
+    pub fn is_def_type(self) -> bool {
+        self.get_str("def_type") == Some("true")
     }
+    pub fn is_callable(self) -> bool {
+        self.get_str("callable") == Some("true")
+    }
+    pub fn is_scoped(self) -> bool {
+        self.get_str("scoped") == Some("true")
+    }
+    pub fn is_flavor(self) -> bool {
+        self.get_str("flavor") == Some("true")
+    }
+    pub fn display_name(self) -> &'static str {
+        self.get_str("display").unwrap_or("")
+    }
+}
+
+use strum::EnumProperty;
+
+pub fn def_type_of(cursor: crate::tree::Cursor) -> Option<Canonical> {
+    cursor.children().find_map(|c| {
+        let ck = Canonical::try_from_u16(c.kind())?;
+        ck.is_def_type().then_some(ck)
+    })
+}
+
+pub fn has_def_type(cursor: crate::tree::Cursor) -> bool {
+    def_type_of(cursor).is_some()
+}
+
+pub fn is_callable_def(cursor: crate::tree::Cursor) -> bool {
+    def_type_of(cursor).is_some_and(|k| k.is_callable())
+}
+
+pub fn is_scoped_def(cursor: crate::tree::Cursor) -> bool {
+    def_type_of(cursor).is_some_and(|k| k.is_scoped())
+}
+
+impl Canonical {
+    pub fn try_from_u16(kind: u16) -> Option<Self> {
+        if kind < CANONICAL_BASE {
+            return None;
+        }
+        use strum::IntoEnumIterator;
+        Self::iter().find(|c| *c as u16 == kind)
+    }
+}
+
+pub fn is_def_type_kind(kind: u16) -> bool {
+    Canonical::try_from_u16(kind).is_some_and(|k| k.is_def_type())
 }

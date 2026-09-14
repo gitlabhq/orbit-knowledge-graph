@@ -74,9 +74,9 @@ stages:
     rules:
       # Defs
       - match: '(assignment left: $N right: $R:lambda)'
-        replace: '(__def (__defname @$N) (__deftype "Lambda") $R)'
+        replace: '(__def (__defname @$N) (__lambda) $R)'
       - match: '(assignment left: $N type: $T:type)'
-        replace: '(__def (__defname @$N) (__deftype "Field"))'
+        replace: '(__def (__defname @$N) (__field_def))'
       - match: '(typed_default_parameter name: $N type: (type $T))'
         replace: '(__binding @$N (__rhs @$T))'
       - match: '(typed_default_parameter name: $N)'
@@ -132,15 +132,19 @@ stages:
       - match: '(generator_expression)'
         replace: '(__loop)'
 
-      # Functions — optionals collapse return_type and typed params variants
+      # Methods — has self parameter (before generic function rule)
+      - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__method) (__self_method) (__return_type? @$R) $$$ANN $$$P $B)'
+
+      # Functions — no self parameter
       - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__return_type? @$R) (__scope) $$$ANN $$$P $B)'
+        replace: '(__def (__defname @$N) (__function) (__return_type? @$R) $$$ANN $$$P $B)'
 
       # Classes — variadic before body captures __supertype/__decorator
       - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")))'
-        replace: '(__def (__defname @$N) (__deftype "Class") (__scope) (__callable "__call__") $$$ANN $B)'
+        replace: '(__def (__defname @$N) (__class) (__callable "__call__") $$$ANN $B)'
       - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $$$ANN $B)'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
 
 resolve:
   display_source: resolved

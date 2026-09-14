@@ -761,9 +761,7 @@ fn materialize(
                 }
             };
             let pos_src = match text {
-                Text::From(slot, _) if caps[*slot as usize] != EMPTY_CAP => {
-                    caps[*slot as usize].0
-                }
+                Text::From(slot, _) if caps[*slot as usize] != EMPTY_CAP => caps[*slot as usize].0,
                 _ => caps[0].0,
             };
             let src = t.node(pos_src);

@@ -20,7 +20,7 @@
 use crate::grammar::{self, SupportLang};
 use crate::lang::Lang;
 use crate::tree::Tree;
-use crate::{canonical, file_tree, linker, pattern, resolver};
+use crate::{file_tree, linker, pattern, resolver};
 
 pub struct IndexResult {
     pub trees: Vec<Tree>,
@@ -59,7 +59,6 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
         pattern::apply_rewrites(&mut tree, lang, stage);
     }
     tree.compact();
-    canonical::classify_methods(&mut tree, lang);
     linker::link(&tree, lang);
     tree.prune();
     tree.compact();
@@ -81,7 +80,6 @@ pub fn process_file_timed(
     }
     tree.compact();
     let t2 = Instant::now();
-    canonical::classify_methods(&mut tree, lang);
     linker::link(&tree, lang);
     let t3 = Instant::now();
     tree.prune();

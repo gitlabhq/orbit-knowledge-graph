@@ -100,7 +100,7 @@ stages:
     rules:
       # Bindings
       - match: '(variable_declarator name: $N value: $V:arrow_function)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $V)'
+        replace: '(__def (__defname @$N) (__function) $V)'
       - match: '(variable_declarator name: $N value: $V)'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(variable_declarator name: $N)'
@@ -110,7 +110,7 @@ stages:
       - match: '(assignment_expression left: $N right: $R)'
         replace: '(__binding @$N (__rhs @$R))'
       - match: '(public_field_definition name: $N)'
-        replace: '(__def (__defname @$N) (__deftype "Property"))'
+        replace: '(__def (__defname @$N) (__property))'
 
       # Control flow
       - match: '(if_statement condition: $COND consequence: $C alternative:? $A)'
@@ -134,28 +134,29 @@ stages:
 
       # Abstract method signatures (no body)
       - match: '(abstract_method_signature name: $N)'
-        replace: '(__def (__defname @$N) (__deftype "Function"))'
-      # Functions — static before generic
+        replace: '(__def (__defname @$N) (__method) (__abstract))'
+      # Functions
       - match: '(function_declaration name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $B)'
+        replace: '(__def (__defname @$N) (__function) $B)'
+      # Methods — static before generic
       - match: '(method_definition **/(static) name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) (__static) $B)'
+        replace: '(__def (__defname @$N) (__method) (__static "StaticMethod") $B)'
       - match: '(method_definition name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $B)'
+        replace: '(__def (__defname @$N) (__method) $B)'
       - match: '(generator_function_declaration name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $B)'
+        replace: '(__def (__defname @$N) (__function) (__generator) $B)'
       - match: '(interface_declaration name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Interface") (__scope) $B)'
+        replace: '(__def (__defname @$N) (__interface) $B)'
       - match: '(type_alias_declaration name: $N)'
-        replace: '(__def (__defname @$N) (__deftype "TypeAlias"))'
+        replace: '(__def (__defname @$N) (__type_alias))'
       - match: '(enum_declaration name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Enum") (__scope) $B)'
+        replace: '(__def (__defname @$N) (__enum) $B)'
 
       # Classes (last — body contains already-canonical methods)
       - match: '(class_declaration name: $N body: $B $$$ANN:__supertype)'
-        replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $$$ANN $B)'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
       - match: '(abstract_class_declaration name: $N body: $B $$$ANN:__supertype)'
-        replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $$$ANN $B)'
+        replace: '(__def (__defname @$N) (__class) (__abstract) $$$ANN $B)'
 
   - name: exports
     rules:
@@ -165,7 +166,7 @@ stages:
 
       # export const X = ... → promote binding to Variable def
       - match: '(export_statement (lexical_declaration $B:__binding))'
-        replace: '(export_statement (__def (__defname @$B) (__deftype "Variable")))'
+        replace: '(export_statement (__def (__defname @$B) (__variable)))'
 
 resolve:
   parse_files:

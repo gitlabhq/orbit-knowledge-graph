@@ -22,8 +22,6 @@ struct Fold {
     def_stack: Vec<(Option<u32>, u32, BlockId)>,
     branch_stack: Vec<BranchFrame>,
     wildcard: u32,
-    class_sym: u32,
-    containers: Vec<u32>,
 }
 
 struct BranchFrame {
@@ -58,14 +56,18 @@ impl Fold {
 
     fn emit(&self, tree: &Tree, r: &Linked, from: u32) {
         match r {
-            Linked::Def(node) => tree.add_edge(from, *node, EdgeKind::Calls),
+            Linked::Def(node) => {
+                if crate::canonical::is_callable_def(tree.cursor(*node)) {
+                    tree.add_edge(from, *node, EdgeKind::Calls);
+                }
+            }
             Linked::Import(node) => tree.add_edge(from, *node, EdgeKind::Imports),
             Linked::Type(_) => {}
         }
     }
 
     fn is_class(&self, tree: &Tree, node: u32) -> bool {
-        tree.cursor(node).child_sym(C::DefType) == Some(self.class_sym)
+        crate::canonical::def_type_of(tree.cursor(node)) == Some(C::Class)
     }
 
     fn any_class(&self, tree: &Tree, resolved: &[Linked]) -> bool {
@@ -112,7 +114,10 @@ impl Fold {
         if let Some(&(Some(parent), _, _)) = self.def_stack.last() {
             tree.add_edge(parent, i, EdgeKind::Defines);
         }
-        for st in c.children().filter(|ch| ch.is(C::SuperType) && ch.sym() != 0) {
+        for st in c
+            .children()
+            .filter(|ch| ch.is(C::SuperType) && ch.sym() != 0)
+        {
             let st_sym = st.sym();
             for &dn in &self.defs {
                 if tree.cursor(dn).child_sym(C::DefName) == Some(st_sym) {
@@ -121,7 +126,7 @@ impl Fold {
                 }
             }
         }
-        if c.has(C::Scope) {
+        if crate::canonical::is_scoped_def(tree.cursor(i)) {
             self.def_stack.push((Some(i), end, parent_block));
         }
     }
@@ -256,8 +261,8 @@ impl Fold {
     fn enclosing_class(&self, tree: &Tree, node: u32) -> Option<u32> {
         let c = tree.cursor(node);
         let check = |n: Cursor| {
-            n.child_sym(C::DefType)
-                .is_some_and(|dt| self.containers.contains(&dt))
+            crate::canonical::def_type_of(n)
+                .is_some_and(|k| matches!(k, C::Class | C::ImplBlock | C::Trait))
         };
         if check(c) {
             Some(node)
@@ -427,12 +432,6 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
         def_stack: vec![(None, u32::MAX, entry)],
         branch_stack: Vec::new(),
         wildcard: lang.syms.intern("*"),
-        class_sym: lang.syms.intern("Class"),
-        containers: vec![
-            lang.syms.intern("Class"),
-            lang.syms.intern("Impl"),
-            lang.syms.intern("Trait"),
-        ],
     };
 
     let mut i = 0u32;
@@ -491,7 +490,7 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
             i += n.size.max(1);
             continue;
         }
-        if tree.cursor(i).child_sym(C::DefType).is_some() {
+        if crate::canonical::has_def_type(tree.cursor(i)) {
             f.handle_def(tree, i, end);
             i += 1;
             continue;

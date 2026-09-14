@@ -312,10 +312,9 @@ pub fn infer_return_type(def: Cursor) -> Option<u32> {
     })
 }
 
-/// Find a method by name in a class. Searches DefType descendants.
 pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     class.descend(|n| {
-        if n.is(C::DefType) {
+        if crate::canonical::is_def_type_kind(n.kind()) {
             if let Some(p) = n.parent() {
                 if p.index() != class.index() && p.child_sym(C::DefName) == Some(name) {
                     return Step::Out(p);

@@ -58,11 +58,11 @@ stages:
       - match: '(let_declaration pattern: $N)'
         replace: '(__binding @$N)'
       - match: '(const_item name: $N)'
-        replace: '(__def (__defname @$N) (__deftype "Constant"))'
+        replace: '(__def (__defname @$N) (__constant))'
       - match: '(static_item name: $N)'
-        replace: '(__def (__defname @$N) (__deftype "Static"))'
+        replace: '(__def (__defname @$N) (__static_constant))'
       - match: '(type_item name: $N)'
-        replace: '(__def (__defname @$N) (__deftype "TypeAlias"))'
+        replace: '(__def (__defname @$N) (__type_alias))'
 
       # Control flow
       - match: '(if_expression condition: $COND consequence: $C alternative:? $A)'
@@ -78,29 +78,29 @@ stages:
 
       # Trait method signatures (no body) — self variant first
       - match: '(function_signature_item name: $N **/(self_parameter))'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__self_method))'
+        replace: '(__def (__defname @$N) (__method) (__self_method))'
       - match: '(function_signature_item name: $N)'
-        replace: '(__def (__defname @$N) (__deftype "Function"))'
+        replace: '(__def (__defname @$N) (__function))'
 
       # Functions — self variant first, then generic
       - match: '(function_item name: $N **/(self_parameter) body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__self_method) (__scope) $$$ANN $B)'
+        replace: '(__def (__defname @$N) (__method) (__self_method) $$$ANN $B)'
       - match: '(function_item name: $N body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__deftype "Function") (__scope) $$$ANN $B)'
+        replace: '(__def (__defname @$N) (__function) $$$ANN $B)'
 
       # Containers (after functions)
       - match: '(struct_item name: $N body:? $B)'
-        replace: '(__def (__defname @$N) (__deftype "Struct") (__scope) $B)'
+        replace: '(__def (__defname @$N) (__struct) $B)'
       - match: '(enum_item name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Enum") (__scope) $B)'
+        replace: '(__def (__defname @$N) (__enum) $B)'
       - match: '(trait_item name: $N bounds: (trait_bounds $$$SUPERS:type_identifier) body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Trait") (__scope) $$$SUPERS=>__supertype $B)'
+        replace: '(__def (__defname @$N) (__trait) $$$SUPERS=>__supertype $B)'
       - match: '(trait_item name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__deftype "Trait") (__scope) $B)'
+        replace: '(__def (__defname @$N) (__trait) $B)'
       - match: '(impl_item trait: $T type: $TY body: $B)'
-        replace: '(__def (__defname @$TY) (__deftype "Impl") (__scope) (__supertype @$T) $B)'
+        replace: '(__def (__defname @$TY) (__impl) (__supertype @$T) $B)'
       - match: '(impl_item type: $T body: $B)'
-        replace: '(__def (__defname @$T) (__deftype "Impl") (__scope) $B)'
+        replace: '(__def (__defname @$T) (__impl) $B)'
 
 resolve:
   parse_files:

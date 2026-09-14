@@ -100,7 +100,7 @@ fn build_visible_names(trees: &[Tree]) -> VisibleMap {
                     continue;
                 }
                 let c = tree.cursor(i);
-                if c.has(C::DefType) {
+                if crate::canonical::has_def_type(c) {
                     if let Some(ns) = c.child_sym(C::DefName) {
                         names.insert(ns, (fi, i));
                     }
@@ -214,8 +214,10 @@ fn propagate_reexports(
             {
                 let ns = c.sym();
                 if lang.syms.resolve(ns) == "*" {
-                    let target_entries: Vec<_> =
-                        visible[req.target_fi].iter().map(|(&s, &v)| (s, v)).collect();
+                    let target_entries: Vec<_> = visible[req.target_fi]
+                        .iter()
+                        .map(|(&s, &v)| (s, v))
+                        .collect();
                     for (ds, (tfi, tn)) in target_entries {
                         if !visible[req.fi].contains_key(&ds) {
                             new_exports.push((req.fi, ds, tfi, tn));
@@ -280,10 +282,7 @@ fn build_import_edges(
                 let results = follow_import_chain(corpus, reqs, visible, ns, tfi);
                 if results.len() == 1 {
                     edges.push(
-                        c.edge_to(
-                            c.jump(results[0].0 as u32, results[0].1),
-                            EdgeKind::Imports,
-                        ),
+                        c.edge_to(c.jump(results[0].0 as u32, results[0].1), EdgeKind::Imports),
                     );
                 } else {
                     let tgt = corpus.jump(tfi as u32, 0);
@@ -340,10 +339,10 @@ fn build_call_edges(
                     if ms != 0 {
                         for &tfi in &target_files {
                             if let Some(&(dfi, dn)) = visible[tfi].get(&ms) {
-                                module_calls.push(
-                                    caller
-                                        .edge_to(caller.jump(dfi as u32, dn), EdgeKind::Calls),
-                                );
+                                let tgt = caller.jump(dfi as u32, dn);
+                                if is_callable(tgt) {
+                                    module_calls.push(caller.edge_to(tgt, EdgeKind::Calls));
+                                }
                                 break;
                             }
                         }
@@ -382,11 +381,19 @@ fn build_call_edges(
                     continue;
                 }
             }
+            let target = corpus.follow(ce);
+            if !is_callable(target) {
+                continue;
+            }
             let from = corpus.jump(ce.from.tree, edge.from.node);
-            call_edges.push(from.edge_to(corpus.follow(ce), EdgeKind::Calls));
+            call_edges.push(from.edge_to(target, EdgeKind::Calls));
         }
     }
     (module_calls, call_edges)
+}
+
+fn is_callable(def: Cursor) -> bool {
+    crate::canonical::is_callable_def(def)
 }
 
 fn build_type_edges(
