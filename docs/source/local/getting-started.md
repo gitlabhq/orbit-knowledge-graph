@@ -73,11 +73,11 @@ self-contained `orbit.exe`, signed by GitLab Inc., so application
 allowlisting policies can authorize it by publisher:
 
 1. From the [latest release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases),
-   download `orbit-local-windows-x86_64.zip` and its `.sha256` file.
+   download `orbit-cli-windows-x86_64.zip` and its `.sha256` file.
 1. Verify the checksum:
 
    ```powershell
-   (Get-FileHash .\orbit-local-windows-x86_64.zip -Algorithm SHA256).Hash
+   (Get-FileHash .\orbit-cli-windows-x86_64.zip -Algorithm SHA256).Hash
    ```
 
    The output must match the hash in the `.sha256` file. The comparison is not
@@ -88,7 +88,7 @@ allowlisting policies can authorize it by publisher:
    prompt or be blocked by policy:
 
    ```powershell
-   Unblock-File .\orbit-local-windows-x86_64.zip
+   Unblock-File .\orbit-cli-windows-x86_64.zip
    ```
 
 1. Extract the archive, create the target directory, then move `orbit.exe` into
@@ -96,7 +96,7 @@ allowlisting policies can authorize it by publisher:
    the installer uses:
 
    ```powershell
-   Expand-Archive -Path .\orbit-local-windows-x86_64.zip -DestinationPath .
+   Expand-Archive -Path .\orbit-cli-windows-x86_64.zip -DestinationPath .
    New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\Programs\orbit"
    Move-Item .\orbit.exe "$env:LOCALAPPDATA\Programs\orbit\orbit.exe"
    ```
