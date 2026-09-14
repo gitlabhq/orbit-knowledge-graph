@@ -552,16 +552,20 @@ impl ArrowQuery {
 
         tokio::spawn(async move {
             let mut decoder = StreamDecoder::new();
+            let mut summary_tx = Some(summary_tx);
             let mut next = Ok(first);
             loop {
                 match next {
                     Ok(Some(chunk)) => {
+                        if let Some(summary_tx) = summary_tx.take() {
+                            let _ = summary_tx.send(cursor.summary().cloned());
+                        }
                         let mut buffer = ArrowBuffer::from(chunk.as_ref());
-                        while !buffer.is_empty() {
+                        while !tx.is_closed() && !buffer.is_empty() {
                             match decoder.decode(&mut buffer) {
                                 Ok(Some(batch)) => {
                                     if tx.send(Ok(batch)).await.is_err() {
-                                        return;
+                                        break;
                                     }
                                 }
                                 Ok(None) => break,
@@ -580,7 +584,9 @@ impl ArrowQuery {
                 }
                 next = cursor.next().await;
             }
-            let _ = summary_tx.send(cursor.summary().cloned());
+            if let Some(summary_tx) = summary_tx.take() {
+                let _ = summary_tx.send(cursor.summary().cloned());
+            }
         });
 
         Ok((ReceiverStream::new(rx).boxed(), summary_rx))

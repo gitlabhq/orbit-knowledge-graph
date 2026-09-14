@@ -308,6 +308,10 @@ impl PreparedQuery {
         self.batch_size
     }
 
+    pub fn set_batch_size(&mut self, batch_size: u64) {
+        self.batch_size = batch_size;
+    }
+
     /// Partitions share the one worker-pool permit the handler holds, so an undivided
     /// budget puts `partitions.len()` pages in flight for a slot accounted as holding one.
     pub fn into_partitions(
