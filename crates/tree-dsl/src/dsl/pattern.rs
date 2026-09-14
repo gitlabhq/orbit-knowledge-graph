@@ -570,6 +570,7 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
             kids,
             ..
         } => {
+
             if n.kind != *kind || !field_ok(*field) {
                 return false;
             }
@@ -858,3 +859,4 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) -> Vec<u
     }
     t.compact()
 }
+

@@ -171,8 +171,16 @@ fn def_fqn(tree: &Tree, node: u32, lang: &Lang) -> String {
         )
     );
 
+    let self_is_property = canonical::def_type_of(tree.cursor(node)) == Some(C::Property);
     let mut parts = Vec::new();
     for a in std::iter::once(tree.cursor(node)).chain(tree.cursor(node).ancestors()) {
+        if self_is_property
+            && a.index() != node
+            && canonical::def_type_of(a)
+                .is_some_and(|k| matches!(k, C::Function | C::Method | C::Lambda))
+        {
+            continue;
+        }
         if canonical::has_def_type(a) || a.index() == 0 {
             let name = if a.index() == 0 && skip_root {
                 String::new()

@@ -120,15 +120,11 @@ fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
         if n.dead {
             continue;
         }
-        if !n.named && n.sym == 0 && std::env::var("SHOW_ALL").is_err() {
+        if !n.named && n.sym == 0 {
             continue;
         }
 
-        let kind_display = if std::env::var("SHOW_ALL").is_ok() {
-            format!("{}({})", lang.kind_name(n.kind), n.kind)
-        } else {
-            lang.kind_name(n.kind).to_string()
-        };
+        let kind_display = lang.kind_name(n.kind).to_string();
 
         let field_str = if n.field != 0 {
             format!(" field={}", lang.fields.resolve(n.field as u32))

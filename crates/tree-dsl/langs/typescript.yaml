@@ -7,6 +7,12 @@ stages:
     rules:
 
 
+      # Constructor parameter property with typed binding
+      - match: '(required_parameter pattern: $N type: (type_annotation $T:type_identifier))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(required_parameter pattern: $N)'
+        replace: '(__def (__defname @$N) (__property))'
+
       - match: '(return_statement $$$VALS)'
         replace: '(__return $$$VALS)'
 
@@ -146,9 +152,13 @@ stages:
       # Functions
       - match: '(function_declaration name: $N body: $B)'
         replace: '(__def (__defname @$N) (__function) $B)'
-      # Methods — static before generic
+      # Methods — static before generic; parameters: captures ctor param properties
+      - match: '(method_definition **/(static) name: $N parameters: (formal_parameters $$$P:__def) body: $B)'
+        replace: '(__def (__defname @$N) (__method) (__static "StaticMethod") $$$P $B)'
       - match: '(method_definition **/(static) name: $N body: $B)'
         replace: '(__def (__defname @$N) (__method) (__static "StaticMethod") $B)'
+      - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def) body: $B)'
+        replace: '(__def (__defname @$N) (__method) $$$P $B)'
       - match: '(method_definition name: $N body: $B)'
         replace: '(__def (__defname @$N) (__method) $B)'
       - match: '(generator_function_declaration name: $N body: $B)'
