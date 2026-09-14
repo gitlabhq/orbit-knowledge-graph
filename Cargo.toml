@@ -205,6 +205,9 @@ rustls = { version = "0.23.36", default-features = false, features = ["aws_lc_rs
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
 
+[profile.release]
+debug = 2
+
 [profile.fuzz]
 inherits = "dev"
 opt-level = 3

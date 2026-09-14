@@ -58,6 +58,7 @@ enum Commands {
         lang: Option<String>,
     },
     /// Run a YAML test suite
+    #[cfg(feature = "test-runner")]
     Test {
         /// Path to YAML test file
         file: Option<String>,
@@ -95,6 +96,7 @@ fn main() -> anyhow::Result<()> {
             after,
         } => cmd_rewrite(file, stdin, lang, r#match, replace, after),
         Commands::Index { path, lang } => cmd_index(&path, lang),
+        #[cfg(feature = "test-runner")]
         Commands::Test { file, inline } => cmd_test(file, inline),
     }
 }
@@ -361,8 +363,7 @@ fn collect_files(dir: &Path) -> Vec<(String, String)> {
     files
 }
 
-// ── test ──
-
+#[cfg(feature = "test-runner")]
 fn cmd_test(file: Option<String>, inline: Option<String>) -> anyhow::Result<()> {
     let yaml = match (file, inline) {
         (Some(path), _) => std::fs::read_to_string(&path)?,
