@@ -210,6 +210,23 @@ impl Tree {
         })
     }
 
+    pub fn child_by_kind(&self, i: u32, kind: u16) -> Option<u32> {
+        let end = self.hop(i);
+        let mut c = i + 1;
+        while c < end {
+            let n = &self.nodes[c as usize];
+            if n.dead {
+                c += n.size.max(1);
+                continue;
+            }
+            if n.kind == kind {
+                return Some(c);
+            }
+            c = c + n.size;
+        }
+        None
+    }
+
     pub fn child_by_field(&self, i: u32, f: u16) -> Option<u32> {
         self.children(i).find(|&c| self.field_of(c) == f)
     }
