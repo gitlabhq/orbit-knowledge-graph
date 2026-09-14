@@ -61,9 +61,9 @@ stages:
       - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name|aliased_import)'
         replace: '(__import (__source @$M) (__source_path @$M|to_rel(".")) $$$NAMES->__name)'
 
-      # import X / import X.Y.Z — bare import
+      # import X / import X.Y.Z
       - match: '(import_statement name: $N:dotted_name)'
-        replace: '(__import (__source @$N) (__source_path @$N|to_rel(".")) (__name @$N) (__alias @$N|split_first(".")))'
+        replace: '(__import (__source @$N) (__source_path @$N|to_rel(".")) (__name @$N (__ssa_hint @$N|split_first("."))))'
 
       # import X as Y — rekind capture to __name, keeping __alias subtree
       - match: '(import_statement name: $N:aliased_import)'

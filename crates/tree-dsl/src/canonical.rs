@@ -185,6 +185,8 @@ pub enum Canonical {
     Abstract,
     #[strum(serialize = "__generator", props(flavor = "true"))]
     Generator,
+    #[strum(serialize = "__ssa_hint")]
+    SsaHint,
     #[strum(serialize = "__self_method", props(flavor = "true"))]
     SelfMethod,
 }

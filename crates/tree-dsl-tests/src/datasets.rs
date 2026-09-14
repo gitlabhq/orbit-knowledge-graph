@@ -508,7 +508,7 @@ fn build_imports(
                         "WildcardImport"
                     } else if name_text == "default" {
                         "DefaultImport"
-                    } else if als != 0 {
+                    } else if als != 0 && als != ns {
                         "AliasedImport"
                     } else if source_eq_name {
                         "Import"

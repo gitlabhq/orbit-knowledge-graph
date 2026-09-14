@@ -103,13 +103,15 @@ impl Fold {
             self.import_names.push(sym);
             self.ssa
                 .write_variable(sym, self.cur, Value::ImportRef(self.import_count - 1));
-            if let Some(alias) = c.child_sym(C::Alias) {
-                if alias != sym {
-                    self.ssa.write_variable(
-                        alias,
-                        self.cur,
-                        Value::ImportRef(self.import_count - 1),
-                    );
+            for kind in [C::Alias, C::SsaHint] {
+                if let Some(alias) = c.child_sym(kind) {
+                    if alias != sym {
+                        self.ssa.write_variable(
+                            alias,
+                            self.cur,
+                            Value::ImportRef(self.import_count - 1),
+                        );
+                    }
                 }
             }
         }
@@ -168,7 +170,7 @@ impl Fold {
                     }
                 }
             } else {
-                let obj_sym = resolve_member_root(member);
+                let obj_sym = root_object_sym(member);
                 self.resolve_obj(tree, obj_sym, method, from);
             }
         } else if let Some(ivar) = callee.child(C::Ivar) {
@@ -457,20 +459,20 @@ impl Fold {
     }
 }
 
-fn resolve_member_root(member: crate::tree::Cursor) -> u32 {
-    let mut cur = member;
-    loop {
-        let Some(obj) = cur.child(C::Object) else {
-            return cur.sym();
-        };
-        if let Some(inner) = obj.child(C::Member) {
-            cur = inner;
-        } else if obj.child(C::Ivar).is_some() {
-            return 0;
-        } else {
-            return obj.sym();
-        }
+fn root_object_sym(member: crate::tree::Cursor) -> u32 {
+    let Some(obj) = member.child(C::Object) else {
+        return 0;
+    };
+    if obj.child(C::Ivar).is_some() {
+        return 0;
     }
+    if obj.sym() != 0 {
+        return obj.sym();
+    }
+    if let Some(inner) = obj.child(C::Member) {
+        return root_object_sym(inner);
+    }
+    0
 }
 
 // ── SSA fold main loop ──
