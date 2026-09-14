@@ -608,6 +608,7 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
         let _ = f.ssa.add_sealed_join(preds);
     }
 
+
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
 

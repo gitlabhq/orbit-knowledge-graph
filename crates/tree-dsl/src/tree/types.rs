@@ -175,13 +175,9 @@ impl Tree {
     }
 
     pub fn add_edge(&self, from: u32, to: u32, kind: EdgeKind) {
-        let mut edges = self.edges_cell.borrow_mut();
-        if !edges
-            .iter()
-            .any(|e| e.from.node == from && e.to.node == to && e.kind == kind)
-        {
-            edges.push(Edge::local(from, to, kind));
-        }
+        self.edges_cell
+            .borrow_mut()
+            .push(Edge::local(from, to, kind));
     }
 
     pub fn edges(&self) -> std::cell::Ref<'_, Vec<Edge>> {
