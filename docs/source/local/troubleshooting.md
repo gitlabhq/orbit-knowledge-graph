@@ -3,7 +3,7 @@ stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Troubleshoot common errors in GitLab Orbit Local.
-title: Troubleshoot GitLab Orbit Local
+title: Troubleshooting GitLab Orbit Local
 ---
 
 {{< details >}}
@@ -21,69 +21,72 @@ title: Troubleshoot GitLab Orbit Local
 
 {{< /history >}}
 
-When working with GitLab Orbit Local, or the `orbit` binary directly, you might encounter the following issues.
+When working with GitLab Orbit Local, or the `orbit` binary directly, you might encounter the
+following issues.
 
-## `no local graph found`
+## Error: `no local graph found`
 
-Symptoms:
+You might get an error that states:
 
 ```plaintext
 Error: no local graph found at ~/.orbit/graph.duckdb. Run `orbit index` first.
 ```
 
-Cause: The repository has not been indexed yet, or the `--db` path you
-specified does not exist. On older versions of GitLab Orbit Local, this error was
-reported as `Table 'Definition' does not exist`.
+This issue occurs when the repository is not indexed yet, or when the `--db` path you specified
+does not exist.
+On earlier versions of GitLab Orbit Local, this error was reported as
+`Table 'Definition' does not exist`.
 
-Resolution: Index the repository first:
+To resolve this issue, index the repository:
 
 ```shell
 glab orbit index /path/to/your/repo
 ```
 
-## `IO Error: Could not set lock on file`
+## Error: `Could not set lock on file`
 
-Symptoms: A command appears to pause briefly, then fails with an error
-containing `Could not set lock on file`.
+A command might pause briefly, then fail with an error that contains
+`IO Error: Could not set lock on file`.
 
-Cause: Another `orbit` process is already running and holds the DuckDB
-write lock. GitLab Orbit retries automatically with exponential backoff, but fails if
-the lock is not released within the retry window.
+This issue occurs when another `orbit` process is already running and holds the DuckDB write
+lock.
+GitLab Orbit retries automatically, but fails if the lock is not
+released in the retry window.
 
-Resolution: Wait for the other process to finish, or stop it:
+To resolve this issue, wait for the other process to finish, or stop it:
 
 ```shell
 pkill orbit
 ```
 
-Then retry your command.
+Then run your command again.
 
-## `list_contains source_tags`
+## Error: `list_contains source_tags`
 
-Symptoms: A query fails with an error containing `list_contains source_tags`.
+A query might fail with an error that contains `list_contains source_tags`.
 
-Cause: A known bug triggered by certain filter combinations that include
-the `source_tags` property.
+This issue occurs because of a known bug that certain filter combinations trigger, including the
+`source_tags` property.
 
-Resolution: Remove any `source_tags` filter from your query and retry.
+The workaround is to remove any `source_tags` filter from your query and run the query again.
 
-## `error: unrecognized subcommand 'mcp'`
+## Error: `unrecognized subcommand 'mcp'`
 
-Symptoms:
+You might get an error that states:
 
 ```plaintext
 error: unrecognized subcommand 'mcp'
 ```
 
-Cause: Your installed `orbit` binary predates the GitLab Orbit Local MCP
-server.
+This issue occurs when your installed `orbit` binary version is older than the GitLab release
+that introduced the `mcp` command.
 
-Resolution: Update the managed binary, then start the stdio MCP server:
+To resolve this issue, update the managed binary, then start the stdio MCP server:
 
 ```shell
 glab orbit --update
 glab orbit mcp serve
 ```
 
-If you installed `orbit` directly, rerun the installer from the
-[GitLab Orbit CLI instructions](access/cli.md#install).
+If you installed `orbit` directly, run the installer again.
+For more information, see the [GitLab Orbit CLI instructions](access/cli.md#install).
