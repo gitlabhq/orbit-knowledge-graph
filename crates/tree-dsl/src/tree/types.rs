@@ -158,6 +158,13 @@ impl Tree {
         }
     }
 
+    pub fn release_buffers(&mut self) {
+        self.spare = Vec::new();
+        self.appends = RefCell::new(Vec::new());
+        self.inserts = RefCell::new(Vec::new());
+        self.insert_buf = RefCell::new(Vec::new());
+    }
+
     #[inline]
     pub fn node(&self, i: u32) -> &Node {
         &self.nodes[i as usize]

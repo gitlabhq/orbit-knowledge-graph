@@ -69,6 +69,7 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
     linker::link(&tree, lang);
     tree.prune();
     tree.compact();
+    tree.release_buffers();
     tree
 }
 
