@@ -70,7 +70,7 @@ fn build_file_index(
     support_lang: SupportLang,
     index_names: &[String],
 ) -> FxHashMap<String, usize> {
-    let mut idx: FxHashMap<String, usize> = FxHashMap::default();
+    let mut idx: FxHashMap<String, usize> = FxHashMap::with_capacity_and_hasher(trees.len() * 3, Default::default());
     for (fi, tree) in trees.iter().enumerate() {
         let path = lang.syms.resolve(tree.root().sym()).to_string();
         let file_lang = SupportLang::from_path(&path).unwrap_or(support_lang);
@@ -97,7 +97,7 @@ fn build_visible_names(trees: &[Tree]) -> VisibleMap {
         .iter()
         .enumerate()
         .map(|(fi, tree)| {
-            let mut names = FxHashMap::default();
+            let mut names = FxHashMap::with_capacity_and_hasher(16, Default::default());
             for i in 0..tree.len() {
                 if tree.nodes[i as usize].dead {
                     continue;
@@ -125,8 +125,9 @@ fn gather_imports(
     lookup_prefixes: &[String],
     external: &[String],
 ) -> (Vec<ImportReq>, Vec<Edge>) {
-    let mut reqs = Vec::new();
-    let mut cross_edges = Vec::new();
+    let import_estimate = trees.iter().map(|t| t.nodes.len()).sum::<usize>() / 20;
+    let mut reqs = Vec::with_capacity(import_estimate);
+    let mut cross_edges = Vec::with_capacity(import_estimate);
     for (fi, tree) in trees.iter().enumerate() {
         for (i, n) in tree.nodes.iter().enumerate() {
             if n.kind != C::Import && n.kind != C::ImportType {
@@ -264,7 +265,7 @@ fn build_import_edges(
     index_names: &[String],
     file_index: &FxHashMap<String, usize>,
 ) -> Vec<Edge> {
-    let mut edges = Vec::new();
+    let mut edges = Vec::with_capacity(reqs.len());
     for req in reqs {
         let (fi, tfi) = (req.fi, req.target_fi);
         let import = corpus.jump(fi as u32, req.node);
@@ -319,19 +320,33 @@ fn build_call_edges(
     reqs: &[ImportReq],
     visible: &VisibleMap,
 ) -> (Vec<Edge>, Vec<Edge>) {
-    let mut module_calls = Vec::new();
+    let mut import_targets: FxHashMap<(usize, u32), Vec<usize>> = FxHashMap::default();
+    for ce in cross_edges.iter().filter(|e| e.kind == EdgeKind::Imports) {
+        import_targets
+            .entry((ce.from.tree as usize, ce.from.node))
+            .or_default()
+            .push(ce.to.tree as usize);
+    }
+
+    let mut module_calls = Vec::with_capacity(reqs.len());
     for req in reqs {
         let (fi, import_node) = (req.fi, req.node);
         let nodes = &corpus.trees_ref()[fi];
         let mut target_files = vec![req.target_fi];
-        for ce in cross_edges {
-            if ce.from.tree as usize == fi
-                && (ce.from.node == import_node
-                    || nodes.nodes[ce.from.node as usize].parent == import_node)
-                && ce.kind == EdgeKind::Imports
-                && !target_files.contains(&(ce.to.tree as usize))
-            {
-                target_files.push(ce.to.tree as usize);
+        if let Some(targets) = import_targets.get(&(fi, import_node)) {
+            for &tfi in targets {
+                if !target_files.contains(&tfi) {
+                    target_files.push(tfi);
+                }
+            }
+        }
+        for child in nodes.children(import_node) {
+            if let Some(targets) = import_targets.get(&(fi, child)) {
+                for &tfi in targets {
+                    if !target_files.contains(&tfi) {
+                        target_files.push(tfi);
+                    }
+                }
             }
         }
         for edge in nodes.edges().iter() {
@@ -362,12 +377,18 @@ fn build_call_edges(
         }
     }
 
-    let mut call_edges = Vec::new();
+    let mut reverse_visible: FxHashMap<(usize, u32), u32> = FxHashMap::default();
+    for (fi, names) in visible.iter().enumerate() {
+        for (&sym, &(vfi, vn)) in names {
+            reverse_visible.insert((vfi, vn), sym);
+        }
+    }
+
+    let mut call_edges = Vec::with_capacity(cross_edges.len());
     for ce in cross_edges.iter().filter(|e| e.kind == EdgeKind::Imports) {
-        let target_name = visible[ce.to.tree as usize]
-            .iter()
-            .find(|(_, (vfi, vn))| *vfi == ce.to.tree as usize && *vn == ce.to.node)
-            .map(|(s, _)| *s)
+        let target_name = reverse_visible
+            .get(&(ce.to.tree as usize, ce.to.node))
+            .copied()
             .unwrap_or(0);
         let ft = &corpus.trees_ref()[ce.from.tree as usize];
         let import_parent = ft.nodes[ce.from.node as usize].parent;
