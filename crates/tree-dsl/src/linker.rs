@@ -213,6 +213,13 @@ impl Fold {
         for r in self.lookup(obj) {
             match r {
                 Linked::Type(ts) => self.resolve_method(tree, ts, method, from),
+                Linked::Def(node) => {
+                    if let Some(m) = self.find_method_in(tree, node, method) {
+                        tree.add_edge(from, m, EdgeKind::Calls);
+                    } else {
+                        self.emit(tree, &Linked::Def(node), from);
+                    }
+                }
                 _ => self.emit(tree, &r, from),
             }
         }

@@ -31,6 +31,9 @@ stages:
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
+      # Scoped call: Shape::Circle(5.0) → __call with __member callee
+      - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object @$P))) $A)'
       - match: '(call_expression function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
 
@@ -91,6 +94,12 @@ stages:
       # Containers (after functions)
       - match: '(struct_item name: $N body:? $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
+      - match: '(enum_variant name: $N body: $B:ordered_field_declaration_list)'
+        replace: '(__def (__defname @$N) (__enum_variant) $B)'
+      - match: '(enum_variant name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__enum_variant) $B)'
+      - match: '(enum_variant name: $N)'
+        replace: '(__def (__defname @$N) (__enum_variant))'
       - match: '(enum_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__enum) $B)'
       - match: '(trait_item name: $N bounds: (trait_bounds $$$SUPERS:type_identifier) body: $B)'
