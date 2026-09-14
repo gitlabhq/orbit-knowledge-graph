@@ -13,7 +13,7 @@ use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::{AppConfig, PathResolverConfig};
-use query_engine::compiler::validate_normalize;
+use query_engine::compiler::{Frontend, validate_normalize};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
@@ -240,7 +240,8 @@ impl SnapshotLoader {
 
 fn fits_ontology(query: &NamedQuery, ontology: &Ontology) -> Result<(), String> {
     let rendered = query.render_example().map_err(|error| error.to_string())?;
-    validate_normalize(&rendered, ontology).map_err(|error| error.to_string())?;
+    validate_normalize(&rendered, Frontend::JsonDsl, ontology)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
