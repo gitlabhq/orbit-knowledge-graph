@@ -5,7 +5,7 @@
 # not invalidate indexed graph data. Describes current state only; history
 # lives in git.
 sources:
-  derived/core/system_note.sql.j2: dfbdb266e4c1263a7b533302e26e48035a77e8aa7e2bce09602b5788da541636
+  derived/core/system_note.sql.j2: 4c1e6cbae95349c6ebeca5f4e27b76b1c7a5ddd1130a7d4efc5bfc9486bddcb4
   derived/core/system_note.yaml: c6c04869ba8395fe7229979be6db0b4583fe2a157846276555e3449a39a063f9
   edges/approved.yaml: c15e78e2aa0bdf00278432257a4f3a8df1c40ed119ff46d81ff02a6aeeffd31b
   edges/assigned.yaml: 61f39b7a5077c293606604b025569d33c37b28e442e512c03bdc751256ab76bc
@@ -76,7 +76,7 @@ sources:
   nodes/code_review/merge_request.sql.j2: ca379e5f1da29a70ed2c27151f5145d9a11fa5baf6f4a18f16aa160f7e6d464d
   nodes/code_review/merge_request.yaml: 6d423ffd33a12e47316dcc37be80ab9719b76ff6c4a925036030cb0c7965a4f0
   nodes/code_review/merge_request_diff.yaml: 5bf7f7b82087fbcd49643daadff581347343e0c6b4fd53f2902b94f8bbc023d4
-  nodes/code_review/merge_request_diff_file.sql.j2: 5c9dec96bb445c50e8e5c043a672534390e12386b8f02e7f51429874858723d9
+  nodes/code_review/merge_request_diff_file.sql.j2: 5f7b29b0b00b813f63a16e2e41382be229b8be42e5214ec05929c53c004e6a20
   nodes/code_review/merge_request_diff_file.yaml: 5fa6d7cc5a9688905beea55dd3d4904dc4e1b03de969f13c898a99d05f733bee
   nodes/container_registry/container_repository.yaml: 1741a773d71166579a51f3ea0431ef44d93e77bd55493d94d1012f349d7b10a0
   nodes/core/group.sql.j2: 608ffa4313cca9a42afb186c22bad7a41449a32af25bf017ea10e0d9d6e5412f
