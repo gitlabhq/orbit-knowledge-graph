@@ -287,7 +287,18 @@ impl Fold {
     }
 
     fn find_method_in(&self, tree: &Tree, container: u32, name: u32) -> Option<u32> {
+        let container_name = tree.cursor(container).child_sym(C::DefName);
         let mut search = vec![container];
+        if let Some(cn) = container_name {
+            for &dn in &self.defs {
+                if dn != container
+                    && tree.cursor(dn).child_sym(C::DefName) == Some(cn)
+                    && !search.contains(&dn)
+                {
+                    search.push(dn);
+                }
+            }
+        }
         let mut si = 0;
         while si < search.len() {
             if let Some(m) = crate::tree::find_method_in(tree.cursor(search[si]), name) {
