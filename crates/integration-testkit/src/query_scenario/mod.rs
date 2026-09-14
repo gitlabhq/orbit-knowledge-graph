@@ -255,7 +255,8 @@ async fn run_frontend(
         let baseline_node_ids = canonical_ids(&resp);
         let baseline_edges = canonical_edges(&resp);
         for run in 2..=n {
-            let rerun = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
+            let rerun =
+                execute_pipeline(ctx, frontend, &compiled, &ontology, security, redaction).await;
             assert_eq!(
                 baseline_node_ids,
                 canonical_ids(&rerun),
