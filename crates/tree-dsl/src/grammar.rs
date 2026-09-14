@@ -166,11 +166,43 @@ fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
     }
 }
 
+pub struct KindMap {
+    kinds: Vec<u16>,
+    fields: Vec<u16>,
+    named: Vec<bool>,
+}
+
+impl KindMap {
+    pub fn build(ts_lang: &tree_sitter::Language, lang: &mut Lang) -> Self {
+        let sym_count = ts_lang.node_kind_count();
+        let field_count = ts_lang.field_count();
+
+        let mut kinds = vec![0u16; sym_count];
+        let mut named = vec![false; sym_count];
+        for id in 0..sym_count as u16 {
+            if let Some(name) = ts_lang.node_kind_for_id(id) {
+                kinds[id as usize] = lang.intern_kind(name);
+            }
+            named[id as usize] = ts_lang.node_kind_is_named(id);
+        }
+
+        let mut fields = vec![0u16; field_count + 1];
+        for id in 1..=field_count as u16 {
+            if let Some(name) = ts_lang.field_name_for_id(id) {
+                fields[id as usize] = lang.intern_field(name);
+            }
+        }
+
+        KindMap { kinds, fields, named }
+    }
+}
+
 fn from_tree_sitter(
     source: &str,
     ts_tree: &tree_sitter::Tree,
     lang: &mut Lang,
     label: &str,
+    km: &KindMap,
 ) -> Tree {
     let root = ts_tree.root_node();
     let mut nodes: Vec<Node> = Vec::with_capacity(root.descendant_count());
@@ -183,27 +215,24 @@ fn from_tree_sitter(
         let id = nodes.len() as u32;
         let parent = parent_stack.last().copied().unwrap_or(NONE);
 
-        let kind = lang.intern_kind(ts.kind());
-        let field = cursor.field_name().map_or(0, |f| lang.intern_field(f));
-        let sym = if ts.is_named() {
-            let text = &source[ts.start_byte()..ts.end_byte()];
-            lang.syms.intern(text)
-        } else {
-            0
-        };
-
+        let kid = ts.kind_id() as usize;
+        let kind = km.kinds.get(kid).copied().unwrap_or(0);
+        let named = km.named.get(kid).copied().unwrap_or(false);
+        let field = cursor.field_id()
+            .map(|fid| km.fields.get(fid.get() as usize).copied().unwrap_or(0))
+            .unwrap_or(0);
         let sp = ts.start_position();
         let ep = ts.end_position();
         nodes.push(Node {
             kind,
             field,
-            named: ts.is_named(),
+            named,
             synth: false,
             dead: false,
             id: 0,
             size: 0,
             parent,
-            sym,
+            sym: 0,
             start: ts.start_byte() as u32,
             end: ts.end_byte() as u32,
             start_row: sp.row as u32,
@@ -214,9 +243,17 @@ fn from_tree_sitter(
 
         if cursor.goto_first_child() {
             parent_stack.push(id);
+            if named && (ts.end_byte() - ts.start_byte()) <= 128 {
+                let text = &source[ts.start_byte()..ts.end_byte()];
+                nodes[id as usize].sym = lang.syms.intern(text);
+            }
             continue;
         }
 
+        if named {
+            let text = &source[ts.start_byte()..ts.end_byte()];
+            nodes[id as usize].sym = lang.syms.intern(text);
+        }
         nodes[id as usize].size = 1;
 
         if cursor.goto_next_sibling() {
@@ -247,8 +284,23 @@ fn from_tree_sitter(
 }
 
 pub fn parse(source: &str, support_lang: SupportLang, lang: &mut Lang, label: &str) -> Tree {
+    let ts_lang = support_lang.ts_language();
+    let km = KindMap::build(&ts_lang, lang);
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&ts_lang).unwrap();
+    let ts_tree = parser.parse(source.as_bytes(), None).unwrap();
+    from_tree_sitter(source, &ts_tree, lang, label, &km)
+}
+
+pub fn parse_with_kind_map(
+    source: &str,
+    support_lang: SupportLang,
+    lang: &mut Lang,
+    label: &str,
+    km: &KindMap,
+) -> Tree {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&support_lang.ts_language()).unwrap();
     let ts_tree = parser.parse(source.as_bytes(), None).unwrap();
-    from_tree_sitter(source, &ts_tree, lang, label)
+    from_tree_sitter(source, &ts_tree, lang, label, km)
 }

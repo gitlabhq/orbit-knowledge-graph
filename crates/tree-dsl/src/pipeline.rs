@@ -72,6 +72,24 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
     tree
 }
 
+fn process_file_with_km(
+    path: &str,
+    source: &str,
+    lang: &mut Lang,
+    pipeline: &Pipeline,
+    km: &grammar::KindMap,
+) -> Tree {
+    let mut tree = grammar::parse_with_kind_map(source, pipeline.lang_id, lang, path, km);
+    for stage in &pipeline.rewrite_stages {
+        pattern::apply_rewrites(&mut tree, lang, stage);
+    }
+    tree.compact();
+    linker::link(&tree, lang);
+    tree.prune();
+    tree.compact();
+    tree
+}
+
 pub fn process_file_timed(
     path: &str,
     source: &str,
@@ -100,6 +118,7 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
     use std::time::Instant;
 
     let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
+    let km = grammar::KindMap::build(&lang_id.ts_language(), &mut lang);
 
     let parseable: Vec<&(String, String)> = files
         .iter()
@@ -114,7 +133,7 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
             .par_iter()
             .map(|(path, content)| {
                 let mut thread_lang = lang.thread_fork();
-                let tree = process_file(path, content, &mut thread_lang, &pipeline);
+                let tree = process_file_with_km(path, content, &mut thread_lang, &pipeline, &km);
                 (tree, thread_lang)
             })
             .collect()
