@@ -107,9 +107,9 @@ stages:
       - match: '(trait_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__trait) $B)'
       - match: '(impl_item trait: $T type: $TY body: $B)'
-        replace: '(__def (__defname @$TY) (__impl) (__supertype @$T) $B)'
+        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) $B)'
       - match: '(impl_item type: $T body: $B)'
-        replace: '(__def (__defname @$T) (__impl) $B)'
+        replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
 
 resolve:
   parse_files:

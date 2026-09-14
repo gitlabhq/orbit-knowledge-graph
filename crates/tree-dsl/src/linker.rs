@@ -111,6 +111,10 @@ impl Fold {
         self.defs.push(i);
         self.ssa
             .write_variable(name, parent_block, Value::LocalDef(idx));
+        for alias in c.children().filter(|ch| ch.is(C::Alias) && ch.sym() != 0) {
+            self.ssa
+                .write_variable(alias.sym(), parent_block, Value::LocalDef(idx));
+        }
         if let Some(&(Some(parent), _, _)) = self.def_stack.last() {
             tree.add_edge(parent, i, EdgeKind::Defines);
         }
