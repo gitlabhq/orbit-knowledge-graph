@@ -9,7 +9,7 @@ use serde_json::Value;
 use thiserror::Error;
 use tracing::debug;
 
-use super::PAGE_BYTE_BUDGET;
+use super::paging::PAGE_BYTE_BUDGET;
 use orbit_utils::arrow::batch_slice_bytes;
 
 #[derive(Debug, Error)]
