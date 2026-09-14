@@ -15,10 +15,10 @@ query:
 expect:
   pages:
     - has_more: true
-      skip_requirements: [neighbors, node_ids]
+      skip_requirements: [node_count, cursor, neighbors, node_ids]
     - has_more: true
-      skip_requirements: [neighbors, node_ids]
+      skip_requirements: [node_count, cursor, neighbors, node_ids]
     - has_more: true
-      skip_requirements: [neighbors, node_ids]
+      skip_requirements: [node_count, cursor, neighbors, node_ids]
     - has_more: false
-      skip_requirements: [neighbors, node_ids]
+      skip_requirements: [node_count, cursor, neighbors, node_ids]
