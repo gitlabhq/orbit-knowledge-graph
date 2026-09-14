@@ -50,11 +50,12 @@ Lexical checks live here: identifier rules, string escapes, numeric ranges, `dat
 Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.
 Scalar values use the same value type as the compiler's filters.
 
-The `clickhouse_json_dsl` preset includes parsing; `clickhouse_gql` starts from parsed Input. Both run the same complete `validate` through `codegen` phases, which cannot depend on the source language.
+The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_parse` and `gql_parse`, then share the complete `validate` through `codegen` phases.
+The `gql_parse` phase parses raw query text when supplied. Preparation supplies parsed Input instead, so the wrapper leaves it unchanged without parsing twice.
 Schema preparation, result types, and resolution belong only to the GQL frontend. Shared compiler contexts have no schema request, response, or introspection scope.
 
 `compiler::gql::prepare` parses once and dispatches by statement kind. MATCH runs the complete graph pipeline; CALL resolves ontology metadata directly.
-`compiler::compile` remains query-only for both frontends. Its GQL path uses `gql::parse`, which rejects schema calls before metadata resolution.
+`compiler::compile` remains query-only for both frontends. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.

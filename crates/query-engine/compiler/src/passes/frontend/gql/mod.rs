@@ -61,7 +61,7 @@ pub fn parse(raw: &str) -> Result<Input> {
     }
 }
 
-pub(crate) fn compile_query(
+fn compile_query(
     input: Input,
     ontology: &Ontology,
     security_context: &SecurityContext,

@@ -60,7 +60,7 @@ Schema calls have no state in the shared compiler contexts. `compiler::compile` 
 
 | # | Pass | Responsibility |
 |---|---|---|
-| 1 | `json_dsl_parse` (JSON only; GQL lowers via `gql::parse`/`gql::prepare` before entering the pipeline) | Lowers graph-query text to `Input`; the JSON frontend also validates the JSON schemas and computes the cursor query hash |
+| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
 | 4 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |

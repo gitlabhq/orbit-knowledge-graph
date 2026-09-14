@@ -110,7 +110,11 @@ pub fn compile(
             ctx.set_raw(raw.to_string());
             finish(&mut ctx, config::run_clickhouse_json_dsl)
         }
-        Frontend::Gql => gql::compile_query(gql::parse(raw).count_err()?, ontology, ctx),
+        Frontend::Gql => {
+            let mut ctx = config::ClickhouseGqlCtx::new(Arc::new(ontology.clone()), ctx.clone());
+            ctx.set_raw(raw.to_string());
+            finish(&mut ctx, config::run_clickhouse_gql)
+        }
     }
 }
 
