@@ -376,11 +376,10 @@ fn build_call_edges(
                 continue;
             }
             let ei = edge.to.node;
-            if ei != ce.from.node
-                && ft.nodes[ei as usize].parent != ce.from.node
-                && ei != import_parent
-                && ft.nodes[ei as usize].parent != import_parent
-            {
+            let direct = ei == ce.from.node
+                || ft.nodes[ei as usize].parent == ce.from.node
+                || ei == import_parent;
+            if !direct {
                 continue;
             }
             if lang.syms.resolve(ft.sym(ce.from.node)) == "*" && target_name != 0 {
