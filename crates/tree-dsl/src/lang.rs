@@ -6,6 +6,29 @@ pub struct Interner {
     names: Vec<Box<str>>,
 }
 
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct InternerSnapshot {
+    names: Vec<String>,
+}
+
+impl From<&Interner> for InternerSnapshot {
+    fn from(i: &Interner) -> Self {
+        InternerSnapshot {
+            names: i.names.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+}
+
+impl From<InternerSnapshot> for Interner {
+    fn from(s: InternerSnapshot) -> Self {
+        let mut interner = Interner::default();
+        for name in &s.names {
+            interner.intern(name);
+        }
+        interner
+    }
+}
+
 impl Interner {
     pub fn intern(&mut self, s: &str) -> u32 {
         if let Some(&i) = self.map.get(s) {
@@ -46,11 +69,38 @@ impl Interner {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Lang {
     pub kinds: Interner,
     pub fields: Interner,
     pub syms: Interner,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct LangSnapshot {
+    pub kinds: InternerSnapshot,
+    pub fields: InternerSnapshot,
+    pub syms: InternerSnapshot,
+}
+
+impl From<&Lang> for LangSnapshot {
+    fn from(l: &Lang) -> Self {
+        LangSnapshot {
+            kinds: InternerSnapshot::from(&l.kinds),
+            fields: InternerSnapshot::from(&l.fields),
+            syms: InternerSnapshot::from(&l.syms),
+        }
+    }
+}
+
+impl From<LangSnapshot> for Lang {
+    fn from(s: LangSnapshot) -> Self {
+        Lang {
+            kinds: Interner::from(s.kinds),
+            fields: Interner::from(s.fields),
+            syms: Interner::from(s.syms),
+        }
+    }
 }
 
 impl Lang {

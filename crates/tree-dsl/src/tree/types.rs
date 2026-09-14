@@ -3,7 +3,7 @@ use std::cell::RefCell;
 pub const NONE: u32 = u32::MAX;
 
 #[repr(u16)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum EdgeKind {
     Calls = 1,
     Defines = 2,
@@ -28,7 +28,7 @@ impl std::fmt::Display for EdgeKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Node {
     pub id: u32,
     pub kind: u16,
@@ -47,7 +47,7 @@ pub struct Node {
     pub named: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct NodeRef {
     pub tree: u32,
     pub node: u32,
@@ -65,7 +65,7 @@ impl NodeRef {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Edge {
     pub from: NodeRef,
     pub to: NodeRef,
@@ -105,6 +105,49 @@ pub struct Tree {
     pub(crate) appends: RefCell<Vec<(u32, Node)>>,
     pub(crate) inserts: RefCell<Vec<(u32, u32, u32)>>,
     pub(crate) insert_buf: RefCell<Vec<Node>>,
+}
+
+impl Clone for Tree {
+    fn clone(&self) -> Self {
+        Tree {
+            nodes: self.nodes.clone(),
+            edges_cell: RefCell::new(self.edges_cell.borrow().clone()),
+            label: self.label.clone(),
+            next_id: self.next_id,
+            spare: Vec::new(),
+            appends: RefCell::new(Vec::new()),
+            inserts: RefCell::new(Vec::new()),
+            insert_buf: RefCell::new(Vec::new()),
+        }
+    }
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct TreeSnapshot {
+    pub nodes: Vec<Node>,
+    pub edges: Vec<Edge>,
+    pub label: String,
+}
+
+impl From<&Tree> for TreeSnapshot {
+    fn from(t: &Tree) -> Self {
+        TreeSnapshot {
+            nodes: t.nodes.clone(),
+            edges: t.edges_cell.borrow().clone(),
+            label: t.label.clone(),
+        }
+    }
+}
+
+impl From<TreeSnapshot> for Tree {
+    fn from(s: TreeSnapshot) -> Self {
+        Tree {
+            nodes: s.nodes,
+            edges_cell: RefCell::new(s.edges),
+            label: s.label,
+            ..Default::default()
+        }
+    }
 }
 
 impl Tree {

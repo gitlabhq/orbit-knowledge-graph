@@ -6,6 +6,7 @@ pub mod lang;
 pub mod linker;
 pub mod pipeline;
 pub mod resolver;
+pub mod snapshot;
 pub mod ssa;
 pub mod tree;
 

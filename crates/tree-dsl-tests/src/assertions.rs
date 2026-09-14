@@ -3,30 +3,42 @@ use serde::de;
 use std::collections::HashMap;
 use std::fmt;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct FixtureFile {
     pub path: String,
     pub content: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct TestSuite {
     pub name: String,
     #[serde(default)]
     pub pipeline: Option<String>,
     #[serde(default)]
     pub fixtures: Vec<FixtureFile>,
-    /// Load all source files from this directory (relative to workspace root).
-    /// Files are discovered recursively and written to the temp dir preserving
-    /// relative paths. Combines with `fixtures` (inline files take precedence).
     #[serde(default, rename = "fixture_dir")]
     pub _fixture_dir: Option<String>,
     #[serde(default, rename = "trace")]
     pub _trace: bool,
     pub tests: Vec<TestCase>,
+    #[serde(default)]
+    pub steps: Vec<IncrementalStep>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct IncrementalStep {
+    pub name: String,
+    #[serde(default)]
+    pub add: Vec<FixtureFile>,
+    #[serde(default)]
+    pub modify: Vec<FixtureFile>,
+    #[serde(default)]
+    pub remove: Vec<String>,
+    #[serde(default)]
+    pub tests: Vec<TestCase>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct TestCase {
     pub name: String,
     #[serde(default)]

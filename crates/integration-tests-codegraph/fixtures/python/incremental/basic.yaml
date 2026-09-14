@@ -1,0 +1,123 @@
+name: "Python: incremental indexing"
+fixtures:
+  - path: main.py
+    content: |
+      from utils import helper
+      helper()
+
+  - path: utils.py
+    content: |
+      def helper():
+          pass
+
+tests:
+  - name: "initial state: helper import resolves"
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'main.py'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'utils.helper' } }
+
+  - name: "initial state: two files"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 2 }
+
+  - name: "initial state: helper definition exists"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper'
+      RETURN d.fqn AS fqn, d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'utils.helper', file: 'utils.py' } }
+
+steps:
+  - name: "add a function to utils"
+    modify:
+      - path: utils.py
+        content: |
+          def helper():
+              pass
+
+          def extra():
+              pass
+    tests:
+      - name: "helper still resolves after modify"
+        query: |
+          MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+          WHERE i.file_path = 'main.py'
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+          - { row: { fqn: 'utils.helper' } }
+
+      - name: "extra is now a definition"
+        query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'extra'
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+          - { row: { fqn: 'utils.extra' } }
+
+      - name: "still two files"
+        query: |
+          MATCH (f:File)
+          RETURN f.path AS path
+        assert:
+          - { row_count: 2 }
+
+  - name: "add a new file that imports extra"
+    add:
+      - path: consumer.py
+        content: |
+          from utils import extra
+          extra()
+    tests:
+      - name: "three files after add"
+        query: |
+          MATCH (f:File)
+          RETURN f.path AS path
+        assert:
+          - { row_count: 3 }
+
+      - name: "consumer import resolves to extra"
+        query: |
+          MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+          WHERE i.file_path = 'consumer.py'
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+          - { row: { fqn: 'utils.extra' } }
+
+  - name: "remove utils.py"
+    remove:
+      - utils.py
+    tests:
+      - name: "two files after remove"
+        query: |
+          MATCH (f:File)
+          RETURN f.path AS path
+        assert:
+          - { row_count: 2 }
+
+      - name: "helper definition is gone"
+        query: |
+          MATCH (d:Definition)
+          WHERE d.name = 'helper'
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 0 }
+
+      - name: "consumer import no longer resolves"
+        query: |
+          MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+          WHERE i.file_path = 'consumer.py'
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 0 }

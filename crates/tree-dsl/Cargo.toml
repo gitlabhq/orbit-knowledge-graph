@@ -27,6 +27,7 @@ tree-sitter-haskell = "0.23.1"
 tree-sitter-ocaml = "0.25.0"
 smallvec = "1"
 smol_str = "0.3"
+rkyv = { workspace = true }
 serde = { workspace = true }
 serde_yaml = "0.9"
 stacker = "0.1"

@@ -3,7 +3,7 @@ use tree_dsl::grammar::SupportLang;
 use super::assertions::{Severity, TestSuite};
 use super::config::make_graph_config;
 use super::datasets::to_datasets;
-use super::validator::run_suite;
+use super::validator::{Failure, run_suite};
 
 fn detect_lang(suite: &TestSuite) -> SupportLang {
     if let Some(ref p) = suite.pipeline
@@ -19,10 +19,27 @@ fn detect_lang(suite: &TestSuite) -> SupportLang {
     SupportLang::Python
 }
 
+async fn build_and_check(
+    result: &mut tree_dsl::IndexResult,
+    lang_id: SupportLang,
+    suite: &TestSuite,
+) -> Vec<Failure> {
+    let datasets = to_datasets(
+        &result.trees,
+        &result.cross_edges,
+        &mut result.lang,
+        lang_id,
+        &result.pipeline.resolve,
+    )
+    .expect("Failed to build datasets");
+    let config = make_graph_config().expect("Failed to build graph config");
+    run_suite(suite, &datasets, &config).await
+}
+
 pub async fn run_yaml_suite(yaml: &str) {
     let suite: TestSuite = serde_yaml::from_str(yaml).expect("Failed to parse YAML suite");
 
-    if suite.tests.iter().all(|t| t.skip) {
+    if suite.tests.iter().all(|t| t.skip) && suite.steps.is_empty() {
         eprintln!(
             "[PASS] Suite: {} ({} tests, all skipped)",
             suite.name,
@@ -39,39 +56,70 @@ pub async fn run_yaml_suite(yaml: &str) {
         .collect();
 
     let mut result = tree_dsl::index(lang_id, &fixtures);
-    let datasets = to_datasets(
-        &result.trees,
-        &result.cross_edges,
-        &mut result.lang,
-        lang_id,
-        &result.pipeline.resolve,
-    )
-    .expect("Failed to build datasets");
 
-    let config = make_graph_config().expect("Failed to build graph config");
-    let failures = run_suite(&suite, &datasets, &config).await;
+    let mut all_failures = Vec::new();
+    let mut total_tests = 0usize;
+    let mut total_skipped = 0usize;
 
-    let total = suite.tests.len();
-    let skipped = suite.tests.iter().filter(|t| t.skip).count();
-    let failed = failures.len();
-    let passed = total.saturating_sub(skipped).saturating_sub(failed);
+    if !suite.tests.is_empty() {
+        let failures = build_and_check(&mut result, lang_id, &suite).await;
+        total_tests += suite.tests.len();
+        total_skipped += suite.tests.iter().filter(|t| t.skip).count();
+        all_failures.extend(failures);
+    }
+
+    for step in &suite.steps {
+        let added: Vec<(String, String)> = step
+            .add
+            .iter()
+            .map(|f| (f.path.clone(), f.content.clone()))
+            .collect();
+        let modified: Vec<(String, String)> = step
+            .modify
+            .iter()
+            .map(|f| (f.path.clone(), f.content.clone()))
+            .collect();
+        result.update(&added, &modified, &step.remove);
+
+        if !step.tests.is_empty() {
+            let step_suite = TestSuite {
+                name: step.name.clone(),
+                pipeline: suite.pipeline.clone(),
+                fixtures: Vec::new(),
+                _fixture_dir: None,
+                _trace: false,
+                tests: step.tests.clone(),
+                steps: Vec::new(),
+            };
+            let failures = build_and_check(&mut result, lang_id, &step_suite).await;
+            total_tests += step.tests.len();
+            total_skipped += step.tests.iter().filter(|t| t.skip).count();
+            all_failures.extend(failures);
+        }
+    }
+
+    let failed = all_failures.len();
+    let passed = total_tests.saturating_sub(total_skipped).saturating_sub(failed);
 
     eprintln!("---");
     eprintln!("suite: {:?}", suite.name);
-    eprintln!("tests: {total}");
+    eprintln!("tests: {total_tests}");
     eprintln!("passed: {passed}");
     eprintln!("failed: {failed}");
-    eprintln!("skipped: {skipped}");
-    if !failures.is_empty() {
+    eprintln!("skipped: {total_skipped}");
+    if !all_failures.is_empty() {
         eprintln!("failures:");
-        for f in &failures {
+        for f in &all_failures {
             eprintln!("  - test: {:?}", f.test);
             eprintln!("    severity: {}", f.severity);
             eprintln!("    message: {:?}", f.message);
         }
     }
 
-    if failures.iter().any(|f| f.severity == Severity::Error) {
-        panic!("suite {:?}: {failed}/{total} tests failed", suite.name);
+    if all_failures.iter().any(|f| f.severity == Severity::Error) {
+        panic!(
+            "suite {:?}: {failed}/{total_tests} tests failed",
+            suite.name
+        );
     }
 }
