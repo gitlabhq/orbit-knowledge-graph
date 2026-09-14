@@ -259,16 +259,10 @@ impl Fold {
 
     fn resolve_method(&mut self, tree: &Tree, type_sym: u32, method: u32, from: u32) {
         for r in self.lookup(type_sym) {
-            match r {
-                Linked::Def(cls) => {
-                    if let Some(m) = self.find_method_in(tree, cls, method) {
-                        tree.add_edge(from, m, EdgeKind::Calls);
-                    }
+            if let Linked::Def(cls) = r {
+                if let Some(m) = self.find_method_in(tree, cls, method) {
+                    tree.add_edge(from, m, EdgeKind::Calls);
                 }
-                Linked::Import(imp) => {
-                    tree.add_edge(from, imp, EdgeKind::Imports);
-                }
-                _ => {}
             }
         }
     }

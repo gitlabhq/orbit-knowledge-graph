@@ -56,9 +56,11 @@ pub fn resolve(
     let (module_call_edges, call_edges) =
         build_call_edges(root, lang, &cross_edges, &reqs, &visible);
     let type_edges = build_type_edges(root, &call_edges, &cross_edges, &visible);
+    let field_edges = build_typed_field_edges(root, &cross_edges);
     cross_edges.extend(module_call_edges);
     cross_edges.extend(call_edges);
     cross_edges.extend(type_edges);
+    cross_edges.extend(field_edges);
     ResolveResult { cross_edges }
 }
 
@@ -468,6 +470,79 @@ fn resolve_type(
         }
     }
     None
+}
+
+fn build_typed_field_edges(corpus: Cursor, cross_edges: &[Edge]) -> Vec<Edge> {
+    let mut edges = Vec::new();
+    for ce in cross_edges.iter().filter(|e| e.kind == EdgeKind::Imports) {
+        let target = corpus.follow(ce);
+        let target_dt = crate::canonical::def_type_of(target);
+        if !target_dt.is_some_and(|k| matches!(k, C::Class | C::Struct)) {
+            continue;
+        }
+        let target_name = target.child_sym(C::DefName).unwrap_or(0);
+        if target_name == 0 {
+            continue;
+        }
+        let ft = &corpus.trees_ref()[ce.from.tree as usize];
+        for i in 0..ft.len() {
+            let nr = ft.cursor(i);
+            if !nr.is(C::Binding) {
+                continue;
+            }
+            let Some(ivar) = nr.child(C::Ivar) else {
+                continue;
+            };
+            let callee_sym = nr
+                .child(C::Rhs)
+                .and_then(|r| r.child(C::Call))
+                .and_then(|c| c.child_sym(C::Callee));
+            if callee_sym != Some(target_name) {
+                continue;
+            }
+            let ivar_sym = ivar.sym();
+            if ivar_sym == 0 {
+                continue;
+            }
+            let class = nr.enclosing(|a| {
+                crate::canonical::def_type_of(a)
+                    .is_some_and(|k| matches!(k, C::Class | C::Struct | C::ImplBlock))
+            });
+            let Some(cls) = class else {
+                continue;
+            };
+            for d in cls.descendants().filter(|d| d.is(C::Call)) {
+                let Some(callee) = d.child(C::Callee) else {
+                    continue;
+                };
+                let Some(member) = callee.child(C::Member) else {
+                    continue;
+                };
+                let obj_ivar = member
+                    .child(C::Object)
+                    .and_then(|o| o.child(C::Ivar));
+                if !obj_ivar.is_some_and(|iv| iv.sym() == ivar_sym) {
+                    continue;
+                }
+                let method_sym = member.sym();
+                if method_sym == 0 {
+                    continue;
+                }
+                let caller = d.enclosing(|a| crate::canonical::has_def_type(a));
+                let Some(caller_def) = caller else {
+                    continue;
+                };
+                if let Some(m) = find_method_in(target, method_sym) {
+                    edges.push(
+                        corpus
+                            .jump(ce.from.tree, caller_def.index())
+                            .edge_to(m, EdgeKind::Calls),
+                    );
+                }
+            }
+        }
+    }
+    edges
 }
 
 fn follow_import_chain(

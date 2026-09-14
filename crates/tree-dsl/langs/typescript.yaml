@@ -24,15 +24,7 @@ stages:
       - match: '(implements_clause $$$TYPES:type_identifier $$$REST)'
         replace: '(implements_clause $$$REST $$$TYPES=>__supertype)'
 
-      # Constructor parameter property: private foo: Bar → property def + typed binding
-      - match: '(required_parameter (accessibility_modifier) pattern: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
-      - match: '(required_parameter (accessibility_modifier) pattern: $N)'
-        replace: '(__def (__defname @$N) (__property))'
-      - match: '(required_parameter **/(readonly) pattern: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
-      - match: '(required_parameter **/(readonly) pattern: $N)'
-        replace: '(__def (__defname @$N) (__property))'
+
 
       # Import alias: capture real name as sym, alias as child
       - match: '(import_specifier name: $N alias: $A)'
