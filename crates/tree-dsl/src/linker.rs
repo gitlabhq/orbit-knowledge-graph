@@ -168,12 +168,8 @@ impl Fold {
                     }
                 }
             } else {
-                self.resolve_obj(
-                    tree,
-                    member.child(C::Object).map(|o| o.sym()).unwrap_or(0),
-                    method,
-                    from,
-                );
+                let obj_sym = resolve_member_root(member);
+                self.resolve_obj(tree, obj_sym, method, from);
             }
         } else if let Some(ivar) = callee.child(C::Ivar) {
             if ivar.sym() != 0 {
@@ -457,6 +453,22 @@ impl Fold {
             Some(di) if self.is_class(tree, self.defs[di]) => Value::Type(rt_sym),
             Some(di) => Value::LocalDef(di as u32),
             None => Value::Type(rt_sym),
+        }
+    }
+}
+
+fn resolve_member_root(member: crate::tree::Cursor) -> u32 {
+    let mut cur = member;
+    loop {
+        let Some(obj) = cur.child(C::Object) else {
+            return cur.sym();
+        };
+        if let Some(inner) = obj.child(C::Member) {
+            cur = inner;
+        } else if obj.child(C::Ivar).is_some() {
+            return 0;
+        } else {
+            return obj.sym();
         }
     }
 }

@@ -35,6 +35,9 @@ stages:
       # self.x.method → __member "method" (__object __ivar)
       - match: '(attribute object: $O:__ivar attribute: $M)'
         replace: '(__member @$M (__object $O))'
+      # a.b.c → __member "c" (__object (__member "b" (__object "a")))
+      - match: '(attribute object: $O:__member attribute: $M)'
+        replace: '(__member @$M (__object $O))'
       # a.b → __member "b" (__object "a")
       - match: '(attribute object: $O attribute: $M)'
         replace: '(__member @$M (__object @$O))'
@@ -58,9 +61,9 @@ stages:
       - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name|aliased_import)'
         replace: '(__import (__source @$M) (__source_path @$M|to_rel(".")) $$$NAMES->__name)'
 
-      # import X
+      # import X / import X.Y.Z — bare import
       - match: '(import_statement name: $N:dotted_name)'
-        replace: '(__import (__source @$N) (__source_path @$N|to_rel(".")) (__name @$N))'
+        replace: '(__import (__source @$N) (__source_path @$N|to_rel(".")) (__name @$N) (__alias @$N|split_first(".")))'
 
       # import X as Y — rekind capture to __name, keeping __alias subtree
       - match: '(import_statement name: $N:aliased_import)'

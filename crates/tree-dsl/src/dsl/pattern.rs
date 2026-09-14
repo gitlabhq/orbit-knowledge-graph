@@ -59,6 +59,7 @@ pub enum Tf {
     FieldChild(u16, u16),
     StripLeading(char),
     SplitLast(Box<str>),
+    SplitFirst(Box<str>),
     Replace(Box<str>, Box<str>),
     StripSuffix(Box<str>),
     Prepend(Box<str>),
@@ -75,6 +76,7 @@ impl Tf {
             Tf::StripSuffix(p) => s.strip_suffix(&**p).unwrap_or(s).to_string(),
             Tf::StripLeading(ch) => s.trim_start_matches(*ch).to_string(),
             Tf::SplitLast(sep) => s.rsplit_once(&**sep).map_or(s, |(_, r)| r).to_string(),
+            Tf::SplitFirst(sep) => s.split_once(&**sep).map_or(s, |(l, _)| l).to_string(),
             Tf::Replace(from, to) => s.replace(&**from, to),
             Tf::Prepend(p) => format!("{p}{s}"),
             Tf::Lowercase => s.to_lowercase(),
@@ -505,6 +507,7 @@ fn visit_tf_expr<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>) -> Tf {
                 "prepend" => Tf::Prepend(args[0].into()),
                 "to_rel" => Tf::ToRel(args[0].chars().next().expect("to_rel arg")),
                 "split_last" => Tf::SplitLast(args[0].into()),
+                "split_first" => Tf::SplitFirst(args[0].into()),
                 _ => panic!("unknown transform: {func}"),
             }
         }
