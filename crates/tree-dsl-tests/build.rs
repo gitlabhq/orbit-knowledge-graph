@@ -1,17 +1,14 @@
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
-    // Find fixtures via git common dir (main repo's integration-tests-codegraph)
-    let common_dir = std::process::Command::new("git")
-        .args(["rev-parse", "--git-common-dir"])
+    // Find fixtures from the worktree root
+    let toplevel = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
         .current_dir(&manifest_dir)
         .output()
         .expect("git rev-parse failed")
         .stdout;
-    let common = String::from_utf8(common_dir).unwrap();
-    let root = std::path::Path::new(common.trim())
-        .parent()
-        .unwrap()
+    let root = std::path::Path::new(String::from_utf8(toplevel).unwrap().trim())
         .join("crates/integration-tests-codegraph/fixtures");
     let root = root.to_str().unwrap();
 

@@ -25,13 +25,14 @@ fixtures:
       }
 
 tests:
-  - name: inner is not nested inside outer via Defines
+  - name: inner is nested inside outer via Defines
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE parent.name = 'outer' AND child.name = 'inner' AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { parent: "outer", child: "outer::inner" } }
 
   - name: outer calls inner
     query: |
