@@ -20,6 +20,6 @@ expect:
     edge_count: 9
     page_count: 3
   pages:
-    - skip_requirements: ["relationship:MEMBER_OF"]
-    - skip_requirements: ["relationship:MEMBER_OF"]
-    - skip_requirements: ["relationship:MEMBER_OF"]
+    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF"]
+    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF"]
+    - skip_requirements: [node_count, cursor, "relationship:MEMBER_OF"]

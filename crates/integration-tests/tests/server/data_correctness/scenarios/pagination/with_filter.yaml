@@ -16,19 +16,22 @@ query:
 
 expect:
   pages:
-    - nodes:
+    - node_count: 2
+      nodes:
         User:
           order: [1, 2]
           filters:
             state: active
       has_more: true
-    - nodes:
+    - node_count: 2
+      nodes:
         User:
           order: [3, 4]
           filters:
             state: active
       has_more: true
-    - nodes:
+    - node_count: 2
+      nodes:
         User:
           order: [6, 7]
           filters:

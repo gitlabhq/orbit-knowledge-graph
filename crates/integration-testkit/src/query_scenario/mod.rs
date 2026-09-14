@@ -354,9 +354,6 @@ async fn run_pages(
         }
 
         apply_expect(&view, page_expect, &page_label);
-        if page_expect.node_count.is_none() {
-            view.assert_node_count(view.node_count());
-        }
 
         match next_cursor {
             Some(cursor) => query_str = with_after(frontend, base_query.trim_end(), &cursor),
@@ -505,6 +502,11 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 .get("id")
                 .and_then(|v| v.as_i64())
                 .unwrap_or_else(|| panic!("{label}: node {entity} row missing integer 'id'"));
+            let prop_count = row.keys().filter(|k| *k != "id").count();
+            assert!(
+                prop_count > 0,
+                "{label}: node {entity}/{id} row has no property assertions (only 'id')"
+            );
             let found = view
                 .find_node(entity, id)
                 .unwrap_or_else(|| panic!("{label}: node {entity}/{id} not found"));
@@ -800,6 +802,13 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             expected,
             "{label}: has_more mismatch"
         );
+    }
+    let has_edge_assertions = !expect.edges.is_empty()
+        || !expect.edge_exists.is_empty()
+        || !expect.edge_absent.is_empty()
+        || !expect.edge_count.is_empty();
+    if has_edge_assertions && !view.response.edges.is_empty() {
+        view.assert_all_edge_types_covered();
     }
 }
 
