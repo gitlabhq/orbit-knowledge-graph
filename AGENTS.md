@@ -106,6 +106,8 @@ See [`crates/code-graph/AGENTS.md`](crates/code-graph/AGENTS.md).
 
 ## MR and issue descriptions and comments
 
+Load the `orbit-planning` skill before creating or labeling issues, epics, or MRs so they use the canonical taxonomy and roadmap rules.
+
 Always use the templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/`, and read the TEMPLATE CONVENTION block at the top of each one before writing the description.
 
 The single most common failure is dumping implementation mechanics into the top sections. The "What does this MR do and why?" section is for a reviewer skimming in 30 seconds: 2-3 plain sentences naming the symptom and the fix, no function names, no type names, no constants, no wire-format detail. Everything mechanical — function/type/constant names, encoder traces, file-by-file walkthroughs, alternatives considered — goes in the Agent context block, never above it. If the headline section has more than three backticked identifiers in it, you are writing at the wrong level; move it down.
