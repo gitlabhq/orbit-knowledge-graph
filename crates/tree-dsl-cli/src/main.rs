@@ -333,6 +333,21 @@ fn cmd_index(path: &str, lang_override: Option<String>) -> anyhow::Result<()> {
     eprintln!("parse:        {:.2}s", result.timings.parse_s);
     eprintln!("resolve:      {:.2}s", result.timings.resolve_s);
     eprintln!("total:        {:.2}s", elapsed.as_secs_f64());
+
+    let graphs_dir = dirs::home_dir()
+        .unwrap_or_else(|| Path::new(".").to_path_buf())
+        .join(".orbit/var/graphs");
+    std::fs::create_dir_all(&graphs_dir)?;
+    let name = Path::new(path)
+        .file_name()
+        .unwrap_or(std::ffi::OsStr::new("graph"))
+        .to_string_lossy();
+    let snap_path = graphs_dir.join(format!("{name}.bin"));
+    let t_save = Instant::now();
+    result.save(&snap_path)?;
+    let save_s = t_save.elapsed().as_secs_f64();
+    let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
+    eprintln!("saved:        {} ({:.1} MB, {:.2}s)", snap_path.display(), size_mb, save_s);
     Ok(())
 }
 
