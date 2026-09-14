@@ -234,24 +234,15 @@ impl<'a> Cursor<'a> {
     // ── Child queries ──
 
     pub fn child(&self, ck: Canonical) -> Option<Cursor<'a>> {
-        self.tree()
-            .child_by_kind(self.idx, ck as u16)
-            .map(|idx| Cursor {
-                trees: self.trees,
-                fi: self.fi,
-                idx,
-            })
+        self.children().find(|n| n.is(ck))
     }
 
     pub fn child_sym(&self, ck: Canonical) -> Option<u32> {
-        self.tree()
-            .child_by_kind(self.idx, ck as u16)
-            .map(|i| self.tree().nodes[i as usize].sym)
-            .filter(|&s| s != 0)
+        self.child(ck).map(|n| n.sym()).filter(|&s| s != 0)
     }
 
     pub fn has(&self, ck: Canonical) -> bool {
-        self.tree().child_by_kind(self.idx, ck as u16).is_some()
+        self.children().any(|n| n.is(ck))
     }
 
     /// Children that are __name nodes with nonzero sym.
