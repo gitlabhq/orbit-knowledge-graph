@@ -247,6 +247,7 @@ impl QueryExpect {
             || !self.edge_count.is_empty()
             || !self.groups.is_empty()
             || !self.group_columns.is_empty()
+            || self.repeat_count.is_some()
             || self.empty_aggregation
             || self.row_count.is_some()
             || !self.row_values.is_empty()

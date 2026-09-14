@@ -1037,7 +1037,9 @@ fn canonical_ids(resp: &serde_json::Value) -> Vec<(String, i64)> {
                         .as_str()
                         .and_then(|s| s.parse().ok())
                         .or_else(|| n["id"].as_i64())
-                        .unwrap_or(0);
+                        .unwrap_or_else(|| {
+                            panic!("determinism check: node missing numeric 'id': {n}")
+                        });
                     (entity, id)
                 })
                 .collect()
@@ -1059,12 +1061,16 @@ fn canonical_edges(resp: &serde_json::Value) -> Vec<(String, i64, i64)> {
                         .as_str()
                         .and_then(|s| s.parse().ok())
                         .or_else(|| e["from_id"].as_i64())
-                        .unwrap_or(0);
+                        .unwrap_or_else(|| {
+                            panic!("determinism check: edge missing numeric 'from_id': {e}")
+                        });
                     let to = e["to_id"]
                         .as_str()
                         .and_then(|s| s.parse().ok())
                         .or_else(|| e["to_id"].as_i64())
-                        .unwrap_or(0);
+                        .unwrap_or_else(|| {
+                            panic!("determinism check: edge missing numeric 'to_id': {e}")
+                        });
                     (kind, from, to)
                 })
                 .collect()

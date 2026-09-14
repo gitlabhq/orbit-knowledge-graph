@@ -18,6 +18,7 @@ expect:
       ids: [1, 2, 3]
     Note:
       ids: [3000, 3002, 3003]
+      prop_present: [note]
       rows:
         - id: 3002
           note: { repeat: "🙂", count: 10000, suffix: "tail" }
