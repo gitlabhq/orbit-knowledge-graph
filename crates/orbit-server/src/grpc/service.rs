@@ -897,7 +897,7 @@ mod tests {
         };
         for (llm, expected) in [
             (false, "{\"domains\":[],\"edges\":[\"AUTHORED\"]}"),
-            (true, "edges[1]: AUTHORED"),
+            (true, "domains[0]:\nedges[1]: AUTHORED"),
         ] {
             let result = schema_query_result(&response, llm).unwrap();
             let content = result.content.unwrap();
