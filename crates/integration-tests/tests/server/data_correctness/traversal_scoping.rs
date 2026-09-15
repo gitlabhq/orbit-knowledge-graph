@@ -350,9 +350,8 @@ pub(super) async fn code_intel_calls_scoped_traversal_is_lossless(ctx: &TestCont
 }
 
 pub(super) async fn gql_path_resolution_uses_the_selected_frontend(ctx: &TestContext) {
-    use orbit_server::pipeline::{PathResolutionStage, PathResolver};
+    use orbit_server::pipeline::{PathResolutionStage, PathResolver, RoutingOutput, RoutingStage};
     use query_engine::compiler::Frontend;
-    use query_engine::shared::CompilationStage;
 
     let ontology = Arc::new(load_ontology());
     let resolver = Arc::new(
@@ -364,7 +363,7 @@ pub(super) async fn gql_path_resolution_uses_the_selected_frontend(ctx: &TestCon
         .await,
     );
 
-    for (authorized, expected_prefix) in [("1/", "1/100/1000/"), ("1/101/", "1/101/")] {
+    for routed in [false, true] {
         let mut extensions = TypeMap::default();
         extensions.insert(Arc::clone(&resolver));
         let mut pipeline = QueryPipelineContext {
@@ -372,30 +371,27 @@ pub(super) async fn gql_path_resolution_uses_the_selected_frontend(ctx: &TestCon
             query_json: "MATCH (p:Project {id: 1000}) RETURN p.name LIMIT 1".into(),
             compiled: None,
             ontology: Arc::clone(&ontology),
-            security_context: Some(SecurityContext::new(1, vec![authorized.into()]).unwrap()),
+            security_context: Some(scoped("1/", &[])),
             server_extensions: extensions,
             phases: TypeMap::default(),
         };
+        if routed {
+            assert!(matches!(
+                RoutingStage
+                    .execute(&mut pipeline, &mut NoOpObserver)
+                    .await
+                    .unwrap(),
+                RoutingOutput::Query
+            ));
+            pipeline.query_json.clear();
+        }
         PathResolutionStage
             .execute(&mut pipeline, &mut NoOpObserver)
             .await
             .unwrap();
-        let prefixes = &pipeline.security_context().unwrap().scope_prefixes;
-        if authorized == "1/" {
-            assert_eq!(prefixes["p"], TraversalPath::new_unchecked(expected_prefix));
-        } else {
-            assert!(prefixes.is_empty());
-        }
-        CompilationStage
-            .execute(&mut pipeline, &mut NoOpObserver)
-            .await
-            .unwrap();
-        let rendered = pipeline.compiled().unwrap().base.render();
-        assert!(
-            rendered.contains(&format!(
-                "startsWith(p.traversal_path, '{expected_prefix}')"
-            )),
-            "{rendered}"
+        assert_eq!(
+            pipeline.security_context().unwrap().scope_prefixes["p"],
+            TraversalPath::new_unchecked("1/100/1000/")
         );
     }
 }

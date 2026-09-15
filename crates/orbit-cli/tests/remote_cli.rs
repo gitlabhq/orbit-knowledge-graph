@@ -259,7 +259,7 @@ fn gql_inline_and_stdin_preserve_query_text_and_response_bytes() {
             String::from_utf8_lossy(&output.stderr)
         );
         let sent: serde_json::Value = serde_json::from_str(&request.body).unwrap();
-        assert_eq!(sent["query"].as_str().unwrap().as_bytes(), text.as_bytes());
+        assert_eq!(sent["query"], text);
         assert_eq!(sent["language"], "gql");
         assert_eq!(sent["response_format"], format);
         assert_eq!(output.stdout, response.as_bytes());
