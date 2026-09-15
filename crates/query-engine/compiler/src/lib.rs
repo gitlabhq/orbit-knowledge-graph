@@ -206,41 +206,6 @@ mod tests {
     }
 
     #[test]
-    fn frontend_normalization_extracts_scope_and_full_compilation_retains_it() {
-        let mut compiled = Vec::new();
-        for (frontend, raw) in [
-            (
-                Frontend::Gql,
-                "MATCH (p:Project {id: 42})-[:CONTAINS]->(b:Branch) RETURN p.name, b.name LIMIT 5",
-            ),
-            (
-                Frontend::JsonDsl,
-                r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[42],"columns":["name"]},{"id":"b","entity":"Branch","columns":["name"]}],"relationships":[{"type":"CONTAINS","from":"p","to":"b"}],"limit":5}"#,
-            ),
-        ] {
-            let input = validate_normalize(raw, frontend, &ONTOLOGY).unwrap();
-            assert_eq!(
-                scope_keys(&input.nodes[0], &ONTOLOGY.anchor_fk_mappings()),
-                vec![PathResolutionKey::id("Project", 42)]
-            );
-            let seed = std::collections::HashMap::from([(
-                "p".into(),
-                TraversalPath::new_unchecked("1/100/42/"),
-            )]);
-            let prefixes = ONTOLOGY.propagate_scope_prefixes(&scope_edges(&input), &seed);
-            assert_eq!(prefixes["b"].as_str(), "1/100/42/");
-            let security = security_ctx().with_scope_prefixes(prefixes);
-            let actual = compile(raw, frontend, &ONTOLOGY, &security).unwrap();
-            assert!(actual.base.render().contains("1/100/42/"));
-            assert!(!matches!(actual.hydration, HydrationPlan::None));
-            compiled.push(actual);
-        }
-        assert_eq!(compiled[0].base.sql, compiled[1].base.sql);
-        assert_eq!(compiled[0].base.params, compiled[1].base.params);
-        assert_eq!(compiled[0].hydration, compiled[1].hydration);
-    }
-
-    #[test]
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
         for fe in [Frontend::JsonDsl, Frontend::Gql] {

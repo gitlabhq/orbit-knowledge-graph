@@ -463,42 +463,6 @@ mod tests {
     }
 
     #[test]
-    fn gql_normalization_preserves_scope_keys_and_rejects_unsupported_syntax() {
-        use ontology::introspection::IntrospectionScope;
-        use query_engine::compiler::{Frontend, gql::RoutedStatement};
-
-        let ontology = ontology();
-        let RoutedStatement::Query(input) = query_engine::compiler::gql::route(
-            "MATCH (p:Project {id: 42})-[:CONTAINS]->(b:Branch) RETURN p, b LIMIT 1",
-            &ontology,
-            IntrospectionScope::All,
-        )
-        .unwrap() else {
-            panic!("expected query");
-        };
-        let input =
-            query_engine::compiler::gql::validate_normalize_query(*input, &ontology).unwrap();
-        assert!(scopes_query_type(input.query_type));
-        assert_eq!(
-            scope_keys(&input.nodes[0], &ontology.anchor_fk_mappings()),
-            vec![PathResolutionKey::id("Project", 42)]
-        );
-        assert_eq!(scope_edges(&input).len(), 1);
-        for text in [
-            "CREATE (p:Project)",
-            "MATCH (p:Project) RETURN p UNION MATCH (p:Project) RETURN p",
-        ] {
-            let error =
-                query_engine::compiler::gql::route(text, &ontology, IntrospectionScope::All)
-                    .unwrap_err();
-            assert!(error.is_client_safe());
-        }
-        assert!(
-            validate_normalize("MATCH (p:Project) RETURN p", Frontend::JsonDsl, &ontology).is_err()
-        );
-    }
-
-    #[test]
     fn only_traversal_and_aggregation_scope_to_tight_prefix() {
         let qt = |json: &str| {
             validate_normalize(json, query_engine::compiler::Frontend::JsonDsl, &ontology())

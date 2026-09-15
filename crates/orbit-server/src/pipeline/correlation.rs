@@ -186,22 +186,13 @@ mod tests {
     fn base_payload_omits_correlation_when_absent() {
         let p = decode_base_payload(&log_comment_base(
             1,
-            "{}",
-            Frontend::JsonDsl,
-            *orbit_migrations::version::SCHEMA_VERSION,
-        ));
-        assert!(p.get("correlation_id").is_none());
-        assert_eq!(p["user_id"], 1);
-    }
-
-    #[test]
-    fn base_payload_tags_gql_queries() {
-        let p = decode_base_payload(&log_comment_base(
-            1,
             "MATCH (u:User) RETURN u",
             Frontend::Gql,
             *orbit_migrations::version::SCHEMA_VERSION,
         ));
+        assert!(p.get("correlation_id").is_none());
+        assert_eq!(p["user_id"], 1);
+        assert_eq!(p["query"], "MATCH (u:User) RETURN u");
         assert_eq!(p["language"], "gql");
     }
 }
