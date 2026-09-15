@@ -364,7 +364,7 @@ description = "Run a vendored dependency's vendor_script (e.g. mise vendor -- du
 usage = 'arg "<name>"'
 
 [tasks."vendor:all"]
-run = "bash ./scripts/vendored/run-all.sh vendor"
+run = "bash ./scripts/vendored/run.sh vendor --all"
 description = "Run vendor_script for every vendored dependency that has one"
 
 [tasks."check:vendored"]
@@ -373,7 +373,7 @@ description = "Run a vendored dependency's check_script (e.g. mise check:vendore
 usage = 'arg "<name>"'
 
 [tasks."check:vendored:all"]
-run = "bash ./scripts/vendored/run-all.sh check"
+run = "bash ./scripts/vendored/run.sh check --all"
 description = "Run check_script for every vendored dependency that has one"
 
 [tasks."ontology:validate"]
