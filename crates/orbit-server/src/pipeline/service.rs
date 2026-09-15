@@ -31,7 +31,7 @@ pub struct RawQuery {
 }
 
 pub enum QueryServiceOutput {
-    Graph(PipelineOutput),
+    Graph(Box<PipelineOutput>),
     Schema(SchemaResponse),
 }
 
@@ -163,7 +163,7 @@ impl QueryPipelineService {
                 .ok_or_else(|| {
                     PipelineError::custom("OutputStage did not produce PipelineOutput")
                 })?;
-            Ok(QueryServiceOutput::Graph(output))
+            Ok(QueryServiceOutput::Graph(Box::new(output)))
         };
 
         let output = match tokio::time::timeout(timeout, pipeline).await {

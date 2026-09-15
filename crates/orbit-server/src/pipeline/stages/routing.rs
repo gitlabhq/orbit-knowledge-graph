@@ -35,7 +35,7 @@ impl PipelineStage for RoutingStage {
             .inspect_err(|error| obs.record_error(error))?
             {
                 RoutedStatement::Query(input) => {
-                    ctx.phases.insert(input);
+                    ctx.phases.insert(*input);
                     Ok(RoutingOutput::Query)
                 }
                 RoutedStatement::Schema(response) => Ok(RoutingOutput::Schema(response)),
