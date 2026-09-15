@@ -2,31 +2,65 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
-use duckdb_client::search::definitions_from_batches;
-use orbit_search::Definition;
+use duckdb_client::search::{NodeHydrator, NodeValue};
 
 use crate::commands::{definition, setup::spec};
 use crate::workspace;
 
 const SIGNATURE_LINES: usize = 3;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SourceRange {
+    pub(crate) fqn: String,
+    pub(crate) kind: String,
+    pub(crate) file: String,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+}
+
+pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
+    let string = |property| {
+        node.properties
+            .get(property)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .context("node has an invalid source property")
+    };
+    let line = |property| {
+        node.properties
+            .get(property)
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|value| usize::try_from(value).ok())
+            .context("node has an invalid source property")
+    };
+    Ok(SourceRange {
+        fqn: string("fqn")?,
+        kind: string("definition_type")?,
+        file: string("file_path")?,
+        start: line("start_line")?,
+        end: line("end_line")?,
+    })
+}
+
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
     let (file, ids) = resolve_targets(&git.repo_path, &target.target)?;
     let file_mode = file.is_some();
-    let mut defs = if let Some(path) = file.as_deref() {
-        let definitions = definitions_in_file(&client, &git, path)?;
-        if definitions.is_empty() {
+    let hydrator = NodeHydrator::embedded("Definition")?;
+    let nodes = if let Some(path) = file.as_deref() {
+        let nodes = definitions_in_file(&client, &git, &hydrator, path)?;
+        if nodes.is_empty() {
             let launcher = spec::launcher();
             anyhow::bail!(
                 "no indexed definitions in {path:?} for commit {} — run `{launcher} grep` or index the checkout",
                 git.commit_sha
             );
         }
-        definitions
+        nodes
     } else {
-        definition::resolve_ids(&client, &git, &ids)?
+        definition::resolve_ids(&client, &git, &hydrator, &ids)?
     };
+    let mut defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
     defs.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
@@ -53,7 +87,11 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
             )?;
         }
         if target.outline {
-            let members = definitions_in_file(&client, &git, &file)?;
+            let members = definitions_in_file(&client, &git, &hydrator, &file)?;
+            let members = members
+                .iter()
+                .map(source_range)
+                .collect::<Result<Vec<_>>>()?;
             render_outline(&mut out, &file_defs, &members, &lines)?;
         } else {
             render(&mut out, &file_defs, &lines, file_mode)?;
@@ -68,14 +106,15 @@ pub(crate) const INLINE_BODY_LINES: usize = 120;
 pub(crate) fn render_bodies(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
-    defs: &[Definition],
+    nodes: &[NodeValue],
 ) -> Result<String> {
+    let defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
     let mut out = String::new();
-    for (file, file_defs) in outline(defs) {
+    for (file, file_defs) in outline(&defs) {
         let content = std::fs::read_to_string(git.repo_path.join(&file))
             .with_context(|| format!("failed to read {file}"))?;
         let lines: Vec<&str> = content.lines().collect();
-        let (short, long): (Vec<Definition>, Vec<Definition>) = file_defs
+        let (short, long): (Vec<SourceRange>, Vec<SourceRange>) = file_defs
             .into_iter()
             .partition(|d| d.end.saturating_sub(d.start) < INLINE_BODY_LINES);
         if !out.is_empty() {
@@ -83,7 +122,12 @@ pub(crate) fn render_bodies(
         }
         render(&mut out, &short, &lines, false)?;
         if !long.is_empty() {
-            let members = definitions_in_file(client, git, &file)?;
+            let hydrator = NodeHydrator::embedded("Definition")?;
+            let members = definitions_in_file(client, git, &hydrator, &file)?;
+            let members = members
+                .iter()
+                .map(source_range)
+                .collect::<Result<Vec<_>>>()?;
             if !short.is_empty() {
                 out.push('\n');
             }
@@ -134,27 +178,30 @@ fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
 fn definitions_in_file(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
+    hydrator: &NodeHydrator,
     path: &str,
-) -> Result<Vec<Definition>> {
-    let batches = client.query_arrow_json(
-        "SELECT id, fqn, definition_type, file_path, start_line, end_line
-         FROM gl_definition
-         WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-           AND fqn NOT LIKE '%@%'
-         ORDER BY start_line, end_line DESC, fqn",
+) -> Result<Vec<NodeValue>> {
+    let mut nodes = hydrator.query(
+        client,
         &[
-            git.project_id.into(),
-            git.commit_sha.clone().into(),
-            path.into(),
+            ("project_id", git.project_id.into()),
+            ("commit_sha", git.commit_sha.clone().into()),
+            ("file_path", path.into()),
         ],
+        None,
     )?;
-    Ok(definitions_from_batches(&batches))
+    nodes.retain(|node| {
+        node.properties["fqn"]
+            .as_str()
+            .is_some_and(|fqn| !fqn.contains('@'))
+    });
+    Ok(nodes)
 }
 
 pub(crate) fn render_outline(
     out: &mut String,
-    defs: &[Definition],
-    members: &[Definition],
+    defs: &[SourceRange],
+    members: &[SourceRange],
     lines: &[&str],
 ) -> std::fmt::Result {
     for (i, def) in defs.iter().enumerate() {
@@ -167,7 +214,7 @@ pub(crate) fn render_outline(
             def.fqn, def.kind, def.file, def.start, def.end
         )?;
         write_signature(out, lines, def.start, def.end)?;
-        let mut nested: Vec<&Definition> = members
+        let mut nested: Vec<&SourceRange> = members
             .iter()
             .filter(|m| m != &def && belongs_to(def, m))
             .collect();
@@ -189,7 +236,7 @@ pub(crate) fn render_outline(
     Ok(())
 }
 
-fn belongs_to(def: &Definition, member: &Definition) -> bool {
+fn belongs_to(def: &SourceRange, member: &SourceRange) -> bool {
     let by_range = member.start >= def.start && member.end <= def.end;
     let by_name = member
         .fqn
@@ -213,8 +260,8 @@ fn write_signature(out: &mut String, lines: &[&str], start: usize, end: usize) -
     Ok(())
 }
 
-pub(crate) fn outline(defs: &[Definition]) -> BTreeMap<String, Vec<Definition>> {
-    let mut by_file: BTreeMap<String, Vec<Definition>> = BTreeMap::new();
+pub(crate) fn outline(defs: &[SourceRange]) -> BTreeMap<String, Vec<SourceRange>> {
+    let mut by_file: BTreeMap<String, Vec<SourceRange>> = BTreeMap::new();
     for def in defs {
         let entry = by_file.entry(def.file.clone()).or_default();
         if entry
@@ -230,14 +277,14 @@ pub(crate) fn outline(defs: &[Definition]) -> BTreeMap<String, Vec<Definition>> 
 
 pub(crate) fn render(
     out: &mut String,
-    defs: &[Definition],
+    defs: &[SourceRange],
     lines: &[&str],
     include_gaps: bool,
 ) -> std::fmt::Result {
-    let mut blocks: Vec<(Option<&Definition>, usize, usize)> = Vec::new();
+    let mut blocks: Vec<(Option<&SourceRange>, usize, usize)> = Vec::new();
     let mut cursor = 1;
     let push_gap =
-        |blocks: &mut Vec<(Option<&Definition>, usize, usize)>, start: usize, end: usize| {
+        |blocks: &mut Vec<(Option<&SourceRange>, usize, usize)>, start: usize, end: usize| {
             if !include_gaps || start > end {
                 return;
             }
@@ -289,9 +336,8 @@ fn write_lines(out: &mut String, lines: &[&str], start: usize, end: usize) -> st
 mod tests {
     use super::*;
 
-    fn def(fqn: &str, kind: &str, start: usize, end: usize) -> Definition {
-        Definition {
-            id: 0,
+    fn def(fqn: &str, kind: &str, start: usize, end: usize) -> SourceRange {
+        SourceRange {
             fqn: fqn.to_string(),
             kind: kind.to_string(),
             file: "src/lib.rs".to_string(),

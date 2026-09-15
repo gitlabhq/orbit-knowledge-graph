@@ -1,15 +1,17 @@
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use duckdb_client::search::excluded_path_predicate;
+use duckdb_client::search::{NodeHydrator, excluded_path_predicate};
 use duckdb_client::{bool_column, string_column};
 
 use crate::commands::{context, definition};
 use crate::workspace;
 
-const LABELS_CTE: &str = "labels AS (
-  SELECT id, fqn AS label,
-         file_path || ':' || CAST(start_line AS VARCHAR) AS loc, file_path AS path
-  FROM gl_definition WHERE project_id = ?2 AND commit_sha = ?3
+fn labels_cte(definition: &NodeHydrator) -> Result<String> {
+    Ok(format!(
+        "labels AS (
+  SELECT {id} AS id, {fqn} AS label,
+         {file} || ':' || CAST({start} AS VARCHAR) AS loc, {file} AS path
+  FROM {table} WHERE {project} = ?2 AND {commit} = ?3
   UNION ALL
   SELECT id, path, '', path FROM gl_file WHERE project_id = ?2 AND commit_sha = ?3
   UNION ALL
@@ -17,7 +19,16 @@ const LABELS_CTE: &str = "labels AS (
   UNION ALL
   SELECT id, identifier_name, '', file_path FROM gl_imported_symbol
   WHERE project_id = ?2 AND commit_sha = ?3
-)";
+)",
+        id = definition.column("id")?,
+        fqn = definition.column("fqn")?,
+        file = definition.column("file_path")?,
+        start = definition.column("start_line")?,
+        table = definition.table(),
+        project = definition.column("project_id")?,
+        commit = definition.column("commit_sha")?,
+    ))
+}
 
 struct Row {
     kind: String,
@@ -55,12 +66,18 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         file.is_none(),
         "relationships require Definition:<id> targets"
     );
-    let defs = definition::resolve_ids(&client, &git, &ids)?;
+    let hydrator = NodeHydrator::embedded("Definition")?;
+    let defs = definition::resolve_ids(&client, &git, &hydrator, &ids)?;
+    let labels_cte = labels_cte(&hydrator)?;
+    let definition_id = hydrator.column("id")?;
+    let definition_fqn = hydrator.column("fqn")?;
+    let definition_table = hydrator.table();
     let hidden_expr = format!("COALESCE({}, FALSE)", excluded_path_predicate("l.path"));
     for (i, def) in defs.iter().enumerate() {
         if i > 0 {
             println!();
         }
+        let range = context::source_range(def)?;
         let params = [
             def.id.into(),
             git.project_id.into(),
@@ -68,7 +85,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         ];
         let edges = client.query_arrow_json(
             &format!(
-                "WITH {LABELS_CTE}
+                "WITH {labels_cte}
 SELECT DISTINCT e.relationship_kind AS kind,
        CASE WHEN e.source_id = ?1 THEN '-->' ELSE '<--' END AS dir,
        l.label, l.loc, '' AS via, {hidden_expr} AS hidden
@@ -83,17 +100,17 @@ ORDER BY kind, dir DESC, l.path, l.label, l.loc"
 
         let via = client.query_arrow_json(
             &format!(
-                "WITH {LABELS_CTE},
+                "WITH {labels_cte},
 members AS (
   SELECT target_id AS id FROM gl_edge
   WHERE source_id = ?1 AND relationship_kind = 'DEFINES'
 )
 SELECT e.relationship_kind AS kind, '<--' AS dir, l.label, l.loc,
-       string_agg(DISTINCT def_name(m.fqn), ', ' ORDER BY def_name(m.fqn)) AS via,
+       string_agg(DISTINCT def_name(m.{definition_fqn}), ', ' ORDER BY def_name(m.{definition_fqn})) AS via,
        {hidden_expr} AS hidden
 FROM gl_edge e
 JOIN members ON members.id = e.target_id
-JOIN gl_definition m ON m.id = e.target_id
+JOIN {definition_table} m ON m.{definition_id} = e.target_id
 JOIN labels l ON l.id = e.source_id
 WHERE e.relationship_kind <> 'DEFINES'
   AND e.source_id <> ?1
@@ -108,11 +125,11 @@ ORDER BY kind, l.path, l.label, l.loc"
         println!(
             "Definition:{}  {}  [{}]  {}:{}-{}  (links {}, via members {})",
             def.id,
-            def.fqn,
-            def.kind,
-            def.file,
-            def.start,
-            def.end,
+            range.fqn,
+            range.kind,
+            range.file,
+            range.start,
+            range.end,
             links.len(),
             via.len(),
         );

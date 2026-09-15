@@ -1,12 +1,15 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
+use ontology::Ontology;
+use serde_json::{Map, Value};
 
 use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
 use orbit_search::grep::{GrepError, GrepSource, grep};
 use orbit_search::{
-    ANCHOR_SIM, CorpusRow, Definition, EXACT_NAME_SIM, GrepOutcome, RecallFilter, SearchVocab,
-    TermRecall,
+    ANCHOR_SIM, CorpusRow, EXACT_NAME_SIM, GrepOutcome, RecallFilter, SearchVocab, TermRecall,
 };
 
 pub const CONTEXT_SIM_CAP: f64 = 0.99;
@@ -19,18 +22,167 @@ pub const DEF_DOC_PREFIX: &str = "gl_def_doc_";
 
 pub const GLOB_CHARS: [char; 3] = ['*', '?', '['];
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct NodeValue {
+    pub entity_type: String,
+    pub id: i64,
+    pub properties: Map<String, Value>,
+}
+
+pub struct NodeHydrator {
+    entity_type: String,
+    table: String,
+    columns: HashMap<String, String>,
+    properties: Vec<String>,
+}
+
+impl NodeHydrator {
+    pub fn new(ontology: &Ontology, entity_type: &str) -> Result<Self> {
+        let node = ontology
+            .get_node(entity_type)
+            .with_context(|| format!("ontology node {entity_type:?} does not exist"))?;
+        let columns: HashMap<String, String> = node
+            .fields
+            .iter()
+            .filter_map(|field| Some((field.name.clone(), field.column_name()?.to_string())))
+            .collect();
+        let properties = if node.default_columns.is_empty() {
+            columns
+                .keys()
+                .filter(|name| *name != "id")
+                .cloned()
+                .collect()
+        } else {
+            node.default_columns
+                .iter()
+                .filter(|name| *name != "id" && columns.contains_key(*name))
+                .cloned()
+                .collect()
+        };
+        anyhow::ensure!(
+            columns.contains_key("id"),
+            "ontology node has no database-backed id property"
+        );
+        Ok(Self {
+            entity_type: node.name.clone(),
+            table: node.destination_table.clone(),
+            columns,
+            properties,
+        })
+    }
+
+    pub fn embedded(entity_type: &str) -> Result<Self> {
+        let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
+        Self::new(&ontology, entity_type)
+    }
+
+    pub fn column(&self, property: &str) -> Result<&str> {
+        self.columns
+            .get(property)
+            .map(String::as_str)
+            .with_context(|| {
+                format!(
+                    "{property:?} is not a database property of {}",
+                    self.entity_type
+                )
+            })
+    }
+
+    pub fn table(&self) -> &str {
+        &self.table
+    }
+
+    fn projection(&self) -> String {
+        let properties = self
+            .properties
+            .iter()
+            .map(|property| format!("{property} := n.{}", self.columns[property]))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "n.{} AS id, to_json(struct_pack({properties})) AS properties",
+            self.columns["id"]
+        )
+    }
+
+    pub fn query(
+        &self,
+        client: &DuckDbClient,
+        filters: &[(&str, Value)],
+        ids: Option<&[i64]>,
+    ) -> Result<Vec<NodeValue>> {
+        if ids.is_some_and(<[i64]>::is_empty) {
+            return Ok(Vec::new());
+        }
+        let mut predicates: Vec<String> = filters
+            .iter()
+            .enumerate()
+            .map(|(index, (property, _))| {
+                self.column(property)
+                    .map(|column| format!("n.{column} = ?{}", index + 1))
+            })
+            .collect::<Result<_>>()?;
+        if let Some(ids) = ids {
+            predicates.push(format!("n.{} IN ({})", self.columns["id"], id_list(ids)));
+        }
+        let where_clause = if predicates.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", predicates.join(" AND "))
+        };
+        let params: Vec<Value> = filters.iter().map(|(_, value)| value.clone()).collect();
+        let batches = client.query_arrow_json(
+            &format!(
+                "SELECT {} FROM {} n{}",
+                self.projection(),
+                self.table,
+                where_clause
+            ),
+            &params,
+        )?;
+        let nodes = self.nodes_from_batches(&batches)?;
+        let Some(ids) = ids else {
+            return Ok(nodes);
+        };
+        let mut by_id: HashMap<i64, NodeValue> =
+            nodes.into_iter().map(|node| (node.id, node)).collect();
+        Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+    }
+
+    fn nodes_from_batches(&self, batches: &[RecordBatch]) -> Result<Vec<NodeValue>> {
+        i64_column(batches, "id")
+            .into_iter()
+            .zip(string_column(batches, "properties"))
+            .map(|(id, properties)| {
+                Ok(NodeValue {
+                    entity_type: self.entity_type.clone(),
+                    id,
+                    properties: serde_json::from_str(&properties)?,
+                })
+            })
+            .collect()
+    }
+}
+
 pub fn def_doc_table(project_id: i64) -> String {
     format!("{DEF_DOC_PREFIX}{project_id}")
 }
 
-pub fn def_doc_sql(doc_table: &str) -> String {
-    format!(
+pub fn def_doc_sql(doc_table: &str, ontology: &Ontology) -> Result<String> {
+    let node = NodeHydrator::new(ontology, "Definition")?;
+    Ok(format!(
         "CREATE OR REPLACE TABLE {doc_table} AS
-SELECT DISTINCT commit_sha, id AS def_id,
-       fts_doc(def_name(fqn)) AS name,
-       fts_doc(fqn || ' ' || file_path) AS context
-FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2"
-    )
+SELECT DISTINCT {commit_sha} AS commit_sha, {id} AS def_id,
+       fts_doc(def_name({fqn})) AS name,
+       fts_doc({fqn} || ' ' || {file_path}) AS context
+FROM {table} WHERE {project_id} = ?1 AND {commit_sha} = ?2",
+        commit_sha = node.column("commit_sha")?,
+        id = node.column("id")?,
+        fqn = node.column("fqn")?,
+        file_path = node.column("file_path")?,
+        table = &node.table,
+        project_id = node.column("project_id")?,
+    ))
 }
 
 pub fn create_fts_index_sql(doc_table: &str) -> String {
@@ -43,13 +195,10 @@ pub struct DuckDbSearch {
     client: DuckDbClient,
     pid: i64,
     sha: String,
+    node: NodeHydrator,
 }
 
 impl DuckDbSearch {
-    pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
-        Self::scoped(client, project_id, commit_sha, &[])
-    }
-
     pub fn scoped(
         client: DuckDbClient,
         project_id: i64,
@@ -57,13 +206,15 @@ impl DuckDbSearch {
         paths: &[String],
     ) -> Result<Self> {
         let sha = sql_lit(commit_sha);
+        let node = NodeHydrator::embedded("Definition")?;
         client.load_extension("fts")?;
         ensure_search_index(&client, project_id, &sha)?;
-        client.execute(&corpus_table_sql(project_id, &sha, paths), &[])?;
+        client.execute(&corpus_table_sql(project_id, &sha, paths, &node)?, &[])?;
         Ok(Self {
             client,
             pid: project_id,
-            sha,
+            sha: commit_sha.to_string(),
+            node,
         })
     }
 
@@ -77,18 +228,28 @@ impl DuckDbSearch {
         limit: usize,
         vocab: &SearchVocab,
         filter: &RecallFilter,
-    ) -> Result<GrepOutcome> {
-        grep(self, query, limit, vocab, filter).map_err(|e| match e {
+    ) -> Result<(GrepOutcome, Vec<NodeValue>)> {
+        let outcome = grep(self, query, limit, vocab, filter).map_err(|e| match e {
             GrepError::Source(e) => e,
             e => anyhow::anyhow!("{e}"),
-        })
+        })?;
+        let ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
+        let nodes = self.node.query(
+            &self.client,
+            &[
+                ("project_id", self.pid.into()),
+                ("commit_sha", self.sha.clone().into()),
+            ],
+            Some(&ids),
+        )?;
+        Ok((outcome, nodes))
     }
 
-    pub fn list_corpus(&self, filter: &RecallFilter) -> Result<Vec<Definition>> {
+    pub fn list_corpus(&self, filter: &RecallFilter) -> Result<Vec<NodeValue>> {
         let batches = query(
             &self.client,
             &format!(
-                "SELECT id, fqn, definition_type, file_path, start_line, end_line
+                "SELECT id
 FROM search_corpus
 WHERE TRUE
 {}
@@ -96,7 +257,15 @@ ORDER BY file_path, start_line, end_line DESC, fqn",
                 kind_scope("definition_type", &filter.kinds)
             ),
         )?;
-        Ok(definitions_from_batches(&batches))
+        let ids = i64_column(&batches, "id");
+        self.node.query(
+            &self.client,
+            &[
+                ("project_id", self.pid.into()),
+                ("commit_sha", self.sha.clone().into()),
+            ],
+            Some(&ids),
+        )
     }
 }
 
@@ -123,7 +292,7 @@ impl GrepSource for DuckDbSearch {
     }
 
     fn recall(&self, terms: &[String], filter: &RecallFilter) -> Result<Vec<TermRecall>> {
-        let sql = recall_sql(self.pid, &self.sha, filter);
+        let sql = recall_sql(self.pid, &sql_lit(&self.sha), filter);
         terms
             .iter()
             .map(|term| {
@@ -159,16 +328,22 @@ impl GrepSource for DuckDbSearch {
         let sql = corpus_rows_sql(
             &format!(
                 "cand AS (
-  SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
-  FROM gl_definition d
-  WHERE d.project_id = {pid} AND d.commit_sha = {sha} AND d.id IN ({list})
+  SELECT d.{id} AS id, d.{fqn} AS fqn, d.{file_path} AS file_path
+  FROM {table} d
+  WHERE d.{project_id} = {pid} AND d.{commit_sha} = {sha} AND d.{id} IN ({list})
 )",
+                id = self.node.column("id")?,
+                fqn = self.node.column("fqn")?,
+                file_path = self.node.column("file_path")?,
+                table = &self.node.table,
+                project_id = self.node.column("project_id")?,
                 pid = self.pid,
-                sha = self.sha,
+                commit_sha = self.node.column("commit_sha")?,
+                sha = sql_lit(&self.sha),
                 list = id_list(ids),
             ),
             self.pid,
-            &self.sha,
+            &sql_lit(&self.sha),
         );
         Ok(rows_from_batches(&query(&self.client, &sql)?))
     }
@@ -255,24 +430,35 @@ ORDER BY sim DESC, id"
     )
 }
 
-fn corpus_table_sql(pid: i64, sha: &str, paths: &[String]) -> String {
-    format!(
+fn corpus_table_sql(pid: i64, sha: &str, paths: &[String], node: &NodeHydrator) -> Result<String> {
+    let id = node.column("id")?;
+    let fqn = node.column("fqn")?;
+    let kind = node.column("definition_type")?;
+    let file = node.column("file_path")?;
+    let start = node.column("start_line")?;
+    let end = node.column("end_line")?;
+    Ok(format!(
         "CREATE OR REPLACE TEMP TABLE search_corpus AS
-SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
-FROM gl_definition d
-WHERE d.project_id = {pid} AND d.commit_sha = {sha}
-  AND regexp_matches(d.file_path, {source_only})
-  AND NOT regexp_matches(d.name, '^[0-9]+$')
-  AND d.fqn NOT LIKE '%@%'
+SELECT d.{id} AS id, d.{fqn} AS fqn, d.{kind} AS definition_type,
+       d.{file} AS file_path, d.{start} AS start_line, d.{end} AS end_line
+FROM {table} d
+WHERE d.{project_id} = {pid} AND d.{commit_sha} = {sha}
+  AND regexp_matches(d.{file}, {source_only})
+  AND NOT regexp_matches(d.{name}, '^[0-9]+$')
+  AND d.{fqn} NOT LIKE '%@%'
 {exclude}{paths}",
+        table = &node.table,
+        project_id = node.column("project_id")?,
+        commit_sha = node.column("commit_sha")?,
+        name = node.column("name")?,
         source_only = sql_lit(&ext_regex(&search_corpus_exts())),
         exclude = if paths.is_empty() {
-            exclusions("d.file_path")
+            exclusions(&format!("d.{file}"))
         } else {
             String::new()
         },
-        paths = path_scope("d.file_path", paths, false),
-    )
+        paths = path_scope(&format!("d.{file}"), paths, false),
+    ))
 }
 
 pub fn kind_scope(col: &str, kinds: &[String]) -> String {
@@ -356,8 +542,7 @@ lens AS (
   WHERE commit_sha = {sha}
     AND def_id IN (SELECT id FROM cand)
 )
-SELECT c.id, c.fqn, c.definition_type, c.file_path, c.start_line, c.end_line,
-       COALESCE(deg.degree, 0) AS degree,
+SELECT c.id, c.fqn, c.file_path, COALESCE(deg.degree, 0) AS degree,
        COALESCE(lens.grams, 0) AS grams
 FROM cand c
 LEFT JOIN deg ON deg.id = c.id
@@ -365,34 +550,17 @@ LEFT JOIN lens ON lens.def_id = c.id"
     )
 }
 
-pub fn definitions_from_batches(batches: &[RecordBatch]) -> Vec<Definition> {
+fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
     let ids = i64_column(batches, "id");
     let fqns = string_column(batches, "fqn");
-    let kinds = string_column(batches, "definition_type");
     let files = string_column(batches, "file_path");
-    let starts = i64_column(batches, "start_line");
-    let ends = i64_column(batches, "end_line");
-    (0..ids.len())
-        .map(|i| Definition {
-            id: ids[i],
-            fqn: fqns[i].clone(),
-            kind: kinds[i].clone(),
-            file: files[i].clone(),
-            start: usize::try_from(starts[i]).unwrap_or(1),
-            end: usize::try_from(ends[i]).unwrap_or(0),
-        })
-        .collect()
-}
-
-fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
-    let definitions = definitions_from_batches(batches);
     let degrees = i64_column(batches, "degree");
     let grams = i64_column(batches, "grams");
-    definitions
-        .into_iter()
-        .enumerate()
-        .map(|(i, definition)| CorpusRow {
-            definition,
+    (0..ids.len())
+        .map(|i| CorpusRow {
+            id: ids[i],
+            fqn: fqns[i].clone(),
+            file: files[i].clone(),
             degree: degrees[i] as u64,
             grams: grams[i] as u64,
         })

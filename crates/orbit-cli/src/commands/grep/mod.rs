@@ -4,7 +4,8 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use orbit_search::{Definition, RecallFilter, SearchVocab, content_words};
+use duckdb_client::search::NodeValue;
+use orbit_search::{RecallFilter, SearchVocab, content_words};
 
 use crate::commands::context;
 use local::LocalBackend;
@@ -68,13 +69,13 @@ pub(crate) fn run(
             writeln!(out)?;
         }
         writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-        let outcome = backend.grep(query, per_query_limit, &vocab, &filter)?;
+        let (outcome, nodes) = backend.grep(query, per_query_limit, &vocab, &filter)?;
         let typed: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         if outcome.terms != typed {
             writeln!(out, "terms: {}", outcome.terms.join(" "))?;
         }
 
-        if outcome.matches.is_empty() {
+        if nodes.is_empty() {
             if paths.is_empty() && filter.is_empty() {
                 writeln!(out, "\nNo definitions match those terms.")?;
             } else {
@@ -92,13 +93,8 @@ pub(crate) fn run(
             continue;
         }
 
-        report_results(&mut out, &outcome)?;
-        let defs: Vec<Definition> = outcome
-            .matches
-            .iter()
-            .take(BODY_LIMIT)
-            .map(|m| m.definition.clone())
-            .collect();
+        report_results(&mut out, &outcome, &nodes)?;
+        let defs: Vec<NodeValue> = nodes.iter().take(BODY_LIMIT).cloned().collect();
         writeln!(out)?;
         write!(
             out,
@@ -129,8 +125,8 @@ fn report_outline(
         return Ok(());
     }
     writeln!(out, "\nDefinitions ({}):", rows.len())?;
-    for definition in &rows {
-        report_definition(out, definition)?;
+    for node in &rows {
+        report_definition(out, node)?;
     }
     Ok(())
 }
@@ -138,11 +134,12 @@ fn report_outline(
 fn report_results(
     out: &mut impl Write,
     outcome: &orbit_search::GrepOutcome,
-) -> std::io::Result<()> {
+    nodes: &[NodeValue],
+) -> Result<()> {
     report_confidence(out, outcome)?;
     writeln!(out, "\nDefinitions:")?;
-    for result in &outcome.matches {
-        report_definition(out, &result.definition)?;
+    for node in nodes {
+        report_definition(out, node)?;
     }
     let hidden = outcome.total.saturating_sub(outcome.matches.len());
     if hidden >= BROAD_HIDDEN_HITS {
@@ -159,17 +156,14 @@ fn report_results(
     Ok(())
 }
 
-fn report_definition(out: &mut impl Write, definition: &Definition) -> std::io::Result<()> {
+fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
+    let range = context::source_range(node)?;
     writeln!(
         out,
-        "  Definition:{}  {}  [{}]  {}:{}-{}",
-        definition.id,
-        definition.fqn,
-        definition.kind,
-        definition.file,
-        definition.start,
-        definition.end
-    )
+        "  {}:{}  {}  [{}]  {}:{}-{}",
+        node.entity_type, node.id, range.fqn, range.kind, range.file, range.start, range.end
+    )?;
+    Ok(())
 }
 
 const COMPOUND_TERM_HINT: usize = 5;
@@ -259,19 +253,24 @@ mod tests {
     fn results_print_definition_identity_and_full_location() {
         let mut result = outcome(Vec::new(), false);
         result.matches.push(orbit_search::GrepMatch {
-            definition: Definition {
-                id: 481,
-                fqn: "Repo::commit_hook".to_string(),
-                kind: "Method".to_string(),
-                file: "crates/repo/src/lib.rs".to_string(),
-                start: 42,
-                end: 57,
-            },
+            id: 481,
             score: 1.0,
         });
         result.total = 1;
+        let node = NodeValue {
+            entity_type: "Definition".to_string(),
+            id: 481,
+            properties: serde_json::from_value(serde_json::json!({
+                "fqn": "Repo::commit_hook",
+                "definition_type": "Method",
+                "file_path": "crates/repo/src/lib.rs",
+                "start_line": 42,
+                "end_line": 57
+            }))
+            .unwrap(),
+        };
         let mut buf = Vec::new();
-        report_results(&mut buf, &result).unwrap();
+        report_results(&mut buf, &result, &[node]).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             "\nDefinitions:\n  Definition:481  Repo::commit_hook  [Method]  crates/repo/src/lib.rs:42-57\n"
@@ -283,13 +282,13 @@ mod tests {
         let mut o = outcome(Vec::new(), false);
         o.total = 42;
         let mut buf = Vec::new();
-        report_results(&mut buf, &o).unwrap();
+        report_results(&mut buf, &o, &[]).unwrap();
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("42 more (narrow"), "{text}");
 
         o.total = 0;
         let mut buf = Vec::new();
-        report_results(&mut buf, &o).unwrap();
+        report_results(&mut buf, &o, &[]).unwrap();
         assert!(!String::from_utf8(buf).unwrap().contains(" more"));
     }
 

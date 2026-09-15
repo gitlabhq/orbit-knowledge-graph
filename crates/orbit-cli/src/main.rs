@@ -953,7 +953,7 @@ fn index_repo(
         .context("failed to load the DuckDB fts extension")?;
     client
         .execute(
-            &duckdb_client::search::def_doc_sql(&doc_table),
+            &duckdb_client::search::def_doc_sql(&doc_table, ontology)?,
             &[
                 serde_json::json!(git.project_id),
                 serde_json::json!(git.commit_sha),

@@ -44,7 +44,7 @@ impl LocalBackend {
         limit: usize,
         vocab: &SearchVocab,
         filter: &RecallFilter,
-    ) -> Result<GrepOutcome> {
+    ) -> Result<(GrepOutcome, Vec<duckdb_client::search::NodeValue>)> {
         self.search.grep(query, limit, vocab, filter)
     }
 }
@@ -107,7 +107,11 @@ mod tests {
             self.client.load_extension("fts").unwrap();
             self.client
                 .execute(
-                    &duckdb_client::search::def_doc_sql("gl_def_doc_7"),
+                    &duckdb_client::search::def_doc_sql(
+                        "gl_def_doc_7",
+                        &ontology::Ontology::load_embedded().unwrap(),
+                    )
+                    .unwrap(),
                     &[serde_json::json!(7), serde_json::json!("sha")],
                 )
                 .unwrap();
@@ -148,20 +152,14 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search
+        let (outcome, nodes) = search
             .grep("dlq publish", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        assert_eq!(
-            outcome.matches[0].definition,
-            orbit_search::Definition {
-                id: 1,
-                fqn: "Dlq::publish".to_string(),
-                kind: "Method".to_string(),
-                file: "app/services/dlq.rb".to_string(),
-                start: 1,
-                end: 2,
-            }
-        );
+        assert_eq!(nodes[0].entity_type, "Definition");
+        assert_eq!(nodes[0].id, 1);
+        assert_eq!(nodes[0].properties["fqn"], "Dlq::publish");
+        assert_eq!(nodes[0].properties["name"], "publish");
+        assert_eq!(nodes[0].properties["commit_sha"], "sha");
         assert!(!outcome.weak);
         assert!(outcome.unmatched_terms.is_empty());
     }
@@ -175,10 +173,10 @@ mod tests {
 
         let search = g.scoped_search(&["crates/compiler"]);
         let vocab = vocab(&search);
-        let outcome = search
+        let (outcome, _) = search
             .grep("limit", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        let ids: Vec<i64> = outcome.matches.iter().map(|m| m.definition.id).collect();
+        let ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
         assert_eq!(ids, vec![2]);
     }
 
@@ -191,10 +189,10 @@ mod tests {
 
         let search = g.scoped_search(&["crates/*/src/main.rs", "e2e/"]);
         let vocab = vocab(&search);
-        let outcome = search
+        let (outcome, _) = search
             .grep("limit", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        let mut ids: Vec<i64> = outcome.matches.iter().map(|m| m.definition.id).collect();
+        let mut ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
         ids.sort_unstable();
         assert_eq!(ids, vec![1, 3]);
     }
@@ -220,10 +218,10 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search
+        let (outcome, _) = search
             .grep("limit", 5, &vocab, &kinds(&["constant", "Field"]))
             .unwrap();
-        let mut ids: Vec<i64> = outcome.matches.iter().map(|m| m.definition.id).collect();
+        let mut ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
         ids.sort_unstable();
         assert_eq!(ids, vec![1, 2]);
     }
@@ -255,11 +253,11 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search
+        let (outcome, _) = search
             .grep("compile", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        assert_eq!(outcome.matches[0].definition.id, 1);
-        assert_eq!(outcome.matches[1].definition.id, 2);
+        assert_eq!(outcome.matches[0].id, 1);
+        assert_eq!(outcome.matches[1].id, 2);
         assert!(!outcome.weak);
     }
 
@@ -271,10 +269,10 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search
+        let (outcome, nodes) = search
             .grep("mr-title-check", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        assert_eq!(outcome.matches[0].definition.fqn, "mr-title-check");
+        assert_eq!(nodes[0].properties["fqn"], "mr-title-check");
         assert!(!outcome.weak);
     }
 
@@ -286,14 +284,14 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let outcome = search
+        let (outcome, _) = search
             .grep("find", 5, &vocab, &RecallFilter::default())
             .unwrap();
         assert!(
             outcome.unmatched_terms.is_empty(),
             "identifiers colliding with English stopwords must recall"
         );
-        assert_eq!(outcome.matches[0].definition.id, 1);
+        assert_eq!(outcome.matches[0].id, 1);
     }
 
     #[test]
