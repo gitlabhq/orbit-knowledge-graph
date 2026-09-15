@@ -177,7 +177,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22max%28%28gkg_indexer_sdlc_watermark_lag_seconds%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%20and%20changes%28gkg_indexer_sdlc_watermark_lag_seconds%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B6m%5D%29%20%3E%200%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22max%28%28gkg_indexer_sdlc_watermark_lag_seconds%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%20and%20on%20%28pod%2C%20entity%29%20%28increase%28gkg_indexer_sdlc_pipeline_duration_seconds_count%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B6m%5D%29%20%3E%200%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -199,7 +199,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(max((gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"} and changes(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"}[6m]) > 0))) or vector(0)",
+          "expr": "(max((gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"} and on (pod, entity) (increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[6m]) > 0)))) or vector(0)",
           "legendFormat": "SDLC: max watermark lag",
           "refId": "A"
         }
@@ -1844,7 +1844,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 9,
+        "w": 12,
         "x": 0,
         "y": 69
       },
@@ -1868,66 +1868,13 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "max by (entity) ((gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"} and changes(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"}[6m]) > 0))",
+          "expr": "max by (entity) ((gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"} and on (pod, entity) (increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[6m]) > 0)))",
           "legendFormat": "{{entity}}",
           "refId": "A"
         }
       ],
       "title": "SDLC: watermark lag per entity",
       "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "SDLC entities that completed no run on any replica in the last 65 minutes. Every entity runs during the hourly namespace sweep, so anything above 0 means an entity has stalled.",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "—",
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 3,
-        "x": 9,
-        "y": 69
-      },
-      "id": 40,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22count%28%28count%20by%20%28entity%29%20%28gkg_indexer_sdlc_watermark_lag_seconds%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%29%20unless%20count%20by%20%28entity%29%20%28changes%28gkg_indexer_sdlc_watermark_lag_seconds%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B65m%5D%29%20%3E%200%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "(count((count by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"}) unless count by (entity) (changes(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"}[65m]) > 0)))) or vector(0)",
-          "legendFormat": "SDLC: entities with no run in 65m",
-          "refId": "A"
-        }
-      ],
-      "title": "SDLC: entities with no run in 65m",
-      "type": "stat"
     },
     {
       "datasource": {
@@ -1952,7 +1899,7 @@
         "x": 12,
         "y": 69
       },
-      "id": 41,
+      "id": 40,
       "options": {
         "legend": {
           "calcs": [
@@ -1981,12 +1928,65 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "SDLC entities that completed no run on any replica in the last 65 minutes. Every entity runs during the hourly namespace sweep, so anything above 0 means an entity has stalled.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 77
+      },
+      "id": 41,
+      "links": [
+        {
+          "targetBlank": false,
+          "title": "Open in Explore",
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22count%28%28count%20by%20%28entity%29%20%28gkg_indexer_sdlc_watermark_lag_seconds%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%29%20unless%20count%20by%20%28entity%29%20%28increase%28gkg_indexer_sdlc_pipeline_duration_seconds_count%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B65m%5D%29%20%3E%200%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "(count((count by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"}) unless count by (entity) (increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[65m]) > 0)))) or vector(0)",
+          "legendFormat": "SDLC: stalled entities",
+          "refId": "A"
+        }
+      ],
+      "title": "SDLC: stalled entities",
+      "type": "stat"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 77
+        "y": 81
       },
       "id": 42,
       "panels": [],
@@ -2009,7 +2009,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 78
+        "y": 82
       },
       "id": 43,
       "links": [
@@ -2062,7 +2062,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 78
+        "y": 82
       },
       "id": 44,
       "links": [
@@ -2115,7 +2115,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 78
+        "y": 82
       },
       "id": 45,
       "links": [
@@ -2173,7 +2173,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 82
+        "y": 86
       },
       "id": 46,
       "options": {
@@ -2209,7 +2209,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 89
+        "y": 93
       },
       "id": 47,
       "panels": [],
@@ -2232,7 +2232,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 90
+        "y": 94
       },
       "id": 48,
       "links": [
@@ -2285,7 +2285,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 90
+        "y": 94
       },
       "id": 49,
       "links": [
@@ -2338,7 +2338,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 90
+        "y": 94
       },
       "id": 50,
       "links": [
@@ -2391,7 +2391,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 90
+        "y": 94
       },
       "id": 51,
       "links": [
@@ -2477,7 +2477,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 94
+        "y": 98
       },
       "id": 52,
       "options": {
@@ -2546,7 +2546,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 94
+        "y": 98
       },
       "id": 53,
       "options": {
@@ -2634,7 +2634,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 102
+        "y": 106
       },
       "id": 54,
       "options": {
@@ -2703,7 +2703,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 102
+        "y": 106
       },
       "id": 55,
       "options": {
@@ -2781,7 +2781,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 110
+        "y": 114
       },
       "id": 56,
       "options": {
@@ -2859,7 +2859,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 110
+        "y": 114
       },
       "id": 57,
       "options": {
@@ -2937,7 +2937,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 118
+        "y": 122
       },
       "id": 58,
       "options": {
@@ -3000,7 +3000,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 126
+        "y": 130
       },
       "id": 59,
       "panels": [
@@ -3025,7 +3025,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 127
+            "y": 131
           },
           "id": 60,
           "options": {
@@ -3076,7 +3076,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 127
+            "y": 131
           },
           "id": 61,
           "options": {
@@ -3127,7 +3127,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 135
+            "y": 139
           },
           "id": 62,
           "options": {
@@ -3187,7 +3187,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 135
+            "y": 139
           },
           "id": 63,
           "options": {
@@ -3247,7 +3247,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 143
+            "y": 147
           },
           "id": 64,
           "options": {
@@ -3307,7 +3307,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 143
+            "y": 147
           },
           "id": 65,
           "options": {
@@ -3367,7 +3367,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 151
+            "y": 155
           },
           "id": 66,
           "options": {
@@ -3416,7 +3416,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 159
+        "y": 163
       },
       "id": 67,
       "panels": [],
@@ -3444,7 +3444,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 160
+        "y": 164
       },
       "id": 68,
       "options": {
@@ -3495,7 +3495,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 160
+        "y": 164
       },
       "id": 69,
       "options": {
@@ -3546,7 +3546,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 168
+        "y": 172
       },
       "id": 70,
       "options": {
@@ -3597,7 +3597,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 168
+        "y": 172
       },
       "id": 71,
       "options": {
@@ -3648,7 +3648,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 168
+        "y": 172
       },
       "id": 72,
       "options": {
@@ -3684,7 +3684,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 176
+        "y": 180
       },
       "id": 73,
       "panels": [
@@ -3709,7 +3709,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 177
+            "y": 181
           },
           "id": 74,
           "options": {
@@ -3760,7 +3760,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 177
+            "y": 181
           },
           "id": 75,
           "options": {
@@ -3811,7 +3811,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 177
+            "y": 181
           },
           "id": 76,
           "options": {
@@ -3880,7 +3880,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 185
+            "y": 189
           },
           "id": 77,
           "options": {
@@ -3931,7 +3931,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 185
+            "y": 189
           },
           "id": 78,
           "options": {
@@ -3982,7 +3982,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 185
+            "y": 189
           },
           "id": 79,
           "options": {
@@ -4033,7 +4033,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 193
+            "y": 197
           },
           "id": 80,
           "options": {
@@ -4102,7 +4102,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 193
+            "y": 197
           },
           "id": 81,
           "options": {
@@ -4153,7 +4153,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 193
+            "y": 197
           },
           "id": 82,
           "options": {
@@ -4204,7 +4204,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 201
+            "y": 205
           },
           "id": 83,
           "options": {
@@ -4273,7 +4273,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 201
+            "y": 205
           },
           "id": 84,
           "options": {
@@ -4324,7 +4324,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 201
+            "y": 205
           },
           "id": 85,
           "options": {
@@ -4375,7 +4375,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 209
+            "y": 213
           },
           "id": 86,
           "options": {
@@ -4444,7 +4444,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 209
+            "y": 213
           },
           "id": 87,
           "options": {
@@ -4495,7 +4495,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 209
+            "y": 213
           },
           "id": 88,
           "options": {
@@ -4564,7 +4564,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 217
+            "y": 221
           },
           "id": 89,
           "options": {
@@ -4615,7 +4615,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 217
+            "y": 221
           },
           "id": 90,
           "options": {
@@ -4655,7 +4655,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 225
+        "y": 229
       },
       "id": 91,
       "panels": [
@@ -4680,7 +4680,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 226
+            "y": 230
           },
           "id": 92,
           "options": {
@@ -4731,7 +4731,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 226
+            "y": 230
           },
           "id": 93,
           "options": {
@@ -4782,7 +4782,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 226
+            "y": 230
           },
           "id": 94,
           "options": {
@@ -4833,7 +4833,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 234
+            "y": 238
           },
           "id": 95,
           "options": {
@@ -4884,7 +4884,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 234
+            "y": 238
           },
           "id": 96,
           "options": {
@@ -4953,7 +4953,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 234
+            "y": 238
           },
           "id": 97,
           "options": {
@@ -5004,7 +5004,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 242
+            "y": 246
           },
           "id": 98,
           "options": {
@@ -5055,7 +5055,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 242
+            "y": 246
           },
           "id": 99,
           "options": {
@@ -5106,7 +5106,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 242
+            "y": 246
           },
           "id": 100,
           "options": {
@@ -5157,7 +5157,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 250
+            "y": 254
           },
           "id": 101,
           "options": {
@@ -5226,7 +5226,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 250
+            "y": 254
           },
           "id": 102,
           "options": {
@@ -5277,7 +5277,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 250
+            "y": 254
           },
           "id": 103,
           "options": {
@@ -5346,7 +5346,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 258
+            "y": 262
           },
           "id": 104,
           "options": {
@@ -5397,7 +5397,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 258
+            "y": 262
           },
           "id": 105,
           "options": {
@@ -5448,7 +5448,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 258
+            "y": 262
           },
           "id": 106,
           "options": {
@@ -5499,7 +5499,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 266
+            "y": 270
           },
           "id": 107,
           "options": {
@@ -5568,7 +5568,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 266
+            "y": 270
           },
           "id": 108,
           "options": {
@@ -5619,7 +5619,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 266
+            "y": 270
           },
           "id": 109,
           "options": {
@@ -5670,7 +5670,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 274
+            "y": 278
           },
           "id": 110,
           "options": {
@@ -5739,7 +5739,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 274
+            "y": 278
           },
           "id": 111,
           "options": {
@@ -5790,7 +5790,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 274
+            "y": 278
           },
           "id": 112,
           "options": {
@@ -5841,7 +5841,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 282
+            "y": 286
           },
           "id": 113,
           "options": {
@@ -5892,7 +5892,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 282
+            "y": 286
           },
           "id": 114,
           "options": {
@@ -5961,7 +5961,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 282
+            "y": 286
           },
           "id": 115,
           "options": {
@@ -6012,7 +6012,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 290
+            "y": 294
           },
           "id": 116,
           "options": {
@@ -6063,7 +6063,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 290
+            "y": 294
           },
           "id": 117,
           "options": {
@@ -6114,7 +6114,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 290
+            "y": 294
           },
           "id": 118,
           "options": {
@@ -6183,7 +6183,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 298
+            "y": 302
           },
           "id": 119,
           "options": {
@@ -6223,7 +6223,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 306
+        "y": 310
       },
       "id": 120,
       "panels": [
@@ -6248,7 +6248,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 307
+            "y": 311
           },
           "id": 121,
           "options": {
@@ -6299,7 +6299,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 307
+            "y": 311
           },
           "id": 122,
           "options": {
@@ -6368,7 +6368,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 307
+            "y": 311
           },
           "id": 123,
           "options": {
@@ -6419,7 +6419,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 315
+            "y": 319
           },
           "id": 124,
           "options": {
@@ -6488,7 +6488,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 315
+            "y": 319
           },
           "id": 125,
           "options": {
@@ -6539,7 +6539,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 315
+            "y": 319
           },
           "id": 126,
           "options": {
@@ -6608,7 +6608,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 323
+            "y": 327
           },
           "id": 127,
           "options": {
@@ -6659,7 +6659,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 323
+            "y": 327
           },
           "id": 128,
           "options": {
@@ -6710,7 +6710,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 323
+            "y": 327
           },
           "id": 129,
           "options": {
@@ -6761,7 +6761,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 331
+            "y": 335
           },
           "id": 130,
           "options": {
@@ -6830,7 +6830,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 331
+            "y": 335
           },
           "id": 131,
           "options": {
@@ -6881,7 +6881,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 331
+            "y": 335
           },
           "id": 132,
           "options": {
@@ -6921,7 +6921,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 339
+        "y": 343
       },
       "id": 133,
       "panels": [
@@ -6946,7 +6946,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 340
+            "y": 344
           },
           "id": 134,
           "options": {
@@ -7021,7 +7021,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 340
+            "y": 344
           },
           "id": 135,
           "interval": "2m",
@@ -7080,7 +7080,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 348
+            "y": 352
           },
           "id": 136,
           "interval": "2m",
@@ -7133,7 +7133,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 348
+            "y": 352
           },
           "id": 137,
           "options": {
@@ -7208,7 +7208,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 356
+            "y": 360
           },
           "id": 138,
           "interval": "2m",
@@ -7267,7 +7267,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 356
+            "y": 360
           },
           "id": 139,
           "interval": "2m",
@@ -7320,7 +7320,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 364
+            "y": 368
           },
           "id": 140,
           "options": {
@@ -7389,7 +7389,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 364
+            "y": 368
           },
           "id": 141,
           "options": {
@@ -7440,7 +7440,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 364
+            "y": 368
           },
           "id": 142,
           "options": {
@@ -7480,7 +7480,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 372
+        "y": 376
       },
       "id": 143,
       "panels": [
@@ -7505,7 +7505,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 373
+            "y": 377
           },
           "id": 144,
           "options": {
@@ -7574,7 +7574,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 373
+            "y": 377
           },
           "id": 145,
           "options": {
@@ -7625,7 +7625,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 373
+            "y": 377
           },
           "id": 146,
           "options": {
@@ -7676,7 +7676,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 381
+            "y": 385
           },
           "id": 147,
           "options": {
@@ -7745,7 +7745,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 381
+            "y": 385
           },
           "id": 148,
           "options": {
@@ -7796,7 +7796,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 381
+            "y": 385
           },
           "id": 149,
           "options": {
@@ -7847,7 +7847,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 389
+            "y": 393
           },
           "id": 150,
           "options": {
@@ -7898,7 +7898,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 389
+            "y": 393
           },
           "id": 151,
           "options": {
