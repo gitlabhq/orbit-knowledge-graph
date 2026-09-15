@@ -65,7 +65,7 @@ graph LR
 
 Orbit has no direct access to Gitaly. Today every repository read goes through a Rails internal API endpoint, one per Gitaly RPC.
 
-We are replacing it with a Gitaly proxy in Workhorse ([ADR 018](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/decisions/018_gitaly_proxy_in_workhorse.md), implementation in [knowledge-graph#1252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1252)): it's gRPC tunnelled over a WebSocket.
+We are replacing it with a transparent Gitaly proxy in Workhorse ([ADR 018](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/decisions/018_gitaly_proxy_in_workhorse.md), implementation in [knowledge-graph#1252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1252)): it's gRPC tunnelled over a WebSocket.
 
 ### RPCs required
 
