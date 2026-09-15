@@ -8,12 +8,12 @@ pub mod vocab;
 pub use grep::{GrepMatch, GrepOutcome, RecallFilter, TermRecall, unmatched_terms};
 pub use rank::{ANCHOR_SIM, CONFIDENT_COVERAGE, EXACT_NAME_SIM, Hit, rank_and_trim};
 pub use text::content_words;
-pub use types::CorpusRow;
+pub use types::SearchCandidate;
 pub use vocab::SearchVocab;
 
 #[cfg(test)]
 pub(crate) mod testutil {
-    use crate::types::CorpusRow;
+    use crate::types::SearchCandidate;
     use crate::vocab::SearchVocab;
 
     pub fn test_vocab() -> SearchVocab {
@@ -28,13 +28,18 @@ pub(crate) mod testutil {
         .to_string()
     }
 
-    pub fn row(id: i64, fqn: &str) -> CorpusRow {
-        CorpusRow {
+    pub fn row(id: i64, label: &str) -> SearchCandidate {
+        let parent_group = label
+            .rfind("::")
+            .or_else(|| label.rfind('.'))
+            .map_or(label, |index| &label[..index]);
+        SearchCandidate {
             id,
-            fqn: fqn.to_string(),
-            file: String::new(),
+            label: label.to_string(),
+            parent_group: parent_group.to_string(),
+            diversity_group: String::new(),
             degree: 0,
-            grams: 0,
+            document_length: 0,
         }
     }
 }

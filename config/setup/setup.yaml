@@ -10,7 +10,7 @@ instructions: |
   - Find: `{{orbit}} grep "<concept>"`. Start unfiltered with 1-3 identifier words. Miss: try a source identifier. Broad: add `--path <glob>` or `--kind Class,Method`.
   - Read: use `{{orbit}} context Definition:<id>` from grep. File: `{{orbit}} context <path>`. Add `--outline` for signatures/members.
   - Relationships: `{{orbit}} context Definition:<id> --related`; add `--tests` to show test connections.
-  - Graph matches guide investigation; they don't prove dataflow or absence. Verify source. Answer mechanism + `file:line`; skip search narration.
+  - Answers from graph cite mechanism + `file:line`; skip search narration.
 
 nudge_search: |
   For code discovery, run `{{orbit}} grep "<terms>"` with 1-3 identifier keywords, without filters first.

@@ -9,7 +9,7 @@ use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_co
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
 use orbit_search::grep::{GrepError, GrepSource, grep};
 use orbit_search::{
-    ANCHOR_SIM, CorpusRow, EXACT_NAME_SIM, GrepOutcome, RecallFilter, SearchVocab, TermRecall,
+    ANCHOR_SIM, EXACT_NAME_SIM, GrepOutcome, RecallFilter, SearchCandidate, SearchVocab, TermRecall,
 };
 
 pub const CONTEXT_SIM_CAP: f64 = 0.99;
@@ -321,7 +321,7 @@ impl GrepSource for DuckDbSearch {
             .collect()
     }
 
-    fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>> {
+    fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<SearchCandidate>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -550,19 +550,27 @@ LEFT JOIN lens ON lens.def_id = c.id"
     )
 }
 
-fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
+fn rows_from_batches(batches: &[RecordBatch]) -> Vec<SearchCandidate> {
     let ids = i64_column(batches, "id");
     let fqns = string_column(batches, "fqn");
     let files = string_column(batches, "file_path");
     let degrees = i64_column(batches, "degree");
     let grams = i64_column(batches, "grams");
     (0..ids.len())
-        .map(|i| CorpusRow {
+        .map(|i| SearchCandidate {
             id: ids[i],
-            fqn: fqns[i].clone(),
-            file: files[i].clone(),
+            label: fqns[i].clone(),
+            parent_group: definition_parent(&fqns[i]),
+            diversity_group: files[i].clone(),
             degree: degrees[i] as u64,
-            grams: grams[i] as u64,
+            document_length: grams[i] as u64,
         })
         .collect()
+}
+
+fn definition_parent(fqn: &str) -> String {
+    fqn.rfind("::")
+        .or_else(|| fqn.rfind('.'))
+        .map_or(fqn, |index| &fqn[..index])
+        .to_string()
 }

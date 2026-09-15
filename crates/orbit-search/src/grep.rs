@@ -3,7 +3,7 @@ use std::fmt;
 
 use crate::rank::rank_and_trim;
 use crate::text::{camel_words, content_words};
-use crate::types::CorpusRow;
+use crate::types::SearchCandidate;
 use crate::vocab::SearchVocab;
 
 pub struct GrepOutcome {
@@ -52,7 +52,7 @@ pub trait GrepSource {
         terms: &[String],
         filter: &RecallFilter,
     ) -> Result<Vec<TermRecall>, Self::Error>;
-    fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
+    fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<SearchCandidate>, Self::Error>;
 }
 
 #[derive(Debug)]
@@ -171,7 +171,7 @@ pub fn grep<S: GrepSource>(
                 .iter()
                 .max_by(|a, b| a.1.total_cmp(&b.1))
                 .and_then(|&(id, _)| index.get(&id))
-                .map(|&i| (term.clone(), corpus[i].fqn.clone()))
+                .map(|&i| (term.clone(), corpus[i].label.clone()))
         })
         .collect();
 
@@ -236,7 +236,7 @@ mod tests {
                 .collect())
         }
 
-        fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error> {
+        fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<SearchCandidate>, Self::Error> {
             Ok(ids
                 .iter()
                 .map(|&id| {
