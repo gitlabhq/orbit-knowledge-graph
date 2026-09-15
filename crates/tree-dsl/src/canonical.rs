@@ -229,22 +229,22 @@ impl Canonical {
 
 use strum::EnumProperty;
 
-pub fn def_type_of(cursor: crate::tree::Cursor) -> Option<Canonical> {
+pub fn def_type_of<T: crate::tree::TreeAccess>(cursor: crate::tree::Cursor<T>) -> Option<Canonical> {
     cursor.children().find_map(|c| {
         let ck = Canonical::try_from_u16(c.kind())?;
         ck.is_def_type().then_some(ck)
     })
 }
 
-pub fn has_def_type(cursor: crate::tree::Cursor) -> bool {
+pub fn has_def_type<T: crate::tree::TreeAccess>(cursor: crate::tree::Cursor<T>) -> bool {
     def_type_of(cursor).is_some()
 }
 
-pub fn is_callable_def(cursor: crate::tree::Cursor) -> bool {
+pub fn is_callable_def<T: crate::tree::TreeAccess>(cursor: crate::tree::Cursor<T>) -> bool {
     def_type_of(cursor).is_some_and(|k| k.is_callable())
 }
 
-pub fn is_scoped_def(cursor: crate::tree::Cursor) -> bool {
+pub fn is_scoped_def<T: crate::tree::TreeAccess>(cursor: crate::tree::Cursor<T>) -> bool {
     def_type_of(cursor).is_some_and(|k| k.is_scoped())
 }
 

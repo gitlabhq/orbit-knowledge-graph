@@ -89,7 +89,7 @@ fn round_trip_save_load() {
 
     for (orig, restored) in result.trees.iter().zip(loaded.trees.iter()) {
         assert_eq!(orig.label, restored.label);
-        assert_eq!(orig.nodes.len(), restored.nodes.len());
+        assert_eq!(orig.len(), restored.len());
         assert_eq!(orig.edges().len(), restored.edges().len());
     }
     for (orig, restored) in result.cross_edges.iter().zip(loaded.cross_edges.iter()) {

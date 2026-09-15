@@ -4,7 +4,7 @@ use std::path::Path;
 use crate::grammar::SupportLang;
 use crate::lang::{Lang, LangSnapshot};
 use crate::pipeline::{IndexResult, Pipeline, process_file};
-use crate::tree::{Edge, TreeSnapshot};
+use crate::tree::{Edge, LockedTree, TreeSnapshot};
 use crate::{file_tree, resolver};
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -35,7 +35,10 @@ impl IndexResult {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         let (pipeline, _) = Pipeline::for_lang(lang_id);
         Ok(IndexResult {
-            trees: snap.trees.into_iter().map(|t| t.into()).collect(),
+            trees: snap.trees.into_iter().map(|s| {
+                let t: crate::tree::Tree = s.into();
+                LockedTree::from(t)
+            }).collect(),
             cross_edges: snap.cross_edges,
             lang: Lang::from(snap.lang),
             pipeline,
@@ -49,29 +52,36 @@ impl IndexResult {
         modified: &[(String, String)],
         removed: &[String],
     ) {
-        for path in removed {
-            self.trees.retain(|t| t.label != *path);
-        }
-        for (path, _) in modified {
-            self.trees.retain(|t| t.label != *path);
-        }
+        use crate::tree::{LockedTree, Tree};
 
-        let new_files: Vec<&(String, String)> = modified.iter().chain(added.iter()).collect();
-        for (path, source) in &new_files {
+        let mut trees: Vec<Tree> = std::mem::take(&mut self.trees)
+            .into_iter()
+            .map(Tree::from)
+            .collect();
+
+        trees.retain(|t| {
+            !removed.contains(&t.label)
+                && !modified.iter().any(|(p, _)| p == &t.label)
+        });
+
+        for (path, source) in modified.iter().chain(added.iter()) {
             let tree = process_file(path, source, &mut self.lang, &self.pipeline);
-            self.trees.push(tree);
+            trees.push(tree);
         }
 
-        let all_paths: Vec<String> = self.trees.iter().map(|t| t.label.clone()).collect();
-        let all_files: Vec<(String, String)> = all_paths.iter().map(|p| (p.clone(), String::new())).collect();
+        let all_paths: Vec<String> = trees.iter().map(|t| t.label.clone()).collect();
+        let all_files: Vec<(String, String)> =
+            all_paths.iter().map(|p| (p.clone(), String::new())).collect();
         let walk = file_tree::walk(&all_paths, &all_files, &mut self.lang, &self.pipeline.resolve);
         self.cross_edges = resolver::resolve(
-            &mut self.trees,
+            &mut trees,
             &mut self.lang,
             self.pipeline.lang_id,
             &walk.lookup_prefixes,
             &self.pipeline.resolve.external,
         )
         .cross_edges;
+
+        self.trees = trees.into_iter().map(LockedTree::from).collect();
     }
 }
