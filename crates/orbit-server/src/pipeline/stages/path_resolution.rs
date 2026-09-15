@@ -464,15 +464,20 @@ mod tests {
 
     #[test]
     fn gql_normalization_preserves_scope_keys_and_rejects_unsupported_syntax() {
-        use query_engine::compiler::Frontend;
+        use ontology::introspection::IntrospectionScope;
+        use query_engine::compiler::{Frontend, gql::RoutedStatement};
 
         let ontology = ontology();
-        let input = validate_normalize(
+        let RoutedStatement::Query(input) = query_engine::compiler::gql::route(
             "MATCH (p:Project {id: 42})-[:CONTAINS]->(b:Branch) RETURN p, b LIMIT 1",
-            Frontend::Gql,
             &ontology,
+            IntrospectionScope::All,
         )
-        .unwrap();
+        .unwrap() else {
+            panic!("expected query");
+        };
+        let input =
+            query_engine::compiler::gql::validate_normalize_query(input, &ontology).unwrap();
         assert!(scopes_query_type(input.query_type));
         assert_eq!(
             scope_keys(&input.nodes[0], &ontology.anchor_fk_mappings()),
@@ -483,7 +488,9 @@ mod tests {
             "CREATE (p:Project)",
             "MATCH (p:Project) RETURN p UNION MATCH (p:Project) RETURN p",
         ] {
-            let error = validate_normalize(text, Frontend::Gql, &ontology).unwrap_err();
+            let error =
+                query_engine::compiler::gql::route(text, &ontology, IntrospectionScope::All)
+                    .unwrap_err();
             assert!(error.is_client_safe());
         }
         assert!(

@@ -823,6 +823,27 @@ mod tests {
     use tonic::metadata::MetadataValue;
 
     #[test]
+    fn schema_query_result_uses_requested_format() {
+        let response = SchemaResponse {
+            domains: vec![],
+            edges: vec!["AUTHORED".into()],
+        };
+        for (llm, expected) in [
+            (false, "{\"domains\":[],\"edges\":[\"AUTHORED\"]}"),
+            (true, "edges[1]: AUTHORED"),
+        ] {
+            let result = schema_query_result(&response, llm).unwrap();
+            let content = result.content.unwrap();
+            let actual = match content {
+                crate::proto::execute_query_result::Content::ResultJson(value)
+                | crate::proto::execute_query_result::Content::FormattedText(value) => value,
+            };
+            assert_eq!(actual, expected);
+            assert!(result.metadata.is_none());
+        }
+    }
+
+    #[test]
     fn query_source_keeps_wire_values_and_text() {
         let named = named_queries::NamedQueries::load_embedded().unwrap();
         let values = named_queries::BindingValues {
