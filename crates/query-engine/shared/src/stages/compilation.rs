@@ -21,12 +21,15 @@ impl PipelineStage for CompilationStage {
             .security_context()
             .inspect_err(|e| obs.record_error(e))?;
 
-        let compiled = compiler::compile(&ctx.query_json, ctx.frontend, ontology, security_context)
-            .map_err(|e| PipelineError::Compile {
-                client_safe: e.is_client_safe(),
-                message: e.to_string(),
-            })
-            .inspect_err(|e| obs.record_error(e))?;
+        let compiled = match ctx.phases.get::<compiler::Input>() {
+            Some(input) => compiler::gql::compile_query(input.clone(), ontology, security_context),
+            None => compiler::compile(&ctx.query_json, ctx.frontend, ontology, security_context),
+        }
+        .map_err(|e| PipelineError::Compile {
+            client_safe: e.is_client_safe(),
+            message: e.to_string(),
+        })
+        .inspect_err(|e| obs.record_error(e))?;
 
         let query_type: &str = compiled.query_type.into();
         obs.set_query_type(query_type);

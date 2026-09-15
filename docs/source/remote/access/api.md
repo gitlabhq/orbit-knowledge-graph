@@ -82,13 +82,19 @@ curl --request POST \
 
 See the [query language reference](../queries/query-language.md) for the full DSL.
 
-To send read-only query text:
+To send read-only query text or inspect its ontology:
 
 ```shell
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
   --data '{"language":"gql","query":"MATCH (u:User {id: 1}) RETURN u.username LIMIT 1","format":"llm"}' \
+  "https://gitlab.com/api/v4/orbit/query"
+
+curl --request POST \
+  --header "Authorization: Bearer <your_token>" \
+  --header "Content-Type: application/json" \
+  --data '{"language":"gql","query":"CALL db.schema(\"MergeRequest\")","format":"raw"}' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
