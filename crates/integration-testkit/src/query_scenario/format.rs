@@ -81,9 +81,9 @@ pub struct QueryExpect {
     pub compile_only: bool,
     #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
-    /// Assert error message does NOT contain these substrings.
+    /// Assert error message does NOT contain these substrings, for every frontend or per frontend key.
     #[serde(default)]
-    pub compile_error_not_contains: Vec<String>,
+    pub compile_error_not_contains: NotContainsExpect,
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
@@ -287,6 +287,41 @@ impl QueryExpect {
 pub enum CompileErrorExpect {
     Flag(bool),
     Substring(String),
+    PerFrontend(BTreeMap<String, String>),
+}
+
+impl CompileErrorExpect {
+    pub fn substring_for(&self, frontend_key: &str) -> Option<&str> {
+        match self {
+            Self::Flag(_) => None,
+            Self::Substring(sub) => Some(sub),
+            Self::PerFrontend(by_frontend) => by_frontend.get(frontend_key).map(String::as_str),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum NotContainsExpect {
+    All(Vec<String>),
+    PerFrontend(BTreeMap<String, Vec<String>>),
+}
+
+impl Default for NotContainsExpect {
+    fn default() -> Self {
+        Self::All(Vec::new())
+    }
+}
+
+impl NotContainsExpect {
+    pub fn banned_for(&self, frontend_key: &str) -> &[String] {
+        match self {
+            Self::All(banned) => banned,
+            Self::PerFrontend(by_frontend) => {
+                by_frontend.get(frontend_key).map_or(&[], Vec::as_slice)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

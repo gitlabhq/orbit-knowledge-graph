@@ -895,6 +895,12 @@ impl<'a> Validator<'a> {
             return Ok(());
         }
 
+        if input.path.is_some() {
+            return Err(QueryError::Validation(
+                "aggregation over shortest paths is not supported".into(),
+            ));
+        }
+
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
         if input.aggregation.group_by.is_empty()

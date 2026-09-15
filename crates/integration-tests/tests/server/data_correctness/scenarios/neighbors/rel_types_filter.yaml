@@ -8,6 +8,8 @@ query:
       "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
       "neighbors": {"direction": "outgoing", "rel_types": ["CONTAINS"]}
     }
+  gql: |
+    MATCH (g:Group {id: 100})-[:`CONTAINS`]->(n) RETURN g, n
 
 expect:
   node_count: 4

@@ -8316,6 +8316,7 @@ dependencies = [
  "code-graph",
  "compiler",
  "indexer",
+ "pest_meta",
  "serde_json",
 ]
 

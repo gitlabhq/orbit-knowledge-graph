@@ -12,6 +12,8 @@ query:
         "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "hops": [1, 2]}],
         "limit": 10
     }
+  gql: |
+    MATCH (parent:Group {id: 100})-[:`CONTAINS`*1..2]->(child:Group) RETURN parent.name, child.name LIMIT 10
 
 expect:
   node_count: 3

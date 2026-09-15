@@ -12,6 +12,8 @@ query:
                  "filters": {"email": "alice@example.com"}}],
         "limit": 10
     }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.email = 'alice@example.com' RETURN u.username, u.email LIMIT 10
 
 expect:
   node_count: 1

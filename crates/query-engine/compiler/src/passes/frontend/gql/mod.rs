@@ -18,6 +18,26 @@ use pest_derive::Parser;
 #[grammar = "passes/frontend/gql/query.pest"]
 struct QueryParser;
 
+pub const GRAMMAR: &str = include_str!("query.pest");
+
+pub fn pair_outline(query: &str) -> Option<Vec<(usize, String)>> {
+    fn visit(
+        pairs: pest::iterators::Pairs<'_, Rule>,
+        depth: usize,
+        out: &mut Vec<(usize, String)>,
+    ) {
+        for pair in pairs {
+            out.push((depth, format!("{:?}", pair.as_rule())));
+            visit(pair.into_inner(), depth + 1, out);
+        }
+    }
+    check_bounds(query).ok()?;
+    let pairs = <QueryParser as pest::Parser<Rule>>::parse(Rule::Query, query).ok()?;
+    let mut outline = Vec::new();
+    visit(pairs, 0, &mut outline);
+    Some(outline)
+}
+
 const MAX_QUERY_BYTES: usize = 32 * 1024;
 const MAX_NESTING: usize = 32;
 

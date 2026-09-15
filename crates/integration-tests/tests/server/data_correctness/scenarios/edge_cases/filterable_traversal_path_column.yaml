@@ -10,6 +10,8 @@ query:
                  "node_ids": [100]}],
         "limit": 10
     }
+  gql: |
+    MATCH (g:Group {id: 100}) RETURN g.name, g.traversal_path LIMIT 10
 
 expect:
   node_count: 1

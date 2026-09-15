@@ -10,6 +10,8 @@ query:
       "order_by": "p.id",
       "limit": 10
     }
+  gql: |
+    MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN p.name, p.full_path ORDER BY p.id LIMIT 10
 
 expect:
   node_count: 6
