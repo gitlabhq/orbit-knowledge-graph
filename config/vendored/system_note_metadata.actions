@@ -2,10 +2,10 @@
 #
 # Source: app/models/system_note_metadata.rb (CE) and
 #         ee/app/models/ee/system_note_metadata.rb (EE) in gitlab-org/gitlab
-# Pinned: ea52f8c3adc370db76545ecd82728710f2609800 (refs/heads/master, captured 2026-06-12)
+# Pinned commit: `gitlab_system_note_actions` in config/versions.yaml.
 #
 # To update: replace the list below with the combined %w[] bodies from the CE
-# and EE Rails files at a newer commit, then update the "Pinned:" line above.
+# and EE Rails files at a newer commit, then update the pin in versions.yaml.
 #
 # ICON_TYPES is generated at build time from this file by crates/indexer/build.rs.
 # One action per line; lines starting with # are ignored.

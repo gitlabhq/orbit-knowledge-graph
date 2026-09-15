@@ -28,11 +28,16 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
   Seven genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) plus the SystemNote derived entity keep a `.sql.j2` MiniJinja template next to the YAML (all ontology SQL templates render through `ontology::sql_template`); derived pipelines are always authored SQL, since their rows are neither node properties nor edge endpoints to generate a projection from.
   New entity types start in the ontology, not in Rust.
   Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`).
+  `settings.denormalized_joins` declares linear chains of tables pre-joined into `gl_denorm_<name>` tables composed from the source tables' DDL and fed by materialized views (`crates/ontology/src/denormalized.rs`, `passes/codegen/ddl/denormalized.rs`); each declaration is a schema bump.
   Unversioned objects (durable tables and materialized views created once at boot, never version-prefixed or GCed) are emitted through one `generate_unversioned_objects` path in `crates/query-engine/compiler/src/passes/codegen/ddl/`; add a new unversioned kind there rather than introducing a parallel per-kind generator.
   Schema: `config/schemas/ontology.schema.json`.
+- **Schema archives.** Migration and promotion require usable ontology archives. The dispatcher bootstraps missing active archives from the build-validated release bundle; unsupported missing versions fail closed. The Webserver serves the active archive and pins one schema snapshot per request. See `docs/design-documents/schema_management.md` for readiness, supported legacy upgrades, and rollback retention.
+- **Orbit query frontend.** `crates/query-engine/compiler/src/passes/frontend/` holds one module per query language; both lower graph queries to language-neutral `Input`. `compiler::gql::prepare` parses once and dispatches MATCH to the complete shared graph compilation phases. Standalone `CALL db.schema(...)` resolves typed ontology metadata inside the GQL frontend without SQL or shared schema state. `compiler::compile` remains graph-query-only. Remote requests still use JSON. See `docs/design-documents/querying/orbit_query_frontend.md`.
 - **Agent-facing prompts are YAML.** Tool and command descriptions live as versioned YAML under `config/prompts/` (`remote/` = server, `local/` = CLI), embedded via rust-embed and build-time validated by `orbit-prompts`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
-- **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
+- **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads four sources (lowest to highest priority): the embedded `config/default.yaml` (compiled in via `include_str!`), an on-disk `config/default.yaml` when present (the Helm ConfigMap key), an overlay file (`--config <path>`, else `config/config.yaml` when present), and K8s secret files from `/etc/secrets/`. There is no environment-variable layer; the mise dev tasks generate `.dev/<mode>.yaml` from `config/dev.yaml`, GDK-derived connection details, and the Git-ignored `config/dev.local.yaml`, and pass that one file to `--config`.
+  `config/default.yaml` is the single source of truth for defaults: every section and scalar is declared there; the Rust structs have no `Default` impls or `serde(default)` fallbacks (only `Option` fields and empty collections may be omitted). Add a setting by adding the struct field plus its value in `default.yaml`; tests start from `AppConfig::embedded_defaults()`. The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md`.
+- **Vendored dependencies.** Upstream artifacts committed to the repo (DuckDB FTS sources, extension binaries) are pinned in the `vendored:` section of `config/versions.yaml` with sub-pins, artifact directories, and vendor/check scripts. A generic runner (`scripts/vendored/run.sh`) invokes them with standardized `VENDOR_*` env vars. Vendor scripts write computed checksums back via `yq -i`; check scripts are read-only. Run `mise vendor -- <name>` to regenerate, `mise check:vendored -- <name>` to verify. See `docs/dev/runbooks/vendored_dependencies.md`.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
 ## What CI enforces
@@ -44,6 +49,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Assistant setup specs and mode texts in `config/setup/` validated against JSON schema (`setup-schema-validate`)
 - Migration ledger validated and scope-checked (`migration-ledger-schema-validate`, `migration-ledger-check`, plus `orbit-server` build-time drift checks); full ledger rules in `docs/design-documents/schema_management.md`
 - `cargo fmt` (`fmt-check`)
+- Trailing newlines (`newline-check`, run locally with `mise lint:newlines`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
 - Unit tests via nextest (`unit-test`)
@@ -53,14 +59,14 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - `rust-toolchain.toml` must match `mise.toml` (`rust-toolchain-sync-check`; regenerate with `mise toolchain:generate`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check_docs_markdown`)
-- Response format version bumped when formatter code or response schema changes (`response-schema-version-check`)
-- GOON format version bumped when GOON encoder or shared formatter code changes (`goon-format-version-check`)
+- Pins in `config/versions.yaml` bumped when their covered files change: query DSL, RAW response format, GOON format (`pinned-version-check`, one job reporting every stale pin at once)
 - Skill version bumped when files under `skills/<name>/` change (`skill-version-bump-check`)
 - Prompt version bumped when files under `config/prompts/` change (`prompt-version-bump-check`)
 - Metrics catalog regenerated in sync with `orbit-observability` source (`metrics-catalog-check`)
 - Query-language text-indexed properties table regenerated in sync with the ontology (`query-language-docs-check`)
 - Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
 - Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`)
+- The vendored DuckDB FTS source archive matches its pinned upstream revisions (`duckdb-fts-sources-sync-check`; regenerate with `mise vendor -- duckdb`)
 - Every `[workspace]` member has a row in `docs/dev/agents-crate-map.md`, and no stale rows remain (`crates/xtask/build.rs`, so any workspace build/clippy fails on drift)
 
 ## Where to find things
@@ -100,6 +106,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 See [`crates/code-graph/AGENTS.md`](crates/code-graph/AGENTS.md).
 
 ## MR and issue descriptions and comments
+
+Load the `orbit-planning` skill before creating or labeling issues, epics, or MRs so they use the canonical taxonomy and roadmap rules.
 
 Always use the templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/`, and read the TEMPLATE CONVENTION block at the top of each one before writing the description.
 

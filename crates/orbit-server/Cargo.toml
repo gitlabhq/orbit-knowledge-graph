@@ -14,7 +14,7 @@ regenerate-protos = []
 testkit = ["orbit-analytics/testkit"]
 
 [dependencies]
-mimalloc = { workspace = true, features = ["secure"] }
+mimalloc = { workspace = true }
 anyhow = { workspace = true }
 arrow = { workspace = true }
 moka = { workspace = true }
@@ -29,8 +29,10 @@ orbit-observability = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts" }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
+orbit-versions = { path = "../orbit-versions" }
 health-check = { workspace = true }
 indexer = { path = "../indexer" }
+orbit-migrations = { path = "../orbit-migrations" }
 minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true }
@@ -64,9 +66,11 @@ toon-format = { workspace = true }
 
 [build-dependencies]
 compiler = { path = "../query-engine/compiler" }
+orbit-migrations = { path = "../orbit-migrations" }
 orbit-prompts = { path = "../orbit-prompts" }
 named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
+orbit-versions = { path = "../orbit-versions" }
 tower = { workspace = true }
 tonic-prost-build = { workspace = true }
 
@@ -75,6 +79,5 @@ orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-[lints.rust]
-# workspace uses `forbid`, downgraded to `deny` so tests can manipulate env vars
-unsafe_code = "deny"
+[lints]
+workspace = true

@@ -65,7 +65,7 @@ async fn drained_namespace_sweeps_unclaimed_rows_once() {
         ))
         .await;
 
-    let (sweep, store) = build_sweep(&clickhouse);
+    let (sweep, store) = build_sweep(&clickhouse, 10);
 
     sweep
         .run_for_drained(&[])
@@ -138,7 +138,7 @@ async fn sweep_scopes_to_the_drained_namespace() {
         .await;
     }
 
-    let (sweep, _) = build_sweep(&clickhouse);
+    let (sweep, _) = build_sweep(&clickhouse, 10);
     sweep
         .run_for_drained(&[TraversalPath::new_unchecked("1/40/")])
         .await
@@ -152,6 +152,72 @@ async fn sweep_scopes_to_the_drained_namespace() {
         file_is_active(&clickhouse, 41, 141).await,
         "an undrained namespace must keep its rows even when a sibling sweeps"
     );
+}
+
+#[tokio::test]
+async fn sweep_honours_the_per_tick_cap_and_finishes_on_a_later_tick() {
+    let clickhouse = TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    for (path, project_id) in [("1/40/", 40i64), ("1/41/", 41i64)] {
+        clickhouse
+            .execute(&format!(
+                "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at) \
+                 VALUES ('{path}', {project_id}, 'main', 1, '{WATERMARK}')",
+                t("code_indexing_checkpoint")
+            ))
+            .await;
+        insert_file(
+            &clickhouse,
+            path,
+            project_id,
+            "main",
+            project_id + 100,
+            PRE_WATERMARK,
+        )
+        .await;
+    }
+    let drained = [
+        TraversalPath::new_unchecked("1/40/"),
+        TraversalPath::new_unchecked("1/41/"),
+    ];
+
+    let (paused, _) = build_sweep(&clickhouse, 0);
+    paused
+        .run_for_drained(&drained)
+        .await
+        .expect("paused sweep failed");
+    assert!(
+        file_is_active(&clickhouse, 40, 140).await && file_is_active(&clickhouse, 41, 141).await,
+        "a zero cap must sweep nothing"
+    );
+
+    let (sweep, _) = build_sweep(&clickhouse, 1);
+    sweep
+        .run_for_drained(&drained)
+        .await
+        .expect("first tick failed");
+    let swept_after_first_tick = [
+        !file_is_active(&clickhouse, 40, 140).await,
+        !file_is_active(&clickhouse, 41, 141).await,
+    ]
+    .into_iter()
+    .filter(|swept| *swept)
+    .count();
+    assert_eq!(
+        swept_after_first_tick, 1,
+        "a tick must sweep no more namespaces than its cap"
+    );
+
+    sweep
+        .run_for_drained(&drained)
+        .await
+        .expect("second tick failed");
+    assert!(!file_is_active(&clickhouse, 40, 140).await);
+    assert!(!file_is_active(&clickhouse, 41, 141).await);
 }
 
 #[tokio::test]
@@ -191,7 +257,7 @@ async fn sweep_writes_no_tombstones_for_superseded_rows() {
     )
     .await;
 
-    let (sweep, _) = build_sweep(&clickhouse);
+    let (sweep, _) = build_sweep(&clickhouse, 10);
     sweep
         .run_for_drained(&[TraversalPath::new_unchecked(traversal_path)])
         .await
@@ -212,7 +278,10 @@ async fn sweep_writes_no_tombstones_for_superseded_rows() {
     );
 }
 
-fn build_sweep(clickhouse: &TestContext) -> (CodeStaleSweep, Arc<ClickHouseCheckpointStore>) {
+fn build_sweep(
+    clickhouse: &TestContext,
+    sweeps_per_tick: usize,
+) -> (CodeStaleSweep, Arc<ClickHouseCheckpointStore>) {
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
     let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
@@ -223,6 +292,7 @@ fn build_sweep(clickhouse: &TestContext) -> (CodeStaleSweep, Arc<ClickHouseCheck
             clickhouse.config.build_client(),
             &table_names,
             store.clone(),
+            sweeps_per_tick,
         ),
         store,
     )

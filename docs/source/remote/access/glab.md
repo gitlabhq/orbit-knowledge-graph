@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query GitLab Orbit from the command line with glab orbit remote, available in glab 1.94 or later. The glab orbit setup helper is planned for a future glab release.
+description: Query GitLab Orbit from the command line with glab orbit, available in glab 1.117 or later.
 title: Use GitLab Orbit with the GitLab CLI (`glab`)
 ---
 
@@ -35,12 +35,12 @@ query GitLab Orbit from the command line.
 
 `glab orbit` runs the managed `orbit` binary. It forwards each command to the
 binary, which `glab` downloads, verifies, and keeps up to date for you. Run
-`glab orbit remote <command> --help` for the binary's own command reference.
+`glab orbit <command> --help` for the binary's own command reference.
 
-- `glab orbit remote`: query the GitLab Orbit Remote REST API. `glab` injects
-  your GitLab credential automatically. Available in `glab` 1.94 or later.
-- `glab orbit setup`: guided onboarding that installs the GitLab Orbit skill and
-  configures your AI agent.
+Hosted commands such as `query`, `status`, `ontology`, `dsl`, `tools`, and
+`graph-status` call the GitLab Orbit Remote REST API. `glab` injects your GitLab
+credential automatically. `glab orbit setup` provides guided onboarding and
+configures supported AI agents.
 
 ## Prerequisites
 
@@ -66,9 +66,9 @@ To connect an MCP client instead, [configure it manually](mcp.md#connect-your-mc
 
 ## Query GitLab Orbit from the command line
 
-Use `glab orbit remote` to call the GitLab Orbit Remote API directly.
+Use `glab orbit` to call the GitLab Orbit Remote API directly.
 Useful for scripting, debugging, and exploring the schema before writing queries.
-Requires `glab` 1.94 or later.
+Requires `glab` 1.117 or later.
 
 `glab` resolves your credential and passes it to the binary, so no extra
 authentication step is needed. Use `--hostname` to target a specific GitLab
@@ -76,21 +76,21 @@ instance, and `--yes` to skip the one-time run confirmation in scripts.
 
 | Subcommand | Endpoint | Purpose |
 |------------|----------|---------|
-| `glab orbit remote status` | `GET orbit/status` | Cluster health. |
-| `glab orbit remote schema [node...]` | `GET orbit/schema` | Graph ontology. Positional args expand specific nodes. |
-| `glab orbit remote dsl` | `GET orbit/schema/dsl` | Query DSL JSON Schema. The source of truth for the query body shape. |
-| `glab orbit remote tools` | `GET orbit/tools` | MCP tool manifest with the full DSL JSON Schema. |
-| `glab orbit remote query [file\|-]` | `POST orbit/query` | Run a query from a file or stdin. |
-| `glab orbit remote graph-status` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
+| `glab orbit status` | `GET orbit/status` | Cluster health. |
+| `glab orbit ontology [node...]` | `GET orbit/schema` | Graph ontology. Positional args expand specific nodes. |
+| `glab orbit dsl` | `GET orbit/schema/dsl` | Query DSL JSON Schema. The source of truth for the query body shape. |
+| `glab orbit tools` | `GET orbit/tools` | MCP tool manifest with the full DSL JSON Schema. |
+| `glab orbit query [file\|-]` | `POST orbit/query` | Run a query from a file or stdin. |
+| `glab orbit graph-status` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
 
 ### Discover the schema
 
 ```shell
-glab orbit remote status
-glab orbit remote schema
-glab orbit remote schema MergeRequest Project
-glab orbit remote dsl
-glab orbit remote tools
+glab orbit status
+glab orbit ontology
+glab orbit ontology MergeRequest Project
+glab orbit dsl
+glab orbit tools
 ```
 
 ### Run a query
@@ -117,7 +117,7 @@ Put the request body in `query.json`:
 ```
 
 ```shell
-glab orbit remote query query.json
+glab orbit query query.json
 ```
 
 The `--response-format` flag maps to the body's `response_format`:
@@ -133,14 +133,14 @@ as the final fallback.
 Pass exactly one scope flag:
 
 ```shell
-glab orbit remote graph-status --full-path your-group/your-project
-glab orbit remote graph-status --namespace-id 24
-glab orbit remote graph-status --project-id 2
+glab orbit graph-status --full-path your-group/your-project
+glab orbit graph-status --namespace-id 24
+glab orbit graph-status --project-id 2
 ```
 
 ## Exit codes
 
-`glab orbit remote` maps HTTP errors to stable exit codes so scripts and agents
+`glab orbit` maps HTTP errors to stable exit codes so scripts and agents
 can branch on them without parsing stderr.
 
 | Status | Exit code | Meaning |
@@ -154,5 +154,5 @@ can branch on them without parsing stderr.
 
 ## Billing
 
-`glab orbit remote query` consumes GitLab Credits the same way as MCP queries.
-`status`, `schema`, `tools`, and `graph-status` calls are free.
+`glab orbit query` consumes GitLab Credits the same way as MCP queries.
+`status`, `ontology`, `tools`, and `graph-status` calls are free.

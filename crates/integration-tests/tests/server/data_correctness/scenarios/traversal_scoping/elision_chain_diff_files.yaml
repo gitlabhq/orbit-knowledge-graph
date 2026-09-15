@@ -1,0 +1,64 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::scope_implied_container_elision_chain_counts_diff_files
+description: Container-elision 4-hop FK chain counts diff files per project
+
+config:
+  security:
+    scope_prefixes:
+      g: "1/701/"
+      p: "1/701/"
+      mr: "1/701/"
+      d: "1/701/"
+      f: "1/701/"
+  extra_seed:
+    gl_group:
+      - { id: 701, name: g701, full_path: g701, visibility_level: public, traversal_path: "1/701/" }
+    gl_project:
+      - { id: 7010, name: p701, full_path: "g701/p701", visibility_level: public, traversal_path: "1/701/7010/" }
+    gl_merge_request:
+      - { id: 7110, iid: 1, title: a, state: opened, source_branch: b, target_branch: main, project_id: 7010, author_id: 1, latest_merge_request_diff_id: 7210, traversal_path: "1/701/7010/" }
+      - { id: 7111, iid: 2, title: b, state: opened, source_branch: b, target_branch: main, project_id: 7010, author_id: 1, latest_merge_request_diff_id: 7211, traversal_path: "1/701/7010/" }
+    gl_merge_request_diff:
+      - { id: 7210, merge_request_id: 7110, state: collected, head_commit_sha: sha1, traversal_path: "1/701/7010/" }
+      - { id: 7211, merge_request_id: 7111, state: collected, head_commit_sha: sha2, traversal_path: "1/701/7010/" }
+    gl_merge_request_diff_file:
+      - { id: 7310, merge_request_id: 7110, merge_request_diff_id: 7210, project_id: 7010, new_path: "a.rs", traversal_path: "1/701/7010/" }
+      - { id: 7311, merge_request_id: 7110, merge_request_diff_id: 7210, project_id: 7010, new_path: "b.rs", traversal_path: "1/701/7010/" }
+      - { id: 7312, merge_request_id: 7111, merge_request_diff_id: 7211, project_id: 7010, new_path: "c.rs", traversal_path: "1/701/7010/" }
+  redaction:
+    allow:
+      user: [1, 2, 3, 4, 5, 6, 7]
+      group: [100, 101, 102, 200, 300, 701, 900]
+      project: [1000, 1001, 1002, 1003, 1004, 1010, 7010, 9000]
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 7110, 9100]
+      note: [3000, 3001, 3002, 3003]
+      work_item: [4000, 4001, 4002, 4003, 4010]
+      milestone: [6000, 6001]
+      label: [7000, 7001, 7002]
+
+query:
+  json: |
+    {
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "g", "entity": "Group", "filters": {"full_path": "g701"}},
+            {"id": "p", "entity": "Project"},
+            {"id": "mr", "entity": "MergeRequest"},
+            {"id": "d", "entity": "MergeRequestDiff"},
+            {"id": "f", "entity": "MergeRequestDiffFile"}
+        ],
+        "relationships": [
+            {"type": "CONTAINS", "from": "g", "to": "p"},
+            {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+            {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+            {"type": "HAS_FILE", "from": "d", "to": "f"}
+        ],
+        "group_by": ["p"],
+        "aggregations": [{"count": "f", "as": "c"}],
+        "limit": 10
+    }
+
+expect:
+  groups:
+    p:
+      rows:
+        - { entity: Project, id: 7010, values: { c: 3 } }

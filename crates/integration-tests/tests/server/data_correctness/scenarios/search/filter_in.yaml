@@ -1,0 +1,20 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_filter_in_returns_matching_rows
+description: IN filter returns rows matching any of the specified values
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["name", "visibility_level"],
+                 "filters": {"visibility_level": {"in": ["public", "internal"]}}}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 4
+  nodes:
+    Project:
+      ids: [1000, 1002, 1004, 1010]
+      filters:
+        visibility_level: { in: [public, internal] }

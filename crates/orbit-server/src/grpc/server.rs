@@ -2,13 +2,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ontology::Ontology;
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::ServerTlsConfig;
 use tracing::info;
 
+use crate::active_schema::ActiveSchema;
 use crate::analytics::AnalyticsTracker;
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
@@ -29,7 +29,7 @@ impl GrpcServer {
     pub fn new(
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
-        ontology: Arc<Ontology>,
+        active_schema: Arc<ActiveSchema>,
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
@@ -38,7 +38,7 @@ impl GrpcServer {
     ) -> Self {
         let service = OrbitServiceImpl::new(
             validator,
-            ontology,
+            active_schema,
             clickhouse_config,
             cluster_health,
             grpc_config.stream_timeout_secs,
@@ -59,11 +59,6 @@ impl GrpcServer {
 
     pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
         self.service = self.service.with_cache_broker(broker);
-        self
-    }
-
-    pub fn with_path_resolver(mut self, resolver: Arc<crate::pipeline::PathResolver>) -> Self {
-        self.service = self.service.with_path_resolver(resolver);
         self
     }
 
@@ -136,6 +131,7 @@ impl GrpcServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ontology::Ontology;
     use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
@@ -144,17 +140,17 @@ mod tests {
         let validator =
             Arc::new(JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap());
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let clickhouse_config = ClickHouseConfiguration::default();
+        let clickhouse_config = orbit_server_config::AppConfig::embedded_defaults().graph;
         let cluster_health = ClusterHealthChecker::default().into_arc();
         let server = GrpcServer::new(
             addr,
             validator,
-            ontology,
+            ActiveSchema::pinned(ontology),
             &clickhouse_config,
             cluster_health,
             None,
-            GrpcConfig::default(),
-            Arc::new(AnalyticsConfig::default()),
+            orbit_server_config::AppConfig::embedded_defaults().grpc,
+            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
         );
         assert_eq!(server.addr(), addr);
     }

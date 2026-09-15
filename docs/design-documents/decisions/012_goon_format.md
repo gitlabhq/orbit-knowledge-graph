@@ -241,7 +241,7 @@ Locked by property tests with 64 cases each:
 
 - `scripts/check-goon-format-version.sh` mirrors `check-response-schema-version.sh`. It watches `crates/query-engine/formatters/src/goon/**.rs`, `graph.rs`, and `lib.rs`, and requires a version bump on any change.
 - Lefthook runs the check pre-commit; GitLab CI runs it on MRs in the `lint` stage.
-- Bypass for wire-neutral edits: `[skip goon-format-version-check]` in the MR description or `SKIP_GOON_FORMAT_VERSION_CHECK=1` locally.
+- Bypass for wire-neutral edits: `[skip pinned-version-check]` in the MR description or `SKIP_PINNED_VERSION_CHECK=1` locally.
 
 ## Test coverage
 

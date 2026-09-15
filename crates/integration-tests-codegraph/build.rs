@@ -1,0 +1,46 @@
+fn main() {
+    let root = format!("{}/fixtures", std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let mut tests = Vec::new();
+    find_yaml(&root, &root, &mut tests);
+    tests.sort();
+
+    // Detect duplicate test names (e.g. foo/bar-baz.yaml and foo/bar_baz.yaml)
+    for pair in tests.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            panic!(
+                "duplicate test name '{}' from:\n  {}\n  {}",
+                pair[0].0, pair[0].1, pair[1].1
+            );
+        }
+    }
+
+    let code: String = tests
+        .iter()
+        .map(|(name, path)| {
+            format!("#[tokio::test]\nasync fn {name}() {{ run_yaml_suite(include_str!(\"{path}\")).await; }}\n")
+        })
+        .collect();
+
+    std::fs::write(
+        format!("{}/generated_suites.rs", std::env::var("OUT_DIR").unwrap()),
+        code,
+    )
+    .unwrap();
+    println!("cargo::rerun-if-changed=fixtures");
+}
+
+fn find_yaml(root: &str, dir: &str, out: &mut Vec<(String, String)>) {
+    for entry in std::fs::read_dir(dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            find_yaml(root, path.to_str().unwrap(), out);
+        } else if path.extension().is_some_and(|e| e == "yaml") {
+            let abs = path.to_str().unwrap().replace('\\', "/");
+            let name = abs[root.len() + 1..]
+                .replace(['/', '.', '-'], "_")
+                .trim_end_matches("_yaml")
+                .to_string();
+            out.push((name, abs));
+        }
+    }
+}

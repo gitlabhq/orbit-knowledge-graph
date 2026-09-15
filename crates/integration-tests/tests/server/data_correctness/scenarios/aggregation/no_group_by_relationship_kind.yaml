@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_no_group_by_preserves_relationship_kind
+description: Ungrouped aggregation preserves relationship_kind filter in WHERE clause
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+      "aggregations": [{"count": "mr", "as": "total_authored"}],
+      "limit": 10
+    }
+
+expect:
+  row_count: 1
+  row_values:
+    - { total_authored: 6 }

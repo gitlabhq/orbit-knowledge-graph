@@ -1,0 +1,45 @@
+# Pinned versions and upstream revisions. Deserialized into
+# orbit_versions::Versions (every key is required, unknown keys fail
+# the build). Shell scripts read vendored entries via yq.
+
+# Graph schema version; prefixes every versioned ClickHouse table (vN_).
+# Bump with `mise schema:bump`, which also appends a migration ledger entry.
+schema: 97
+
+# Accepted query-DSL shape. Bump when graph_query.schema.json or the
+# compiler's input/validate passes change what queries are accepted.
+query_dsl: 12.1.3
+
+# Response envelope of the raw (JSON) formatter.
+raw_output_format: 5.0.1
+
+# Response envelope of the GOON formatter.
+goon_output_format: 4.0.1
+
+# gitlab-org/gitlab commit whose SystemNoteMetadata::ICON_TYPES is vendored
+# in config/vendored/system_note_metadata.actions.
+gitlab_system_note_actions: ea52f8c3adc370db76545ecd82728710f2609800
+
+# Vendored dependencies. Each entry declares its pins, artifact location,
+# and vendor/check scripts. Vendor scripts read pins and write computed
+# checksums back into this file via `yq -i`. Run `mise vendor <name>`.
+vendored:
+  duckdb:
+    # DuckDB release linked by the duckdb crate in Cargo.lock; crate
+    # 1.10505.x is DuckDB 1.5.5.
+    version: v1.5.5
+    vendor_dir: crates/duckdb-client/third_party
+    vendor_script: scripts/vendored/duckdb/vendor-duckdb-fts-sources.sh
+    check_script: scripts/vendored/duckdb/check-duckdb-fts-sources-sync.sh
+    extensions:
+      fts:
+        source_revision: 6814ec9a7d5fd63500176507262b0dbf7cea0095
+        source_archive_sha256: 2aad18164aa651b56a00ea40fd1fa7662bdc54fe7e627cd76f7a3d05225b4f88
+        binaries:
+          linux_amd64: 90d6f049e59b592566cfcd228de3001eb679c64e9f144c138dc2cd55dab12cd6
+          linux_arm64: 87a8c2dddf41d397c617af41e479d4e365dd66a9f115cec7e78374057e80478f
+          linux_amd64_musl: 10b1049bffa9cbd85ae1a9e82e330258666780ca79a462829e0d78318b08433f
+          linux_arm64_musl: 21d81026d1fc06613fd6d0dd63d5ab2de8e61540b9f5d1c441d5d7cc80d9e3f0
+          osx_amd64: c3da1ea86c107650edf06a8296094640b9f4886b8ceab4ad42912b6ff5c880bc
+          osx_arm64: b6b8d0a13e0457f3ce368e4e7c2ff8de48637eea5ca61e5ff983c05018e7f315
+          windows_amd64: 24a328d189aa87a22cd3c2ac6c3f484a49ba30adfd6ce05572fe5841429f2ab5

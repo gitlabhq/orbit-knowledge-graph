@@ -21,6 +21,7 @@ namespaces:
 configMap: e2e-robot-tests
 fixturesConfigMap: e2e-robot-fixtures
 rootPatSecret: gitlab-root-pat
+indexingBudgetMultiplier: "1"
 rootPatSecretNamespace: ""
 rootPatSecretKey: pat
 ttlSecondsAfterFinished: 600

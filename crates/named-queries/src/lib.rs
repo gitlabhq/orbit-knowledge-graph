@@ -13,6 +13,8 @@
 //! - `{ "$param": "<name>" }` — selection values supplied by the client
 //!   (e.g. the entity and ids of a clicked node) and validated against the
 //!   JSON Schema each template declares for the parameter.
+//! - `"$param:<name>": ...` — an object key filled from a string parameter,
+//!   so a template can take the property name to filter on.
 
 mod query;
 
@@ -164,6 +166,10 @@ impl NamedQueries {
         self.queries.values()
     }
 
+    pub fn retain(&mut self, mut keep: impl FnMut(&NamedQuery) -> bool) {
+        self.queries.retain(|_, query| keep(query));
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.queries.keys().map(String::as_str)
     }
@@ -214,6 +220,12 @@ query:
             "top_mr_authors",
             "mrs_fixing_vulnerabilities",
             "expand_neighbors",
+            "search_nodes",
+            "list_nodes",
+            "file_definitions",
+            "file_definition_callers",
+            "definition_references",
+            "definition_callees",
         ] {
             assert!(queries.get(name).is_some(), "missing named query `{name}`");
         }

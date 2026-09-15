@@ -29,22 +29,6 @@ internal_col!(neighbor_type_column, "neighbor_type");
 internal_col!(relationship_type_column, "relationship_type");
 internal_col!(neighbor_is_outgoing_column, "neighbor_is_outgoing");
 
-/// Physical tables of `global` nodes (User, Runner). These skip the
-/// traversal-path security filter because they are non-namespaced hubs with
-/// no `traversal_path` to scope on. Derived from the `global` node flag.
-pub fn global_tables() -> &'static [String] {
-    use std::sync::OnceLock;
-    static TABLES: OnceLock<Vec<String>> = OnceLock::new();
-    TABLES.get_or_init(|| {
-        ontology::Ontology::load_embedded()
-            .expect("embedded ontology must load")
-            .global_tables()
-            .iter()
-            .map(|t| t.to_string())
-            .collect()
-    })
-}
-
 // _gkg_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {
     format!("{}{alias}_pk", internal_column_prefix())

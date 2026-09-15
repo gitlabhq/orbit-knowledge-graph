@@ -1,0 +1,21 @@
+# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_wildcard_keeps_intermediate_hops_unconstrained
+description: Wildcard rel_types traverses User -> Group -> Project unconstrained
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "node_ids": [1]},
+        {"id": "end", "entity": "Project", "node_ids": [1004]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["*"]}
+    }
+
+expect:
+  referential_integrity: true
+  path_count: 1
+  path_edges:
+    - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 102 },
+       { from: Group, from_id: 102, type: CONTAINS, to: Project, to_id: 1004 }]

@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_count_group_contains_projects
+description: Count projects contained in each group
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "p", "entity": "Project"}
+      ],
+      "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+      "group_by": ["g"],
+      "aggregations": [{"count": "p", "as": "project_count"}],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    g:
+      rows:
+        - { entity: Group, id: 100, values: { project_count: 2 }, properties: { name: Public Group } }
+        - { entity: Group, id: 101, values: { project_count: 2 }, properties: { name: Private Group } }
+        - { entity: Group, id: 102, values: { project_count: 1 }, properties: { name: Internal Group } }

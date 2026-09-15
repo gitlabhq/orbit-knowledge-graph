@@ -8,6 +8,7 @@ license = "LicenseRef-EE"
 circuit-breaker = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
+rand = { workspace = true }
 arrow = { workspace = true }
 arrow-ipc = { workspace = true, features = ["lz4"] }
 bytes = { workspace = true }

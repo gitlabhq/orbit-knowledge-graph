@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 const_format = { workspace = true }
+flate2 = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 minijinja = { workspace = true }
 serde = { workspace = true }
@@ -13,3 +14,6 @@ orbit-utils = { path = "../utils" }
 sha2 = { workspace = true }
 rust-embed = { workspace = true, features = ["include-exclude"] }
 strum = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }

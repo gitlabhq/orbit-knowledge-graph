@@ -21,12 +21,9 @@ title: GitLab Self-Managed上のGitLab Orbitを使い始める
 {{< /history >}}
 
 > [!note]
-> GitLab Self-Managed上のGitLab Orbitは
-> [ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> GitLab Self-Managed上のGitLab Orbitは[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-GitLab Orbitは、ClickHouse、Kubernetes、NATSという3つのシステムに依存していますが、これらはGitLab Orbitがインストールするものではありません。
-残りのセットアップ手順を進めるには、この3つのシステムがすべて存在し、到達可能である必要があります。
+GitLab Orbitは、ClickHouse、Kubernetes、NATSという3つのシステムに依存していますが、これらはGitLab Orbitがインストールするものではありません。残りのセットアップ手順を進めるには、この3つのシステムがすべて存在し、到達可能である必要があります。
 
 ## 前提条件 {#prerequisites}
 
@@ -39,7 +36,7 @@ GitLab Orbitは、ClickHouse、Kubernetes、NATSという3つのシステムに�
 
 ## インストール順序 {#installation-order}
 
-各ステップは前のステップに依存しています。以下の順序でコンポーネントをインストールしてください。
+各ステップは前のステップに依存しています。以下の順序でコンポーネントをインストールしてください:
 
 1. GitLab用にClickHouseをセットアップし、GitLab ClickHouseマイグレーションを実行します。
 1. JetStreamを有効にしてNATSをクラスターにインストールします。
@@ -52,18 +49,14 @@ GitLab Orbitは、ClickHouse、Kubernetes、NATSという3つのシステムに�
 
 GitLab Orbitには、ClickHouse 26.2以降が必要です。これは、グラフがそのリリースで導入された全文インデックスとマテリアライズド共通テーブル式を使用するためです。GitLabは25.xおよび26.xのリリースをサポートしているため、25.xリリースはGitLabの他の部分には対応しますが、GitLab Orbitには対応しません。ClickHouseに関するその他のGitLab要件は変更ありません。
 
-まずGitLab用にClickHouseをセットアップしてください。詳細については、
-[ClickHouse](https://docs.gitlab.com/integration/clickhouse/)を参照してください。
-[ClickHouseマイグレーションの実行](https://docs.gitlab.com/integration/clickhouse/#run-clickhouse-migrations)および
-[分析用ClickHouseの有効化](https://docs.gitlab.com/integration/clickhouse/#enable-clickhouse-for-analytics)を含む、そのページのすべての手順を完了してください。
-これらのマイグレーションにより、レプリケーションが書き込むデータレイクテーブルが作成されます。これらのテーブルがない場合、Siphonには書き込み先がなく、レプリケーションが失敗します。
+まずGitLab用にClickHouseをセットアップしてください。詳細については、[ClickHouse](https://docs.gitlab.com/integration/clickhouse/)を参照してください。[ClickHouseマイグレーションの実行](https://docs.gitlab.com/integration/clickhouse/#run-clickhouse-migrations)および[分析用ClickHouseの有効化](https://docs.gitlab.com/integration/clickhouse/#enable-clickhouse-for-analytics)を含む、そのページのすべての手順を完了してください。これらのマイグレーションにより、レプリケーションが書き込むデータレイクテーブルが作成されます。これらのテーブルがない場合、Siphonには書き込み先がなく、レプリケーションが失敗します。
 
-GitLab Orbitは2つのデータベースを使用します。
+GitLab Orbitは2つのデータベースを使用します:
 
 | データベース | 書き込み元 | 読み取り元 |
 |----------|------------|---------|
-| `gitlab_clickhouse_main_production` | GitLab、Siphon | GitLab、GitLab OrbitのIndexerおよびディスパッチャー |
-| `orbit` | GitLab Orbitディスパッチャー（スキーマ）およびIndexer（データ） | GitLab Orbitの3つのコンポーネントすべて |
+| `gitlab_clickhouse_main_production` | GitLab、Siphon | GitLab、GitLab Orbitのインデクサーおよびディスパッチャー |
+| `orbit` | GitLab Orbitディスパッチャー（スキーマ）およびインデクサー（データ） | GitLab Orbitの3つのコンポーネントすべて |
 
 2つのデータベースは別々のClickHouseインスタンスに配置できます。その場合、GitLab、Siphon、およびGitLab Orbitに対して、それぞれが使用するデータベースを持つインスタンスの認証情報を付与してください。
 
@@ -75,7 +68,7 @@ ClickHouseには少なくとも8 CPUと32 GiBのメモリをプロビジョニ�
 
 ClickHouseのストレージは、少なくともGitLab PostgreSQLデータベースのサイズ以上をプロビジョニングしてください。
 
-自分で運用するClickHouseインスタンスでは、`max_bytes_before_external_sort`と`max_bytes_before_external_group_by`が`0`に設定されており、ディスクへのスピルが無効になっています。ClickHouse Cloudでは、両方が利用可能なメモリの半分に設定されています。スピルが無効の場合、大規模なソートはすべての結果をメモリに保持するため、サーバーがメモリ不足になります。`default`プロファイルで両方を設定してください。以下の値は32 GiBインスタンスに適しており、各しきい値に8 GiB、メモリ上限に20 GiBを割り当てています。
+自分で運用するClickHouseインスタンスでは、`max_bytes_before_external_sort`と`max_bytes_before_external_group_by`が`0`に設定されており、ディスクへのスピルが無効になっています。ClickHouse Cloudでは、両方が利用可能なメモリの半分に設定されています。スピルが無効の場合、大規模なソートはすべての結果をメモリに保持するため、サーバーがメモリ不足になります。`default`プロファイルで両方を設定してください。以下の値は32 GiBインスタンスに適しており、各しきい値に8 GiB、メモリ上限に20 GiBを割り当てています:
 
 ```xml
 <profiles>
@@ -104,7 +97,7 @@ NATSサーバーの`max_payload`を64 MBに設定してください。デフォ�
 
 Siphonはスナップショットイベントをオブジェクトストアに保存します。また、`max_payload`を引き上げた後もまだ大きすぎる行も同様に保存されます。デフォルトでは、SiphonはNATS JetStreamオブジェクトストアバケットを使用するため、追加のサービスは不要です。JetStreamボリュームへのトラフィックを抑えたい場合や、別の保持ポリシーを適用したい場合は、代わりにS3互換またはGoogle Cloud Storageバケットを設定してください。
 
-GitLab Orbitはオブジェクトストレージを使用しません。グラフはClickHouseに保存されており、再度インデックス作成を行うことで再構築できます。Indexerはリポジトリのチェックアウトにノードローカルディスクを必要とします。チャートは一時的なストレージリクエストによってこのディスクのサイズを設定します。
+GitLab Orbitはオブジェクトストレージを使用しません。グラフはClickHouseに保存されており、再度インデックス作成を行うことで再構築できます。インデクサーはリポジトリのチェックアウトにノードローカルディスクを必要とします。チャートは一時的なストレージリクエストによってこのディスクのサイズを設定します。
 
 ## 共有設定値 {#shared-configuration-values}
 

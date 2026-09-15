@@ -16,14 +16,15 @@ use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
 use crate::retry::{Backoff, LocalRetry, Step, drive_with};
 
-use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
-use super::deleted_rows::DeletedRowSplitter;
+use super::datalake::{DatalakeQuery, FetchedPage, ScanStats, is_arrow_string_overflow};
 use super::metrics::SdlcMetrics;
+use super::paging::{block_size_for, next_page_limit};
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::durability::RunDurability;
 use orbit_server_config::DatalakeRetryConfig;
+use orbit_utils::arrow::batch_slice_bytes;
 
 const MAX_RETRIES: u32 = 3;
 
@@ -76,6 +77,7 @@ struct Page {
     batches: Vec<RecordBatch>,
     scan_stats: ScanStats,
     extract_elapsed: Duration,
+    truncated: bool,
 }
 
 impl Page {
@@ -88,10 +90,7 @@ impl Page {
     }
 
     fn bytes(&self) -> u64 {
-        self.batches
-            .iter()
-            .map(|b| b.get_array_memory_size() as u64)
-            .sum()
+        self.batches.iter().map(batch_slice_bytes).sum()
     }
 }
 
@@ -107,7 +106,6 @@ pub(in crate::modules::sdlc) struct Pipeline {
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
     registry: Arc<TransformRegistry>,
-    deleted_rows: DeletedRowSplitter,
 }
 
 impl Pipeline {
@@ -116,7 +114,6 @@ impl Pipeline {
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
         retry_config: DatalakeRetryConfig,
-        ontology: &ontology::Ontology,
     ) -> Self {
         Self {
             datalake,
@@ -124,7 +121,6 @@ impl Pipeline {
             metrics,
             retry_config,
             registry: Arc::new(TransformRegistry::default()),
-            deleted_rows: DeletedRowSplitter::from_ontology(ontology),
         }
     }
 
@@ -139,7 +135,7 @@ impl Pipeline {
         &self,
         context: &PipelineContext,
         plan: &Plan,
-        base_query: PreparedQuery,
+        mut base_query: PreparedQuery,
         position_key: &str,
         window: WindowBounds,
         durability: RunDurability,
@@ -155,13 +151,16 @@ impl Pipeline {
         let transform = self.registry.build(plan)?;
         let outputs = transform.outputs().to_vec();
         let params = base_query.params();
+        let plan_limit = base_query.batch_size();
         let mut stats = PipelineStats::default();
+        let mut block_size = None;
 
         let mut page = self
             .extract_batch(
                 transform.name(),
                 &self.page_sql(&base_query, &plan.sort_key, &cursor)?,
                 params.clone(),
+                block_size,
             )
             .await?;
         stats.extract_ms += page.extract_elapsed.as_millis() as u64;
@@ -183,7 +182,19 @@ impl Pipeline {
                     .expect("non-empty page has a last block"),
                 &plan.sort_key,
             )?;
-            let has_more = rows_in_page >= base_query.batch_size();
+            let has_more = rows_in_page >= base_query.batch_size() || page.truncated;
+            base_query.set_batch_size(next_page_limit(
+                base_query.batch_size(),
+                plan_limit,
+                rows_in_page,
+                bytes_in_page,
+                page.truncated,
+            ));
+            block_size = block_size_for(
+                rows_in_page,
+                bytes_in_page,
+                self.retry_config.halving_min_block_size,
+            );
 
             let transform_start = Instant::now();
             let grouped = self
@@ -195,21 +206,15 @@ impl Pipeline {
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
             let mut write_futures = FuturesUnordered::new();
-            let mut delete_statements = Vec::new();
             for (index, batches) in grouped.into_iter().enumerate() {
                 if batches.is_empty() {
                     continue;
                 }
                 let table = outputs[index].clone();
-                let split = self.deleted_rows.split(&table, batches)?;
-                delete_statements.extend(split.delete_statements);
-                if split.live.is_empty() {
-                    continue;
-                }
                 let w = Arc::clone(&context.writer);
                 let d = durability.data_writes;
                 write_futures.push(async move {
-                    w.write(&table, split.live, d)
+                    w.write(&table, batches, d)
                         .await
                         .map_err(|e| HandlerError::Processing(e.to_string()))
                 });
@@ -229,14 +234,6 @@ impl Pipeline {
                     stats.written_rows += report.rows;
                     stats.written_bytes += report.bytes;
                 }
-                // Deletes run only after every insert has landed, so a same-key insert in this page cannot resurrect a row the delete removed.
-                for statement in delete_statements.drain(..) {
-                    context
-                        .writer
-                        .lightweight_delete(&statement)
-                        .await
-                        .map_err(|e| HandlerError::Processing(e.to_string()))?;
-                }
                 Ok::<_, HandlerError>(write_start.elapsed())
             };
 
@@ -245,7 +242,7 @@ impl Pipeline {
                 let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor)?;
                 let (write_result, extract_result) = tokio::join!(
                     drain_writes,
-                    self.extract_batch(transform.name(), &next_sql, params.clone()),
+                    self.extract_batch(transform.name(), &next_sql, params.clone(), block_size),
                 );
                 (write_result?, Some(extract_result?))
             } else {
@@ -299,7 +296,8 @@ impl Pipeline {
         stats.duration_ms = elapsed.as_millis() as u64;
         self.metrics
             .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
-        self.metrics.record_watermark_lag(&window.target);
+        self.metrics
+            .record_watermark_lag(&plan.name, &window.target);
 
         {
             let mut observer = context.observer.lock().unwrap();
@@ -351,10 +349,11 @@ impl Pipeline {
         transform_name: &str,
         sql: &str,
         params: Value,
+        block_size: Option<u64>,
     ) -> Result<Page, HandlerError> {
         drive_with(
             &DATALAKE_EXTRACT_RETRY,
-            None::<u64>,
+            block_size,
             |block_size, attempt| {
                 let query_start = Instant::now();
                 let fut = self
@@ -364,12 +363,13 @@ impl Pipeline {
                 let retry_config = &self.retry_config;
                 async move {
                     match fut.await {
-                        Ok((batches, scan_stats)) => {
+                        Ok(FetchedPage {
+                            batches,
+                            scan_stats,
+                            truncated,
+                        }) => {
                             let extract_elapsed = query_start.elapsed();
-                            let bytes: u64 = batches
-                                .iter()
-                                .map(|b| b.get_array_memory_size() as u64)
-                                .sum();
+                            let bytes: u64 = batches.iter().map(batch_slice_bytes).sum();
                             metrics.record_datalake_query(
                                 transform_name,
                                 extract_elapsed.as_secs_f64(),
@@ -379,6 +379,7 @@ impl Pipeline {
                                 batches,
                                 scan_stats,
                                 extract_elapsed,
+                                truncated,
                             })
                         }
                         Err(err) => {
@@ -509,12 +510,9 @@ mod tests {
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
+    use orbit_server_config::AppConfig;
     use std::collections::HashSet;
     use std::sync::Mutex;
-
-    fn test_ontology() -> ontology::Ontology {
-        ontology::Ontology::load_embedded().expect("ontology must load")
-    }
 
     fn simple_plan(name: &str) -> Plan {
         simple_plan_with_batch_size(name, 1000)
@@ -733,8 +731,7 @@ mod tests {
             Arc::new(EmptyDatalake),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
-            Default::default(),
-            &test_ontology(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let plan = simple_plan("Test");
 
@@ -763,8 +760,7 @@ mod tests {
             }),
             store.clone(),
             test_metrics(),
-            Default::default(),
-            &test_ontology(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let result = pipeline
             .run_plan(
@@ -828,8 +824,7 @@ mod tests {
             }),
             store.clone(),
             test_metrics(),
-            Default::default(),
-            &test_ontology(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         pipeline
             .run_plan(
@@ -856,8 +851,7 @@ mod tests {
             Arc::new(FailingDatalake),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
-            Default::default(),
-            &test_ontology(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let plan = simple_plan("Failing");
 
@@ -931,8 +925,7 @@ mod tests {
             datalake.clone(),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
-            Default::default(),
-            &test_ontology(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
 
         let plan = simple_plan("Test");
@@ -971,7 +964,6 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1024,
             },
-            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1011,7 +1003,6 @@ mod tests {
                 halving_initial_block_size: 4_096,
                 halving_min_block_size: 2_048,
             },
-            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1092,7 +1083,6 @@ mod tests {
                 halving_initial_block_size: 8_000,
                 halving_min_block_size: 1_024,
             },
-            &test_ontology(),
         );
 
         let plan = simple_plan("Test");
@@ -1133,8 +1123,7 @@ mod tests {
             Arc::new(EmptyDatalake),
             store,
             test_metrics(),
-            Default::default(),
-            &test_ontology(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let plan = simple_plan("Test");
 
@@ -1183,13 +1172,17 @@ mod tests {
             _sql: &str,
             _params: Value,
             _max_block_size: Option<u64>,
-        ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
+        ) -> Result<FetchedPage, DatalakeError> {
             let mut calls = self.calls.lock().unwrap();
             *calls += 1;
             if *calls == 1 {
-                Ok((vec![test_batch(self.rows)], self.scan_stats))
+                Ok(FetchedPage {
+                    batches: vec![test_batch(self.rows)],
+                    scan_stats: self.scan_stats,
+                    truncated: false,
+                })
             } else {
-                Ok((vec![], ScanStats::default()))
+                Ok(FetchedPage::default())
             }
         }
     }
@@ -1210,8 +1203,7 @@ mod tests {
             datalake,
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
-            Default::default(),
-            &test_ontology(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
         );
         let plan = simple_plan("Test");
 

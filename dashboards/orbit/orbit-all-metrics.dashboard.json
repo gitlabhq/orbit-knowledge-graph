@@ -1,6 +1,21 @@
 {
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ORBIT_DS"
+        },
+        "enable": true,
+        "expr": "label_replace(group by (image_spec, cluster) (kube_pod_container_info{container=~\"gkg-.*\", cluster=~\"$cluster\"}) unless group by (image_spec, cluster) (kube_pod_container_info{container=~\"gkg-.*\", cluster=~\"$cluster\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
+        "hide": false,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Deploys",
+        "step": "60s",
+        "textFormat": "{{version}} on {{cluster}}",
+        "titleFormat": "Deploy"
+      }
+    ]
   },
   "description": "Every metric the Orbit stack emits, grouped by domain. Use the component dashboards for focused views.",
   "editable": true,
@@ -4094,8 +4109,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
-          "legendFormat": "{{instance}}",
+          "expr": "max by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+          "legendFormat": "{{entity}}",
           "refId": "A"
         }
       ],
@@ -4952,7 +4967,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(gkg_schema_migrating_age_seconds{container=\"gkg-dispatcher\", cluster=~\"$cluster\"})",
+          "expr": "max(gkg_schema_migrating_age_seconds{container=\"gkg-dispatcher\", cluster=~\"$cluster\"})",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -6967,7 +6982,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Webserver readiness gate state (pending|ready|outdated|migrating); 1 indicates the active state per `state` label.",
+      "description": "Webserver serving schema state (pending|ready); 1 indicates the active state per `state` label.",
       "fieldConfig": {
         "defaults": {
           "custom": {

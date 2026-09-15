@@ -25,18 +25,13 @@ impl CircuitBreakingClickHouseClient {
     }
 
     pub async fn execute(&self, sql: &str) -> Result<(), ClickHouseError> {
-        self.query(sql).execute().await
+        self.breaker
+            .call_transient(|| self.client.execute(sql))
+            .await
     }
 
     pub async fn query_arrow(&self, sql: &str) -> Result<Vec<RecordBatch>, ClickHouseError> {
         self.query(sql).fetch_arrow().await
-    }
-
-    pub async fn query_arrow_stream(
-        &self,
-        sql: &str,
-    ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        self.query(sql).fetch_arrow_stream().await
     }
 
     pub async fn insert_arrow(
@@ -92,14 +87,6 @@ impl CircuitBreakingQuery {
     ) -> Result<(Vec<RecordBatch>, Option<QuerySummary>), ClickHouseError> {
         self.breaker
             .call_transient(|| self.inner.fetch_arrow_with_summary())
-            .await
-    }
-
-    pub async fn fetch_arrow_stream(
-        self,
-    ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        self.breaker
-            .call_transient(|| self.inner.fetch_arrow_stream())
             .await
     }
 

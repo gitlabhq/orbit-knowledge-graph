@@ -40,9 +40,9 @@ The handler follows these steps:
 
 2. **Check if the namespace is still deleted.** Between scheduling and execution, an operator may have re-enabled the namespace. The handler queries the datalake to check the current state. If the namespace was re-enabled, the handler clears the schedule entry without touching any data and returns early.
 
-3. **Soft-delete graph data.** For every namespaced node table and all configured edge tables, the handler runs an `INSERT INTO ... SELECT` that copies matching rows with `_deleted = true` and a fresh `_version` timestamp. The list of tables comes from the ontology at startup, so adding a new entity type or edge table to the ontology automatically includes it in namespace deletion. If any table fails, the handler stops and returns an error without proceeding to the next steps.
+3. **Soft-delete graph data.** For every namespaced node table and all configured edge tables, the handler runs an `INSERT INTO ... SELECT` that copies matching rows with `_deleted = true` and a fresh `_version` timestamp. The list of tables comes from the ontology at startup, so adding a new entity type or edge table to the ontology automatically includes it in namespace deletion. The handler attempts every table, records each outcome, and returns an error after the pass if any table failed. Successful tombstones are not rolled back.
 
-4. **Soft-delete checkpoints.** Once all graph data has been marked deleted, the handler removes the SDLC checkpoints (keyed by namespace position, e.g. `ns.42.Project`) and the code indexing checkpoints (keyed by traversal path prefix). This prevents stale checkpoints from interfering if the namespace is later re-enabled and re-indexed from scratch.
+4. **Soft-delete checkpoints.** Once every graph-table attempt succeeds, the handler removes the SDLC checkpoints (keyed by namespace position, e.g. `ns.42.Project`) and then the code indexing checkpoints (keyed by traversal path prefix). These are two sequential ClickHouse inserts rather than one transaction. This prevents stale checkpoints from interfering if the namespace is later re-enabled and re-indexed from scratch.
 
 5. **Mark deletion complete.** The handler soft-deletes the `namespace_deletion_schedule` entry so the scheduler does not dispatch it again.
 
@@ -98,9 +98,9 @@ The scheduler writes to this table when it detects a deleted namespace. The hand
 
 ## Error handling
 
-Table deletion is all-or-nothing. If any graph table fails to soft-delete, the handler returns an error and NATS redelivers the message on the next attempt. Checkpoints and the schedule entry are only cleaned up after every table has been processed, so a transient ClickHouse failure will not leave the namespace in a state where checkpoints are gone but graph data remains.
+Graph-table deletion is an idempotent, best-effort pass, not an all-or-nothing transaction. Every table is attempted even after a failure, so a failed request can leave successful tombstones visible alongside live rows from failed tables. The handler then returns an error. It does not start checkpoint cleanup or clear the schedule entry while any graph-table outcome is unsuccessful, so a later scheduler publication or configured NATS redelivery can retry the request.
 
-If the `mark_deletion_complete` step fails after data and checkpoints have been deleted, the message will be redelivered. The next run will re-execute the soft-deletes, which is safe because the queries only affect rows where `_deleted = false`.
+Checkpoint cleanup is also nontransactional: the SDLC checkpoint insert completes before the code checkpoint insert starts. If the second insert fails, the schedule entry remains and a later attempt safely retries both. If `mark_deletion_complete` fails after graph data and checkpoints have been deleted, a later attempt re-executes the idempotent soft-deletes and cleanup before trying the schedule entry again.
 
 ## Observability
 

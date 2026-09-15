@@ -45,7 +45,11 @@ pub struct CodeIndexingDeps {
 
 impl CodeIndexingDeps {
     pub fn new(mock: &MockGitlabServer, clickhouse: &TestContext) -> Self {
-        Self::new_with_pipeline_config(mock, clickhouse, CodeIndexingPipelineConfig::default())
+        Self::new_with_pipeline_config(
+            mock,
+            clickhouse,
+            indexer::testkit::test_pipeline_configuration(),
+        )
     }
 
     pub fn new_with_pipeline_config(
@@ -131,7 +135,7 @@ impl CodeIndexingDeps {
             self.metrics.clone(),
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
-        let config = CodeIndexingPipelineConfig::default();
+        let config = indexer::testkit::test_pipeline_configuration();
         let pipeline = Arc::new(CodeIndexer::new(
             resolver,
             writer,

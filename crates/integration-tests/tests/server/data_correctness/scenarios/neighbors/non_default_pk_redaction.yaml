@@ -1,0 +1,33 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_non_default_pk_redaction_uses_merge_request_id
+description: Non-default PK redaction uses merge_request_id for authorization
+
+config:
+  redaction:
+    allow:
+      merge_request: [2001]
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{
+        "id": "d",
+        "entity": "MergeRequestDiff",
+        "filters": {"head_commit_sha": {"starts_with": "bbbb"}}
+      }],
+      "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
+    }
+
+expect:
+  skip_requirements:
+    - "filter:head_commit_sha"
+  node_count: 2
+  nodes:
+    MergeRequestDiff:
+      ids: [5002]
+      absent: [5000, 5001]
+    MergeRequest:
+      ids: [2001]
+      absent: [2000]
+  edge_exists:
+    HAS_DIFF: [[2001, 5002]]

@@ -27,9 +27,9 @@ title: GitLab Orbitのトラブルシューティング
 
 GitLab Orbit Localのエラーは、`orbit`バイナリを直接実行するか、`glab orbit local`を通じて実行する際に発生します。
 
-### `no local graph found`
+### `no local graph found` {#no-local-graph-found}
 
-**症状:**
+**症状:** 
 
 ```plaintext
 Error: no local graph found at ~/.orbit/graph.duckdb. Run `orbit index` first.
@@ -43,7 +43,7 @@ Error: no local graph found at ~/.orbit/graph.duckdb. Run `orbit index` first.
 glab orbit local index /path/to/your/repo
 ```
 
-### `IO Error: Could not set lock on file`
+### `IO Error: Could not set lock on file` {#io-error-could-not-set-lock-on-file}
 
 **症状:** コマンドが一時的に停止したように見えた後、`Could not set lock on file`を含むエラーで失敗します。
 
@@ -57,7 +57,7 @@ pkill orbit
 
 その後、コマンドを再試行してください。
 
-### `list_contains source_tags`
+### `list_contains source_tags` {#list_contains-source_tags}
 
 **症状:** `list_contains source_tags`を含むエラーでクエリが失敗します。
 
@@ -65,9 +65,9 @@ pkill orbit
 
 **解決策:** クエリから`source_tags`フィルターを削除して再試行してください。
 
-### `error: unrecognized subcommand 'mcp'`
+### `error: unrecognized subcommand 'mcp'` {#error-unrecognized-subcommand-mcp}
 
-**症状:**
+**症状:** 
 
 ```plaintext
 error: unrecognized subcommand 'mcp'
@@ -102,7 +102,7 @@ GitLab Orbit Remoteのエラーは、`glab orbit remote`コマンドを実行す
 glab auth login
 ```
 
-### MCPエンドポイントでの`insufficient_scope` {#on-the-mcp-endpoint}
+### MCPエンドポイントでの`insufficient_scope` {#insufficient_scope-on-the-mcp-endpoint}
 
 **症状:** GitLab OrbitのMCPエンドポイントへの接続が`insufficient_scope`で失敗します。
 

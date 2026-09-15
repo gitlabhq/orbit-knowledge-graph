@@ -1,8 +1,7 @@
 name: get_graph_schema
-version: 1.0.1
+version: 1.1.0
 summary: Return graph nodes, edges, and expanded node properties.
 description: >-
-  List the GitLab Orbit schema. Returns the available nodes and
-  edges with their source/target types. Pass expand_nodes (or its alias
-  entity_types) with specific type names to get their filterable properties
-  and types before composing a query_graph call.
+  Return the graph schema: node types, edge types, and their source and target
+  types. Pass expand_nodes (alias entity_types) with the node types you plan to
+  query to get their properties and relationships.

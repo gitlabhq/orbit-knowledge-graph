@@ -220,8 +220,8 @@ mod tests {
     use crate::modules::sdlc::plan::{
         Cursor, CursorFilter, Plan, TransformSpec, TraversalPathFilter, WatermarkFilter,
     };
-    use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
     use chrono::Utc;
+    use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
     use orbit_utils::traversal_path::TraversalPath;
 
     fn test_ontology() -> Ontology {
@@ -743,5 +743,20 @@ mod tests {
             }
         }
         assert!(count > 0, "ontology produced no plans");
+    }
+
+    #[test]
+    fn every_extract_orders_its_outermost_select() {
+        let plans = plans(&test_ontology(), 1_000_000);
+        for plan in plans.global.iter().chain(plans.namespaced.iter()) {
+            let sql = plan.extract_template.as_str();
+            let last_from = sql.rfind("FROM ").expect("extract has a FROM");
+            let last_order_by = sql.rfind("ORDER BY").unwrap_or(0);
+            assert!(
+                last_order_by > last_from,
+                "{}: outermost SELECT has no ORDER BY",
+                plan.name
+            );
+        }
     }
 }

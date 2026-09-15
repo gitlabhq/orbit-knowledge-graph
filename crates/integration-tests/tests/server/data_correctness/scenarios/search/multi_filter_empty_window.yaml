@@ -1,0 +1,23 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_multi_filter_empty_window_returns_empty
+description: Zero-width date window returns no results
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest",
+               "id_range": {"start": 1, "end": 10000},
+               "columns": ["title", "merged_at"],
+               "filters": {
+                   "merged_at": [
+                       {"gte": "2024-07-01T00:00:00Z"},
+                       {"lt": "2024-07-01T00:00:00Z"}
+                   ]
+               }}],
+      "limit": 10
+    }
+
+expect:
+  skip_requirements:
+    - "filter:merged_at"
+  node_count: 0

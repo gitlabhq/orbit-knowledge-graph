@@ -16,46 +16,37 @@ pub struct NatsConfiguration {
     pub url: String,
 
     /// Optional username for authentication.
-    #[serde(default)]
     pub username: Option<String>,
 
     /// Optional password for authentication.
-    /// For production, prefer environment variables over storing in config files.
-    #[serde(default)]
+    /// For production, mount it as a secret file at `/etc/secrets/nats/password`.
     pub password: Option<String>,
 
     /// Path to CA certificate (PEM) for verifying the NATS server.
     /// Setting this enables TLS (connection uses `tls://` scheme).
-    #[serde(default)]
     pub tls_ca_cert_path: Option<String>,
 
     /// Path to client certificate (PEM) for mTLS authentication.
     /// Must be paired with `tls_key_path`.
-    #[serde(default)]
     pub tls_cert_path: Option<String>,
 
     /// Path to client private key (PEM) for mTLS authentication.
     /// Must be paired with `tls_cert_path`.
-    #[serde(default)]
     pub tls_key_path: Option<String>,
 
-    /// Connection timeout in seconds. Defaults to 10.
-    #[serde(default = "NatsConfiguration::default_connection_timeout_secs")]
+    /// Connection timeout in seconds.
     pub connection_timeout_secs: u64,
 
-    /// Request timeout in seconds. Defaults to 5.
-    #[serde(default = "NatsConfiguration::default_request_timeout_secs")]
+    /// Request timeout in seconds.
     pub request_timeout_secs: u64,
 
-    /// Acknowledgment wait time in seconds before message redelivery. Defaults to 300.
-    #[serde(default = "NatsConfiguration::default_ack_wait_secs")]
+    /// Acknowledgment wait time in seconds before message redelivery.
     pub ack_wait_secs: u64,
 
-    /// Maximum redelivery attempts. None means unlimited. Defaults to 5.
-    #[serde(default = "NatsConfiguration::default_max_deliver")]
+    /// Maximum redelivery attempts. None means unlimited.
     pub max_deliver: Option<u32>,
 
-    /// How many messages to buffer per subscription. Defaults to 100.
+    /// How many messages to buffer per subscription.
     ///
     /// This controls the capacity of the internal channel between the NATS fetch loop
     /// and your message handler. When `subscribe()` is called, a background task fetches
@@ -65,10 +56,9 @@ pub struct NatsConfiguration {
     /// - **Larger buffer**: More messages pre-fetched, smoother throughput, higher memory usage
     ///
     /// For slow handlers or bursty workloads, consider increasing this value.
-    #[serde(default = "NatsConfiguration::default_subscription_buffer_size")]
     pub subscription_buffer_size: usize,
 
-    /// Consumer name for durable subscriptions. Defaults to None (ephemeral consumer).
+    /// Consumer name for durable subscriptions.
     ///
     /// **Ephemeral consumers** (`None`): Created on subscribe, destroyed on disconnect.
     /// Messages are only delivered while connected. Good for transient workers or testing.
@@ -79,39 +69,31 @@ pub struct NatsConfiguration {
     ///
     /// For horizontal scaling, give all instances the same `consumer_name`. NATS will
     /// distribute messages across them (each message delivered to exactly one instance).
-    #[serde(default)]
     pub consumer_name: Option<String>,
 
     /// How many messages to fetch per batch. Higher values improve throughput
-    /// but increase memory usage. Defaults to 10.
-    #[serde(default = "NatsConfiguration::default_batch_size")]
+    /// but increase memory usage.
     pub batch_size: usize,
 
-    /// Whether to auto-create streams on startup. Defaults to true.
-    #[serde(default = "NatsConfiguration::default_auto_create_streams")]
+    /// Whether to auto-create streams on startup.
     pub auto_create_streams: bool,
 
-    /// Number of stream replicas for fault tolerance. Defaults to 1.
+    /// Number of stream replicas for fault tolerance.
     /// Production should use 3 for fault tolerance.
-    #[serde(default = "NatsConfiguration::default_stream_replicas")]
     pub stream_replicas: usize,
 
-    /// Maximum age of messages in seconds before deletion. Defaults to 14400 (4 hours).
-    #[serde(default = "NatsConfiguration::default_stream_max_age_secs")]
+    /// Maximum age of messages in seconds before deletion.
     pub stream_max_age_secs: Option<u64>,
 
-    /// Maximum bytes per stream before oldest messages are deleted. Defaults to None (unlimited).
-    #[serde(default)]
+    /// Maximum bytes per stream before oldest messages are deleted.
     pub stream_max_bytes: Option<i64>,
 
-    /// Maximum messages per stream. Defaults to None (unlimited).
-    #[serde(default)]
+    /// Maximum messages per stream.
     pub stream_max_messages: Option<i64>,
 
     /// Server-side timeout in seconds for `consume_pending` batch fetch.
     /// Must be long enough for the NATS server to scan through gaps between
-    /// matching messages in filtered consumers. Defaults to 5.
-    #[serde(default = "NatsConfiguration::default_fetch_expires_secs")]
+    /// matching messages in filtered consumers.
     pub fetch_expires_secs: u64,
 
     /// Inactive threshold for versioned durable consumers in seconds.
@@ -119,73 +101,21 @@ pub struct NatsConfiguration {
     /// Applied to Siphon dispatch consumers and to subscribe consumers on the
     /// versioned work streams, so a retired release's consumers reap
     /// themselves and stop vetoing release GC. A connected consumer's fetch
-    /// loop keeps it active. Clamped to a minimum of 60 seconds. Defaults to
-    /// 3600 (1 hour).
-    #[serde(default = "NatsConfiguration::default_consumer_inactive_threshold_secs")]
+    /// loop keeps it active. Clamped to a minimum of 60 seconds.
     #[schemars(range(min = 60))]
     pub consumer_inactive_threshold_secs: u64,
 
     /// How long another release's streams must show no activity (creation,
     /// publishes, attached consumers) before a starting dispatcher deletes
     /// them. A live release's dispatcher publishes every minute, so activity
-    /// doubles as liveness. Clamped to a minimum of 600 seconds. Defaults to
-    /// 3600.
-    #[serde(default = "NatsConfiguration::default_release_gc_idle_threshold_secs")]
+    /// doubles as liveness. Clamped to a minimum of 600 seconds.
     #[schemars(range(min = 600))]
     pub release_gc_idle_threshold_secs: u64,
 }
 
 impl NatsConfiguration {
-    fn default_connection_timeout_secs() -> u64 {
-        10
-    }
-
-    fn default_request_timeout_secs() -> u64 {
-        5
-    }
-
-    fn default_ack_wait_secs() -> u64 {
-        300
-    }
-
-    fn default_max_deliver() -> Option<u32> {
-        Some(5)
-    }
-
-    fn default_subscription_buffer_size() -> usize {
-        100
-    }
-
-    fn default_batch_size() -> usize {
-        10
-    }
-
-    fn default_auto_create_streams() -> bool {
-        true
-    }
-
-    fn default_stream_replicas() -> usize {
-        1
-    }
-
-    fn default_stream_max_age_secs() -> Option<u64> {
-        Some(14400)
-    }
-
-    fn default_fetch_expires_secs() -> u64 {
-        5
-    }
-
-    fn default_consumer_inactive_threshold_secs() -> u64 {
-        3600
-    }
-
     pub fn consumer_inactive_threshold(&self) -> Duration {
         Duration::from_secs(self.consumer_inactive_threshold_secs.max(60))
-    }
-
-    fn default_release_gc_idle_threshold_secs() -> u64 {
-        3600
     }
 
     pub fn release_gc_idle_threshold(&self) -> Duration {
@@ -284,42 +214,19 @@ impl NatsConfiguration {
     }
 }
 
-impl Default for NatsConfiguration {
-    fn default() -> Self {
-        Self {
-            url: "localhost:4222".to_string(),
-            username: None,
-            password: None,
-            tls_ca_cert_path: None,
-            tls_cert_path: None,
-            tls_key_path: None,
-            connection_timeout_secs: Self::default_connection_timeout_secs(),
-            request_timeout_secs: Self::default_request_timeout_secs(),
-            ack_wait_secs: Self::default_ack_wait_secs(),
-            max_deliver: Self::default_max_deliver(),
-            subscription_buffer_size: Self::default_subscription_buffer_size(),
-            consumer_name: None,
-            batch_size: Self::default_batch_size(),
-            auto_create_streams: Self::default_auto_create_streams(),
-            stream_replicas: Self::default_stream_replicas(),
-            stream_max_age_secs: Self::default_stream_max_age_secs(),
-            stream_max_bytes: None,
-            stream_max_messages: None,
-            fetch_expires_secs: Self::default_fetch_expires_secs(),
-            consumer_inactive_threshold_secs: Self::default_consumer_inactive_threshold_secs(),
-            release_gc_idle_threshold_secs: Self::default_release_gc_idle_threshold_secs(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AppConfig;
     use tempfile::NamedTempFile;
+
+    fn defaults() -> NatsConfiguration {
+        AppConfig::embedded_defaults().nats
+    }
 
     #[test]
     fn bare_host_defaults_to_nats_scheme() {
-        let config = NatsConfiguration::default();
+        let config = defaults();
         assert_eq!(config.connection_url(), "nats://localhost:4222");
         assert!(!config.tls_enabled());
     }
@@ -328,7 +235,7 @@ mod tests {
     fn bare_host_uses_tls_scheme_when_ca_set() {
         let config = NatsConfiguration {
             tls_ca_cert_path: Some("/tmp/ca.pem".into()),
-            ..Default::default()
+            ..defaults()
         };
         assert_eq!(config.connection_url(), "tls://localhost:4222");
         assert!(config.tls_enabled());
@@ -339,7 +246,7 @@ mod tests {
         let config = NatsConfiguration {
             tls_cert_path: Some("/tmp/cert.pem".into()),
             tls_key_path: Some("/tmp/key.pem".into()),
-            ..Default::default()
+            ..defaults()
         };
         assert_eq!(config.connection_url(), "tls://localhost:4222");
     }
@@ -348,7 +255,7 @@ mod tests {
     fn nats_scheme_in_url_is_preserved() {
         let config = NatsConfiguration {
             url: "nats://my-nats:4222".into(),
-            ..Default::default()
+            ..defaults()
         };
         assert_eq!(config.connection_url(), "nats://my-nats:4222");
         assert!(!config.tls_enabled());
@@ -358,7 +265,7 @@ mod tests {
     fn tls_scheme_in_url_enables_tls() {
         let config = NatsConfiguration {
             url: "tls://secure-nats:4222".into(),
-            ..Default::default()
+            ..defaults()
         };
         assert_eq!(config.connection_url(), "tls://secure-nats:4222");
         assert!(config.tls_enabled());
@@ -369,14 +276,14 @@ mod tests {
         let config = NatsConfiguration {
             url: "tls://secure-nats:4222".into(),
             tls_ca_cert_path: Some("/tmp/ca.pem".into()),
-            ..Default::default()
+            ..defaults()
         };
         assert_eq!(config.connection_url(), "tls://secure-nats:4222");
     }
 
     #[test]
     fn validate_no_tls_is_valid() {
-        let config = NatsConfiguration::default();
+        let config = defaults();
         assert!(config.validate_tls_config().is_ok());
     }
 
@@ -385,7 +292,7 @@ mod tests {
         let ca_file = NamedTempFile::new().unwrap();
         let config = NatsConfiguration {
             tls_ca_cert_path: Some(ca_file.path().to_str().unwrap().into()),
-            ..Default::default()
+            ..defaults()
         };
         assert!(config.validate_tls_config().is_ok());
     }
@@ -399,7 +306,7 @@ mod tests {
             tls_ca_cert_path: Some(ca.path().to_str().unwrap().into()),
             tls_cert_path: Some(cert.path().to_str().unwrap().into()),
             tls_key_path: Some(key.path().to_str().unwrap().into()),
-            ..Default::default()
+            ..defaults()
         };
         assert!(config.validate_tls_config().is_ok());
     }
@@ -409,7 +316,7 @@ mod tests {
         let cert = NamedTempFile::new().unwrap();
         let config = NatsConfiguration {
             tls_cert_path: Some(cert.path().to_str().unwrap().into()),
-            ..Default::default()
+            ..defaults()
         };
         let err = config.validate_tls_config().unwrap_err();
         assert!(err.contains("tls_key_path is missing"), "{err}");
@@ -420,7 +327,7 @@ mod tests {
         let key = NamedTempFile::new().unwrap();
         let config = NatsConfiguration {
             tls_key_path: Some(key.path().to_str().unwrap().into()),
-            ..Default::default()
+            ..defaults()
         };
         let err = config.validate_tls_config().unwrap_err();
         assert!(err.contains("tls_cert_path is missing"), "{err}");
@@ -430,7 +337,7 @@ mod tests {
     fn validate_missing_file_is_invalid() {
         let config = NatsConfiguration {
             tls_ca_cert_path: Some("/nonexistent/ca.pem".into()),
-            ..Default::default()
+            ..defaults()
         };
         let err = config.validate_tls_config().unwrap_err();
         assert!(err.contains("tls_ca_cert_path"), "{err}");
@@ -445,37 +352,15 @@ mod tests {
             tls_ca_cert_path: Some(ca.path().to_str().unwrap().into()),
             tls_cert_path: Some("/nonexistent/cert.pem".into()),
             tls_key_path: Some(key.path().to_str().unwrap().into()),
-            ..Default::default()
+            ..defaults()
         };
         let err = config.validate_tls_config().unwrap_err();
         assert!(err.contains("tls_cert_path"), "{err}");
     }
 
     #[test]
-    fn deserialize_with_tls_fields() {
-        let yaml = r#"
-            url: "localhost:4222"
-            tls_ca_cert_path: "/etc/nats/ca.pem"
-            tls_cert_path: "/etc/nats/client.pem"
-            tls_key_path: "/etc/nats/client-key.pem"
-        "#;
-        let config: NatsConfiguration = orbit_utils::yaml::from_str(yaml).unwrap();
-        assert_eq!(config.tls_ca_cert_path.as_deref(), Some("/etc/nats/ca.pem"));
-        assert_eq!(
-            config.tls_cert_path.as_deref(),
-            Some("/etc/nats/client.pem")
-        );
-        assert_eq!(
-            config.tls_key_path.as_deref(),
-            Some("/etc/nats/client-key.pem")
-        );
-        assert!(config.tls_enabled());
-    }
-
-    #[test]
-    fn deserialize_without_tls_fields_uses_defaults() {
-        let yaml = r#"url: "localhost:4222""#;
-        let config: NatsConfiguration = orbit_utils::yaml::from_str(yaml).unwrap();
+    fn defaults_omit_tls_fields() {
+        let config = defaults();
         assert!(config.tls_ca_cert_path.is_none());
         assert!(config.tls_cert_path.is_none());
         assert!(config.tls_key_path.is_none());
@@ -483,19 +368,11 @@ mod tests {
     }
 
     #[test]
-    fn fetch_expires_defaults_to_5s() {
-        let yaml = r#"url: "localhost:4222""#;
-        let config: NatsConfiguration = orbit_utils::yaml::from_str(yaml).unwrap();
-        assert_eq!(config.fetch_expires(), Duration::from_secs(5));
-    }
-
-    #[test]
     fn fetch_expires_clamps_zero_to_1s() {
-        let yaml = r#"
-            url: "localhost:4222"
-            fetch_expires_secs: 0
-        "#;
-        let config: NatsConfiguration = orbit_utils::yaml::from_str(yaml).unwrap();
+        let config = NatsConfiguration {
+            fetch_expires_secs: 0,
+            ..defaults()
+        };
         assert_eq!(config.fetch_expires(), Duration::from_secs(1));
     }
 }

@@ -1,0 +1,9 @@
+# Helm values files: every key at every depth is a definition with a
+# dotted FQN, since values are addressed by path (`indexer.resources`).
+name: helm_values
+match:
+  filename_suffixes: [values.yaml, values.yml]
+  filename_prefixes: [values-]
+definitions:
+  - type: HelmValue
+    all_keys: true

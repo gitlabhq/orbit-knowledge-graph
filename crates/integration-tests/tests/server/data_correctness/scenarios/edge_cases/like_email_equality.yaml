@@ -1,0 +1,21 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_equality_on_email_returns_correct_row
+description: Exact equality on admin_only email field works (like_allowed false does not block eq)
+
+config:
+  security: admin
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "email"],
+                 "filters": {"email": "alice@example.com"}}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    User:
+      filters:
+        email: "alice@example.com"

@@ -26,13 +26,14 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             &build_session_settings_with_quorum_defaults(self),
             &self.insert_settings,
         )
+        .with_replicated(self.replicated)
     }
 }
 
 fn build_session_settings_with_quorum_defaults(
     config: &ClickHouseConfiguration,
 ) -> HashMap<String, String> {
-    if !config.quorum_writes {
+    if !config.replicated {
         return config.session_settings.clone();
     }
     let mut settings: HashMap<String, String> = QUORUM_SESSION_SETTINGS
@@ -51,7 +52,7 @@ fn build_session_settings_with_quorum_defaults(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbit_server_config::ConfigurationError;
+    use orbit_server_config::{AppConfig, ConfigurationError};
 
     #[test]
     fn test_optional_password() {
@@ -59,11 +60,17 @@ mod tests {
             "database": "test",
             "url": "http://127.0.0.1:8123",
             "username": "default",
-            "password": "secret"
+            "password": "secret",
+            "replicated": false,
+            "profiling": {
+                "enabled": false, "explain": false, "query_log": false,
+                "processors": false, "instance_health": false
+            }
         }"#;
 
         let config: ClickHouseConfiguration = serde_json::from_str(json).unwrap();
         assert_eq!(config.password, Some("secret".to_string()));
+        assert!(config.session_settings.is_empty());
     }
 
     #[test]
@@ -71,7 +78,12 @@ mod tests {
         let json = r#"{
             "database": "test",
             "url": "http://127.0.0.1:8123",
-            "username": "default"
+            "username": "default",
+            "replicated": false,
+            "profiling": {
+                "enabled": false, "explain": false, "query_log": false,
+                "processors": false, "instance_health": false
+            }
         }"#;
 
         let config: ClickHouseConfiguration = serde_json::from_str(json).unwrap();
@@ -86,9 +98,9 @@ mod tests {
             username: "default".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
-            quorum_writes: false,
+            replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: Default::default(),
+            profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
         assert!(config.validate().is_ok());
@@ -102,9 +114,9 @@ mod tests {
             username: "default".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
-            quorum_writes: false,
+            replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: Default::default(),
+            profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
         let result = config.validate();
@@ -119,9 +131,9 @@ mod tests {
             username: "default".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
-            quorum_writes: false,
+            replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: Default::default(),
+            profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
         let result = config.validate();
@@ -136,9 +148,9 @@ mod tests {
             username: "".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
-            quorum_writes: false,
+            replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: Default::default(),
+            profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
         let result = config.validate();
@@ -146,26 +158,26 @@ mod tests {
     }
 
     #[test]
-    fn quorum_writes_with_zero_insert_quorum_is_rejected() {
+    fn replicated_with_zero_insert_quorum_is_rejected() {
         let config = ClickHouseConfiguration {
-            quorum_writes: true,
+            replicated: true,
             session_settings: HashMap::from([("insert_quorum".to_string(), "0".to_string())]),
-            ..ClickHouseConfiguration::default()
+            ..AppConfig::embedded_defaults().graph
         };
 
         let result = config.validate();
 
         assert!(matches!(
             result,
-            Err(ConfigurationError::QuorumWritesWithoutQuorum)
+            Err(ConfigurationError::ReplicatedWithoutQuorum)
         ));
     }
 
     #[test]
-    fn quorum_writes_expand_to_session_settings() {
+    fn replicated_expands_to_quorum_session_settings() {
         let config = ClickHouseConfiguration {
-            quorum_writes: true,
-            ..ClickHouseConfiguration::default()
+            replicated: true,
+            ..AppConfig::embedded_defaults().graph
         };
 
         let settings = build_session_settings_with_quorum_defaults(&config);
@@ -195,12 +207,12 @@ mod tests {
     #[test]
     fn explicit_session_setting_overrides_quorum_default() {
         let config = ClickHouseConfiguration {
-            quorum_writes: true,
+            replicated: true,
             session_settings: std::collections::HashMap::from([(
                 "insert_quorum".to_string(),
                 "3".to_string(),
             )]),
-            ..ClickHouseConfiguration::default()
+            ..AppConfig::embedded_defaults().graph
         };
 
         let settings = build_session_settings_with_quorum_defaults(&config);
@@ -209,8 +221,11 @@ mod tests {
     }
 
     #[test]
-    fn quorum_writes_unset_leaves_session_settings_alone() {
-        let config = ClickHouseConfiguration::default();
+    fn replicated_unset_leaves_session_settings_alone() {
+        let config = ClickHouseConfiguration {
+            session_settings: std::collections::HashMap::new(),
+            ..AppConfig::embedded_defaults().graph
+        };
 
         let settings = build_session_settings_with_quorum_defaults(&config);
 
@@ -218,18 +233,20 @@ mod tests {
     }
 
     #[test]
-    fn quorum_writes_reach_the_built_client() {
+    fn replicated_reaches_the_built_client() {
         let config = ClickHouseConfiguration {
-            quorum_writes: true,
-            ..ClickHouseConfiguration::default()
+            replicated: true,
+            ..AppConfig::embedded_defaults().graph
         };
 
-        assert!(config.build_client().has_quorum_writes());
+        let client = config.build_client();
+        assert!(client.has_quorum_writes());
+        assert!(client.is_replicated());
     }
 
     #[test]
     fn test_default_uses_http() {
-        let config = ClickHouseConfiguration::default();
+        let config = AppConfig::embedded_defaults().graph;
         assert!(config.url.starts_with("http://"));
         assert!(config.url.contains("8123"));
     }
@@ -245,9 +262,9 @@ mod tests {
             username: "default".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
-            quorum_writes: false,
+            replicated: false,
             insert_settings: std::collections::HashMap::new(),
-            profiling: Default::default(),
+            profiling: AppConfig::embedded_defaults().graph.profiling,
         };
 
         let client = config.build_client();

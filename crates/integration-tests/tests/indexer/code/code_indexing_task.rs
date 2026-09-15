@@ -88,6 +88,10 @@ async fn indexes_file_nodes_for_all_archive_files() {
             ("src/main.py", "def hello():\n    return 1\n"),
             ("README.md", "# Project\n"),
             ("config/app.yml", "enabled: true\n"),
+            (
+                ".gitlab-ci.yml",
+                "stages: [test]\nvariables:\n  CARGO_HOME: .cargo\nunit-test:\n  script: [true]\n",
+            ),
             ("Dockerfile", "FROM scratch\n"),
             (".gitignore", "target/\n"),
             ("assets/logo.png", "fake png bytes"),
@@ -119,6 +123,7 @@ async fn indexes_file_nodes_for_all_archive_files() {
         unique_paths,
         BTreeSet::from([
             ".gitignore".to_string(),
+            ".gitlab-ci.yml".to_string(),
             "Dockerfile".to_string(),
             "README.md".to_string(),
             "assets/logo.png".to_string(),
@@ -134,6 +139,8 @@ async fn indexes_file_nodes_for_all_archive_files() {
     );
     assert_eq!(language_for(&files, "assets/logo.png"), Some("unknown"));
     assert_eq!(language_for(&files, "src/main.py"), Some("python"));
+    assert_eq!(language_for(&files, "config/app.yml"), Some("yaml"));
+    assert_eq!(language_for(&files, ".gitlab-ci.yml"), Some("yaml"));
 
     assert_eq!(
         file_size_bytes(&clickhouse, project_id, "src/main.py").await,
@@ -159,8 +166,15 @@ async fn indexes_file_nodes_for_all_archive_files() {
     .await;
 
     assert_no_active_definitions(&clickhouse, project_id, "README.md").await;
-    assert_no_active_definitions(&clickhouse, project_id, "config/app.yml").await;
     assert_no_active_definitions(&clickhouse, project_id, "assets/logo.png").await;
+    assert_no_active_definitions(&clickhouse, project_id, "config/app.yml").await;
+    assert_active_definitions(
+        &clickhouse,
+        project_id,
+        ".gitlab-ci.yml",
+        &["test", "CARGO_HOME", "unit-test"],
+    )
+    .await;
     assert_active_definitions(&clickhouse, project_id, "src/main.py", &["hello"]).await;
 }
 
@@ -198,7 +212,7 @@ async fn skips_oversized_go_parser_input_and_indexes_repository() {
         &clickhouse,
         orbit_server_config::CodeIndexingPipelineConfig {
             max_file_size_bytes: u64::MAX,
-            ..Default::default()
+            ..indexer::testkit::test_pipeline_configuration()
         },
     );
     let handler = deps.code_indexing_task_handler();
@@ -309,7 +323,8 @@ async fn indexes_calls_and_extends_edges() {
     let security_ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
         .expect("security context")
         .with_role(true, None);
-    let compiled = compiler::compile(json, &ontology, &security_ctx).expect("CALLS query compiles");
+    let compiled = compiler::compile(json, compiler::Frontend::JsonDsl, &ontology, &security_ctx)
+        .expect("CALLS query compiles");
     let sql = compiled.base.render();
     assert!(
         sql.contains("gl_code_edge"),
@@ -552,6 +567,123 @@ async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_waterma
 
     assert_file_is_active(&clickhouse, project_id, "src/Kept.java").await;
     assert_file_not_active(&clickhouse, project_id, "src/Stale.java").await;
+}
+
+#[tokio::test]
+async fn reindex_tombstones_only_the_vanished_keys() {
+    let project_id: i64 = 23;
+    let traversal_path = "1/23/";
+    let kept = (
+        "src/Kept.java",
+        "public class Kept { public void keep() {} }",
+    );
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[
+            kept,
+            (
+                "src/Gone.java",
+                "public class Gone { public void vanish() {} }",
+            ),
+        ],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+    mock.replace_archive(project_id, &[kept]);
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    let file_ids = |path: &str| {
+        format!(
+            "SELECT id FROM {} WHERE project_id = {project_id} AND path = '{path}'",
+            t("gl_file")
+        )
+    };
+    let definition_ids = |path: &str| {
+        format!(
+            "SELECT id FROM {} WHERE project_id = {project_id} AND file_path = '{path}'",
+            t("gl_definition")
+        )
+    };
+    let gone_file = format!("id IN ({})", file_ids("src/Gone.java"));
+    let kept_file = format!("id IN ({})", file_ids("src/Kept.java"));
+    let gone_definitions = format!("id IN ({})", definition_ids("src/Gone.java"));
+    let kept_definitions = format!("id IN ({})", definition_ids("src/Kept.java"));
+
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_file", project_id, &gone_file).await,
+        1,
+        "the vanished file must get exactly one tombstone"
+    );
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_file", project_id, &kept_file).await,
+        0,
+        "a file re-emitted by the new snapshot must not be tombstoned"
+    );
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_directory", project_id, "true").await,
+        0,
+        "directories re-emitted by the new snapshot must not be tombstoned"
+    );
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_definition", project_id, &gone_definitions).await,
+        2,
+        "each vanished definition must get exactly one tombstone"
+    );
+    assert_eq!(
+        count_tombstones(&clickhouse, "gl_definition", project_id, &kept_definitions).await,
+        0,
+        "definitions re-emitted by the new snapshot must not be tombstoned"
+    );
+
+    let kept_ids = format!(
+        "{} UNION ALL {} UNION ALL SELECT id FROM {} WHERE project_id = {project_id}",
+        file_ids("src/Kept.java"),
+        definition_ids("src/Kept.java"),
+        t("gl_directory")
+    );
+    assert!(
+        count_tombstones(&clickhouse, "gl_code_edge", project_id, "true").await > 0,
+        "edges of the vanished file must be tombstoned"
+    );
+    assert_eq!(
+        count_tombstones(
+            &clickhouse,
+            "gl_code_edge",
+            project_id,
+            &format!("source_id IN ({kept_ids}) AND target_id IN ({kept_ids})")
+        )
+        .await,
+        0,
+        "edges between re-emitted nodes must not be tombstoned"
+    );
 }
 
 #[tokio::test]
@@ -954,6 +1086,219 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     .await;
 }
 
+#[tokio::test]
+async fn stale_rows_in_the_shared_edge_table_are_cleaned_on_reindex() {
+    let project_id: i64 = 22;
+    let traversal_path = "1/22/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Alpha.java", "public class Alpha {}")],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+
+    let directory_id = first_active_directory_id(&clickhouse, project_id).await;
+    insert_stale_canary_edge(&clickhouse, traversal_path, directory_id).await;
+    assert_eq!(count_canary_edges(&clickhouse, directory_id).await, 1);
+
+    mock.replace_archive(
+        project_id,
+        &[("src/AlphaV2.java", "public class AlphaV2 {}")],
+    );
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    assert_eq!(
+        count_canary_edges(&clickhouse, directory_id).await,
+        0,
+        "the reindex must tombstone the stale shared edge so a _deleted = false FINAL \
+         read no longer returns it"
+    );
+}
+
+#[tokio::test]
+async fn edges_from_a_directory_removed_by_a_reindex_are_cleaned() {
+    let project_id: i64 = 23;
+    let traversal_path = "1/23/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[
+            ("src/Alpha.java", "public class Alpha {}"),
+            ("src/legacy/Old.java", "public class Old {}"),
+        ],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+    assert_eq!(
+        count_active_directories_at_path(&clickhouse, project_id, "src/legacy").await,
+        1,
+        "the fixture must produce a directory that the reindex can then remove"
+    );
+
+    mock.replace_archive(project_id, &[("src/Alpha.java", "public class Alpha {}")]);
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    assert_eq!(
+        count_active_directories_at_path(&clickhouse, project_id, "src/legacy").await,
+        0,
+        "the removed directory's own row should be gone"
+    );
+    assert_eq!(
+        edges_from_directories_that_no_longer_exist(&clickhouse).await,
+        0,
+        "a shared edge whose source directory the same reindex removed can never be \
+         matched again once that directory's id is no longer resolvable"
+    );
+}
+
+async fn count_active_directories_at_path(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    path: &str,
+) -> usize {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_directory")
+        ))
+        .await;
+    result.first().map_or(0, |b| b.num_rows())
+}
+
+async fn edges_from_directories_that_no_longer_exist(
+    clickhouse: &integration_testkit::TestContext,
+) -> usize {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let result = clickhouse
+        .query(&format!(
+            "SELECT source_id FROM {edge_table} FINAL \
+             WHERE _deleted = false AND source_kind = 'Directory' \
+             AND source_id NOT IN (SELECT id FROM {} FINAL WHERE _deleted = false)",
+            t("gl_directory")
+        ))
+        .await;
+    result.first().map_or(0, |b| b.num_rows())
+}
+
+const CANARY_TARGET_ID: i64 = 999_999_998;
+
+async fn first_active_directory_id(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+) -> i64 {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND _deleted = false LIMIT 1",
+            t("gl_directory")
+        ))
+        .await;
+    let batch = result
+        .first()
+        .expect("directory query should return a batch");
+    assert_eq!(
+        batch.num_rows(),
+        1,
+        "indexing must produce directory nodes for the canary to hang off"
+    );
+    ArrowUtils::get_column_by_name::<Int64Array>(batch, "id")
+        .expect("id column")
+        .value(0)
+}
+
+async fn insert_stale_canary_edge(
+    clickhouse: &integration_testkit::TestContext,
+    traversal_path: &str,
+    source_id: i64,
+) {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    // The shared edge table carries no project column, so the cleanup resolves
+    // ownership through the code node tables. A canary sourced from anything
+    // other than a real directory id would fall outside the predicate.
+    let sql = format!(
+        "INSERT INTO {edge_table} \
+         (traversal_path, source_id, source_kind, relationship_kind, \
+          target_id, target_kind, _version) \
+         VALUES ('{traversal_path}', {source_id}, 'Directory', 'CONTAINS', \
+                 {CANARY_TARGET_ID}, 'File', '2020-01-01 00:00:00.000000')"
+    );
+    clickhouse.execute(&sql).await;
+}
+
+async fn count_canary_edges(
+    clickhouse: &integration_testkit::TestContext,
+    source_id: i64,
+) -> usize {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let result = clickhouse
+        .query(&format!(
+            "SELECT target_id FROM {edge_table} FINAL \
+             WHERE source_id = {source_id} AND target_id = {CANARY_TARGET_ID} \
+             AND _deleted = false"
+        ))
+        .await;
+    result.first().map_or(0, |b| b.num_rows())
+}
+
 async fn index_code(
     handler: &indexer::modules::code::CodeIndexingTaskHandler,
     _clickhouse: &integration_testkit::TestContext,
@@ -1026,7 +1371,7 @@ fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
         indexer::clickhouse::ClickHouseWriter::new(
             orbit_server_config::ClickHouseConfiguration {
                 url: "http://127.0.0.1:1".into(),
-                ..Default::default()
+                ..orbit_server_config::AppConfig::embedded_defaults().graph
             },
             Arc::new(indexer::metrics::EngineMetrics::new()),
         )
@@ -1291,6 +1636,22 @@ async fn count_active_edges(
     result.first().map_or(0, |b| b.num_rows())
 }
 
+async fn count_tombstones(
+    clickhouse: &integration_testkit::TestContext,
+    table: &str,
+    project_id: i64,
+    predicate: &str,
+) -> usize {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT _version FROM {} \
+             WHERE project_id = {project_id} AND _deleted = true AND {predicate}",
+            t(table)
+        ))
+        .await;
+    result.iter().map(|b| b.num_rows()).sum()
+}
+
 async fn assert_no_active_definitions(
     clickhouse: &integration_testkit::TestContext,
     project_id: i64,
@@ -1397,7 +1758,7 @@ async fn timed_out_job_writes_no_data() {
         &clickhouse,
         orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
-            ..Default::default()
+            ..indexer::testkit::test_pipeline_configuration()
         },
     );
     let handler = deps.code_indexing_task_handler();
@@ -1494,7 +1855,7 @@ async fn disk_is_clean_after_a_timed_out_job() {
         &clickhouse,
         orbit_server_config::CodeIndexingPipelineConfig {
             job_timeout_secs: 1,
-            ..Default::default()
+            ..indexer::testkit::test_pipeline_configuration()
         },
     );
     let cache_dir = deps.cache_dir_path().to_path_buf();

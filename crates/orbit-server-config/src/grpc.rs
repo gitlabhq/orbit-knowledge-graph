@@ -4,7 +4,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
 #[schemars(deny_unknown_fields)]
 pub struct GrpcConfig {
     pub keepalive_interval_secs: u64,
@@ -22,38 +21,22 @@ pub struct GrpcConfig {
     pub max_header_list_size_bytes: u32,
 }
 
-impl Default for GrpcConfig {
-    fn default() -> Self {
-        Self {
-            keepalive_interval_secs: 20,
-            keepalive_timeout_secs: 20,
-            tcp_keepalive_secs: 60,
-            connection_window_size: 2 * 1024 * 1024,
-            stream_window_size: 1024 * 1024,
-            concurrency_limit: 256,
-            max_connection_age_secs: 300,
-            max_connection_age_grace_secs: 30,
-            stream_timeout_secs: 60,
-            max_header_list_size_bytes: 64 * 1024,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AppConfig;
 
     // Regression guard for hyperium/tonic#2522: a zero grace with a non-zero
     // max age reproduces the "async fn resumed after completion" panic.
     #[test]
     fn default_pairs_max_connection_age_with_nonzero_grace() {
-        let cfg = GrpcConfig::default();
+        let cfg = AppConfig::embedded_defaults().grpc;
         assert!(cfg.max_connection_age_secs > 0);
         assert!(cfg.max_connection_age_grace_secs > 0);
     }
 
     #[test]
-    fn deserializes_without_grace_field_using_default() {
+    fn missing_grace_field_is_rejected() {
         let yaml = r#"
             keepalive_interval_secs: 20
             keepalive_timeout_secs: 20
@@ -63,14 +46,18 @@ mod tests {
             concurrency_limit: 256
             max_connection_age_secs: 300
             stream_timeout_secs: 60
+            max_header_list_size_bytes: 65536
         "#;
-        let cfg: GrpcConfig = orbit_utils::yaml::from_str(yaml).expect("valid config");
-        assert_eq!(cfg.max_connection_age_grace_secs, 30);
+        let err = orbit_utils::yaml::from_str::<GrpcConfig>(yaml).unwrap_err();
+        assert!(
+            err.to_string().contains("max_connection_age_grace_secs"),
+            "{err}"
+        );
     }
 
     #[test]
     fn default_max_header_list_size_exceeds_hyper_default() {
-        let cfg = GrpcConfig::default();
+        let cfg = AppConfig::embedded_defaults().grpc;
         assert!(cfg.max_header_list_size_bytes > 16 * 1024);
     }
 }

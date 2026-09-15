@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_filter_is_null_matches_unset_columns
+description: is_null filter matches rows where the nullable column is unset
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username", "avatar_url"],
+                 "filters": {"avatar_url": {"is_null": true}}}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 7
+  nodes:
+    User:
+      prop_present: [username]
+      prop_absent: [avatar_url]

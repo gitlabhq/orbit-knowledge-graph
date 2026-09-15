@@ -8,79 +8,78 @@ This plan draws on the [team's research](https://gitlab.com/gitlab-org/rust/know
 
 ## Storage Model in ClickHouse
 
-The storage model aims to replicate the CSR (Compressed Sparse Row) adjacency list index concepts from [KuzuDB’s whitepaper](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf).
+The ontology defines the ClickHouse storage model, including table routing, sort keys,
+primary keys, and secondary indexes.
 
-- Nodes by type: separate ReplacingMergeTree tables per entity (e.g., `groups`, `projects`, `issues`, `merge_requests`, `files`, `symbols`).
-  - Primary key and ORDER BY are led by `traversal_path` (for SDLC entities) or `branch` (for code node types), followed by the local identifier. Organization isolation comes from `traversal_path` prefix filtering — the organization ID is its first segment.
-  - SDLC example: `(traversal_path, issue_id)`
-  - Code example: `(traversal_path, project_id, branch, symbol_id)`
-
-- Edges by relationship: separate MergeTree tables per relationship (e.g., `has_subgroup`, `has_project`, `mr_closes_issue`, `imports`, `calls`).
-  - ORDER BY `(traversal_path, relationship_kind, source_id, target_id, ...)` to create contiguous adjacency lists per namespace prefix and source. The `by_source` and `by_target` projections reorder by `source_id` or `target_id` as the leading key for fast forward/reverse neighbor scans.
-  - Branched edges for code relationships; current-state edges for SDLC hierarchy unless historical analysis is required.
-
-- `traversal_path`: SDLC entities (issues, merge requests, pipelines, etc.) are enriched with a `traversal_path` column during indexing. This slash-delimited string encodes the full ancestor hierarchy of the entity's parent namespace (e.g., `"42/100/1000/"` for a project inside a subgroup inside a top-level group, where `42` is the organization ID). The query engine uses `traversal_path` for prefix-based permission filtering via `startsWith` predicates, enabling efficient authorization checks without joining back to the namespace hierarchy. See [Security Architecture](../security.md) for details on how `traversal_path` filters are injected.
-
-- `branch`: Code node types (`files`, `symbols`, `definitions`) include a `branch` column to track which Git branch the indexed code belongs to. SDLC entities do not use this column as it is not relevant to their current state. **Note**: we intend to only index the **current** state of a particular branch in the initial iteration, not the historical state. See [Code Indexing](../indexing/code_indexing.md) for more details.
-
-- Multi‑tenancy and authorization are enforced in every query by `startsWith(traversal_path, ?)` prefix filtering — the organization ID is the first segment of each path, so org isolation is implicit. See [Security Architecture](../security.md).
+- Each node type has a dedicated `ReplacingMergeTree` table. Namespaced node tables
+  usually lead their sort key with `traversal_path`; individual ontology declarations
+  can add entity-specific columns such as project, branch, or local identifiers.
+- Relationship types share physical edge tables. `settings.edge_tables` declares those
+  tables, `settings.default_edge_table` selects `gl_edge` as the default, and an edge YAML
+  can use `table:` to route a relationship elsewhere. The current routes include
+  dedicated tables for code, CI/CD, security, and merge request diff relationships.
+- `traversal_path` is the slash-delimited namespace hierarchy for a namespaced row. The
+  query engine applies `startsWith` predicates to namespaced node and edge scans, using
+  exactly the paths Rails authorized. See [Security Architecture](../security.md).
+- Code tables can also carry project and branch columns. Their ontology declarations put
+  these columns into the physical sort and primary keys where required. See
+  [Code Indexing](../indexing/code_indexing.md).
 
 ### Edge table schema
 
-Edge tables are declared in `settings.edge_tables` in `schema.yaml` (default: `gl_edge`). Each edge YAML can set `table:` to route that relationship type to a specific table. All edge tables share the same column schema and use an adjacency-optimized primary key:
+Each physical edge table has ontology-defined columns and storage settings. For example,
+the default `gl_edge` table uses this key and these ID indexes in the generated DDL:
 
 ```sql
-PRIMARY KEY (source_id, relationship_kind, target_id)
-ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)
-PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, target_kind, source_id, traversal_path))
+PRIMARY KEY (traversal_path, relationship_kind, source_id)
+ORDER BY (
+  traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind
+)
+INDEX idx_source_id source_id TYPE bloom_filter(0.0001) GRANULARITY 1
+INDEX idx_target_id target_id TYPE bloom_filter(0.0001) GRANULARITY 1
 ```
 
-The primary key serves as a forward adjacency index, giving O(log N) lookup for all
-outgoing edges from a node. The `by_target` projection serves as the reverse adjacency
-index for incoming edge lookups.
-
-Sort key column order matters: `(id, relationship_kind, ...)` ensures ClickHouse can use
-prefix-based primary index pruning for both the base table and projections. Placing
-`source_kind`/`target_kind` before `relationship_kind` breaks prefix matching since
-queries rarely filter on entity kind alone.
-
-Bloom filter indexes on `source_id`/`target_id` are intentionally omitted. They compete
-with projections in ClickHouse's cost optimizer: the optimizer counts granules and picks
-the "cheaper" path, but bloom-filtered base table granules appear cheaper than projection
-granules even though projection data is contiguous and bloom data is scattered. Removing
-bloom filters lets projections be correctly selected.
+Leading with `traversal_path` lets authorization and namespace scope prune the primary
+index. `relationship_kind` then groups the relationship types routed to the same table.
+Bloom filter indexes support source and target ID lookups. The current ontology-backed
+edge DDL does not define source- or target-ordered projections.
 
 ## Query Engine Design
 
-There are two intended ways to interact with the graph engine:
+The compiler supports two query frontends:
 
-1. Intermediate JSON tools (MCP/HTTP): existing JSON schemas describe graph intents (`traversal`, `neighbors`, `path_finding`, `aggregation`). The server validates input and compiles to parameterized SQL.
-2. Cypher reader (optional): Cypher to SQL translation à la ClickGraph for teams that prefer property‑graph syntax or need Neo4j driver compatibility.
+1. The JSON Query DSL describes traversal, neighbors, path-finding, and aggregation queries. Remote requests through MCP, HTTP, and gRPC use this frontend.
+2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. It is a compiler preset, not a remote endpoint or Neo4j-compatible driver.
 
 ### Compiler pass pipeline
 
-The query compiler transforms a JSON DSL input into parameterized ClickHouse SQL through an ordered pipeline of passes. The canonical pass order is defined in `crates/query-engine/compiler/src/config.rs` (the `clickhouse` pipeline):
+Both frontends compile to parameterized ClickHouse SQL through shared passes.
+`crates/query-engine/compiler/src/config.rs` defines the `clickhouse_json_dsl` and `clickhouse_gql` presets for graph queries.
+`compiler::gql::prepare` parses once: MATCH enters the shared graph passes, while `CALL db.schema(...)` resolves ontology metadata inside the GQL frontend without SQL.
+Schema calls have no state in the shared compiler contexts. `compiler::compile` remains query-only for both frontends.
 
 | # | Pass | Responsibility |
 |---|---|---|
-| 1 | `validate` | Schema and cross-reference validation of the JSON input against the ontology |
-| 2 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
-| 3 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
-| 4 | `plan` | Translates validated input into a query plan (hop chain, join strategy, FK shape) |
-| 5 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
-| 6 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
-| 7 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping ([Security](../security.md)) |
-| 8 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
-| 9 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
-| 10 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
-| 11 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
+| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |
+| 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
+| 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
+| 4 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
+| 5 | `plan` | Translates validated input into a query plan (hop chain, join strategy, FK shape) |
+| 6 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
+| 7 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
+| 8 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
+| 9 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
+| 10 | `check` | Verifies every namespaced graph-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
+| 11 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
+| 12 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
+| 13 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
 The planner emits ClickHouse SQL similar to these patterns:
 
 - One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE startsWith(traversal_path, ?) AND branch = ? AND src_id IN (...)` (for code) or `WHERE startsWith(traversal_path, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
-- Multi‑hop fixed depth (2–3): chained JOINs/CTEs with DISTINCT frontiers between hops to avoid blow‑ups.
-- Variable‑length paths: `WITH RECURSIVE` over the edge table(s) with a depth limit and optional accumulation of `nodes(path)` and `relationships(path)` as arrays.
-- Reverse hops: use the destination‑ordered projection or a reversed view produced on the fly.
+- Multi-selector traversals: chained JOINs/CTEs with DISTINCT frontiers between selectors to avoid blow-ups. A traversal can contain up to five node selectors and therefore four relationship selectors; each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.
+- Path finding: bounded expansion over the routed edge tables, with `path.max_depth` capped independently at 3.
+- Reverse hops: filter the edge table on `target_id`, supported by its target ID bloom filter.
 - Alternate relationship types: when a query's relationship types span multiple physical edge tables (or use a wildcard), the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results. Top-level `group_by` supports node groups and scalar property groups, and property groups keep the grouped alias table-backed so security filters and latest-row checks apply before aggregation.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
@@ -116,6 +115,22 @@ Filter placement rules for node `FINAL` scans:
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 
+### Denormalized joins
+
+A denormalized join pre-joins a linear chain of tables into one `gl_denorm_<name>` table so the compiler can answer the matching hops with a single scan. It is declared as a chain of edge variants, each realized either through its edge table or, with `via: fk`, directly node to node on the variant's FK column:
+
+```yaml
+denormalized_joins:
+  - name: reviewer_project
+    hops:
+      - {relationship: REVIEWER,   from: User,         to: MergeRequest}
+      - {relationship: IN_PROJECT, from: MergeRequest, to: Project, via: fk}
+```
+
+That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`. Adjacent tables join on the id or edge id that links them, and every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join. Every other column of every table is copied under a `t{i}_` prefix. The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key. The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning) and emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`. The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor, so a hop may cross namespaces just as it may in an edge chain: a row is returned only when the caller is authorized for every namespace it touches. The loader only requires that at least one table in the chain is scoped.
+
+Before declaring a join in `schema.yaml`, trial it as an ontology overlay under `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, merged over it) and run the data correctness suite against it with `mise test:integration:overlay <name>`. The suite creates the table and its views from the seed, checks the table holds exactly the rows the live source join produces, and compiles every query it knows against the overlaid ontology.
+
 ### Scope rewrite (traversal_path prefix injection)
 
 Project- and group-scoped queries (`traversal` and `aggregation`) are rewritten to add a tight `startsWith(traversal_path, '<prefix>')` predicate, so the leading primary-key segment prunes the scan rather than a structural-column filter alone. A node pins a scope when it carries a single `id`/`full_path`/`node_ids` for an anchor entity, **or** a single equality filter on a `namespace_anchor` FK column (e.g. `project_id`/`group_id`) — the anchor and its FK columns are read from the ontology's per-property `traversal_path_lookup` declarations and edge scope annotations via `Ontology::is_anchor` / `Ontology::anchor_fk_mappings`, not a hardcoded list. Anchors are `Project` and `Group` (resolved through a ClickHouse `CACHE` dictionary over `gl_project`/`gl_group`), plus `MergeRequest` and the code entities `Definition`/`File`/`Directory`, which have no dictionary and resolve through an `argMax(traversal_path, _version)` lookup on their own table by `id` (`PathResolver`, backed by a short-lived in-process cache; see `crates/orbit-server/src/pipeline/path_resolver.rs`). The code-entity lookups let code-intelligence "find callers/references/callees" traversals — anchored on a single `Definition` node id rather than a project filter — scope to the symbol's own project. A resolution failure — a dictionary miss for a not-yet-indexed id, or the `'0/'` sentinel — yields no injection, so the query falls back to the plain filter.
@@ -141,6 +156,8 @@ A `GraphFormatter` handles the transformation, and a JSON Schema defines the res
 
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
 
+Direct projections and hydration apply ontology-derived [text excerpts](../../source/remote/queries/query-language.md#text-excerpts) in SQL before serialization, without changing filters, joins, authorization, grouping, sorting, or cursor keys.
+
 ## Authorization and Safety
 
 - Hard filters in SQL: every query carries `startsWith(traversal_path, ?)` predicates scoped to the caller's authorized namespaces (organization isolation is implicit — the org ID is the first path segment).
@@ -159,7 +176,7 @@ Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](.
 ## Integration with Indexing
 
 The indexer writes denormalized, typed node and edge tables in ClickHouse via ETL rather than synchronous materialized views. The exact mechanisms for this are covered in [SDLC Indexing](../indexing/sdlc_indexing.md) and [Schema Management](../schema_management.md). Materialized views would require filtered license checks on every inserted row, reducing ingestion efficiency. ETL decouples transformation from ingestion, allowing the indexer to batch writes and maintain control over schema evolution without impacting ClickHouse insert performance. Materialized views are reserved for precomputing stable summaries (e.g., group closure) that change infrequently and do not require per-row filtering, but these are optional enhancements for performance and may be subject to change.
-For reverse access paths, projections are built per table.
+Edge lookups use the ontology-declared sort keys, primary keys, and bloom filter indexes rather than per-table projections.
 
 ## Unified Security and Performance Testing
 

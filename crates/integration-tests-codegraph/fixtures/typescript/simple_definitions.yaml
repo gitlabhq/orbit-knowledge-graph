@@ -1,0 +1,69 @@
+name: "TypeScript: simple definitions"
+pipeline: js
+fixtures:
+  - path: main.ts
+    content: |
+      function greet(name: string): string {
+          return `hello ${name}`;
+      }
+
+      class Animal {
+          sound: string = "generic";
+          speak(): string { return this.sound; }
+      }
+
+      interface Shape {
+          area(): number;
+      }
+
+      type Point = { x: number; y: number };
+
+      enum Color { Red, Green, Blue }
+
+      const helper = () => "help";
+
+tests:
+  - name: Exactly 6 top-level definitions with correct types
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.ts'
+        AND d.definition_type IN ['Function', 'Class', 'Interface', 'TypeAlias', 'Enum']
+      RETURN d.name AS name, d.definition_type AS type
+      ORDER BY name
+    assert:
+      - { row_count: 6 }
+      - { unique: name }
+      - { no_nulls: name }
+      - { row: { name: "Animal", type: "Class" } }
+      - { row: { name: "Color", type: "Enum" } }
+      - { row: { name: "Point", type: "TypeAlias" } }
+      - { row: { name: "Shape", type: "Interface" } }
+      - { row: { name: "greet", type: "Function" } }
+      - { row: { name: "helper", type: "Function" } }
+
+  - name: speak and sound are nested inside Animal via Defines
+    query: |
+      MATCH (cls:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Animal' AND e.edge_kind = 'Defines'
+      RETURN m.name AS method, m.definition_type AS type
+      ORDER BY method
+    assert:
+      - { row_count: 2 }
+      - { row: { method: "sound", type: "Property" } }
+      - { row: { method: "speak", type: "Method" } }
+
+  - name: All definitions have names
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.ts'
+      RETURN d.name AS name
+    assert:
+      - { no_nulls: name }
+
+  - name: Exactly 1 TypeScript file
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.language AS lang
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "main.ts", lang: "typescript" } }

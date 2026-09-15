@@ -492,6 +492,7 @@ mod tests {
     use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
     use ontology::Ontology;
+    use orbit_server_config::AppConfig;
 
     fn handler_context() -> HandlerContext {
         let mock_nats = Arc::new(MockNatsServices::new());
@@ -525,13 +526,11 @@ mod tests {
 
         let datalake: Arc<dyn DatalakeQuery> = Arc::new(EmptyDatalake);
         let checkpoint_store: Arc<dyn CheckpointStore> = Arc::new(MockCheckpointStore);
-        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let pipeline = Arc::new(Pipeline::new(
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
             test_metrics(),
-            Default::default(),
-            &ontology,
+            AppConfig::embedded_defaults().engine.datalake_retry,
         ));
         let subscription = match scope {
             EtlScope::Global => GlobalIndexingRequest::subscription(),

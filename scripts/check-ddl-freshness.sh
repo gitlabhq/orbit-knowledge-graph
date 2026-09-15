@@ -4,7 +4,7 @@
 set -euo pipefail
 
 XTASK="${1:-cargo xtask}"
-SCHEMA_VERSION=$(cat config/SCHEMA_VERSION | tr -d '[:space:]')
+SCHEMA_VERSION=$(awk '/^schema:/ { print $2 }' config/versions.yaml)
 FAILED=0
 
 check_file() {
@@ -20,7 +20,7 @@ check_file() {
         return
     fi
     if [ "$header_version" != "$SCHEMA_VERSION" ]; then
-        echo "❌ $file header says SCHEMA_VERSION=$header_version but config/SCHEMA_VERSION is $SCHEMA_VERSION."
+        echo "❌ $file header says SCHEMA_VERSION=$header_version but config/versions.yaml pins schema: $SCHEMA_VERSION."
         FAILED=1
         return
     fi

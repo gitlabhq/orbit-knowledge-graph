@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::durability::WriteDurability;
 use crate::modules::code::config::CodeTableNames;
 use crate::orchestrator::scheduled::TaskError;
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 use orbit_utils::traversal_path::TraversalPath;
 
 pub(crate) const CHECKPOINT_KEY_PREFIX: &str = "maintenance.code_stale_sweep";
@@ -25,6 +25,7 @@ pub struct CodeStaleSweep {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
     statements: Vec<(String, String)>,
+    sweeps_per_tick: usize,
 }
 
 impl CodeStaleSweep {
@@ -32,6 +33,7 @@ impl CodeStaleSweep {
         graph: ArrowClickHouseClient,
         table_names: &CodeTableNames,
         checkpoint_store: Arc<dyn CheckpointStore>,
+        sweeps_per_tick: usize,
     ) -> Self {
         let checkpoint_table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
 
@@ -51,11 +53,13 @@ impl CodeStaleSweep {
             graph,
             checkpoint_store,
             statements,
+            sweeps_per_tick,
         }
     }
 
+    /// Capped per tick so a burst of drained namespaces cannot hold up the next dispatch ticks.
     pub async fn run_for_drained(&self, drained_paths: &[TraversalPath]) -> Result<(), TaskError> {
-        if drained_paths.is_empty() {
+        if drained_paths.is_empty() || self.sweeps_per_tick == 0 {
             return Ok(());
         }
         let swept: HashSet<String> = self
@@ -67,11 +71,29 @@ impl CodeStaleSweep {
             .map(|(key, _)| key)
             .collect();
 
-        for path in drained_paths {
-            if swept.contains(&namespace_checkpoint_key(path)) {
-                continue;
+        let pending: Vec<&TraversalPath> = drained_paths
+            .iter()
+            .filter(|path| !swept.contains(&namespace_checkpoint_key(path)))
+            .collect();
+        let attempted = pending.len().min(self.sweeps_per_tick);
+        let mut failed = 0usize;
+        for path in pending.iter().take(attempted) {
+            if let Err(error) = self.sweep_namespace(path).await {
+                failed += 1;
+                warn!(%path, %error, "post-backfill stale sweep failed, retrying on a later tick");
             }
-            self.sweep_namespace(path).await?;
+        }
+        if pending.len() > self.sweeps_per_tick {
+            info!(
+                pending = pending.len(),
+                cap = self.sweeps_per_tick,
+                "post-backfill stale sweeps deferred to later ticks"
+            );
+        }
+        if failed > 0 {
+            return Err(TaskError::new(format!(
+                "{failed} of {attempted} post-backfill stale sweeps failed"
+            )));
         }
         Ok(())
     }
@@ -111,44 +133,55 @@ impl CodeStaleSweep {
 
 fn node_sweep(table: &str, checkpoint_table: &str) -> String {
     format!(
-        "DELETE FROM {table} \
-         WHERE startsWith(traversal_path, {{path:String}}) \
-         AND _deleted = false \
-         AND (traversal_path, project_id, branch, _version) IN ( \
-           SELECT s.traversal_path, s.project_id, s.branch, s._version \
-           FROM {table} AS s FINAL \
-           INNER JOIN {checkpoint_table} AS cp FINAL \
-             ON cp.traversal_path = s.traversal_path \
-             AND cp.project_id = s.project_id \
-             AND cp.branch = s.branch \
-           WHERE startsWith(s.traversal_path, {{path:String}}) \
-             AND s._deleted = false \
-             AND cp._deleted = false \
-             AND s._version < cp.indexed_at \
-         )"
+        r#"
+        INSERT INTO {table} (traversal_path, project_id, branch, id, _version, _deleted)
+        SELECT
+            s.traversal_path,
+            s.project_id,
+            s.branch,
+            s.id,
+            cp.indexed_at - toIntervalMicrosecond(1) AS _version,
+            true AS _deleted
+        FROM {table} AS s FINAL
+        INNER JOIN {checkpoint_table} AS cp FINAL
+            ON cp.traversal_path = s.traversal_path
+           AND cp.project_id = s.project_id
+           AND cp.branch = s.branch
+        WHERE startsWith(s.traversal_path, {{path:String}})
+          AND s._deleted = false
+          AND cp._deleted = false
+          AND s._version < cp.indexed_at
+        "#
     )
 }
 
 fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
     if edge_table.contains("code_edge") {
         return format!(
-            "DELETE FROM {edge_table} \
-             WHERE startsWith(traversal_path, {{path:String}}) \
-             AND _deleted = false \
-             AND (traversal_path, project_id, branch, source_id, source_kind, \
-                  relationship_kind, target_id, target_kind, _version) IN ( \
-               SELECT s.traversal_path, s.project_id, s.branch, s.source_id, s.source_kind, \
-                      s.relationship_kind, s.target_id, s.target_kind, s._version \
-               FROM {edge_table} AS s FINAL \
-               INNER JOIN {checkpoint_table} AS cp FINAL \
-                 ON cp.traversal_path = s.traversal_path \
-                 AND cp.project_id = s.project_id \
-                 AND cp.branch = s.branch \
-               WHERE startsWith(s.traversal_path, {{path:String}}) \
-                 AND s._deleted = false \
-                 AND cp._deleted = false \
-                 AND s._version < cp.indexed_at \
-             )"
+            r#"
+            INSERT INTO {edge_table}
+                (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted)
+            SELECT
+                s.traversal_path,
+                s.project_id,
+                s.branch,
+                s.source_id,
+                s.source_kind,
+                s.relationship_kind,
+                s.target_id,
+                s.target_kind,
+                cp.indexed_at - toIntervalMicrosecond(1) AS _version,
+                true AS _deleted
+            FROM {edge_table} AS s FINAL
+            INNER JOIN {checkpoint_table} AS cp FINAL
+                ON cp.traversal_path = s.traversal_path
+               AND cp.project_id = s.project_id
+               AND cp.branch = s.branch
+            WHERE startsWith(s.traversal_path, {{path:String}})
+              AND s._deleted = false
+              AND cp._deleted = false
+              AND s._version < cp.indexed_at
+            "#
         );
     }
 
@@ -157,26 +190,30 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
         .join(", ");
 
     format!(
-        "DELETE FROM {edge_table} \
-         WHERE startsWith(traversal_path, {{path:String}}) \
-         AND _deleted = false \
-         AND source_kind IN ({code_source_kinds}) \
-         AND (traversal_path, source_id, source_kind, relationship_kind, \
-              target_id, target_kind, _version) IN ( \
-           SELECT s.traversal_path, s.source_id, s.source_kind, \
-                  s.relationship_kind, s.target_id, s.target_kind, s._version \
-           FROM {edge_table} AS s FINAL \
-           INNER JOIN ( \
-             SELECT traversal_path, min(indexed_at) AS watermark \
-             FROM {checkpoint_table} FINAL \
-             WHERE _deleted = false AND startsWith(traversal_path, {{path:String}}) \
-             GROUP BY traversal_path \
-           ) AS w ON w.traversal_path = s.traversal_path \
-           WHERE startsWith(s.traversal_path, {{path:String}}) \
-             AND s._deleted = false \
-             AND s.source_kind IN ({code_source_kinds}) \
-             AND s._version < w.watermark \
-         )"
+        r#"
+        INSERT INTO {edge_table}
+            (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted)
+        SELECT
+            s.traversal_path,
+            s.source_id,
+            s.source_kind,
+            s.relationship_kind,
+            s.target_id,
+            s.target_kind,
+            w.watermark - toIntervalMicrosecond(1) AS _version,
+            true AS _deleted
+        FROM {edge_table} AS s FINAL
+        INNER JOIN (
+            SELECT traversal_path, min(indexed_at) AS watermark
+            FROM {checkpoint_table} FINAL
+            WHERE _deleted = false AND startsWith(traversal_path, {{path:String}})
+            GROUP BY traversal_path
+        ) AS w ON w.traversal_path = s.traversal_path
+        WHERE startsWith(s.traversal_path, {{path:String}})
+          AND s._deleted = false
+          AND s.source_kind IN ({code_source_kinds})
+          AND s._version < w.watermark
+        "#
     )
 }
 
@@ -190,15 +227,12 @@ mod tests {
     }
 
     #[test]
-    fn node_sweep_uses_lightweight_delete_with_final_subquery() {
+    fn node_sweep_tombstones_only_final_survivors() {
         let sql = node_sweep("v9_gl_file", "v9_code_indexing_checkpoint");
         assert!(
-            sql.starts_with("DELETE FROM v9_gl_file"),
-            "should use lightweight DELETE: {sql}"
-        );
-        assert!(
             sql.contains("FROM v9_gl_file AS s FINAL"),
-            "subquery must use FINAL to avoid deleting superseded parts: {sql}"
+            "a raw-parts scan emits a no-op tombstone per superseded part row \
+             instead of one per surviving stale key: {sql}"
         );
         assert!(sql.contains("s._deleted = false"), "{sql}");
         assert!(
@@ -226,20 +260,13 @@ mod tests {
     #[test]
     fn code_edge_sweep_joins_checkpoint_directly() {
         let sql = edge_sweep("v9_gl_code_edge", "v9_cp");
-        assert!(
-            sql.starts_with("DELETE FROM v9_gl_code_edge"),
-            "should use lightweight DELETE: {sql}"
-        );
         assert!(sql.contains("cp.project_id = s.project_id"), "{sql}");
+        assert!(!sql.contains("source_kind IN"), "{sql}");
     }
 
     #[test]
     fn plain_edge_sweep_scopes_by_source_kind_and_min_watermark() {
         let sql = edge_sweep("v9_gl_edge", "v9_cp");
-        assert!(
-            sql.starts_with("DELETE FROM v9_gl_edge"),
-            "should use lightweight DELETE: {sql}"
-        );
         assert!(
             sql.contains("s.source_kind IN ('Directory', 'File', 'Definition', 'ImportedSymbol')"),
             "{sql}"
@@ -279,7 +306,7 @@ mod tests {
         let store = Arc::new(crate::checkpoint::ClickHouseCheckpointStore::new(Arc::new(
             graph.clone(),
         )));
-        let sweep = CodeStaleSweep::new(graph, &names, store);
+        let sweep = CodeStaleSweep::new(graph, &names, store, 10);
         let tables: Vec<&str> = sweep.statements.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
             tables.len(),

@@ -1,0 +1,26 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_no_alias_sum_defaults_to_function_name
+description: Omitted alias defaults to the function name (sum)
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [{"sum": "u.id", "as": "sum"}],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    g:
+      rows:
+        - { entity: Group, id: 100, values: { sum: 9 }, properties: { name: Public Group } }

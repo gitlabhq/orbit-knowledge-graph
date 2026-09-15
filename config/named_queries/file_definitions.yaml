@@ -1,0 +1,25 @@
+name: file_definitions
+description: Definitions declared in one file, with location and type columns.
+parameters:
+  project_id:
+    schema: { type: integer, minimum: 1 }
+    example: 1
+  file_path:
+    schema: { type: string, minLength: 1, maxLength: 1024 }
+    example: app/models/user.rb
+query:
+  query_type: traversal
+  nodes:
+    - id: file
+      entity: File
+      filters:
+        project_id: { $param: project_id }
+        path: { $param: file_path }
+    - id: def
+      entity: Definition
+      columns: [start_line, file_path, name, fqn, definition_type]
+  relationships:
+    - type: DEFINES
+      from: file
+      to: def
+  limit: 100

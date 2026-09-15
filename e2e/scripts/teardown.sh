@@ -19,12 +19,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -n "$SHA" ]; then
-  PATTERN="^e2e-${SHA}-"
+  PATTERN="^e2e-${SHA}-(nats|clickhouse|gitlab|siphon|gkg)$"
 else
   PATTERN="^e2e-"
 fi
 
-E2E_NAMESPACES=($($KC get ns -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep "$PATTERN")) || true
+E2E_NAMESPACES=($($KC get ns -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep -E "$PATTERN")) || true
 
 if [ ${#E2E_NAMESPACES[@]} -eq 0 ]; then
   echo "No matching namespaces found (pattern: $PATTERN)."

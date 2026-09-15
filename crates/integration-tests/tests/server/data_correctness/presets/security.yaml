@@ -1,0 +1,6 @@
+default:
+  paths: ["1/"]
+
+admin:
+  admin: true
+  access_level: 50

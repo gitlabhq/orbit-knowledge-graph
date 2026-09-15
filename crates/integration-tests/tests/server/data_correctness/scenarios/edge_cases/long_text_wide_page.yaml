@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::long_node_text_is_excerpted_only_on_wide_pages
+# The wide-page limit triggers text truncation. The ClickHouse filter
+# matches the full value, but the response property is truncated.
+# The filter assertion checks the response (truncated) value.
+description: Wide-page limit triggers text truncation with [truncated] suffix
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "n", "entity": "Note", "node_ids": [3002],
+                 "columns": ["note", "discussion_id"],
+                 "filters": {"note": {"ends_with": "tail"}}}],
+      "limit": 1000
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    Note:
+      ids: [3002]
+      filters:
+        note: { ends_with: " [truncated]" }
+      prop_present: [note, discussion_id]
