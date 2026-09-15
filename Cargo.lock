@@ -8249,6 +8249,7 @@ version = "0.1.0"
 dependencies = [
  "labkit-events",
  "orbit-server-config",
+ "orbit-versions",
  "parking_lot",
  "prettyplease",
  "serde",

@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 # Verify pinned Iglu schema versions exist locally and match upstream.
 #
+# Called by `mise check:vendored -- iglu` which sets:
+#   VENDOR_VERSIONS_FILE  — absolute path to config/versions.yaml
+#   VENDOR_DIR            — absolute path to config/schemas/iglu
+#   VENDOR_NAME           — "iglu"
+#
+# Can also be called directly; falls back to repo-relative paths.
+#
 # Without flags: full check (committed file exists + matches upstream).
 # With --remote-only: only verifies upstream has the pinned version.
-#
-# Upstream is the anonymous public Pages CDN at
-# https://gitlab-org.gitlab.io/iglu/...
-#
-# Exits non-zero if any pinned version is missing locally, missing
-# upstream, or has drifted in content.
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
+
+VERSIONS_FILE="${VENDOR_VERSIONS_FILE:-$REPO_ROOT/config/versions.yaml}"
+VENDOR_DIR="${VENDOR_DIR:-$REPO_ROOT/$(yq '.vendored.iglu.vendor_dir' "$VERSIONS_FILE")}"
 IGLU_BASE="https://gitlab-org.gitlab.io/iglu/schemas/com.gitlab"
-VERSION_DIR="config/schemas/iglu"
 
 check_local=true
 if [ "${1:-}" = "--remote-only" ]; then
@@ -22,14 +27,12 @@ fi
 
 failed=0
 
-for version_file in "$VERSION_DIR"/*.version; do
-  [ -f "$version_file" ] || continue
-  name=$(basename "$version_file" .version)
-  version=$(cat "$version_file" | tr -d '[:space:]')
-  local_file="${VERSION_DIR}/${name}/${version}.json"
+for name in $(yq '.vendored.iglu.pins | keys | .[]' "$VERSIONS_FILE"); do
+  version=$(yq ".vendored.iglu.pins.$name" "$VERSIONS_FILE")
+  local_file="$VENDOR_DIR/$name/$version.json"
 
   if [ "$check_local" = true ] && [ ! -f "$local_file" ]; then
-    echo "ERROR: $local_file missing (pinned: $version). Run: mise iglu:bump -- $name $version"
+    echo "ERROR: $local_file missing (pinned: $version). Run: mise vendor -- iglu"
     failed=1
     continue
   fi
@@ -45,7 +48,7 @@ for version_file in "$VERSION_DIR"/*.version; do
     remote_norm=$(printf '%s' "$remote" | python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, sort_keys=True)")
 
     if [ "$local_norm" != "$remote_norm" ]; then
-      echo "DRIFT: $local_file differs from upstream Iglu. Run: mise iglu:bump -- $name $version"
+      echo "DRIFT: $local_file differs from upstream Iglu. Run: mise vendor -- iglu"
       failed=1
       continue
     fi

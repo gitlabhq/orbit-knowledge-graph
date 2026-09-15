@@ -13,7 +13,6 @@ pub struct Versions {
     pub query_dsl: String,
     pub raw_output_format: String,
     pub goon_output_format: String,
-    pub gitlab_system_note_actions: String,
     pub vendored: BTreeMap<String, VendoredDependency>,
 }
 
@@ -25,6 +24,7 @@ pub struct VendoredDependency {
     pub vendor_script: Option<String>,
     pub check_script: Option<String>,
     pub extensions: Option<BTreeMap<String, Extension>>,
+    pub pins: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +66,15 @@ impl Versions {
                     if path.starts_with('/') || path.contains("..") {
                         return Err(format!(
                             "vendored.{name}.{label} must be relative without ..: {path}"
+                        ));
+                    }
+                }
+            }
+            if let Some(pins) = &dep.pins {
+                for (key, val) in pins {
+                    if val.is_empty() || val != val.trim() {
+                        return Err(format!(
+                            "vendored.{name}.pins.{key} is empty or has whitespace"
                         ));
                     }
                 }
@@ -141,7 +150,6 @@ mod tests {
     #[test]
     fn parses_every_pin() {
         assert!(VERSIONS.schema > 0);
-        assert_eq!(VERSIONS.gitlab_system_note_actions.len(), 40);
         VERSIONS.validate().unwrap();
     }
 
@@ -249,6 +257,50 @@ mod tests {
         let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
         let duckdb = versions.vendored.get_mut("duckdb").unwrap();
         duckdb.vendor_script = Some("scripts/evil.py".into());
+        assert!(versions.validate().is_err());
+    }
+
+    #[test]
+    fn gitlab_system_note_actions_entry_is_complete() {
+        let entry = VERSIONS
+            .vendored
+            .get("gitlab_system_note_actions")
+            .expect("vendored.gitlab_system_note_actions");
+        let version = entry.version.as_deref().expect("version");
+        assert_eq!(version.len(), 40);
+        assert!(entry.vendor_dir.is_some());
+        assert!(entry.check_script.is_some());
+    }
+
+    #[test]
+    fn iglu_entry_is_complete() {
+        let entry = VERSIONS.vendored.get("iglu").expect("vendored.iglu");
+        assert!(entry.vendor_dir.is_some());
+        assert!(entry.vendor_script.is_some());
+        assert!(entry.check_script.is_some());
+
+        let pins = entry.pins.as_ref().expect("iglu.pins");
+        for name in [
+            "orbit_query",
+            "orbit_common",
+            "orbit_code_indexing",
+            "orbit_sdlc_indexing",
+        ] {
+            let version = pins
+                .get(name)
+                .unwrap_or_else(|| panic!("missing iglu pin for {name}"));
+            assert!(!version.is_empty(), "empty iglu pin for {name}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_empty_pin_value() {
+        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
+        let iglu = versions.vendored.get_mut("iglu").unwrap();
+        iglu.pins
+            .as_mut()
+            .unwrap()
+            .insert("bad".into(), String::new());
         assert!(versions.validate().is_err());
     }
 

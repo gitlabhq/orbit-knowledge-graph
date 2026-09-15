@@ -77,8 +77,9 @@ Each entry under `vendored:` follows this contract:
 | `vendor_script` | No | Script that regenerates artifacts. Must comply with the vendor contract. |
 | `check_script` | No | Script that validates artifacts match pins. Must comply with the check contract. |
 | `extensions` | No | Named sub-dependencies with optional `source_revision`, `source_archive_sha256`, and `binaries` (platform to SHA-256 map). |
+| `pins` | No | Flat key-value sub-pins (e.g. Iglu schema name to version). |
 
-Example (current DuckDB entry):
+Examples:
 
 ```yaml
 vendored:
@@ -93,7 +94,19 @@ vendored:
         source_archive_sha256: 2aad18...
         binaries:
           linux_amd64: 90d6f049...
-          osx_arm64: b6b8d0a1...
+
+  gitlab_system_note_actions:
+    version: ea52f8c3adc...
+    vendor_dir: config/vendored
+    check_script: scripts/vendored/gitlab_system_note_actions/check.sh
+
+  iglu:
+    vendor_dir: config/schemas/iglu
+    vendor_script: scripts/vendored/iglu/bump.sh
+    check_script: scripts/vendored/iglu/check.sh
+    pins:
+      orbit_query: 2-2-0
+      orbit_common: 1-0-3
 ```
 
 ## Script contract
@@ -158,6 +171,15 @@ invokes the script with standardized environment variables.
    extension with a source archive.
 3. For static linking, add a `compile_<name>` function in `build.rs` with the
    extension-specific C++ source list and build flags.
+
+### Bump an Iglu schema version
+
+1. Edit the pin under `vendored.iglu.pins` in `config/versions.yaml`
+   (e.g. change `orbit_query: 2-2-0` to `orbit_query: 2-3-0`).
+2. Run `mise vendor -- iglu`. The script fetches the schema JSON for every
+   pin from the upstream Iglu registry and writes it to `vendor_dir`.
+3. Run `cargo build` to verify (the `orbit-analytics` build script reads
+   the pins at compile time and validates the schema's `self` block).
 
 ### Add a new vendored dependency
 

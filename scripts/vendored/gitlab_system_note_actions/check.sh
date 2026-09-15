@@ -1,43 +1,47 @@
 #!/usr/bin/env bash
 # Verify config/vendored/system_note_metadata.actions matches the Rails
-# SystemNoteMetadata::ICON_TYPES at the commit SHA pinned in config/versions.yaml.
+# SystemNoteMetadata::ICON_TYPES at the commit SHA pinned in
+# vendored.gitlab_system_note_actions.version in config/versions.yaml.
 #
-# The vendored list is the runtime union the Rails model exposes:
-# CE `ICON_TYPES` plus EE `EE_ICON_TYPES` (icon_types is overridden in EE as
-# `super + EE_ICON_TYPES`), so this check fetches both files and compares
-# against their union.
+# Called by `mise check:vendored -- gitlab_system_note_actions` which sets:
+#   VENDOR_VERSIONS_FILE  — absolute path to config/versions.yaml
+#   VENDOR_DIR            — absolute path to config/vendored
+#   VENDOR_VERSION        — the pinned Rails commit SHA
+#   VENDOR_NAME           — "gitlab_system_note_actions"
+#
+# Can also be called directly; falls back to repo-relative paths.
 #
 # Fetches the Rails source from gitlab.com; requires network access.
 # Skippable via [skip system-note-actions-check] in the MR description,
 # MR title, or a commit message, or by setting SKIP_SYSTEM_NOTE_ACTIONS_CHECK=1.
 set -euo pipefail
 
-ACTIONS_FILE="config/vendored/system_note_metadata.actions"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
+
+VERSIONS_FILE="${VENDOR_VERSIONS_FILE:-$REPO_ROOT/config/versions.yaml}"
+VENDOR_DIR="${VENDOR_DIR:-$REPO_ROOT/$(yq '.vendored.gitlab_system_note_actions.vendor_dir' "$VERSIONS_FILE")}"
+pinned_sha="${VENDOR_VERSION:-$(yq '.vendored.gitlab_system_note_actions.version' "$VERSIONS_FILE")}"
+
+ACTIONS_FILE="$VENDOR_DIR/system_note_metadata.actions"
 CE_RAILS_PATH="app/models/system_note_metadata.rb"
 EE_RAILS_PATH="ee/app/models/ee/system_note_metadata.rb"
 GITLAB_PROJECT="gitlab-org/gitlab"
 
-source "$(dirname "$0")/ci-skip-utils.sh"
+source "$REPO_ROOT/scripts/ci-skip-utils.sh"
 
 if ci_skip_requested "system-note-actions-check"; then
     echo "[skip system-note-actions-check] found — skipping."
     exit 0
 fi
 
-pinned_sha=$(awk '/^gitlab_system_note_actions:/ { print $2 }' config/versions.yaml)
-
-if [[ -z "$pinned_sha" ]]; then
-    echo "Could not find 'gitlab_system_note_actions:' in config/versions.yaml"
+if [[ -z "$pinned_sha" || "$pinned_sha" == "null" ]]; then
+    echo "Could not find gitlab_system_note_actions version in config/versions.yaml" >&2
     exit 1
 fi
 
 echo "Checking $ACTIONS_FILE against ${GITLAB_PROJECT} @ ${pinned_sha:0:12}..."
 
-# Fetch one Rails source file at the pinned SHA. Retries transient failures with
-# backoff. Plain --retry skips DNS/connection-refused/timeouts, hence
-# --retry-all-errors + --retry-connrefused. A transient fetch failure must not
-# fail unrelated MRs, so a fetch miss is reported via a sentinel and treated as
-# non-fatal by the caller; real drift still hard-fails below.
 fetch_rails_src() {
     local path="$1"
     local raw_url="https://gitlab.com/${GITLAB_PROJECT}/-/raw/${pinned_sha}/${path}"
@@ -46,7 +50,6 @@ fetch_rails_src() {
             "$raw_url"; then
         echo "WARNING: could not fetch $raw_url after retries (non-fatal)" >&2
         echo "         Network unavailable, rate-limited, or commit SHA no longer accessible." >&2
-        echo "         If this persists, verify the gitlab_system_note_actions SHA in config/versions.yaml is reachable." >&2
         return 1
     fi
 }
@@ -58,14 +61,11 @@ if ! ee_src=$(fetch_rails_src "$EE_RAILS_PATH"); then
     exit 0
 fi
 
-# CE exposes ICON_TYPES; EE overrides icon_types as `super + EE_ICON_TYPES`, so
-# the vendored list is the union of both constants.
 upstream_actions=$(printf '%s\n%s' "$ce_src" "$ee_src" | python3 -c "
 import sys, re
 src = sys.stdin.read()
 seen = set()
 found_any = False
-# \b prevents the CE 'ICON_TYPES' pattern from also matching 'EE_ICON_TYPES'.
 for const in (r'\bICON_TYPES', r'\bEE_ICON_TYPES'):
     m = re.search(const + r'\s*=\s*%[wi]\[([^\]]*)\]', src, re.DOTALL)
     if not m:
@@ -103,6 +103,6 @@ else
     diff <(echo "$local_sorted") <(echo "$upstream_sorted") || true
     echo ""
     echo "To fix: update $ACTIONS_FILE to match the upstream list and"
-    echo "        update the '# Pinned:' line to the new commit SHA."
+    echo "        bump vendored.gitlab_system_note_actions.version in config/versions.yaml."
     exit 1
 fi
