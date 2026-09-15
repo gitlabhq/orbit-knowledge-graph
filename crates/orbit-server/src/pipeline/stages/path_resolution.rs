@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use query_engine::compiler::{
-    DEFAULT_PATH_ACCESS_LEVEL, PathResolutionKey, QueryType, scope_edges, scope_keys,
+    DEFAULT_PATH_ACCESS_LEVEL, Input, PathResolutionKey, QueryType, gql, scope_edges, scope_keys,
     validate_normalize,
 };
 use query_engine::pipeline::{
@@ -37,13 +37,14 @@ impl PipelineStage for PathResolutionStage {
             return Ok(());
         }
 
-        let input =
-            validate_normalize(&ctx.query_json, ctx.frontend, &ctx.ontology).map_err(|e| {
-                PipelineError::Compile {
-                    client_safe: e.is_client_safe(),
-                    message: e.to_string(),
-                }
-            })?;
+        let input = match ctx.phases.get::<Input>() {
+            Some(input) => gql::validate_normalize_query(input.clone(), &ctx.ontology),
+            None => validate_normalize(&ctx.query_json, ctx.frontend, &ctx.ontology),
+        }
+        .map_err(|e| PipelineError::Compile {
+            client_safe: e.is_client_safe(),
+            message: e.to_string(),
+        })?;
 
         if !scopes_query_type(input.query_type) {
             return Ok(());

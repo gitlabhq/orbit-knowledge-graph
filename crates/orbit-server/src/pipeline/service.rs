@@ -12,6 +12,8 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
+use ontology::introspection::SchemaResponse;
+use query_engine::compiler::Frontend;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
@@ -20,12 +22,17 @@ use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, Pipel
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage,
-    SecurityStage,
+    RoutingOutput, RoutingStage, SecurityStage,
 };
 
 pub struct RawQuery {
     pub text: String,
-    pub frontend: query_engine::compiler::Frontend,
+    pub frontend: Frontend,
+}
+
+pub enum QueryServiceOutput {
+    Graph(PipelineOutput),
+    Schema(SchemaResponse),
 }
 
 #[derive(Clone)]
@@ -78,7 +85,7 @@ impl QueryPipelineService {
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
         timeout: std::time::Duration,
-    ) -> Result<PipelineOutput, PipelineError> {
+    ) -> Result<QueryServiceOutput, PipelineError> {
         let coding_agent = request_context.coding_agent().map(String::from);
         let claims = request_context.claims;
         let mut obs = MultiObserver::new(vec![
@@ -125,7 +132,16 @@ impl QueryPipelineService {
         // tore down the observer before record_error could run, leaving
         // timed-out queries invisible to every metric.
         let pipeline = async {
-            PipelineRunner::start(&mut ctx, &mut obs)
+            let route = PipelineRunner::start(&mut ctx, &mut obs)
+                .then(&RoutingStage)
+                .await?
+                .finish()
+                .ok_or_else(|| PipelineError::custom("RoutingStage produced no output"))?;
+            if let RoutingOutput::Schema(response) = route {
+                return Ok(QueryServiceOutput::Schema(response));
+            }
+
+            let output = PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&SecurityStage)
                 .await?
                 .then(&PathResolutionStage)
@@ -147,7 +163,10 @@ impl QueryPipelineService {
                 .then(&OutputStage)
                 .await?
                 .finish()
-                .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+                .ok_or_else(|| {
+                    PipelineError::custom("OutputStage did not produce PipelineOutput")
+                })?;
+            Ok(QueryServiceOutput::Graph(output))
         };
 
         let output = match tokio::time::timeout(timeout, pipeline).await {
@@ -160,7 +179,9 @@ impl QueryPipelineService {
             }
         };
 
-        obs.finish(output.row_count, output.redacted_count);
+        if let QueryServiceOutput::Graph(output) = &output {
+            obs.finish(output.row_count, output.redacted_count);
+        }
         Ok(output)
     }
 }

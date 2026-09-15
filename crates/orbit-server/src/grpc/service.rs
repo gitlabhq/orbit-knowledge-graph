@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use ontology::Ontology;
+use ontology::introspection::SchemaResponse;
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::Frontend;
@@ -21,8 +22,8 @@ use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::pipeline::{
-    QueryPipelineService, RawQuery, receive_query_request, send_invalid_request_error,
-    send_query_error,
+    QueryPipelineService, QueryServiceOutput, RawQuery, receive_query_request,
+    send_invalid_request_error, send_query_error,
 };
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
@@ -59,6 +60,27 @@ fn resolve_raw_query(
         Err(_) => return Err(format!("Unknown query_type: {query_type}")),
     };
     Ok(RawQuery { text, frontend })
+}
+
+fn schema_query_result(
+    response: &SchemaResponse,
+    use_llm_format: bool,
+) -> Result<ExecuteQueryResult, PipelineError> {
+    use crate::proto::execute_query_result::Content;
+
+    let content = if use_llm_format {
+        ToolService::encode_schema_toon(response)
+            .map(Content::FormattedText)
+            .map_err(|error| PipelineError::custom(error.to_string()))?
+    } else {
+        serde_json::to_string(response)
+            .map(Content::ResultJson)
+            .map_err(|error| PipelineError::custom(error.to_string()))?
+    };
+    Ok(ExecuteQueryResult {
+        content: Some(content),
+        metadata: None,
+    })
 }
 
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
@@ -354,7 +376,23 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     .await;
 
                 match result {
-                    Ok(output) => {
+                    Ok(QueryServiceOutput::Schema(response)) => {
+                        let result = schema_query_result(&response, use_llm_format);
+                        match result {
+                            Ok(result) => {
+                                info!("Sending schema query result");
+                                let _ = tx
+                                    .send(Ok(ExecuteQueryMessage {
+                                        content: Some(execute_query_message::Content::Result(
+                                            result,
+                                        )),
+                                    }))
+                                    .await;
+                            }
+                            Err(error) => send_query_error(&tx, error).await,
+                        }
+                    }
+                    Ok(QueryServiceOutput::Graph(output)) => {
                         info!("Sending final query result");
 
                         use crate::proto::execute_query_result::Content;
