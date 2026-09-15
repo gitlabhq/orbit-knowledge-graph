@@ -1248,7 +1248,7 @@ fn context_relationship_order_is_stable_across_overloads() {
 
     let repo_arg = repo.to_str().unwrap();
     for (fqn, section) in [
-        ("Target.ping", "Connections (5):"),
+        ("Target.ping", "Connections (7):"),
         ("Target", "Used via members (5)"),
     ] {
         let (matches, stderr, ok) = run_cmd(&["grep", fqn, "--repo", repo_arg], dd);

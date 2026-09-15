@@ -5,7 +5,7 @@
 instructions: |
   ## Orbit
 
-  Use Orbit first for code.
+  Use Orbit first before editing code and for code search.
 
   - Find: `{{orbit}} grep "<concept>"`. Start unfiltered with 1-3 identifier words. Miss: retry once with a source identifier. Broad: add `--path <glob>` or `--kind Class,Method`.
   - Read code: `{{orbit}} context Definition:<id>` or `{{orbit}} context <path>`.

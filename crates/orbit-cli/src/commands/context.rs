@@ -108,6 +108,11 @@ pub(crate) fn render_bodies(
     nodes: &[NodeValue],
 ) -> Result<String> {
     let defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
+    let hydrator = defs
+        .iter()
+        .any(|def| def.end.saturating_sub(def.start) >= INLINE_BODY_LINES)
+        .then(|| NodeHydrator::embedded("Definition"))
+        .transpose()?;
     let mut files = BTreeMap::new();
     let mut out = String::new();
     for def in &defs {
@@ -125,8 +130,10 @@ pub(crate) fn render_bodies(
         if def.end.saturating_sub(def.start) < INLINE_BODY_LINES {
             render(&mut out, std::slice::from_ref(def), &lines, false)?;
         } else {
-            let hydrator = NodeHydrator::embedded("Definition")?;
-            let members = definitions_in_file(client, git, &hydrator, &def.file)?;
+            let hydrator = hydrator
+                .as_ref()
+                .context("definition hydrator unavailable")?;
+            let members = definitions_in_file(client, git, hydrator, &def.file)?;
             let members = members
                 .iter()
                 .map(source_range)
@@ -154,7 +161,7 @@ fn resolve_targets(
                 .and_then(|id| id.parse().ok())
                 .with_context(|| {
                     format!(
-                        "{target:?} is not a Definition:<id> from `{} grep` or an existing file",
+                        "{target:?} is not a Definition:<id> from `{} grep`; a file path is accepted only as the sole target",
                         spec::launcher()
                     )
                 })
