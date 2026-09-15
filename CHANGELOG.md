@@ -1,3 +1,23 @@
+## [0.123.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.122.0...v0.123.0) (2026-09-15)
+
+### Features
+
+* **dx:** close remaining YAML scenario assertion gaps ([4fa4dd7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4fa4dd74e2173ca2ecbcd615dbc141a9016aaee3)) by Michael Usachenko
+* **gql:** add schema inspection calls ([8c54d1b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8c54d1b748f51743c458316dcc71c3e6f85d20a2)) by Aaron Algutifan
+
+### Performance
+
+* **indexer:** bound datalake pages by bytes ([6905f74](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6905f740cdace924b88b6799fba3c51feffa91c0)) by Bohdan Parkhomchuk
+
+### Other
+
+* **cli:** source long help from the prompt ymls ([8fc9e44](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8fc9e4499fa26f57bbbecf3c8ae8aaa7d0f684a7)) by Michael Angelo Rivera
+* **cli:** tighten the local help text and MCP tool descriptions ([7070659](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7070659b46bb4c1540a08336459439e7793cad29)) by Michael Angelo Rivera
+* **dx:** generic vendored dependency pins in versions.yaml ([7257f21](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7257f2192896e273eee308e3190d57ab9d5c7a79)) by Michael Usachenko
+* **local:** use orbit-cli package name in script-free Windows install ([183de04](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/183de0496674053451f437b4985248c4c974f81f)) by Michael Angelo Rivera
+* **Orbit:** align troubleshooting pages with topic type guidance ([ee101ee](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ee101eed90ecb82fa1db6206cdc50c5f8e874c45)) by Zachary Painter
+* **planning:** vendor orbit planning skill ([ef06f19](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ef06f19c817223b813d6e7edd2bb011024ab9085)) by Dmitry Gruzd
+
 ## [0.122.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.121.0...v0.122.0) (2026-09-14)
 
 ### Features
