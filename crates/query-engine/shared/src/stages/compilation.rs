@@ -62,7 +62,17 @@ mod tests {
 
     #[tokio::test]
     async fn compilation_stage_uses_selected_frontend() {
-        let mut ctx = context("MATCH (p:Project {id: 42}) RETURN p LIMIT 1", Frontend::Gql);
+        let gql = "MATCH (p:Project {id: 42}) RETURN p LIMIT 1";
+        let mut ctx = context("not parsed again", Frontend::Gql);
+        let compiler::gql::RoutedStatement::Query(input) = compiler::gql::route(
+            gql,
+            &ctx.ontology,
+            ontology::introspection::IntrospectionScope::All,
+        )
+        .unwrap() else {
+            panic!("expected query");
+        };
+        ctx.phases.insert(input);
         CompilationStage
             .execute(&mut ctx, &mut NoOpObserver)
             .await
