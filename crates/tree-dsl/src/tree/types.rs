@@ -141,37 +141,6 @@ impl From<&Tree> for TreeSnapshot {
     }
 }
 
-impl From<&super::locked::LockedTree> for TreeSnapshot {
-    fn from(lt: &super::locked::LockedTree) -> Self {
-        let n = lt.kinds.len();
-        let mut nodes = Vec::with_capacity(n);
-        for i in 0..n {
-            nodes.push(Node {
-                kind: lt.kinds[i],
-                parent: lt.parents[i],
-                sym: lt.syms[i],
-                size: lt.sizes[i],
-                start: lt.starts[i],
-                end: lt.ends[i],
-                field: lt.fields[i],
-                named: lt.flags[i] & 1 != 0,
-                synth: lt.flags[i] & 2 != 0,
-                dead: false,
-                start_row: lt.start_rows[i],
-                start_col: lt.start_cols[i],
-                end_row: lt.end_rows[i],
-                end_col: lt.end_cols[i],
-                id: 0,
-            });
-        }
-        TreeSnapshot {
-            nodes,
-            edges: lt.edges.clone(),
-            label: lt.label.clone(),
-        }
-    }
-}
-
 impl From<TreeSnapshot> for Tree {
     fn from(s: TreeSnapshot) -> Self {
         Tree {
@@ -279,11 +248,6 @@ impl Tree {
                 n.sym = remap[n.sym as usize];
             }
         }
-    }
-
-    #[inline]
-    pub fn len(&self) -> u32 {
-        self.nodes.len() as u32
     }
 
     pub fn prune(&mut self) {

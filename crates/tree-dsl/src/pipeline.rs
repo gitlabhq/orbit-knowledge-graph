@@ -23,7 +23,7 @@ use crate::tree::Tree;
 use crate::{file_tree, linker, pattern, resolver};
 
 pub struct IndexResult {
-    pub trees: Vec<crate::tree::LockedTree>,
+    pub trees: Vec<Tree>,
     pub cross_edges: Vec<crate::tree::Edge>,
     pub lang: Lang,
     pub pipeline: Pipeline,
@@ -149,10 +149,8 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
 
     let resolve_s = t1.elapsed().as_secs_f64();
 
-    let locked: Vec<crate::tree::LockedTree> = trees.into_iter().map(|t| t.into()).collect();
-
     IndexResult {
-        trees: locked,
+        trees,
         cross_edges,
         lang,
         pipeline,

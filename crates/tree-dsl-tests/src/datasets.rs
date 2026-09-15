@@ -8,11 +8,11 @@ use arrow_56::record_batch::RecordBatch;
 use tree_dsl::canonical::{self, Canonical as C};
 use tree_dsl::grammar::SupportLang;
 use tree_dsl::lang::Lang;
-use tree_dsl::tree::LockedTree;
+use tree_dsl::tree::Tree;
 
 pub type LanceDatasets = HashMap<String, RecordBatch>;
 
-fn flavor_display<'a, T: tree_dsl::tree::TreeAccess>(def: tree_dsl::tree::Cursor<T>, dtk: C, lang: &'a Lang) -> &'a str {
+fn flavor_display<'a>(def: tree_dsl::tree::Cursor, dtk: C, lang: &'a Lang) -> &'a str {
     for c in def.children() {
         if let Some(ck) = C::try_from_u16(c.kind()) {
             if ck.is_flavor() && c.sym() != 0 {
@@ -41,7 +41,7 @@ pub struct IdMaps {
     pub modules: HashMap<usize, i64>,
 }
 
-fn assign_ids(trees: &[LockedTree], lang: &Lang) -> IdMaps {
+fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
     let mut defs = HashMap::new();
     let mut imports = HashMap::new();
     let mut import_by_name = HashMap::new();
@@ -123,7 +123,7 @@ fn assign_ids(trees: &[LockedTree], lang: &Lang) -> IdMaps {
 // ── Public API ──
 
 pub fn to_datasets(
-    trees: &[LockedTree],
+    trees: &[Tree],
     cross_edges: &[tree_dsl::tree::Edge],
     lang: &mut Lang,
     support_lang: SupportLang,
@@ -162,7 +162,7 @@ pub fn to_datasets(
 
 // ── FQN builder ──
 
-fn def_fqn(tree: &LockedTree, node: u32, lang: &Lang) -> String {
+fn def_fqn(tree: &Tree, node: u32, lang: &Lang) -> String {
     let path_str = lang.syms.resolve(tree.root().sym()).to_string();
     let lang_id = SupportLang::from_path(&path_str);
     let sep = lang_id.map(|l| l.fqn_separator()).unwrap_or(".");
@@ -254,7 +254,7 @@ fn make_batch(
 
 // ── Table builders ──
 
-fn build_files(trees: &[LockedTree], lang: &Lang) -> anyhow::Result<RecordBatch> {
+fn build_files(trees: &[Tree], lang: &Lang) -> anyhow::Result<RecordBatch> {
     let n = trees.len();
     let (mut id_b, mut path_b, mut name_b, mut ext_b, mut lang_b) = (
         Int64Builder::with_capacity(n),
@@ -298,7 +298,7 @@ fn build_files(trees: &[LockedTree], lang: &Lang) -> anyhow::Result<RecordBatch>
     )
 }
 
-fn build_defs(trees: &[LockedTree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<RecordBatch> {
+fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<RecordBatch> {
     let (mut id_b, mut fp_b, mut fqn_b, mut name_b, mut dt_b) = (
         Int64Builder::new(),
         StringBuilder::new(),
@@ -416,7 +416,7 @@ fn build_defs(trees: &[LockedTree], lang: &Lang, ids: &IdMaps) -> anyhow::Result
 }
 
 fn build_imports(
-    trees: &[LockedTree],
+    trees: &[Tree],
     lang: &Lang,
     ids: &IdMaps,
     support_lang: SupportLang,
@@ -580,7 +580,7 @@ fn build_imports(
 }
 
 fn build_file_edges(
-    trees: &[LockedTree],
+    trees: &[Tree],
     ids: &IdMaps,
 ) -> (anyhow::Result<RecordBatch>, anyhow::Result<RecordBatch>) {
     let (mut ds, mut dt, mut dk) = (
@@ -629,7 +629,7 @@ fn build_file_edges(
 }
 
 fn build_def2def(
-    trees: &[LockedTree],
+    trees: &[Tree],
     cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
@@ -680,7 +680,7 @@ fn build_def2def(
 }
 
 fn build_def2imp(
-    trees: &[LockedTree],
+    trees: &[Tree],
     cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
@@ -722,7 +722,7 @@ fn build_def2imp(
 }
 
 fn build_imp2def(
-    trees: &[LockedTree],
+    trees: &[Tree],
     cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
