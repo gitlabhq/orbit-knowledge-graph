@@ -1361,6 +1361,21 @@ fn refresh_resolves_relationships_through_import_neighbors() {
         output.contains("<-- src.consumer.consume  [calls]"),
         "{output}"
     );
+    std::fs::create_dir_all(repo.path.join("src/new/deep")).unwrap();
+    std::fs::write(
+        repo.path.join("src/new/deep/tool.py"),
+        "def nested():\n    pass\n",
+    )
+    .unwrap();
+    orbit(&repo.path, data.path(), &["grep", "nested"]);
+    assert_eq!(
+        rows(&orbit_sql(
+            "SELECT e.relationship_kind FROM gl_edge e JOIN gl_directory s ON s.id = e.source_id JOIN gl_directory t ON t.id = e.target_id WHERE s.path = 'src/new' AND t.path = 'src/new/deep'",
+            data.path()
+        ))
+        .len(),
+        1
+    );
     let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "hello", "--related-to"]);
     assert!(!stderr.contains("refreshed"), "{stderr}");
     assert!(rows(&orbit_sql("SELECT source_id, target_id, relationship_kind FROM gl_edge GROUP BY ALL HAVING count(*) > 1", data.path())).is_empty());
@@ -1382,6 +1397,12 @@ fn refresh_resolves_relationships_through_import_neighbors() {
     assert!(orbit_index(&repo.path, data.path()));
     let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "fetch", "--related-to"]);
     assert!(!stderr.contains("stale"), "{stderr}");
+    std::fs::remove_file(repo.path.join("src/utils.py")).unwrap();
+    let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "hello", "--related-to"]);
+    assert!(
+        stderr.contains("refreshed 0 file(s) with 1 neighbor(s), removed 1 file(s)"),
+        "{stderr}"
+    );
 }
 
 #[test]

@@ -69,6 +69,7 @@ fn neighbors(
     git: &GitInfo,
     files: &[FileInventoryEntry],
     changed: &[FileInventoryEntry],
+    deleted: &[String],
 ) -> Result<Vec<FileInventoryEntry>> {
     let imports = client.query_arrow_json(
         "SELECT file_path, import_path || '/' || identifier_name AS import_path
@@ -78,9 +79,14 @@ fn neighbors(
     let sources = string_column(&imports, "file_path");
     let targets = string_column(&imports, "import_path");
     let changed_paths: BTreeSet<_> = changed.iter().map(|f| f.path.as_str()).collect();
+    let affected_paths: BTreeSet<_> = changed_paths
+        .iter()
+        .copied()
+        .chain(deleted.iter().map(String::as_str))
+        .collect();
     let mut wanted = BTreeSet::new();
     for (source, target) in sources.iter().zip(&targets) {
-        if changed_paths.contains(source.as_str()) {
+        if affected_paths.contains(source.as_str()) {
             wanted.extend(
                 files
                     .iter()
@@ -90,20 +96,20 @@ fn neighbors(
                     })
                     .map(|f| f.path.clone()),
             );
-        } else if changed
+        } else if affected_paths
             .iter()
-            .any(|f| import_mentions(target, stem(&f.path)))
+            .any(|path| import_mentions(target, stem(path)))
         {
             wanted.insert(source.clone());
         }
     }
     let mut params = vec![json!(git.project_id), json!(git.commit_sha)];
-    params.extend(changed.iter().map(|f| json!(f.path)));
+    params.extend(affected_paths.iter().map(|path| json!(path)));
     let placeholders = (3..=params.len())
         .map(|n| format!("?{n}"))
         .collect::<Vec<_>>()
         .join(", ");
-    if !changed.is_empty() {
+    if !affected_paths.is_empty() {
         let linked = client.query_arrow_json(
             &format!(
                 "WITH touched AS (
@@ -211,7 +217,7 @@ pub fn open(
     if changed.is_empty() && deleted.is_empty() {
         return Ok(client);
     }
-    let companions = neighbors(&client, git, &files, &changed)?;
+    let companions = neighbors(&client, git, &files, &changed, &deleted)?;
     drop(client);
     let result = (|| -> Result<()> {
         let client = DuckDbClient::open(db)?;
@@ -308,6 +314,12 @@ pub fn open(
              UNION ALL SELECT id FROM gl_imported_symbol WHERE project_id = ?1 AND commit_sha = ?2 AND file_path IN ({placeholders})
              UNION ALL SELECT id FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2 AND path IN ({placeholders})"
         );
+        let mut directory_params = vec![json!(git.project_id), json!(git.commit_sha)];
+        directory_params.extend(changed.iter().map(|file| json!(file.path)));
+        let directory_scope = (3..=directory_params.len())
+            .map(|i| format!("starts_with(?{i}, d.path || '/')"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
         client.execute("BEGIN TRANSACTION", &[])?;
         client.execute(
             &format!("CREATE TEMP TABLE refresh_touched AS {touched}"),
@@ -349,6 +361,17 @@ pub fn open(
             &format!("CREATE TEMP TABLE refresh_touched AS {touched}"),
             &params,
         )?;
+        if !directory_scope.is_empty() {
+            client.execute(
+                &format!(
+                    "INSERT INTO refresh_touched
+                     SELECT id FROM gl_directory d
+                     WHERE project_id = ?1 AND commit_sha = ?2
+                       AND (d.path = '.' OR {directory_scope})"
+                ),
+                &directory_params,
+            )?;
+        }
         for (table, batch) in &batches {
             if table != &edge_table {
                 continue;
@@ -371,9 +394,11 @@ pub fn open(
             client.execute("DROP TABLE refresh_edges", &[])?;
         }
         client.execute("DROP TABLE refresh_touched", &[])?;
-        client.execute("DELETE FROM gl_directory d WHERE project_id = ?1 AND commit_sha = ?2
-            AND NOT EXISTS (SELECT 1 FROM gl_file f WHERE f.project_id = d.project_id AND f.commit_sha = d.commit_sha
-                AND (d.path = '.' OR starts_with(f.path, d.path || '/')))", &[json!(git.project_id), json!(git.commit_sha)])?;
+        if !deleted.is_empty() {
+            client.execute("DELETE FROM gl_directory d WHERE project_id = ?1 AND commit_sha = ?2
+                AND NOT EXISTS (SELECT 1 FROM gl_file f WHERE f.project_id = d.project_id AND f.commit_sha = d.commit_sha
+                    AND (d.path = '.' OR starts_with(f.path, d.path || '/')))", &[json!(git.project_id), json!(git.commit_sha)])?;
+        }
         rebuild_search(&client, git)?;
         workspace::store_source_fingerprints(&client, git.project_id, &sources)?;
         if unresolved.is_empty() {
@@ -445,7 +470,10 @@ fn parse(
         result.skipped.len(),
         result.faults.len()
     );
-    Ok(Arc::try_unwrap(batches).unwrap().into_inner().unwrap())
+    let mut batches = batches
+        .lock()
+        .map_err(|_| anyhow::anyhow!("parsed batch lock poisoned"))?;
+    Ok(std::mem::take(&mut *batches))
 }
 
 pub fn rebuild_search(client: &DuckDbClient, git: &GitInfo) -> Result<()> {
