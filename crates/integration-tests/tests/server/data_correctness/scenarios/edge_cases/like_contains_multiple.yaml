@@ -9,6 +9,8 @@ query:
                  "filters": {"username": {"contains": "arl"}}}],
         "limit": 10
     }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username CONTAINS 'arl' RETURN u.username LIMIT 10
 
 expect:
   node_count: 1

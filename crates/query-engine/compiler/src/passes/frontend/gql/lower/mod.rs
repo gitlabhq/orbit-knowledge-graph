@@ -165,7 +165,7 @@ impl Lowering {
                 || self.input.nodes.iter().any(|n| n.entity.is_none())
             {
                 return Err(QueryError::Validation(
-                    "shortestPath requires one bounded relationship between two labeled nodes"
+                    "a shortest path requires one bounded relationship between two labeled nodes"
                         .into(),
                 ));
             }

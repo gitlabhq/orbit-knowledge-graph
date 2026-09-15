@@ -17,6 +17,8 @@ query:
         "relationships": [{"type": "HAS_LABEL", "from": "wi", "to": "lab"}],
         "limit": 50
     }
+  gql: |
+    MATCH (wi:WorkItem)-[:HAS_LABEL]->(lab:Label) WHERE wi.id IN [4000, 4001] RETURN wi, lab LIMIT 50
 
 expect:
   node_count: 5

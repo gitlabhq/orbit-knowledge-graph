@@ -222,7 +222,7 @@ async fn data_correctness() {
         security::aggregation_user_only_neighbors_query_is_not_blocked,
         security::aggregation_user_joined_runtime_returns_expected_counts,
         security::aggregation_user_disconnected_scoped_node_rejects_at_compile,
-        security::aggregation_user_reachable_via_path_compiles,
+        security::aggregation_over_shortest_path_rejects_at_compile,
         security::traversal_vulnerability_reporter_no_filters_sees_nothing,
         security::traversal_vulnerability_security_manager_no_filters_sees_data,
         security::aggregation_vulnerability_reporter_only_sees_zero_counts,

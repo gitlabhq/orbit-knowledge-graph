@@ -17,6 +17,8 @@ query:
       "aggregations": [{"count": "mr", "as": "total_authored"}],
       "limit": 10
     }
+  gql: |
+    MATCH (mr:MergeRequest)<-[:AUTHORED]-(u:User) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN count(mr) AS total_authored LIMIT 10
 
 expect:
   row_count: 1

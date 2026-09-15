@@ -22,7 +22,7 @@ The new Rust implementation remains under the repository's license.
 
 The grammar restricts identifiers and arrows to ASCII. Escaped identifiers must still pass the compiler's identifier rules.
 Keywords are case insensitive; identifiers are case sensitive. Strings support M23 escape forms, and comments count as whitespace.
-`PAGE`, `AFTER`, and `DEBUG` are reserved in addition to the openCypher reserved words, so a variable with one of those names needs backticks.
+`PAGE`, `AFTER`, `DEBUG`, `ANY`, and `SHORTEST` are reserved in addition to the openCypher reserved words, so a variable with one of those names needs backticks.
 
 ## Compiler boundary
 
@@ -107,12 +107,13 @@ The frontend infers the query type:
 
 | Pattern or projection | Compiler query type |
 |---|---|
-| Named `shortestPath(...)` pattern | Path finding |
+| Named `ANY SHORTEST ...` pattern | Path finding |
 | One relationship to an unfiltered, unlabeled far endpoint | Neighbors |
 | Aggregate in RETURN | Aggregation |
 | Other supported patterns | Traversal |
 
 Path finding supports outgoing paths from one hop to an explicit maximum.
+Aggregation over shortest paths is unsupported; shared validation rejects it for both JSON and GQL.
 Variable-length traversal accepts exact lengths and bounded ranges. Traversal and path finding share the compiler's three-hop cap.
 Undirected relationships are supported only for neighbors queries. Between labeled nodes, use `->` or `<-`.
 Relationship property filters, including inline maps, require a maximum of one hop.
@@ -125,8 +126,8 @@ LIMIT 10
 
 RETURN controls the existing graph response, not a general-purpose table of arbitrary expressions.
 Traversal properties select node columns. Whole nodes use ontology defaults; `properties(node)` selects all allowed columns.
-`properties(node)` on the far endpoint of a neighbors query or on a `shortestPath` variable sets the compiler's dynamic column mode to all columns, because those results are hydrated from dynamic column specifications instead of per-node selections.
-Neighbors queries still reject `properties(center)`.
+`properties(node)` on the far endpoint of a neighbors query or on a path variable sets the compiler's dynamic column mode to all columns, because those results are hydrated from dynamic column specifications instead of per-node selections.
+Neighbors queries select center columns with `center.property` items and still reject `properties(center)`.
 The compiler still includes graph identity and relationship metadata.
 
 Aggregates support `count`, `sum`, `avg`, `min`, and `max`.
@@ -140,8 +141,11 @@ ORDER BY notes DESC
 LIMIT 10
 ```
 
-The implementation adds node projections, `shortestPath` pattern syntax, `date_trunc`, token predicates, `PAGE ... AFTER`, and `DEBUG` to the selected EBNF productions.
+The implementation adds node projections, `date_trunc`, token predicates, `PAGE ... AFTER`, and `DEBUG` to the selected EBNF productions.
 These are implementation extensions, not changes to the official grammar.
+Shortest paths use the ISO GQL path search prefix, `p = ANY SHORTEST (a)-[*1..3]->(b)` or `p = SHORTEST 1 ...`, because openCypher 9 has no shortest-path syntax.
+The other GQL selectors (`ALL SHORTEST`, `SHORTEST k` for k above one, `SHORTEST k GROUP`) are rejected: the compiler returns one path per endpoint pair.
+`ANY` and `SHORTEST` are reserved.
 
 Predicates support AND, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
 Values are literals; the frontend has no parameter binding, so callers keep untrusted values out of the query text themselves.
@@ -149,10 +153,11 @@ Values are literals; the frontend has no parameter binding, so callers keep untr
 ID forms preserve the compiler's distinct selector and filter representations:
 
 - An inline integer `{id: 1}` becomes `node_ids`.
-- A standalone `node.id IN [...]` becomes `node_ids`.
-- Paired lower and upper ID bounds become an inclusive `id_range`.
+- The first nonempty `node.id IN [...]` becomes `node_ids` unless the node already has an ID selector.
+- When two ID predicates remain and form lower and upper bounds, they become an inclusive `id_range`.
+- An ID list and range can appear together, in any predicate order.
 - `WHERE node.id = 1` remains a property filter.
-- Additional predicates on an already pinned node remain filters; they do not replace its ID selector.
+- Other ID predicates remain filters; they do not replace the ID selector.
 
 ## Rejections and bounds
 
@@ -190,6 +195,16 @@ Each scenario declares its query once per frontend under `query:`, keyed `json` 
 The runner parses each key into a `Frontend` and passes it to `compiler::compile`.
 A scenario whose query has no text spelling carries only the `json` key.
 Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`.
+
+### GQL fuzzing
+
+The `fuzz_gql_grammar` target in `crates/fuzz/` generates query text from `query.pest` through `orbit_fuzz::grammar::Grammar` and `pest_meta`.
+Input bytes choose grammar productions, with repetition bounded to two.
+Each derivation must be consumed by `syntax.rs`: a lowering error is acceptable, a syntax error or pipeline invariant is not.
+The real parser decides whether a derivation is faithful: its pair tree for the generated text must equal the rules the walk produced, which discards derivations that PEG ordered choice or greedy repetition would read differently.
+
+The `fuzz_gql` target sends arbitrary text through the compiler and checks that errors are client-safe.
+Semantic checks remain in the JSON parity tests above, whose paired JSON and text queries must compile to matching SQL.
 
 JSON syntax-error tests remain JSON-only.
 The existing `valid_identifiers_produce_renderable_sql` fixture also remains JSON-only:
