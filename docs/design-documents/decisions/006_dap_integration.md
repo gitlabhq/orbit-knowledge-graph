@@ -193,40 +193,16 @@ or `--callees`. An explicit target after the flag takes precedence over position
 terms. Path and definition-kind filters apply to the connected results.
 These commands share the indexed definitions and relationships in DuckDB.
 
-Full indexing records stable source-version fingerprints in `_orbit_meta`,
-including skipped or failed files. Fingerprints describe source versions, not
-complete parse coverage. Unchanged skipped files do not trigger retries or block
-refresh of other edited files. An indexed manifest entry establishes readiness,
-even when a project has no remaining definitions or files.
+`grep` and `context` hash working-tree source on each request, then reparse
+changed files and their import/relationship neighbors. One DuckDB transaction
+updates affected graph rows, search documents, and fingerprints. Failed or
+unstable parses keep the previous state; files leaving the source inventory
+are removed. Source reads with mismatched fingerprints show the full file as
+`ranges=unverified` rather than stale slices.
 
-On each `grep` or `context` request, the repository walk and content hashing
-identify changed or new source and files that left the indexed inventory.
-Unchanged files still incur filesystem reads. The code pipeline parses changed
-and new candidates plus their neighbors, retaining the repository root for
-parser workspace context. Other files are not reparsed. File, definition, and
-import rows, project search documents, and fingerprints are replaced in one
-DuckDB transaction. Directory rows are deduplicated; empty directories are removed.
-
-Any parser error, skip, fault, or unstable source aborts publication of the
-changed set. Previous definitions and fingerprints remain intact. Before using
-indexed source ranges, `context` and inline `grep` bodies verify the current
-content against its fingerprint. A mismatch shows the full current file labeled
-`ranges=unverified` instead of stale slices, including for `context --outline`.
-A file that was parseable and no longer is leaves the index like a deleted file.
-
-Subset parsing only resolves relationships between files in the same parse run.
-Refresh therefore includes indexed files whose recorded imports mention a
-changed file's stem, targets of its recorded imports, and files sharing an edge
-with it. If fresh imports reference files outside that set, the set is widened
-once and parsed again. A reference with no import and no prior edge is not
-discovered until a full index. Edges touching changed or deleted files are
-replaced; edges between unchanged files are kept. Neighbor rows are deduplicated.
-
-When a fresh import points at a project file the indexer cannot parse, a stale
-marker naming the importing file is persisted in `_orbit_meta`. Relationship
-commands, SQL, and repository maps warn with that file list. MCP adds the warning
-alongside its unchanged JSON result. A full `index` clears the marker once source
-is stable. Other projects remain intact.
+The manifest keeps empty projects indexed. New references with neither an
+import nor an existing edge need a full `index`. Unsupported project imports
+can leave stale-relationship warnings; a full index rebuilds the relationships.
 
 ### Caller identification
 
