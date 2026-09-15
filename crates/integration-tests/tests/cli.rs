@@ -1236,6 +1236,23 @@ fn repo_map_api_empty_prefix_succeeds() {
     );
 }
 
+const CONTEXT_RUST: &str = "use std::fmt;\npub struct Config {\n    pub value: String,\n}\nimpl Config {\n    pub fn get(&self) -> &str {\n        &self.value\n    }\n}\n#[test]\nfn smoke() {}\n";
+const CONTEXT_PYTHON: &str = "def hello():\n    pass\n\ndef bye():\n    pass\n";
+
+fn context_repo() -> (tempfile::TempDir, tempfile::TempDir) {
+    let repo = tempfile::TempDir::new().unwrap();
+    init_repo_at(
+        repo.path(),
+        &[
+            ("src/lib.rs", CONTEXT_RUST),
+            ("src/tool.py", CONTEXT_PYTHON),
+        ],
+    );
+    let data = tempfile::TempDir::new().unwrap();
+    assert!(orbit_index(repo.path(), data.path()));
+    (repo, data)
+}
+
 fn orbit(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> (String, String) {
     let (stdout, stderr, ok) = run_cmd(&[args, &["--repo", repo.to_str().unwrap()]].concat(), data);
     assert!(ok, "orbit {args:?}: {stderr}");
