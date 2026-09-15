@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_filter_eq_returns_matching_rows
+description: Equality filter returns only matching rows
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username", "state"],
+                 "filters": {"state": "blocked"}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.state = 'blocked' RETURN u.username, u.state LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    User:
+      count: 1
+      filters:
+        state: blocked
+      rows:
+        - { id: 5, username: eve, state: blocked }

@@ -16,7 +16,9 @@
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
+pub mod archive;
 pub mod constants;
+pub mod denormalized;
 mod entities;
 pub mod errors;
 pub mod etl;
@@ -136,7 +138,6 @@ pub struct Ontology {
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
-    pub(crate) edge_search_weights: BTreeMap<String, f64>,
     pub(crate) edge_pipelines: BTreeMap<String, Vec<Pipeline>>,
     /// Reindex trigger tables per edge relationship kind, resolved from each
     /// edge's `indexer` block. Parallels `edge_pipelines`; the pipeline model
@@ -153,6 +154,8 @@ pub struct Ontology {
     pub(crate) auxiliary_dictionaries: Vec<AuxiliaryDictionary>,
     /// Node properties denormalized onto edge tables for query optimization.
     pub(crate) denormalized_properties: Vec<DenormalizedProperty>,
+    /// Declared pre-joined table chains; see [`denormalized`].
+    pub(crate) denormalized_joins: Vec<denormalized::DenormalizedJoin>,
     /// Edge-producing entities derived by a Rust transform (keyed by name).
     /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
@@ -198,7 +201,6 @@ impl Ontology {
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
             edge_descriptions: BTreeMap::new(),
-            edge_search_weights: BTreeMap::new(),
             edge_pipelines: BTreeMap::new(),
             edge_reindex_sources: BTreeMap::new(),
             etl_settings: EtlSettings {
@@ -217,6 +219,7 @@ impl Ontology {
             auxiliary_tables: Vec::new(),
             auxiliary_dictionaries: Vec::new(),
             denormalized_properties: Vec::new(),
+            denormalized_joins: Vec::new(),
             derived_entities: BTreeMap::new(),
             materialized_views: Vec::new(),
             refreshable_materialized_views: Vec::new(),
@@ -319,6 +322,24 @@ impl Ontology {
                 storage: EdgeTableStorage::default(),
             },
         );
+        self
+    }
+
+    /// Test builder for a `denormalized_joins` entry; runs the loader's own validation.
+    #[must_use]
+    pub fn with_denormalized_join(mut self, name: &str, hops: &[(&str, &str, &str, bool)]) -> Self {
+        let declared: Vec<loading::DeclaredHop<'_>> = hops
+            .iter()
+            .map(|&(relationship, from, to, via_fk)| loading::DeclaredHop {
+                relationship,
+                from,
+                to,
+                via_fk,
+            })
+            .collect();
+        let join = loading::resolve_denormalized_join(&self, name, &declared)
+            .unwrap_or_else(|e| panic!("denormalized join {name}: {e}"));
+        self.denormalized_joins.push(join);
         self
     }
 
@@ -560,6 +581,11 @@ impl Ontology {
         loading::load_from_dir(dir.as_ref())
     }
 
+    /// The embedded ontology with a directory mirroring `config/ontology/` merged over it.
+    pub fn load_embedded_with_overlay(dir: impl AsRef<Path>) -> Result<Self, OntologyError> {
+        loading::load_with(&loading::DirOverlay(dir.as_ref()))
+    }
+
     /// Load ontology from embedded files compiled into the binary.
     ///
     /// This uses the ontology files from `config/ontology/` that were
@@ -609,6 +635,13 @@ impl Ontology {
             }
         }
 
+        for join in &mut self.denormalized_joins {
+            join.table = format!("{prefix}{}", join.table);
+            for t in &mut join.tables {
+                t.table = format!("{prefix}{}", t.table);
+            }
+        }
+
         for aux in self.auxiliary_tables.iter_mut().filter(|aux| aux.versioned) {
             aux.name = format!("{prefix}{}", aux.name);
         }
@@ -643,11 +676,6 @@ impl Ontology {
     #[must_use]
     pub fn get_edge(&self, name: &str) -> Option<&[EdgeEntity]> {
         self.edges.get(name).map(|v| v.as_slice())
-    }
-
-    #[must_use]
-    pub fn edge_search_weight(&self, relationship_kind: &str) -> Option<f64> {
-        self.edge_search_weights.get(relationship_kind).copied()
     }
 
     pub fn get_edge_source_types(&self, relationship_kind: &str) -> Vec<String> {
@@ -926,10 +954,51 @@ impl Ontology {
     #[must_use]
     pub fn is_table_path_scopable(&self, table: &str) -> bool {
         let normalized = strip_schema_version_prefix(table);
+        // A denormalized join's sort key always leads with its anchor's traversal_path.
+        if self.denormalized_join_by_table(normalized).is_some() {
+            return true;
+        }
         self.nodes
             .iter()
             .find(|(_, n)| strip_schema_version_prefix(&n.destination_table) == normalized)
             .is_some_and(|(name, _)| self.is_path_scopable(name))
+    }
+
+    /// Path columns a scan of `table` is filtered on, each with its source table's role floor.
+    #[must_use]
+    pub fn traversal_path_columns(&self, table: &str) -> Vec<(String, Option<u32>)> {
+        match self.denormalized_join_by_table(table) {
+            Some(join) => join
+                .traversal_path_columns()
+                .map(|(i, column)| {
+                    (
+                        column,
+                        self.min_access_level_for_table(&join.tables[i].table),
+                    )
+                })
+                .collect(),
+            None => vec![(
+                TRAVERSAL_PATH_COLUMN.to_string(),
+                self.min_access_level_for_table(table),
+            )],
+        }
+    }
+
+    #[must_use]
+    pub fn denormalized_joins(&self) -> &[denormalized::DenormalizedJoin] {
+        &self.denormalized_joins
+    }
+
+    /// The join whose table is `table`, with or without a schema-version prefix.
+    #[must_use]
+    pub fn denormalized_join_by_table(
+        &self,
+        table: &str,
+    ) -> Option<&denormalized::DenormalizedJoin> {
+        let normalized = strip_schema_version_prefix(table);
+        self.denormalized_joins
+            .iter()
+            .find(|j| strip_schema_version_prefix(&j.table) == normalized)
     }
 
     /// Returns `(fk_column, anchor_entity)` pairs derived from
@@ -1105,6 +1174,14 @@ impl Ontology {
             .filter(|n| n.global)
             .map(|n| n.destination_table.as_str())
             .collect()
+    }
+
+    #[must_use]
+    pub fn is_global_table(&self, table: &str) -> bool {
+        let normalized = strip_schema_version_prefix(table);
+        self.global_tables()
+            .into_iter()
+            .any(|global| strip_schema_version_prefix(global) == normalized)
     }
 
     #[must_use]
@@ -1369,10 +1446,13 @@ impl Ontology {
     /// edges carry which denorm tags; both the read path (compiler) and the
     /// write path (indexer) derive from it.
     ///
-    /// - FK edges (no standalone ETL config) project every column of their
-    ///   node, so they always carry it.
     /// - A standalone edge projects `column` only when the matching literal
     ///   endpoint maps its ontology property to an extracted input field.
+    /// - An FK edge projects only on the side holding the key.
+    /// - A node-pipeline edge projects only the pipeline's own node, on the
+    ///   side that names it literally; derived-entity edges project nothing.
+    /// - An edge no declared pipeline emits has no writer the ontology can
+    ///   consult, so it is assumed to project on both sides.
     pub fn edge_projects_column(
         &self,
         relationship_kind: &str,
@@ -1383,10 +1463,7 @@ impl Ontology {
         if let Some(pipelines) = self.get_edge_etl(relationship_kind) {
             return pipelines.iter().any(|pipeline| {
                 pipeline.transform.edges().iter().any(|mapping| {
-                    let node_ref = match direction {
-                        DenormDirection::Source => &mapping.source,
-                        DenormDirection::Target => &mapping.target,
-                    };
+                    let node_ref = direction.endpoint(mapping);
                     let NodeRefKind::Literal(endpoint_kind) = &node_ref.kind else {
                         return false;
                     };
@@ -1427,7 +1504,33 @@ impl Ontology {
             });
         }
 
-        true
+        let own_pipeline_tags_this_side = self.get_node(node_kind).is_some_and(|node| {
+            node.pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+                .filter(|mapping| mapping.label == relationship_kind)
+                .any(|mapping| {
+                    matches!(&direction.endpoint(mapping).kind, NodeRefKind::Literal(kind) if kind == node_kind)
+                })
+        });
+
+        own_pipeline_tags_this_side || !self.has_declared_emitter(relationship_kind)
+    }
+
+    fn has_declared_emitter(&self, relationship_kind: &str) -> bool {
+        let node_pipelines_emit = self.nodes().any(|node| {
+            node.pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+                .any(|mapping| mapping.label == relationship_kind)
+        });
+        node_pipelines_emit
+            || self.derived_entities().any(|derived| {
+                derived
+                    .emits
+                    .iter()
+                    .any(|emitted| emitted == relationship_kind)
+            })
     }
 
     fn node_has_property(&self, node_kind: &str, property_name: &str) -> bool {
@@ -1641,17 +1744,6 @@ mod tests {
             ontology.edge_count() > 0,
             "ontology should have at least one edge"
         );
-    }
-
-    #[test]
-    fn search_weights_load_for_code_edges_and_stay_absent_elsewhere() {
-        let ontology = Ontology::load_embedded().expect("should load embedded ontology");
-        assert_eq!(ontology.edge_search_weight("CALLS"), Some(1.0));
-        assert_eq!(ontology.edge_search_weight("EXTENDS"), Some(1.0));
-        assert_eq!(ontology.edge_search_weight("IMPORTS"), Some(0.7));
-        assert_eq!(ontology.edge_search_weight("CONTAINS"), Some(0.4));
-        assert_eq!(ontology.edge_search_weight("DEFINES"), Some(0.4));
-        assert_eq!(ontology.edge_search_weight("AUTHORED"), None);
     }
 
     #[test]
@@ -1914,6 +2006,30 @@ mod tests {
         );
     }
 
+    // Another entity's pipeline writes these edges with empty tags (#1249).
+    #[test]
+    fn denorm_not_declared_on_sides_no_pipeline_tags() {
+        use crate::entities::DenormDirection::{Source, Target};
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        for (edge, node, direction) in [
+            ("MENTIONS", "WorkItem", Source),
+            ("MENTIONS", "WorkItem", Target),
+            ("HAS_NOTE", "WorkItem", Source),
+            ("HAS_NOTE", "MergeRequest", Source),
+            ("CREATOR", "User", Source),
+            ("OWNER", "User", Source),
+        ] {
+            assert!(
+                !ontology.edge_projects_column(edge, node, direction, "state"),
+                "{edge} must not project {node}.state"
+            );
+        }
+        assert!(ontology.edge_projects_column("HAS_NOTE", "Note", Target, "confidential"));
+        assert!(ontology.edge_projects_column("CREATOR", "Project", Target, "archived"));
+        assert!(ontology.edge_projects_column("CALLS", "Definition", Source, "definition_type"));
+    }
+
     #[test]
     fn test_display() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
@@ -2112,6 +2228,110 @@ mod tests {
     fn min_access_level_for_table_reads_redaction_required_role() {
         let ontology = ontology_with_role("Project", RequiredRole::SecurityManager);
         assert_eq!(ontology.min_access_level_for_table("gl_project"), Some(25));
+    }
+
+    fn reviewer_project_join() -> Ontology {
+        Ontology::load_embedded().unwrap().with_denormalized_join(
+            "reviewer_project",
+            &[
+                ("REVIEWER", "User", "MergeRequest", false),
+                ("IN_PROJECT", "MergeRequest", "Project", true),
+            ],
+        )
+    }
+
+    #[test]
+    fn denormalized_join_exposes_one_path_column_per_scoped_table_with_its_floor() {
+        let table = "gl_denorm_reviewer_project";
+        let mut ontology = reviewer_project_join();
+        ontology
+            .nodes
+            .get_mut("MergeRequest")
+            .and_then(|n| n.redaction.as_mut())
+            .unwrap()
+            .required_role = RequiredRole::SecurityManager;
+
+        // User is global, so the edge is the anchor; an edge table has no redaction floor.
+        assert_eq!(
+            ontology.traversal_path_columns(&format!("v9_{table}")),
+            [
+                ("traversal_path".to_string(), None),
+                ("t2_traversal_path".to_string(), Some(25)),
+                ("t3_traversal_path".to_string(), Some(20)),
+            ]
+        );
+        assert!(ontology.is_table_path_scopable(table));
+        assert_eq!(
+            ontology.traversal_path_columns("gl_merge_request"),
+            [("traversal_path".to_string(), Some(25))]
+        );
+    }
+
+    #[test]
+    fn overlay_dir_merges_any_ontology_file_and_adds_new_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "settings:\n  denormalized_joins:\n    - name: approved\n      hops:\n        - {relationship: APPROVED, from: User, to: MergeRequest}\n",
+        )
+        .unwrap();
+        std::fs::create_dir(dir.path().join("edges")).unwrap();
+        std::fs::write(
+            dir.path().join("edges/approved.yaml"),
+            "variants:\n  - from_node: { type: User, id: id }\n    to_node: { type: WorkItem, id: id }\n    scope: prune_to_target\n    description: \"User approved work item.\"\n",
+        )
+        .unwrap();
+
+        let base = Ontology::load_embedded().unwrap();
+        let overlaid = Ontology::load_embedded_with_overlay(dir.path()).unwrap();
+
+        assert_eq!(
+            overlaid.denormalized_joins().len(),
+            base.denormalized_joins().len() + 1
+        );
+        assert!(
+            overlaid
+                .denormalized_join_by_table("gl_denorm_approved")
+                .is_some()
+        );
+        let approved = |o: &Ontology| {
+            o.edges()
+                .filter(|e| e.relationship_kind == "APPROVED")
+                .count()
+        };
+        assert_eq!(approved(&overlaid), approved(&base) + 1);
+        assert_eq!(overlaid.nodes().count(), base.nodes().count());
+
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "settings:\n  denormalized_joins: [{name: x, hops: []}]\n",
+        )
+        .unwrap();
+        let err = Ontology::load_embedded_with_overlay(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("at least one hop"), "got: {err}");
+    }
+
+    #[test]
+    fn denormalized_join_follows_the_schema_version_prefix() {
+        let ontology = reviewer_project_join().with_schema_version_prefix("v9_");
+        let join = ontology
+            .denormalized_join_by_table("gl_denorm_reviewer_project")
+            .expect("lookup normalizes the prefix");
+        assert_eq!(join.table, "v9_gl_denorm_reviewer_project");
+        let tables: Vec<&str> = join.tables.iter().map(|t| t.table.as_str()).collect();
+        assert_eq!(
+            tables,
+            [
+                "v9_gl_user",
+                "v9_gl_edge",
+                "v9_gl_merge_request",
+                "v9_gl_project"
+            ]
+        );
+        assert_eq!(
+            join.sort_key(),
+            ["traversal_path", "t2_id", "t0_id", "t3_id"]
+        );
     }
 
     #[test]

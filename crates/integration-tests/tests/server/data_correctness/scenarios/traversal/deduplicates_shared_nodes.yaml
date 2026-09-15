@@ -1,0 +1,29 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_deduplicates_shared_nodes
+description: Shared group nodes are deduplicated when multiple users fan into them
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "limit": 20
+    }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id IN [1, 2] RETURN u.username, g.name LIMIT 20
+
+expect:
+  node_count: 4
+  nodes:
+    User:
+      ids: [1, 2]
+    Group:
+      ids: [100, 102]
+  edges:
+    MEMBER_OF:
+      - [1, 100]
+      - [1, 102]
+      - [2, 100]

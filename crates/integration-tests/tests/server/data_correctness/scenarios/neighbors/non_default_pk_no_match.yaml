@@ -1,0 +1,23 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_non_default_pk_filter_excludes_non_matching
+description: Non-default PK filter with no matching rows returns empty result
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{
+        "id": "d",
+        "entity": "MergeRequestDiff",
+        "filters": {"head_commit_sha": {"eq": "no-such-sha"}}
+      }],
+      "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
+    }
+
+expect:
+  skip_requirements:
+    - node_ids
+    - "filter:head_commit_sha"
+    - "relationship:HAS_DIFF"
+    - neighbors
+  node_count: 0
+

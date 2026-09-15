@@ -10,6 +10,7 @@ testutils = []
 
 [dependencies]
 orbit-utils = { path = "../../utils" }
+orbit-versions = { path = "../../orbit-versions" }
 indexmap = { workspace = true }
 shared = { path = "../shared" }
 types = { path = "../types" }

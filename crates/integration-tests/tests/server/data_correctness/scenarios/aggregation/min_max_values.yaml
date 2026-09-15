@@ -1,0 +1,31 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_min_max_produce_correct_values
+description: Min and max of user IDs per group
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [
+        {"min": "u.id", "as": "min_id"},
+        {"max": "u.id", "as": "max_id"}
+      ],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    g:
+      rows:
+        - { entity: Group, id: 100, values: { min_id: 1, max_id: 6 } }
+        - { entity: Group, id: 101, values: { min_id: 3, max_id: 6 } }
+        - { entity: Group, id: 102, values: { min_id: 1, max_id: 4 } }

@@ -20,6 +20,8 @@ pub type ImportRewriterBuilder = fn(paths: &[&str], sep: &str) -> Box<ImportRewr
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
+pub type NameHookFn = fn(&N<'_>) -> Option<String>;
+
 pub trait Rule {
     fn kinds(&self) -> &[&'static str];
     fn condition(&self) -> Option<&Pred>;
@@ -45,6 +47,7 @@ pub struct ScopeRule {
     def_kind: DefKind,
     condition: Option<Pred>,
     name: Extract,
+    name_hook: Option<NameHookFn>,
     pub(crate) default_name: Option<&'static str>,
     pub creates_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
@@ -59,6 +62,13 @@ impl Rule for ScopeRule {
     }
     fn extract(&self) -> &Extract {
         &self.name
+    }
+
+    fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        match self.name_hook {
+            Some(hook) => hook(node),
+            None => self.extract().apply(node),
+        }
     }
 }
 
@@ -77,6 +87,13 @@ impl ScopeRule {
 
     pub fn name_from(mut self, extract: Extract) -> Self {
         self.name = extract;
+        self
+    }
+
+    /// Use this hook only when an `Extract` chain cannot express the name.
+    /// The hook replaces `name_from`. `None` falls back to `default_name`.
+    pub fn name_hook(mut self, hook: NameHookFn) -> Self {
+        self.name_hook = Some(hook);
         self
     }
 
@@ -128,6 +145,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        name_hook: None,
         default_name: None,
         creates_scope: true,
         metadata_rule: None,
@@ -141,6 +159,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        name_hook: None,
         default_name: None,
         creates_scope: true,
         metadata_rule: None,
@@ -158,6 +177,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        name_hook: None,
         default_name: None,
         creates_scope: true,
         metadata_rule: None,
@@ -707,8 +727,16 @@ pub struct SsaConfig {
     pub constructor_methods: &'static [&'static str],
 }
 
+pub type PathImportHookFn = fn(&N<'_>, &str, &mut Vec<crate::v2::types::CanonicalImport>) -> bool;
 pub type ScopeHookFn = fn(
     &N<'_>,
+    &mut Vec<crate::v2::types::CanonicalDefinition>,
+    &[std::sync::Arc<str>],
+    &'static str,
+) -> bool;
+pub type PathScopeHookFn = fn(
+    &N<'_>,
+    &str,
     &mut Vec<crate::v2::types::CanonicalDefinition>,
     &[std::sync::Arc<str>],
     &'static str,
@@ -723,8 +751,14 @@ pub struct LanguageHooks {
     pub module_scope: Option<fn(&str, &str) -> Option<String>>,
     /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
     pub on_scope: Option<ScopeHookFn>,
+    /// Path-aware variant of `on_scope` for definition extraction that
+    /// dispatches on filename (e.g. YAML document types). Takes precedence when set.
+    pub on_scope_with_path: Option<PathScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
+    /// Path-aware variant of `on_import` for extraction that dispatches
+    /// on filename (e.g. YAML document types). Takes precedence when set.
+    pub on_import_with_path: Option<PathImportHookFn>,
     /// Override the identifier an import writes into SSA.
     pub import_scope_name: Option<ImportScopeNameHook>,
     /// Override the target FQN used by type-resolution import maps.

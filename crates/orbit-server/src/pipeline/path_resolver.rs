@@ -29,20 +29,29 @@ impl PathResolver {
         ontology: &Ontology,
         cfg: &PathResolverConfig,
     ) -> Self {
-        let lookups = ontology.traversal_path_lookups().to_vec();
-        let dicts: Vec<&str> = lookups
+        let mut resolver = Self::without_dictionaries(client, ontology, cfg);
+        let dicts: Vec<&str> = resolver
+            .lookups
             .iter()
             .filter_map(|l| l.dictionary.as_deref())
             .collect();
 
-        let dict_available = probe_dict_available(&client, &dicts).await;
-        if !dict_available {
+        resolver.dict_available = probe_dict_available(&resolver.client, &dicts).await;
+        if !resolver.dict_available {
             warn!(
                 ?dicts,
                 "traversal-path dictionaries unavailable; using argMax fallback"
             );
         }
 
+        resolver
+    }
+
+    pub(crate) fn without_dictionaries(
+        client: Arc<ArrowClickHouseClient>,
+        ontology: &Ontology,
+        cfg: &PathResolverConfig,
+    ) -> Self {
         let cache = Cache::builder()
             .max_capacity(cfg.cache_capacity)
             .time_to_live(Duration::from_secs(cfg.cache_ttl_secs))
@@ -50,8 +59,8 @@ impl PathResolver {
 
         Self {
             client,
-            lookups,
-            dict_available,
+            lookups: ontology.traversal_path_lookups().to_vec(),
+            dict_available: false,
             cache,
         }
     }

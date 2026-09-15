@@ -1,0 +1,17 @@
+# Minimal multi-stage build for bench deploys. No sccache, no secrets.
+# Builds a debug binary for faster compilation (~4 min vs ~15 min release).
+FROM registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest AS builder
+
+WORKDIR /build
+COPY . .
+
+RUN CARGO_PROFILE_DEV_DEBUG=0 cargo build -p orbit-server --locked && \
+    cp target/debug/gkg-server /gkg-server
+
+FROM registry.access.redhat.com/ubi10/ubi-minimal:10.2
+
+WORKDIR /app
+COPY --from=builder /gkg-server /usr/local/bin/gkg-server
+COPY config/clickhouse-setup.sql /usr/share/gkg/clickhouse-setup.sql
+
+ENTRYPOINT ["gkg-server"]

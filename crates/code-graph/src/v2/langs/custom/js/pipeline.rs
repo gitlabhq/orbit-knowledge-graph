@@ -35,7 +35,8 @@ impl LanguagePipeline for JsPipeline {
             .and_then(sentinel::spawn_sentinel);
         let sentinel_handle = sentinel.as_ref().map(|(h, _)| h);
 
-        let (analyzed_files, errors) = analyze_files(files, root_path, sentinel_handle);
+        let (analyzed_files, errors) =
+            analyze_files(files, root_path, sentinel_handle, &ctx.config.cancel);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         // Route per-file outcomes to the typed collections regardless of
@@ -62,6 +63,9 @@ impl LanguagePipeline for JsPipeline {
         let mut file_infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved_files = Vec::with_capacity(analyzed_files.len());
         for file in analyzed_files {
+            if ctx.is_cancelled() {
+                return Ok(());
+            }
             ctx.record_file_timing(FileTimingEntry {
                 path: file.relative_path.clone(),
                 size_bytes: file.phase1.size,
@@ -98,6 +102,9 @@ impl LanguagePipeline for JsPipeline {
             sentinel_handle,
             ctx,
         );
+        if ctx.is_cancelled() {
+            return Ok(());
+        }
         graph.finalize(tracer);
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let resolve_ms = total_ms - parse_ms - graph_build_ms;

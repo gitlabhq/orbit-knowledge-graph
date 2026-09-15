@@ -1,0 +1,30 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::cross_namespace_aggregation_respects_scope
+description: Aggregation scoped to 1/100/ counts only projects in that namespace
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  json: |
+    {
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+        "group_by": ["g"],
+        "aggregations": [{"count": "p", "as": "project_count"}],
+        "limit": 20
+    }
+
+expect:
+  groups:
+    g:
+      count: 2
+      rows:
+        - { entity: Group, id: 100, values: { project_count: 2 } }
+        - { entity: Group, id: 200, values: { project_count: 1 } }
+      absent:
+        - { entity: Group, id: 101 }
+        - { entity: Group, id: 102 }

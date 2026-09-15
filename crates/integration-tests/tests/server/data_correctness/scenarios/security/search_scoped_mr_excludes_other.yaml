@@ -1,0 +1,20 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::search_scoped_mr_excludes_other_namespaces
+description: MR search scoped to 1/101/ returns only MRs in that namespace
+
+config:
+  security: { org_id: 1, paths: ["1/101/"] }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    MergeRequest:
+      ids: [2002]
+      absent: [2000, 2001]

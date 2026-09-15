@@ -20,6 +20,7 @@ fn support_lang_for_extension(ext: &str) -> Option<SupportLang> {
         "php" | "phtml" => SupportLang::Php,
         "tf" | "tfvars" | "hcl" => SupportLang::Hcl,
         "scala" | "sc" => SupportLang::Scala,
+        "yml" | "yaml" => SupportLang::Yaml,
         "zig" => SupportLang::Zig,
         _ => return None,
     })

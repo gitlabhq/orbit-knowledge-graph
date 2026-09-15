@@ -38,3 +38,4 @@ SELECT
   _e0.action AS action
 FROM _batch
 LEFT JOIN _e0 ON _batch.id = _e0.id
+ORDER BY traversal_path, id

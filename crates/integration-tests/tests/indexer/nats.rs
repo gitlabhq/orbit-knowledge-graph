@@ -9,7 +9,7 @@ use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::nats::versioning::{
-    NATS_VERSIONER, NatsVersioner, cleanup_schema_state, gc_idle_release_streams,
+    MANAGED_BUCKETS, NATS_VERSIONER, NatsVersioner, gc_idle_release_streams,
 };
 use indexer::orchestrator::Trigger;
 use indexer::orchestrator::max_deliveries::MaxDeliveriesReconciler;
@@ -70,7 +70,7 @@ async fn start_nats_container() -> (testcontainers::ContainerAsync<Nats>, String
 fn default_config(url: &str) -> NatsConfiguration {
     NatsConfiguration {
         url: url.to_string(),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     }
 }
 
@@ -516,7 +516,7 @@ async fn auto_creates_stream_with_configured_settings() {
         auto_create_streams: true,
         stream_replicas: 1,
         stream_max_age_secs: Some(3600),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker = connect_broker(&config).await;
@@ -547,7 +547,7 @@ async fn skips_creation_when_disabled() {
     let config = NatsConfiguration {
         url: url.clone(),
         auto_create_streams: false,
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker = connect_broker(&config).await;
@@ -571,7 +571,7 @@ async fn updates_stream_config_during_rolling_update() {
         url: url.clone(),
         auto_create_streams: true,
         stream_max_age_secs: Some(3600),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker_old = connect_broker(&config_v1).await;
@@ -590,7 +590,7 @@ async fn updates_stream_config_during_rolling_update() {
         url: url.clone(),
         auto_create_streams: true,
         stream_max_age_secs: Some(7200),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker_new = connect_broker(&config_v2).await;
@@ -643,7 +643,7 @@ async fn in_progress_prevents_redelivery() {
     let config = NatsConfiguration {
         url,
         ack_wait_secs: ack_wait.as_secs(),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
     let broker = NatsBroker::connect(&config)
@@ -703,7 +703,7 @@ async fn subscribe_with_multi_level_wildcard_does_not_reject_durable_name() {
         url,
         auto_create_streams: true,
         consumer_name: Some("gkg-indexer".to_string()),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
     let broker = connect_broker(&config).await;
 
@@ -773,9 +773,13 @@ async fn release_gc_and_schema_cleanup_delete_their_own_entities() {
     gc_idle_release_streams(&client, Duration::ZERO)
         .await
         .expect("gc_idle_release_streams failed");
-    cleanup_schema_state(&client, schema_version)
-        .await
-        .expect("cleanup_schema_state failed");
+    orbit_migrations::nats::cleanup_schema_version_buckets(
+        &client,
+        schema_version,
+        MANAGED_BUCKETS,
+    )
+    .await
+    .expect("cleanup_schema_version_buckets failed");
 
     for name in &stream_names {
         assert!(
@@ -855,9 +859,9 @@ async fn cleanup_is_idempotent() {
     gc_idle_release_streams(&client, Duration::ZERO)
         .await
         .expect("gc_idle_release_streams failed with no gkg streams present");
-    cleanup_schema_state(&client, 888)
+    orbit_migrations::nats::cleanup_schema_version_buckets(&client, 888, MANAGED_BUCKETS)
         .await
-        .expect("cleanup_schema_state failed for non-existent schema version");
+        .expect("cleanup_schema_version_buckets failed for non-existent schema version");
 }
 
 /// A message that's never ack'd/nack'd/term'd across every `max_deliver` attempt leaves NATS
@@ -874,7 +878,7 @@ async fn exhausted_message_blocks_redispatch_until_manually_deleted() {
         ack_wait_secs: ack_wait.as_secs(),
         max_deliver: Some(max_deliver),
         fetch_expires_secs: 1,
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
     let broker = connect_broker(&config).await;
 
@@ -947,7 +951,7 @@ async fn max_deliveries_reconciler_deletes_stuck_message_and_unblocks_subject() 
         ack_wait_secs: ack_wait.as_secs(),
         max_deliver: Some(max_deliver),
         fetch_expires_secs: 1,
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
     let broker = connect_broker(&config).await;
 

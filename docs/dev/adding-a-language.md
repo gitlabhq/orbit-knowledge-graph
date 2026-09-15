@@ -111,6 +111,14 @@ Builders — `scope(...)`, `reference(...)`, `field(...)`, `child_of_kind(...)`,
 For grammars where every construct shares a kind (Elixir: everything is `call`),
 use `scope_fn(...)` with a custom label-picker.
 
+When a definition's name can't be expressed as an `Extract` chain — e.g. C/C++
+declarator descent, where pointer/parenthesized/attributed wrappers of unbounded
+depth sit between the definition and its name — attach a language function with
+`scope(...).name_hook(fn)`, where `fn: fn(&Node) -> Option<String>` receives the
+definition node. When set, `name_hook` takes precedence over `name_from`; a
+`None` result falls back to `default_name` (see
+[`c_family.rs`](../../crates/code-graph/src/v2/langs/generic/c_family.rs)).
+
 ## `LanguageFamily`
 
 ```rust

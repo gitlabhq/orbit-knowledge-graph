@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::{Ontology, OntologyError};
 
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
 const CODE_DOMAIN: &str = "source_code";
 
@@ -82,6 +82,11 @@ impl CodeTableNames {
 
     /// Ontology node names backing [`Self::node_tables`], in the same order.
     pub const NODE_KINDS: [&'static str; 4] = ["Directory", "File", "Definition", "ImportedSymbol"];
+
+    /// `NODE_KINDS` as a quoted SQL list for a `source_kind IN (...)` predicate.
+    pub fn node_kinds_sql_list() -> String {
+        Self::NODE_KINDS.map(|kind| format!("'{kind}'")).join(", ")
+    }
 }
 
 #[cfg(test)]

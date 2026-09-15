@@ -1,0 +1,50 @@
+name: "TypeScript: nested functions and recursive calls"
+pipeline: js
+fixtures:
+  - path: main.ts
+    content: |
+      function outer(): number {
+          function inner(): number {
+              return 42;
+          }
+          return inner();
+      }
+
+      function factorial(n: number): number {
+          if (n <= 1) return 1;
+          return n * factorial(n - 1);
+      }
+
+      class Container {
+          items: number[] = [];
+
+          process(): void {
+              const transform = (x: number): number => x * 2;
+              this.items.map(transform);
+          }
+      }
+
+tests:
+  - name: inner is not nested inside outer via Defines
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.name = 'outer' AND child.name = 'inner' AND e.edge_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
+    assert:
+      - { empty: true }
+
+  - name: outer calls inner
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'outer' AND callee.name = 'inner' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: factorial calls itself
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'factorial' AND callee.name = 'factorial' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

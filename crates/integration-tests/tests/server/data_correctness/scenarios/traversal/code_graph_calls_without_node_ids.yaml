@@ -1,0 +1,30 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_code_graph_calls_without_node_ids
+description: Code graph CALLS traversal without node_ids relies on auth-scope cascade
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name", "fqn"]},
+            {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+        "limit": 20
+    }
+  gql: |
+    MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, caller.fqn, callee.name, callee.fqn LIMIT 20
+
+expect:
+  node_count: 4
+  referential_integrity: true
+  nodes:
+    Definition:
+      rows:
+        - id: 12000
+          name: compile
+  edges:
+    CALLS:
+      - [12000, 12001]
+      - [12001, 12002]
+      - [12001, 12102]

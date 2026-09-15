@@ -1,0 +1,40 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::neighbors_cross_namespace_no_false_positives
+description: Bidirectional neighbors of Group 101 scoped to 1/101/ excludes other namespaces
+
+config:
+  security: { org_id: 1, paths: ["1/101/"] }
+
+query:
+  json: |
+    {
+        "query_type": "neighbors",
+        "nodes": [{"id": "g", "entity": "Group", "node_ids": [101]}],
+        "neighbors": {"direction": "both"}
+    }
+
+expect:
+  node_count: 8
+  nodes:
+    Group:
+      ids: [101]
+      absent: [100, 200]
+    User:
+      ids: [3, 4, 5, 6]
+      absent: [1, 2]
+    Project:
+      ids: [1001, 1003]
+      absent: [1000, 1002, 1004]
+    WorkItem:
+      ids: [4002]
+  edge_exists:
+    MEMBER_OF:
+      - [3, 101]
+      - [4, 101]
+      - [5, 101]
+      - [6, 101]
+    CONTAINS:
+      - [101, 1001]
+      - [101, 1003]
+    IN_GROUP:
+      - [4002, 101]
+  referential_integrity: true

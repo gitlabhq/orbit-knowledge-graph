@@ -13,7 +13,7 @@ use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
 use query_engine::compiler::compile;
-use query_engine::compiler::{AuthorizedPath, SecurityContext};
+use query_engine::compiler::{AuthorizedPath, Frontend, SecurityContext};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
@@ -60,7 +60,7 @@ async fn query_with_security(
     let svc = allow_all();
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
-    let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
+    let compiled = Arc::new(compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);

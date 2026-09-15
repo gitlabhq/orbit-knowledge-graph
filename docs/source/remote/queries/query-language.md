@@ -32,7 +32,7 @@ the relationships to follow, and the properties to return.
 
 ## Request envelope
 
-When submitting a query via the REST API or `glab orbit remote query`, wrap the
+When submitting a query via the REST API or `glab orbit query`, wrap the
 query object in a top-level `query` field:
 
 ```json orbit-query
@@ -56,8 +56,7 @@ query object in a top-level `query` field:
 | `query` | Yes | The query object documented below. |
 | `response_format` | No | `"llm"` (default when omitted; compact [GOON](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/graph_engine.md) text optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
 
-The `orbit query` CLI (for local graphs) takes the raw query body **without**
-the envelope.
+The `orbit query` command requires this envelope.
 
 ## Query shape
 
@@ -197,6 +196,7 @@ objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 | `all_tokens` | Text index contains all tokens. |
 | `any_tokens` | Text index contains any token. |
 
+`contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID properties.
 Token operators work only on properties with text indexes.
 
 ### Text-indexed properties
@@ -257,6 +257,10 @@ can require external service calls.
 
 The `content` column is for source code. For merge request diff text, use
 `MergeRequest.diff`, `MergeRequestDiff.patch`, or `MergeRequestDiffFile.diff`.
+
+### Text excerpts
+
+Database-backed node strings are shortened to fit the page: the fewer rows a page can return, the longer each value may be, so a single-row lookup returns full text while a 1,000-row page returns short excerpts. Shortened values end with `" [truncated]"`; use the GitLab API for full text.
 
 ### Filtering on virtual columns
 

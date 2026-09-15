@@ -1,3 +1,4 @@
+{{- $replicated := include "clickhouse.replicated" . }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -5,8 +6,9 @@ metadata:
   labels:
     app: {{ .Release.Name }}
 spec:
-  replicas: 1
-  serviceName: {{ .Release.Name }}
+  replicas: {{ .Values.replicas }}
+  serviceName: {{ include "clickhouse.headless" . }}
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: {{ .Release.Name }}
@@ -24,6 +26,14 @@ spec:
               containerPort: 8123
             - name: native
               containerPort: 9000
+            {{- if $replicated }}
+            - name: keeper
+              containerPort: 9181
+            - name: raft
+              containerPort: 9234
+            - name: interserver
+              containerPort: 9009
+            {{- end }}
           env:
             - name: CLICKHOUSE_USER
               value: "default"
@@ -31,24 +41,39 @@ spec:
               value: {{ .Values.password | quote }}
             - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
               value: "1"
+            {{- if $replicated }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KEEPER_SERVER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            - name: INTERSERVER_HOST
+              value: "$(POD_NAME).{{ include "clickhouse.headless" . }}"
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/clickhouse
-            - name: initdb
-              mountPath: /docker-entrypoint-initdb.d
             - name: config
               mountPath: /etc/clickhouse-server/config.d/low_memory_server.xml
               subPath: low_memory_server.xml
             - name: config
               mountPath: /etc/clickhouse-server/users.d/low_memory_users.xml
               subPath: low_memory_users.xml
+            {{- if $replicated }}
+            - name: config
+              mountPath: /etc/clickhouse-server/config.d/cluster.xml
+              subPath: cluster.xml
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /ping
               port: http
-            initialDelaySeconds: 15
+            initialDelaySeconds: {{ if $replicated }}90{{ else }}15{{ end }}
             periodSeconds: 10
           readinessProbe:
             httpGet:
@@ -57,9 +82,6 @@ spec:
             initialDelaySeconds: 2
             periodSeconds: 2
       volumes:
-        - name: initdb
-          configMap:
-            name: {{ .Release.Name }}-initdb
         - name: config
           configMap:
             name: {{ .Release.Name }}-config

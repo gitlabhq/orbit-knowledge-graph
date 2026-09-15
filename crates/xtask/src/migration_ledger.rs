@@ -8,6 +8,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use ontology::Ontology;
+use ontology::archive::OntologyArchive;
 use ontology::migrations::{
     self, Fingerprints, LedgerScope, MigrationEntry, MigrationLedger, MigrationScope, derive_scope,
 };
@@ -15,7 +16,7 @@ use ontology::migrations::{
 const DEFAULT_BASE: &str = "origin/main";
 
 const FINGERPRINT_REPO_PATH: &str = "config/schema-migrations.fingerprint.yaml";
-const SCHEMA_VERSION_REPO_PATH: &str = "config/SCHEMA_VERSION";
+const VERSIONS_REPO_PATH: &str = "config/versions.yaml";
 
 const REMEDIATION: &str = "Run `mise schema:bump` to record the change and re-snapshot.";
 
@@ -31,15 +32,11 @@ fn fingerprint_path() -> PathBuf {
     config_dir().join(migrations::FINGERPRINT_FILE)
 }
 
-fn schema_version_path() -> PathBuf {
-    config_dir().join("SCHEMA_VERSION")
-}
-
 fn current_fingerprints(ontology: &Ontology) -> Fingerprints {
     Fingerprints {
         sources: migrations::source_fingerprints(),
-        ddl: query_engine::compiler::ddl_fingerprints(ontology),
-        auxiliary_schema: query_engine::compiler::auxiliary_schema_fingerprints(ontology),
+        ddl: orbit_migrations::fingerprint::ddl_fingerprints(ontology),
+        auxiliary_schema: orbit_migrations::fingerprint::auxiliary_schema_fingerprints(ontology),
     }
 }
 
@@ -62,18 +59,26 @@ fn read_ledger() -> Result<MigrationLedger> {
     MigrationLedger::parse(&content).map_err(|e| anyhow!(e))
 }
 
-fn read_schema_version() -> Result<u32> {
-    let path = schema_version_path();
-    let content =
-        fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    content
-        .trim()
-        .parse()
-        .with_context(|| format!("{} must contain a u32", path.display()))
+fn write_schema_version(version: u32) -> Result<()> {
+    let path = env!("VERSIONS_FILE");
+    let content = fs::read_to_string(path)?;
+    let current = format!("\nschema: {}\n", orbit_versions::VERSIONS.schema);
+    if !content.contains(&current) {
+        bail!("{path} has no `schema:` line matching the compiled-in version");
+    }
+    fs::write(
+        path,
+        content.replace(&current, &format!("\nschema: {version}\n")),
+    )
+    .with_context(|| format!("writing {path}"))
 }
 
-fn write_schema_version(version: u32) -> Result<()> {
-    fs::write(schema_version_path(), format!("{version}\n")).context("writing SCHEMA_VERSION")
+fn schema_version_at(base: &str) -> Option<u32> {
+    Some(
+        orbit_versions::parse(&git_show(base, VERSIONS_REPO_PATH)?)
+            .ok()?
+            .schema,
+    )
 }
 
 fn git_show(base: &str, repo_path: &str) -> Option<String> {
@@ -163,11 +168,26 @@ pub fn check(base: Option<String>) -> Result<()> {
         )
     })?;
 
-    let schema_version = read_schema_version()?;
+    let schema_version = orbit_versions::VERSIONS.schema;
     let ledger = read_ledger()?;
 
     migrations::verify_snapshot(&ontology, &current, &committed, &ledger, schema_version)
         .map_err(|e| anyhow!(e))?;
+
+    let archive_path = OntologyArchive::path(&config_dir(), schema_version);
+    let archive_bytes = fs::read(&archive_path).with_context(|| {
+        format!(
+            "reading {}. Run `mise schema:snapshot` to recreate a missing archive.",
+            archive_path.display()
+        )
+    })?;
+
+    let archive = OntologyArchive::from_bytes(schema_version, &archive_bytes)?;
+    let current_sources = migrations::embedded_sources();
+
+    if !archive.matches_sources(&current_sources) {
+        bail!("ontology archive is stale. {REMEDIATION}");
+    }
 
     if let Some(base) = base {
         check_under_declaration(&ontology, &committed, &ledger, schema_version, &base)?;
@@ -197,9 +217,8 @@ fn check_under_declaration(
         return Ok(());
     }
 
-    let base_version: u32 = git_show(base, SCHEMA_VERSION_REPO_PATH)
-        .and_then(|s| s.trim().parse().ok())
-        .ok_or_else(|| anyhow!("could not read {base}:{SCHEMA_VERSION_REPO_PATH}"))?;
+    let base_version: u32 = schema_version_at(base)
+        .ok_or_else(|| anyhow!("could not read {base}:{VERSIONS_REPO_PATH}"))?;
     // A gap would leave an entry-less version, which the migration path treats
     // as a full rebuild; one MR bumps exactly one version.
     if schema_version != base_version + 1 {
@@ -294,10 +313,9 @@ pub fn bump(
         }
     };
 
-    let working_version = read_schema_version()?;
+    let working_version = orbit_versions::VERSIONS.schema;
     let base_ref = base.unwrap_or_else(|| DEFAULT_BASE.to_string());
-    let base_version =
-        git_show(&base_ref, SCHEMA_VERSION_REPO_PATH).and_then(|s| s.trim().parse::<u32>().ok());
+    let base_version = schema_version_at(&base_ref);
 
     let is_new = match base_version {
         Some(bv) => working_version == bv,
@@ -308,7 +326,7 @@ pub fn bump(
                 true
             } else {
                 bail!(
-                    "could not read {base_ref}:{SCHEMA_VERSION_REPO_PATH} to decide bump vs amend; \
+                    "could not read {base_ref}:{VERSIONS_REPO_PATH} to decide bump vs amend; \
                      pass --new or --amend"
                 );
             }
@@ -351,6 +369,25 @@ pub fn bump(
         .validate(&ontology, final_version)
         .map_err(|e| anyhow!(e))?;
 
+    let archive = OntologyArchive::from_sources(final_version, &source_contents)?;
+    archive.load_ontology()?;
+
+    let archive_path = OntologyArchive::path(&config_dir(), final_version);
+
+    if is_new && archive_path.exists() {
+        let existing_bytes = fs::read(&archive_path)
+            .with_context(|| format!("reading {}", archive_path.display()))?;
+
+        if existing_bytes != archive.bytes() {
+            bail!(
+                "ontology archive already exists with different contents: {}",
+                archive_path.display()
+            );
+        }
+    }
+
+    archive.write_atomic(&archive_path)?;
+
     if is_new {
         write_schema_version(final_version)?;
     }
@@ -383,6 +420,12 @@ pub fn snapshot() -> Result<()> {
             format_set(&changed_tables),
         );
     }
+    let version = orbit_versions::VERSIONS.schema;
+    let archive_path = OntologyArchive::path(&config_dir(), version);
+    if !archive_path.exists() {
+        OntologyArchive::from_sources(version, &migrations::embedded_sources())?
+            .write_atomic(&archive_path)?;
+    }
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!(
         "regenerated fingerprint snapshot at {}",
@@ -401,9 +444,11 @@ fn format_set(values: &BTreeSet<String>) -> String {
 
 /// First-time snapshot: write the fingerprint file without bumping.
 fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result<()> {
-    let version = read_schema_version()?;
+    let version = orbit_versions::VERSIONS.schema;
     let ledger = read_ledger()?;
     ledger.validate(ontology, version).map_err(|e| anyhow!(e))?;
+    OntologyArchive::from_sources(version, &migrations::embedded_sources())?
+        .write_atomic(&OntologyArchive::path(&config_dir(), version))?;
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!("wrote initial fingerprint snapshot for version {version}");
     Ok(())

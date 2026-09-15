@@ -5,8 +5,6 @@ use tracing::info;
 
 use crate::engine::{EngineConfiguration, IndexerModule};
 
-pub(crate) const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
-
 /// Calibrated on observed prod peaks: code pods hold ~2.5 GiB per in-flight
 /// indexing lane.
 const WORKER_MEMORY_BUDGET_BYTES: u64 = 2560 * 1024 * 1024;
@@ -24,7 +22,7 @@ const CODE_BIG_LANE_SHARE_PERCENT: usize = 25;
 const DATALAKE_BATCH_MEMORY_ANCHOR_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 const DATALAKE_BATCH_AT_ANCHOR: u64 = 500_000;
 
-/// Matches the retry loop's known-safe re-read block size (`engine::default_halving_initial_block_size`).
+/// Matches the retry loop's known-safe re-read block size (`engine.datalake_retry.halving_initial_block_size`).
 pub const MIN_DATALAKE_BATCH_SIZE: u64 = 100_000;
 
 pub struct CodeIndexingSlots {
@@ -163,6 +161,11 @@ fn read_memory_ceiling_bytes() -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AppConfig;
+
+    fn engine() -> EngineConfiguration {
+        AppConfig::embedded_defaults().engine
+    }
 
     const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -238,7 +241,7 @@ mod tests {
 
     #[test]
     fn resolve_fills_entity_handler_batch_size_from_memory() {
-        let mut cfg = EngineConfiguration::default();
+        let mut cfg = engine();
 
         cfg.resolve_runtime_defaults(&container_resources(8, Some(16 * GIB)));
 
@@ -247,7 +250,7 @@ mod tests {
 
     #[test]
     fn resolve_keeps_explicit_entity_handler_batch_size() {
-        let mut cfg = EngineConfiguration::default();
+        let mut cfg = engine();
         cfg.handlers.entity_handler.datalake_batch_size = Some(999);
 
         cfg.resolve_runtime_defaults(&container_resources(8, Some(64 * GIB)));
@@ -283,7 +286,7 @@ mod tests {
 
     #[test]
     fn resolve_fills_workers_and_groups() {
-        let mut cfg = EngineConfiguration::default();
+        let mut cfg = engine();
 
         cfg.resolve_runtime_defaults(&container_resources(20, None));
 
@@ -294,7 +297,7 @@ mod tests {
 
     #[test]
     fn resolve_caps_workers_by_memory() {
-        let mut cfg = EngineConfiguration::default();
+        let mut cfg = engine();
 
         cfg.resolve_runtime_defaults(&container_resources(16, Some(6 * GIB)));
 
@@ -340,7 +343,7 @@ mod tests {
         let mut cfg = EngineConfiguration {
             max_concurrent_workers: Some(4),
             concurrency_groups: HashMap::from([("sdlc".to_string(), 3)]),
-            ..EngineConfiguration::default()
+            ..engine()
         };
 
         cfg.resolve_runtime_defaults(&container_resources(64, None));

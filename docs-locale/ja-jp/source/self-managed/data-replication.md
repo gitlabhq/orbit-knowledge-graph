@@ -21,13 +21,11 @@ title: データレプリケーションのセットアップ
 {{< /history >}}
 
 > [!note]
-> GitLab Self-Managed上のGitLab Orbitは
-> [ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> GitLab Self-Managed上のGitLab Orbitは[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)です。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 GitLab OrbitはClickHouse内のGitLabデータベースのコピーからGitLabデータを読み取ります。GitLabデータベース自体からは読み取りません。[Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon)がそのコピーを最新の状態に保ちます。
 
-SiphonはKubernetes上で3つのデプロイとして動作します。
+SiphonはKubernetes上で3つのデプロイとして動作します:
 
 | デプロイ | 役割 |
 |------------|------|
@@ -35,7 +33,7 @@ SiphonはKubernetes上で3つのデプロイとして動作します。
 | Consumer | NATSを読み取り、行をClickHouseに書き込みます。 |
 | Reconciler | ネームスペーストラバーサルパスなどの派生列をスケジュールに従って再計算し、影響を受けた行をNATSを通じて再パブリッシュします。 |
 
-前提条件:
+前提条件: 
 
 - GitLab Self-Managed上のGitLab Orbitの[前提条件](getting-started.md#prerequisites)。
 - GitLab向けにセットアップされたClickHouseインスタンス（GitLab ClickHouseマイグレーション適用済み）。詳細については、[ClickHouse](getting-started.md#clickhouse)を参照してください。
@@ -43,7 +41,7 @@ SiphonはKubernetes上で3つのデプロイとして動作します。
 - PostgreSQLの再起動1回分のメンテナンスウィンドウ。
 - Helm 3およびクラスターへの`kubectl`アクセス。
 
-次の順序でレプリケーションをセットアップします。
+次の順序でレプリケーションをセットアップします:
 
 1. PostgreSQLで論理レプリケーションを有効にする。
 1. SiphonのPostgreSQLユーザーを作成する。
@@ -59,9 +57,9 @@ SiphonはKubernetes上で3つのデプロイとして動作します。
 
 {{< tabs >}}
 
-{{< tab title="Linux package (Omnibus)" >}}
+{{< tab title="Linuxパッケージ（Omnibus）" >}}
 
-1. `/etc/gitlab/gitlab.rb`を編集します。
+1. `/etc/gitlab/gitlab.rb`を編集します:
 
    ```ruby
    postgresql['wal_level'] = 'logical'
@@ -77,14 +75,14 @@ SiphonはKubernetes上で3つのデプロイとして動作します。
    gitlab_rails['db_host'] = '/var/opt/gitlab/postgresql'
    ```
 
-1. ファイルを保存し、GitLabを再設定してからPostgreSQLを再起動します。
+1. ファイルを保存し、GitLabを再設定してからPostgreSQLを再起動します:
 
    ```shell
    sudo gitlab-ctl reconfigure
    sudo gitlab-ctl restart postgresql
    ```
 
-1. 設定を確認します。
+1. 設定を確認します:
 
    ```shell
    sudo gitlab-psql -c 'SHOW wal_level'
@@ -95,11 +93,11 @@ SiphonはKubernetes上で3つのデプロイとして動作します。
 
 {{< /tab >}}
 
-{{< tab title="Helm chart (Kubernetes)" >}}
+{{< tab title="Helmチャート（Kubernetes）" >}}
 
 GitLab Helmチャートは本番PostgreSQLを管理しないため、これらの設定は独自のサーバーまたはマネージドデータベースに適用してください。
 
-1. 次のパラメーターを設定します。
+1. 次のパラメーターを設定します:
 
    | パラメーター | 値 |
    |-----------|-------|
@@ -113,7 +111,7 @@ GitLab Helmチャートは本番PostgreSQLを管理しないため、これら�
 
 1. クラスターからポート5432への接続を許可します。
 
-1. 設定を確認します。
+1. 設定を確認します:
 
    ```shell
    psql -h <postgresql_host> -U <admin_user> -d gitlabhq_production \
@@ -131,7 +129,7 @@ GitLab Helmチャートは本番PostgreSQLを管理しないため、これら�
 
 Siphonは3つのロールを使用します。スーパーユーザーとして作成してください。ロールが`REPLICATION`を付与できるのは、そのロール自身がすでに`REPLICATION`属性を持っている場合のみです。GitLabアプリケーションロールはこの属性を持っていません。
 
-スーパーユーザーとして`gitlabhq_production`に接続し、次を実行します。
+スーパーユーザーとして`gitlabhq_production`に接続し、次を実行します:
 
 ```sql
 CREATE USER siphon WITH PASSWORD '<your_password>'
@@ -148,7 +146,7 @@ CREATE USER siphon_snapshot WITH PASSWORD '<your_password>'
 
 ## パブリケーションと権限を作成する {#create-the-publication-and-grants}
 
-GitLabにはSiphon向けにPostgreSQLを準備するRakeタスクが同梱されています。このタスクは冪等であり、次を作成します。
+GitLabにはSiphon向けにPostgreSQLを準備するRakeタスクが同梱されています。このタスクは冪等であり、次を作成します:
 
 - パブリケーション。
 - Siphonがパブリケーションにテーブルを追加するために呼び出すヘルパー関数。
@@ -158,15 +156,15 @@ GitLab 19.2.2以降にはこのタスクが含まれています。
 
 {{< tabs >}}
 
-{{< tab title="Linux package (Omnibus)" >}}
+{{< tab title="Linuxパッケージ（Omnibus）" >}}
 
-1. タスクが存在することを確認します。
+1. タスクが存在することを確認します:
 
    ```shell
    sudo gitlab-rake -T | grep gitlab:siphon:setup
    ```
 
-1. タスクを実行します。
+1. タスクを実行します:
 
    ```shell
    sudo gitlab-rake gitlab:siphon:setup
@@ -174,21 +172,21 @@ GitLab 19.2.2以降にはこのタスクが含まれています。
 
 {{< /tab >}}
 
-{{< tab title="Helm chart (Kubernetes)" >}}
+{{< tab title="Helmチャート（Kubernetes）" >}}
 
-1. toolboxデプロイを見つけます。
+1. toolboxデプロイを見つけます:
 
    ```shell
    kubectl -n <gitlab_namespace> get deploy -l app=toolbox
    ```
 
-1. タスクが存在することを確認します。
+1. タスクが存在することを確認します:
 
    ```shell
    kubectl -n <gitlab_namespace> exec -it deploy/<release>-toolbox -- gitlab-rake -T | grep gitlab:siphon:setup
    ```
 
-1. タスクを実行します。
+1. タスクを実行します:
 
    ```shell
    kubectl -n <gitlab_namespace> exec -it deploy/<release>-toolbox -- gitlab-rake gitlab:siphon:setup
@@ -198,7 +196,7 @@ GitLab 19.2.2以降にはこのタスクが含まれています。
 
 {{< /tabs >}}
 
-このタスクは`siphon_publication_main_1`という名前のパブリケーションを作成し、`siphon`ロールに`public.siphon_alter_publication`への`EXECUTE`権限を付与します。producerは`siphon_replicator`接続でこの関数を呼び出すため、`siphon_replicator`にも同じ`EXECUTE`権限を付与してください。スーパーユーザーとして次を実行します。
+このタスクは`siphon_publication_main_1`という名前のパブリケーションを作成し、`siphon`ロールに`public.siphon_alter_publication`への`EXECUTE`権限を付与します。producerは`siphon_replicator`接続でこの関数を呼び出すため、`siphon_replicator`にも同じ`EXECUTE`権限を付与してください。スーパーユーザーとして次を実行します:
 
 ```sql
 GRANT EXECUTE ON FUNCTION public.siphon_alter_publication(text, text, integer)
@@ -211,7 +209,7 @@ GRANT EXECUTE ON FUNCTION public.siphon_alter_publication(text, text, integer)
 
 SiphonはGitLabがすでに使用しているデータベースに書き込みます。GitLab ClickHouseマイグレーションがターゲットテーブルを作成するため、Siphonにはスキーマ権限は不要です。
 
-管理者としてClickHouseに接続し、次を実行します。
+管理者としてClickHouseに接続し、次を実行します:
 
 ```sql
 CREATE USER siphon IDENTIFIED WITH sha256_password BY '<your_password>';
@@ -222,7 +220,7 @@ GRANT siphon_app TO siphon;
 
 `dictGet`権限は必須です。これがないと、プローブはメトリクスエンドポイントをスクレイピングするだけなので、ポッドはヘルスチェックを通過します。障害はconsumerログにパーミッションエラーとして現れます。ディクショナリに基づくすべてのテーブルは空のままになります。
 
-`system`データベースを制限するマネージドClickHouseの場合は、次も実行します。
+`system`データベースを制限するマネージドClickHouseの場合は、次も実行します:
 
 ```sql
 GRANT SELECT ON system.tables, system.columns TO siphon_app;
@@ -230,7 +228,7 @@ GRANT SELECT ON system.tables, system.columns TO siphon_app;
 
 ## パスワードをSiphonで利用可能にする {#make-the-passwords-available-to-siphon}
 
-SiphonはKubernetes Secretに基づく環境変数から両方のパスワードを読み取ります。Secretを作成する前にネームスペースが存在している必要があります。次のセクションのvaluesファイルは、Siphonネームスペース内に`siphon-secrets`という名前のSecretが1つあり、次のキーを持つことを想定しています。
+SiphonはKubernetes Secretに基づく環境変数から両方のパスワードを読み取ります。Secretを作成する前にネームスペースが存在している必要があります。次のセクションのvaluesファイルは、Siphonネームスペース内に`siphon-secrets`という名前のSecretが1つあり、次のキーを持つことを想定しています:
 
 | キー | 内容 |
 |-----|-------|
@@ -245,7 +243,7 @@ SiphonはKubernetes Secretに基づく環境変数から両方のパスワード
 
 `global.gitlabVersion`は`gitlab-siphon-tables`イメージのタグであり、レプリケートされるテーブルセットをGitLabのバージョンに固定します。タグは`v19.2.0-ee`から始まります。タグが存在しないとポッドが起動できなくなるため、インストール前に[コンテナレジストリ](https://gitlab.com/gitlab-org/gitlab/container_registry)でタグが存在することを確認してください。
 
-1. 次の内容を`siphon-values.yaml`として保存し、プレースホルダーを置き換えます。
+1. 次の内容を`siphon-values.yaml`として保存し、プレースホルダーを置き換えます:
 
    ```yaml
    configMode: split
@@ -347,7 +345,7 @@ SiphonはKubernetes Secretに基づく環境変数から両方のパスワード
          - {name: CLICKHOUSE_SIPHON_PASSWORD, secretName: siphon-secrets, secretKey: ch-siphon-password}
    ```
 
-1. チャートをインストールします。
+1. チャートをインストールします:
 
    ```shell
    helm repo add siphon https://gitlab.com/api/v4/projects/76780115/packages/helm/stable
@@ -362,7 +360,7 @@ SiphonはKubernetes Secretに基づく環境変数から両方のパスワード
 
    これらのコマンドは直接Helmインストールのリファレンスです。ネームスペース名とデプロイ方法は独自のツールに合わせて調整してください。
 
-1. 3つのデプロイがすべて実行中であることを確認します。
+1. 3つのデプロイがすべて実行中であることを確認します:
 
    ```shell
    kubectl -n siphon get pods
@@ -370,7 +368,7 @@ SiphonはKubernetes Secretに基づく環境変数から両方のパスワード
 
 出力には、`Running`状態の`postgres-producer`、`clickhouse-consumer`、`reconciler`ポッドが一覧表示されます。
 
-Siphonはvaluesファイルを変更してもポッドを再起動しません。変更を適用するには、デプロイを再起動します。
+Siphonはvaluesファイルを変更してもポッドを再起動しません。変更を適用するには、デプロイを再起動します:
 
 ```shell
 kubectl -n siphon rollout restart deployment
@@ -385,7 +383,7 @@ kubectl -n siphon rollout restart deployment
 | `advisory_lock_id`とロックタイムアウト | 必須。これらがないとproducerは起動時に停止します。 |
 | `nats_config.replicas` | NATSクラスターのサイズと一致する必要があります。単一のNATSサーバーはレプリカを1つしかサポートしません。 |
 | `ssl_mode` | PostgreSQLサーバーが提供するものと一致する必要があります。例では`require`を使用しています。これはLinuxパッケージのPostgreSQLがデフォルトでTLSを提供するため機能します。TLSを提供しないサーバーは接続を拒否し、producerは`server refused TLS connection`で起動時に停止します。 |
-| `connection.replication.use_alter_publication_function` | チャートのデフォルトである`true`のままにする必要があります。`public.siphon_alter_publication`への`EXECUTE`権限はこの設定のために存在します。パブリケーションはGitLabデータベースユーザーに属しているため、SiphonロールからのダイレクトなALTER PUBLICATIONは失敗します。 |
+| `connection.replication.use_alter_publication_function` | チャートのデフォルトである`true`のままにする必要があります。`public.siphon_alter_publication`への`EXECUTE`権限はこの設定のために存在します。パブリケーションはGitLabデータベースユーザーに属しているため、Siphonロールからのダイレクトな`ALTER PUBLICATION`は失敗します。 |
 | `max_age_seconds` | consumerがどこまで遡って再生できるかを制御します。60以上のテーブルにわたって変更された各行を15日間保持すると、大きなJetStreamファイルストアが生成されます。完全な保持ウィンドウに対応できるようNATSボリュームをサイジングするか、値を下げてください。 |
 
 ### 大きな行のオブジェクトストレージ {#object-storage-for-large-rows}
@@ -398,7 +396,7 @@ kubectl -n siphon rollout restart deployment
 
 最初のコピーは一度に1つのテーブルを処理し、各テーブルのマージ中はレプリケーションを一時停止します。そのため、所要時間はデータ量ではなくテーブル数に依存します。GitLab 19.2.2インスタンスは60以上のテーブルをレプリケートします。以下のチェックはレプリケーションが実行中であることを確認するものです。最初のコピーが完了したことを確認するものではありません。
 
-1. SiphonがPostgreSQLを読み取っていることを確認します。スロットがアクティブであり、GitLabへの書き込み後に`confirmed_flush_lsn`が進んでいる必要があります。
+1. SiphonがPostgreSQLを読み取っていることを確認します。スロットがアクティブであり、GitLabへの書き込み後に`confirmed_flush_lsn`が進んでいる必要があります:
 
    ```sql
    SELECT slot_name, active, wal_status, confirmed_flush_lsn
@@ -406,7 +404,7 @@ kubectl -n siphon rollout restart deployment
    WHERE slot_name = 'siphon_main_1_slot';
    ```
 
-1. ClickHouseに行が届いていることを確認します。
+1. ClickHouseに行が届いていることを確認します:
 
    ```sql
    SELECT count() FROM gitlab_clickhouse_main_production.siphon_namespaces FINAL;

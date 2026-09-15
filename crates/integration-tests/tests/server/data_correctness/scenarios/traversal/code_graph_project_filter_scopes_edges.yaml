@@ -1,0 +1,35 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_code_graph_project_id_filter_scopes_edges
+description: Filtering Definition by project_id scopes both node scan and CALLS edge scan
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "filters": {"project_id": 1000}, "columns": ["name"]},
+            {"id": "callee", "entity": "Definition", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+        "limit": 20
+    }
+  gql: |
+    MATCH (caller:Definition {project_id: 1000})-[:CALLS]->(callee:Definition) RETURN caller.name, callee.name LIMIT 20
+
+expect:
+  skip_requirements: ["filter:project_id"]
+  node_count: 3
+  referential_integrity: true
+  nodes:
+    Definition:
+      ids: [12000, 12001, 12002]
+      rows:
+        - id: 12000
+          name: compile
+        - id: 12001
+          name: helper
+        - id: 12002
+          name: run_query
+  edges:
+    CALLS:
+      - [12000, 12001]
+      - [12001, 12002]

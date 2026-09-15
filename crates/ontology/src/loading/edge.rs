@@ -16,8 +16,6 @@ pub(crate) struct EdgeYaml {
     #[serde(default)]
     pub table: Option<String>,
     #[serde(default)]
-    pub search_weight: Option<f64>,
-    #[serde(default)]
     variants: Vec<EdgeVariantYaml>,
     #[serde(default)]
     indexer: Option<IndexerYaml>,

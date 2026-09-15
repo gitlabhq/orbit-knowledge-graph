@@ -19,7 +19,7 @@ use tracing_subscriber::{EnvFilter, Layer};
 use executor::enrich_output;
 use formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
 use orbit_server::pipeline::PathResolver;
-use orbit_server_config::{PathResolverConfig, ProfilingConfig};
+use orbit_server_config::{AppConfig, ProfilingConfig};
 use output::{ProfilerOutput, build_output};
 use service::ProfilerPipelineService;
 
@@ -244,10 +244,7 @@ async fn run_raw_sql(
 }
 
 fn embedded_schema_version() -> u32 {
-    include_str!("../../../../config/SCHEMA_VERSION")
-        .trim()
-        .parse()
-        .expect("config/SCHEMA_VERSION must contain a valid u32")
+    orbit_versions::VERSIONS.schema
 }
 
 fn seed_scope_prefixes(
@@ -283,8 +280,13 @@ fn compile_one(
     ontology: &Ontology,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
-    compiler::compile(query_json, ontology, security_ctx)
-        .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
+    compiler::compile(
+        query_json,
+        compiler::Frontend::JsonDsl,
+        ontology,
+        security_ctx,
+    )
+    .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
 
 fn format_hydration(plan: &compiler::HydrationPlan) -> String {
@@ -437,7 +439,8 @@ async fn main() -> Result<()> {
         enabled: true,
         explain: cli.explain,
         instance_health: cli.health,
-        ..Default::default()
+        query_log: false,
+        processors: false,
     };
 
     if cli.raw_sql {
@@ -465,7 +468,7 @@ async fn main() -> Result<()> {
         PathResolver::new(
             Arc::clone(&client),
             &ontology,
-            &PathResolverConfig::default(),
+            &AppConfig::embedded_defaults().path_resolver,
         )
         .await,
     ));

@@ -1,0 +1,17 @@
+# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_max_depth_too_shallow_returns_empty
+description: max_depth=1 cannot reach a 2-hop path, returns no paths
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "node_ids": [1]},
+        {"id": "end", "entity": "Project", "node_ids": [1000]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
+               "rel_types": ["CONTAINS", "MEMBER_OF"]}
+    }
+
+expect:
+  path_count: 0

@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::sql_injection_string_preserved
+description: SQL-injection payload stored verbatim, not executed
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]}],
+        "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    Note:
+      ids: [3003]
+      filters:
+        note: { contains: "DROP TABLE" }

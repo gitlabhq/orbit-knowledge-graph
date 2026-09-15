@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::cross_namespace_group_containment_across_depth
+description: Nested group containment visible within namespace 1/100/
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "child", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "CONTAINS", "from": "g", "to": "child"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 3
+  edge_exists:
+    CONTAINS:
+      - [100, 200]
+      - [200, 300]
+  referential_integrity: true

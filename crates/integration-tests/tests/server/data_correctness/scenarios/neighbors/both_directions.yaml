@@ -1,0 +1,27 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_both_direction_returns_all_connected
+description: Bidirectional neighbors of Group 100
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+      "neighbors": {"direction": "both"}
+    }
+
+expect:
+  node_count: 9
+  referential_integrity: true
+  nodes:
+    Group:
+      ids: [100, 200]
+    User:
+      ids: [1, 2, 6]
+    Project:
+      ids: [1000, 1002]
+    WorkItem:
+      ids: [4000, 4001]
+  edge_exists:
+    MEMBER_OF: [[1, 100]]
+    CONTAINS: [[100, 200]]
+    IN_GROUP: [[4000, 100], [4001, 100]]

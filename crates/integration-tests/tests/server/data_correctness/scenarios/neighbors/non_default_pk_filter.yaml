@@ -1,0 +1,27 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_non_default_pk_with_non_denorm_filter
+description: Non-default PK entity with starts_with filter on head_commit_sha
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{
+        "id": "d",
+        "entity": "MergeRequestDiff",
+        "filters": {"head_commit_sha": {"starts_with": "aaaa"}}
+      }],
+      "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
+    }
+
+expect:
+  skip_requirements:
+    - "filter:head_commit_sha"
+  referential_integrity: true
+  node_count: 3
+  nodes:
+    MergeRequestDiff:
+      ids: [5000, 5001]
+    MergeRequest:
+      ids: [2000]
+  edge_exists:
+    HAS_DIFF: [[2000, 5000], [2000, 5001]]

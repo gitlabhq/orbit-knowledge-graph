@@ -9,6 +9,9 @@ use serde_json::Value;
 use thiserror::Error;
 use tracing::debug;
 
+use super::paging::PAGE_BYTE_BUDGET;
+use orbit_utils::arrow::batch_slice_bytes;
+
 #[derive(Debug, Error)]
 pub(crate) enum DatalakeError {
     #[error("query failed: {0}")]
@@ -32,6 +35,13 @@ pub(crate) type RecordBatchStream<'a> = BoxStream<'a, Result<RecordBatch, Datala
 pub(crate) struct ScanStats {
     pub scanned_rows: u64,
     pub scanned_bytes: u64,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct FetchedPage {
+    pub batches: Vec<RecordBatch>,
+    pub scan_stats: ScanStats,
+    pub truncated: bool,
 }
 
 #[async_trait]
@@ -58,9 +68,12 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         sql: &str,
         params: Value,
         max_block_size: Option<u64>,
-    ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
+    ) -> Result<FetchedPage, DatalakeError> {
         let batches = self.query_batches(sql, params, max_block_size).await?;
-        Ok((batches, ScanStats::default()))
+        Ok(FetchedPage {
+            batches,
+            ..FetchedPage::default()
+        })
     }
 }
 
@@ -133,7 +146,7 @@ impl DatalakeQuery for Datalake {
         sql: &str,
         params: Value,
         max_block_size: Option<u64>,
-    ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
+    ) -> Result<FetchedPage, DatalakeError> {
         let mut query = self.build_query(sql, params);
         if max_block_size.is_some() {
             // Retry after a datalake failure (the Arrow 2GB overflow): byte-cap
@@ -149,12 +162,22 @@ impl DatalakeQuery for Datalake {
             .map_err(|e| DatalakeError::Query(e.to_string()))?;
 
         let mut batches = Vec::new();
+        let mut bytes = 0;
+        let mut truncated = false;
         while let Some(result) = stream.next().await {
             let batch = result.map_err(|e| DatalakeError::Query(e.to_string()))?;
-            if batch.num_rows() > 0 {
-                batches.push(batch);
+            if batch.num_rows() == 0 {
+                continue;
             }
+            let batch_bytes = batch_slice_bytes(&batch);
+            if !batches.is_empty() && bytes + batch_bytes > PAGE_BYTE_BUDGET {
+                truncated = true;
+                break;
+            }
+            bytes += batch_bytes;
+            batches.push(batch);
         }
+        drop(stream);
 
         let scan_stats = summary
             .await
@@ -163,7 +186,11 @@ impl DatalakeQuery for Datalake {
             .map(scan_stats_from_summary)
             .unwrap_or_default();
 
-        Ok((batches, scan_stats))
+        Ok(FetchedPage {
+            batches,
+            scan_stats,
+            truncated,
+        })
     }
 }
 

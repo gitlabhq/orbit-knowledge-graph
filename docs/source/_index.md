@@ -79,16 +79,18 @@ GitLab Orbit Remote runs as a separate service and shares minimal load with your
 
 GitLab Orbit Local runs entirely on your machine. The GitLab Orbit CLI (`orbit`) parses a local repository,
 extracts definitions and cross-file references, and writes the graph to a local DuckDB file.
-No GitLab instance or network connection required.
+Query it directly from the CLI or connect an AI agent through the stdio MCP server. No GitLab
+instance or network connection is required after installation.
 
 ```mermaid
 flowchart LR
     accTitle: GitLab Orbit Local architecture
-    accDescr: The GitLab Orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI.
+    accDescr: The GitLab Orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI or connect an AI agent through the stdio MCP server.
 
     Repo[Local repository] --> CLI["orbit CLI"]
     CLI --> DB[("DuckDB\n~/.orbit/graph.duckdb")]
     DB --> Query[CLI query]
+    DB --> MCP[stdio MCP server]
 ```
 
 GitLab Orbit Local indexes code only. SDLC data - merge requests, pipelines, work items - requires

@@ -1,0 +1,21 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_boolean_columns_have_correct_values
+description: Boolean columns serialize as true/false values
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["note", "confidential", "internal"],
+                 "node_ids": [3000, 3001]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    Note:
+      ids: [3000, 3001]
+      rows:
+        - { id: 3000, confidential: false, internal: false }
+        - { id: 3001, confidential: true, internal: false }

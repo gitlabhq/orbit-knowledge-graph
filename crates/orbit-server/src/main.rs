@@ -2,14 +2,14 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::schema;
-use indexer::schema::version::SCHEMA_VERSION;
 use indexer::{DispatcherConfig, IndexerConfig};
 use orbit_billing::{QuotaService, SnowplowBillingTracker};
+use orbit_migrations::version::SCHEMA_VERSION;
+use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::SnowplowAnalyticsTracker;
 use orbit_server::auth::JwtValidator;
 use orbit_server::cli::{Args, Mode};
@@ -17,8 +17,6 @@ use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::content;
 use orbit_server::grpc::GrpcServer;
 use orbit_server::health_check as health_check_mode;
-use orbit_server::pipeline::PathResolver;
-use orbit_server::schema_watcher::SchemaWatcher;
 use orbit_server::shutdown;
 use orbit_server::webserver::Server as HttpServer;
 use orbit_server_config::AppConfig;
@@ -34,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to install rustls CryptoProvider");
 
     let args = Args::parse();
-    let config = AppConfig::load()?;
+    let config = AppConfig::load(args.config.as_deref())?;
 
     // Force-parse schema/format versions at boot so malformed version files
     // fail fast instead of per-request.
@@ -80,57 +78,30 @@ async fn main() -> anyhow::Result<()> {
     let result = match args.mode {
         Mode::DispatchIndexing => {
             config.schema.validate()?;
+            let archive = ontology::archive::OntologyArchive::from_bytes(
+                *schema::version::SCHEMA_VERSION,
+                include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
+            )?;
+
             let graph = config.graph.build_client();
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
 
-            let dispatcher_config = DispatcherConfig {
-                nats: config.nats.clone(),
-                graph: config.graph.clone(),
-                datalake: config.datalake.clone(),
-                schedule: config.schedule.clone(),
-                schema: config.schema.clone(),
-                health_bind_address: config.dispatcher_health_bind_address,
-            };
-            indexer::run_dispatcher(&dispatcher_config, &ontology, shutdown)
+            let dispatcher_config = DispatcherConfig::from(&config);
+            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
         Mode::Indexer => {
-            let indexer_config = IndexerConfig {
-                nats: config.nats.clone(),
-                graph: config.graph.clone(),
-                datalake: config.datalake.clone(),
-                engine: config.engine.clone(),
-                gitlab: config.gitlab_client_config(),
-                schedule: config.schedule.clone(),
-                health_bind_address: config.indexer_health_bind_address,
-                schema: config.schema.clone(),
-                analytics: config.analytics.clone(),
-            };
+            let indexer_config = IndexerConfig::from(&config);
             indexer::run(&indexer_config, ontology, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            let graph = config.graph.build_client();
-
-            let embedded = *SCHEMA_VERSION;
-            let prefix = schema::version::table_prefix(embedded);
-            info!(version = embedded, table_prefix = %prefix, "pinned to embedded schema version");
-            let ontology =
-                Arc::new(Arc::unwrap_or_clone(ontology).with_schema_version_prefix(&prefix));
-
-            let watcher = SchemaWatcher::spawn(
-                graph,
-                embedded,
-                Duration::from_secs(config.schema.version_poll_interval_secs),
-                shutdown.clone(),
-            );
-
-            run_webserver(&config, ontology, watcher, shutdown.clone()).await
+            run_webserver(&config, shutdown.clone()).await
         }
     };
 
@@ -139,12 +110,7 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-async fn run_webserver(
-    config: &AppConfig,
-    ontology: Arc<ontology::Ontology>,
-    schema_watcher: Arc<SchemaWatcher>,
-    shutdown: CancellationToken,
-) -> anyhow::Result<()> {
+async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
         config.jwt_clock_skew_secs,
@@ -175,16 +141,26 @@ async fn run_webserver(
     );
     info!("Content resolution enabled (GitlabClient configured)");
 
-    let path_resolver = Arc::new(
-        PathResolver::new(
-            Arc::new(config.graph.build_client()),
-            &ontology,
-            &config.path_resolver,
-        )
-        .await,
+    info!("initializing NATS connection");
+    let nats = Arc::new(
+        nats_client::NatsClient::connect(&config.nats)
+            .await
+            .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
+    );
+    let archive = ontology::archive::OntologyArchive::from_bytes(
+        *SCHEMA_VERSION,
+        include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
+    )?;
+    let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
+    let active_schema = ActiveSchema::spawn(
+        Arc::new(config.graph.build_client()),
+        archive,
+        catalog,
+        config,
+        shutdown.clone(),
     );
 
-    let http_server = HttpServer::bind(config.bind_address, schema_watcher).await?;
+    let http_server = HttpServer::bind(config.bind_address, active_schema.clone()).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
     let tls_config = orbit_server::tls::load_tls_config(&config.tls).await?;
@@ -192,22 +168,14 @@ async fn run_webserver(
     let mut grpc_server = GrpcServer::new(
         config.grpc_bind_address,
         validator,
-        ontology,
+        active_schema,
         &config.graph,
         cluster_health,
         tls_config,
         config.grpc.clone(),
         Arc::new(config.analytics.clone()),
     )
-    .with_resolver_registry(Arc::new(resolver_registry))
-    .with_path_resolver(path_resolver);
-
-    info!("initializing NATS connection");
-    let nats = Arc::new(
-        nats_client::NatsClient::connect(&config.nats)
-            .await
-            .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
-    );
+    .with_resolver_registry(Arc::new(resolver_registry));
 
     let broker = Arc::new(indexer::nats::NatsBroker::from_client(
         nats.clone(),
@@ -232,8 +200,7 @@ async fn run_webserver(
     if config.billing.enabled {
         if config.billing.collector_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
-                "billing.enabled=true but billing.collector_url is empty — \
-                 set GKG_BILLING__COLLECTOR_URL"
+                "billing.enabled=true but billing.collector_url is empty"
             ));
         }
         info!(
@@ -251,14 +218,13 @@ async fn run_webserver(
     if config.billing.quota.enabled {
         if config.billing.quota.customers_dot_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
-                "billing.quota.enabled=true but billing.quota.customers_dot_url is empty — \
-                 set GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL"
+                "billing.quota.enabled=true but billing.quota.customers_dot_url is empty"
             ));
         }
         if config.billing.quota.api_user.is_none() || config.billing.quota.api_token.is_none() {
             return Err(anyhow::anyhow!(
-                "billing.quota.enabled=true but billing.quota.api_user or api_token is not set — \
-                 set GKG_BILLING__QUOTA__API_USER and GKG_BILLING__QUOTA__API_TOKEN"
+                "billing.quota.enabled=true but billing.quota.api_user or api_token is not set \
+                 (mount them at /etc/secrets/billing/quota/)"
             ));
         }
         info!(
@@ -273,8 +239,7 @@ async fn run_webserver(
     if config.analytics.enabled {
         if config.analytics.collector_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
-                "analytics.enabled=true but analytics.collector_url is empty — \
-                 set GKG_ANALYTICS__COLLECTOR_URL"
+                "analytics.enabled=true but analytics.collector_url is empty"
             ));
         }
         info!(

@@ -44,6 +44,8 @@ pub struct Claims {
     #[serde(default, rename = "session_id")]
     pub ai_session_id: Option<String>,
     #[serde(default)]
+    pub request_id: Option<String>,
+    #[serde(default)]
     pub instance_id: Option<String>,
     #[serde(default)]
     pub unique_instance_id: Option<String>,

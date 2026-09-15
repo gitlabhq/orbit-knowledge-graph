@@ -1,0 +1,21 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_returns_correct_project_full_path
+description: Project search returns correct full_path
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["name", "full_path"]}],
+      "order_by": "p.id",
+      "limit": 10
+    }
+
+expect:
+  node_count: 6
+  nodes:
+    Project:
+      order: [1000, 1001, 1002, 1003, 1004, 1010]
+      rows:
+        - { id: 1000, full_path: public-group/public-project }
+        - { id: 1004, full_path: internal-group/shared-project }

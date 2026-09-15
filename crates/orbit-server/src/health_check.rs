@@ -1,6 +1,8 @@
 use clickhouse_client::ClickHouseConfigurationExt;
-use health_check::{ClickHouseInstance, CodeQueueConfig, HealthChecker, run_server};
-use indexer::nats::versioning::{code_work_consumer_name, code_work_stream_name};
+use health_check::{ClickHouseInstance, HealthChecker, WorkQueueConfig, run_server};
+use indexer::nats::versioning::{
+    code_work_consumer_name, code_work_stream_name, sdlc_work_consumer_name,
+};
 
 use orbit_server_config::AppConfig;
 
@@ -12,16 +14,21 @@ pub enum Error {
 
 pub async fn run(config: &AppConfig) -> Result<(), Error> {
     let instances = build_clickhouse_instances(config);
-    let code_queue = CodeQueueConfig {
+    let work_queue = WorkQueueConfig {
         nats: config.nats.clone(),
         stream_name: code_work_stream_name(),
-        consumer_name: config
+        code_consumer_name: config
             .nats
             .consumer_name
             .as_deref()
             .map(code_work_consumer_name),
+        sdlc_consumer_name: config
+            .nats
+            .consumer_name
+            .as_deref()
+            .map(sdlc_work_consumer_name),
     };
-    let checker = HealthChecker::new(&config.health_check, instances, code_queue).await?;
+    let checker = HealthChecker::new(&config.health_check, instances, work_queue).await?;
 
     run_server(config.health_check.bind_address, checker).await?;
 
@@ -55,13 +62,10 @@ mod tests {
     use super::*;
 
     fn config_with_urls(graph_url: &str, datalake_url: &str) -> AppConfig {
-        let json = format!(
-            r#"{{
-                "graph": {{ "url": "{graph_url}", "database": "default", "username": "default" }},
-                "datalake": {{ "url": "{datalake_url}", "database": "default", "username": "default" }}
-            }}"#,
-        );
-        serde_json::from_str(&json).unwrap()
+        let mut config = AppConfig::embedded_defaults();
+        config.graph.url = graph_url.to_string();
+        config.datalake.url = datalake_url.to_string();
+        config
     }
 
     #[test]

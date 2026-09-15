@@ -16,6 +16,10 @@ View the [Graph Query Engine](graph_engine.md) design document for more details 
 
 View the [Intermediate Query Language](./intermediary_llm_query_language.md) design document for more details on the intermediate LLM query language.
 
+### Orbit query frontend
+
+The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs become a typed syntax tree that lowers into compiler Input. Remote requests still use the JSON Query DSL.
+
 ### Unified Response Schema
 
 All four query types (traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value, `group_columns` describing grouping keys, and tabular `rows` carrying group values plus metric values. Every response includes a `pagination` object with `has_more`, `truncated`, and (for cursor queries with more pages) `next_cursor`.
@@ -30,7 +34,7 @@ Orbit agents discover graph capabilities through a command catalog instead of re
 
 The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
 
-Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version lives in `config/QUERY_DSL_VERSION` and is tied to the `graph_query` schema `$id` major version; the query response format version lives in `config/RAW_OUTPUT_FORMAT_VERSION`.
+Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version is the `query_dsl` pin in `config/versions.yaml` and is tied to the `graph_query` schema `$id` major version; the query response format version is the `raw_output_format` pin in the same file.
 
 ### Named Queries
 
@@ -41,7 +45,8 @@ At runtime the same files are embedded into the binary (via the `named-queries` 
 - `{ "$binding": ... }` — identity values resolved from trusted request context (currently only `current_user_id`, taken from the caller's JWT claims). Never client-supplied.
 - `{ "$param": ... }` — selection values supplied by the client (e.g. the entity and ids of a node clicked in the graph explorer), validated against a JSON Schema each template declares per parameter. Authorization never depends on these: the compiler security pass and redaction filter results regardless of which ids the client asks for. Each parameter also declares an `example` value used to compile the template at build time.
 
-Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. Clients discover the catalog through the `ListNamedQueries` RPC (surfaced as `GET /api/v4/orbit/templates`), which returns each query's name, description, and DSL rendered for the caller: bindings resolved from the JWT claims and parameters filled with their declared examples, so the returned DSL is executable as-is and can populate a query editor. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side — parameters carry only values, so the drift-by-construction guarantee is preserved.
+Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. Clients discover the catalog through the `ListNamedQueries` RPC (surfaced as `GET /api/v4/orbit/templates`), which returns each parameterless query's name, description, and DSL rendered for the caller with bindings resolved from the JWT claims, so the returned DSL is executable as-is and can populate a query editor.
+Queries that declare parameters are executed by name only and do not appear in the catalog. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side — parameters carry only values (a string parameter may also fill an object key, written `"$param:<name>": ...`, so a template can take the property name to filter on), so the drift-by-construction guarantee is preserved.
 
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 
@@ -85,5 +90,5 @@ flowchart LR
 ## Additional Notes
 
 - All query paths reuse the shared ontology and query infrastructure from `config/ontology/`, `config/schemas/graph_query.schema.json`, and the `query-engine/*` crates, so code and namespace graphs adhere to the same entity and relationship definitions.
-- SQL generation is guard-railed: hop limits (max three for namespace traversals), explicit relationship lists, and schema-driven validation prevent runaway queries.
-- The response format is defined by [ADR 004](../decisions/004_unified_response_schema.md). Every query returns a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` payload with deduplicated entity objects and instance-level edges. `format_version` is a semver string (`config/RAW_OUTPUT_FORMAT_VERSION`) so consumers can detect breaking changes. Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output. Proto-level metadata (row count, generated SQL, pagination info, format name + version) travels alongside the JSON payload in `QueryMetadata`.
+- SQL generation is guard-railed: traversal shape limits, a maximum of three hops per relationship selector, a path-finding depth cap of three, explicit relationship lists, and schema-driven validation prevent runaway queries.
+- The response format is defined by [ADR 004](../decisions/004_unified_response_schema.md). Every query returns a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` payload with deduplicated entity objects and instance-level edges. `format_version` is a semver string (the `raw_output_format` pin in `config/versions.yaml`) so consumers can detect breaking changes. Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output. Proto-level metadata (row count, generated SQL, pagination info, format name + version) travels alongside the JSON payload in `QueryMetadata`.

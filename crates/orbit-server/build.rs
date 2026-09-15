@@ -3,9 +3,44 @@ fn main() {
     validate_prompts();
     validate_named_queries();
     validate_migration_ledger();
+    validate_ontology_archives();
     validate_authored_etl_sql();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
+}
+
+fn validate_ontology_archives() {
+    let config_directory = std::path::Path::new(env!("CONFIG_DIR"));
+    let directory = config_directory.join("ontology-archives");
+    println!("cargo:rerun-if-changed={}", directory.display());
+    let current_version = orbit_versions::VERSIONS.schema;
+    let current_path = ontology::archive::OntologyArchive::path(config_directory, current_version);
+    let versions = ontology::archive::OntologyArchive::bundled_versions()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(
+        versions.contains(&current_version),
+        "{} is missing; run `mise schema:snapshot` to seed the current archive.",
+        current_path.display()
+    );
+
+    for version in versions {
+        let archive = ontology::archive::OntologyArchive::bundled(version)
+            .unwrap_or_else(|error| panic!("{error}"))
+            .expect("bundled archive must exist");
+        archive
+            .load_ontology()
+            .unwrap_or_else(|error| panic!("bundled archive v{version}: {error}"));
+        if version == current_version {
+            assert!(
+                archive.matches_sources(&ontology::migrations::embedded_sources()),
+                "ontology archive is stale; run `mise schema:bump`"
+            );
+        }
+    }
+    println!(
+        "cargo:rustc-env=ONTOLOGY_ARCHIVE_PATH={}",
+        current_path.canonicalize().unwrap().display()
+    );
 }
 
 fn validate_prompts() {
@@ -20,10 +55,8 @@ fn validate_migration_ledger() {
     let config_dir = std::path::PathBuf::from(env!("CONFIG_DIR"));
     let ledger_path = config_dir.join(ontology::migrations::LEDGER_FILE);
     let fingerprint_path = config_dir.join(ontology::migrations::FINGERPRINT_FILE);
-    let version_path = config_dir.join("SCHEMA_VERSION");
     println!("cargo:rerun-if-changed={}", ledger_path.display());
     println!("cargo:rerun-if-changed={}", fingerprint_path.display());
-    println!("cargo:rerun-if-changed={}", version_path.display());
     println!("cargo:rerun-if-changed={}/ontology", config_dir.display());
 
     let ontology = ontology::Ontology::load_embedded()
@@ -31,8 +64,8 @@ fn validate_migration_ledger() {
 
     let current = ontology::migrations::Fingerprints {
         sources: ontology::migrations::source_fingerprints(),
-        ddl: compiler::ddl_fingerprints(&ontology),
-        auxiliary_schema: compiler::auxiliary_schema_fingerprints(&ontology),
+        ddl: orbit_migrations::fingerprint::ddl_fingerprints(&ontology),
+        auxiliary_schema: orbit_migrations::fingerprint::auxiliary_schema_fingerprints(&ontology),
     };
 
     let committed_text = std::fs::read_to_string(&fingerprint_path).unwrap_or_else(|e| {
@@ -44,11 +77,7 @@ fn validate_migration_ledger() {
     let committed = ontology::migrations::Fingerprints::parse(&committed_text)
         .unwrap_or_else(|e| panic!("{e}"));
 
-    let version: u32 = std::fs::read_to_string(&version_path)
-        .unwrap_or_else(|e| panic!("reading {}: {e}", version_path.display()))
-        .trim()
-        .parse()
-        .unwrap_or_else(|e| panic!("{} must contain a u32: {e}", version_path.display()));
+    let version = orbit_versions::VERSIONS.schema;
 
     let ledger_text = std::fs::read_to_string(&ledger_path)
         .unwrap_or_else(|e| panic!("reading {}: {e}", ledger_path.display()));
@@ -81,12 +110,11 @@ fn validate_named_queries() {
     let queries = named_queries::NamedQueries::load_from_dir(&dir)
         .unwrap_or_else(|e| panic!("named queries failed to load: {e}"));
 
-    let values = named_queries::BindingValues { current_user_id: 1 };
     for query in queries.iter() {
         let rendered = query
-            .render(&values, &query.example_parameters())
+            .render_example()
             .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
-        if let Err(e) = compiler::compile(&rendered, &ontology, &ctx) {
+        if let Err(e) = compiler::compile(&rendered, compiler::Frontend::JsonDsl, &ontology, &ctx) {
             panic!("named query `{}` failed to compile: {e}", query.name);
         }
     }

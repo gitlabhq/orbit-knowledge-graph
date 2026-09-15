@@ -6,7 +6,7 @@ use orbit_utils::traversal_path::TraversalPath;
 
 use crate::input::*;
 
-use super::{Plan, PlanBody};
+use super::{Plan, PlanBody, TextExcerpt};
 use crate::passes::shared::{requested_columns, resolve_edge_table};
 
 pub struct Hop {
@@ -67,6 +67,7 @@ pub struct NodePlan {
     pub is_global: bool,
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
+    pub text_excerpt: TextExcerpt,
     pub dedup_columns: Vec<String>,
     pub use_narrowing: bool,
     pub needs_elevated_filter: bool,
@@ -274,11 +275,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 max_hops: rel.hops.max,
                 fk,
                 scope_preserving: rel.scope_preserving,
-                filters: rel
-                    .filters
-                    .iter()
-                    .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
-                    .collect(),
+                filters: crate::passes::shared::ordered_filters(&rel.filters),
                 join_prev: None,
                 scope_prefix: rel.scope_prefix.clone(),
                 cascade_anchor: false,
@@ -303,14 +300,11 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
                     has_traversal_path: n.has_traversal_path,
                     is_global: n.is_global,
                     redaction_id_column: n.redaction_id_column.clone(),
-                    filters: n
-                        .filters
-                        .iter()
-                        .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
-                        .collect(),
+                    filters: crate::passes::shared::ordered_filters(&n.filters),
                     node_ids: n.node_ids.clone(),
                     id_range: n.id_range.clone(),
                     columns: n.columns.clone(),
+                    text_excerpt: TextExcerpt::default(),
                     dedup_columns: Vec::new(),
                     use_narrowing: false,
                     needs_elevated_filter: false,
@@ -886,6 +880,7 @@ mod tests {
             is_global,
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             columns: None,
+            text_excerpt: TextExcerpt::default(),
             dedup_columns: Vec::new(),
             use_narrowing: false,
             needs_elevated_filter: false,

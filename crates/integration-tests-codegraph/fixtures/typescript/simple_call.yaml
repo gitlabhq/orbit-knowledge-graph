@@ -1,0 +1,48 @@
+name: "TypeScript: simple function call"
+pipeline: js
+fixtures:
+  - path: main.ts
+    content: |
+      function helper(): string {
+          return "help";
+      }
+
+      function unused(): void {}
+
+      function run(): void {
+          helper();
+      }
+
+tests:
+  - name: Exactly 3 definitions with correct types
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.ts'
+        AND d.definition_type = 'Function'
+      RETURN d.name AS name, d.fqn AS fqn
+      ORDER BY name
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+      - { column_values: { field: name, values: ["helper", "run", "unused"] } }
+      - { row: { name: "helper", fqn: "helper" } }
+      - { row: { name: "run", fqn: "run" } }
+      - { row: { name: "unused", fqn: "unused" } }
+
+  - name: run calls helper (exactly 1 call edge)
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "helper" } }
+
+  - name: unused has no incoming call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'unused' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { empty: true }

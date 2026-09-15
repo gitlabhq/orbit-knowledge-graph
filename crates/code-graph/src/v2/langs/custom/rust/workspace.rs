@@ -536,7 +536,8 @@ mod tests {
         assert_eq!(plan.len(), 2);
         assert_eq!(plan.candidates(0), &[0, 1]);
 
-        let output = parse_rust_files_with_workspaces(&files, &root_str, &plan, None);
+        let output =
+            parse_rust_files_with_workspaces(&files, &root_str, &plan, None, &Default::default());
         assert!(output.errors.is_empty(), "{:?}", output.errors);
         let mut paths = output
             .parsed

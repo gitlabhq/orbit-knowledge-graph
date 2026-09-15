@@ -1,5 +1,5 @@
 use axum::{Json, Router, routing::get};
-use indexer::schema::version::{ensure_version_table, write_migrating_version};
+use indexer::schema::version::{ensure_version_table, mark_version_migrating};
 use integration_testkit::TestContext;
 use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::proto::{
@@ -58,7 +58,7 @@ async fn cluster_health_migrating_when_migration_active() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    write_migrating_version(&client, 2).await.unwrap();
+    mark_version_migrating(&client, 2).await.unwrap();
 
     let sidecar = start_mock_sidecar(unready_indexer_payload()).await;
     let checker = ClusterHealthChecker::new(Some(sidecar), Some(client), None);

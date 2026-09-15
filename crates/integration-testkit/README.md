@@ -144,9 +144,9 @@ and the formatted `GraphResponse`:
 
 ```rust
 use integration_testkit::visitor::{ResponseView, NodeExt};
-use query_engine::compiler::compile;
+use compiler::{compile, Frontend};
 
-let compiled = compile(json, &ontology, &security_ctx).unwrap();
+let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
 // ... run pipeline, get response ...
 let resp = ResponseView::for_query(&compiled.input, response);
 ```

@@ -6,7 +6,7 @@ use chrono::Utc;
 use clickhouse_client::ArrowClickHouseClient;
 use gitlab_client::{GitlabClient, GitlabClientError};
 use health_check::HealthStatus;
-use indexer::schema::version::read_migrating_version;
+use orbit_migrations::version::read_migrating_version;
 use tokio::time::timeout;
 use toon_format::{EncodeOptions, encode};
 use tracing::warn;

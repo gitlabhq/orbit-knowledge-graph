@@ -1,0 +1,26 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_virtual_filter_combined_with_physical
+description: Virtual column filter combined with physical column filter
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest",
+               "node_ids": [2000, 2001, 2002, 2003, 2004, 2005],
+               "columns": ["title", "state", "diff"],
+               "filters": {
+                   "state": "merged",
+                   "diff": {"starts_with": "@@ -"}
+               }}],
+      "order_by": "mr.id",
+      "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    MergeRequest:
+      order: [2004, 2005]
+      filters:
+        state: merged
+        diff: { starts_with: "@@ -" }

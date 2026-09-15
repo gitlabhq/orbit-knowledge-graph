@@ -15,6 +15,42 @@ use crate::passes::shared::{
     rel_kind_filter, rel_kind_filter_values,
 };
 
+const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
+
+pub(super) fn text_excerpt_projection(
+    alias: &str,
+    column: &str,
+    text_excerpt: &TextExcerpt,
+) -> Expr {
+    let value = Expr::col(alias, column);
+    if !text_excerpt.columns.contains(column) {
+        return value;
+    }
+
+    let excerpt = Expr::func(
+        "substringUTF8",
+        vec![
+            value.clone(),
+            Expr::lit(1),
+            Expr::lit(text_excerpt.max_chars),
+        ],
+    );
+    let shortened = Expr::binary(
+        Op::Gt,
+        Expr::func("length", vec![value]),
+        Expr::func("length", vec![excerpt.clone()]),
+    );
+    let suffix = Expr::func(
+        "if",
+        vec![
+            shortened,
+            Expr::string(TEXT_TRUNCATION_SUFFIX),
+            Expr::string(""),
+        ],
+    );
+    Expr::func("concat", vec![excerpt, suffix])
+}
+
 /// Predicates applied after `FINAL` has resolved each node's latest row.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut predicates = Vec::new();
@@ -57,7 +93,12 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
     }
     crate::passes::shared::requested_columns(&np.columns)
         .into_iter()
-        .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
+        .map(|col| {
+            SelectExpr::new(
+                text_excerpt_projection(alias, &col, &np.text_excerpt),
+                format!("{alias}_{col}"),
+            )
+        })
         .collect()
 }
 
@@ -658,20 +699,24 @@ pub(super) fn build_depth_arm(
 
     let last = format!("e{depth}");
 
-    let (rel_kind, src_id, src_kind, tgt_id, tgt_kind) = match direction {
+    let (rel_kind, src_id, src_kind, src_tags, tgt_id, tgt_kind, tgt_tags) = match direction {
         Direction::Outgoing | Direction::Both => (
             Expr::col("e1", RELATIONSHIP_KIND_COLUMN),
             Expr::col("e1", SOURCE_ID_COLUMN),
             Expr::col("e1", SOURCE_KIND_COLUMN),
+            Expr::col("e1", SOURCE_TAGS_COLUMN),
             Expr::col(&last, TARGET_ID_COLUMN),
             Expr::col(&last, TARGET_KIND_COLUMN),
+            Expr::col(&last, TARGET_TAGS_COLUMN),
         ),
         Direction::Incoming => (
             Expr::col(&last, RELATIONSHIP_KIND_COLUMN),
             Expr::col(&last, SOURCE_ID_COLUMN),
             Expr::col(&last, SOURCE_KIND_COLUMN),
+            Expr::col(&last, SOURCE_TAGS_COLUMN),
             Expr::col("e1", TARGET_ID_COLUMN),
             Expr::col("e1", TARGET_KIND_COLUMN),
+            Expr::col("e1", TARGET_TAGS_COLUMN),
         ),
     };
 
@@ -695,8 +740,10 @@ pub(super) fn build_depth_arm(
             SelectExpr::new(rel_kind, RELATIONSHIP_KIND_COLUMN),
             SelectExpr::new(src_id, SOURCE_ID_COLUMN),
             SelectExpr::new(src_kind, SOURCE_KIND_COLUMN),
+            SelectExpr::new(src_tags, SOURCE_TAGS_COLUMN),
             SelectExpr::new(tgt_id, TARGET_ID_COLUMN),
             SelectExpr::new(tgt_kind, TARGET_KIND_COLUMN),
+            SelectExpr::new(tgt_tags, TARGET_TAGS_COLUMN),
             SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
             SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
             SelectExpr::col("e1", DELETED_COLUMN),

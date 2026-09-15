@@ -235,6 +235,7 @@ pub enum JsDefKind {
     Class,
     Function,
     Method { class_fqn: String, is_static: bool },
+    Property { class_fqn: String },
     ComputedProperty { class_fqn: String },
     Watcher { class_fqn: String },
     LifecycleHook { class_fqn: String },
@@ -250,6 +251,7 @@ impl JsDefKind {
     pub fn class_fqn(&self) -> Option<&str> {
         match self {
             Self::Method { class_fqn, .. }
+            | Self::Property { class_fqn }
             | Self::ComputedProperty { class_fqn }
             | Self::Watcher { class_fqn }
             | Self::LifecycleHook { class_fqn } => Some(class_fqn),
@@ -267,6 +269,7 @@ impl JsDefKind {
             Self::Method {
                 is_static: false, ..
             } => "Method",
+            Self::Property { .. } => "Property",
             Self::ComputedProperty { .. } => "ComputedProperty",
             Self::Watcher { .. } => "Watcher",
             Self::LifecycleHook { .. } => "LifecycleHook",

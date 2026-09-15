@@ -1,0 +1,23 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::admin_only_non_admin_neighbors_dynamic_wildcard_strips_admin_fields
+description: Non-admin neighbors with dynamic_columns wildcard strips admin-only fields
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+      "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]},
+      "options": {"dynamic_columns": "*"}
+    }
+
+expect:
+  node_count: 4
+  nodes:
+    Group:
+      ids: [100]
+    User:
+      ids: [1, 2, 6]
+      prop_present: [username]
+      prop_absent: [is_admin, is_auditor]
+  edges:
+    MEMBER_OF: [[1, 100], [2, 100], [6, 100]]

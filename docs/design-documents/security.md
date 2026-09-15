@@ -61,7 +61,7 @@ sequenceDiagram
 
 The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). A user's `SecurityContext` carries the exact set of traversal paths that Rails authorized. The compiler injects `startsWith(traversal_path, ?)` predicates for each path, so queries are scoped to exactly those namespaces — regardless of which organization(s) the paths belong to.
 
-This layer is primarily intended for .com customers to ensure that they can only query data within their own organization.
+This layer limits queries to data within the traversal paths that Rails authorized. A user's authorized paths can span more than one organization.
 
 **Component**: Orbit Query Engine (`gkg-webserver`)
 
@@ -80,7 +80,11 @@ This layer is primarily intended for .com customers to ensure that they can only
 - Unit tests verify that queries without traversal path filters are rejected by `CheckPass`.
 - Integration tests verify cross-namespace isolation within an organization and cross-organization isolation with multi-org seed data.
 
-**Global table exceptions**: Two entities are global (not namespace-scoped) and have no `traversal_path` column on their node tables: `User` (`gl_user`) and `Runner` (`gl_runner`). Both are listed in `skip_security_filter_for_entities` in the ontology and rely on Rails-side redaction (`Authz::RedactionService` with `read_user` and `read_runner` abilities respectively). They can only appear in query results through edge table joins, and the edge tables always carry the `traversal_path` filter, preventing cross-tenant leakage through global-node joins.
+**Global table exceptions**: Nodes declare `global: true` in the ontology when their tables are not namespace-scoped.
+The compiler's security and check passes use the ontology supplied for that compilation, including its schema-version table prefixes,
+rather than a cached list from the embedded ontology. This keeps archived or overlaid node classifications consistent with the query.
+The current global nodes, `User` and `Runner`, rely on Rails-side redaction with `read_user` and `read_runner` abilities respectively.
+Edge tables and other non-global `gl_*` tables still require traversal-path filters, including when joined to global nodes.
 
 ```plantuml
 @startuml
@@ -197,7 +201,7 @@ In addition to authorization filtering, the query engine implements further safe
 
 **Controls**:
 
-- **Depth Caps**: Traversals limited to max 3 hops. Enforced in query compiler; queries exceeding this are rejected with error.
+- **Traversal Shape Caps**: A traversal accepts at most five node selectors and therefore at most four relationship selectors in its chain. Each relationship selector's inclusive `hops` range has a maximum of 3, while a path-finding query independently caps `path.max_depth` at 3. The schema and compiler reject requests that exceed these limits.
 - **Relationship Allow-Lists**: Only pre-defined relationship types are allowed. Unknown relationships trigger validation errors.
 - **Row Limits**: Max 1000 rows per query (configurable). Enforced in SQL generation: `LIMIT 1000`.
 - **Query Timeouts**: All ClickHouse queries have a 30-second timeout via `max_execution_time` setting.
@@ -375,7 +379,7 @@ This dual approach provides zero-trust security:
 The Orbit service connects to ClickHouse with restricted privileges:
 
 - **Read-Only Role**: The database user has SELECT-only permissions, preventing any writes or schema modifications.
-- **Table-Level Restrictions**: Access is limited to Orbit graph tables only; the role cannot access system tables or other tenant data.
+- **Table-Level Restrictions**: The reader needs SELECT on its Orbit graph tables and visibility of their metadata in `system.tables` for readiness checks. It must not have SELECT on other tenants' data.
 - **Connection Pooling**: Connections are pooled and rate-limited to prevent resource exhaustion.
 
 ## Handling Aggregations

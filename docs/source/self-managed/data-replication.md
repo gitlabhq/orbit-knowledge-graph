@@ -263,13 +263,16 @@ such as the External Secrets Operator. Do not store the plaintext elsewhere.
 
 ## Install Siphon
 
-With `configMode: split`, Siphon builds its table list at pod startup from an image that ships with GitLab.
-The list then matches your GitLab version and needs no manual updates.
+If you use `configMode: split`, Siphon does not include its own table list. At pod startup, Siphon mounts the
+`gitlab-siphon-tables` image, which contains only the table definitions from the GitLab source tree. GitLab
+publishes the `gitlab-siphon-tables` image for every release. This means that Siphon's table list matches your
+GitLab version without manual updates.
 
-`global.gitlabVersion` is the tag of the `gitlab-siphon-tables` image, which pins the replicated table set
-to your GitLab version. Tags start at `v19.2.0-ee`. Confirm the tag exists in the
-[container registry](https://gitlab.com/gitlab-org/gitlab/container_registry) before you install, because a
-tag that does not exist prevents the pods from starting.
+The image is `registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables`. It is not part of the Siphon
+project. `global.gitlabVersion` selects its tag and pins the replicated table set to your GitLab version.
+Tags start at `v19.2.0-ee`. Before you install, confirm the tag exists in the
+[`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/gitlab/container_registry/11634641).
+A missing tag prevents pods from starting.
 
 1. Save the following as `siphon-values.yaml` and replace the placeholders:
 
@@ -277,7 +280,7 @@ tag that does not exist prevents the pods from starting.
    configMode: split
 
    global:
-     # Tag of the gitlab-siphon-tables image.
+     # Tag of registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables.
      # Must match your GitLab version exactly, patch level included.
      gitlabVersion: v19.2.2-ee
 
@@ -415,6 +418,7 @@ kubectl -n siphon rollout restart deployment
 | `nats_config.replicas` | Must match your NATS cluster size. A single NATS server supports only one replica. |
 | `ssl_mode` | Must match what the PostgreSQL server offers. The example uses `require`, which works with a Linux package PostgreSQL because it serves TLS by default. A server that does not serve TLS refuses the connection, and the producer stops at startup with `server refused TLS connection`. |
 | `connection.replication.use_alter_publication_function` | Must stay `true`, which is the chart default. The `EXECUTE` grant on `public.siphon_alter_publication` exists for this setting: the publication belongs to the GitLab database user, so a direct `ALTER PUBLICATION` from a Siphon role fails. |
+| `connection.clickhouse.connection_settings` | Required on a replicated ClickHouse cluster: `insert_quorum: "auto"`, `insert_quorum_parallel: "0"`, and `async_insert: "0"`. Siphon reads with `select_sequential_consistency` by default, and these three make its delete and refresh queries safe against a lagging replica. Leave them out on a single node and on ClickHouse Cloud. See [High availability](getting-started.md#high-availability). |
 | `max_age_seconds` | Controls how far back a consumer can replay. Retaining 15 days of every changed row across more than 60 tables produces a large JetStream file store. Size the NATS volume for the full retention window, or lower the value. |
 
 ### Object storage for large rows

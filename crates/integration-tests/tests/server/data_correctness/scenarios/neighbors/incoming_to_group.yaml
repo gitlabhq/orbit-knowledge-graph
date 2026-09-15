@@ -1,0 +1,20 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_incoming_returns_correct_sources
+description: Incoming MEMBER_OF neighbors to Group 100
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+      "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]}
+    }
+
+expect:
+  node_count: 4
+  nodes:
+    Group:
+      ids: [100]
+    User:
+      ids: [1, 2, 6]
+  edge_exists:
+    MEMBER_OF: [[1, 100], [2, 100], [6, 100]]

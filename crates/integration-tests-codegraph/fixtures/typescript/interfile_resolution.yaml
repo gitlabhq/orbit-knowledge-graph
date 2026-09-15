@@ -1,0 +1,81 @@
+name: "TypeScript: inter-file resolution"
+pipeline: js
+fixtures:
+  - path: models.ts
+    content: |
+      export class User {
+          greet(): string { return "hi"; }
+      }
+
+  - path: services.ts
+    content: |
+      import { User } from './models';
+
+      export function buildUser(): User {
+          return new User();
+      }
+
+  - path: main.ts
+    content: |
+      import { buildUser } from './services';
+      import { User } from './models';
+
+      function run(): void {
+          const u = buildUser();
+          const v = new User();
+          v.greet();
+      }
+
+tests:
+  - name: Exactly 3 files
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+      ORDER BY path
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: path, values: ["main.ts", "models.ts", "services.ts"] } }
+
+  - name: All definitions with correct types and files
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['Class', 'Function', 'Method']
+      RETURN d.name AS name, d.definition_type AS type, d.file_path AS file
+      ORDER BY name
+    assert:
+      - { row_count: 4 }
+      - { unique: name }
+      - { row: { name: "User", type: "Class", file: "models.ts" } }
+      - { row: { name: "buildUser", type: "Function", file: "services.ts" } }
+      - { row: { name: "greet", type: "Method", file: "models.ts" } }
+      - { row: { name: "run", type: "Function", file: "main.ts" } }
+
+  - name: All imports extracted correctly
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN i.file_path AS file, i.name AS name, i.path AS path
+      ORDER BY file, name
+    assert:
+      - { row_count: 3 }
+      - { row: { file: "main.ts", name: "User", path: "./models" } }
+      - { row: { file: "main.ts", name: "buildUser", path: "./services" } }
+      - { row: { file: "services.ts", name: "User", path: "./models" } }
+
+  - name: run calls buildUser cross-file
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'buildUser'
+        AND caller.file_path <> callee.file_path
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "buildUser" } }
+
+  - name: No call edges from models.ts (it only defines)
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path = 'models.ts' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { empty: true }

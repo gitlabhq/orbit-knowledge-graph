@@ -8,8 +8,12 @@ const MAX_PER_PARENT: usize = 2;
 const MAX_PER_FILE: usize = 3;
 
 pub const ANCHOR_SIM: f64 = 0.999;
+pub const EXACT_NAME_SIM: f64 = 1.0;
+pub const EXACT_NAME_BOOST: f64 = 2.0;
 pub const CONFIDENT_COVERAGE: f64 = 0.5;
 pub const LENGTH_NORM_B: f64 = 0.75;
+pub const DEGREE_WEIGHT: f64 = 0.5;
+pub const DEGREE_CAP: u64 = 200;
 
 pub struct Hit {
     pub index: usize,
@@ -73,10 +77,19 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
             .filter(|&(&s, _)| s >= ANCHOR_SIM)
             .map(|(_, idf)| idf)
             .sum();
+        let exact_idf: f64 = row_sims
+            .iter()
+            .zip(idfs)
+            .filter(|&(&s, _)| s >= EXACT_NAME_SIM)
+            .map(|(_, idf)| idf)
+            .sum();
         let coverage = matched_idf / idf_total;
+        let exactness = 1.0 + EXACT_NAME_BOOST * exact_idf / idf_total;
+        let degree = corpus[index].degree.min(DEGREE_CAP) as f64;
+        let connectedness = 1.0 + DEGREE_WEIGHT * (1.0 + degree).ln();
         hits.push(Hit {
             index,
-            score: total * coverage * coverage / length_norm,
+            score: total * coverage * coverage * exactness * connectedness / length_norm,
             anchored: anchored_idf > 0.0,
             coverage,
         });
@@ -204,6 +217,45 @@ mod tests {
         assert_eq!(parent_key("a::B::field"), "a::B");
         assert_eq!(parent_key("pkg.Func"), "pkg");
         assert_eq!(parent_key("bare"), "bare");
+    }
+
+    #[test]
+    fn connected_definitions_outrank_leaf_values_on_equal_name_matches() {
+        let mut leaf = row(1, "resources.limits");
+        leaf.degree = 2;
+        let mut hub = row(2, "Compiler::check_depth_limit");
+        hub.degree = 20;
+        let corpus = vec![leaf, hub];
+        let sims = vec![vec![1.0], vec![1.0]];
+        let hits = rank(&corpus, &sims, &[1.0], 10);
+        assert_eq!(corpus[hits[0].index].fqn, "Compiler::check_depth_limit");
+        assert!(
+            hits[0].score < 2.0 * hits[1].score,
+            "degree is a tiebreaker, not a dominant signal"
+        );
+    }
+
+    #[test]
+    fn exact_name_outranks_stem_hit_despite_degree() {
+        let mut exact = row(1, "compiler::compile");
+        exact.degree = 2;
+        let mut stem = row(2, "code_graph::STRUCTURAL_LABELS");
+        stem.degree = 1_000_000;
+        let corpus = vec![stem, exact];
+        let sims = vec![vec![ANCHOR_SIM], vec![EXACT_NAME_SIM]];
+        let hits = rank(&corpus, &sims, &[1.0], 10);
+        assert_eq!(corpus[hits[0].index].fqn, "compiler::compile");
+        assert!(hits[0].anchored() && hits[1].anchored());
+    }
+
+    #[test]
+    fn degree_does_not_override_coverage() {
+        let mut hub = row(1, "Repo::other");
+        hub.degree = 200;
+        let corpus = vec![hub, row(2, "Repo::commit_hook")];
+        let sims = vec![vec![1.0, 0.0], vec![1.0, 1.0]];
+        let hits = rank(&corpus, &sims, &[1.0, 1.0], 10);
+        assert_eq!(corpus[hits[0].index].fqn, "Repo::commit_hook");
     }
 
     #[test]

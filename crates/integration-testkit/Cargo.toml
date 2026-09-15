@@ -10,9 +10,11 @@ clickhouse-client = { path = "../clickhouse-client" }
 orbit-server-config = { path = "../orbit-server-config" }
 gitalisk-core = { workspace = true }
 orbit-utils = { path = "../utils" }
+orbit-versions = { path = "../orbit-versions" }
 futures = { workspace = true }
 orbit-server = { path = "../orbit-server" }
 ontology = { path = "../ontology" }
+orbit-migrations = { path = "../orbit-migrations" }
 query-engine = { path = "../query-engine", features = ["testutils"] }
 reqwest = { workspace = true }
 rustls = { workspace = true }

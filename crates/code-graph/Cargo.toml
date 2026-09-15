@@ -24,7 +24,9 @@ either = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }
 indicatif = { workspace = true }
+jsonschema = { workspace = true }
 memchr = { workspace = true }
+parking_lot = { workspace = true }
 petgraph = { workspace = true }
 rayon = { workspace = true }
 rust-lapper = { workspace = true }
