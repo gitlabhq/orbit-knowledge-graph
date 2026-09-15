@@ -839,14 +839,15 @@ fn repo_map_yaml_fixture_suite() {
         .map(|(path, content)| (path.as_str(), content.as_str()))
         .collect();
     init_repo_at(repo_dir.path(), &files);
-    let repo_path = repo_dir.path().display().to_string();
-    let sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+    let repo = repo_dir.path().canonicalize().unwrap();
+    let repo_path = repo.display().to_string();
+    let sha = git(&repo, &["rev-parse", "HEAD"]);
     let dd = data_dir.path();
-    assert!(orbit_index(repo_dir.path(), dd));
+    assert!(orbit_index(&repo, dd));
 
     for command in fixture.commands {
         let args: Vec<_> = command.args.iter().map(String::as_str).collect();
-        let out = repo_map(repo_dir.path(), dd, &args);
+        let out = repo_map(&repo, dd, &args);
         assert!(
             out.status.success(),
             "repo-map {:?} failed: {}",
