@@ -37,6 +37,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
 - **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads four sources (lowest to highest priority): the embedded `config/default.yaml` (compiled in via `include_str!`), an on-disk `config/default.yaml` when present (the Helm ConfigMap key), an overlay file (`--config <path>`, else `config/config.yaml` when present), and K8s secret files from `/etc/secrets/`. There is no environment-variable layer; the mise dev tasks generate `.dev/<mode>.yaml` from `config/dev.yaml`, GDK-derived connection details, and the Git-ignored `config/dev.local.yaml`, and pass that one file to `--config`.
   `config/default.yaml` is the single source of truth for defaults: every section and scalar is declared there; the Rust structs have no `Default` impls or `serde(default)` fallbacks (only `Option` fields and empty collections may be omitted). Add a setting by adding the struct field plus its value in `default.yaml`; tests start from `AppConfig::embedded_defaults()`. The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md`.
+- **Vendored dependencies.** Upstream artifacts committed to the repo (DuckDB FTS sources, extension binaries) are pinned in the `vendored:` section of `config/versions.yaml` with sub-pins, artifact directories, and vendor/check scripts. A generic runner (`scripts/vendored/run.sh`) invokes them with standardized `VENDOR_*` env vars. Vendor scripts write computed checksums back via `yq -i`; check scripts are read-only. Run `mise vendor -- <name>` to regenerate, `mise check:vendored -- <name>` to verify. See `docs/dev/runbooks/vendored_dependencies.md`.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
 ## What CI enforces
@@ -65,7 +66,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Query-language text-indexed properties table regenerated in sync with the ontology (`query-language-docs-check`)
 - Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
 - Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`)
-- The vendored DuckDB FTS source archive matches its pinned upstream revisions (`duckdb-fts-sources-sync-check`; regenerate with `scripts/duckdb/vendor-duckdb-fts-sources.sh`)
+- The vendored DuckDB FTS source archive matches its pinned upstream revisions (`duckdb-fts-sources-sync-check`; regenerate with `mise vendor -- duckdb`)
 - Every `[workspace]` member has a row in `docs/dev/agents-crate-map.md`, and no stale rows remain (`crates/xtask/build.rs`, so any workspace build/clippy fails on drift)
 
 ## Where to find things

@@ -28,8 +28,11 @@ format version (`0.1`).
 ### The `schema` pin in `config/versions.yaml`
 
 `config/versions.yaml` holds every pinned version in the repo (schema, query DSL, output
-formats, DuckDB release, vendored upstream revisions). It is embedded at compile time and
-deserialized into `orbit_versions::Versions`; the indexer exposes the `schema` key as:
+formats, vendored upstream revisions) plus a `vendored:` section for dependencies like DuckDB
+with sub-pins, artifact directories, and vendor/check scripts (see
+[vendored dependencies runbook](../dev/runbooks/vendored_dependencies.md)). It is embedded at
+compile time and deserialized into `orbit_versions::Versions`; the indexer exposes the `schema`
+key as:
 
 ```rust
 pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| orbit_versions::VERSIONS.schema);

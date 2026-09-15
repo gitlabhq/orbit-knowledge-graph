@@ -358,6 +358,24 @@ description = "Bump a pinned Iglu schema version (e.g. mise iglu:bump -- orbit_q
 run = "bash ./scripts/iglu/check.sh"
 description = "Verify pinned Iglu schemas exist locally and match live Iglu"
 
+[tasks."vendor"]
+run = "bash ./scripts/vendored/run.sh vendor ${@}"
+description = "Run a vendored dependency's vendor_script (e.g. mise vendor -- duckdb)"
+usage = 'arg "<name>"'
+
+[tasks."vendor:all"]
+run = "bash ./scripts/vendored/run.sh vendor --all"
+description = "Run vendor_script for every vendored dependency that has one"
+
+[tasks."check:vendored"]
+run = "bash ./scripts/vendored/run.sh check ${@}"
+description = "Run a vendored dependency's check_script (e.g. mise check:vendored -- duckdb)"
+usage = 'arg "<name>"'
+
+[tasks."check:vendored:all"]
+run = "bash ./scripts/vendored/run.sh check --all"
+description = "Run check_script for every vendored dependency that has one"
+
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
