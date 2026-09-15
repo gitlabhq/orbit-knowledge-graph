@@ -951,6 +951,15 @@ fn index_repo(
             ],
         )
         .context("failed to build the search documents")?;
+    duckdb_client::search::populate_def_doc_sources(
+        &client,
+        &doc_table,
+        ontology,
+        &git.repo_path,
+        git.project_id,
+        &git.commit_sha,
+    )
+    .context("failed to add definition sources to the search documents")?;
     client
         .execute(
             &duckdb_client::search::create_fts_index_sql(&doc_table),

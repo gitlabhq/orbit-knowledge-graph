@@ -1,6 +1,10 @@
 use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use arrow::array::{Int64Array, StringBuilder};
+use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 use serde_json::{Map, Value};
@@ -19,6 +23,8 @@ pub const NAME_SIM_CEIL: f64 = 0.9999;
 pub const FTS_STEMMER: &str = "english";
 
 pub const DEF_DOC_PREFIX: &str = "gl_def_doc_";
+
+const DEF_SOURCE_TABLE: &str = "search_def_source";
 
 pub const GLOB_CHARS: [char; 3] = ['*', '?', '['];
 
@@ -174,7 +180,8 @@ pub fn def_doc_sql(doc_table: &str, ontology: &Ontology) -> Result<String> {
         "CREATE OR REPLACE TABLE {doc_table} AS
 SELECT DISTINCT {commit_sha} AS commit_sha, {id} AS def_id,
        fts_doc(def_name({fqn})) AS name,
-       fts_doc({fqn} || ' ' || {file_path}) AS context
+       fts_doc({fqn} || ' ' || {file_path}) AS context,
+       '' AS source
 FROM {table} WHERE {project_id} = ?1 AND {commit_sha} = ?2",
         commit_sha = node.column("commit_sha")?,
         id = node.column("id")?,
@@ -185,9 +192,94 @@ FROM {table} WHERE {project_id} = ?1 AND {commit_sha} = ?2",
     ))
 }
 
+pub fn populate_def_doc_sources(
+    client: &DuckDbClient,
+    doc_table: &str,
+    ontology: &Ontology,
+    repository_root: &Path,
+    project_id: i64,
+    commit_sha: &str,
+) -> Result<()> {
+    let node = NodeHydrator::new(ontology, "Definition")?;
+    let batches = client.query_arrow_json(
+        &format!(
+            "SELECT {id} AS def_id, {file_path} AS file_path,
+       {start_byte} AS start_byte, {end_byte} AS end_byte
+FROM {table}
+WHERE {project_id} = ?1 AND {commit_sha} = ?2
+QUALIFY row_number() OVER (
+  PARTITION BY {id} ORDER BY {file_path}, {start_byte}, {end_byte}
+) = 1
+ORDER BY {file_path}, {id}",
+            id = node.column("id")?,
+            file_path = node.column("file_path")?,
+            start_byte = node.column("start_byte")?,
+            end_byte = node.column("end_byte")?,
+            table = node.table(),
+            project_id = node.column("project_id")?,
+            commit_sha = node.column("commit_sha")?,
+        ),
+        &[project_id.into(), commit_sha.into()],
+    )?;
+    let ids = i64_column(&batches, "def_id");
+    let paths = string_column(&batches, "file_path");
+    let starts = i64_column(&batches, "start_byte");
+    let ends = i64_column(&batches, "end_byte");
+    anyhow::ensure!(
+        ids.len() == paths.len() && ids.len() == starts.len() && ids.len() == ends.len(),
+        "definition source metadata columns have unequal lengths"
+    );
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut current_path = String::new();
+    let mut content = String::new();
+    let mut sources = StringBuilder::new();
+    for index in 0..ids.len() {
+        if current_path != paths[index] {
+            current_path.clone_from(&paths[index]);
+            let path = repository_root.join(&current_path);
+            content = std::fs::read_to_string(&path)
+                .with_context(|| format!("failed to read definition source {}", path.display()))?;
+        }
+        let source = match (usize::try_from(starts[index]), usize::try_from(ends[index])) {
+            (Ok(start), Ok(end)) if start < content.len() => content
+                .get(start..end.min(content.len()))
+                .unwrap_or_default(),
+            _ => "",
+        };
+        sources.append_value(source);
+    }
+
+    let batch = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("def_id", DataType::Int64, false),
+            Field::new("source", DataType::Utf8, false),
+        ])),
+        vec![Arc::new(Int64Array::from(ids)), Arc::new(sources.finish())],
+    )?;
+    client.execute(
+        &format!("CREATE OR REPLACE TEMP TABLE {DEF_SOURCE_TABLE} (def_id BIGINT, source VARCHAR)"),
+        &[],
+    )?;
+    client.insert_batch(DEF_SOURCE_TABLE, &batch)?;
+    client.execute(
+        &format!(
+            "UPDATE {doc_table} AS d
+SET source = s.source
+FROM {DEF_SOURCE_TABLE} AS s
+WHERE d.def_id = s.def_id"
+        ),
+        &[],
+    )?;
+    client.execute(&format!("DROP TABLE {DEF_SOURCE_TABLE}"), &[])?;
+    Ok(())
+}
+
 pub fn create_fts_index_sql(doc_table: &str) -> String {
     format!(
-        "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', stemmer='{FTS_STEMMER}', stopwords='none', overwrite=1)"
+        "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', 'source', stemmer='{FTS_STEMMER}', stopwords='none', overwrite=1)"
     )
 }
 
@@ -371,7 +463,13 @@ fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Res
   WHERE table_name = {}",
         sql_lit(&doc_table)
     ))?) > 0;
-    let indexed = table_exists
+    let has_source = table_exists
+        && scalar_i64(&client.query_arrow(&format!(
+            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM duckdb_columns()
+             WHERE table_name = {} AND column_name = 'source'",
+            sql_lit(&doc_table)
+        ))?) > 0;
+    let indexed = has_source
         && scalar_i64(&client.query_arrow(&format!(
             "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
   SELECT 1 FROM {doc_table}
@@ -397,7 +495,7 @@ fn recall_sql(pid: i64, sha: &str, filter: &RecallFilter) -> String {
     format!(
         "WITH scored AS (
   SELECT def_id AS id,
-         fts_main_{doc_table}.match_bm25(def_id, ?1, fields := 'name,context') AS score
+         fts_main_{doc_table}.match_bm25(def_id, ?1, fields := 'name,context,source') AS score
   FROM {doc_table}
   WHERE commit_sha = {sha}
     AND def_id IN ({corpus})

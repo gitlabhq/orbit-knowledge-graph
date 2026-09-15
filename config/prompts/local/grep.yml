@@ -1,8 +1,8 @@
 name: grep
-version: 1.4.0
-short: Search local code definitions
+version: 1.5.0
+short: Search local definition names, paths, and bodies
 description: >-
-  Search local code definitions.
+  Search local definition names, paths, and bodies.
 
 
   Returns ranked `Definition:<id>` references and source for the top three.

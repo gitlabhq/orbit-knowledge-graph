@@ -1193,14 +1193,14 @@ fn repo_map_omitted_subcommand_runs_overview() {
 }
 
 #[test]
-fn grep_loads_bundled_extension_in_fresh_data_dir() {
+fn grep_loads_bundled_extension_and_matches_definition_body() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let dd = data_dir.path();
     assert!(orbit_index(&repo.path, dd));
 
     let out = orbit_cmd()
-        .args(["grep", "how do we read a file", "--repo"])
+        .args(["grep", "open", "--repo"])
         .arg(&repo.path)
         .env("ORBIT_DATA_DIR", dd)
         .output()

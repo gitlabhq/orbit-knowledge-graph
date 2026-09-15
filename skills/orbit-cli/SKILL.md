@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.8
+version: 0.6.0
 license: MIT
 metadata:
   audience: developers
@@ -91,8 +91,9 @@ orbit context src/lib.rs
 orbit context Definition:481 --tests
 ```
 
-`grep` returns `Definition:<id>` references and source for its top three
-matches. Pass those exact references to `context`; it does not resolve names,
+`grep` searches Definition names, FQNs, file paths, and bodies. It returns
+`Definition:<id>` references and source for its top three matches. Pass those
+exact references to `context`; it does not resolve names,
 FQNs, or globs. One existing repo-relative or absolute file path prints that
 file's source and definitions once. Definition targets also show relationships
 with direction and edge kind; file targets do not. `--tests` includes test,
