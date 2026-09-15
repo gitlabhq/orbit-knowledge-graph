@@ -136,7 +136,7 @@ fn report_results(
     outcome: &orbit_search::GrepOutcome,
     nodes: &[NodeValue],
 ) -> Result<()> {
-    report_confidence(out, outcome)?;
+    report_query_note(out, outcome)?;
     writeln!(out, "\nDefinitions:")?;
     for node in nodes {
         report_definition(out, node)?;
@@ -169,7 +169,7 @@ fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
 const COMPOUND_TERM_HINT: usize = 5;
 const BROAD_HIDDEN_HITS: usize = 100;
 
-fn report_confidence(
+fn report_query_note(
     out: &mut impl Write,
     outcome: &orbit_search::GrepOutcome,
 ) -> std::io::Result<()> {
@@ -182,28 +182,6 @@ fn report_confidence(
             outcome.terms.len()
         )?;
     }
-    if !outcome.unmatched_terms.is_empty() {
-        writeln!(
-            out,
-            "note: no matches for: {} — results reflect only the matched terms \
-             and may be incomplete. If they look off, retry once with a synonym \
-             or identifier fragment for each unmatched term (e.g. \"throttle\" \
-             → \"rate limit\").",
-            outcome.unmatched_terms.join(", ")
-        )?;
-    }
-    if !outcome.unmatched_terms.is_empty() && !outcome.term_anchors.is_empty() {
-        let anchors: Vec<String> = outcome
-            .term_anchors
-            .iter()
-            .map(|(term, fqn)| format!("{term} → {fqn}"))
-            .collect();
-        writeln!(
-            out,
-            "note: matched terms anchored on: {}",
-            anchors.join(", ")
-        )?;
-    }
     Ok(())
 }
 
@@ -211,28 +189,17 @@ fn report_confidence(
 mod tests {
     use super::*;
 
-    fn outcome(unmatched: Vec<&str>) -> orbit_search::GrepOutcome {
+    fn outcome() -> orbit_search::GrepOutcome {
         orbit_search::GrepOutcome {
             terms: Vec::new(),
             matches: Vec::new(),
             total: 0,
-            unmatched_terms: unmatched.into_iter().map(String::from).collect(),
-            term_anchors: Vec::new(),
         }
     }
 
     #[test]
-    fn partial_anchor_note_lists_unmatched_terms_with_a_retry_instruction() {
-        let mut buf = Vec::new();
-        report_confidence(&mut buf, &outcome(vec!["throttle", "dlq"])).unwrap();
-        let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("no matches for: throttle, dlq"), "{text}");
-        assert!(text.contains("retry once"), "{text}");
-    }
-
-    #[test]
     fn results_print_definition_identity_and_full_location() {
-        let mut result = outcome(Vec::new());
+        let mut result = outcome();
         result.matches.push(orbit_search::GrepMatch {
             id: 481,
             score: 1.0,
@@ -260,7 +227,7 @@ mod tests {
 
     #[test]
     fn truncated_results_report_how_many_were_hidden() {
-        let mut o = outcome(Vec::new());
+        let mut o = outcome();
         o.total = 42;
         let mut buf = Vec::new();
         report_results(&mut buf, &o, &[]).unwrap();
@@ -274,9 +241,9 @@ mod tests {
     }
 
     #[test]
-    fn confident_full_anchor_prints_no_notes() {
+    fn short_query_prints_no_notes() {
         let mut buf = Vec::new();
-        report_confidence(&mut buf, &outcome(Vec::new())).unwrap();
+        report_query_note(&mut buf, &outcome()).unwrap();
         assert!(buf.is_empty());
     }
 }

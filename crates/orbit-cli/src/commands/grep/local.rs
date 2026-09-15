@@ -152,7 +152,7 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let (outcome, nodes) = search
+        let (_, nodes) = search
             .grep("dlq publish", 5, &vocab, &RecallFilter::default())
             .unwrap();
         assert_eq!(nodes[0].entity_type, "Definition");
@@ -160,8 +160,6 @@ mod tests {
         assert_eq!(nodes[0].properties["fqn"], "Dlq::publish");
         assert_eq!(nodes[0].properties["name"], "publish");
         assert_eq!(nodes[0].properties["commit_sha"], "sha");
-
-        assert!(outcome.unmatched_terms.is_empty());
     }
 
     #[test]
@@ -285,10 +283,6 @@ mod tests {
         let (outcome, _) = search
             .grep("find", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        assert!(
-            outcome.unmatched_terms.is_empty(),
-            "identifiers colliding with English stopwords must recall"
-        );
         assert_eq!(outcome.matches[0].id, 1);
     }
 

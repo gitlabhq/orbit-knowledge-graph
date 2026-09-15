@@ -5,7 +5,7 @@ pub mod text;
 pub mod types;
 pub mod vocab;
 
-pub use grep::{GrepMatch, GrepOutcome, RecallFilter, TermRecall, unmatched_terms};
+pub use grep::{GrepMatch, GrepOutcome, RecallFilter, TermRecall};
 pub use rank::{ANCHOR_SIM, EXACT_NAME_SIM, Hit, rank_and_trim};
 pub use text::content_words;
 pub use types::SearchCandidate;
