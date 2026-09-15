@@ -109,29 +109,30 @@ pub(crate) fn render_bodies(
     nodes: &[NodeValue],
 ) -> Result<String> {
     let defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
+    let mut files = BTreeMap::new();
     let mut out = String::new();
-    for (file, file_defs) in outline(&defs) {
-        let content = std::fs::read_to_string(git.repo_path.join(&file))
-            .with_context(|| format!("failed to read {file}"))?;
+    for def in &defs {
+        let content = match files.entry(def.file.clone()) {
+            std::collections::btree_map::Entry::Vacant(entry) => entry.insert(
+                std::fs::read_to_string(git.repo_path.join(&def.file))
+                    .with_context(|| format!("failed to read {}", def.file))?,
+            ),
+            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+        };
         let lines: Vec<&str> = content.lines().collect();
-        let (short, long): (Vec<SourceRange>, Vec<SourceRange>) = file_defs
-            .into_iter()
-            .partition(|d| d.end.saturating_sub(d.start) < INLINE_BODY_LINES);
         if !out.is_empty() {
             out.push('\n');
         }
-        render(&mut out, &short, &lines, false)?;
-        if !long.is_empty() {
+        if def.end.saturating_sub(def.start) < INLINE_BODY_LINES {
+            render(&mut out, std::slice::from_ref(def), &lines, false)?;
+        } else {
             let hydrator = NodeHydrator::embedded("Definition")?;
-            let members = definitions_in_file(client, git, &hydrator, &file)?;
+            let members = definitions_in_file(client, git, &hydrator, &def.file)?;
             let members = members
                 .iter()
                 .map(source_range)
                 .collect::<Result<Vec<_>>>()?;
-            if !short.is_empty() {
-                out.push('\n');
-            }
-            render_outline(&mut out, &long, &members, &lines)?;
+            render_outline(&mut out, std::slice::from_ref(def), &members, &lines)?;
         }
     }
     Ok(out)
@@ -361,6 +362,40 @@ mod tests {
             (None, vec![7, 9])
         );
         assert!(resolve_targets(&repo, &["Type::method".into()]).is_err());
+    }
+
+    #[test]
+    fn inline_bodies_preserve_rank_order_across_files() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::write(repo.path().join("z.rs"), "fn first() {}\n").unwrap();
+        std::fs::write(repo.path().join("a.rs"), "fn second() {}\n").unwrap();
+        let node = |id, fqn: &str, file: &str| NodeValue {
+            entity_type: "Definition".into(),
+            id,
+            properties: serde_json::from_value(serde_json::json!({
+                "fqn": fqn,
+                "definition_type": "Function",
+                "file_path": file,
+                "start_line": 1,
+                "end_line": 1
+            }))
+            .unwrap(),
+        };
+        let client = duckdb_client::DuckDbClient::open(&repo.path().join("graph.duckdb")).unwrap();
+        let git = workspace::GitInfo {
+            repo_path: repo.path().to_path_buf(),
+            project_id: 1,
+            branch: "main".into(),
+            commit_sha: "current".into(),
+            parent_repo_path: repo.path().to_path_buf(),
+        };
+        let out = render_bodies(
+            &client,
+            &git,
+            &[node(1, "z::first", "z.rs"), node(2, "a::second", "a.rs")],
+        )
+        .unwrap();
+        assert!(out.find("z::first").unwrap() < out.find("a::second").unwrap());
     }
 
     #[test]
