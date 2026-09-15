@@ -1,11 +1,21 @@
 name: context
-version: 1.0.0
-short: Print the source bodies of definitions by fqn or unqualified name
+version: 1.1.0
+short: Read definition bodies, a file's definitions, or relationships
 description: >-
-  Print the source bodies of definitions by fqn or unqualified name
+  Read definition bodies, a file's definitions, or relationships.
 
 
-  Bodies come from the working tree, so you can read several grep matches in
-  one call. A glob such as `crate::module::*` prints every match in file order.
-  Use `--file` to read a whole file as its definitions, or `--outline` to map a
-  large type before reading one method.
+  Accepts FQNs from grep, unique tails like `Type::method`, or globs like
+  `crate::module::*`, and prints their full bodies in file order.
+  `--file <path>` alone shows imports and the bodies of definitions in that
+  file. With names, `--file` restricts lookup and accepts bare names.
+  Add `--related` to list connections instead of bodies; arrows show direction
+  and each line names its edge kind. `--tests` expands test connections.
+
+
+  Refreshes changed and new source files on demand together with their
+  neighbors; other files are not reparsed. If source cannot be verified,
+  file requests report unavailable definition bodies; definition requests
+  show the full file labeled `ranges=unverified`. Relationships are
+  re-resolved across the reparsed set; an import of a project file the
+  indexer cannot parse leaves a stale-relationship warning until a full `index`.

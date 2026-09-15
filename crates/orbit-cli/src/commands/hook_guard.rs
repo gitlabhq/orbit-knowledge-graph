@@ -8,7 +8,7 @@ use std::io::Read;
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
-use crate::commands::setup::spec;
+use crate::commands::{setup::spec, shell_quote};
 use crate::workspace;
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -27,6 +27,8 @@ const COMMAND_WRAPPERS: &[&str] = &[
     "command", "env", "git", "nice", "nohup", "sudo", "time", "xargs",
 ];
 
+const ESCAPED_METACHARS: [(&str, &str); 3] = [("\\|", "\u{1}"), ("\\(", "\u{2}"), ("\\)", "\u{3}")];
+
 const SOURCE_EXTS: &[&str] = &[
     "py", "js", "cjs", "mjs", "ts", "tsx", "jsx", "vue", "svelte", "go", "rs", "java", "rb", "c",
     "h", "cpp", "hpp", "cc", "cs", "kt", "kts", "swift", "php", "scala", "lua", "sh", "pl",
@@ -40,36 +42,56 @@ pub(crate) fn run(kind: Kind) {
     let Ok(call) = serde_json::from_str::<Value>(&input) else {
         return;
     };
-    if !local_graph_exists() {
+    if !workspace::resolve_db_path(None).is_ok_and(|path| path.is_file()) {
         return;
     }
-    if should_nudge(kind, &call) {
+    if let Some(nudge) = resolve(kind, &call) {
         println!(
             "{}",
             json!({
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
-                    "additionalContext": nudge_text(kind),
+                    "additionalContext": nudge.text(),
                 }
             })
         );
     }
 }
 
-fn local_graph_exists() -> bool {
-    workspace::resolve_db_path(None)
-        .map(|path| path.is_file())
-        .unwrap_or(false)
+#[derive(Debug, PartialEq, Eq)]
+enum Nudge {
+    Search,
+    Usage { term: String },
+    InFile { term: String, path: String },
+    Read { path: Option<String> },
 }
 
-fn nudge_text(kind: Kind) -> &'static str {
-    match kind {
-        Kind::Search => spec::nudge_search(),
-        Kind::Read => spec::nudge_read(),
+impl Nudge {
+    fn text(&self) -> String {
+        match self {
+            Self::Search => spec::nudge_search().to_string(),
+            Self::Usage { term } => spec::nudge_usage().replace("{{term}}", term),
+            Self::InFile { term, path } => {
+                let path = workspace::absolutize(path.into())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| path.clone());
+                spec::nudge_in_file()
+                    .replace("{{term}}", term)
+                    .replace("{{path}}", &shell_quote(&path))
+            }
+            Self::Read { path: Some(path) } => {
+                let Ok(path) = workspace::absolutize(path.into()) else {
+                    return spec::nudge_read().to_string();
+                };
+                let quoted = shell_quote(&path.to_string_lossy());
+                spec::nudge_read().replace("--file <path>", &format!("--file={quoted}"))
+            }
+            Self::Read { path: None } => spec::nudge_read().to_string(),
+        }
     }
 }
 
-fn should_nudge(kind: Kind, call: &Value) -> bool {
+fn resolve(kind: Kind, call: &Value) -> Option<Nudge> {
     let tool_input = call.get("tool_input").unwrap_or(call);
     match kind {
         Kind::Search => {
@@ -77,53 +99,166 @@ fn should_nudge(kind: Kind, call: &Value) -> bool {
                 .get("command")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            let is_pattern_tool = command.is_empty()
-                && tool_input
-                    .get("pattern")
-                    .and_then(Value::as_str)
-                    .is_some_and(|p| !p.is_empty());
-            is_pattern_tool || invokes_search(command) || reads_source(command)
+            let pattern = tool_input.get("pattern").and_then(Value::as_str);
+            if command.is_empty() && pattern.is_some_and(|p| !p.is_empty()) {
+                let path = tool_input.get("path").and_then(Value::as_str);
+                let pattern = mask_escapes(pattern.unwrap_or(""));
+                return Some(search_nudge(&pattern, path.into_iter()));
+            }
+            let command = mask_escapes(command);
+            source_read_nudge(&command).or_else(|| command_search_nudge(&command))
         }
         Kind::Read => {
             let path = tool_input
                 .get("file_path")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            is_source_path(path)
+            is_source_path(path).then(|| Nudge::Read {
+                path: Some(path.to_string()),
+            })
         }
     }
+}
+
+fn mask_escapes(text: &str) -> String {
+    ESCAPED_METACHARS
+        .iter()
+        .fold(text.to_string(), |acc, (escaped, mask)| {
+            acc.replace(escaped, mask)
+        })
 }
 
 fn invokes_search(command: &str) -> bool {
-    command
-        .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(segment_invokes_search)
+    search_segments(command).next().is_some()
 }
 
-fn segment_invokes_search(segment: &str) -> bool {
-    for token in segment.split_whitespace() {
-        if token.starts_with('-') || token.contains('=') {
-            continue;
+fn search_segments(command: &str) -> impl Iterator<Item = &str> {
+    command
+        .split(['|', ';', '&', '\n', '(', ')', '`'])
+        .filter(|segment| search_operands(segment).is_some())
+}
+
+fn search_operands(segment: &str) -> Option<Vec<&str>> {
+    let mut tokens = segment.split_whitespace();
+    let name = tokens
+        .by_ref()
+        .filter(|t| !t.starts_with('-') && !t.contains('='))
+        .map(basename)
+        .find(|name| !COMMAND_WRAPPERS.contains(name))?;
+    SEARCH_COMMANDS.contains(&name).then(|| {
+        let mut operands = Vec::new();
+        let mut explicit_pattern = None;
+        let mut tokens = tokens.peekable();
+        while let Some(token) = tokens.next() {
+            if matches!(token, "-e" | "--regexp") {
+                explicit_pattern = tokens.next();
+            } else if !token.starts_with('-') {
+                operands.push(token);
+            }
         }
-        let name = basename(token);
-        if COMMAND_WRAPPERS.contains(&name) {
-            continue;
+        if let Some(pattern) = explicit_pattern {
+            operands.insert(0, pattern);
         }
-        return SEARCH_COMMANDS.contains(&name);
+        operands
+    })
+}
+
+fn command_search_nudge(command: &str) -> Option<Nudge> {
+    let segment = search_segments(command).next()?;
+    let operands = search_operands(segment)?;
+    let mut operands = operands
+        .into_iter()
+        .skip_while(|t| t.chars().all(|c| c.is_ascii_digit()));
+    let pattern = operands.next().unwrap_or("");
+    Some(search_nudge(pattern, operands))
+}
+
+fn search_nudge<'a>(pattern: &str, targets: impl Iterator<Item = &'a str>) -> Nudge {
+    let targets: Vec<&str> = targets.map(|t| t.trim_matches(['\'', '"'])).collect();
+    let Some(term) = identifier_term(pattern) else {
+        return Nudge::Search;
+    };
+    match targets.as_slice() {
+        [path] if is_source_path(path) && !path.contains(['*', '?', '[', '{']) => Nudge::InFile {
+            term,
+            path: path.to_string(),
+        },
+        _ => Nudge::Usage { term },
     }
-    false
 }
 
-fn reads_source(command: &str) -> bool {
+fn identifier_term(pattern: &str) -> Option<String> {
+    let quote = pattern.chars().next().filter(|c| matches!(c, '\'' | '"'));
+    if quote.is_some_and(|q| pattern.len() == 1 || !pattern.ends_with(q)) {
+        return None;
+    }
+    let is_identifier_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':');
+    pattern
+        .trim_matches(['\'', '"'])
+        .split(['|', '\u{1}'])
+        .map(strip_regex_anchors)
+        .find(|candidate| {
+            candidate
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && candidate.chars().all(is_identifier_char)
+        })
+        .map(str::to_string)
+}
+
+fn source_read_nudge(command: &str) -> Option<Nudge> {
+    let direct_reader = command
+        .split_whitespace()
+        .next()
+        .is_some_and(|t| READ_COMMANDS.contains(&basename(t)));
+    let ambiguous = !direct_reader
+        || command.split_whitespace().any(|t| matches!(t, "--" | "-"))
+        || command.contains([
+            '\'', '"', '\\', '$', '`', '(', ')', '|', ';', '&', '\n', '<', '>', '*', '?', '[', ']',
+            '{', '}', '~', '#',
+        ]);
     command
-        .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(|segment| {
+        .split([';', '&', '\n'])
+        .filter(|statement| !invokes_search(statement))
+        .flat_map(|statement| statement.split(['|', '(', ')', '`']))
+        .find_map(|segment| {
             let mut tokens = segment.split_whitespace().filter(|t| !t.starts_with('-'));
             let is_reader = tokens
                 .find(|t| !COMMAND_WRAPPERS.contains(&basename(t)))
                 .is_some_and(|t| READ_COMMANDS.contains(&basename(t)));
-            is_reader && tokens.any(is_source_path)
+            if !is_reader {
+                return None;
+            }
+            let operands: Vec<&str> = tokens.collect();
+            let path = operands
+                .iter()
+                .map(|t| t.trim_matches(['\'', '"']))
+                .find(|t| is_source_path(t))?;
+            Some(Nudge::Read {
+                path: (!ambiguous && operands.len() == 1).then(|| path.to_string()),
+            })
         })
+}
+
+fn strip_regex_anchors(alternative: &str) -> &str {
+    let mut candidate = alternative;
+    loop {
+        let trimmed = ["^", "\\b", "\\<", "(", "\u{2}"]
+            .iter()
+            .fold(candidate, |acc, anchor| {
+                acc.strip_prefix(anchor).unwrap_or(acc)
+            });
+        let trimmed = ["$", "\\b", "\\>", ")", "\u{3}", "(", "\u{2}"]
+            .iter()
+            .fold(trimmed, |acc, anchor| {
+                acc.strip_suffix(anchor).unwrap_or(acc)
+            });
+        if trimmed == candidate {
+            return candidate;
+        }
+        candidate = trimmed;
+    }
 }
 
 fn basename(token: &str) -> &str {
@@ -145,10 +280,30 @@ fn is_source_path(path: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn usage(term: &str) -> Option<Nudge> {
+        Some(Nudge::Usage {
+            term: term.to_string(),
+        })
+    }
+
+    fn search(command: &str) -> Option<Nudge> {
+        resolve(Kind::Search, &json!({"tool_input": {"command": command}}))
+    }
+
     #[test]
     fn grep_tool_pattern_nudges() {
         let call = json!({"tool_input": {"pattern": "fn main"}});
-        assert!(should_nudge(Kind::Search, &call));
+        assert_eq!(resolve(Kind::Search, &call), Some(Nudge::Search));
+        let call = json!({"tool_input": {"pattern": "NewSource", "path": "/repo"}});
+        assert_eq!(resolve(Kind::Search, &call), usage("NewSource"));
+        let call = json!({"tool_input": {"pattern": "Git", "path": "src/lib.rs"}});
+        assert_eq!(
+            resolve(Kind::Search, &call),
+            Some(Nudge::InFile {
+                term: "Git".into(),
+                path: "src/lib.rs".into()
+            })
+        );
     }
 
     #[test]
@@ -156,7 +311,6 @@ mod tests {
         for command in [
             "rg -n foo src/",
             "grep -r foo .",
-            "find . -name '*.rs'",
             "sudo rg foo",
             "xargs -n1 grep foo",
             "/usr/bin/rg foo",
@@ -164,21 +318,141 @@ mod tests {
             "cat x.txt | grep foo",
             "RUST_LOG=debug rg foo",
         ] {
-            let call = json!({"tool_input": {"command": command}});
-            assert!(should_nudge(Kind::Search, &call), "{command}");
+            assert_eq!(search(command), usage("foo"), "{command}");
+        }
+        for command in [
+            "find . -name '*.rs'",
+            "grep -rn 'TODO: fix' src/",
+            "grep -rn 42 src/",
+            "grep -rn 'a.*b' src/",
+        ] {
+            assert_eq!(search(command), Some(Nudge::Search), "{command}");
         }
     }
 
     #[test]
-    fn bash_source_reads_nudge() {
-        for command in [
-            "cat src/main.rs",
-            "head -50 crates/foo/src/lib.rs",
-            "sed -n '1,40p' app/models/user.rb",
-            "cd repo && cat lib/x.py",
+    fn usage_searches_name_the_first_identifier_alternative() {
+        for (command, term) in [
+            (
+                "grep -rn 'git.NewSource\\|git.WithAuth' src/ | grep -v _test.go",
+                "git.NewSource",
+            ),
+            ("rg -n 'WithInsecureTLS\\(' internal/", "WithInsecureTLS"),
+            ("grep -n -e Source -A 3 -r internal/storage", "Source"),
+            ("rg -A 3 Source internal/storage", "Source"),
+            ("rg TLS src/*_test.go", "TLS"),
+            ("grep -n Git go.mod", "Git"),
         ] {
-            let call = json!({"tool_input": {"command": command}});
-            assert!(should_nudge(Kind::Search, &call), "{command}");
+            assert_eq!(search(command), usage(term), "{command}");
+        }
+    }
+
+    #[test]
+    fn single_source_file_searches_name_the_file() {
+        for command in [
+            "grep -n 'Git\\|Type' src/lib.rs | head -80",
+            "rg Git src/lib.rs",
+        ] {
+            let expected = Nudge::InFile {
+                term: "Git".into(),
+                path: "src/lib.rs".into(),
+            };
+            assert_eq!(search(command), Some(expected), "{command}");
+        }
+    }
+
+    #[test]
+    fn specific_nudges_render_term_and_quoted_path() {
+        let text = usage("git.NewSource").unwrap().text();
+        assert!(
+            text.contains("`orbit context \"git.NewSource\" --related`"),
+            "{text}"
+        );
+        assert!(text.contains("`orbit grep \"git.NewSource\"`"), "{text}");
+        assert!(!text.contains("{{"), "{text}");
+        let path = "/repo/-my $file's.rs";
+        let quoted = "'/repo/-my $file'\\''s.rs'";
+        for nudge in [
+            Nudge::Read {
+                path: Some(path.into()),
+            },
+            Nudge::InFile {
+                term: "Git".into(),
+                path: path.into(),
+            },
+        ] {
+            let text = nudge.text();
+            assert!(text.contains(&format!("context --file={quoted}")), "{text}");
+            assert!(!text.contains("<path>") && !text.contains("{{"), "{text}");
+            if matches!(nudge, Nudge::InFile { .. }) {
+                assert!(
+                    text.contains(&format!("`orbit grep \"Git\" --path {quoted}`")),
+                    "{text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bash_source_reads_get_the_read_nudge_with_the_path() {
+        for (command, path) in [
+            ("cat src/main.rs", "src/main.rs"),
+            ("head -50 crates/foo/src/lib.rs", "crates/foo/src/lib.rs"),
+        ] {
+            let expected = Nudge::Read {
+                path: Some(path.to_string()),
+            };
+            assert_eq!(search(command), Some(expected), "{command}");
+        }
+    }
+
+    #[test]
+    fn ambiguous_source_reads_keep_generic_read_guidance() {
+        for command in [
+            "cat 'lib/file with spaces.py'",
+            "cat lib/file\\ with\\ spaces.py",
+            "cd repo && cat lib/x.py",
+            "env --chdir=repo cat src/main.rs",
+            "sed -n '1,40p' app/models/user.rb",
+            "cat src/main.rs src/lib.rs",
+            "cat -- src/main.rs -other.rs",
+            "cat src/main.rs -",
+            "cat $ROOT/src/main.rs",
+        ] {
+            assert_eq!(
+                search(command),
+                Some(Nudge::Read { path: None }),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn independent_source_read_wins_over_manifest_search() {
+        for command in [
+            "cat router.rs; ls src; grep rand Cargo.toml",
+            "grep rand Cargo.toml; ls src; cat router.rs",
+            "cat router.rs && grep rand Cargo.toml",
+            "cat router.rs\nls src\ngrep rand Cargo.toml",
+            "cat router.rs | rg handler; cat app.rs",
+        ] {
+            assert_eq!(
+                search(command),
+                Some(Nudge::Read { path: None }),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn piped_read_into_search_is_a_search() {
+        for command in [
+            "cat src/main.rs | grep foo",
+            "cat 'my file.rs' | rg foo",
+            "cat router.rs | rg foo; ls src; grep rand Cargo.toml",
+            "cd src && cat router.rs | rg foo",
+        ] {
+            assert_eq!(search(command), usage("foo"), "{command}");
         }
     }
 
@@ -197,15 +471,17 @@ mod tests {
             "cat Cargo.toml",
             "tail -f server.log",
         ] {
-            let call = json!({"tool_input": {"command": command}});
-            assert!(!should_nudge(Kind::Search, &call), "{command}");
+            assert_eq!(search(command), None, "{command}");
         }
     }
 
     #[test]
     fn source_reads_nudge_but_docs_do_not() {
         let source = json!({"tool_input": {"file_path": "/repo/src/main.rs"}});
-        assert!(should_nudge(Kind::Read, &source));
+        let expected = Nudge::Read {
+            path: Some("/repo/src/main.rs".to_string()),
+        };
+        assert_eq!(resolve(Kind::Read, &source), Some(expected));
 
         for path in [
             "/repo/README.md",
@@ -214,7 +490,7 @@ mod tests {
             "/repo/Cargo.toml",
         ] {
             let call = json!({"tool_input": {"file_path": path}});
-            assert!(!should_nudge(Kind::Read, &call), "{path}");
+            assert_eq!(resolve(Kind::Read, &call), None, "{path}");
         }
     }
 
@@ -228,12 +504,22 @@ mod tests {
     #[test]
     fn missing_tool_input_falls_back_to_root() {
         let call = json!({"pattern": "foo"});
-        assert!(should_nudge(Kind::Search, &call));
+        assert_eq!(resolve(Kind::Search, &call), usage("foo"));
     }
 
     #[test]
     fn nudge_text_names_the_launcher_verbs() {
-        assert!(nudge_text(Kind::Search).contains("`orbit grep"));
-        assert!(nudge_text(Kind::Read).contains("`orbit context"));
+        assert!(Nudge::Search.text().contains("`orbit grep"));
+        let cwd = std::env::current_dir().unwrap();
+        let path = cwd.join("src/main.rs");
+        let read = Nudge::Read {
+            path: Some("src/main.rs".into()),
+        }
+        .text();
+        assert!(
+            read.contains(&format!("`orbit context --file='{}'`", path.display())),
+            "{read}"
+        );
+        assert_eq!(Nudge::Read { path: None }.text(), spec::nudge_read());
     }
 }

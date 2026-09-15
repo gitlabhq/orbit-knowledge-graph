@@ -20,6 +20,8 @@ struct SetupAssets;
 struct SetupTexts {
     instructions: String,
     nudge_search: String,
+    nudge_usage: String,
+    nudge_in_file: String,
     nudge_read: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
@@ -50,13 +52,7 @@ fn render_launcher(text: &str, launcher: &str) -> String {
 }
 
 fn render_instructions(launcher: &str) -> String {
-    render_launcher(
-        &TEXTS
-            .instructions
-            .trim_end()
-            .replace("{{graph_contents}}", &graph_contents()),
-        launcher,
-    )
+    render_launcher(TEXTS.instructions.trim_end(), launcher)
 }
 
 static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instructions(launcher()));
@@ -64,47 +60,14 @@ static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instruc
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| render_launcher(TEXTS.nudge_search.trim_end(), launcher()));
 
+static RENDERED_NUDGE_USAGE: LazyLock<String> =
+    LazyLock::new(|| render_launcher(TEXTS.nudge_usage.trim_end(), launcher()));
+
+static RENDERED_NUDGE_IN_FILE: LazyLock<String> =
+    LazyLock::new(|| render_launcher(TEXTS.nudge_in_file.trim_end(), launcher()));
+
 static RENDERED_NUDGE_READ: LazyLock<String> =
     LazyLock::new(|| render_launcher(TEXTS.nudge_read.trim_end(), launcher()));
-
-fn graph_contents() -> String {
-    use strum::IntoEnumIterator;
-
-    use code_graph::v2::types::{EdgeKind, NodeKind};
-
-    let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
-    let nodes = NodeKind::iter()
-        .map(|kind| {
-            let node = ontology
-                .get_node(kind.as_ref())
-                .unwrap_or_else(|| panic!("ontology must declare node {}", kind.as_ref()));
-            if matches!(kind, NodeKind::Definition) {
-                let def_types = node
-                    .fields
-                    .iter()
-                    .find(|field| field.name == "definition_type")
-                    .and_then(|field| field.description.as_deref())
-                    .expect("ontology Definition must describe definition_type")
-                    .trim_end_matches('.');
-                format!(
-                    "`{}` (`definition_type`: {def_types}; not an exhaustive list)",
-                    node.destination_table
-                )
-            } else {
-                format!("`{}`", node.destination_table)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let edges = EdgeKind::iter()
-        .map(|kind| format!("`{}`", kind.as_ref()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "{nodes}; typed edges in `{}` (`relationship_kind`: {edges})",
-        ontology.edge_table()
-    )
-}
 
 pub(crate) fn instructions() -> &'static str {
     &RENDERED_INSTRUCTIONS
@@ -112,6 +75,14 @@ pub(crate) fn instructions() -> &'static str {
 
 pub(crate) fn nudge_search() -> &'static str {
     &RENDERED_NUDGE_SEARCH
+}
+
+pub(crate) fn nudge_usage() -> &'static str {
+    &RENDERED_NUDGE_USAGE
+}
+
+pub(crate) fn nudge_in_file() -> &'static str {
+    &RENDERED_NUDGE_IN_FILE
 }
 
 pub(crate) fn nudge_read() -> &'static str {
@@ -268,6 +239,14 @@ mod tests {
             assert!(!text.trim().is_empty());
             assert!(!text.contains("{{"), "unresolved placeholder: {text}");
         }
+        for text in [nudge_usage(), nudge_in_file()] {
+            assert!(!text.contains("{{orbit}}"), "unresolved launcher: {text}");
+            assert!(
+                text.contains("{{term}}"),
+                "missing term placeholder: {text}"
+            );
+        }
+        assert!(nudge_in_file().contains("{{path}}"));
     }
 
     #[test]

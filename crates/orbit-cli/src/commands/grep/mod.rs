@@ -1,14 +1,13 @@
 mod local;
-pub(crate) mod relations;
 
-use std::io::Write;
-use std::path::PathBuf;
+use std::fmt::Write;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use duckdb_client::search::DuckDbSearch;
 use orbit_search::{RecallFilter, SearchVocab, content_words};
 
-use crate::commands::{context, fqn::Def};
-use local::LocalBackend;
+use crate::commands::{context, fqn::Def, shell_quote};
 
 fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVocab, S::Error> {
     use strum::IntoEnumIterator;
@@ -29,19 +28,55 @@ fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVo
     ))
 }
 
-const MIN_HITS_PER_QUERY: usize = 3;
-const BODY_LIMIT: usize = 3;
+const RESULT_LIMIT: usize = 10;
+const BODY_LIMIT: usize = 5;
+const OUTPUT_CHARS: usize = 24_000;
+const OUTPUT_OMITTED: &str =
+    "\nOutput budget reached; narrow with --path/--kind or use context on a listed FQN.\n";
+
+struct Output {
+    text: String,
+    remaining: usize,
+    omitted: bool,
+}
+
+impl Output {
+    fn new() -> Self {
+        Self {
+            text: String::new(),
+            remaining: OUTPUT_CHARS - OUTPUT_OMITTED.chars().count(),
+            omitted: false,
+        }
+    }
+
+    fn push(&mut self, text: &str) -> bool {
+        let chars = text.chars().count();
+        if chars > self.remaining {
+            self.omitted = true;
+            return false;
+        }
+        self.text.push_str(text);
+        self.remaining -= chars;
+        true
+    }
+
+    fn finish(mut self) -> String {
+        if self.omitted {
+            self.text.push_str(OUTPUT_OMITTED);
+        }
+        self.text
+    }
+}
 
 pub(crate) fn run(
     queries: Vec<String>,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
-    limit: usize,
     paths: Vec<String>,
     filter: RecallFilter,
-    body: bool,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
+    let include_tests = queries.iter().any(|q| test_query(q));
     if let Some(query) = queries.iter().find(|q| content_words(q).is_empty()) {
         anyhow::bail!(
             "no usable search terms in query: {query:?} — to list every definition in a \
@@ -50,68 +85,145 @@ pub(crate) fn run(
         );
     }
 
-    let backend = LocalBackend::open(repo, db, &paths)?;
+    let context_command = context_command(launcher, repo.as_deref(), db.as_deref());
+    let (git, search) = local::open(repo, db, &paths, include_tests)?;
 
-    let mut out = std::io::stdout().lock();
+    let mut out = Output::new();
     if queries.is_empty() {
-        return report_outline(&mut out, &backend, &paths, &filter, launcher);
+        report_outline(
+            &mut out,
+            &search,
+            git.short_sha(),
+            &paths,
+            &filter,
+            launcher,
+        )?;
+        print!("{}", out.finish());
+        return Ok(());
     }
     if !paths.is_empty() {
-        writeln!(out, "path: {}", paths.join(" "))?;
+        out.push(&format!("path: {}\n", paths.join(" ")));
     }
     if !filter.kinds.is_empty() {
-        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
+        out.push(&format!("kind: {}\n", filter.kinds.join(" ")));
     }
 
-    let vocab = build_vocab(backend.search())?;
-    let limit = if body { limit.min(BODY_LIMIT) } else { limit };
-    let per_query_limit = (limit / queries.len()).max(MIN_HITS_PER_QUERY.min(limit));
+    let vocab = build_vocab(&search)?;
+    let mut defs = Vec::new();
     for (i, query) in queries.iter().enumerate() {
+        let mut header = format!("grep {:?} @ {}\n", query, git.short_sha());
         if i > 0 {
-            writeln!(out)?;
+            header.insert(0, '\n');
         }
-        writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-        let outcome = backend.grep(query, per_query_limit, &vocab, &filter)?;
+        if !out.push(&header) {
+            break;
+        }
+        let mut outcome = search.grep(query, RESULT_LIMIT, &vocab, &filter)?;
+        outcome
+            .matches
+            .sort_by_key(|candidate| !exact_match(&candidate.row, query));
+        if outcome
+            .matches
+            .iter()
+            .any(|candidate| exact_match(&candidate.row, query))
+        {
+            outcome.weak = false;
+        }
         let typed: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         if outcome.terms != typed {
-            writeln!(out, "terms: {}", outcome.terms.join(" "))?;
+            out.push(&format!("terms: {}\n", outcome.terms.join(" ")));
         }
 
         if outcome.matches.is_empty() {
             if paths.is_empty() && filter.is_empty() {
-                writeln!(out, "\nNo definitions match those terms.")?;
+                out.push("\nNo definitions match those terms.\n");
             } else {
-                writeln!(
-                    out,
-                    "\nNo definitions match those terms within that scope; drop --path/--kind to widen."
-                )?;
+                out.push("\nNo definitions match those terms within that scope; drop --path/--kind to widen.\n");
             }
-            writeln!(
-                out,
+            out.push(
                 "Rephrase and retry once — use synonyms or identifier fragments \
                  from the code (e.g. \"throttle\" → \"rate limit\"). If the retry \
-                 also misses, fall back to text grep."
-            )?;
+                 also misses, fall back to text grep.\n",
+            );
             continue;
         }
 
-        report_results(&mut out, &outcome)?;
-        if body || outcome.total <= BODY_LIMIT {
-            let defs: Vec<Def> = outcome
-                .matches
-                .iter()
-                .take(BODY_LIMIT)
-                .map(|m| def_from(&m.row))
-                .collect();
-            writeln!(out)?;
-            write!(
-                out,
-                "{}",
-                context::render_bodies(backend.search().client(), backend.git(), &defs)?
-            )?;
+        let mut body_candidates: Vec<_> = outcome.matches.iter().collect();
+        body_candidates.sort_by_key(|candidate| {
+            (
+                !exact_match(&candidate.row, query),
+                low_value_body(&candidate.row.kind),
+            )
+        });
+        for candidate in body_candidates {
+            let def = def_from(&candidate.row);
+            if defs.len() < BODY_LIMIT && !defs.contains(&def) {
+                defs.push(def);
+            }
+        }
+        let mut report = String::new();
+        report_results(&mut report, &outcome, Some(&context_command))?;
+        if !out.push(&report) {
+            break;
         }
     }
+    if !defs.is_empty() {
+        let bodies = context::render_bodies(
+            search.client(),
+            &git,
+            &defs,
+            out.remaining,
+            &context_command,
+        )?;
+        if bodies.is_empty() {
+            out.omitted = true;
+        }
+        out.push(&bodies);
+    }
+    print!("{}", out.finish());
     Ok(())
+}
+
+fn test_query(query: &str) -> bool {
+    const TEST_TOKENS: &[&str] = &["test", "tests", "spec", "stub", "mock", "fake", "fixture"];
+    query
+        .split_whitespace()
+        .flat_map(|term| term.rsplit(['.', ':', '/']).next())
+        .flat_map(|name| {
+            let mut tokens = Vec::new();
+            let mut current = String::new();
+            for c in name.chars() {
+                if c == '_'
+                    || (c.is_ascii_uppercase()
+                        && current
+                            .chars()
+                            .last()
+                            .is_some_and(|p| p.is_ascii_lowercase()))
+                {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                if c != '_' {
+                    current.push(c.to_ascii_lowercase());
+                }
+            }
+            tokens.push(current);
+            tokens
+        })
+        .any(|token| TEST_TOKENS.contains(&token.as_str()))
+}
+
+fn exact_match(row: &orbit_search::CorpusRow, query: &str) -> bool {
+    let query = query.trim().trim_end_matches(['(', ')']);
+    row.fqn.eq_ignore_ascii_case(query)
+        || row
+            .fqn
+            .rsplit([':', '.', '#', '/'])
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case(query))
+}
+
+fn low_value_body(kind: &str) -> bool {
+    matches!(kind, "Module" | "ModuleExport" | "EnumMember")
 }
 
 fn def_from(row: &orbit_search::CorpusRow) -> Def {
@@ -127,86 +239,85 @@ fn def_from(row: &orbit_search::CorpusRow) -> Def {
 }
 
 fn report_outline(
-    out: &mut impl Write,
-    backend: &LocalBackend,
+    out: &mut Output,
+    search: &DuckDbSearch,
+    header: &str,
     paths: &[String],
     filter: &RecallFilter,
     launcher: &str,
 ) -> Result<()> {
-    writeln!(out, "outline {} @ {}", paths.join(" "), backend.header())?;
+    out.push(&format!("outline {} @ {header}\n", paths.join(" ")));
     if !filter.kinds.is_empty() {
-        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
+        out.push(&format!("kind: {}\n", filter.kinds.join(" ")));
     }
-    let rows = backend.search().list_corpus(filter)?;
+    let rows = search.list_corpus(filter)?;
     if rows.is_empty() {
-        writeln!(
-            out,
-            "\nNo indexed definitions under that path. Paths are repo-relative, as printed by `{launcher} grep`."
-        )?;
+        out.push(&format!("\nNo indexed definitions under that path. Paths are repo-relative, as printed by `{launcher} grep`.\n"));
         return Ok(());
     }
-    writeln!(out, "\nDefinitions ({}):", rows.len())?;
+    out.push(&format!("\nDefinitions ({}):\n", rows.len()));
     for r in &rows {
-        writeln!(out, "  {}  [{}]  {}", r.fqn, r.kind, r.loc)?;
+        if !out.push(&format!("  {}  [{}]  {}\n", r.fqn, r.kind, r.loc)) {
+            break;
+        }
     }
     Ok(())
+}
+
+fn context_command(launcher: &str, repo: Option<&Path>, db: Option<&Path>) -> String {
+    let mut command = format!("{launcher} context");
+    for (flag, path) in [("--repo", repo), ("--db", db)] {
+        if let Some(path) = path {
+            command.push_str(&format!(" {flag}={}", shell_quote(&path.to_string_lossy())));
+        }
+    }
+    command
 }
 
 fn report_results(
     out: &mut impl Write,
     outcome: &orbit_search::GrepOutcome,
-) -> std::io::Result<()> {
+    context_command: Option<&str>,
+) -> std::fmt::Result {
+    if let Some(command) = context_command.filter(|_| !outcome.matches.is_empty()) {
+        write!(out, "Candidate context: {command} --")?;
+        for candidate in outcome.matches.iter().take(BODY_LIMIT) {
+            write!(out, " {}", shell_quote(&candidate.row.fqn))?;
+        }
+        writeln!(out)?;
+    }
     report_confidence(out, outcome)?;
     writeln!(out, "\nNodes:")?;
     for m in &outcome.matches {
         writeln!(out, "  {}  [{}]  {}", m.row.fqn, m.row.kind, m.row.loc)?;
     }
-    let hidden = outcome.total.saturating_sub(outcome.matches.len());
-    if hidden >= BROAD_HIDDEN_HITS {
-        writeln!(
-            out,
-            "  … {hidden} more — the query is broad; scope with --path <dir>/--kind <Kind> or use a more specific identifier"
-        )?;
-    } else if hidden > 0 {
-        writeln!(
-            out,
-            "  … {hidden} more (narrow with --path/--kind, or raise --limit)"
-        )?;
-    }
     Ok(())
 }
 
 const COMPOUND_TERM_HINT: usize = 5;
-const BROAD_HIDDEN_HITS: usize = 100;
 
 fn report_confidence(
     out: &mut impl Write,
     outcome: &orbit_search::GrepOutcome,
-) -> std::io::Result<()> {
+) -> std::fmt::Result {
     if outcome.terms.len() >= COMPOUND_TERM_HINT {
         writeln!(
             out,
-            "note: {} search terms — long queries dilute matching. grep matches \
-             symbol-name words, so use one to three identifier-like words per \
-             query and batch several queries in one call instead.",
+            "note: {} search terms — matches may cover different parts of the query.",
             outcome.terms.len()
         )?;
     }
     if outcome.weak {
         writeln!(
             out,
-            "note: weak matches — no term anchors a symbol name, so the results \
-             below may be coincidental. Use an identifier fragment the code would \
-             use, or scope with --path/--kind."
+            "note: weak matches — symbol names do not closely match enough of the query."
         )?;
     }
     if !outcome.unmatched_terms.is_empty() {
         writeln!(
             out,
-            "note: no matches for: {} — results reflect only the matched terms \
-             and may be incomplete. If they look off, retry once with a synonym \
-             or identifier fragment for each unmatched term (e.g. \"throttle\" \
-             → \"rate limit\").",
+            "note: no matches for: {} — results reflect only the matched terms. \
+             If needed, retry once with a synonym or identifier fragment.",
             outcome.unmatched_terms.join(", ")
         )?;
     }
@@ -216,11 +327,7 @@ fn report_confidence(
             .iter()
             .map(|(term, fqn)| format!("{term} → {fqn}"))
             .collect();
-        writeln!(
-            out,
-            "note: matched terms anchored on: {}",
-            anchors.join(", ")
-        )?;
+        writeln!(out, "note: matched-term candidates: {}", anchors.join(", "))?;
     }
     Ok(())
 }
@@ -233,7 +340,6 @@ mod tests {
         orbit_search::GrepOutcome {
             terms: Vec::new(),
             matches: Vec::new(),
-            total: 0,
             weak,
             unmatched_terms: unmatched.into_iter().map(String::from).collect(),
             term_anchors: Vec::new(),
@@ -242,9 +348,9 @@ mod tests {
 
     #[test]
     fn partial_anchor_note_lists_unmatched_terms_with_a_retry_instruction() {
-        let mut buf = Vec::new();
+        let mut buf = String::new();
         report_confidence(&mut buf, &outcome(vec!["throttle", "dlq"], false)).unwrap();
-        let text = String::from_utf8(buf).unwrap();
+        let text = buf;
         assert!(text.contains("no matches for: throttle, dlq"), "{text}");
         assert!(text.contains("retry once"), "{text}");
         assert!(!text.contains("weak matches"), "{text}");
@@ -252,31 +358,68 @@ mod tests {
 
     #[test]
     fn weak_and_unmatched_notes_stack() {
-        let mut buf = Vec::new();
+        let mut buf = String::new();
         report_confidence(&mut buf, &outcome(vec!["throttle"], true)).unwrap();
-        let text = String::from_utf8(buf).unwrap();
+        let text = buf;
         assert!(text.contains("weak matches"), "{text}");
         assert!(text.contains("no matches for: throttle"), "{text}");
     }
 
     #[test]
-    fn truncated_results_report_how_many_were_hidden() {
-        let mut o = outcome(Vec::new(), false);
-        o.total = 42;
-        let mut buf = Vec::new();
-        report_results(&mut buf, &o).unwrap();
-        let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("42 more (narrow"), "{text}");
+    fn candidate_context_is_bounded_ordered_and_before_advice() {
+        let mut o = outcome(vec!["unknown"], true);
+        o.matches = ["field", "module", "it's", "other", "fifth", "sixth"]
+            .into_iter()
+            .map(|fqn| orbit_search::grep::GrepMatch {
+                row: orbit_search::CorpusRow {
+                    id: 1,
+                    fqn: fqn.into(),
+                    kind: "Function".into(),
+                    loc: "src/lib.rs:1".into(),
+                    end_line: 1,
+                    degree: 0,
+                    grams: 0,
+                },
+                score: 0.0,
+            })
+            .collect();
+        let mut buf = String::new();
+        report_results(&mut buf, &o, Some("orbit context")).unwrap();
+        let text = buf;
+        assert_eq!(
+            text.lines().next().unwrap(),
+            "Candidate context: orbit context -- 'field' 'module' 'it'\\''s' 'other' 'fifth'"
+        );
+        let nodes: Vec<_> = text.lines().filter(|line| line.starts_with("  ")).collect();
+        assert_eq!(nodes.len(), o.matches.len());
+        for (line, candidate) in nodes.iter().zip(&o.matches) {
+            assert!(
+                line.starts_with(&format!("  {}  [", candidate.row.fqn)),
+                "{line}"
+            );
+        }
 
-        o.total = 0;
-        let mut buf = Vec::new();
-        report_results(&mut buf, &o).unwrap();
-        assert!(!String::from_utf8(buf).unwrap().contains(" more"));
+        let mut buf = String::new();
+        report_results(&mut buf, &o, None).unwrap();
+        assert!(!buf.contains("Candidate context:"));
+    }
+
+    #[test]
+    fn context_command_keeps_only_explicit_scope_and_quotes_it() {
+        assert_eq!(context_command("orbit", None, None), "orbit context");
+        assert_eq!(
+            context_command(
+                "glab orbit local",
+                Some(Path::new("my repo's checkout")),
+                Some(Path::new("-graph $db.duckdb")),
+            ),
+            "glab orbit local context --repo='my repo'\\''s checkout' --db='-graph $db.duckdb'"
+        );
     }
 
     #[test]
     fn confident_full_anchor_prints_no_notes() {
-        let mut buf = Vec::new();
+        let mut buf = String::new();
         report_confidence(&mut buf, &outcome(Vec::new(), false)).unwrap();
         assert!(buf.is_empty());
     }

@@ -160,13 +160,36 @@ prints nothing; structured formats emit valid empty output (`[]` for `json`,
 no records for `ndjson`) so pipelines like `orbit list -F json | jq` keep
 working.
 
-## Working-tree freshness
+## Search definitions
+
+`grep` searches indexed names and paths, not source bodies or regular expressions.
+It returns the top ten ranked matches without parent or file quotas.
+Use one concept per query, such as `orbit grep "rate limit"`. Inspect weak or
+unmatched candidates with `context` before retrying; **weak matches** does not
+mean every term failed to match. Test, fixture, mock, and generated files are
+included automatically when the query looks like a test name; use `--path` for
+an explicit test-directory search.
+
+Read known definitions directly with `orbit context <fqn>`, or use
+`context --file <path>` for imports and the bodies of definitions in that file. Numbered source lines are verbatim working-tree text. Strip `NN|`
+and reuse them for edits instead of rereading the file with raw tools. Start implementing
+once the edit point is clear; follow identifiers only for remaining questions
+and batch independent lookups. `grep` includes source for the first five matches, including weak matches,
+with exact identifiers first. A shared 24,000-character budget covers the whole
+response, including batched queries and path listings. After result listings,
+the remaining space is divided equally among the selected matches. Long bodies
+stop at a line boundary with a truncation notice and a `context` command.
 
 `grep` and `context` refresh source edits and deletions without a new commit,
 including import/relationship neighbors. If source ranges cannot be verified,
 reads show the full file marked `ranges=unverified`. Run `orbit index` when
 warned about stale relationships, or for new references without an import
 or existing relationship.
+
+`orbit context <fqn> --related` lists connections with direction and edge kind;
+`--tests` expands hidden test connections. Name/path matches and missing edges
+do not prove dataflow, so inspect source bodies. Use `--repo`, `--db`, `--path`,
+or `--kind` to set scope.
 
 ## Run as an MCP server
 

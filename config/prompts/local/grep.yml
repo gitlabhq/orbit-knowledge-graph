@@ -1,13 +1,30 @@
 name: grep
-version: 1.2.0
-short: Search local code definitions and their relationships
+version: 1.3.0
+short: Search local code definitions with bounded source
 description: >-
-  Search local code definitions and their relationships
+  Search local code definitions with bounded source.
 
 
-  Ranks definitions by how many query terms they match, then lists the
-  connections of the top matches by graph proximity. Terms are plain words, not
-  regexes, and matches are resolved definitions, not text lines. Add
-  --related-to, --callers, or --callees with a positional FQN to look up
-  relationships. A target given after the flag wins over positional terms.
-  --path and --kind filter the connected definitions, not the target.
+  Use 1-3 identifier keywords for one concept; multiword identifiers such as
+  'rate limit' are fine. Read relevant bodies with context, not cat, head, sed,
+  or raw Read. Use those bodies for exact edits; use context --file for
+  definitions and imports in one file. Start implementing once the edit point
+  and nearby pattern are clear.
+
+
+  Shows the top ten matches, with source for the first five in a shared
+  24,000-character output budget. Remaining source space is divided equally
+  among the selected matches. Long bodies stop at a line boundary with a
+  truncation notice and a context command. Search matches indexed names and
+  paths, not source bodies or regexes.
+
+
+  Changed and new source files are refreshed on demand together with their
+  neighbors (files they import, that import them, or that share a relationship);
+  other files are not reparsed. Name/path matches do not establish a code
+  connection or dataflow. Trace relationships with `context <fqn> --related`.
+  --kind takes one comma-separated list, e.g. `Class,Method`.
+
+
+  For weak or unmatched terms, inspect a candidate with context. Retry with one
+  concept or a source identifier; if that still misses, fall back to text grep.

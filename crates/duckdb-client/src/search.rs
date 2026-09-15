@@ -45,20 +45,20 @@ pub struct DuckDbSearch {
 }
 
 impl DuckDbSearch {
-    pub fn new(client: DuckDbClient, project_id: i64, commit_sha: &str) -> Result<Self> {
-        Self::scoped(client, project_id, commit_sha, &[])
-    }
-
     pub fn scoped(
         client: DuckDbClient,
         project_id: i64,
         commit_sha: &str,
         paths: &[String],
+        include_tests: bool,
     ) -> Result<Self> {
         let sha = sql_lit(commit_sha);
         client.load_extension("fts")?;
         ensure_search_index(&client, project_id, &sha)?;
-        client.execute(&corpus_table_sql(project_id, &sha, paths), &[])?;
+        client.execute(
+            &corpus_table_sql(project_id, &sha, paths, include_tests),
+            &[],
+        )?;
         Ok(Self {
             client,
             pid: project_id,
@@ -274,7 +274,7 @@ ORDER BY sim DESC, id"
     )
 }
 
-fn corpus_table_sql(pid: i64, sha: &str, paths: &[String]) -> String {
+fn corpus_table_sql(pid: i64, sha: &str, paths: &[String], include_tests: bool) -> String {
     format!(
         "CREATE OR REPLACE TEMP TABLE search_corpus AS
 SELECT d.id, d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line
@@ -285,12 +285,12 @@ WHERE d.project_id = {pid} AND d.commit_sha = {sha}
   AND d.fqn NOT LIKE '%@%'
 {exclude}{paths}",
         source_only = sql_lit(&ext_regex(&search_corpus_exts())),
-        exclude = if paths.is_empty() {
+        exclude = if paths.is_empty() && !include_tests {
             exclusions("d.file_path")
         } else {
             String::new()
         },
-        paths = path_scope("d.file_path", paths, false),
+        paths = path_scope("d.file_path", paths),
     )
 }
 
@@ -306,7 +306,7 @@ pub fn kind_scope(col: &str, kinds: &[String]) -> String {
     format!("  AND lower({col}) IN ({list})\n")
 }
 
-pub fn path_scope(col: &str, paths: &[String], include_excluded: bool) -> String {
+fn path_scope(col: &str, paths: &[String]) -> String {
     if paths.is_empty() {
         return String::new();
     }
@@ -323,9 +323,6 @@ pub fn path_scope(col: &str, paths: &[String], include_excluded: bool) -> String
                     sql_lit(&format!("{p}/*"))
                 )
             };
-            if include_excluded {
-                return format!("({scope})");
-            }
             let opted_in = format!(
                 "{} OR {}",
                 excluded_path_predicate(&sql_lit(p)),

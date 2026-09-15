@@ -1214,52 +1214,6 @@ fn grep_loads_bundled_extension_in_fresh_data_dir() {
 }
 
 #[test]
-fn grep_callers_order_is_stable_across_overloads() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let workspace = tempfile::TempDir::new().unwrap();
-    let repo = workspace.path().join("repo");
-    init_repo_at(
-        &repo,
-        &[
-            (
-                "src/Target.java",
-                "public class Target {\n    public Target() {}\n    public void ping() {}\n}\n",
-            ),
-            (
-                "src/Caller.java",
-                concat!(
-                    "public class Caller {\n",
-                    "    public Caller(Target t) { t.ping(); }\n",
-                    "    public Caller(Target t, int n) { t.ping(); }\n",
-                    "    public void run(Target t) { t.ping(); }\n",
-                    "    public void run(Target t, int n) { t.ping(); }\n",
-                    "    public void run(Target t, int n, int m) { t.ping(); }\n",
-                    "}\n",
-                ),
-            ),
-        ],
-    );
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo, dd));
-
-    let repo_arg = repo.to_str().unwrap();
-    for (fqn, section) in [
-        ("Target.ping", "Connections (5):"),
-        ("Target", "Used via members (5)"),
-    ] {
-        let (first, stderr, ok) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-        assert!(ok, "grep {fqn} --callers failed: {stderr}");
-        assert!(first.contains(section), "{fqn}: {first}");
-        assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
-        assert_eq!(first.matches("<-- Caller.run ").count(), 3, "{first}");
-        for _ in 0..10 {
-            let (again, _, _) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-            assert_eq!(first, again, "grep {fqn} --callers output must be stable");
-        }
-    }
-}
-
-#[test]
 fn repo_map_api_empty_prefix_succeeds() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
@@ -1290,6 +1244,115 @@ fn orbit(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> (Stri
 
 fn context(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> String {
     orbit(repo, data, &[&["context"], args].concat()).0
+}
+
+#[test]
+fn context_file_gives_definition_bodies_and_names_select_bodies() {
+    let (repo, data) = context_repo();
+    let overview = context(repo.path(), data.path(), &["--file", "src/lib.rs"]);
+    assert!(overview.starts_with("src/lib.rs  ("), "{overview}");
+    assert!(overview.contains("Imports:\n1|use std::fmt;"), "{overview}");
+    assert!(overview.contains("fn smoke()"), "{overview}");
+    for (kind, includes_type) in [("mEtHoD", false), ("sTrUcT", true)] {
+        let selected = context(
+            repo.path(),
+            data.path(),
+            &["--file", "src/lib.rs", "--kind", kind],
+        );
+        assert!(selected.contains("Imports:\n1|use std::fmt;"), "{selected}");
+        assert_eq!(
+            selected.contains("pub struct Config"),
+            includes_type,
+            "{selected}"
+        );
+        assert_eq!(
+            selected.matches("fn get(&self) -> &str").count(),
+            1,
+            "{selected}"
+        );
+        assert!(
+            !selected.contains("fn smoke()") && selected.contains("&self.value"),
+            "{selected}"
+        );
+    }
+    let body = context(repo.path(), data.path(), &["Config::get"]);
+    assert!(body.contains("7|        &self.value"), "{body}");
+    assert_eq!(
+        body,
+        context(repo.path(), data.path(), &["get", "--file", "src/lib.rs"])
+    );
+    std::fs::write(repo.path().join("notes.txt"), "current notes\n").unwrap();
+    let output = context(repo.path(), data.path(), &["--file", "notes.txt"]);
+    assert!(
+        output.contains("definition bodies unavailable") && !output.contains("current notes"),
+        "{output}"
+    );
+}
+
+#[test]
+fn grep_shares_its_budget_across_distinct_bodies_and_keeps_context_hints() {
+    let (repo, data) = context_repo();
+    let line = "    consume('αβγδεζηθικλμνξοπρστυφχψω')\n";
+    for n in 0..7 {
+        let name = if n == 6 {
+            "needle".into()
+        } else {
+            format!("needle_{n}")
+        };
+        std::fs::write(
+            repo.path().join(format!("src/case_{n}.py")),
+            format!("def {name}():\n{}", line.repeat(800)),
+        )
+        .unwrap();
+    }
+    let (output, _) = orbit(
+        repo.path(),
+        data.path(),
+        &["grep", "needle", "needle", "hello"],
+    );
+    let blocks: Vec<_> = output
+        .split("\n\n")
+        .filter(|block| block.contains("|def needle"))
+        .collect();
+    let headers: BTreeSet<_> = blocks
+        .iter()
+        .map(|block| block.lines().next().unwrap())
+        .collect();
+    assert_eq!(blocks.len(), 5, "{output}");
+    assert_eq!(headers.len(), blocks.len(), "{output}");
+    assert!(blocks[0].contains("|def needle():"), "{output}");
+    let lengths: Vec<_> = blocks
+        .iter()
+        .map(|block| block.matches("|    consume(").count())
+        .collect();
+    let minimum_body_chars = 16_000 / blocks.len();
+    assert!(
+        lengths.iter().max().unwrap() - lengths.iter().min().unwrap() <= 1,
+        "{output}"
+    );
+    for block in blocks {
+        assert!(block.chars().count() >= minimum_body_chars, "{output}");
+        assert!(block.contains("Source truncated. Context:"), "{output}");
+        assert!(
+            block
+                .lines()
+                .filter(|s| s.contains("|    consume("))
+                .all(|s| s.split_once('|').unwrap().1 == line.trim_end()),
+            "{output}"
+        );
+    }
+    assert!(output.chars().count() <= 24_000, "{output}");
+    let (output, _) = orbit(
+        repo.path(),
+        data.path(),
+        &[&["grep"][..], &["needle"; 100]].concat(),
+    );
+    assert!(output.chars().count() <= 24_000, "{output}");
+    assert!(
+        output.contains("Output budget reached")
+            && output.contains("Candidate context: orbit context --repo="),
+        "{output}"
+    );
 }
 
 #[test]
@@ -1342,7 +1405,7 @@ fn refresh_resolves_relationships_through_import_neighbors() {
     let (output, stderr) = orbit(
         &repo.path,
         data.path(),
-        &["grep", "read_file", "--related-to"],
+        &["context", "read_file", "--related"],
     );
     assert!(stderr.contains("neighbor(s)"), "{stderr}");
     assert!(!stderr.contains("stale"), "{stderr}");
@@ -1352,11 +1415,7 @@ fn refresh_resolves_relationships_through_import_neighbors() {
         "from utils import read_file\n\ndef consume():\n    read_file(\"x\")\n",
     )
     .unwrap();
-    let (output, _) = orbit(
-        &repo.path,
-        data.path(),
-        &["grep", "read_file", "--related-to"],
-    );
+    let output = context(&repo.path, data.path(), &["read_file", "--related"]);
     assert!(
         output.contains("<-- src.consumer.consume  [calls]"),
         "{output}"
@@ -1376,7 +1435,7 @@ fn refresh_resolves_relationships_through_import_neighbors() {
         .len(),
         1
     );
-    let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "hello", "--related-to"]);
+    let (_, stderr) = orbit(&repo.path, data.path(), &["context", "hello", "--related"]);
     assert!(!stderr.contains("refreshed"), "{stderr}");
     assert!(rows(&orbit_sql("SELECT source_id, target_id, relationship_kind FROM gl_edge GROUP BY ALL HAVING count(*) > 1", data.path())).is_empty());
     std::fs::write(
@@ -1389,16 +1448,16 @@ fn refresh_resolves_relationships_through_import_neighbors() {
         "import huge\n\ndef fetch():\n    huge.read()\n",
     )
     .unwrap();
-    let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "fetch", "--related-to"]);
+    let (_, stderr) = orbit(&repo.path, data.path(), &["context", "fetch", "--related"]);
     assert!(
         stderr.contains("relationships may be stale for src/main.py"),
         "{stderr}"
     );
     assert!(orbit_index(&repo.path, data.path()));
-    let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "fetch", "--related-to"]);
+    let (_, stderr) = orbit(&repo.path, data.path(), &["context", "fetch", "--related"]);
     assert!(!stderr.contains("stale"), "{stderr}");
     std::fs::remove_file(repo.path.join("src/utils.py")).unwrap();
-    let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "hello", "--related-to"]);
+    let (_, stderr) = orbit(&repo.path, data.path(), &["context", "hello", "--related"]);
     assert!(
         stderr.contains("refreshed 0 file(s) with 1 neighbor(s), removed 1 file(s)"),
         "{stderr}"

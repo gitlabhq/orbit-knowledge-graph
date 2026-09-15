@@ -2,15 +2,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
-use duckdb_client::search::kind_scope;
+use duckdb_client::i64_column;
 
-use crate::commands::{
-    fqn::{self, Def},
-    setup::spec,
-};
+use crate::commands::fqn::{self, Def};
 use crate::workspace;
-
-const SIGNATURE_LINES: usize = 3;
 
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     let file_mode = target.fqn.is_empty();
@@ -22,21 +17,18 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         .map(|p| repo_relative(&git.repo_path, p))
         .transpose()?;
     let file = file.as_deref();
+    let mut members = Vec::new();
     let mut defs = match (target.fqn.as_slice(), file) {
         ([], None) => anyhow::bail!("pass one or more fqns or globs, or --file <path>"),
         ([], Some(path)) => {
-            let resolved = definitions_in_file(&client, &git, path, &kinds)?;
-            if resolved.is_empty() {
-                let launcher = spec::launcher();
-                anyhow::bail!(
-                    "no indexed definitions in {path:?}{} for commit {} — pass a repo-relative \
-                     path as printed by `{launcher} grep`, and make sure the commit is indexed \
-                     (`{launcher} index <path>`)",
-                    fqn::kind_suffix(&kinds),
-                    git.commit_sha
-                );
-            }
-            resolved
+            members = definitions_in_file(&client, &git, path)?;
+            members
+                .iter()
+                .filter(|def| {
+                    kinds.is_empty() || kinds.iter().any(|k| def.kind.eq_ignore_ascii_case(k))
+                })
+                .cloned()
+                .collect()
         }
         (names, file) => {
             let mut defs = Vec::new();
@@ -56,9 +48,12 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     defs.dedup();
 
     let sources = workspace::source_fingerprints(&client, git.project_id)?;
-
+    let mut files = outline(&defs);
+    if let Some(file) = file.filter(|_| file_mode) {
+        files.entry(file.to_string()).or_default();
+    }
     let mut out = String::new();
-    for (file, file_defs) in outline(&defs) {
+    for (file, file_defs) in files {
         let content = std::fs::read_to_string(git.repo_path.join(&file))
             .with_context(|| format!("failed to read {file}"))?;
         let lines: Vec<&str> = content.lines().collect();
@@ -66,7 +61,14 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
             out.push('\n');
         }
         if sources.get(&file) != Some(&ontology::migrations::sha256_hex(&content)) {
-            render_unverified(&mut out, &file, &lines)?;
+            if file_mode {
+                writeln!(
+                    out,
+                    "{file}  ranges=unverified; definition bodies unavailable; read the file directly"
+                )?;
+            } else {
+                render_unverified(&mut out, &file, &lines)?;
+            }
             continue;
         }
         if file_mode {
@@ -76,51 +78,142 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
                 file_defs.len(),
                 lines.len()
             )?;
+            let imports = client.query_arrow_json(
+                "SELECT DISTINCT start_line, end_line FROM gl_imported_symbol
+                 WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+                 ORDER BY start_line, end_line DESC",
+                &[
+                    git.project_id.into(),
+                    git.commit_sha.clone().into(),
+                    file.clone().into(),
+                ],
+            )?;
+            let mut printed_until = 0;
+            for (start, end) in i64_column(&imports, "start_line")
+                .into_iter()
+                .zip(i64_column(&imports, "end_line"))
+            {
+                let (Ok(start), Ok(end)) = (usize::try_from(start), usize::try_from(end)) else {
+                    continue;
+                };
+                if start == 0
+                    || members
+                        .iter()
+                        .any(|def| def.start <= start && end <= def.end)
+                {
+                    continue;
+                }
+                if printed_until == 0 {
+                    writeln!(out, "Imports:")?;
+                }
+                write_lines(&mut out, &lines, start.max(printed_until + 1), end)?;
+                printed_until = printed_until.max(end);
+            }
+            if printed_until > 0 {
+                out.push('\n');
+            }
         }
-        if target.outline {
-            let members = definitions_in_file(&client, &git, &file, &[])?;
-            render_outline(&mut out, &file_defs, &members, &lines)?;
-        } else {
-            render(&mut out, &file_defs, &lines, file_mode)?;
-        }
+        render(&mut out, &file_defs, &lines)?;
     }
     print!("{out}");
     Ok(())
 }
 
-pub(crate) const INLINE_BODY_LINES: usize = 120;
-
 pub(crate) fn render_bodies(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
     defs: &[Def],
+    max_chars: usize,
+    command: &str,
 ) -> Result<String> {
     let sources = workspace::source_fingerprints(client, git.project_id)?;
+    let mut files = BTreeMap::new();
     let mut out = String::new();
-    for (file, file_defs) in outline(defs) {
-        let content = std::fs::read_to_string(git.repo_path.join(&file))
-            .with_context(|| format!("failed to read {file}"))?;
+    let per_body = max_chars.checked_div(defs.len()).unwrap_or(0);
+    for def in defs {
+        if !files.contains_key(&def.file) {
+            let content = std::fs::read_to_string(git.repo_path.join(&def.file))
+                .with_context(|| format!("failed to read {}", def.file))?;
+            let verified =
+                sources.get(&def.file) == Some(&ontology::migrations::sha256_hex(&content));
+            files.insert(def.file.clone(), (content, verified));
+        }
+        let (content, verified) = &files[&def.file];
         let lines: Vec<&str> = content.lines().collect();
-        let (short, long): (Vec<Def>, Vec<Def>) = file_defs
-            .into_iter()
-            .partition(|d| d.end.saturating_sub(d.start) < INLINE_BODY_LINES);
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        if sources.get(&file) != Some(&ontology::migrations::sha256_hex(&content)) {
-            render_unverified(&mut out, &file, &lines)?;
-            continue;
-        }
-        render(&mut out, &short, &lines, false)?;
-        if !long.is_empty() {
-            let members = definitions_in_file(client, git, &file, &[])?;
-            if !short.is_empty() {
-                out.push('\n');
-            }
-            render_outline(&mut out, &long, &members, &lines)?;
-        }
+        let target = format!("{command} -- {}", crate::commands::shell_quote(&def.fqn));
+        out.push_str(&render_excerpt(def, &lines, *verified, per_body, &target)?);
     }
     Ok(out)
+}
+
+fn render_excerpt(
+    def: &Def,
+    lines: &[&str],
+    verified: bool,
+    max_chars: usize,
+    target: &str,
+) -> Result<String> {
+    let verified = verified && def.start > 0 && def.end >= def.start && def.end <= lines.len();
+    let (start, end) = if verified {
+        (def.start, def.end)
+    } else {
+        (1, lines.len())
+    };
+    let mut block = String::from("\n");
+    if lines.is_empty() || lines_fit(lines, start, end, max_chars) {
+        if verified {
+            render(&mut block, std::slice::from_ref(def), lines)?;
+        } else {
+            render_unverified(&mut block, &def.file, lines)?;
+        }
+        if block.chars().count() <= max_chars {
+            return Ok(block);
+        }
+        block.truncate(1);
+    }
+    if verified {
+        render_header(&mut block, def)?;
+    } else {
+        writeln!(
+            block,
+            "{}  source=working-tree  ranges=unverified",
+            def.file
+        )?;
+    }
+    let hint = format!("Source truncated. Context: {target}\n");
+    let Some(mut remaining) = max_chars.checked_sub(block.chars().count() + hint.chars().count())
+    else {
+        return Ok(String::new());
+    };
+    for n in start..=end {
+        if !lines_fit(lines, n, n, remaining) {
+            break;
+        }
+        let before = block.len();
+        write_lines(&mut block, lines, n, n)?;
+        remaining -= block[before..].chars().count();
+    }
+    block.push_str(&hint);
+    Ok(block)
+}
+
+fn lines_fit(lines: &[&str], start: usize, end: usize, mut remaining: usize) -> bool {
+    if start == 0 || end < start || end > lines.len() {
+        return false;
+    }
+    for n in start..=end {
+        let chars = lines[n - 1]
+            .chars()
+            .take(remaining.saturating_add(1))
+            .count()
+            + n.to_string().len()
+            + "|\n".len();
+        let Some(rest) = remaining.checked_sub(chars) else {
+            return false;
+        };
+        remaining = rest;
+    }
+    true
 }
 
 fn render_unverified(out: &mut String, file: &str, lines: &[&str]) -> std::fmt::Result {
@@ -131,16 +224,12 @@ fn render_unverified(out: &mut String, file: &str, lines: &[&str]) -> std::fmt::
     write_lines(out, lines, 1, lines.len())
 }
 
-fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
-    let trimmed = path.trim_end_matches('/');
-    if !std::path::Path::new(trimmed).is_absolute() {
-        return Ok(trimmed.trim_start_matches("./").to_string());
-    }
-    let canonical =
-        dunce::canonicalize(trimmed).with_context(|| format!("{trimmed} does not exist"))?;
+pub(crate) fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
+    let canonical = dunce::canonicalize(repo_path.join(path))
+        .with_context(|| format!("{path} does not exist"))?;
     let relative = canonical.strip_prefix(repo_path).with_context(|| {
         format!(
-            "{trimmed} is outside the indexed repository {}",
+            "{path} is outside the indexed repository {}",
             repo_path.display()
         )
     })?;
@@ -151,18 +240,13 @@ fn definitions_in_file(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
     path: &str,
-    kinds: &[String],
 ) -> Result<Vec<Def>> {
     let batches = client.query_arrow_json(
-        &format!(
-            "SELECT id, fqn, definition_type, file_path, start_line, end_line
-             FROM gl_definition
-             WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-               AND fqn NOT LIKE '%@%'
-             {}
-             ORDER BY start_line, end_line DESC, fqn",
-            kind_scope("definition_type", kinds)
-        ),
+        "SELECT id, fqn, definition_type, file_path, start_line, end_line
+         FROM gl_definition
+         WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+           AND fqn NOT LIKE '%@%'
+         ORDER BY start_line, end_line DESC, fqn",
         &[
             git.project_id.into(),
             git.commit_sha.clone().into(),
@@ -170,68 +254,6 @@ fn definitions_in_file(
         ],
     )?;
     Ok(fqn::defs_from(&batches))
-}
-
-pub(crate) fn render_outline(
-    out: &mut String,
-    defs: &[Def],
-    members: &[Def],
-    lines: &[&str],
-) -> std::fmt::Result {
-    for (i, def) in defs.iter().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-        writeln!(
-            out,
-            "{}  [{}]  {}:{}-{}",
-            def.fqn, def.kind, def.file, def.start, def.end
-        )?;
-        write_signature(out, lines, def.start, def.end)?;
-        let mut nested: Vec<&Def> = members
-            .iter()
-            .filter(|m| m != &def && belongs_to(def, m))
-            .collect();
-        nested.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
-        let mut covered_until = 0;
-        for member in nested {
-            if member.start <= covered_until {
-                continue;
-            }
-            covered_until = member.end;
-            writeln!(
-                out,
-                "  {}  [{}]  L{}-{}",
-                member.fqn, member.kind, member.start, member.end
-            )?;
-            write_signature(out, lines, member.start, member.end)?;
-        }
-    }
-    Ok(())
-}
-
-fn belongs_to(def: &Def, member: &Def) -> bool {
-    let by_range = member.start >= def.start && member.end <= def.end;
-    let by_name = member
-        .fqn
-        .strip_prefix(&def.fqn)
-        .is_some_and(|rest| rest.starts_with([':', '.', '#']));
-    by_range || by_name
-}
-
-fn write_signature(out: &mut String, lines: &[&str], start: usize, end: usize) -> std::fmt::Result {
-    let last = end.min(start + SIGNATURE_LINES - 1).min(lines.len());
-    for n in start..=last {
-        let line = lines[n - 1];
-        writeln!(out, "{n}|{line}")?;
-        if line.trim_end().ends_with(['{', ':', ';']) {
-            return Ok(());
-        }
-    }
-    if last < end {
-        writeln!(out, "{}|…", last + 1)?;
-    }
-    Ok(())
 }
 
 pub(crate) fn outline(defs: &[Def]) -> BTreeMap<String, Vec<Def>> {
@@ -249,53 +271,26 @@ pub(crate) fn outline(defs: &[Def]) -> BTreeMap<String, Vec<Def>> {
     by_file
 }
 
-pub(crate) fn render(
-    out: &mut String,
-    defs: &[Def],
-    lines: &[&str],
-    include_gaps: bool,
-) -> std::fmt::Result {
-    let mut blocks: Vec<(Option<&Def>, usize, usize)> = Vec::new();
-    let mut cursor = 1;
-    let push_gap = |blocks: &mut Vec<(Option<&Def>, usize, usize)>, start: usize, end: usize| {
-        if !include_gaps || start > end {
-            return;
-        }
-        let blank = lines
-            .get(start - 1..end.min(lines.len()))
-            .is_none_or(|gap| gap.iter().all(|l| l.trim().is_empty()));
-        if !blank {
-            blocks.push((None, start, end));
-        }
-    };
-    for def in defs {
-        if def.start > cursor {
-            push_gap(&mut blocks, cursor, def.start - 1);
-        }
-        blocks.push((Some(def), def.start, def.end));
-        cursor = cursor.max(def.end + 1);
-    }
-    if cursor <= lines.len() {
-        push_gap(&mut blocks, cursor, lines.len());
-    }
+pub(crate) fn render(out: &mut String, defs: &[Def], lines: &[&str]) -> std::fmt::Result {
     let mut prev_single_line = false;
-    for (i, (def, start, end)) in blocks.into_iter().enumerate() {
-        let single_line = start == end;
+    for (i, def) in defs.iter().enumerate() {
+        let single_line = def.start == def.end;
         if i > 0 && !(single_line && prev_single_line) {
             out.push('\n');
         }
         prev_single_line = single_line;
-        if let Some(def) = def {
-            let loc = if include_gaps {
-                format!("L{}-{}", def.start, def.end)
-            } else {
-                format!("{}:{}-{}", def.file, def.start, def.end)
-            };
-            writeln!(out, "{}  [{}]  {loc}", def.fqn, def.kind)?;
-        }
-        write_lines(out, lines, start, end)?;
+        render_header(out, def)?;
+        write_lines(out, lines, def.start, def.end)?;
     }
     Ok(())
+}
+
+fn render_header(out: &mut String, def: &Def) -> std::fmt::Result {
+    writeln!(
+        out,
+        "{}  [{}]  {}:{}-{}",
+        def.fqn, def.kind, def.file, def.start, def.end
+    )
 }
 
 fn write_lines(out: &mut String, lines: &[&str], start: usize, end: usize) -> std::fmt::Result {
@@ -318,6 +313,37 @@ mod tests {
             start,
             end,
         }
+    }
+
+    #[test]
+    fn excerpts_obey_unicode_and_line_boundaries() {
+        let long_line = "é".repeat(300);
+        let lines = ["fn large() {", long_line.as_str(), "}"];
+        let definition = def("m::large", "Function", 1, 3);
+        let target = "orbit context -- 'm::large'";
+        let full = render_excerpt(&definition, &lines, true, 1_000, target).unwrap();
+        assert_eq!(
+            render_excerpt(&definition, &lines, true, full.chars().count(), target).unwrap(),
+            full
+        );
+        let short = render_excerpt(&definition, &lines, true, 180, target).unwrap();
+        assert!(short.chars().count() <= 180 && !short.contains('é'));
+        assert!(short.contains("Source truncated.") && short.contains(target));
+        let empty = render_excerpt(&definition, &[], false, 180, target).unwrap();
+        assert!(empty.contains("ranges=unverified") && !empty.contains("truncated"));
+    }
+
+    #[test]
+    fn file_context_normalizes_paths_and_rejects_escape() {
+        let root = tempfile::TempDir::new().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(repo.join("lib.rs"), "").unwrap();
+        std::fs::write(root.path().join("outside.rs"), "").unwrap();
+        let repo = dunce::canonicalize(repo).unwrap();
+        assert_eq!(repo_relative(&repo, "src/../lib.rs").unwrap(), "lib.rs");
+        assert!(repo_relative(&repo, "../outside.rs").is_err());
+        assert!(repo_relative(&repo, root.path().join("outside.rs").to_str().unwrap()).is_err());
     }
 
     #[test]
@@ -356,12 +382,12 @@ mod tests {
             def("m::run", "Function", 4, 5),
         ];
         let mut out = String::new();
-        render(&mut out, &defs, &lines, true).unwrap();
+        render(&mut out, &defs, &lines).unwrap();
         assert_eq!(
             out,
-            "m::a  [Module]  L1-1\n1|pub mod a;\n\
-             m::b  [Module]  L2-2\n2|pub mod b;\n\n\
-             m::run  [Function]  L4-5\n4|fn run() {\n5|}\n"
+            "m::a  [Module]  src/lib.rs:1-1\n1|pub mod a;\n\
+             m::b  [Module]  src/lib.rs:2-2\n2|pub mod b;\n\n\
+             m::run  [Function]  src/lib.rs:4-5\n4|fn run() {\n5|}\n"
         );
     }
 
@@ -373,55 +399,24 @@ mod tests {
             def("m::b", "Function", 20, 25),
         ];
         let mut out = String::new();
-        render(&mut out, &defs, &lines, true).unwrap();
+        render(&mut out, &defs, &lines).unwrap();
         assert!(out.contains("1|a\n2|b\n3|c\n"));
-        assert!(out.contains("m::b  [Function]  L20-25\n"));
+        assert!(out.contains("m::b  [Function]  src/lib.rs:20-25\n"));
     }
 
     #[test]
-    fn render_without_gaps_prints_only_definition_bodies() {
+    fn render_prints_only_definition_bodies() {
         let lines = vec!["use a;", "", "fn one() {", "}", "", "fn two() {", "}"];
         let defs = vec![
             def("m::one", "Function", 3, 4),
             def("m::two", "Function", 6, 7),
         ];
         let mut out = String::new();
-        render(&mut out, &defs, &lines, false).unwrap();
+        render(&mut out, &defs, &lines).unwrap();
         assert_eq!(
             out,
             "m::one  [Function]  src/lib.rs:3-4\n3|fn one() {\n4|}\n\n\
              m::two  [Function]  src/lib.rs:6-7\n6|fn two() {\n7|}\n"
         );
-    }
-
-    #[test]
-    fn render_with_gaps_prints_non_blank_gaps_between_definitions() {
-        let lines = vec![
-            "use a;",
-            "",
-            "fn one() {",
-            "}",
-            "",
-            "fn two() {",
-            "}",
-            "// tail",
-        ];
-        let defs = vec![
-            def("m::one", "Function", 3, 4),
-            def("m::two", "Function", 6, 7),
-        ];
-        let mut out = String::new();
-        render(&mut out, &defs, &lines, true).unwrap();
-        let numbered: Vec<usize> = out
-            .lines()
-            .filter_map(|l| l.split_once('|').and_then(|(n, _)| n.trim().parse().ok()))
-            .collect();
-        assert_eq!(
-            numbered,
-            vec![1, 2, 3, 4, 6, 7, 8],
-            "blank-only gaps are skipped"
-        );
-        assert!(out.starts_with("1|use a;\n2|\n\nm::one  [Function]"));
-        assert!(out.ends_with("7|}\n\n8|// tail\n"));
     }
 }

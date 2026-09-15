@@ -187,11 +187,24 @@ branch, which the remote graph does not cover. Flows that already give the
 agent a shell get Orbit this way for free; the MCP path exists for the
 surfaces that do not.
 
-Orbit Local exposes code discovery through `grep` and source bodies through
-`context`. Relationship lookups use `grep <fqn>` with `--related-to`, `--callers`,
-or `--callees`. An explicit target after the flag takes precedence over positional
-terms. Path and definition-kind filters apply to the connected results.
-These commands share the indexed definitions and relationships in DuckDB.
+Orbit Local exposes code discovery through `grep` and inspection through
+`context`. `grep` returns the top ten ranked matches without parent or file quotas.
+It includes source for the first five matches regardless of confidence, with exact identifiers first,
+within a shared 24,000-character output budget. Batched queries and path
+listings share that cap. After result listings, the remaining space is divided
+equally among the selected matches. Long bodies stop at a line boundary with a
+truncation notice and a `context` command.
+`grep` has no `--limit` flag. `context <fqn>` prints bodies; with
+`--related` it lists every connection of the same targets instead, with
+direction and edge kind on each line. `--file` and `--kind` narrow the target
+in both modes.
+Both commands share the indexed definitions and relationships in DuckDB.
+
+Agent guidance prefers one-concept `grep` searches and direct `context` reads
+for known definitions or files. Agents reuse returned source for edits, using raw
+reads only for non-code, missing coverage, or unreliable working-tree source;
+literal-text searches use `rg`. Lookups stop once the edit point is clear.
+Name/path matches do not establish connections, field access, or dataflow.
 
 `grep` and `context` hash working-tree source on each request, then reparse
 changed files and their import/relationship neighbors. One DuckDB transaction
@@ -203,6 +216,9 @@ are removed. Source reads with mismatched fingerprints show the full file as
 The manifest keeps empty projects indexed. New references with neither an
 import nor an existing edge need a full `index`. Unsupported project imports
 can leave stale-relationship warnings; a full index rebuilds the relationships.
+
+Setup hooks route searches to `grep` and source reads to `context`. They emit
+nothing without a local graph and never block.
 
 ### Caller identification
 

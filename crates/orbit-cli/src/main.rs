@@ -16,13 +16,11 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
-use code_graph::v2::types::EdgeKind;
 use ontology::Ontology;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
-use strum::IntoEnumIterator;
 use tracing::{Level, debug, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -180,28 +178,16 @@ struct IndexArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("grep"), long_about = descriptions::long("grep"))]
 struct GrepArgs {
-    /// Plain-language queries, e.g. "NATS message publish"; several may be
-    /// given and are searched in one call. Omit them with --path to list
-    /// every definition under that path instead.
-    #[arg(value_name = "QUERY", required_unless_present_any = ["path", "related_to", "callers_of", "callees_of"])]
+    #[arg(
+        help = "One concept per query, e.g. 'rate limit'; batch only independent lookups. Omit with --path to list definitions under that path.",
+        value_name = "QUERY",
+        required_unless_present = "path"
+    )]
     query: Vec<String>,
-
-    #[command(flatten)]
-    relations: RelationArgs,
-
-    /// Print the source bodies of the top three matches even when the search
-    /// is broad. Searches with three or fewer hits include bodies automatically.
-    #[arg(long, requires = "query", conflicts_with = "relation_target")]
-    body: bool,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
-
-    /// Maximum matched definitions to show, shared across the queries of one
-    /// call (at least three each).
-    #[arg(long, default_value = "10", conflicts_with_all = ["relation_target", "edge", "incoming", "outgoing", "tests"])]
-    limit: usize,
 
     /// Only search definitions under this repo-relative directory or file
     /// (e.g. `crates/query-engine`); repeatable, and accepts globs such as
@@ -241,36 +227,12 @@ fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
     kinds.map(|Kinds(names)| names).unwrap_or_default()
 }
 
-fn fqn_arg_help() -> String {
-    format!(
-        "Fully qualified name as printed by `{} grep`, a unique unqualified tail such as \
-         `Type::method`, or a glob such as `crate::module::*`.",
-        commands::setup::spec::launcher()
-    )
-}
-
 fn context_fqn_arg_help() -> String {
     format!(
         "Fully qualified names as printed by `{} grep`, unique unqualified tails such as \
          `Type::method`, or globs such as `crate::module::*`. Several may be given.",
         commands::setup::spec::launcher()
     )
-}
-
-fn edge_kind_names() -> String {
-    EdgeKind::iter()
-        .map(|kind| kind.as_ref().to_lowercase())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn parse_edge_kind(value: &str) -> Result<EdgeKind, String> {
-    value.to_uppercase().parse().map_err(|_| {
-        format!(
-            "unknown edge kind {value:?}; expected one of {}",
-            edge_kind_names()
-        )
-    })
 }
 
 fn sql_long_about() -> String {
@@ -288,18 +250,25 @@ struct ContextArgs {
     #[arg(value_name = "FQN", help = context_fqn_arg_help(), required_unless_present = "file")]
     fqn: Vec<String>,
 
-    /// Restrict to this file (repo-relative or absolute). Alone, prints every
-    /// indexed definition in the file with the lines between them. With FQNs,
-    /// also accepts bare definition names.
-    #[arg(long, value_name = "PATH", visible_alias = "path")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        visible_alias = "path",
+        help = "Show imports and definition bodies, or restrict named definitions to this file (repo-relative or absolute)"
+    )]
     file: Option<String>,
 
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = format!("{KIND_ARG_HELP} Narrows a glob or --file and disambiguates a bare name."))]
     kind: Option<Kinds>,
 
-    /// Print signatures and nested members instead of full bodies.
-    #[arg(long)]
-    outline: bool,
+    /// List every connection of the named definitions instead of their bodies:
+    /// calls in both directions, imports, and extends, including uses via members.
+    #[arg(long, requires = "fqn")]
+    related: bool,
+
+    /// List test, fixture, and generated connections instead of collapsing them into a count.
+    #[arg(long, requires = "related")]
+    tests: bool,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -308,97 +277,6 @@ struct ContextArgs {
     /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
-}
-
-#[derive(Args, Debug, PartialEq)]
-#[group(skip)]
-struct RelationArgs {
-    #[arg(long, value_name = "FQN", group = "relation_target", conflicts_with = "limit", help = format!("List all connections of a definition. {}", fqn_arg_help()))]
-    related_to: Option<Option<String>>,
-
-    #[arg(
-        long = "callers",
-        value_name = "FQN",
-        group = "relation_target",
-        conflicts_with = "limit",
-        help = "List callers of a definition, including calls to its members."
-    )]
-    callers_of: Option<Option<String>>,
-
-    #[arg(
-        long = "callees",
-        value_name = "FQN",
-        group = "relation_target",
-        conflicts_with = "limit",
-        help = "List definitions and imported symbols called by a definition."
-    )]
-    callees_of: Option<Option<String>>,
-
-    #[arg(long, value_name = "KIND", requires = "related_to", conflicts_with_all = ["callers_of", "callees_of"], help = format!(
-            "Only connections of this edge kind ({}); repeatable, case-insensitive.",
-            edge_kind_names()
-        ), value_parser = parse_edge_kind)]
-    edge: Vec<EdgeKind>,
-
-    #[arg(
-        long = "in",
-        requires = "related_to",
-        conflicts_with_all = ["callers_of", "callees_of"],
-        help = "Only incoming connections, including uses via members."
-    )]
-    incoming: bool,
-
-    #[arg(
-        long = "out",
-        requires = "related_to",
-        conflicts_with_all = ["callers_of", "callees_of"],
-        help = "Only outgoing connections."
-    )]
-    outgoing: bool,
-
-    #[arg(
-        long,
-        requires = "relation_target",
-        help = "List test, fixture, and generated connections instead of collapsing them into a count."
-    )]
-    tests: bool,
-}
-
-impl RelationArgs {
-    fn into_target(
-        self,
-        query: &[String],
-    ) -> Result<Option<(String, commands::grep::relations::Filter)>> {
-        let (fqn, edges, incoming, outgoing) = if let Some(fqn) = self.callers_of {
-            (fqn, vec![EdgeKind::Calls], true, false)
-        } else if let Some(fqn) = self.callees_of {
-            (fqn, vec![EdgeKind::Calls], false, true)
-        } else if let Some(fqn) = self.related_to {
-            (fqn, self.edge, self.incoming, self.outgoing)
-        } else {
-            return Ok(None);
-        };
-        let fqn = match fqn {
-            Some(fqn) => fqn,
-            None => {
-                let [fqn] = query else {
-                    anyhow::bail!(
-                        "pass one definition before the relationship flag, or a target after it"
-                    );
-                };
-                fqn.clone()
-            }
-        };
-        Ok(Some((
-            fqn,
-            commands::grep::relations::Filter {
-                edges,
-                incoming,
-                outgoing,
-                tests: self.tests,
-            },
-        )))
-    }
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -706,30 +584,20 @@ async fn dispatch(command: Commands) -> Result<()> {
         }
         Commands::Grep(GrepArgs {
             query,
-            relations,
-            body,
             repo,
-            limit,
             path,
             kind,
             db,
-        }) => {
-            let kind = kind_names(kind);
-            match relations.into_target(&query)? {
-                Some((fqn, filter)) => {
-                    commands::grep::relations::run(fqn, repo, db, filter, &path, &kind)
-                }
-                None => commands::grep::run(
-                    query,
-                    repo,
-                    db,
-                    limit,
-                    path,
-                    orbit_search::RecallFilter { kinds: kind },
-                    body,
-                ),
-            }
-        }
+        }) => commands::grep::run(
+            query,
+            repo,
+            db,
+            path,
+            orbit_search::RecallFilter {
+                kinds: kind_names(kind),
+            },
+        ),
+        Commands::Context(args) if args.related => commands::relations::run(args),
         Commands::Context(args) => commands::context::run(args),
         Commands::Sql(SqlArgs {
             query,
@@ -1298,7 +1166,7 @@ mod tests {
         );
 
         assert!(matches!(
-            Cli::parse_from(["orbit", "grep", "who calls this", "--limit", "5"]).command,
+            Cli::parse_from(["orbit", "grep", "who calls this"]).command,
             Commands::Grep(_)
         ));
         assert!(matches!(
@@ -1360,6 +1228,13 @@ mod tests {
             ["orbit", "local", "grep", "x"].as_slice(),
             &["orbit", "remote", "status"],
             &["orbit", "ask", "x"],
+            &["orbit", "grep", "x", "--body"],
+            &["orbit", "grep", "x", "--limit", "5"],
+            &["orbit", "context", "x", "--outline"],
+            &["orbit", "grep", "x", "--related"],
+            &["orbit", "context", "--file", "a.rs", "--related"],
+            &["orbit", "context", "x", "--callers"],
+            &["orbit", "context", "x", "--tests"],
             &["orbit", "setup", "claude", "--local"],
         ] {
             assert!(

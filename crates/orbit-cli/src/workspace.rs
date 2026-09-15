@@ -126,7 +126,7 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     Ok(IndexedRepo { git, client })
 }
 
-fn absolutize(path: PathBuf) -> Result<PathBuf> {
+pub(crate) fn absolutize(path: PathBuf) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path)
     } else {
