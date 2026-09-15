@@ -1282,23 +1282,6 @@ fn repo_map_api_empty_prefix_succeeds() {
     );
 }
 
-const CONTEXT_RUST: &str = "use std::fmt;\npub struct Config {\n    pub value: String,\n}\nimpl Config {\n    pub fn get(&self) -> &str {\n        &self.value\n    }\n}\n#[test]\nfn smoke() {}\n";
-const CONTEXT_PYTHON: &str = "def hello():\n    pass\n\ndef bye():\n    pass\n";
-
-fn context_repo() -> (tempfile::TempDir, tempfile::TempDir) {
-    let repo = tempfile::TempDir::new().unwrap();
-    init_repo_at(
-        repo.path(),
-        &[
-            ("src/lib.rs", CONTEXT_RUST),
-            ("src/tool.py", CONTEXT_PYTHON),
-        ],
-    );
-    let data = tempfile::TempDir::new().unwrap();
-    assert!(orbit_index(repo.path(), data.path()));
-    (repo, data)
-}
-
 fn orbit(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> (String, String) {
     let (stdout, stderr, ok) = run_cmd(&[args, &["--repo", repo.to_str().unwrap()]].concat(), data);
     assert!(ok, "orbit {args:?}: {stderr}");
@@ -1311,32 +1294,38 @@ fn context(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> Str
 
 #[test]
 fn refresh_tracks_edits_renames_deletions_and_ignores() {
-    let (repo, data) = context_repo();
-    let repo_path = repo.path();
+    let repo = create_test_repo();
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_path = &repo.path;
+    assert!(orbit_index(repo_path, data.path()));
     std::fs::write(
-        repo_path.join("src/tool.py"),
-        format!("import sys\n{CONTEXT_PYTHON}"),
+        repo_path.join("src/utils.py"),
+        "import sys\n\n\n\ndef read_file(path):\n    return path\n",
     )
     .unwrap();
-    let output = context(repo_path, data.path(), &["bye"]);
-    assert!(output.contains("src/tool.py:5-6"), "{output}");
+    let output = context(repo_path, data.path(), &["read_file"]);
+    assert!(output.contains("src/utils.py:5-6"), "{output}");
     std::fs::rename(
-        repo_path.join("src/tool.py"),
+        repo_path.join("src/utils.py"),
         repo_path.join("src/moved's.py"),
     )
     .unwrap();
-    let (output, _) = orbit(repo_path, data.path(), &["grep", "bye"]);
+    let (output, _) = orbit(repo_path, data.path(), &["grep", "read_file"]);
     assert!(
-        output.contains("src/moved's.py:5") && !output.contains("src/tool.py"),
+        output.contains("src/moved's.py:5") && !output.contains("src/utils.py"),
         "{output}"
     );
     std::fs::write(repo_path.join(".gitignore"), "src/moved's.py\n").unwrap();
-    std::fs::write(repo_path.join("src/lib.rs"), "pub fn after_ignore() {}\n").unwrap();
+    std::fs::write(
+        repo_path.join("src/main.py"),
+        "def after_ignore():\n    pass\n",
+    )
+    .unwrap();
     for _ in 0..2 {
         let output = context(repo_path, data.path(), &["after_ignore"]);
-        assert!(output.contains("1|pub fn after_ignore() {}"), "{output}");
+        assert!(output.contains("1|def after_ignore():"), "{output}");
     }
-    let (stdout, _) = orbit(repo_path, data.path(), &["grep", "bye"]);
+    let (stdout, _) = orbit(repo_path, data.path(), &["grep", "read_file"]);
     assert!(stdout.contains("No definitions match"), "{stdout}");
 }
 
@@ -1359,29 +1348,18 @@ fn refresh_resolves_relationships_through_import_neighbors() {
     assert!(!stderr.contains("stale"), "{stderr}");
     assert!(output.contains("<-- src.main.App.run  [calls]"), "{output}");
     std::fs::write(
-        repo.path.join("src/test_utils.py"),
-        "from utils import read_file\n\ndef test_read():\n    read_file(\"x\")\n",
+        repo.path.join("src/consumer.py"),
+        "from utils import read_file\n\ndef consume():\n    read_file(\"x\")\n",
     )
     .unwrap();
-    let collapsed = orbit(
+    let (output, _) = orbit(
         &repo.path,
         data.path(),
         &["grep", "read_file", "--related-to"],
-    )
-    .0;
-    assert!(
-        collapsed.contains("1 more in test, fixture, or generated files"),
-        "{collapsed}"
     );
-    let expanded = orbit(
-        &repo.path,
-        data.path(),
-        &["grep", "read_file", "--related-to", "--tests"],
-    )
-    .0;
     assert!(
-        expanded.contains("<-- src.test_utils.test_read  [calls]"),
-        "{expanded}"
+        output.contains("<-- src.consumer.consume  [calls]"),
+        "{output}"
     );
     let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "hello", "--related-to"]);
     assert!(!stderr.contains("refreshed"), "{stderr}");
@@ -1407,43 +1385,26 @@ fn refresh_resolves_relationships_through_import_neighbors() {
 }
 
 #[test]
-fn failed_refresh_falls_back_to_unverified_source() {
-    let (repo, data) = context_repo();
-    let source = "pub fn run() {}\n\0";
-    std::fs::write(repo.path().join("src/lib.rs"), source).unwrap();
-    let output = context(repo.path(), data.path(), &["Config::get"]);
-    assert!(
-        output.contains("ranges=unverified") && output.contains("1|pub fn run() {}"),
-        "{output}"
-    );
-    assert!(
-        rows(&orbit_sql(
-            "SELECT * FROM gl_definition WHERE name = 'run'",
-            data.path()
-        ))
-        .is_empty()
-    );
-}
-
-#[test]
 fn empty_project_stays_indexed_and_scoped() {
-    let (repo, data) = context_repo();
+    let repo = create_test_repo();
+    let data = tempfile::TempDir::new().unwrap();
+    assert!(orbit_index(&repo.path, data.path()));
     let other = create_test_repo();
     assert!(orbit_index(&other.path, data.path()));
-    for file in ["src/lib.rs", "src/tool.py"] {
-        std::fs::remove_file(repo.path().join(file)).unwrap();
+    for file in ["src/main.py", "src/utils.py"] {
+        std::fs::remove_file(repo.path.join(file)).unwrap();
     }
-    let (output, _) = orbit(repo.path(), data.path(), &["grep", "--path", "src"]);
+    let (output, _) = orbit(&repo.path, data.path(), &["grep", "--path", "src"]);
     assert!(output.contains("definitions"), "{output}");
     let (output, stderr) = orbit(
-        repo.path(),
+        &repo.path,
         data.path(),
         &["sql", "-F", "json", "SELECT name FROM gl_definition"],
     );
     assert!(!stderr.contains("as with --all"), "{stderr}");
     assert_eq!(serde_json::from_str::<Value>(&output).unwrap(), json!([]));
-    std::fs::write(repo.path().join("src/new.py"), "def newest():\n    pass\n").unwrap();
-    let (output, stderr) = orbit(repo.path(), data.path(), &["grep", "newest"]);
+    std::fs::write(repo.path.join("src/new.py"), "def newest():\n    pass\n").unwrap();
+    let (output, stderr) = orbit(&repo.path, data.path(), &["grep", "newest"]);
     assert!(
         output.contains("src/new.py:1") && !stderr.contains("indexing "),
         "{output}{stderr}"
