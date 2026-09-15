@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
@@ -6,8 +6,6 @@ use duckdb_client::i64_column;
 
 use crate::commands::fqn::{self, Def};
 use crate::workspace;
-
-const SIGNATURE_LINES: usize = 3;
 
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     let file_mode = target.fqn.is_empty();
@@ -66,7 +64,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
             if file_mode {
                 writeln!(
                     out,
-                    "{file}  ranges=unverified; outline unavailable; read the file directly"
+                    "{file}  ranges=unverified; definition bodies unavailable; read the file directly"
                 )?;
             } else {
                 render_unverified(&mut out, &file, &lines)?;
@@ -76,7 +74,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         if file_mode {
             writeln!(
                 out,
-                "{file}  (outline; {} definitions, {} lines)",
+                "{file}  ({} definitions, {} lines)",
                 file_defs.len(),
                 lines.len()
             )?;
@@ -114,7 +112,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
             if printed_until > 0 {
                 out.push('\n');
             }
-            render_outline(&mut out, &file_defs, &members, &lines)?;
+            render_file_bodies(&mut out, &file_defs, &lines)?;
         } else {
             render(&mut out, &file_defs, &lines)?;
         }
@@ -260,63 +258,19 @@ fn definitions_in_file(
     Ok(fqn::defs_from(&batches))
 }
 
-pub(crate) fn render_outline(
-    out: &mut String,
-    defs: &[Def],
-    members: &[Def],
-    lines: &[&str],
-) -> std::fmt::Result {
-    let mut shown = BTreeSet::new();
-    for (i, def) in defs.iter().enumerate() {
-        if !shown.insert((def.fqn.as_str(), def.start, def.end)) {
-            continue;
-        }
-        if i > 0 {
-            out.push('\n');
-        }
-        render_header(out, def)?;
-        write_signature(out, lines, def.start, def.end)?;
-        let mut covered_until = 0;
-        for member in members.iter().filter(|m| m != &def && belongs_to(def, m)) {
-            if member.start <= covered_until
-                || !shown.insert((member.fqn.as_str(), member.start, member.end))
-            {
-                continue;
-            }
-            covered_until = member.end;
-            writeln!(
-                out,
-                "  {}  [{}]  L{}-{}",
-                member.fqn, member.kind, member.start, member.end
-            )?;
-            write_signature(out, lines, member.start, member.end)?;
+fn render_file_bodies(out: &mut String, defs: &[Def], lines: &[&str]) -> std::fmt::Result {
+    let mut bodies = Vec::new();
+    for def in defs {
+        let nested = bodies.iter().any(|parent: &&Def| {
+            parent.start <= def.start
+                && def.end <= parent.end
+                && (parent.start < def.start || def.end < parent.end)
+        });
+        if !nested {
+            bodies.push(def);
         }
     }
-    Ok(())
-}
-
-fn belongs_to(def: &Def, member: &Def) -> bool {
-    let by_range = member.start >= def.start && member.end <= def.end;
-    let by_name = member
-        .fqn
-        .strip_prefix(&def.fqn)
-        .is_some_and(|rest| rest.starts_with([':', '.', '#']));
-    by_range || by_name
-}
-
-fn write_signature(out: &mut String, lines: &[&str], start: usize, end: usize) -> std::fmt::Result {
-    let last = end.min(start + SIGNATURE_LINES - 1).min(lines.len());
-    for n in start..=last {
-        let line = lines[n - 1];
-        writeln!(out, "{n}|{line}")?;
-        if line.trim_end().ends_with(['{', ':', ';']) {
-            return Ok(());
-        }
-    }
-    if last < end {
-        writeln!(out, "… signature continues")?;
-    }
-    Ok(())
+    render(out, &bodies.into_iter().cloned().collect::<Vec<_>>(), lines)
 }
 
 pub(crate) fn outline(defs: &[Def]) -> BTreeMap<String, Vec<Def>> {
@@ -481,30 +435,5 @@ mod tests {
             "m::one  [Function]  src/lib.rs:3-4\n3|fn one() {\n4|}\n\n\
              m::two  [Function]  src/lib.rs:6-7\n6|fn two() {\n7|}\n"
         );
-    }
-
-    #[test]
-    fn outline_prints_associated_members_once_without_bodies() {
-        let lines = [
-            "struct Config {",
-            "    name: String,",
-            "}",
-            "impl Config {",
-            "    fn name(&self) -> &str {",
-            "        &self.name",
-            "    }",
-            "}",
-        ];
-        let members = vec![
-            def("m::Config", "Struct", 1, 3),
-            def("m::Config::name", "Field", 2, 2),
-            def("m::Config::name", "Method", 5, 7),
-        ];
-        let mut out = String::new();
-        render_outline(&mut out, &outline(&members)["src/lib.rs"], &members, &lines).unwrap();
-        assert!(out.contains("name: String"), "{out}");
-        assert_eq!(out.matches("[Method]").count(), 1, "{out}");
-        assert!(out.contains("fn name(&self) -> &str"), "{out}");
-        assert!(!out.contains("&self.name"), "{out}");
     }
 }

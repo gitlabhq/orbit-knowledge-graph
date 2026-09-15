@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.10
+version: 0.5.11
 license: MIT
 metadata:
   audience: developers
@@ -74,7 +74,7 @@ wrapper flags, config keys, and pass-through rules:
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
 | `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions by name with up to five source bodies in bounded output |
-| `orbit context [FQN…] [--file P] [--kind K,K]` | Read definition bodies by FQN, unique tail, or glob; `--file` alone prints a file overview |
+| `orbit context [FQN…] [--file P] [--kind K,K]` | Read definition bodies by FQN, unique tail, or glob; `--file` prints imports and definitions in that file |
 | `orbit context FQN --related [--tests]` | List every connection of a definition: calls both ways, imports, extends |
 | `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
 | `orbit schema [TABLE…] [--raw]` | Describe graph tables/columns (index-storage tables hidden); scope to table names to trim output |
@@ -87,7 +87,7 @@ wrapper flags, config keys, and pass-through rules:
 
 Search one concept per `grep`, including multiword identifiers like `rate limit`.
 Inspect known targets directly with `context`; `--file` alone prints imports and
-definition signatures. Numbered source lines are verbatim working-tree text;
+the bodies of definitions in that file. Numbered source lines are verbatim working-tree text;
 strip `NN|` and reuse them for edits instead of rereading the file with raw tools. Stop exploring when the edit
 point is clear; follow identifiers only for remaining questions and batch
 independent lookups. Use raw reads for non-code or unreliable index coverage.
@@ -119,9 +119,9 @@ matches. Long bodies stop at a line boundary with a truncation notice and a
 Use `--path` or `--kind` to narrow results; `grep` has no `--limit` flag.
 
 `context` accepts several names or globs in one call. `--file` takes a
-repo-relative or absolute path inside the checkout. `--file` alone prints an
-overview: imports, definition signatures, and nested members, so a file can be
-mapped before reading one body. With names, it restricts lookup to that file
+repo-relative or absolute path inside the checkout. `--file` alone prints imports
+and the outermost definition bodies in that file; nested definitions already
+covered by an enclosing body are not repeated. With names, it restricts lookup to that file
 and accepts bare names; `--kind` narrows the selection.
 
 `grep` and `context` refresh changed and new source files on demand, removing
@@ -130,7 +130,7 @@ relationship) are reparsed with them; other files are not. Successful refreshes 
 search results and definition ranges. Failed, unsupported, or unstable refreshes
 keep the previous definitions. `context` definition reads return the full current
 file with `ranges=unverified`; `grep` uses the same label and truncates to its source budget.
-File overviews report that the outline is unavailable.
+File requests report that definition bodies are unavailable.
 Test code is included.
 
 File refresh reparses changed files together with their neighbors, so cross-file

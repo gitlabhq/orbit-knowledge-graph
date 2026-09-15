@@ -186,7 +186,7 @@ struct IndexArgs {
                   Use 1-3 identifier keywords for one concept; multiword identifiers \
                   such as 'rate limit' are fine. Read relevant bodies with context, \
                   not cat, head, sed, or raw Read. Use those bodies for exact edits; \
-                  use context --file for a file overview with imports and signatures. \
+                  use context --file for definitions and imports in one file. \
                   Start implementing once the edit point and nearby pattern are clear. \
                   Shows the top ten matches, with source for the first five in a shared 24,000-character output budget. \
                   Remaining source space is divided equally among the selected matches. \
@@ -261,16 +261,16 @@ fn context_fqn_arg_help() -> String {
 
 fn context_long_about() -> String {
     format!(
-        "Read definition bodies, a file overview, or a definition's relationships.\n\n\
+        "Read definition bodies, a file's definitions, or a definition's relationships.\n\n\
          Accepts FQNs from `{launcher} grep`, unique tails like `Type::method`, or globs \
          like `crate::module::*`, and prints their full bodies in file order. \
-         `--file <path>` alone shows imports, definition signatures, and nested members. \
+         `--file <path>` alone shows imports and the bodies of definitions in that file. \
          With names, `--file` restricts lookup and accepts bare names. \
          Add `--related` to list connections instead of bodies; arrows show direction and \
          each line names its edge kind. `--tests` expands test connections.\n\n\
          Refreshes changed and new source files on demand together with their neighbors; \
          other files are not reparsed. \
-         If source cannot be verified, file requests report an unavailable outline; \
+         If source cannot be verified, file requests report unavailable definition bodies; \
          definition requests show the full file labeled `ranges=unverified`. \
          Relationships are re-resolved across the reparsed set; an import of a project file the \
          indexer cannot parse leaves a stale-relationship warning until a full `index`.",
@@ -288,7 +288,7 @@ fn sql_long_about() -> String {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = "Read definition bodies, a file overview, or relationships")]
+#[command(about = "Read definition bodies, a file's definitions, or relationships")]
 #[command(long_about = context_long_about())]
 struct ContextArgs {
     #[arg(value_name = "FQN", help = context_fqn_arg_help(), required_unless_present = "file")]
@@ -298,7 +298,7 @@ struct ContextArgs {
         long,
         value_name = "PATH",
         visible_alias = "path",
-        help = "Show a file overview, or restrict named definitions to this file (repo-relative or absolute)"
+        help = "Show imports and definition bodies, or restrict named definitions to this file (repo-relative or absolute)"
     )]
     file: Option<String>,
 

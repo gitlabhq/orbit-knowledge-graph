@@ -122,6 +122,13 @@ pub(crate) fn run(
         outcome
             .matches
             .sort_by_key(|candidate| !exact_match(&candidate.row, query));
+        if outcome
+            .matches
+            .iter()
+            .any(|candidate| exact_match(&candidate.row, query))
+        {
+            outcome.weak = false;
+        }
         let typed: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         if outcome.terms != typed {
             out.push(&format!("terms: {}\n", outcome.terms.join(" ")));
@@ -141,7 +148,14 @@ pub(crate) fn run(
             continue;
         }
 
-        for candidate in &outcome.matches {
+        let mut body_candidates: Vec<_> = outcome.matches.iter().collect();
+        body_candidates.sort_by_key(|candidate| {
+            (
+                !exact_match(&candidate.row, query),
+                low_value_body(&candidate.row.kind),
+            )
+        });
+        for candidate in body_candidates {
             let def = def_from(&candidate.row);
             if defs.len() < BODY_LIMIT && !defs.contains(&def) {
                 defs.push(def);
@@ -199,12 +213,17 @@ fn test_query(query: &str) -> bool {
 }
 
 fn exact_match(row: &orbit_search::CorpusRow, query: &str) -> bool {
-    row.fqn.eq_ignore_ascii_case(query.trim())
+    let query = query.trim().trim_end_matches(['(', ')']);
+    row.fqn.eq_ignore_ascii_case(query)
         || row
             .fqn
             .rsplit([':', '.', '#', '/'])
             .next()
-            .is_some_and(|name| name.eq_ignore_ascii_case(query.trim()))
+            .is_some_and(|name| name.eq_ignore_ascii_case(query))
+}
+
+fn low_value_body(kind: &str) -> bool {
+    matches!(kind, "Module" | "ModuleExport" | "EnumMember")
 }
 
 fn def_from(row: &orbit_search::CorpusRow) -> Def {

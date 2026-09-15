@@ -171,8 +171,7 @@ included automatically when the query looks like a test name; use `--path` for
 an explicit test-directory search.
 
 Read known definitions directly with `orbit context <fqn>`, or use
-`context --file <path>` for a file overview with imports and definition
-signatures. Numbered source lines are verbatim working-tree text. Strip `NN|`
+`context --file <path>` for imports and the bodies of definitions in that file. Numbered source lines are verbatim working-tree text. Strip `NN|`
 and reuse them for edits instead of rereading the file with raw tools. Start implementing
 once the edit point is clear; follow identifiers only for remaining questions
 and batch independent lookups. `grep` includes source for the first five matches, including weak matches,
@@ -190,8 +189,8 @@ search results and definition ranges together.
 If parsing fails, source is unsupported, or files change during refresh, the
 previous definitions remain indexed. Definition reads return the full current file,
 labeled `ranges=unverified`, instead of potentially stale slices. `grep` uses that
-label and truncates the current file to its source budget. File overviews report that the outline
-is unavailable. Test code is included.
+label and truncates the current file to its source budget. File requests report that definition
+bodies are unavailable. Test code is included.
 
 File refresh also reparses the changed file's neighbors: files it imports, files
 that import it, and files that share a relationship with it. Relationships between

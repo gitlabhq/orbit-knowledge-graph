@@ -5,7 +5,7 @@ instructions: |
   Orbit first for code.
 
   - Find: `{{orbit}} grep "<one concept>"`. Start unfiltered. Miss? Try the code's identifier. Too broad? Add `--path <dir-or-glob>` or `--kind Class,Method`.
-  - Read: `{{orbit}} context "<fqn>"`. Map/imports: `{{orbit}} context --file <path>`. Other repo: `--repo <path>`.
+  - Read: `{{orbit}} context "<fqn>"`. File definitions/imports: `{{orbit}} context --file <path>`. Other repo: `--repo <path>`.
   - Callers: `{{orbit}} context "<fqn>" --related`. Incoming `<--` + `calls` = caller. `--tests` shows hidden tests.
   - Edit from returned source. Numbered lines are verbatim; strip `NN|`. Need a body or test helper? Fetch it with `context`. No whole-file rereads just to edit.
   - No piping Orbit output through `head`, `sed`, or other truncation. `grep` budgets itself. Narrow targets; use supplied `context` commands for more source.
@@ -17,8 +17,8 @@ nudge_search: |
 nudge_usage: |
   Callers/connections: `{{orbit}} context "{{term}}" --related`. Definition: `{{orbit}} grep "{{term}}"`.
 nudge_in_file: |
-  Map/imports: `{{orbit}} context --file={{path}}`. Find: `{{orbit}} grep "{{term}}" --path {{path}}`. Reuse returned source.
+  File definitions/imports: `{{orbit}} context --file={{path}}`. Find: `{{orbit}} grep "{{term}}" --path {{path}}`. Reuse returned source.
 nudge_read: |
-  Map/imports: `{{orbit}} context --file <path>`. Body/helper: `{{orbit}} context "<fqn>"`. Strip `NN|`; edit. No whole-file rereads or `head`. Raw reads only for non-code or missing/unreliable Orbit source.
+  File definitions/imports: `{{orbit}} context --file <path>`. Body/helper: `{{orbit}} context "<fqn>"`. Strip `NN|`; edit. No whole-file rereads or `head`. Raw reads only for non-code or missing/unreliable Orbit source.
 template_vars:
   reminder: "[orbit] when a graph lookup would help, run {{orbit}} grep"

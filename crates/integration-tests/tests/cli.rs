@@ -1264,14 +1264,14 @@ fn context(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> Str
 }
 
 #[test]
-fn context_file_gives_an_overview_and_names_give_bodies() {
+fn context_file_gives_definition_bodies_and_names_select_bodies() {
     let (repo, data) = context_repo();
     let overview = context(repo.path(), data.path(), &["--file", "src/lib.rs"]);
-    assert!(overview.starts_with("src/lib.rs  (outline;"), "{overview}");
+    assert!(overview.starts_with("src/lib.rs  ("), "{overview}");
     assert!(overview.contains("Imports:\n1|use std::fmt;"), "{overview}");
     assert!(overview.contains("fn get(&self) -> &str"), "{overview}");
     assert!(overview.contains("fn smoke()"), "{overview}");
-    assert!(!overview.contains("&self.value"), "{overview}");
+    assert!(overview.contains("&self.value"), "{overview}");
     for (kind, includes_type) in [("mEtHoD", false), ("sTrUcT", true)] {
         let selected = context(
             repo.path(),
@@ -1290,7 +1290,7 @@ fn context_file_gives_an_overview_and_names_give_bodies() {
             "{selected}"
         );
         assert!(
-            !selected.contains("fn smoke()") && !selected.contains("&self.value"),
+            !selected.contains("fn smoke()") && selected.contains("&self.value"),
             "{selected}"
         );
     }
@@ -1303,7 +1303,7 @@ fn context_file_gives_an_overview_and_names_give_bodies() {
     std::fs::write(repo.path().join("notes.txt"), "current notes\n").unwrap();
     let output = context(repo.path(), data.path(), &["--file", "notes.txt"]);
     assert!(
-        output.contains("outline unavailable") && !output.contains("current notes"),
+        output.contains("definition bodies unavailable") && !output.contains("current notes"),
         "{output}"
     );
 }
