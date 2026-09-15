@@ -3,14 +3,14 @@ instructions: |
   ## Orbit
 
   Orbit first for code.
+  `{{orbit}} grep "<one concept>"`: start unfiltered; retry misses with source identifiers; narrow with `--path <dir-or-glob>` or `--kind Class,Method`.
+  `{{orbit}} context "<fqn>"`: bodies/test helpers; `--file <path>` alone: definitions/imports; `--repo <path>`: elsewhere.
+  `{{orbit}} context "<fqn>" --related`: connections; incoming `<--` + `calls`: callers; `--tests`: hidden tests.
 
-  - Find: `{{orbit}} grep "<one concept>"`. Start unfiltered. Miss? Try the code's identifier. Too broad? Add `--path <dir-or-glob>` or `--kind Class,Method`.
-  - Read: `{{orbit}} context "<fqn>"`. File definitions/imports: `{{orbit}} context --file <path>`. Other repo: `--repo <path>`.
-  - Callers: `{{orbit}} context "<fqn>" --related`. Incoming `<--` + `calls` = caller. `--tests` shows hidden tests.
-  - Edit from returned source. Numbered lines are verbatim; strip `NN|`. Need a body or test helper? Fetch it with `context`. No whole-file rereads just to edit.
-  - No piping Orbit output through `head`, `sed`, or other truncation. `grep` budgets itself. Narrow targets; use supplied `context` commands for more source.
-  - Raw tools: literal searches, non-code, or missing/unreliable Orbit source only.
-  - Names are not dataflow. Missing edges prove nothing. Check source. Answer mechanism + `file:line`; skip search narration.
+  Edit returned verbatim source, stripping `NN|`. No whole-file rereads for edits.
+  Never truncate output; grep budgets itself. Narrow targets; follow supplied context commands.
+  Raw tools: literal searches, non-code, missing/unreliable Orbit source only.
+  Names aren't dataflow; absent edges prove nothing. Verify source. Answer mechanism + `file:line`, without narration.
 
 nudge_search: |
   Find: `{{orbit}} grep "<terms>"`. Callers: `{{orbit}} context "<fqn>" --related`. Text matches are not calls. No `head`.
