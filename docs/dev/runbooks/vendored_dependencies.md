@@ -86,7 +86,7 @@ vendored:
   duckdb:
     version: v1.5.5
     vendor_dir: crates/duckdb-client/third_party
-    vendor_script: scripts/vendored/duckdb/vendor-duckdb-fts-sources.sh
+    vendor_script: scripts/vendored/duckdb/fts-vendor.sh
     check_script: scripts/vendored/duckdb/check-duckdb-fts-sources-sync.sh
     extensions:
       fts:
