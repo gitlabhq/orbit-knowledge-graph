@@ -5,7 +5,8 @@ use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_co
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
 use orbit_search::grep::{GrepError, GrepSource, grep};
 use orbit_search::{
-    ANCHOR_SIM, CorpusRow, EXACT_NAME_SIM, GrepOutcome, RecallFilter, SearchVocab, TermRecall,
+    ANCHOR_SIM, CorpusRow, Definition, EXACT_NAME_SIM, GrepOutcome, RecallFilter, SearchVocab,
+    TermRecall,
 };
 
 pub const CONTEXT_SIM_CAP: f64 = 0.99;
@@ -83,12 +84,11 @@ impl DuckDbSearch {
         })
     }
 
-    pub fn list_corpus(&self, filter: &RecallFilter) -> Result<Vec<CorpusRow>> {
+    pub fn list_corpus(&self, filter: &RecallFilter) -> Result<Vec<Definition>> {
         let batches = query(
             &self.client,
             &format!(
-                "SELECT id, fqn, definition_type,
-       file_path || ':' || CAST(start_line AS VARCHAR) AS loc, end_line
+                "SELECT id, fqn, definition_type, file_path, start_line, end_line
 FROM search_corpus
 WHERE TRUE
 {}
@@ -96,22 +96,7 @@ ORDER BY file_path, start_line, end_line DESC, fqn",
                 kind_scope("definition_type", &filter.kinds)
             ),
         )?;
-        let ids = i64_column(&batches, "id");
-        let fqns = string_column(&batches, "fqn");
-        let kinds = string_column(&batches, "definition_type");
-        let locs = string_column(&batches, "loc");
-        let end_lines = i64_column(&batches, "end_line");
-        Ok((0..ids.len())
-            .map(|i| CorpusRow {
-                id: ids[i],
-                fqn: fqns[i].clone(),
-                kind: kinds[i].clone(),
-                loc: locs[i].clone(),
-                end_line: end_lines[i],
-                degree: 0,
-                grams: 0,
-            })
-            .collect())
+        Ok(definitions_from_batches(&batches))
     }
 }
 
@@ -371,9 +356,7 @@ lens AS (
   WHERE commit_sha = {sha}
     AND def_id IN (SELECT id FROM cand)
 )
-SELECT c.id, c.fqn, c.definition_type,
-       c.file_path || ':' || CAST(c.start_line AS VARCHAR) AS loc,
-       c.end_line,
+SELECT c.id, c.fqn, c.definition_type, c.file_path, c.start_line, c.end_line,
        COALESCE(deg.degree, 0) AS degree,
        COALESCE(lens.grams, 0) AS grams
 FROM cand c
@@ -382,21 +365,34 @@ LEFT JOIN lens ON lens.def_id = c.id"
     )
 }
 
-fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
+pub fn definitions_from_batches(batches: &[RecordBatch]) -> Vec<Definition> {
     let ids = i64_column(batches, "id");
     let fqns = string_column(batches, "fqn");
     let kinds = string_column(batches, "definition_type");
-    let locs = string_column(batches, "loc");
-    let end_lines = i64_column(batches, "end_line");
-    let degrees = i64_column(batches, "degree");
-    let grams = i64_column(batches, "grams");
+    let files = string_column(batches, "file_path");
+    let starts = i64_column(batches, "start_line");
+    let ends = i64_column(batches, "end_line");
     (0..ids.len())
-        .map(|i| CorpusRow {
+        .map(|i| Definition {
             id: ids[i],
             fqn: fqns[i].clone(),
             kind: kinds[i].clone(),
-            loc: locs[i].clone(),
-            end_line: end_lines[i],
+            file: files[i].clone(),
+            start: usize::try_from(starts[i]).unwrap_or(1),
+            end: usize::try_from(ends[i]).unwrap_or(0),
+        })
+        .collect()
+}
+
+fn rows_from_batches(batches: &[RecordBatch]) -> Vec<CorpusRow> {
+    let definitions = definitions_from_batches(batches);
+    let degrees = i64_column(batches, "degree");
+    let grams = i64_column(batches, "grams");
+    definitions
+        .into_iter()
+        .enumerate()
+        .map(|(i, definition)| CorpusRow {
+            definition,
             degree: degrees[i] as u64,
             grams: grams[i] as u64,
         })

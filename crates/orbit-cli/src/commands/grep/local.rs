@@ -151,7 +151,17 @@ mod tests {
         let outcome = search
             .grep("dlq publish", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        assert!(!outcome.matches.is_empty());
+        assert_eq!(
+            outcome.matches[0].definition,
+            orbit_search::Definition {
+                id: 1,
+                fqn: "Dlq::publish".to_string(),
+                kind: "Method".to_string(),
+                file: "app/services/dlq.rb".to_string(),
+                start: 1,
+                end: 2,
+            }
+        );
         assert!(!outcome.weak);
         assert!(outcome.unmatched_terms.is_empty());
     }
@@ -168,7 +178,7 @@ mod tests {
         let outcome = search
             .grep("limit", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        let ids: Vec<i64> = outcome.matches.iter().map(|m| m.row.id).collect();
+        let ids: Vec<i64> = outcome.matches.iter().map(|m| m.definition.id).collect();
         assert_eq!(ids, vec![2]);
     }
 
@@ -184,7 +194,7 @@ mod tests {
         let outcome = search
             .grep("limit", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        let mut ids: Vec<i64> = outcome.matches.iter().map(|m| m.row.id).collect();
+        let mut ids: Vec<i64> = outcome.matches.iter().map(|m| m.definition.id).collect();
         ids.sort_unstable();
         assert_eq!(ids, vec![1, 3]);
     }
@@ -213,7 +223,7 @@ mod tests {
         let outcome = search
             .grep("limit", 5, &vocab, &kinds(&["constant", "Field"]))
             .unwrap();
-        let mut ids: Vec<i64> = outcome.matches.iter().map(|m| m.row.id).collect();
+        let mut ids: Vec<i64> = outcome.matches.iter().map(|m| m.definition.id).collect();
         ids.sort_unstable();
         assert_eq!(ids, vec![1, 2]);
     }
@@ -248,8 +258,8 @@ mod tests {
         let outcome = search
             .grep("compile", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        assert_eq!(outcome.matches[0].row.id, 1);
-        assert_eq!(outcome.matches[1].row.id, 2);
+        assert_eq!(outcome.matches[0].definition.id, 1);
+        assert_eq!(outcome.matches[1].definition.id, 2);
         assert!(!outcome.weak);
     }
 
@@ -264,7 +274,7 @@ mod tests {
         let outcome = search
             .grep("mr-title-check", 5, &vocab, &RecallFilter::default())
             .unwrap();
-        assert_eq!(outcome.matches[0].row.fqn, "mr-title-check");
+        assert_eq!(outcome.matches[0].definition.fqn, "mr-title-check");
         assert!(!outcome.weak);
     }
 
@@ -283,7 +293,7 @@ mod tests {
             outcome.unmatched_terms.is_empty(),
             "identifiers colliding with English stopwords must recall"
         );
-        assert_eq!(outcome.matches[0].row.id, 1);
+        assert_eq!(outcome.matches[0].definition.id, 1);
     }
 
     #[test]

@@ -2,49 +2,30 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
-use duckdb_client::search::kind_scope;
+use duckdb_client::search::definitions_from_batches;
+use orbit_search::Definition;
 
-use crate::commands::{
-    fqn::{self, Def},
-    setup::spec,
-};
+use crate::commands::{definition, setup::spec};
 use crate::workspace;
 
 const SIGNATURE_LINES: usize = 3;
 
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
-    let file_mode = target.fqn.is_empty();
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
-    let kinds = crate::kind_names(target.kind);
-    let file = target
-        .file
-        .as_deref()
-        .map(|p| repo_relative(&git.repo_path, p))
-        .transpose()?;
-    let file = file.as_deref();
-    let mut defs = match (target.fqn.as_slice(), file) {
-        ([], None) => anyhow::bail!("pass one or more fqns or globs, or --file <path>"),
-        ([], Some(path)) => {
-            let resolved = definitions_in_file(&client, &git, path, &kinds)?;
-            if resolved.is_empty() {
-                let launcher = spec::launcher();
-                anyhow::bail!(
-                    "no indexed definitions in {path:?}{} for commit {} — pass a repo-relative \
-                     path as printed by `{launcher} grep`, and make sure the commit is indexed \
-                     (`{launcher} index <path>`)",
-                    fqn::kind_suffix(&kinds),
-                    git.commit_sha
-                );
-            }
-            resolved
+    let (file, ids) = resolve_targets(&git.repo_path, &target.target)?;
+    let file_mode = file.is_some();
+    let mut defs = if let Some(path) = file.as_deref() {
+        let definitions = definitions_in_file(&client, &git, path)?;
+        if definitions.is_empty() {
+            let launcher = spec::launcher();
+            anyhow::bail!(
+                "no indexed definitions in {path:?} for commit {} — run `{launcher} grep` or index the checkout",
+                git.commit_sha
+            );
         }
-        (names, file) => {
-            let mut defs = Vec::new();
-            for name in names {
-                defs.extend(fqn::resolve(&client, &git, name, file, &kinds)?);
-            }
-            defs
-        }
+        definitions
+    } else {
+        definition::resolve_ids(&client, &git, &ids)?
     };
     defs.sort_by(|a, b| {
         a.file
@@ -72,7 +53,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
             )?;
         }
         if target.outline {
-            let members = definitions_in_file(&client, &git, &file, &[])?;
+            let members = definitions_in_file(&client, &git, &file)?;
             render_outline(&mut out, &file_defs, &members, &lines)?;
         } else {
             render(&mut out, &file_defs, &lines, file_mode)?;
@@ -87,14 +68,14 @@ pub(crate) const INLINE_BODY_LINES: usize = 120;
 pub(crate) fn render_bodies(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
-    defs: &[Def],
+    defs: &[Definition],
 ) -> Result<String> {
     let mut out = String::new();
     for (file, file_defs) in outline(defs) {
         let content = std::fs::read_to_string(git.repo_path.join(&file))
             .with_context(|| format!("failed to read {file}"))?;
         let lines: Vec<&str> = content.lines().collect();
-        let (short, long): (Vec<Def>, Vec<Def>) = file_defs
+        let (short, long): (Vec<Definition>, Vec<Definition>) = file_defs
             .into_iter()
             .partition(|d| d.end.saturating_sub(d.start) < INLINE_BODY_LINES);
         if !out.is_empty() {
@@ -102,7 +83,7 @@ pub(crate) fn render_bodies(
         }
         render(&mut out, &short, &lines, false)?;
         if !long.is_empty() {
-            let members = definitions_in_file(client, git, &file, &[])?;
+            let members = definitions_in_file(client, git, &file)?;
             if !short.is_empty() {
                 out.push('\n');
             }
@@ -112,16 +93,38 @@ pub(crate) fn render_bodies(
     Ok(out)
 }
 
-fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
-    let trimmed = path.trim_end_matches('/');
-    if !std::path::Path::new(trimmed).is_absolute() {
-        return Ok(trimmed.trim_start_matches("./").to_string());
+pub(crate) fn resolve_targets(
+    repo_path: &std::path::Path,
+    targets: &[String],
+) -> Result<(Option<String>, Vec<i64>)> {
+    if let [target] = targets
+        && repo_path.join(target).is_file()
+    {
+        return Ok((Some(repo_relative(repo_path, target)?), Vec::new()));
     }
-    let canonical =
-        dunce::canonicalize(trimmed).with_context(|| format!("{trimmed} does not exist"))?;
+    let ids = targets
+        .iter()
+        .map(|target| {
+            target
+                .strip_prefix("Definition:")
+                .and_then(|id| id.parse().ok())
+                .with_context(|| {
+                    format!(
+                        "{target:?} is not a Definition:<id> from `{} grep` or an existing file",
+                        spec::launcher()
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((None, ids))
+}
+
+fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
+    let canonical = dunce::canonicalize(repo_path.join(path))
+        .with_context(|| format!("{path} does not exist"))?;
     let relative = canonical.strip_prefix(repo_path).with_context(|| {
         format!(
-            "{trimmed} is outside the indexed repository {}",
+            "{path} is outside the indexed repository {}",
             repo_path.display()
         )
     })?;
@@ -132,31 +135,26 @@ fn definitions_in_file(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
     path: &str,
-    kinds: &[String],
-) -> Result<Vec<Def>> {
+) -> Result<Vec<Definition>> {
     let batches = client.query_arrow_json(
-        &format!(
-            "SELECT id, fqn, definition_type, file_path, start_line, end_line
-             FROM gl_definition
-             WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-               AND fqn NOT LIKE '%@%'
-             {}
-             ORDER BY start_line, end_line DESC, fqn",
-            kind_scope("definition_type", kinds)
-        ),
+        "SELECT id, fqn, definition_type, file_path, start_line, end_line
+         FROM gl_definition
+         WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+           AND fqn NOT LIKE '%@%'
+         ORDER BY start_line, end_line DESC, fqn",
         &[
             git.project_id.into(),
             git.commit_sha.clone().into(),
             path.into(),
         ],
     )?;
-    Ok(fqn::defs_from(&batches))
+    Ok(definitions_from_batches(&batches))
 }
 
 pub(crate) fn render_outline(
     out: &mut String,
-    defs: &[Def],
-    members: &[Def],
+    defs: &[Definition],
+    members: &[Definition],
     lines: &[&str],
 ) -> std::fmt::Result {
     for (i, def) in defs.iter().enumerate() {
@@ -169,7 +167,7 @@ pub(crate) fn render_outline(
             def.fqn, def.kind, def.file, def.start, def.end
         )?;
         write_signature(out, lines, def.start, def.end)?;
-        let mut nested: Vec<&Def> = members
+        let mut nested: Vec<&Definition> = members
             .iter()
             .filter(|m| m != &def && belongs_to(def, m))
             .collect();
@@ -191,7 +189,7 @@ pub(crate) fn render_outline(
     Ok(())
 }
 
-fn belongs_to(def: &Def, member: &Def) -> bool {
+fn belongs_to(def: &Definition, member: &Definition) -> bool {
     let by_range = member.start >= def.start && member.end <= def.end;
     let by_name = member
         .fqn
@@ -215,8 +213,8 @@ fn write_signature(out: &mut String, lines: &[&str], start: usize, end: usize) -
     Ok(())
 }
 
-pub(crate) fn outline(defs: &[Def]) -> BTreeMap<String, Vec<Def>> {
-    let mut by_file: BTreeMap<String, Vec<Def>> = BTreeMap::new();
+pub(crate) fn outline(defs: &[Definition]) -> BTreeMap<String, Vec<Definition>> {
+    let mut by_file: BTreeMap<String, Vec<Definition>> = BTreeMap::new();
     for def in defs {
         let entry = by_file.entry(def.file.clone()).or_default();
         if entry
@@ -232,23 +230,24 @@ pub(crate) fn outline(defs: &[Def]) -> BTreeMap<String, Vec<Def>> {
 
 pub(crate) fn render(
     out: &mut String,
-    defs: &[Def],
+    defs: &[Definition],
     lines: &[&str],
     include_gaps: bool,
 ) -> std::fmt::Result {
-    let mut blocks: Vec<(Option<&Def>, usize, usize)> = Vec::new();
+    let mut blocks: Vec<(Option<&Definition>, usize, usize)> = Vec::new();
     let mut cursor = 1;
-    let push_gap = |blocks: &mut Vec<(Option<&Def>, usize, usize)>, start: usize, end: usize| {
-        if !include_gaps || start > end {
-            return;
-        }
-        let blank = lines
-            .get(start - 1..end.min(lines.len()))
-            .is_none_or(|gap| gap.iter().all(|l| l.trim().is_empty()));
-        if !blank {
-            blocks.push((None, start, end));
-        }
-    };
+    let push_gap =
+        |blocks: &mut Vec<(Option<&Definition>, usize, usize)>, start: usize, end: usize| {
+            if !include_gaps || start > end {
+                return;
+            }
+            let blank = lines
+                .get(start - 1..end.min(lines.len()))
+                .is_none_or(|gap| gap.iter().all(|l| l.trim().is_empty()));
+            if !blank {
+                blocks.push((None, start, end));
+            }
+        };
     for def in defs {
         if def.start > cursor {
             push_gap(&mut blocks, cursor, def.start - 1);
@@ -290,8 +289,8 @@ fn write_lines(out: &mut String, lines: &[&str], start: usize, end: usize) -> st
 mod tests {
     use super::*;
 
-    fn def(fqn: &str, kind: &str, start: usize, end: usize) -> Def {
-        Def {
+    fn def(fqn: &str, kind: &str, start: usize, end: usize) -> Definition {
+        Definition {
             id: 0,
             fqn: fqn.to_string(),
             kind: kind.to_string(),
@@ -299,6 +298,23 @@ mod tests {
             start,
             end,
         }
+    }
+
+    #[test]
+    fn targets_resolve_definition_references_or_one_file() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("src")).unwrap();
+        std::fs::write(root.path().join("src/lib.rs"), "").unwrap();
+        let repo = dunce::canonicalize(root.path()).unwrap();
+        assert_eq!(
+            resolve_targets(&repo, &["src/lib.rs".into()]).unwrap(),
+            (Some("src/lib.rs".into()), Vec::new())
+        );
+        assert_eq!(
+            resolve_targets(&repo, &["Definition:7".into(), "Definition:9".into()]).unwrap(),
+            (None, vec![7, 9])
+        );
+        assert!(resolve_targets(&repo, &["Type::method".into()]).is_err());
     }
 
     #[test]

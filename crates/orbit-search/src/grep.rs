@@ -3,7 +3,7 @@ use std::fmt;
 
 use crate::rank::rank_and_trim;
 use crate::text::{camel_words, content_words};
-use crate::types::CorpusRow;
+use crate::types::{CorpusRow, Definition};
 use crate::vocab::SearchVocab;
 
 pub struct GrepOutcome {
@@ -16,7 +16,7 @@ pub struct GrepOutcome {
 }
 
 pub struct GrepMatch {
-    pub row: CorpusRow,
+    pub definition: Definition,
     pub score: f64,
 }
 
@@ -145,7 +145,7 @@ pub fn grep<S: GrepSource>(
     let index: HashMap<i64, usize> = corpus
         .iter()
         .enumerate()
-        .map(|(i, row)| (row.id, i))
+        .map(|(i, row)| (row.definition.id, i))
         .collect();
     let mut sims = vec![vec![0.0; search_terms.len()]; corpus.len()];
     for (t, recall) in recalls.iter().enumerate() {
@@ -171,7 +171,7 @@ pub fn grep<S: GrepSource>(
                 .iter()
                 .max_by(|a, b| a.1.total_cmp(&b.1))
                 .and_then(|&(id, _)| index.get(&id))
-                .map(|&i| (term.clone(), corpus[i].fqn.clone()))
+                .map(|&i| (term.clone(), corpus[i].definition.fqn.clone()))
         })
         .collect();
 
@@ -180,7 +180,7 @@ pub fn grep<S: GrepSource>(
     let matches: Vec<GrepMatch> = hits
         .into_iter()
         .map(|h| GrepMatch {
-            row: corpus[h.index].clone(),
+            definition: corpus[h.index].definition.clone(),
             score: h.score,
         })
         .collect();
@@ -262,7 +262,7 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.matches.len(), 2);
         assert_eq!(outcome.total, 2);
-        assert_eq!(outcome.matches[0].row.id, HOOK_ID);
+        assert_eq!(outcome.matches[0].definition.id, HOOK_ID);
         assert!(!outcome.weak, "both terms fully anchor one row");
         assert!(outcome.unmatched_terms.is_empty());
     }

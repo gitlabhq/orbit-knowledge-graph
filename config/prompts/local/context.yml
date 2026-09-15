@@ -1,11 +1,11 @@
 name: context
-version: 1.0.0
-short: Print the source bodies of definitions by fqn or unqualified name
+version: 1.1.0
+short: Read local definitions or one source file
 description: >-
-  Print the source bodies of definitions by fqn or unqualified name
+  Read local definitions or one source file.
 
 
-  Bodies come from the working tree, so you can read several grep matches in
-  one call. A glob such as `crate::module::*` prints every match in file order.
-  Use `--file` to read a whole file as its definitions, or `--outline` to map a
-  large type before reading one method.
+  Pass one or more `Definition:<id>` references from grep, or one existing file
+  path in the current checkout. Definition references select exact graph nodes;
+  file paths show the file's indexed definitions. Use `--outline` for signatures
+  and nested members, or `--related` for relationships.

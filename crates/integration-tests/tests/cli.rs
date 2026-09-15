@@ -1214,7 +1214,7 @@ fn grep_loads_bundled_extension_in_fresh_data_dir() {
 }
 
 #[test]
-fn grep_callers_order_is_stable_across_overloads() {
+fn context_relationship_order_is_stable_across_overloads() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
     let repo = workspace.path().join("repo");
@@ -1247,14 +1247,21 @@ fn grep_callers_order_is_stable_across_overloads() {
         ("Target.ping", "Connections (5):"),
         ("Target", "Used via members (5)"),
     ] {
-        let (first, stderr, ok) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-        assert!(ok, "grep {fqn} --callers failed: {stderr}");
+        let (matches, stderr, ok) = run_cmd(&["grep", fqn, "--repo", repo_arg], dd);
+        assert!(ok, "grep {fqn} failed: {stderr}");
+        let reference = matches
+            .lines()
+            .find(|line| line.split_whitespace().nth(1) == Some(fqn))
+            .and_then(|line| line.split_whitespace().next())
+            .unwrap();
+        let args = ["context", reference, "--related", "--repo", repo_arg];
+        let (first, stderr, ok) = run_cmd(&args, dd);
+        assert!(ok, "context {reference} --related failed: {stderr}");
         assert!(first.contains(section), "{fqn}: {first}");
         assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
         assert_eq!(first.matches("<-- Caller.run ").count(), 3, "{first}");
         for _ in 0..10 {
-            let (again, _, _) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-            assert_eq!(first, again, "grep {fqn} --callers output must be stable");
+            assert_eq!(first, run_cmd(&args, dd).0, "{reference} output changed");
         }
     }
 }

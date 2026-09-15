@@ -95,11 +95,15 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
         });
     }
     hits.sort_by(|a, b| {
-        b.score
+        let score = b
+            .score
             .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| corpus[a.index].fqn.len().cmp(&corpus[b.index].fqn.len()))
-            .then_with(|| corpus[a.index].id.cmp(&corpus[b.index].id))
+            .unwrap_or(std::cmp::Ordering::Equal);
+        let a = &corpus[a.index].definition;
+        let b = &corpus[b.index].definition;
+        score
+            .then_with(|| a.fqn.len().cmp(&b.fqn.len()))
+            .then_with(|| a.id.cmp(&b.id))
     });
     hits.truncate(cap);
     hits
@@ -114,14 +118,11 @@ fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Ve
             break;
         }
         let row = &corpus[r.index];
-        let file = row
-            .loc
-            .rsplit_once(':')
-            .map_or(row.loc.clone(), |(f, _)| f.to_string());
-        if !file.is_empty() && per_file.get(&file).is_some_and(|&n| n >= MAX_PER_FILE) {
+        let file = &row.definition.file;
+        if !file.is_empty() && per_file.get(file).is_some_and(|&n| n >= MAX_PER_FILE) {
             continue;
         }
-        let parent = parent_key(&row.fqn);
+        let parent = parent_key(&row.definition.fqn);
         if per_parent
             .get(&parent)
             .is_some_and(|&n| n >= MAX_PER_PARENT)
@@ -129,7 +130,7 @@ fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Ve
             continue;
         }
         if !file.is_empty() {
-            *per_file.entry(file).or_insert(0) += 1;
+            *per_file.entry(file.clone()).or_insert(0) += 1;
         }
         *per_parent.entry(parent).or_insert(0) += 1;
         kept.push(r);
@@ -181,7 +182,10 @@ mod tests {
             vec![1.0, 0.0, 0.0],
         ];
         let hits = rank(&corpus, &sims, &[1.0, 1.0, 1.0], 10);
-        let order: Vec<&str> = hits.iter().map(|h| corpus[h.index].fqn.as_str()).collect();
+        let order: Vec<&str> = hits
+            .iter()
+            .map(|h| corpus[h.index].definition.fqn.as_str())
+            .collect();
         assert_eq!(order, vec!["Repo::commit", "Repo::komit", "Repo::other"]);
         assert!(hits[0].confident());
         assert!(!hits[1].anchored());
@@ -202,7 +206,7 @@ mod tests {
         let sims = vec![vec![1.0], vec![1.0], vec![0.0]];
         let hits = rank(&corpus, &sims, &[1.0], 10);
         assert_eq!(hits.len(), 2);
-        assert_eq!(corpus[hits[0].index].fqn, "Repo::commit");
+        assert_eq!(corpus[hits[0].index].definition.fqn, "Repo::commit");
     }
 
     #[test]
@@ -228,7 +232,10 @@ mod tests {
         let corpus = vec![leaf, hub];
         let sims = vec![vec![1.0], vec![1.0]];
         let hits = rank(&corpus, &sims, &[1.0], 10);
-        assert_eq!(corpus[hits[0].index].fqn, "Compiler::check_depth_limit");
+        assert_eq!(
+            corpus[hits[0].index].definition.fqn,
+            "Compiler::check_depth_limit"
+        );
         assert!(
             hits[0].score < 2.0 * hits[1].score,
             "degree is a tiebreaker, not a dominant signal"
@@ -244,7 +251,7 @@ mod tests {
         let corpus = vec![stem, exact];
         let sims = vec![vec![ANCHOR_SIM], vec![EXACT_NAME_SIM]];
         let hits = rank(&corpus, &sims, &[1.0], 10);
-        assert_eq!(corpus[hits[0].index].fqn, "compiler::compile");
+        assert_eq!(corpus[hits[0].index].definition.fqn, "compiler::compile");
         assert!(hits[0].anchored() && hits[1].anchored());
     }
 
@@ -255,7 +262,7 @@ mod tests {
         let corpus = vec![hub, row(2, "Repo::commit_hook")];
         let sims = vec![vec![1.0, 0.0], vec![1.0, 1.0]];
         let hits = rank(&corpus, &sims, &[1.0, 1.0], 10);
-        assert_eq!(corpus[hits[0].index].fqn, "Repo::commit_hook");
+        assert_eq!(corpus[hits[0].index].definition.fqn, "Repo::commit_hook");
     }
 
     #[test]
@@ -266,22 +273,22 @@ mod tests {
         ];
         let sims = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
         let hits = rank(&corpus, &sims, &[9.0, 1.1], 10);
-        assert_eq!(corpus[hits[0].index].fqn, "Ci::AutoCancel");
+        assert_eq!(corpus[hits[0].index].definition.fqn, "Ci::AutoCancel");
         assert!(hits[0].score > 5.0 * hits[1].score);
     }
 
     #[test]
     fn parent_rejection_does_not_burn_file_quota() {
-        let row_at = |id: i64, fqn: &str, loc: &str| {
+        let row_at = |id: i64, fqn: &str, file: &str| {
             let mut r = row(id, fqn);
-            r.loc = loc.to_string();
+            r.definition.file = file.to_string();
             r
         };
         let corpus = vec![
-            row_at(1, "A::x1", "f.rb:1"),
-            row_at(2, "A::x2", "f.rb:2"),
-            row_at(3, "A::x3", "f.rb:3"),
-            row_at(4, "B::y", "f.rb:4"),
+            row_at(1, "A::x1", "f.rb"),
+            row_at(2, "A::x2", "f.rb"),
+            row_at(3, "A::x3", "f.rb"),
+            row_at(4, "B::y", "f.rb"),
         ];
         let hits = (0..4)
             .map(|index| Hit {

@@ -1,13 +1,12 @@
 mod local;
-pub(crate) mod relations;
 
 use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use orbit_search::{RecallFilter, SearchVocab, content_words};
+use orbit_search::{Definition, RecallFilter, SearchVocab, content_words};
 
-use crate::commands::{context, fqn::Def};
+use crate::commands::context;
 use local::LocalBackend;
 
 fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVocab, S::Error> {
@@ -39,14 +38,13 @@ pub(crate) fn run(
     limit: usize,
     paths: Vec<String>,
     filter: RecallFilter,
-    body: bool,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
     if let Some(query) = queries.iter().find(|q| content_words(q).is_empty()) {
         anyhow::bail!(
             "no usable search terms in query: {query:?} — to list every definition in a \
              file or directory instead, run `{launcher} grep --path <path>`; to print a whole \
-             file, `{launcher} context --file <path>`"
+             file, `{launcher} context <path>`"
         );
     }
 
@@ -64,7 +62,6 @@ pub(crate) fn run(
     }
 
     let vocab = build_vocab(backend.search())?;
-    let limit = if body { limit.min(BODY_LIMIT) } else { limit };
     let per_query_limit = (limit / queries.len()).max(MIN_HITS_PER_QUERY.min(limit));
     for (i, query) in queries.iter().enumerate() {
         if i > 0 {
@@ -96,34 +93,20 @@ pub(crate) fn run(
         }
 
         report_results(&mut out, &outcome)?;
-        if body || outcome.total <= BODY_LIMIT {
-            let defs: Vec<Def> = outcome
-                .matches
-                .iter()
-                .take(BODY_LIMIT)
-                .map(|m| def_from(&m.row))
-                .collect();
-            writeln!(out)?;
-            write!(
-                out,
-                "{}",
-                context::render_bodies(backend.search().client(), backend.git(), &defs)?
-            )?;
-        }
+        let defs: Vec<Definition> = outcome
+            .matches
+            .iter()
+            .take(BODY_LIMIT)
+            .map(|m| m.definition.clone())
+            .collect();
+        writeln!(out)?;
+        write!(
+            out,
+            "{}",
+            context::render_bodies(backend.search().client(), backend.git(), &defs)?
+        )?;
     }
     Ok(())
-}
-
-fn def_from(row: &orbit_search::CorpusRow) -> Def {
-    let (file, start) = row.loc.rsplit_once(':').unwrap_or((&row.loc, "1"));
-    Def {
-        id: row.id,
-        fqn: row.fqn.clone(),
-        kind: row.kind.clone(),
-        file: file.to_string(),
-        start: start.parse().unwrap_or(1),
-        end: usize::try_from(row.end_line).unwrap_or(0),
-    }
 }
 
 fn report_outline(
@@ -146,8 +129,8 @@ fn report_outline(
         return Ok(());
     }
     writeln!(out, "\nDefinitions ({}):", rows.len())?;
-    for r in &rows {
-        writeln!(out, "  {}  [{}]  {}", r.fqn, r.kind, r.loc)?;
+    for definition in &rows {
+        report_definition(out, definition)?;
     }
     Ok(())
 }
@@ -157,9 +140,9 @@ fn report_results(
     outcome: &orbit_search::GrepOutcome,
 ) -> std::io::Result<()> {
     report_confidence(out, outcome)?;
-    writeln!(out, "\nNodes:")?;
-    for m in &outcome.matches {
-        writeln!(out, "  {}  [{}]  {}", m.row.fqn, m.row.kind, m.row.loc)?;
+    writeln!(out, "\nDefinitions:")?;
+    for result in &outcome.matches {
+        report_definition(out, &result.definition)?;
     }
     let hidden = outcome.total.saturating_sub(outcome.matches.len());
     if hidden >= BROAD_HIDDEN_HITS {
@@ -174,6 +157,19 @@ fn report_results(
         )?;
     }
     Ok(())
+}
+
+fn report_definition(out: &mut impl Write, definition: &Definition) -> std::io::Result<()> {
+    writeln!(
+        out,
+        "  Definition:{}  {}  [{}]  {}:{}-{}",
+        definition.id,
+        definition.fqn,
+        definition.kind,
+        definition.file,
+        definition.start,
+        definition.end
+    )
 }
 
 const COMPOUND_TERM_HINT: usize = 5;
@@ -257,6 +253,29 @@ mod tests {
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("weak matches"), "{text}");
         assert!(text.contains("no matches for: throttle"), "{text}");
+    }
+
+    #[test]
+    fn results_print_definition_identity_and_full_location() {
+        let mut result = outcome(Vec::new(), false);
+        result.matches.push(orbit_search::GrepMatch {
+            definition: Definition {
+                id: 481,
+                fqn: "Repo::commit_hook".to_string(),
+                kind: "Method".to_string(),
+                file: "crates/repo/src/lib.rs".to_string(),
+                start: 42,
+                end: 57,
+            },
+            score: 1.0,
+        });
+        result.total = 1;
+        let mut buf = Vec::new();
+        report_results(&mut buf, &result).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "\nDefinitions:\n  Definition:481  Repo::commit_hook  [Method]  crates/repo/src/lib.rs:42-57\n"
+        );
     }
 
     #[test]
