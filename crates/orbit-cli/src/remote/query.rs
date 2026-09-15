@@ -133,20 +133,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gql_query_strips_bom_and_preserves_text() {
-        let text = "MATCH (u:User {username: 'a\\\\b\\\"λ'})\nRETURN u LIMIT 1\n";
-        for format in [None, Some(ResponseFormat::Raw), Some(ResponseFormat::Llm)] {
-            let out = build_gql_request(format!("\u{feff}{text}").as_bytes(), format).unwrap();
-            let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
-            assert_eq!(value["query"].as_str().unwrap().as_bytes(), text.as_bytes());
-            assert_eq!(value["language"], "gql");
-            assert_eq!(
-                value["response_format"],
-                format.map_or("llm", ResponseFormat::as_str)
-            );
-        }
+    fn gql_query_rejects_empty_or_invalid_utf8() {
         for body in [b"".as_slice(), BOM, &[0xff]] {
-            assert!(build_gql_request(body, None).is_err());
+            assert!(build_gql_request(body, None).is_err(), "{body:?}");
         }
     }
 

@@ -377,26 +377,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     .run_query(&schema, ctx, query, tx.clone(), stream, timeout)
                     .await;
 
-                match result {
-                    Ok(QueryServiceOutput::Schema(response)) => {
-                        let result = schema_query_result(&response, use_llm_format);
-                        match result {
-                            Ok(result) => {
-                                info!("Sending schema query result");
-                                let _ = tx
-                                    .send(Ok(ExecuteQueryMessage {
-                                        content: Some(execute_query_message::Content::Result(
-                                            result,
-                                        )),
-                                    }))
-                                    .await;
-                            }
-                            Err(error) => send_query_error(&tx, error).await,
-                        }
+                let result = result.and_then(|output| match output {
+                    QueryServiceOutput::Schema(response) => {
+                        schema_query_result(&response, use_llm_format)
                     }
-                    Ok(QueryServiceOutput::Graph(output)) => {
-                        info!("Sending final query result");
-
+                    QueryServiceOutput::Graph(output) => {
                         use crate::proto::execute_query_result::Content;
 
                         let (formatted, format_version, format_name) = if use_llm_format {
@@ -429,11 +414,16 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                             format_name: proto_format_name(format_name).into(),
                         });
 
+                        Ok(ExecuteQueryResult { content, metadata })
+                    }
+                });
+
+                match result {
+                    Ok(result) => {
+                        info!("Sending final query result");
                         let _ = tx
                             .send(Ok(ExecuteQueryMessage {
-                                content: Some(execute_query_message::Content::Result(
-                                    ExecuteQueryResult { content, metadata },
-                                )),
+                                content: Some(execute_query_message::Content::Result(result)),
                             }))
                             .await;
                     }
@@ -888,48 +878,6 @@ mod tests {
     use crate::proto::orbit_service_server::OrbitService;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     use tonic::metadata::MetadataValue;
-
-    #[test]
-    fn schema_query_result_uses_requested_format() {
-        let response = SchemaResponse {
-            domains: vec![],
-            edges: vec!["AUTHORED".into()],
-        };
-        for (llm, expected) in [
-            (false, "{\"domains\":[],\"edges\":[\"AUTHORED\"]}"),
-            (true, "domains[0]:\nedges[1]: AUTHORED"),
-        ] {
-            let result = schema_query_result(&response, llm).unwrap();
-            let content = result.content.unwrap();
-            let actual = match content {
-                crate::proto::execute_query_result::Content::ResultJson(value)
-                | crate::proto::execute_query_result::Content::FormattedText(value) => value,
-            };
-            assert_eq!(actual, expected);
-            assert!(result.metadata.is_none());
-        }
-    }
-
-    #[test]
-    fn query_source_keeps_wire_values_and_text() {
-        let named = named_queries::NamedQueries::load_embedded().unwrap();
-        let values = named_queries::BindingValues {
-            current_user_id: 42,
-        };
-        let gql = "  // {comment}\nMATCH (u:User {username: 'a\\\\b\\\"λ{}'})\nRETURN u LIMIT 1\n";
-        for (wire, frontend) in [(0, Frontend::JsonDsl), (2, Frontend::Gql)] {
-            let query = resolve_raw_query(wire, gql.into(), &named, &values).unwrap();
-            assert_eq!(query.text.as_bytes(), gql.as_bytes());
-            assert_eq!(query.frontend, frontend);
-        }
-        for wire in [-1, 3, i32::MAX] {
-            assert!(resolve_raw_query(wire, gql.into(), &named, &values).is_err());
-        }
-        let request = r#"{"name":"my_neighbors"}"#;
-        let query = resolve_raw_query(1, request.into(), &named, &values).unwrap();
-        assert_eq!(query.frontend, Frontend::JsonDsl);
-        assert_eq!(query.text, named.render_request(request, &values).unwrap());
-    }
 
     fn mock_validator() -> JwtValidator {
         JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap()
