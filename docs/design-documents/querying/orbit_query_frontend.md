@@ -55,9 +55,8 @@ The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_pars
 The `gql_parse` phase parses raw query text when supplied. Preparation supplies parsed Input instead, so the wrapper leaves it unchanged without parsing twice.
 Schema preparation, result types, and resolution belong only to the GQL frontend. Shared compiler contexts have no schema request, response, or introspection scope.
 
-`compiler::gql::prepare` parses once and dispatches by statement kind. MATCH runs the complete graph pipeline; CALL resolves ontology metadata directly.
+`compiler::gql::route` parses once and returns lowered query Input or resolved schema metadata. `compiler::gql::prepare` uses that result to compile MATCH or return CALL metadata.
 `compiler::compile` remains query-only for both frontends. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
-The query pipeline carries the same `Frontend` into `validate_normalize` for path resolution and into full compilation, so both read the same parser.
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
@@ -90,7 +89,7 @@ CALL db.schema('MergeRequest')
 
 The `db.` prefix follows openCypher 9 procedure naming. `db.schema` is Orbit-defined, not an exact Neo4j builtin or an ISO catalog operation.
 Only case-sensitive `db.schema` is allowed. `resolve_schema` rejects unknown or scope-hidden nodes and `'*'` against the supplied ontology. The grammar rejects extra arguments, parameters, YIELD, and query composition.
-`compiler::compile` remains query-only. Schema calls are not yet wired into remote query dispatch; that path must authenticate before using `gql::prepare`.
+`compiler::compile` remains query-only.
 
 ## Remote transport
 
@@ -98,7 +97,10 @@ The gRPC `QueryType` enum is `JSON=0`, `NAMED=1`, `GQL=2`; unknown values reject
 REST and MCP `query_graph` accept `language: gql` with query text; omitted `language` keeps the JSON object.
 Rails maps the selector onto the gRPC query type. The CLI sends `--language gql` text unchanged.
 Rails rejects `language: gql` before the request reaches Workhorse unless the `orbit_gql_queries` feature flag is enabled for the user or for a root group where the user is Reporter or higher; GKG itself does not gate the frontend.
-Path resolution, authorization, redaction, hydration, and response formatting are shared.
+The server routing stage parses GQL once and returns its result through `PipelineRunner`.
+For MATCH, it carries the lowered Input into path resolution and compilation; the `gql_parse` wrapper leaves that Input unchanged.
+For CALL, it returns schema metadata before security-context construction, path resolution, ClickHouse, row authorization, redaction, hydration, and graph formatting.
+Request authentication and query quota checks happen before this dispatch. Schema calls return raw JSON or TOON in the existing result envelope and do not emit graph-query billing events.
 The base ClickHouse query's attribution payload records the language alongside the query text.
 
 ## Supported query statement
