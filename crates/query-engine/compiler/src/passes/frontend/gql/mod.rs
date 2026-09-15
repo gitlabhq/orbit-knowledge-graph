@@ -28,6 +28,12 @@ const INVARIANT_PREFIXES: [&str; 3] = [
 ];
 
 #[derive(Debug)]
+pub enum RoutedStatement {
+    Query(Input),
+    Schema(SchemaResponse),
+}
+
+#[derive(Debug)]
 pub enum PreparedStatement {
     Query(Box<CompiledQueryContext>),
     Schema(SchemaResponse),
@@ -40,15 +46,21 @@ pub fn prepare(
     security_context: &SecurityContext,
     scope: IntrospectionScope,
 ) -> Result<PreparedStatement> {
+    match route(raw, ontology, scope)? {
+        RoutedStatement::Query(input) => compile_query(input, ontology, security_context)
+            .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
+        RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
+    }
+}
+
+pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Result<RoutedStatement> {
     match parse_statement(raw).count_err()? {
-        ast::Statement::Query(query) => {
-            let input = lower::lower(raw, *query).count_err()?;
-            compile_query(input, ontology, security_context)
-                .map(|compiled| PreparedStatement::Query(Box::new(compiled)))
-        }
+        ast::Statement::Query(query) => lower::lower(raw, *query)
+            .count_err()
+            .map(RoutedStatement::Query),
         ast::Statement::SchemaCall { node } => resolve_schema(node, ontology, scope)
             .count_err()
-            .map(PreparedStatement::Schema),
+            .map(RoutedStatement::Schema),
     }
 }
 
@@ -61,7 +73,7 @@ pub fn parse(raw: &str) -> Result<Input> {
     }
 }
 
-fn compile_query(
+pub fn compile_query(
     input: Input,
     ontology: &Ontology,
     security_context: &SecurityContext,
@@ -70,6 +82,18 @@ fn compile_query(
         config::ClickhouseGqlCtx::new(Arc::new(ontology.clone()), security_context.clone());
     ctx.set_input(input);
     crate::finish(&mut ctx, config::run_clickhouse_gql)
+}
+
+pub fn validate_normalize_query(input: Input, ontology: &Ontology) -> Result<Input> {
+    let mut ctx = config::ValidateNormalizeGqlCtx::new(Arc::new(ontology.clone()));
+    ctx.set_input(input);
+    config::run_validate_normalize_gql(&mut ctx)
+        .and_then(|()| {
+            ctx.take_input().ok_or_else(|| {
+                QueryError::PipelineInvariant("validate_normalize produced no input".into())
+            })
+        })
+        .count_err()
 }
 
 fn resolve_schema(
