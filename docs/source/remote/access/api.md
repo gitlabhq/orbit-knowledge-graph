@@ -62,8 +62,10 @@ The request body contains:
 
 - `query`: A JSON Query DSL object, or a text string when `language` is `gql`.
 - `language`: Optional `json` (default) or `gql`. Unknown values and query shapes that do not match the language are rejected.
-- `format`: Optional response format. Use `raw` for structured JSON, or `llm`
-  for compact text optimized for AI agents. Default: `llm`.
+- `response_format`: Optional response format. Use `raw` for structured JSON, or `llm`
+  for compact text optimized for AI agents. Default: `raw`.
+
+The GitLab Orbit CLI explicitly sends `llm` by default.
 
 For example:
 
@@ -71,7 +73,7 @@ For example:
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{"query": <query_json>, "format": "raw"}' \
+  --data '{"query": <query_json>, "response_format": "raw"}' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
@@ -83,17 +85,17 @@ To send read-only query text or inspect its ontology:
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{"language":"gql","query":"MATCH (u:User {id: 1}) RETURN u.username LIMIT 1","format":"llm"}' \
+  --data '{"language":"gql","query":"MATCH (u:User {id: 1}) RETURN u.username LIMIT 1","response_format":"llm"}' \
   "https://gitlab.com/api/v4/orbit/query"
 
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{"language":"gql","query":"CALL db.schema(\"MergeRequest\")","format":"raw"}' \
+  --data '{"language":"gql","query":"CALL db.schema(\"MergeRequest\")","response_format":"raw"}' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
-The query text language, based on openCypher 9 syntax, is documented in the [Orbit query frontend](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/orbit_query_frontend.md) design document.
+The query text language, based on openCypher 9 syntax, is documented in the [GitLab Orbit query frontend](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/orbit_query_frontend.md) design document.
 
 ### Example request
 
@@ -122,7 +124,7 @@ Put the request body in `request.json`:
     "aggregation_sort": "-failed_pipelines",
     "limit": 10
   },
-  "format": "raw"
+  "response_format": "raw"
 }
 ```
 
