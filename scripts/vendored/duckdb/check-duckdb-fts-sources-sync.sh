@@ -35,6 +35,6 @@ VENDOR_VERSIONS_FILE="$VERSIONS_FILE" \
 VENDOR_DIR="$VENDOR_DIR" \
 VENDOR_VERSION="$(yq '.vendored.duckdb.version' "$VERSIONS_FILE")" \
 VENDOR_NAME="duckdb" \
-    "$REPO_ROOT/scripts/duckdb/vendor-duckdb-fts-sources.sh" "$WORK_DIR/duckdb-fts-sources.tar.gz"
+    "$REPO_ROOT/scripts/vendored/duckdb/vendor-duckdb-fts-sources.sh" "$WORK_DIR/duckdb-fts-sources.tar.gz"
 cmp "$ARCHIVE" "$WORK_DIR/duckdb-fts-sources.tar.gz"
 echo "$ARCHIVE matches its pinned upstream DuckDB and duckdb-fts revisions"
