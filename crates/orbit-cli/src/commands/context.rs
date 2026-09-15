@@ -55,6 +55,8 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     });
     defs.dedup();
 
+    let sources = workspace::source_fingerprints(&client, git.project_id)?;
+
     let mut out = String::new();
     for (file, file_defs) in outline(&defs) {
         let content = std::fs::read_to_string(git.repo_path.join(&file))
@@ -62,6 +64,10 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         let lines: Vec<&str> = content.lines().collect();
         if !out.is_empty() {
             out.push('\n');
+        }
+        if sources.get(&file) != Some(&ontology::migrations::sha256_hex(&content)) {
+            render_unverified(&mut out, &file, &lines)?;
+            continue;
         }
         if file_mode {
             writeln!(
@@ -89,6 +95,7 @@ pub(crate) fn render_bodies(
     git: &workspace::GitInfo,
     defs: &[Def],
 ) -> Result<String> {
+    let sources = workspace::source_fingerprints(client, git.project_id)?;
     let mut out = String::new();
     for (file, file_defs) in outline(defs) {
         let content = std::fs::read_to_string(git.repo_path.join(&file))
@@ -100,6 +107,10 @@ pub(crate) fn render_bodies(
         if !out.is_empty() {
             out.push('\n');
         }
+        if sources.get(&file) != Some(&ontology::migrations::sha256_hex(&content)) {
+            render_unverified(&mut out, &file, &lines)?;
+            continue;
+        }
         render(&mut out, &short, &lines, false)?;
         if !long.is_empty() {
             let members = definitions_in_file(client, git, &file, &[])?;
@@ -110,6 +121,14 @@ pub(crate) fn render_bodies(
         }
     }
     Ok(out)
+}
+
+fn render_unverified(out: &mut String, file: &str, lines: &[&str]) -> std::fmt::Result {
+    writeln!(
+        out,
+        "{file}  source=working-tree  ranges=unverified; showing full file"
+    )?;
+    write_lines(out, lines, 1, lines.len())
 }
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {

@@ -1281,3 +1281,171 @@ fn repo_map_api_empty_prefix_succeeds() {
         "must not leak DuckDB glob error: {stderr}"
     );
 }
+
+const CONTEXT_RUST: &str = "use std::fmt;\npub struct Config {\n    pub value: String,\n}\nimpl Config {\n    pub fn get(&self) -> &str {\n        &self.value\n    }\n}\n#[test]\nfn smoke() {}\n";
+const CONTEXT_PYTHON: &str = "def hello():\n    pass\n\ndef bye():\n    pass\n";
+
+fn context_repo() -> (tempfile::TempDir, tempfile::TempDir) {
+    let repo = tempfile::TempDir::new().unwrap();
+    init_repo_at(
+        repo.path(),
+        &[
+            ("src/lib.rs", CONTEXT_RUST),
+            ("src/tool.py", CONTEXT_PYTHON),
+        ],
+    );
+    let data = tempfile::TempDir::new().unwrap();
+    assert!(orbit_index(repo.path(), data.path()));
+    (repo, data)
+}
+
+fn orbit(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> (String, String) {
+    let (stdout, stderr, ok) = run_cmd(&[args, &["--repo", repo.to_str().unwrap()]].concat(), data);
+    assert!(ok, "orbit {args:?}: {stderr}");
+    (stdout, stderr)
+}
+
+fn context(repo: &std::path::Path, data: &std::path::Path, args: &[&str]) -> String {
+    orbit(repo, data, &[&["context"], args].concat()).0
+}
+
+#[test]
+fn refresh_tracks_edits_renames_deletions_and_ignores() {
+    let (repo, data) = context_repo();
+    let repo_path = repo.path();
+    std::fs::write(
+        repo_path.join("src/tool.py"),
+        format!("import sys\n{CONTEXT_PYTHON}"),
+    )
+    .unwrap();
+    let output = context(repo_path, data.path(), &["bye"]);
+    assert!(output.contains("src/tool.py:5-6"), "{output}");
+    std::fs::rename(
+        repo_path.join("src/tool.py"),
+        repo_path.join("src/moved's.py"),
+    )
+    .unwrap();
+    let (output, _) = orbit(repo_path, data.path(), &["grep", "bye"]);
+    assert!(
+        output.contains("src/moved's.py:5") && !output.contains("src/tool.py"),
+        "{output}"
+    );
+    std::fs::write(repo_path.join(".gitignore"), "src/moved's.py\n").unwrap();
+    std::fs::write(repo_path.join("src/lib.rs"), "pub fn after_ignore() {}\n").unwrap();
+    for _ in 0..2 {
+        let output = context(repo_path, data.path(), &["after_ignore"]);
+        assert!(output.contains("1|pub fn after_ignore() {}"), "{output}");
+    }
+    let (stdout, _) = orbit(repo_path, data.path(), &["grep", "bye"]);
+    assert!(stdout.contains("No definitions match"), "{stdout}");
+}
+
+#[test]
+fn refresh_resolves_relationships_through_import_neighbors() {
+    let repo = create_test_repo();
+    let data = tempfile::TempDir::new().unwrap();
+    assert!(orbit_index(&repo.path, data.path()));
+    std::fs::write(
+        repo.path.join("src/utils.py"),
+        "import os\n\ndef write_file(path):\n    pass\n\ndef read_file(path):\n    return open(path).read()\n",
+    )
+    .unwrap();
+    let (output, stderr) = orbit(
+        &repo.path,
+        data.path(),
+        &["grep", "read_file", "--related-to"],
+    );
+    assert!(stderr.contains("neighbor(s)"), "{stderr}");
+    assert!(!stderr.contains("stale"), "{stderr}");
+    assert!(output.contains("<-- src.main.App.run  [calls]"), "{output}");
+    std::fs::write(
+        repo.path.join("src/test_utils.py"),
+        "from utils import read_file\n\ndef test_read():\n    read_file(\"x\")\n",
+    )
+    .unwrap();
+    let collapsed = orbit(
+        &repo.path,
+        data.path(),
+        &["grep", "read_file", "--related-to"],
+    )
+    .0;
+    assert!(
+        collapsed.contains("1 more in test, fixture, or generated files"),
+        "{collapsed}"
+    );
+    let expanded = orbit(
+        &repo.path,
+        data.path(),
+        &["grep", "read_file", "--related-to", "--tests"],
+    )
+    .0;
+    assert!(
+        expanded.contains("<-- src.test_utils.test_read  [calls]"),
+        "{expanded}"
+    );
+    let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "hello", "--related-to"]);
+    assert!(!stderr.contains("refreshed"), "{stderr}");
+    assert!(rows(&orbit_sql("SELECT source_id, target_id, relationship_kind FROM gl_edge GROUP BY ALL HAVING count(*) > 1", data.path())).is_empty());
+    std::fs::write(
+        repo.path.join("src/huge.py"),
+        format!("def read():\n    pass\n{}", "#".repeat(5_000_001)),
+    )
+    .unwrap();
+    std::fs::write(
+        repo.path.join("src/main.py"),
+        "import huge\n\ndef fetch():\n    huge.read()\n",
+    )
+    .unwrap();
+    let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "fetch", "--related-to"]);
+    assert!(
+        stderr.contains("relationships may be stale for src/main.py"),
+        "{stderr}"
+    );
+    assert!(orbit_index(&repo.path, data.path()));
+    let (_, stderr) = orbit(&repo.path, data.path(), &["grep", "fetch", "--related-to"]);
+    assert!(!stderr.contains("stale"), "{stderr}");
+}
+
+#[test]
+fn failed_refresh_falls_back_to_unverified_source() {
+    let (repo, data) = context_repo();
+    let source = "pub fn run() {}\n\0";
+    std::fs::write(repo.path().join("src/lib.rs"), source).unwrap();
+    let output = context(repo.path(), data.path(), &["Config::get"]);
+    assert!(
+        output.contains("ranges=unverified") && output.contains("1|pub fn run() {}"),
+        "{output}"
+    );
+    assert!(
+        rows(&orbit_sql(
+            "SELECT * FROM gl_definition WHERE name = 'run'",
+            data.path()
+        ))
+        .is_empty()
+    );
+}
+
+#[test]
+fn empty_project_stays_indexed_and_scoped() {
+    let (repo, data) = context_repo();
+    let other = create_test_repo();
+    assert!(orbit_index(&other.path, data.path()));
+    for file in ["src/lib.rs", "src/tool.py"] {
+        std::fs::remove_file(repo.path().join(file)).unwrap();
+    }
+    let (output, _) = orbit(repo.path(), data.path(), &["grep", "--path", "src"]);
+    assert!(output.contains("definitions"), "{output}");
+    let (output, stderr) = orbit(
+        repo.path(),
+        data.path(),
+        &["sql", "-F", "json", "SELECT name FROM gl_definition"],
+    );
+    assert!(!stderr.contains("as with --all"), "{stderr}");
+    assert_eq!(serde_json::from_str::<Value>(&output).unwrap(), json!([]));
+    std::fs::write(repo.path().join("src/new.py"), "def newest():\n    pass\n").unwrap();
+    let (output, stderr) = orbit(repo.path(), data.path(), &["grep", "newest"]);
+    assert!(
+        output.contains("src/new.py:1") && !stderr.contains("indexing "),
+        "{output}{stderr}"
+    );
+}

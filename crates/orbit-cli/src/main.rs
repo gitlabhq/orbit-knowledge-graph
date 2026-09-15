@@ -5,6 +5,7 @@ mod commands;
 mod descriptions;
 mod list;
 mod mcp;
+mod refresh;
 mod remote;
 mod settings;
 mod skill;
@@ -899,15 +900,7 @@ pub(crate) fn index_collect(
 
     workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
 
-    let pipeline_config = code_graph::v2::PipelineConfig {
-        worker_threads: threads,
-        per_file_timeout: Some(std::time::Duration::from_secs(2)),
-        per_file_parse_timeout: Some(std::time::Duration::from_millis(100)),
-        per_file_walk_timeout: Some(std::time::Duration::from_millis(100)),
-        per_file_ssa_timeout: Some(std::time::Duration::from_millis(100)),
-        cross_file_resolve_timeout: Some(std::time::Duration::from_secs(180)),
-        ..Default::default()
-    };
+    let pipeline_config = pipeline_config(threads);
 
     let mut failed = 0usize;
     let mut outputs = Vec::with_capacity(repos.len());
@@ -981,6 +974,18 @@ pub(crate) fn index_collect(
     Ok(outputs)
 }
 
+fn pipeline_config(threads: usize) -> code_graph::v2::PipelineConfig {
+    code_graph::v2::PipelineConfig {
+        worker_threads: threads,
+        per_file_timeout: Some(std::time::Duration::from_secs(2)),
+        per_file_parse_timeout: Some(std::time::Duration::from_millis(100)),
+        per_file_walk_timeout: Some(std::time::Duration::from_millis(100)),
+        per_file_ssa_timeout: Some(std::time::Duration::from_millis(100)),
+        cross_file_resolve_timeout: Some(std::time::Duration::from_secs(180)),
+        ..Default::default()
+    }
+}
+
 fn fatal_pipeline_reason(errors: &[code_graph::v2::pipeline::PipelineError]) -> Option<String> {
     let fatal_count = errors.iter().filter(|e| e.fatal).count();
     let first = errors.iter().find(|e| e.fatal)?;
@@ -1001,18 +1006,17 @@ fn index_repo(
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let mut filter = code_graph::v2::config::CodeFilter::new(
-        MAX_INDEXED_FILE_BYTES,
-        0,
-        code_graph::v2::config::detect_language_from_path,
-    );
-    let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(
-        orbit_utils::walk::walk_dir(&git.repo_path, &mut filter)
-            .context("failed to walk repository files")?,
-    );
+    let (file_inventory, filter) = refresh::inventory(&git.repo_path)?;
 
+    let mut sources = workspace::fingerprint_files(&git.repo_path, &file_inventory);
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
+    refresh::mark_stale(
+        &client,
+        git.project_id,
+        "the whole project until indexing completes",
+    )?;
+    workspace::store_source_fingerprints(&client, git.project_id, &Default::default())?;
 
     let node_tables: Vec<String> = ontology
         .local_entity_names()
@@ -1065,7 +1069,7 @@ fn index_repo(
 
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
         std::path::Path::new(&root_path),
-        file_inventory,
+        file_inventory.clone(),
         pipeline_config.clone(),
         filter.file_reasons(),
         tracer,
@@ -1082,25 +1086,18 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
-    let doc_table = duckdb_client::search::def_doc_table(git.project_id);
-    client
-        .load_extension("fts")
-        .context("failed to load the DuckDB fts extension")?;
-    client
-        .execute(
-            &duckdb_client::search::def_doc_sql(&doc_table),
-            &[
-                serde_json::json!(git.project_id),
-                serde_json::json!(git.commit_sha),
-            ],
-        )
-        .context("failed to build the search documents")?;
-    client
-        .execute(
-            &duckdb_client::search::create_fts_index_sql(&doc_table),
-            &[],
-        )
-        .context("failed to build the search index")?;
+    refresh::rebuild_search(&client, git)?;
+    let current_sources = workspace::fingerprint_files(&git.repo_path, &file_inventory);
+    let stable_sources = sources == current_sources;
+    sources.retain(|path, fingerprint| current_sources.get(path) == Some(fingerprint));
+    let sources = sources
+        .into_iter()
+        .map(|(path, (hash, _))| (path, hash))
+        .collect();
+    workspace::store_source_fingerprints(&client, git.project_id, &sources)?;
+    if stable_sources {
+        refresh::clear_stale(&client, git.project_id)?;
+    }
     workspace::set_status(
         &client,
         &key,

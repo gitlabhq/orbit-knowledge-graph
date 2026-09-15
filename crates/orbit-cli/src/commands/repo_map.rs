@@ -161,6 +161,9 @@ pub(crate) fn run(
 
     let client = sql::open_graph(Some(db))?;
     map.preflight(&client)?;
+    if let Some(warning) = crate::refresh::relationship_warning(&client, Some(git.project_id))? {
+        eprintln!("warning: {warning}");
+    }
 
     let mut out = std::io::stdout().lock();
     match command {

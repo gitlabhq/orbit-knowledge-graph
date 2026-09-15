@@ -160,6 +160,29 @@ prints nothing; structured formats emit valid empty output (`[]` for `json`,
 no records for `ndjson`) so pipelines like `orbit list -F json | jq` keep
 working.
 
+## Working-tree freshness
+
+`grep` and `context` refresh changed and new source files on demand, including
+edits made without changing commits. Deleted files are removed. Unchanged files
+are discovered and fingerprinted; only changed files and their neighbors are
+reparsed. Successful refreshes update search results and definition ranges together.
+An empty project remains indexed and scoped to its own checkout.
+
+If parsing fails or files change during refresh, the previous definitions remain
+indexed. Source reads verify the current file against its stored fingerprint.
+A mismatch returns the full current file labeled `ranges=unverified`, instead
+of stale slices. This also applies to inline `grep` bodies and `context --outline`.
+Files that leave the supported source inventory are removed from the index.
+
+Refresh also reparses the changed file's neighbors: files it imports, files that
+import it, and files that share a relationship with it. Relationships between
+unchanged files are kept. A new reference with no import and no prior relationship
+is not discovered until a full `orbit index`.
+
+If a changed file imports a project file the indexer cannot parse, relationship
+lookups (`grep --related-to`, `--callers`, or `--callees`), SQL, MCP, and repository
+maps warn that relationships may be stale. Re-run `orbit index` to clear the warning.
+
 ## Run as an MCP server
 
 Expose the local graph to any MCP-compatible AI agent over stdio:

@@ -60,8 +60,13 @@ pub fn run(
     }
 
     let client = open_graph(db)?;
-    if !all {
-        scope_to_checkout(&client, repo.as_deref().unwrap_or(Path::new(".")))?;
+    let project = if all {
+        None
+    } else {
+        scope_to_checkout(&client, repo.as_deref().unwrap_or(Path::new(".")))?
+    };
+    if let Some(warning) = crate::refresh::relationship_warning(&client, project)? {
+        eprintln!("warning: {warning}");
     }
     let batches = query(&client, sql)?;
 
@@ -69,7 +74,7 @@ pub fn run(
     sql_format::write(stdout, format, &batches)
 }
 
-fn scope_to_checkout(client: &DuckDbClient, repo: &Path) -> Result<()> {
+fn scope_to_checkout(client: &DuckDbClient, repo: &Path) -> Result<Option<i64>> {
     let git = match workspace::git_toplevel(repo).and_then(|top| workspace::git_info(&top)) {
         Ok(git) => git,
         Err(_) => {
@@ -77,7 +82,7 @@ fn scope_to_checkout(client: &DuckDbClient, repo: &Path) -> Result<()> {
                 "note: {} is not inside a git checkout; querying every indexed commit (as with --all)",
                 repo.display()
             );
-            return Ok(());
+            return Ok(None);
         }
     };
     if !scope_tables(client, git.project_id, &git.commit_sha)? {
@@ -90,7 +95,7 @@ fn scope_to_checkout(client: &DuckDbClient, repo: &Path) -> Result<()> {
             git.repo_path.display()
         );
     }
-    Ok(())
+    Ok(Some(git.project_id))
 }
 
 fn scope_tables(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Result<bool> {
@@ -125,14 +130,17 @@ fn scope_tables(client: &DuckDbClient, project_id: i64, commit_sha: &str) -> Res
 
     let sha = sql_lit(commit_sha);
     let base = |table: &str| format!("{}.main.{}", quote_ident(&catalog), quote_ident(table));
-    let indexed = node_tables
-        .iter()
+    let indexed = std::iter::once(format!(
+        "EXISTS (SELECT 1 FROM {} WHERE project_id = {project_id} AND commit_sha = {sha} AND status = 'indexed')",
+        base("_orbit_manifest")
+    ))
+        .chain(node_tables.iter()
         .map(|(table, _)| {
             format!(
                 "EXISTS (SELECT 1 FROM {} WHERE project_id = {project_id} AND commit_sha = {sha})",
                 base(table)
             )
-        })
+        }))
         .collect::<Vec<_>>()
         .join(" OR ");
     if !bool_column(

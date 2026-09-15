@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.3
+version: 0.5.4
 license: MIT
 metadata:
   audience: developers
@@ -113,6 +113,22 @@ all definitions and the lines between them. With names, it restricts lookup
 to that file and accepts bare names; `--kind` narrows the selection.
 `--outline` replaces bodies with each definition's signature and its nested
 members, so a large type or file can be mapped before reading one method.
+
+`grep` and `context` refresh changed and new source files on demand, removing
+files that leave the supported source inventory. Neighbors (files they import,
+that import them, or that share a relationship) are reparsed with them; other
+files are not. An empty project remains indexed. Successful refreshes update
+search results and definition ranges together.
+
+Failed or unstable refreshes keep the previous definitions. Source reads verify
+the current file's fingerprint before using indexed ranges. A mismatch shows the
+full current file with `ranges=unverified`, including inline `grep` bodies and
+`context --outline`.
+
+Edges between unchanged files are kept. A new reference with no import and no
+prior edge is not discovered until a full `index`. When a changed file imports a
+project file the indexer cannot parse, relationship commands, SQL, MCP, and
+repository maps warn that relationships may be stale. Run `index` to clear it.
 
 `--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
 (`"Class|Method"`) also works. It is not repeatable.
