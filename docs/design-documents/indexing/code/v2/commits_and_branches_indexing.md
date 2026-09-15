@@ -63,11 +63,9 @@ graph LR
 
 ## Gitaly access
 
-Orbit has no network path to Gitaly. Today every repository read goes through a Rails internal API endpoint, one per Gitaly RPC, and Rails serialises the response through its own worker pool. This is the main source of contention on the internal endpoints today, and the internal API still lacks branch listing and first-parent history ([knowledge-graph#1216](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1216)).
+Orbit has no direct access to Gitaly. Today every repository read goes through a Rails internal API endpoint, one per Gitaly RPC.
 
-We are replacing it with a Gitaly proxy in Workhorse ([ADR 018](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/decisions/018_gitaly_proxy_in_workhorse.md), implementation in [knowledge-graph#1252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1252)): gRPC tunnelled over a WebSocket, Rails preauthorizes each connection and binds a read-only policy to it, and Orbit keeps using the generated Gitaly clients. No Gitaly address or token reaches the Orbit cluster. Phase 1 hosts the proxy in Workhorse on top of an exported `gitlab-org/gitaly` package; phase 2 moves the hosting layer to Gitway with no change to the Orbit client. All legs are open drafts, gated by the `workhorse_gitaly_proxy` and `orbit_gitaly_proxy` flags; `rails_http` stays the default until they land.
-
-The RPCs below are already in the proxy allowlist. `GetArchive` is not part of v2: we fetch tree manifests and changed blobs incrementally.
+We are replacing it with a Gitaly proxy in Workhorse ([ADR 018](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/decisions/018_gitaly_proxy_in_workhorse.md), implementation in [knowledge-graph#1252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1252)): it's gRPC tunnelled over a WebSocket.
 
 ### RPCs required
 
@@ -79,12 +77,6 @@ The RPCs below are already in the proxy allowlist. `GetArchive` is not part of v
 | **ListCommits** | Walks the first-parent commit history for the revisions tier. |
 | **FindChangedPaths** | Diffs commit pairs in batches. Powers history deltas and branch-tip comparisons. |
 | **ListBlobs** | Streams actual blob content by OID, capped at 1 MiB. This is how we fetch file contents to index. |
-
-### Gitaly load
-
-Listing every branch, as the POC does, does not work on repositories like the monolith. The v2 design uses repository lifecycle events (push, branch delete, default-branch change, transfer) as the only steady-state trigger, the same shape as the Zoekt integration, and reserves ref enumeration for enablement and repair. Force pushes are coalesced per project and ref, and backfills go through the same path with lifecycle work ahead of history.
-
-The proxy is also where the per-instance read budget lives: Rails picks the limits during preauthorization and Workhorse enforces concurrency and admission rate before a stream reaches Gitaly. Orbit retries with backoff on rejection and does not fall back to Rails HTTP to bypass an exhausted budget. The actual limits, the debounce window, and the initial branch discovery on enablement are open and tracked in [knowledge-graph#1252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1252).
 
 ## Backfill
 
