@@ -8,14 +8,14 @@ instructions: |
   Use Orbit first for code.
 
   - Find: `{{orbit}} grep "<concept>"`. Start unfiltered with 1-3 identifier words. Miss: retry once with a source identifier. Broad: add `--path <glob>` or `--kind Class,Method`.
-  - Read: use `{{orbit}} context Definition:<id>` from grep. File: `{{orbit}} context <path>`. Use `--outline` for signatures. If raw search finds a file, return to context.
+  - Read code: `{{orbit}} context Definition:<id>` or `{{orbit}} context <path>`. Use `--outline` for signatures.
   - Relationships: `{{orbit}} context Definition:<id> --related`; add `--tests` to show test connections.
-  - Edit from context output. Never `cat`/`head`/`sed` source or truncate Orbit output.
+  - Edit context output; never truncate it. Raw Read or shell reads: non-code or unavailable Orbit source only.
   - Answers from graph cite mechanism + `file:line`; skip search narration.
 
 nudge_search: |
-  Run `{{orbit}} grep "<terms>"` first. If raw search finds a file, read it with `{{orbit}} context <path>`, never `cat`, `head`, or `sed`.
+  Run `{{orbit}} grep "<terms>"` first. Read discovered code with `{{orbit}} context <path>`; raw Read or shell reads are only for non-code or unavailable Orbit source.
 nudge_read: |
-  Read source with `{{orbit}} context Definition:<id>` or `{{orbit}} context <path>`, never `cat`, `head`, or `sed`. Find unknown code with `{{orbit}} grep "<terms>"`.
+  Read code with `{{orbit}} context Definition:<id>` or `{{orbit}} context <path>`. Built-in Read and shell reads are only for non-code or unavailable Orbit source.
 template_vars:
   reminder: "[orbit] when a graph lookup would help, run {{orbit}} grep"

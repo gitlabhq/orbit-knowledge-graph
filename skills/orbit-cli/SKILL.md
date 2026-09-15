@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.5
+version: 0.5.6
 license: MIT
 metadata:
   audience: developers
@@ -100,8 +100,9 @@ FQNs, or globs. One existing repo-relative or absolute file path prints that
 file's definitions. `--outline` replaces bodies with signatures and nested
 members. `--related` lists connections with direction and edge kind;
 `--tests` includes test, fixture, and generated connections. If raw search is
-needed to locate a file, return to `context <path>` to read it. Do not read
-source with `cat`, `head`, or `sed`, or truncate Orbit output.
+needed to locate a file, return to `context <path>` to read it. Built-in Read
+and shell reads are only for non-code or unavailable Orbit source. Never
+truncate Orbit output.
 
 `--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
 (`"Class|Method"`) also works. It is not repeatable.
