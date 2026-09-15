@@ -252,10 +252,6 @@ struct ContextArgs {
     #[arg(value_name = "TARGET", help = context_target_help(), required = true)]
     target: Vec<String>,
 
-    /// Print signatures and nested members instead of full bodies.
-    #[arg(long)]
-    outline: bool,
-
     /// Show relationships to test, fixture, and generated definitions.
     #[arg(long)]
     tests: bool,
@@ -1234,32 +1230,30 @@ mod tests {
 
     #[test]
     fn context_accepts_definition_references_or_a_file_target() {
-        let Commands::Context(args) = Cli::parse_from([
-            "orbit",
-            "context",
-            "Definition:7",
-            "Definition:9",
-            "--outline",
-        ])
-        .command
+        let Commands::Context(args) =
+            Cli::parse_from(["orbit", "context", "Definition:7", "Definition:9"]).command
         else {
             panic!("expected context");
         };
         assert_eq!(args.target, vec!["Definition:7", "Definition:9"]);
-        assert!(args.outline);
         let Commands::Context(with_tests) =
-            Cli::parse_from(["orbit", "context", "Definition:7", "--outline", "--tests"]).command
+            Cli::parse_from(["orbit", "context", "Definition:7", "--tests"]).command
         else {
             panic!("expected context");
         };
-        assert!(with_tests.outline && with_tests.tests);
+        assert!(with_tests.tests);
         assert!(matches!(
             Cli::parse_from(["orbit", "context", "src/lib.rs"]).command,
             Commands::Context(_)
         ));
         assert!(Cli::try_parse_from(["orbit", "context"]).is_err());
         assert!(Cli::try_parse_from(["orbit", "context", "--file", "src/lib.rs"]).is_err());
-        assert!(Cli::try_parse_from(["orbit", "context", "Definition:7", "--related"]).is_err());
+        for removed in ["--outline", "--related"] {
+            assert!(
+                Cli::try_parse_from(["orbit", "context", "Definition:7", removed]).is_err(),
+                "{removed}"
+            );
+        }
     }
 
     #[test]

@@ -1,5 +1,5 @@
 name: context
-version: 1.2.0
+version: 1.3.0
 short: Read local definitions or one source file
 description: >-
   Read local definitions or one source file.
@@ -7,6 +7,5 @@ description: >-
 
   Pass one or more `Definition:<id>` references from grep, or one existing file
   path in the current checkout. Definition targets include source and relationships;
-  `--tests` expands hidden test connections. File targets show indexed definitions
-  without relationships. Use `--outline` for signatures and nested members instead
-  of full bodies.
+  `--tests` expands hidden test connections. File targets show source and indexed
+  definitions once, without relationships.

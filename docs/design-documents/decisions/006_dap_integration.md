@@ -190,8 +190,8 @@ surfaces that do not.
 Orbit Local `grep` discovers Definition nodes and prints source for the top
 three matches. `context Definition:<id>` returns source and relationships from
 the current checkout's indexed commit. A file target returns its indexed
-source without relationships. `--outline` replaces bodies with signatures;
-`--tests` expands hidden test connections for Definition targets.
+source without relationships. `--tests` expands hidden test connections for
+Definition targets.
 
 ### Caller identification
 

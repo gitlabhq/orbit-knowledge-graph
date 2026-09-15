@@ -90,16 +90,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
                 lines.len()
             )?;
         }
-        if target.outline {
-            let members = definitions_in_file(&client, &git, &hydrator, &file)?;
-            let members = members
-                .iter()
-                .map(source_range)
-                .collect::<Result<Vec<_>>>()?;
-            render_outline(&mut out, &file_defs, &members, &lines)?;
-        } else {
-            render(&mut out, &file_defs, &lines, file_mode)?;
-        }
+        render(&mut out, &file_defs, &lines, file_mode)?;
     }
     print!("{out}");
     if !file_mode {
@@ -308,8 +299,11 @@ pub(crate) fn render(
         if def.start > cursor {
             push_gap(&mut blocks, cursor, def.start - 1);
         }
-        blocks.push((Some(def), def.start, def.end));
-        cursor = cursor.max(def.end + 1);
+        let start = def.start.max(cursor);
+        if start <= def.end {
+            blocks.push((Some(def), start, def.end));
+            cursor = def.end + 1;
+        }
     }
     if cursor <= lines.len() {
         push_gap(&mut blocks, cursor, lines.len());
@@ -462,6 +456,19 @@ mod tests {
         render(&mut out, &defs, &lines, true).unwrap();
         assert!(out.contains("1|a\n2|b\n3|c\n"));
         assert!(out.contains("m::b  [Function]  L20-25\n"));
+    }
+
+    #[test]
+    fn render_does_not_repeat_partially_overlapping_lines() {
+        let lines = vec!["a", "b", "c"];
+        let defs = vec![
+            def("m::first", "Function", 1, 2),
+            def("m::second", "Function", 2, 3),
+        ];
+        let mut out = String::new();
+        render(&mut out, &defs, &lines, false).unwrap();
+        assert_eq!(out.matches("2|b").count(), 1, "{out}");
+        assert!(out.contains("m::second  [Function]  src/lib.rs:2-3\n3|c"));
     }
 
     #[test]
