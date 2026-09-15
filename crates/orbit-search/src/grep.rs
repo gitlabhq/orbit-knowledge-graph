@@ -10,7 +10,6 @@ pub struct GrepOutcome {
     pub terms: Vec<String>,
     pub matches: Vec<GrepMatch>,
     pub total: usize,
-    pub weak: bool,
     pub unmatched_terms: Vec<String>,
     pub term_anchors: Vec<(String, String)>,
 }
@@ -176,7 +175,6 @@ pub fn grep<S: GrepSource>(
         .collect();
 
     let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
-    let weak = hits.first().is_none_or(|h| !h.confident());
     let matches: Vec<GrepMatch> = hits
         .into_iter()
         .map(|h| GrepMatch {
@@ -188,7 +186,6 @@ pub fn grep<S: GrepSource>(
         terms,
         matches,
         total: corpus.len(),
-        weak,
         unmatched_terms: unmatched,
         term_anchors,
     })
@@ -263,7 +260,6 @@ mod tests {
         assert_eq!(outcome.matches.len(), 2);
         assert_eq!(outcome.total, 2);
         assert_eq!(outcome.matches[0].id, HOOK_ID);
-        assert!(!outcome.weak, "both terms fully anchor one row");
         assert!(outcome.unmatched_terms.is_empty());
     }
 
@@ -282,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn unrecalled_terms_are_reported_without_deflating_confidence() {
+    fn unrecalled_terms_are_reported() {
         let outcome = grep(
             &FakeRecallSource,
             "commit zzzz yyyy",
@@ -294,10 +290,6 @@ mod tests {
         assert_eq!(
             outcome.unmatched_terms,
             vec!["zzzz".to_string(), "yyyy".to_string()]
-        );
-        assert!(
-            !outcome.weak,
-            "terms no row can match must not count against coverage"
         );
     }
 

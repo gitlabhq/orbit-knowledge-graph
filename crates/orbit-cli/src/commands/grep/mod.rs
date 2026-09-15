@@ -182,14 +182,6 @@ fn report_confidence(
             outcome.terms.len()
         )?;
     }
-    if outcome.weak {
-        writeln!(
-            out,
-            "note: weak matches — no term anchors a symbol name, so the results \
-             below may be coincidental. Use an identifier fragment the code would \
-             use, or scope with --path/--kind."
-        )?;
-    }
     if !outcome.unmatched_terms.is_empty() {
         writeln!(
             out,
@@ -219,12 +211,11 @@ fn report_confidence(
 mod tests {
     use super::*;
 
-    fn outcome(unmatched: Vec<&str>, weak: bool) -> orbit_search::GrepOutcome {
+    fn outcome(unmatched: Vec<&str>) -> orbit_search::GrepOutcome {
         orbit_search::GrepOutcome {
             terms: Vec::new(),
             matches: Vec::new(),
             total: 0,
-            weak,
             unmatched_terms: unmatched.into_iter().map(String::from).collect(),
             term_anchors: Vec::new(),
         }
@@ -233,25 +224,15 @@ mod tests {
     #[test]
     fn partial_anchor_note_lists_unmatched_terms_with_a_retry_instruction() {
         let mut buf = Vec::new();
-        report_confidence(&mut buf, &outcome(vec!["throttle", "dlq"], false)).unwrap();
+        report_confidence(&mut buf, &outcome(vec!["throttle", "dlq"])).unwrap();
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("no matches for: throttle, dlq"), "{text}");
         assert!(text.contains("retry once"), "{text}");
-        assert!(!text.contains("weak matches"), "{text}");
-    }
-
-    #[test]
-    fn weak_and_unmatched_notes_stack() {
-        let mut buf = Vec::new();
-        report_confidence(&mut buf, &outcome(vec!["throttle"], true)).unwrap();
-        let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("weak matches"), "{text}");
-        assert!(text.contains("no matches for: throttle"), "{text}");
     }
 
     #[test]
     fn results_print_definition_identity_and_full_location() {
-        let mut result = outcome(Vec::new(), false);
+        let mut result = outcome(Vec::new());
         result.matches.push(orbit_search::GrepMatch {
             id: 481,
             score: 1.0,
@@ -279,7 +260,7 @@ mod tests {
 
     #[test]
     fn truncated_results_report_how_many_were_hidden() {
-        let mut o = outcome(Vec::new(), false);
+        let mut o = outcome(Vec::new());
         o.total = 42;
         let mut buf = Vec::new();
         report_results(&mut buf, &o, &[]).unwrap();
@@ -295,7 +276,7 @@ mod tests {
     #[test]
     fn confident_full_anchor_prints_no_notes() {
         let mut buf = Vec::new();
-        report_confidence(&mut buf, &outcome(Vec::new(), false)).unwrap();
+        report_confidence(&mut buf, &outcome(Vec::new())).unwrap();
         assert!(buf.is_empty());
     }
 }

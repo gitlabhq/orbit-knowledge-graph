@@ -160,7 +160,7 @@ mod tests {
         assert_eq!(nodes[0].properties["fqn"], "Dlq::publish");
         assert_eq!(nodes[0].properties["name"], "publish");
         assert_eq!(nodes[0].properties["commit_sha"], "sha");
-        assert!(!outcome.weak);
+
         assert!(outcome.unmatched_terms.is_empty());
     }
 
@@ -258,7 +258,6 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.matches[0].id, 1);
         assert_eq!(outcome.matches[1].id, 2);
-        assert!(!outcome.weak);
     }
 
     #[test]
@@ -269,11 +268,10 @@ mod tests {
 
         let search = g.search();
         let vocab = vocab(&search);
-        let (outcome, nodes) = search
+        let (_, nodes) = search
             .grep("mr-title-check", 5, &vocab, &RecallFilter::default())
             .unwrap();
         assert_eq!(nodes[0].properties["fqn"], "mr-title-check");
-        assert!(!outcome.weak);
     }
 
     #[test]

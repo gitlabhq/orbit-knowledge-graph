@@ -10,7 +10,6 @@ const MAX_PER_GROUP: usize = 3;
 pub const ANCHOR_SIM: f64 = 0.999;
 pub const EXACT_NAME_SIM: f64 = 1.0;
 pub const EXACT_NAME_BOOST: f64 = 2.0;
-pub const CONFIDENT_COVERAGE: f64 = 0.5;
 pub const LENGTH_NORM_B: f64 = 0.75;
 pub const DEGREE_WEIGHT: f64 = 0.5;
 pub const DEGREE_CAP: u64 = 200;
@@ -18,18 +17,6 @@ pub const DEGREE_CAP: u64 = 200;
 pub struct Hit {
     pub index: usize,
     pub score: f64,
-    anchored: bool,
-    coverage: f64,
-}
-
-impl Hit {
-    pub fn anchored(&self) -> bool {
-        self.anchored
-    }
-
-    pub fn confident(&self) -> bool {
-        self.anchored && self.coverage >= CONFIDENT_COVERAGE
-    }
 }
 
 pub fn rank_and_trim(
@@ -71,12 +58,6 @@ fn rank(corpus: &[SearchCandidate], sims: &[Vec<f64>], idfs: &[f64], cap: usize)
             .filter(|&(&s, _)| s > 0.0)
             .map(|(_, idf)| idf)
             .sum();
-        let anchored_idf: f64 = row_sims
-            .iter()
-            .zip(idfs)
-            .filter(|&(&s, _)| s >= ANCHOR_SIM)
-            .map(|(_, idf)| idf)
-            .sum();
         let exact_idf: f64 = row_sims
             .iter()
             .zip(idfs)
@@ -90,8 +71,6 @@ fn rank(corpus: &[SearchCandidate], sims: &[Vec<f64>], idfs: &[f64], cap: usize)
         hits.push(Hit {
             index,
             score: total * coverage * coverage * exactness * connectedness / length_norm,
-            anchored: anchored_idf > 0.0,
-            coverage,
         });
     }
     hits.sort_by(|a, b| {
@@ -141,22 +120,6 @@ mod tests {
     use crate::testutil::row;
 
     #[test]
-    fn flood_terms_do_not_dilute_confidence() {
-        let corpus = vec![row(1, "Repo::commit_hook")];
-        let sims = vec![vec![1.0, 1.0, 0.0, 0.0, 0.0, 0.0]];
-        let high_idf_anchors = rank(&corpus, &sims, &[5.0, 5.0, 0.2, 0.2, 0.2, 0.2], 10);
-        assert!(
-            high_idf_anchors[0].confident(),
-            "anchoring the informative mass must clear the bar despite four flood terms"
-        );
-        let low_idf_anchors = rank(&corpus, &sims, &[0.2, 0.2, 5.0, 5.0, 5.0, 5.0], 10);
-        assert!(
-            !low_idf_anchors[0].confident(),
-            "anchoring only flood terms must stay weak"
-        );
-    }
-
-    #[test]
     fn full_sim_outranks_fuzzy_and_coverage_squares_partial_matches() {
         let corpus = vec![
             row(1, "Repo::commit"),
@@ -174,12 +137,6 @@ mod tests {
             .map(|h| corpus[h.index].label.as_str())
             .collect();
         assert_eq!(order, vec!["Repo::commit", "Repo::komit", "Repo::other"]);
-        assert!(hits[0].confident());
-        assert!(!hits[1].anchored());
-        assert!(
-            !hits[2].confident(),
-            "one anchored term of three must stay below the confidence floor"
-        );
         assert!(hits[0].score > 4.0 * hits[2].score);
     }
 
@@ -232,7 +189,6 @@ mod tests {
         let sims = vec![vec![ANCHOR_SIM], vec![EXACT_NAME_SIM]];
         let hits = rank(&corpus, &sims, &[1.0], 10);
         assert_eq!(corpus[hits[0].index].label, "compiler::compile");
-        assert!(hits[0].anchored() && hits[1].anchored());
     }
 
     #[test]
@@ -270,14 +226,7 @@ mod tests {
             row_at(3, "A::x3", "f.rb"),
             row_at(4, "B::y", "f.rb"),
         ];
-        let hits = (0..4)
-            .map(|index| Hit {
-                index,
-                score: 1.0,
-                anchored: false,
-                coverage: 0.0,
-            })
-            .collect();
+        let hits = (0..4).map(|index| Hit { index, score: 1.0 }).collect();
         let kept = dedupe_by_parent(hits, &corpus, 10);
         let indices: Vec<usize> = kept.iter().map(|h| h.index).collect();
         assert_eq!(indices, vec![0, 1, 3]);

@@ -6,7 +6,7 @@ pub mod types;
 pub mod vocab;
 
 pub use grep::{GrepMatch, GrepOutcome, RecallFilter, TermRecall, unmatched_terms};
-pub use rank::{ANCHOR_SIM, CONFIDENT_COVERAGE, EXACT_NAME_SIM, Hit, rank_and_trim};
+pub use rank::{ANCHOR_SIM, EXACT_NAME_SIM, Hit, rank_and_trim};
 pub use text::content_words;
 pub use types::SearchCandidate;
 pub use vocab::SearchVocab;
