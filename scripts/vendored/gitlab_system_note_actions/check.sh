@@ -16,19 +16,16 @@
 # MR title, or a commit message, or by setting SKIP_SYSTEM_NOTE_ACTIONS_CHECK=1.
 set -euo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
-
-VERSIONS_FILE="${VENDOR_VERSIONS_FILE:-$REPO_ROOT/config/versions.yaml}"
-VENDOR_DIR="${VENDOR_DIR:-$REPO_ROOT/$(yq '.vendored.gitlab_system_note_actions.vendor_dir' "$VERSIONS_FILE")}"
-pinned_sha="${VENDOR_VERSION:-$(yq '.vendored.gitlab_system_note_actions.version' "$VERSIONS_FILE")}"
+VERSIONS_FILE="${VENDOR_VERSIONS_FILE:?Set VENDOR_VERSIONS_FILE or call via scripts/vendored/run.sh}"
+VENDOR_DIR="${VENDOR_DIR:?Set VENDOR_DIR or call via scripts/vendored/run.sh}"
+pinned_sha="${VENDOR_VERSION:?Set VENDOR_VERSION or call via scripts/vendored/run.sh}"
 
 ACTIONS_FILE="$VENDOR_DIR/system_note_metadata.actions"
 CE_RAILS_PATH="app/models/system_note_metadata.rb"
 EE_RAILS_PATH="ee/app/models/ee/system_note_metadata.rb"
 GITLAB_PROJECT="gitlab-org/gitlab"
 
-source "$REPO_ROOT/scripts/ci-skip-utils.sh"
+source "$(dirname "$VERSIONS_FILE")/../scripts/ci-skip-utils.sh"
 
 if ci_skip_requested "system-note-actions-check"; then
     echo "[skip system-note-actions-check] found — skipping."

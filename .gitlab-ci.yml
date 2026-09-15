@@ -395,7 +395,7 @@ iglu-schema-check:
   # the job.
   script:
     - apk add --no-cache bash curl python3 yq
-    - bash ./scripts/vendored/iglu/check.sh
+    - bash ./scripts/vendored/run.sh check iglu
 
 system-note-actions-check:
   stage: lint
@@ -409,7 +409,7 @@ system-note-actions-check:
   # SystemNoteMetadata::ICON_TYPES at the pinned commit SHA.
   script:
     - apk add --no-cache bash curl python3 yq
-    - bash ./scripts/vendored/gitlab_system_note_actions/check.sh
+    - bash ./scripts/vendored/run.sh check gitlab_system_note_actions
 
 duckdb-fts-sources-sync-check:
   stage: lint
@@ -421,7 +421,7 @@ duckdb-fts-sources-sync-check:
   needs: []
   script:
     - apk add --no-cache bash git gzip tar yq
-    - bash ./scripts/vendored/duckdb/check-duckdb-fts-sources-sync.sh
+    - bash ./scripts/vendored/run.sh check duckdb
 
 unused-deps-check:
   stage: lint

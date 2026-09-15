@@ -12,11 +12,8 @@ set -euo pipefail
 #
 # Workflow: edit a pin in versions.yaml, then run `mise vendor -- iglu`.
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
-
-VERSIONS_FILE="${VENDOR_VERSIONS_FILE:-$REPO_ROOT/config/versions.yaml}"
-VENDOR_DIR="${VENDOR_DIR:-$REPO_ROOT/$(yq '.vendored.iglu.vendor_dir' "$VERSIONS_FILE")}"
+VERSIONS_FILE="${VENDOR_VERSIONS_FILE:?Set VENDOR_VERSIONS_FILE or call via scripts/vendored/run.sh}"
+VENDOR_DIR="${VENDOR_DIR:?Set VENDOR_DIR or call via scripts/vendored/run.sh}"
 IGLU_BASE="https://gitlab-org.gitlab.io/iglu/schemas/com.gitlab"
 
 for name in $(yq '.vendored.iglu.pins | keys | .[]' "$VERSIONS_FILE"); do

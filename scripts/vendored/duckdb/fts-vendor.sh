@@ -13,12 +13,9 @@ set -euo pipefail
 #
 # Can also be called directly; falls back to repo-relative paths.
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
-
-VERSIONS_FILE="${VENDOR_VERSIONS_FILE:-$REPO_ROOT/config/versions.yaml}"
-DUCKDB_VERSION="${VENDOR_VERSION:-$(yq '.vendored.duckdb.version' "$VERSIONS_FILE")}"
-VENDOR_DIR="${VENDOR_DIR:-$REPO_ROOT/$(yq '.vendored.duckdb.vendor_dir' "$VERSIONS_FILE")}"
+VERSIONS_FILE="${VENDOR_VERSIONS_FILE:?Set VENDOR_VERSIONS_FILE or call via scripts/vendored/run.sh}"
+VENDOR_DIR="${VENDOR_DIR:?Set VENDOR_DIR or call via scripts/vendored/run.sh}"
+DUCKDB_VERSION="${VENDOR_VERSION:?Set VENDOR_VERSION or call via scripts/vendored/run.sh}"
 
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
