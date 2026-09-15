@@ -477,7 +477,7 @@ mod tests {
             panic!("expected query");
         };
         let input =
-            query_engine::compiler::gql::validate_normalize_query(input, &ontology).unwrap();
+            query_engine::compiler::gql::validate_normalize_query(*input, &ontology).unwrap();
         assert!(scopes_query_type(input.query_type));
         assert_eq!(
             scope_keys(&input.nodes[0], &ontology.anchor_fk_mappings()),
