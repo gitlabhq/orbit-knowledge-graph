@@ -228,4 +228,36 @@ mod tests {
         duckdb.check_script = Some("/tmp/evil.sh".into());
         assert!(versions.validate().is_err());
     }
+
+    #[test]
+    fn validate_rejects_empty_vendored_section() {
+        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
+        versions.vendored.clear();
+        assert!(versions.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_whitespace_version() {
+        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
+        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
+        duckdb.version = Some(" v1.5.5 ".into());
+        assert!(versions.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_non_sh_script() {
+        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
+        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
+        duckdb.vendor_script = Some("scripts/evil.py".into());
+        assert!(versions.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_uppercase_hex() {
+        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
+        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
+        let fts = duckdb.extensions.as_mut().unwrap().get_mut("fts").unwrap();
+        fts.source_revision = Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into());
+        assert!(versions.validate().is_err());
+    }
 }

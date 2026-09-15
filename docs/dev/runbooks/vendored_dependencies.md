@@ -32,7 +32,7 @@ start
 :Write checksum back to\n**$VENDOR_VERSIONS_FILE** via yq -i;
 
 |mise vendor|
-:Assert $VENDOR_DIR is non-empty;
+:Assert $VENDOR_DIR exists and is non-empty;
 :Assert versions.yaml is still valid YAML;
 
 |cargo build|
@@ -59,6 +59,8 @@ endif
 |check_script|
 :Re-vendor archive into temp dir;
 :Byte-compare against committed archive;
+
+|mise check:vendored|
 :Assert versions.yaml was not modified\n(read-only postcondition);
 stop
 @enduml

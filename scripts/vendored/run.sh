@@ -13,6 +13,11 @@ set -euo pipefail
 MODE="${1:?usage: scripts/vendored/run.sh <vendor|check> <name>}"
 NAME="${2:?usage: scripts/vendored/run.sh <vendor|check> <name>}"
 
+if [[ ! "$NAME" =~ ^[a-z0-9_-]+$ ]]; then
+    echo "Invalid vendored dependency name: $NAME (must match [a-z0-9_-]+)" >&2
+    exit 1
+fi
+
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 VERSIONS_FILE="$REPO_ROOT/config/versions.yaml"
 
@@ -53,7 +58,7 @@ if [[ "$MODE" == "vendor" ]]; then
         echo "Postcondition failed: $VENDOR_DIR is empty after vendor_script" >&2
         exit 1
     fi
-    yq '.' "$VERSIONS_FILE" > /dev/null 2>&1 || {
+    yq '.' "$VERSIONS_FILE" > /dev/null || {
         echo "Postcondition failed: versions.yaml is not valid YAML after vendor_script" >&2
         exit 1
     }
