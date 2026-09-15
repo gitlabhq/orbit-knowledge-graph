@@ -1,9 +1,9 @@
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use duckdb_client::search::{NodeHydrator, excluded_path_predicate};
-use duckdb_client::{bool_column, string_column};
+use duckdb_client::search::{NodeHydrator, NodeValue, excluded_path_predicate};
+use duckdb_client::{DuckDbClient, bool_column, string_column};
 
-use crate::commands::{context, definition};
+use crate::commands::context;
 use crate::workspace;
 
 fn labels_cte(definition: &NodeHydrator) -> Result<String> {
@@ -59,16 +59,14 @@ fn rows_from(batches: &[RecordBatch], show_tests: bool) -> (Vec<Row>, usize) {
     (rows, hidden)
 }
 
-pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
-    let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
-    let (file, ids) = context::resolve_targets(&git.repo_path, &target.target)?;
-    anyhow::ensure!(
-        file.is_none(),
-        "relationships require Definition:<id> targets"
-    );
-    let hydrator = NodeHydrator::embedded("Definition")?;
-    let defs = definition::resolve_ids(&client, &git, &hydrator, &ids)?;
-    let labels_cte = labels_cte(&hydrator)?;
+pub(crate) fn print(
+    client: &DuckDbClient,
+    git: &workspace::GitInfo,
+    hydrator: &NodeHydrator,
+    defs: &[NodeValue],
+    show_tests: bool,
+) -> Result<()> {
+    let labels_cte = labels_cte(hydrator)?;
     let definition_id = hydrator.column("id")?;
     let definition_fqn = hydrator.column("fqn")?;
     let definition_table = hydrator.table();
@@ -96,7 +94,7 @@ ORDER BY kind, dir DESC, l.path, l.label, l.loc"
             ),
             &params,
         )?;
-        let (links, links_hidden) = rows_from(&edges, target.tests);
+        let (links, links_hidden) = rows_from(&edges, show_tests);
 
         let via = client.query_arrow_json(
             &format!(
@@ -120,7 +118,7 @@ ORDER BY kind, l.path, l.label, l.loc"
             ),
             &params,
         )?;
-        let (via, via_hidden) = rows_from(&via, target.tests);
+        let (via, via_hidden) = rows_from(&via, show_tests);
 
         println!(
             "Definition:{}  {}  [{}]  {}:{}-{}  (links {}, via members {})",

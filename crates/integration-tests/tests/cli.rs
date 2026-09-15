@@ -1258,16 +1258,25 @@ fn context_relationship_order_is_stable_across_overloads() {
             .find(|line| line.split_whitespace().nth(1) == Some(fqn))
             .and_then(|line| line.split_whitespace().next())
             .unwrap();
-        let args = ["context", reference, "--related", "--repo", repo_arg];
+        let args = ["context", reference, "--repo", repo_arg];
         let (first, stderr, ok) = run_cmd(&args, dd);
-        assert!(ok, "context {reference} --related failed: {stderr}");
-        assert!(first.contains(section), "{fqn}: {first}");
+        assert!(ok, "context {reference} failed: {stderr}");
+        assert!(
+            first.find("public void ping() {}").unwrap() < first.find(section).unwrap(),
+            "{first}"
+        );
         assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
         assert_eq!(first.matches("<-- Caller.run ").count(), 3, "{first}");
         for _ in 0..10 {
             assert_eq!(first, run_cmd(&args, dd).0, "{reference} output changed");
         }
     }
+    let (file, stderr, ok) = run_cmd(&["context", "src/Target.java", "--repo", repo_arg], dd);
+    assert!(ok, "{stderr}");
+    assert!(
+        file.contains("public class Target") && !file.contains("Connections ("),
+        "{file}"
+    );
 }
 
 #[test]

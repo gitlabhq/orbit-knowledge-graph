@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use anyhow::{Context, Result};
 use duckdb_client::search::{NodeHydrator, NodeValue};
 
-use crate::commands::{definition, setup::spec};
+use crate::commands::{definition, relations, setup::spec};
 use crate::workspace;
 
 const SIGNATURE_LINES: usize = 3;
@@ -46,6 +46,10 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
     let (file, ids) = resolve_targets(&git.repo_path, &target.target)?;
     let file_mode = file.is_some();
+    anyhow::ensure!(
+        !file_mode || !target.tests,
+        "--tests requires Definition:<id> targets"
+    );
     let hydrator = NodeHydrator::embedded("Definition")?;
     let nodes = if let Some(path) = file.as_deref() {
         let nodes = definitions_in_file(&client, &git, &hydrator, path)?;
@@ -98,6 +102,10 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         }
     }
     print!("{out}");
+    if !file_mode {
+        println!();
+        relations::print(&client, &git, &hydrator, &nodes, target.tests)?;
+    }
     Ok(())
 }
 
@@ -138,7 +146,7 @@ pub(crate) fn render_bodies(
     Ok(out)
 }
 
-pub(crate) fn resolve_targets(
+fn resolve_targets(
     repo_path: &std::path::Path,
     targets: &[String],
 ) -> Result<(Option<String>, Vec<i64>)> {

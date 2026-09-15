@@ -253,15 +253,11 @@ struct ContextArgs {
     target: Vec<String>,
 
     /// Print signatures and nested members instead of full bodies.
-    #[arg(long, conflicts_with = "related")]
+    #[arg(long)]
     outline: bool,
 
-    /// List the target definitions' relationships instead of their bodies.
-    #[arg(long)]
-    related: bool,
-
     /// Show relationships to test, fixture, and generated definitions.
-    #[arg(long, requires = "related")]
+    #[arg(long)]
     tests: bool,
 
     /// Repository path (default: current directory).
@@ -593,7 +589,6 @@ async fn dispatch(command: Commands) -> Result<()> {
                 kinds: kind_names(kind),
             },
         ),
-        Commands::Context(args) if args.related => commands::relations::run(args),
         Commands::Context(args) => commands::context::run(args),
         Commands::Sql(SqlArgs {
             query,
@@ -1252,22 +1247,19 @@ mod tests {
         };
         assert_eq!(args.target, vec!["Definition:7", "Definition:9"]);
         assert!(args.outline);
-        let Commands::Context(related) =
-            Cli::parse_from(["orbit", "context", "Definition:7", "--related", "--tests"]).command
+        let Commands::Context(with_tests) =
+            Cli::parse_from(["orbit", "context", "Definition:7", "--outline", "--tests"]).command
         else {
             panic!("expected context");
         };
-        assert!(related.related && related.tests);
+        assert!(with_tests.outline && with_tests.tests);
         assert!(matches!(
             Cli::parse_from(["orbit", "context", "src/lib.rs"]).command,
             Commands::Context(_)
         ));
         assert!(Cli::try_parse_from(["orbit", "context"]).is_err());
         assert!(Cli::try_parse_from(["orbit", "context", "--file", "src/lib.rs"]).is_err());
-        assert!(
-            Cli::try_parse_from(["orbit", "context", "Definition:7", "--related", "--outline",])
-                .is_err()
-        );
+        assert!(Cli::try_parse_from(["orbit", "context", "Definition:7", "--related"]).is_err());
     }
 
     #[test]

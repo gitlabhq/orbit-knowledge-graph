@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.6
+version: 0.5.7
 license: MIT
 metadata:
   audience: developers
@@ -74,8 +74,7 @@ wrapper flags, config keys, and pass-through rules:
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
 | `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions and print source for the top three, or list definitions under a path |
-| `orbit context <Definition:ID…\|FILE> [--outline]` | Read exact definitions or one file; `--outline` prints signatures and members only |
-| `orbit context <Definition:ID…> --related [--tests]` | List connections, including uses through members; `--tests` expands hidden test connections |
+| `orbit context <Definition:ID…\|FILE> [--outline] [--tests]` | Read source and relationships for exact definitions, or one file; `--tests` expands hidden test connections |
 | `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
 | `orbit schema [TABLE…] [--raw]` | Describe graph tables/columns (index-storage tables hidden); scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
@@ -90,16 +89,15 @@ orbit grep "rateLimit" --path src --kind Method,Function
 orbit context Definition:481
 orbit context Definition:481 Definition:620 --outline
 orbit context src/lib.rs
-orbit context Definition:481 --related
-orbit context Definition:481 --related --tests
+orbit context Definition:481 --tests
 ```
 
 `grep` returns `Definition:<id>` references and source for its top three
 matches. Pass those exact references to `context`; it does not resolve names,
 FQNs, or globs. One existing repo-relative or absolute file path prints that
-file's definitions. `--outline` replaces bodies with signatures and nested
-members. `--related` lists connections with direction and edge kind;
-`--tests` includes test, fixture, and generated connections. If raw search is
+file's definitions. Definition targets also show relationships with direction
+and edge kind; file targets do not. `--outline` replaces bodies with signatures
+and nested members. `--tests` includes test, fixture, and generated connections. If raw search is
 needed to locate a file, return to `context <path>` to read it. Built-in Read
 and shell reads are only for non-code or unavailable Orbit source. Never
 truncate Orbit output.

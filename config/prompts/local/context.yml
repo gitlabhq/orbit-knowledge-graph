@@ -1,11 +1,12 @@
 name: context
-version: 1.1.0
+version: 1.2.0
 short: Read local definitions or one source file
 description: >-
   Read local definitions or one source file.
 
 
   Pass one or more `Definition:<id>` references from grep, or one existing file
-  path in the current checkout. Definition references select exact graph nodes;
-  file paths show the file's indexed definitions. Use `--outline` for signatures
-  and nested members, or `--related` for relationships.
+  path in the current checkout. Definition targets include source and relationships;
+  `--tests` expands hidden test connections. File targets show indexed definitions
+  without relationships. Use `--outline` for signatures and nested members instead
+  of full bodies.

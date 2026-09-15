@@ -9,7 +9,7 @@ instructions: |
 
   - Find: `{{orbit}} grep "<concept>"`. Start unfiltered with 1-3 identifier words. Miss: retry once with a source identifier. Broad: add `--path <glob>` or `--kind Class,Method`.
   - Read code: `{{orbit}} context Definition:<id>` or `{{orbit}} context <path>`. Use `--outline` for signatures.
-  - Relationships: `{{orbit}} context Definition:<id> --related`; add `--tests` to show test connections.
+  - Definition context includes relationships; `--tests` shows hidden test connections.
   - Edit context output; never truncate it. Raw Read or shell reads: non-code or unavailable Orbit source only.
   - Answers from graph cite mechanism + `file:line`; skip search narration.
 
