@@ -1252,12 +1252,22 @@ mod tests {
         };
         assert_eq!(args.target, vec!["Definition:7", "Definition:9"]);
         assert!(args.outline);
+        let Commands::Context(related) =
+            Cli::parse_from(["orbit", "context", "Definition:7", "--related", "--tests"]).command
+        else {
+            panic!("expected context");
+        };
+        assert!(related.related && related.tests);
         assert!(matches!(
             Cli::parse_from(["orbit", "context", "src/lib.rs"]).command,
             Commands::Context(_)
         ));
         assert!(Cli::try_parse_from(["orbit", "context"]).is_err());
         assert!(Cli::try_parse_from(["orbit", "context", "--file", "src/lib.rs"]).is_err());
+        assert!(
+            Cli::try_parse_from(["orbit", "context", "Definition:7", "--related", "--outline",])
+                .is_err()
+        );
     }
 
     #[test]

@@ -1210,7 +1210,11 @@ fn grep_loads_bundled_extension_in_fresh_data_dir() {
         "grep failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("read_file"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Definition:") && stdout.contains("return open"),
+        "{stdout}"
+    );
 }
 
 #[test]
