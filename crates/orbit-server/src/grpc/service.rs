@@ -317,6 +317,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                             .render_request(&req.query, &values)
                             .map_err(|e| e.to_string())
                     }
+                    Ok(QueryType::Gql) => Err("GQL query_type is not supported".to_string()),
                     Err(_) => Err(format!("Unknown query_type: {}", req.query_type)),
                 };
                 let query_json = match resolved {

@@ -5,8 +5,9 @@
 The Orbit query frontend accepts a read-only graph language based on openCypher 9 syntax.
 It includes Orbit-specific query restrictions, extensions, and schema discovery.
 
-Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend. Remote query contracts remain JSON-only.
-This implementation does not change MCP tools, protocol messages, Rails, or CLI contracts.
+Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend.
+Remote execution remains JSON/named-only: `QUERY_TYPE_GQL` is present in the gRPC protocol but rejected by the server.
+MCP tools, Rails, and CLI contracts remain unchanged.
 
 A **Pest pair** is a matched grammar rule and its source span.
 A query's **syntax tree** is its typed Rust form, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
