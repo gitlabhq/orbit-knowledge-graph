@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_wildcard_columns_returns_all_ontology_fields
+description: Wildcard columns returns all ontology fields but excludes internal columns
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    User:
+      ids: [1]
+      prop_absent: [traversal_path, _version, _deleted]
+      rows:
+        - { id: 1, username: alice, name: Alice Admin, state: active, user_type: human }

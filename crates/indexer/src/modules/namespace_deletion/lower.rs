@@ -1,6 +1,6 @@
 use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
 pub struct DeletionStatement {
     /// Unprefixed table name.

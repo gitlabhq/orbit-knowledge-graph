@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use super::TextExcerpt;
+
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use orbit_utils::traversal_path::TraversalPath;
@@ -13,6 +15,7 @@ pub struct HydrationNodePlan {
     pub id_property: String,
     pub node_ids: Vec<i64>,
     pub columns: Vec<String>,
+    pub text_excerpt: TextExcerpt,
     /// Traversal paths extracted from the base query, used to narrow hydration
     /// scans via `startsWith(traversal_path, tp)`.
     pub traversal_paths: Vec<TraversalPath>,
@@ -59,6 +62,7 @@ pub fn plan_hydration(input: &Input) -> Result<Plan> {
                 id_property: node.id_property.clone(),
                 node_ids: node.node_ids.clone(),
                 columns,
+                text_excerpt: TextExcerpt::default(),
                 traversal_paths: node.traversal_paths.clone(),
                 sort_key,
             })

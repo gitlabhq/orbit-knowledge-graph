@@ -1,3 +1,3 @@
 name: skill
-version: 1.0.0
-short: Print the bundled orbit-local skill content (SKILL.md or a file path)
+version: 1.0.1
+short: Print the bundled orbit-cli skill content (SKILL.md or a file path)

@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_group_by_property_truncate_month
+description: Group by truncated month produces date-bucketed counts
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]},
+        {"id": "n", "entity": "Note", "filters": {"created_at": {"gte": "2024-01-01T00:00:00Z"}}}
+      ],
+      "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+      "group_by": [{"key": "n.created_at", "truncate": "month"}],
+      "aggregations": [{"count": "n", "as": "note_count"}],
+      "aggregation_sort": "n_created_at_month",
+      "limit": 20
+    }
+
+expect:
+  skip_requirements: ["node_ids", "filter:created_at", "aggregation_sort", "aggregation"]
+  row_count: 2
+  row_values:
+    - { n_created_at_month: "2024-01-01", note_count: 1 }
+    - { n_created_at_month: "2024-02-01", note_count: 1 }

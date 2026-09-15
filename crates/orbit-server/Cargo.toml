@@ -32,6 +32,7 @@ orbit-utils = { path = "../utils" }
 orbit-versions = { path = "../orbit-versions" }
 health-check = { workspace = true }
 indexer = { path = "../indexer" }
+orbit-migrations = { path = "../orbit-migrations" }
 minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true }
@@ -65,6 +66,7 @@ toon-format = { workspace = true }
 
 [build-dependencies]
 compiler = { path = "../query-engine/compiler" }
+orbit-migrations = { path = "../orbit-migrations" }
 orbit-prompts = { path = "../orbit-prompts" }
 named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
@@ -77,6 +79,5 @@ orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-[lints.rust]
-# workspace uses `forbid`, downgraded to `deny` so tests can manipulate env vars
-unsafe_code = "deny"
+[lints]
+workspace = true

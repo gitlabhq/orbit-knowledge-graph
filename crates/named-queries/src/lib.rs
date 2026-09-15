@@ -166,6 +166,10 @@ impl NamedQueries {
         self.queries.values()
     }
 
+    pub fn retain(&mut self, mut keep: impl FnMut(&NamedQuery) -> bool) {
+        self.queries.retain(|_, query| keep(query));
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.queries.keys().map(String::as_str)
     }
@@ -218,6 +222,10 @@ query:
             "expand_neighbors",
             "search_nodes",
             "list_nodes",
+            "file_definitions",
+            "file_definition_callers",
+            "definition_references",
+            "definition_callees",
         ] {
             assert!(queries.get(name).is_some(), "missing named query `{name}`");
         }

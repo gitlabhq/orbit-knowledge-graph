@@ -393,7 +393,10 @@ mod tests {
             nats,
             checkpoint_store,
             ScheduledTaskMetrics::new(),
-            NamespaceDispatcherConfig::default(),
+            orbit_server_config::AppConfig::embedded_defaults()
+                .schedule
+                .tasks
+                .namespace,
         )
     }
 

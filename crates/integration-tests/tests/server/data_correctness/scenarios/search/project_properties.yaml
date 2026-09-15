@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_returns_correct_project_properties
+description: Project search returns correct name and visibility_level
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["name", "visibility_level"]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 6
+  nodes:
+    Project:
+      rows:
+        - { id: 1000, name: Public Project, visibility_level: public }
+        - { id: 1003, name: Secret Project, visibility_level: private }

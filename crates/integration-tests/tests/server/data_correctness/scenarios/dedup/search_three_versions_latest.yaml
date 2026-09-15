@@ -1,0 +1,32 @@
+# source: crates/integration-tests/tests/server/data_correctness/dedup.rs::search_three_versions_returns_latest
+description: Three versions collapse to latest
+
+config:
+  extra_seed:
+    gl_merge_request:
+      - { id: 9800, iid: 800, title: "MR v1", state: opened, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9800, iid: 800, title: "MR v2", state: merged, traversal_path: "1/100/1000/", _version: "2024-03-01 00:00:00", _deleted: false }
+      - { id: 9800, iid: 800, title: "MR v3", state: closed, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: false }
+      - { id: 9801, iid: 801, title: "Control MR", state: merged, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9800, 9801]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest",
+                 "columns": ["title", "state"],
+                 "node_ids": [9800, 9801]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    MergeRequest:
+      ids: [9800, 9801]
+      rows:
+        - { id: 9800, state: closed, title: "MR v3" }
+        - { id: 9801, state: merged }

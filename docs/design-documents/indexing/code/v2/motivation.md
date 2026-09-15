@@ -79,25 +79,54 @@ Additional limitations:
 
 ### Why not Zoekt
 
-Why not Zoekt can be broken down into the following points:
+While Zoekt is a solid system for trigram matching, it is not a good base for Orbit. The reasons:
 
-- It indexes only the default branch, and branches and commits are our top customer ask,
-- It is memory-resident and stateful,
-- We need graph data, trigrams, and content in one store with authz baked into the layout,
-- Most of the logic around archive fetching, locking, task queues, and backfill is already built for Orbit, which is 90% of the Zoekt code.
+1. GitLab Zoekt as of today is a Rails and Gitaly appliance, not a modular engine. Orbit runs in a separate GCP project and cannot reach Gitaly.
+2. It indexes the default branch only, caps at 64 branches, and has no commit dimension. Branches and commits are our top customer ask.
+3. It is memory-resident and stateful. Orbit wants stateless workers over object storage.
+4. Authorization is a per-request list of project ids from Rails, not a property of the storage layout.
+5. The shard format has no place for graph data, so content and graph would live in two engines.
+6. Orbit's graph indexer is Rust. The text matcher must sit in the same process and read the same layout.
+
+#### A Rails and Gitaly appliance
+
+Everything that makes Zoekt a service lives in Rails: node registry, replicas, indices, tasks, and watermarks. The indexer polls the Rails internal API for tasks. Each task carries a Gitaly address and token, and the indexer dials Gitaly gRPC directly. Zoekt nodes must sit on the Gitaly network with Gitaly credentials.
+
+Orbit runs in its own GCP project and reaches GitLab only through the Rails internal API and the Siphon and NATS pipeline. To run Zoekt there, we would open Gitaly gRPC across projects or move Orbit into the production cluster. Both break the [minimal Gitaly load](functional_requirements.md#minimal-load-on-gitaly) requirement. The reusable part of Zoekt is the shard builder and the matcher. We would replace everything else.
+
+#### Default branch only, no commits
+
+The GitLab indexer hard-codes one branch named `HEAD`. Upstream allows at most 64 branches per repository, and a delta build refuses a changed branch set. The monolith has 4,000 active branches. Commits have no representation, so a search at a commit is not expressible.
 
 #### Memory-resident and stateful
 
-Zoekt keeps its index and cache in RAM on PVCs with mmap, and a central coordinator pins repos to nodes. On `.com` it sits on 60 to 80 TiB and the trigram index runs about 3x the corpus. We want an SSD cache in front of object storage and stateless workers to reduce COGS.
+Zoekt maps shards into RAM from persistent disks, and Rails pins each top-level namespace to StatefulSet nodes. The index is about 3.5x the corpus and needs RAM above 1.2x the corpus. Memory is the recurring failure mode on `.com`. Orbit wants memory to be a cache, not the index.
 
-#### Zoekt limitations for what we need
+#### Authorization is a filter, not a layout
 
-Additional limitations:
+Rails expands the caller's permissions into a list of project ids and sends it with each query. Orbit requires authorization [before candidate selection](functional_requirements.md#authorization-and-namespace-isolation), encoded in the layout as traversal paths, with no Rails call per query.
 
-- We need fine-grained access control, and the database must respect authz rules out of the box. Zoekt is not built that way.
-- Zoekt is written in Go, and we are using Rust.
-- We need to co-locate graph data, trigrams, and content in the same database. Zoekt has trigrams and content only, no graph and no `ast-grep`.
-- We don't want to require customers to deploy and operate Zoekt to use Orbit. Orbit must own the vertical stack and not rely on external services.
+#### No place for the graph
+
+A Zoekt shard holds file content, filenames, posting lists, branch masks, ctags symbols, and metadata. Offsets are 32-bit, so a shard stays under 4 GB and about 1 GB of content. There is no extension point for definitions, references, edges, or partition metadata. Symbols come from a universal-ctags subprocess and serve ranking and the `sym:` filter. Orbit builds its graph with tree-sitter in Rust and needs `ast-grep` matching.
+
+The functional requirements need [content and graph in one query](functional_requirements.md#graph-filtering-by-file-content), at the same revision, under the same access scope. With Zoekt, the graph lives in a second engine. Every combined query becomes two engines, two revision anchors, two coverage statements, and a join in the application. The per-repository shard SHA and the graph revision drift apart on every push.
+
+#### Vertical integration in Rust
+
+Orbit's graph indexer, tree-sitter parsing, `ast-grep`, authorization, and ingest are Rust crates. The text matcher must run in the same process, share the same object storage layout, and commit at the same revision. Then one query can filter by content and walk the graph in one pass with one coverage statement. Calling out to a separate, stateful Go system gives up all of that. It adds a network hop or a CGo boundary on every query, a second scheduler, and a second consistency point. The memory work we need is also easier in Rust. Sourcegraph's 5x RAM reduction came from working around Go map and garbage collector overhead. Rust gives explicit layout and zero-copy reads over object storage bytes by default.
+
+#### References
+
+- [Zoekt design document (GitLab handbook)](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/code_search_with_zoekt/)
+- [gitlab-zoekt-indexer: task polling against the Rails internal API](https://gitlab.com/gitlab-org/gitlab-zoekt-indexer/-/blob/c6de94b111d4b1d078ec922085ad0effe7b47035/internal/task_request/task_request.go#L26)
+- [gitlab-zoekt-indexer: direct Gitaly gRPC dial](https://gitlab.com/gitlab-org/gitlab-zoekt-indexer/-/blob/c6de94b111d4b1d078ec922085ad0effe7b47035/internal/gitaly/gitaly.go#L89)
+- [gitlab-zoekt-indexer: single `HEAD` branch](https://gitlab.com/gitlab-org/gitlab-zoekt-indexer/-/blob/c6de94b111d4b1d078ec922085ad0effe7b47035/internal/indexer/indexer.go#L142)
+- [gitlab-zoekt-indexer: `repo_ids` authorization filter](https://gitlab.com/gitlab-org/gitlab-zoekt-indexer/-/blob/c6de94b111d4b1d078ec922085ad0effe7b47035/internal/search/query.go#L336)
+- [Zoekt upstream: delta builds refuse a changed branch set](https://github.com/sourcegraph/zoekt/blob/0e022b711109/index/builder.go#L721)
+- [Zoekt upstream: design notes (index size, shard limits)](https://github.com/sourcegraph/zoekt/blob/main/doc/design.md)
+- [Sourcegraph: 5x reduction in Zoekt RAM usage](https://sourcegraph.com/blog/zoekt-memory-optimizations-for-sourcegraph-cloud)
+- [Orbit v1 code indexing design](../v1/code_indexing.md)
 
 Zoekt does not go away. Orbit code indexing will ship as another engine and an alternative path for large Zoekt users.
 

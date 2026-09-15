@@ -220,8 +220,8 @@ mod tests {
     use crate::modules::sdlc::plan::{
         Cursor, CursorFilter, Plan, TransformSpec, TraversalPathFilter, WatermarkFilter,
     };
-    use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
     use chrono::Utc;
+    use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
     use orbit_utils::traversal_path::TraversalPath;
 
     fn test_ontology() -> Ontology {

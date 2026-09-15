@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_avg_produces_correct_values
+description: Average of user IDs per group
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [{"avg": "u.id", "as": "avg_id"}],
+      "limit": 10
+    }
+
+expect:
+  groups:
+    g:
+      rows:
+        - { entity: Group, id: 100, values: { avg_id: 3.0 } }
+        - { entity: Group, id: 101, values: { avg_id: 4.5 } }
+        - { entity: Group, id: 102, values: { avg_id: 2.5 } }

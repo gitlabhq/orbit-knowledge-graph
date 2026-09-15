@@ -1,0 +1,24 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_dynamic_columns_all_returns_properties
+description: Dynamic columns "*" returns properties on neighbors
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+      "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+      "options": {"dynamic_columns": "*"}
+    }
+
+expect:
+  node_count: 3
+  nodes:
+    User:
+      ids: [1]
+    Group:
+      ids: [100, 102]
+      rows:
+        - { id: 100, name: Public Group, visibility_level: public }
+        - { id: 102, name: Internal Group, visibility_level: internal }
+  edge_exists:
+    MEMBER_OF: [[1, 100], [1, 102]]

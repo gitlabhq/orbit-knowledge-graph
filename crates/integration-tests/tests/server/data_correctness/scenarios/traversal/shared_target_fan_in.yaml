@@ -1,0 +1,29 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_shared_target_fan_in
+description: Multiple notes fan in from a single merge request via HAS_NOTE
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title"], "node_ids": [2000]},
+            {"id": "n", "entity": "Note", "columns": ["note"]}
+        ],
+        "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+        "limit": 20
+    }
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) RETURN mr.title, n.note LIMIT 20
+
+expect:
+  node_count: 4
+  nodes:
+    MergeRequest:
+      ids: [2000]
+    Note:
+      ids: [3000, 3002, 3003]
+  edges:
+    HAS_NOTE:
+      - [2000, 3000]
+      - [2000, 3002]
+      - [2000, 3003]

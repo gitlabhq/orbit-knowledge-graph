@@ -299,24 +299,24 @@ settings:
       ttl: snapshot_date + INTERVAL 400 DAY
     - name: checkpoint
       columns:
-        - {name: key, type: string, codec: ["zstd(1)"]}
-        - {name: watermark, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
-        - {name: cursor_values, type: string, default: "''", codec: ["zstd(1)"]}
+        - {name: key, type: string, codec: ["ZSTD(1)"]}
+        - {name: watermark, type: timestamp, codec: ["Delta(8)", "ZSTD(1)"]}
+        - {name: cursor_values, type: string, default: "''", codec: ["ZSTD(1)"]}
       order_by: [key]
     - name: namespace_deletion_schedule
       columns:
-        - {name: namespace_id, type: int64, codec: ["zstd(1)"]}
-        - {name: traversal_path, type: string, codec: ["zstd(1)"]}
-        - {name: scheduled_deletion_date, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+        - {name: namespace_id, type: int64, codec: ["ZSTD(1)"]}
+        - {name: traversal_path, type: string, codec: ["ZSTD(1)"]}
+        - {name: scheduled_deletion_date, type: timestamp, codec: ["Delta(8)", "ZSTD(1)"]}
       order_by: [namespace_id, traversal_path]
     - name: code_indexing_checkpoint
       columns:
-        - {name: traversal_path, type: string, codec: ["zstd(1)"]}
-        - {name: project_id, type: int64, codec: ["zstd(1)"]}
-        - {name: branch, type: string, codec: ["zstd(1)"]}
-        - {name: last_task_id, type: int64, codec: ["zstd(1)"]}
-        - {name: last_commit, type: string, default: "''", codec: ["zstd(1)"]}
-        - {name: indexed_at, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+        - {name: traversal_path, type: string, codec: ["ZSTD(1)"]}
+        - {name: project_id, type: int64, codec: ["ZSTD(1)"]}
+        - {name: branch, type: string, codec: ["ZSTD(1)"]}
+        - {name: last_task_id, type: int64, codec: ["ZSTD(1)"]}
+        - {name: last_commit, type: string, default: "''", codec: ["ZSTD(1)"]}
+        - {name: indexed_at, type: timestamp, codec: ["Delta(8)", "ZSTD(1)"]}
       order_by: [traversal_path, project_id, branch]
       version_type: uint64
   auxiliary_dictionaries:

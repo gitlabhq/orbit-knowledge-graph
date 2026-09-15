@@ -62,13 +62,10 @@ mod tests {
     use super::*;
 
     fn config_with_urls(graph_url: &str, datalake_url: &str) -> AppConfig {
-        let json = format!(
-            r#"{{
-                "graph": {{ "url": "{graph_url}", "database": "default", "username": "default" }},
-                "datalake": {{ "url": "{datalake_url}", "database": "default", "username": "default" }}
-            }}"#,
-        );
-        serde_json::from_str(&json).unwrap()
+        let mut config = AppConfig::embedded_defaults();
+        config.graph.url = graph_url.to_string();
+        config.datalake.url = datalake_url.to_string();
+        config
     }
 
     #[test]

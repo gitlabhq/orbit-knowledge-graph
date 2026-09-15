@@ -1,0 +1,20 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_nullable_datetime_returns_null_when_unset
+description: Nullable DateTime column returns null when the value is unset
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["created_at"],
+                 "node_ids": [3002]}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    Note:
+      ids: [3002]
+      rows:
+        - { id: 3002, created_at: null }

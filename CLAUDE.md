@@ -31,9 +31,12 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
   `settings.denormalized_joins` declares linear chains of tables pre-joined into `gl_denorm_<name>` tables composed from the source tables' DDL and fed by materialized views (`crates/ontology/src/denormalized.rs`, `passes/codegen/ddl/denormalized.rs`); each declaration is a schema bump.
   Unversioned objects (durable tables and materialized views created once at boot, never version-prefixed or GCed) are emitted through one `generate_unversioned_objects` path in `crates/query-engine/compiler/src/passes/codegen/ddl/`; add a new unversioned kind there rather than introducing a parallel per-kind generator.
   Schema: `config/schemas/ontology.schema.json`.
+- **Schema archives.** Migration and promotion require usable ontology archives. The dispatcher bootstraps missing active archives from the build-validated release bundle; unsupported missing versions fail closed. The Webserver serves the active archive and pins one schema snapshot per request. See `docs/design-documents/schema_management.md` for readiness, supported legacy upgrades, and rollback retention.
+- **Orbit query frontend.** `crates/query-engine/compiler/src/passes/frontend/` holds one module per query language. `json_dsl` and `gql` each lower source text to compiler `Input` as the first phase of their own pipeline preset; every later phase is shared. Remote requests still use JSON. See `docs/design-documents/querying/orbit_query_frontend.md`.
 - **Agent-facing prompts are YAML.** Tool and command descriptions live as versioned YAML under `config/prompts/` (`remote/` = server, `local/` = CLI), embedded via rust-embed and build-time validated by `orbit-prompts`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
-- **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
+- **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads four sources (lowest to highest priority): the embedded `config/default.yaml` (compiled in via `include_str!`), an on-disk `config/default.yaml` when present (the Helm ConfigMap key), an overlay file (`--config <path>`, else `config/config.yaml` when present), and K8s secret files from `/etc/secrets/`. There is no environment-variable layer; the mise dev tasks generate `.dev/<mode>.yaml` from `config/dev.yaml`, GDK-derived connection details, and the Git-ignored `config/dev.local.yaml`, and pass that one file to `--config`.
+  `config/default.yaml` is the single source of truth for defaults: every section and scalar is declared there; the Rust structs have no `Default` impls or `serde(default)` fallbacks (only `Option` fields and empty collections may be omitted). Add a setting by adding the struct field plus its value in `default.yaml`; tests start from `AppConfig::embedded_defaults()`. The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md`.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
 ## What CI enforces
@@ -45,6 +48,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Assistant setup specs and mode texts in `config/setup/` validated against JSON schema (`setup-schema-validate`)
 - Migration ledger validated and scope-checked (`migration-ledger-schema-validate`, `migration-ledger-check`, plus `orbit-server` build-time drift checks); full ledger rules in `docs/design-documents/schema_management.md`
 - `cargo fmt` (`fmt-check`)
+- Trailing newlines (`newline-check`, run locally with `mise lint:newlines`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
 - Unit tests via nextest (`unit-test`)
@@ -61,6 +65,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Query-language text-indexed properties table regenerated in sync with the ontology (`query-language-docs-check`)
 - Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
 - Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`)
+- The vendored DuckDB FTS source archive matches its pinned upstream revisions (`duckdb-fts-sources-sync-check`; regenerate with `scripts/duckdb/vendor-duckdb-fts-sources.sh`)
 - Every `[workspace]` member has a row in `docs/dev/agents-crate-map.md`, and no stale rows remain (`crates/xtask/build.rs`, so any workspace build/clippy fails on drift)
 
 ## Where to find things
@@ -100,6 +105,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 See [`crates/code-graph/AGENTS.md`](crates/code-graph/AGENTS.md).
 
 ## MR and issue descriptions and comments
+
+Load the `orbit-planning` skill before creating or labeling issues, epics, or MRs so they use the canonical taxonomy and roadmap rules.
 
 Always use the templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/`, and read the TEMPLATE CONVENTION block at the top of each one before writing the description.
 

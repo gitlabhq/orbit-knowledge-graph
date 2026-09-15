@@ -1,0 +1,19 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_after_token_with_sql_metacharacters_is_parameterized
+# Token snapshot: encode(canonical_hash(query), ["'); DROP TABLE gl_user; --", "0"])
+# If cursor encoding changes, regenerate with the Rust encode() function.
+description: SQL injection payload in a well-formed cursor token is parameterized away
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"]}],
+      "order_by": "-u.username",
+      "cursor": {"page_size": 2,
+                 "after": "eyJoIjoiNDUzMzNmMDg3NWU5NzJjYSIsImsiOlsiJyk7IERST1AgVEFCTEUgZ2xfdXNlcjsgLS0iLCIwIl19"}
+    }
+
+expect:
+  node_count: 0
+  skip_requirements: [cursor, order_by, node_ids]

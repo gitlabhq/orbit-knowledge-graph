@@ -10,4 +10,4 @@ pub use circuit_breaking::CircuitBreakingNatsClient;
 pub use client::{NatsClient, SubjectDedup};
 pub use error::NatsError;
 pub use kv_services::{KvServices, KvServicesImpl};
-pub use kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
+pub use kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult, KvWatch};

@@ -638,16 +638,17 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{"count": "u", "as": "member_count"}],
-            "limit": 10
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{"count": "u", "as": "member_count"}],
+        "limit": 10
+    }"#,
+        query_engine::compiler::Frontend::JsonDsl,
         &ontology,
         &security_ctx,
     );

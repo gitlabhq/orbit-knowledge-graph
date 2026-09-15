@@ -4109,8 +4109,8 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
-          "legendFormat": "{{instance}}",
+          "expr": "max by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+          "legendFormat": "{{entity}}",
           "refId": "A"
         }
       ],
@@ -4967,7 +4967,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(gkg_schema_migrating_age_seconds{container=\"gkg-dispatcher\", cluster=~\"$cluster\"})",
+          "expr": "max(gkg_schema_migrating_age_seconds{container=\"gkg-dispatcher\", cluster=~\"$cluster\"})",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -6982,7 +6982,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Webserver readiness gate state (pending|ready|outdated|migrating); 1 indicates the active state per `state` label.",
+      "description": "Webserver serving schema state (pending|ready); 1 indicates the active state per `state` label.",
       "fieldConfig": {
         "defaults": {
           "custom": {

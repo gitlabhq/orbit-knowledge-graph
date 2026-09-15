@@ -17,10 +17,12 @@ endpoint to determine whether the process can answer HTTP.
 
 ### `/ready`
 
-Readiness is also local-only. The Webserver reads the latest state held in memory by its background
-`SchemaWatcher`. The Indexer and Dispatcher read an in-memory serving flag that is set after their
-startup gates have cleared. These handlers make no network calls, so a dependency outage cannot
-restart otherwise healthy pods or prevent a rollout from converging.
+Readiness is also local-only. The Webserver is ready (`200`) while its `ActiveSchema` holds a
+serving snapshot and pending (`503`, `schema_pending`) otherwise; see
+[schema management](schema_management.md#webserver-readiness-gate). The Indexer and Dispatcher
+read an in-memory serving flag that is set after their startup gates have cleared. These handlers
+make no network calls, so a dependency outage cannot restart otherwise healthy pods or prevent a
+rollout from converging.
 
 ## HealthCheck runtime endpoints
 
@@ -65,7 +67,7 @@ GitLab ─────────── connectivity/JWT check ────┘ 
 
 NATS JetStream ─► HealthChecker.queue_depth() ─► HealthCheck /queue-depth ─► KEDA
 
-Local SchemaWatcher/serving flag ─► pod /ready
+Local ActiveSchema/serving flag ─► pod /ready
 Local HTTP process response ───────► pod /live
 ```
 
@@ -84,10 +86,9 @@ component is omitted.
 
 ## Migration awareness
 
-During a schema migration the newly deployed Webserver pods are `Pending` (embedded version greater
-than active version) and drop out of the Kubernetes rotation. The HealthCheck runtime consequently
-reports the Webserver Deployment as Unhealthy for the migration window. Without extra context this
-is indistinguishable from a broken deployment.
+Webservers stay ready through a schema migration, since they keep serving the active snapshot
+while the target version is built. The overlay below only matters when Kubernetes reports the
+Deployments unhealthy for another reason.
 
 When only Kubernetes services are unhealthy and every ClickHouse component is Healthy,
 `ClusterHealthChecker` reads the shared `gkg_schema_version` table. If a `migrating` row exists, it:
@@ -111,7 +112,7 @@ lifecycle.
 
 ## Modes and configuration
 
-**Real mode:** When `GKG_HEALTH_CHECK__SERVICES` is set, the Webserver fetches the HealthCheck
+**Real mode:** When `health_check_url` is set, the Webserver fetches the HealthCheck
 runtime's live `/health` response. If that service is unreachable, cluster health is Unhealthy and
 includes the connection error rather than failing the request.
 
@@ -119,8 +120,8 @@ includes the connection error rather than failing the request.
 components with `mode: "stubbed"`. If a GitLab client is configured, the real reporting-only GitLab
 diagnostic is still appended to this stubbed infrastructure data.
 
-| Environment variable | Effect |
+| Config path | Effect |
 |---|---|
-| `GKG_HEALTH_CHECK__SERVICES` | Base URL for the HealthCheck runtime, for example `http://localhost:9090`. When unset, cluster health uses stubbed infrastructure data. |
+| `health_check_url` | Base URL for the HealthCheck runtime, for example `http://localhost:4201`. When unset, cluster health uses stubbed infrastructure data. |
 
 See [ADR 003](decisions/003_api_design.md) for cluster-health request and response examples.

@@ -15,8 +15,8 @@ json_merges:
       - matcher: "Bash|Grep|Glob"
         hooks:
           - type: command
-            command: "{{orbit}} hook-guard search --mode {mode}"
+            command: "{{orbit}} hook-guard search"
       - matcher: Read
         hooks:
           - type: command
-            command: "{{orbit}} hook-guard read --mode {mode}"
+            command: "{{orbit}} hook-guard read"

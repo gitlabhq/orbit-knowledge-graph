@@ -61,9 +61,13 @@ graph LR
     Arrow --> S3["S3"]
 ```
 
-## New Gitaly RPCs required
+## Gitaly access
 
-As you may have guessed by now, this will eventually be served through a new proxy. But possibly through Rails RPC proxy endpoint using the Orbit internal API.
+Orbit has no direct access to Gitaly. Today every repository read goes through a Rails internal API endpoint, one per Gitaly RPC.
+
+We are replacing it with a transparent Gitaly proxy in Workhorse ([ADR 018](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/decisions/018_gitaly_proxy_in_workhorse.md), implementation in [knowledge-graph#1252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1252)): it's gRPC tunnelled over a WebSocket.
+
+### RPCs required
 
 | RPC | What it does |
 |---|---|
@@ -190,4 +194,8 @@ This design comes with a bunch of new components and RPCs, naturally we need to 
 ### Analytics
 
 - Switch analytics events to speak S3 instead of ClickHouse
+<<<<<<< HEAD
 - Inlcude branch in code indexing events.
+=======
+- Inlcude branch in code indexing events.
+>>>>>>> refs/remotes/origin/orbit-team/code-indexing-v2

@@ -1,0 +1,31 @@
+# source: crates/integration-tests/tests/server/data_correctness/pagination.rs::cursor_traversal_four_hop_pages_cover_all_edges
+description: Four-hop traversal pages cover all 13 edges in 3 pages
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        {"id": "wi", "entity": "WorkItem"},
+        {"id": "g", "entity": "Group"},
+        {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+      ],
+      "relationships": [
+        {"type": "AUTHORED", "from": "u", "to": "wi"},
+        {"type": "IN_GROUP", "from": "wi", "to": "g"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "cursor": {"page_size": 3}
+    }
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)-[:IN_GROUP]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, wi, g, p PAGE 3
+
+expect:
+  all_pages:
+    edge_count: 13
+    page_count: 3
+  pages:
+    - skip_requirements: [node_count, cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - skip_requirements: [node_count, cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - skip_requirements: [node_count, cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]

@@ -71,17 +71,14 @@ fn node_plan_from(node: &InputNode) -> NodePlan {
         table: node.table.clone(),
         selectivity: Selectivity::from_node(node),
         hydration: HydrationStrategy::Skip,
-        filters: node
-            .filters
-            .iter()
-            .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
-            .collect(),
+        filters: crate::passes::shared::ordered_filters(&node.filters),
         node_ids: node.node_ids.clone(),
         id_range: node.id_range.clone(),
         has_traversal_path: node.has_traversal_path,
         is_global: node.is_global,
         redaction_id_column: node.redaction_id_column.clone(),
         columns: node.columns.clone(),
+        text_excerpt: Default::default(),
         dedup_columns: vec![],
         use_narrowing: false,
         needs_elevated_filter: false,

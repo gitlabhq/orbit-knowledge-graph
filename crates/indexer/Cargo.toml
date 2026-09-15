@@ -18,13 +18,11 @@ chrono = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
-croner = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 petgraph = { workspace = true }
 orbit-utils = { path = "../utils" }
-orbit-versions = { path = "../orbit-versions" }
 datafusion = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
@@ -35,7 +33,7 @@ labkit-events = { workspace = true }
 moka = { workspace = true }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
-query-engine = { path = "../query-engine" }
+orbit-migrations = { path = "../orbit-migrations" }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }

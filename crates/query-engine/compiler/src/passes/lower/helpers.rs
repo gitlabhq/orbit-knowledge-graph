@@ -15,6 +15,42 @@ use crate::passes::shared::{
     rel_kind_filter, rel_kind_filter_values,
 };
 
+const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
+
+pub(super) fn text_excerpt_projection(
+    alias: &str,
+    column: &str,
+    text_excerpt: &TextExcerpt,
+) -> Expr {
+    let value = Expr::col(alias, column);
+    if !text_excerpt.columns.contains(column) {
+        return value;
+    }
+
+    let excerpt = Expr::func(
+        "substringUTF8",
+        vec![
+            value.clone(),
+            Expr::lit(1),
+            Expr::lit(text_excerpt.max_chars),
+        ],
+    );
+    let shortened = Expr::binary(
+        Op::Gt,
+        Expr::func("length", vec![value]),
+        Expr::func("length", vec![excerpt.clone()]),
+    );
+    let suffix = Expr::func(
+        "if",
+        vec![
+            shortened,
+            Expr::string(TEXT_TRUNCATION_SUFFIX),
+            Expr::string(""),
+        ],
+    );
+    Expr::func("concat", vec![excerpt, suffix])
+}
+
 /// Predicates applied after `FINAL` has resolved each node's latest row.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut predicates = Vec::new();
@@ -57,7 +93,12 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
     }
     crate::passes::shared::requested_columns(&np.columns)
         .into_iter()
-        .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
+        .map(|col| {
+            SelectExpr::new(
+                text_excerpt_projection(alias, &col, &np.text_excerpt),
+                format!("{alias}_{col}"),
+            )
+        })
         .collect()
 }
 

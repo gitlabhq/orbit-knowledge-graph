@@ -8,6 +8,8 @@ if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
   # Reuse multi-arch dev image published by docker-manifest.
   export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg"
   export E2E_GKG_TAG="${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+  docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1 \
+    || { echo "${E2E_GKG_IMAGE}:${E2E_GKG_TAG} is not in the registry; the docker-manifest job for this commit has not published it"; exit 1; }
 else
   # MR: build a debug image inline for faster iteration.
   export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg-e2e"
@@ -30,7 +32,7 @@ else
     (
       while kill -0 "$E2E_BUILD_PID" 2>/dev/null; do sleep 5; done
       docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1 || exit 0
-      kubectl -n "e2e-${CI_COMMIT_SHORT_SHA}-gkg" delete pods \
+      kubectl -n "e2e-${E2E_SHA}-gkg" delete pods \
         --field-selector=status.phase=Pending 2>/dev/null || true
     ) &
   fi

@@ -1,0 +1,16 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_default_columns_include_full_path
+description: Default columns include full_path without explicit column selection
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 5
+  nodes:
+    Group:
+      prop_present: [full_path]

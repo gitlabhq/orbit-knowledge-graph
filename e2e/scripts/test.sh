@@ -37,11 +37,16 @@ HELM_ARGS=(install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner"
   --namespace "$NS_GKG"
   --kube-context "$KCTX"
   --set "namespaces.gitlab=$NS_GITLAB"
-  --set "namespaces.gkg=$NS_GKG")
+  --set "namespaces.gkg=$NS_GKG"
+  --set "indexingBudgetMultiplier=${E2E_INDEXING_BUDGET_MULTIPLIER:-1}")
 if [ -n "${E2E_ROBOT_IMAGE:-}" ]; then
   HELM_ARGS+=(--set "image=$E2E_ROBOT_IMAGE")
 fi
 helm "${HELM_ARGS[@]}"
+
+"$E2E_DIR/scripts/ch-chaos.sh" indexing &
+CHAOS_PID=$!
+trap 'rm -rf "$FIX_TMP"; kill "$CHAOS_PID" 2>/dev/null || true' EXIT
 
 # Poll job status until terminal condition or timeout. Heartbeat keeps the
 # pipeline trace alive without the complexity (and orphaned-kubectl bugs) of
@@ -62,6 +67,13 @@ while [ "$SECONDS" -lt "$TIMEOUT_SECONDS" ]; do
   log "Tests running... (${SECONDS}s elapsed)"
   sleep "$POLL_INTERVAL"
 done
+
+CHAOS_FAILED=0
+if [ "$result" = "pass" ]; then
+  wait "$CHAOS_PID" || CHAOS_FAILED=1
+else
+  kill "$CHAOS_PID" 2>/dev/null || true
+fi
 
 log "Robot Framework output:"
 $KC logs job/"$JOB_NAME" -n "$NS_GKG" --tail=-1 2>&1 || true
@@ -84,10 +96,11 @@ for pod in $($KC get pods -n "$NS_GKG" -o jsonpath='{.items[*].metadata.name}' 2
     > "$DIAG_DIR/${GKG_NS_SHORT}-${pod}.log" || true
 done
 
-if [ "$result" = "pass" ]; then
+if [ "$result" = "pass" ] && [ "$CHAOS_FAILED" -eq 0 ]; then
   log "Tests passed"
   exit 0
 fi
+[ "$CHAOS_FAILED" -eq 0 ] || log "ch-chaos.sh indexing failed"
 
 log "Tests $result"
 

@@ -80,8 +80,6 @@ A function, class, method, module, or other named symbol declared in a file.
 | `end_byte` | Byte offset where the definition ends |
 | `start_char` | Column on `start_line` where the definition starts |
 | `end_char` | Column on `end_line` where the definition ends |
-| `search_text` | Lowercase identifier tokens from `fqn` and `file_path`, used for ranked code search |
-| `token_count` | Number of tokens in `search_text` |
 
 ### `ImportedSymbol`
 

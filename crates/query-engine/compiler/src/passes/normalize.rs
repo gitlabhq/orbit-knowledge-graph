@@ -1,5 +1,7 @@
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
+use crate::input::{
+    ColumnSelection, Direction, EntityAuthConfig, FilterOp, Input, QueryType, TextIndexMeta,
+};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology, TraversalPathKind};
@@ -247,8 +249,9 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         let mut virtual_filters = Vec::new();
         node.filters.retain(|prop, filters| {
             if virtual_col_names.contains(prop.as_str()) {
-                for f in filters.drain(..) {
-                    virtual_filters.push((prop.clone(), f));
+                for mut filter in filters.drain(..) {
+                    filter.op.get_or_insert(FilterOp::Eq);
+                    virtual_filters.push((prop.clone(), filter));
                 }
                 false
             } else {

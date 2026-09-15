@@ -3,7 +3,7 @@
 Run GKG as native Rust processes connected to NATS, Siphon, PostgreSQL, and
 ClickHouse from your GDK installation.
 
-> Working on `orbit-local`, the ontology, language parsers, or docs only?
+> Working on `orbit-cli`, the ontology, language parsers, or docs only?
 > You don't need GDK or any of the services below. See the
 > [Orbit Local development quickstart](orbit-local-quickstart.md).
 
@@ -254,7 +254,7 @@ adjacent.
    ```
 
 The GKG webserver is available at `http://localhost:8090` (HTTP) and
-`localhost:50054` (gRPC) by default. Ports can be changed in `.env`.
+`localhost:50054` (gRPC) by default. Override ports in `config/dev.local.yaml`.
 
 This starts all three GKG runtime modes in the foreground:
 
@@ -271,7 +271,6 @@ Useful companion tasks:
 mise run dev:check    # validate prerequisites
 mise run dev:setup    # create graph DB + apply schema
 mise run dev:status   # show derived config
-mise run dev:env      # print env vars
 ```
 
 `mise run gdk` is also available as an alias.
@@ -279,15 +278,25 @@ mise run dev:env      # print env vars
 On the first run, `cargo` compiles the full workspace which takes several
 minutes. Subsequent runs use the cached build and start in seconds.
 
-Port assignments can be overridden in the `.env` file if you want to run
-multiple isolated local clusters on the same machine.
+To run multiple isolated local clusters on the same machine, override the
+bind addresses in `config/dev.local.yaml`. The file is Git-ignored and the dev
+script merges it last into the generated `.dev/<mode>.yaml` that each process
+loads. Any `AppConfig` key is valid there:
+
+```yaml
+bind_address: "127.0.0.1:8091"
+grpc_bind_address: "127.0.0.1:50055"
+indexer_health_bind_address: "127.0.0.1:4212"
+nats:
+  consumer_name: "gkg-indexer-dev-2"
+```
 
 ### HTTPS and NGINX GDK setups
 
 The dev script reads `hostname`, `port`, and `https.enabled` from `gdk.yml` to
-derive `GKG_GITLAB__BASE_URL`. If your GDK has HTTPS enabled (for example
-`https.enabled: true` with `hostname: gdk.test` and `port: 3443`), the script
-automatically sets `GKG_GITLAB__BASE_URL=https://gdk.test:3443`.
+derive `gitlab.base_url` in the generated `.dev/<mode>.yaml`. If your GDK has HTTPS
+enabled (for example `https.enabled: true` with `hostname: gdk.test` and
+`port: 3443`), the script writes `https://gdk.test:3443`.
 
 For HTTPS to work, the GKG server's TLS stack (`rustls` via `reqwest`) must
 trust the certificate. If you used `mkcert` to generate GDK certificates, run

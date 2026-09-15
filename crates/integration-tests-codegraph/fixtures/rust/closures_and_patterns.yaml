@@ -1,0 +1,77 @@
+name: "Rust: closures, match, and control flow"
+fixtures:
+  - path: main.rs
+    content: |
+      fn apply(f: fn(i32) -> i32, x: i32) -> i32 {
+          f(x)
+      }
+
+      fn double(x: i32) -> i32 {
+          x * 2
+      }
+
+      fn use_closure() -> i32 {
+          let add_one = |x: i32| x + 1;
+          apply(double, add_one(5))
+      }
+
+      enum Shape {
+          Circle(f64),
+          Rectangle(f64, f64),
+      }
+
+      fn area(s: &Shape) -> f64 {
+          match s {
+              Shape::Circle(r) => std::f64::consts::PI * r * r,
+              Shape::Rectangle(w, h) => w * h,
+          }
+      }
+
+      fn process() {
+          let items = vec![1, 2, 3];
+          for item in &items {
+              let _ = double(*item);
+          }
+          let result = area(&Shape::Circle(5.0));
+      }
+
+tests:
+  - name: All top-level functions extracted
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'main.rs'
+        AND d.definition_type = 'Function'
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 5 }
+      - { unique: name }
+      - { column_values: { field: name, values: ["apply", "area", "double", "process", "use_closure"] } }
+
+  - name: Enum definition exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Shape' AND d.definition_type = 'Enum'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: use_closure calls apply
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_closure' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 1 }
+      - { column_values: { field: callee, values: ["apply"] } }
+
+  - name: process calls double, area, and Circle
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'process' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: callee, values: ["Circle", "area", "double"] } }

@@ -16,8 +16,8 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 
 {{< history >}}
 
-- GitLab 19.0で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
+- GitLab 19.0で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)されました。
+- GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)されました。
 
 {{< /history >}}
 
@@ -28,7 +28,7 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 > [!note]
 > `glab orbit local`と`glab orbit setup`は、`glab` 1.94以降で現在利用可能です。
 
-トップレベルのコマンドは2つあります。
+トップレベルのコマンドは2つあります:
 
 - `glab orbit local`: 管理された`orbit`バイナリをラップし、ローカルグラフのインデックス作成とクエリを実行します。
 - `glab orbit setup`: アクセスの確認、GitLab Orbitスキルのインストール、ローカルバイナリのインストールをガイド付きで行うオンボーディングコマンドです。
@@ -42,14 +42,13 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 
 ## インストール {#install}
 
-管理された`orbit`バイナリをインストールします。
+管理された`orbit`バイナリをインストールします:
 
 ```shell
 glab orbit local --install
 ```
 
-`glab`がバイナリをダウンロードし、チェックサムを検証して、最新の状態に保ちます。
-インストールを確認するには、次のコマンドを実行します。
+`glab`がバイナリをダウンロードし、チェックサムを検証して、最新の状態に保ちます。インストールを確認するには、次のコマンドを実行します:
 
 ```shell
 glab orbit version
@@ -67,7 +66,7 @@ glab orbit setup
 
 スキルは`orbit`バイナリを直接駆動します。MCPクライアントをローカルグラフに接続する場合は、[MCPを使用してOrbitにアクセスする](mcp.md)を参照してください。
 
-`glab skills install --global orbit`を使用して、[GitLab Orbitスキルを手動でインストールする](../../ai_coding_agents.md)こともできます。
+`glab skills install --global orbit`を使用して、[GitLab Orbitスキルを手動でインストール](../../ai_coding_agents.md)することもできます。
 
 ## リポジトリのインデックスを作成する {#index-a-repository}
 
@@ -90,13 +89,13 @@ echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit local sql -
 
 ## スキーマを確認する {#inspect-the-schema}
 
-`glab orbit local schema`は、ローカルDuckDBグラフ内のすべてのテーブルとカラムを一覧表示します。
+`glab orbit local schema`は、ローカルDuckDBグラフ内のすべてのテーブルとカラムを一覧表示します:
 
 ```shell
 glab orbit local schema
 ```
 
-テーブル名を位置引数として渡すと、出力を絞り込めます。
+テーブル名を位置引数として渡すと、出力を絞り込めます:
 
 ```shell
 glab orbit local schema gl_definition              # scoped to one table
@@ -110,7 +109,7 @@ glab orbit local schema gl_definition gl_edge      # scoped to two tables
 
 ## MCPサーバーとして実行する {#run-as-an-mcp-server}
 
-ローカルグラフをMCP対応のAIエージェントに公開します。
+ローカルグラフをMCP対応のAIエージェントに公開します:
 
 ```shell
 glab orbit local mcp serve
@@ -124,4 +123,4 @@ MCPプロトコルを通じて`~/.orbit/graph.duckdb`に対して`run_sql`、`ge
 
 ## 課金 {#billing}
 
-Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで行われます。
+GitLab Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで行われます。

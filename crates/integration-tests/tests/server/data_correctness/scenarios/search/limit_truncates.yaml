@@ -1,0 +1,18 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_limit_truncates_results
+description: Limit clause truncates results to the specified count
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                 "columns": ["username"]}],
+      "order_by": "u.id",
+      "limit": 3
+    }
+
+expect:
+  node_count: 3
+  nodes:
+    User:
+      order: [1, 2, 3]
