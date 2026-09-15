@@ -1,0 +1,24 @@
+name: file_definition_callers
+description: CALLS edges from any definition into the definitions of one file.
+parameters:
+  project_id:
+    schema: { type: integer, minimum: 1 }
+    example: 1
+  file_path:
+    schema: { type: string, minLength: 1, maxLength: 1024 }
+    example: app/models/user.rb
+query:
+  query_type: traversal
+  nodes:
+    - id: caller
+      entity: Definition
+    - id: def
+      entity: Definition
+      filters:
+        project_id: { $param: project_id }
+        file_path: { $param: file_path }
+  relationships:
+    - type: CALLS
+      from: caller
+      to: def
+  limit: 500

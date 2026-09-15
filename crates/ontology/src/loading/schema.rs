@@ -54,6 +54,8 @@ pub(super) struct SettingsYaml {
     #[serde(default)]
     pub denormalization: Vec<DenormalizationEntryYaml>,
     #[serde(default)]
+    pub denormalized_joins: Vec<DenormalizedJoinYaml>,
+    #[serde(default)]
     pub statistics: Option<StatisticsYaml>,
     #[serde(default)]
     pub partition: Option<PartitionYaml>,
@@ -118,6 +120,33 @@ pub(super) struct StatisticsYaml {
 pub(super) struct StatisticsExcludeYaml {
     pub node: String,
     pub columns: Vec<String>,
+}
+
+/// A `denormalized_joins` entry; see [`crate::denormalized`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DenormalizedJoinYaml {
+    pub name: String,
+    pub hops: Vec<DenormalizedHopYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DenormalizedHopYaml {
+    pub relationship: String,
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub via: HopVia,
+}
+
+/// Link a hop through its edge table or directly through the variant's FK column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum HopVia {
+    #[default]
+    Edge,
+    Fk,
 }
 
 #[derive(Debug, Clone, Deserialize)]

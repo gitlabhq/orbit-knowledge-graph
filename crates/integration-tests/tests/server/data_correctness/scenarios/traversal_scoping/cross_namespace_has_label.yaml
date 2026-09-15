@@ -1,0 +1,33 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::cross_namespace_has_label_returns_cross_group_label
+description: Cross-namespace HAS_LABEL returns labels from a different group
+
+config:
+  security:
+    scope_prefixes:
+      wi: "1/100/"
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "wi", "entity": "WorkItem", "node_ids": [4000, 4001]},
+            {"id": "lab", "entity": "Label"}
+        ],
+        "relationships": [{"type": "HAS_LABEL", "from": "wi", "to": "lab"}],
+        "limit": 50
+    }
+
+expect:
+  node_count: 5
+  nodes:
+    WorkItem:
+      ids: [4000, 4001]
+    Label:
+      ids: [7000, 7001, 7002]
+  edges:
+    HAS_LABEL:
+      - [4000, 7000]
+      - [4000, 7001]
+      - [4001, 7002]
+  referential_integrity: true

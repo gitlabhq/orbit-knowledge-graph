@@ -6,6 +6,7 @@ use orbit_analytics::{
     OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query, validation,
 };
 use orbit_server_config::AnalyticsConfig;
+use orbit_versions::VERSIONS;
 use query_engine::compiler::ExecMetrics;
 
 use crate::auth::{Claims, SourceType};
@@ -33,6 +34,7 @@ pub(crate) fn build_common(
         host_name: parse_opt(&claims.host_name, "host_name")?,
         organization_id: claims.organization_id.map(|id| id as i64),
         root_namespace_ids: claims.root_namespace_id.map(|ns| vec![ns]),
+        coding_agent: None,
         schema_version: Some(
             schema_version
                 .parse::<orbit_common::OrbitCommonSchemaVersion>()
@@ -202,10 +204,9 @@ fn apply_metrics(
     q.ch_read_bytes = Some(metrics.ch_read_bytes as i64);
     q.ch_memory_usage = Some(metrics.ch_memory_usage as i64);
 
-    q.graph_schema_version = GRAPH_SCHEMA_VERSION.trim().parse().ok();
-    q.query_dsl_version = QUERY_DSL_VERSION.trim().parse().ok();
-    q.raw_output_format_version = RAW_OUTPUT_FORMAT_VERSION.trim().parse().ok();
-    q.goon_output_format_version = GOON_OUTPUT_FORMAT_VERSION.trim().parse().ok();
+    q.query_dsl_version = VERSIONS.query_dsl.parse().ok();
+    q.raw_output_format_version = VERSIONS.raw_output_format.parse().ok();
+    q.goon_output_format_version = VERSIONS.goon_output_format.parse().ok();
 }
 
 /// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
@@ -234,13 +235,6 @@ fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
     }
     Some(parts.join(", "))
 }
-
-const GRAPH_SCHEMA_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION"));
-const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
-const RAW_OUTPUT_FORMAT_VERSION: &str =
-    include_str!(concat!(env!("CONFIG_DIR"), "/RAW_OUTPUT_FORMAT_VERSION"));
-const GOON_OUTPUT_FORMAT_VERSION: &str =
-    include_str!(concat!(env!("CONFIG_DIR"), "/GOON_OUTPUT_FORMAT_VERSION"));
 
 /// Bounds are 255 chars for instance/host fields; exceeding that surfaces a
 /// typed validation error rather than truncating silently.
@@ -311,6 +305,7 @@ mod tests {
                 .collect(),
             source_type: crate::auth::SourceType::Mcp,
             ai_session_id: None,
+            request_id: None,
             instance_id: None,
             unique_instance_id: None,
             instance_version: None,
@@ -324,7 +319,12 @@ mod tests {
     }
 
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
-        let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
+        let common = build_common(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            claims,
+            "33",
+        )
+        .unwrap();
         let query = build_query(
             claims,
             tool,
@@ -344,7 +344,12 @@ mod tests {
     }
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
-        let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
+        let common = build_common(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            claims,
+            schema_version,
+        )
+        .unwrap();
         let query = build_query(
             claims,
             "query_graph",
@@ -401,7 +406,12 @@ mod tests {
     #[test]
     fn build_query_passes_through_coding_agent() {
         let claims = claims_with_paths(vec![]);
-        let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
+        let common = build_common(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            &claims,
+            "33",
+        )
+        .unwrap();
         let query = build_query(
             &claims,
             "query_graph",
@@ -455,7 +465,12 @@ mod tests {
     fn build_common_rejects_oversized_instance_id() {
         let mut claims = claims_with_paths(vec![]);
         claims.instance_id = Some("x".repeat(256));
-        let err = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap_err();
+        let err = build_common(
+            &orbit_server_config::AppConfig::embedded_defaults().analytics,
+            &claims,
+            "33",
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -498,14 +513,24 @@ mod tests {
         #[test]
         fn common_context_validates_against_iglu_schema() {
             let claims = claims_with_paths(vec!["1/22/"]);
-            let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
+            let common = build_common(
+                &orbit_server_config::AppConfig::embedded_defaults().analytics,
+                &claims,
+                "33",
+            )
+            .unwrap();
             assert_valid(&ORBIT_COMMON_VALIDATOR, &common.data(), "orbit_common");
         }
 
         #[test]
         fn common_context_minimal_validates() {
             let claims = claims_with_paths(vec![]);
-            let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
+            let common = build_common(
+                &orbit_server_config::AppConfig::embedded_defaults().analytics,
+                &claims,
+                "33",
+            )
+            .unwrap();
             assert_valid(
                 &ORBIT_COMMON_VALIDATOR,
                 &common.data(),

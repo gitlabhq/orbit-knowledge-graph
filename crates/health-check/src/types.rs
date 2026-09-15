@@ -43,6 +43,8 @@ pub struct ComponentHealth {
 pub struct QueueDepth {
     pub code_pending: u64,
     pub code_in_flight: u64,
+    pub sdlc_pending: u64,
+    pub sdlc_in_flight: u64,
 }
 
 impl HealthStatus {
@@ -169,6 +171,8 @@ mod tests {
         let depth = QueueDepth {
             code_pending: 142,
             code_in_flight: 96,
+            sdlc_pending: 2503,
+            sdlc_in_flight: 187,
         };
         let value: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&depth).unwrap())
@@ -176,5 +180,7 @@ mod tests {
 
         assert_eq!(value["code_pending"], 142);
         assert_eq!(value["code_in_flight"], 96);
+        assert_eq!(value["sdlc_pending"], 2503);
+        assert_eq!(value["sdlc_in_flight"], 187);
     }
 }

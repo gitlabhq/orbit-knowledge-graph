@@ -8,7 +8,9 @@ mod observer;
 use std::sync::Arc;
 
 use orbit_analytics::{AnalyticsTracker, SnowplowAnalyticsTracker};
-use orbit_server_config::AnalyticsConfig;
+use orbit_server_config::{
+    AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
+};
 
 use crate::observer::IndexingObserver;
 pub use observer::SnowplowIndexingObserver;
@@ -30,7 +32,14 @@ impl IndexingAnalytics {
     pub fn disabled() -> Self {
         Self {
             tracker: None,
-            config: Arc::new(AnalyticsConfig::default()),
+            config: Arc::new(AnalyticsConfig {
+                enabled: false,
+                collector_url: String::new(),
+                deployment: DeploymentConfig {
+                    kind: DeploymentKind::SelfManaged,
+                    environment: DeploymentEnvironment::Development,
+                },
+            }),
         }
     }
 

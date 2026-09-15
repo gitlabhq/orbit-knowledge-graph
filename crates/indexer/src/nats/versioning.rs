@@ -10,9 +10,9 @@ use tracing::{debug, info, warn};
 use crate::dead_letter::DEAD_LETTER_STREAM;
 use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
 use crate::locking::INDEXING_LOCKS_BUCKET;
-use crate::schema::version::SCHEMA_VERSION;
 use crate::topic::INDEXER_STREAM;
 use crate::types::Subscription;
+use orbit_migrations::version::SCHEMA_VERSION;
 
 pub const MANAGED_STREAMS: &[&str] = &[INDEXER_STREAM, DEAD_LETTER_STREAM];
 
@@ -157,6 +157,16 @@ pub fn code_work_consumer_name(consumer_name: &str) -> String {
     )
 }
 
+pub fn sdlc_work_consumer_name(consumer_name: &str) -> String {
+    let versioned_subject =
+        NATS_VERSIONER.subject(crate::topic::NAMESPACE_INDEXING_SUBJECT_PATTERN);
+    format!(
+        "{consumer_name}-{}",
+        super::broker::escape_subject_for_durable(&versioned_subject)
+    )
+}
+
+#[cfg(test)]
 fn schema_bucket_stream_names(schema_version: u32) -> Vec<String> {
     let versioner = NatsVersioner::new("", schema_version);
     MANAGED_BUCKETS
@@ -197,18 +207,6 @@ async fn delete_streams(
     } else {
         Err(CleanupError(errors))
     }
-}
-
-pub async fn cleanup_schema_state(
-    nats_client: &async_nats::Client,
-    schema_version: u32,
-) -> Result<(), CleanupError> {
-    delete_streams(
-        nats_client,
-        &schema_bucket_stream_names(schema_version),
-        &format!("schema_v{schema_version}"),
-    )
-    .await
 }
 
 #[derive(Debug)]
@@ -337,6 +335,15 @@ mod tests {
         assert_eq!(
             super::code_work_consumer_name("gkg-indexer"),
             format!("gkg-indexer-v{release}-code-task-indexing-requested-wildcard-wildcard")
+        );
+    }
+
+    #[test]
+    fn sdlc_work_consumer_name_matches_handler_durable() {
+        let release = release_segment();
+        assert_eq!(
+            super::sdlc_work_consumer_name("gkg-indexer"),
+            format!("gkg-indexer-v{release}-sdlc-namespace-indexing-requested-wildcard-wildcard")
         );
     }
 }

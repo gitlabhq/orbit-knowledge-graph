@@ -1,0 +1,26 @@
+# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_redaction_removes_unauthorized_targets
+description: Redaction removes unauthorized Group 102 from outgoing MEMBER_OF
+
+config:
+  redaction:
+    allow:
+      user: [1]
+      group: [100]
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+      "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]}
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    Group:
+      ids: [100]
+  edge_exists:
+    MEMBER_OF: [[1, 100]]
+  edge_absent:
+    MEMBER_OF: [[1, 102]]

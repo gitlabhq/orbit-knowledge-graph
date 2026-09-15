@@ -21,6 +21,7 @@ DRY_RUN="${DRY_RUN:-true}"
 
 KEEP_LABEL="${PREFIX}::keep"
 SCHEDULED_LABEL="${PREFIX}::scheduled_for_closing"
+EXCLUDE_LABEL="${STALE_EXCLUDE_LABEL:-Community contribution}"
 
 NOW_EPOCH="$(date -u +%s)"
 IDLE_CUTOFF_EPOCH=$(( NOW_EPOCH - IDLE_DAYS * 86400 ))
@@ -135,6 +136,11 @@ process_mr() {
   author="$(printf '%s' "$mr" | jq -r '.author.username')"
   created_at="$(printf '%s' "$mr" | jq -r '.created_at')"
   labels="$(printf '%s' "$mr" | jq -r '.labels[]?')"
+
+  if printf '%s\n' "$labels" | grep -qxF "$EXCLUDE_LABEL"; then
+    log "MR !$iid: has \"$EXCLUDE_LABEL\", left to triage-ops, skipping"
+    return
+  fi
 
   has_keep=false
   has_scheduled=false

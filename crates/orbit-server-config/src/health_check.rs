@@ -5,10 +5,6 @@ use std::net::SocketAddr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-fn default_bind_address() -> SocketAddr {
-    SocketAddr::from(([0, 0, 0, 0], 4201))
-}
-
 /// A namespace with lists of deployments and/or statefulsets to monitor.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -23,19 +19,9 @@ pub struct NamespaceTarget {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct HealthCheckConfig {
-    #[serde(default = "default_bind_address")]
     pub bind_address: SocketAddr,
     #[serde(default)]
     pub targets: Vec<NamespaceTarget>,
-}
-
-impl Default for HealthCheckConfig {
-    fn default() -> Self {
-        Self {
-            bind_address: default_bind_address(),
-            targets: Vec::new(),
-        }
-    }
 }
 
 #[cfg(test)]

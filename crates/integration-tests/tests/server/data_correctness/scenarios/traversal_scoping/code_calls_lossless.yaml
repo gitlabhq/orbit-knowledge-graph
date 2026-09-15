@@ -1,0 +1,36 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::code_intel_calls_scoped_traversal_is_lossless
+description: Code-intel CALLS traversal returns caller-callee pair without loss under scoping
+
+config:
+  security:
+    scope_prefixes:
+      caller: "1/100/1000/"
+      def: "1/100/1000/"
+  extra_seed:
+    gl_definition:
+      - { id: 12000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "src/a.rs", fqn: "A#callee", name: callee, definition_type: Method, start_line: 10, end_line: 12, start_byte: 0, end_byte: 0, start_char: 0, end_char: 0 }
+      - { id: 12001, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "src/b.rs", fqn: "B#caller", name: caller, definition_type: Method, start_line: 20, end_line: 25, start_byte: 0, end_byte: 0, start_char: 0, end_char: 0 }
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12000, target_kind: Definition, source_tags: [], target_tags: [] }
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition"},
+            {"id": "def", "entity": "Definition", "node_ids": [12000]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "def"}],
+        "limit": 50
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    Definition:
+      ids: [12000, 12001]
+  edges:
+    CALLS:
+      - [12001, 12000]
+  referential_integrity: true

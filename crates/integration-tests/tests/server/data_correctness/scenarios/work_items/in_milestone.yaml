@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::traversal_work_item_in_milestone_returns_correct_edges
+description: WorkItem-Milestone IN_MILESTONE traversal returns correct edges and milestone properties
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
+        {"id": "m", "entity": "Milestone", "columns": ["title", "state"]}
+      ],
+      "relationships": [{"type": "IN_MILESTONE", "from": "w", "to": "m"}],
+      "limit": 20
+    }
+  gql: |
+    MATCH (w:WorkItem)-[:IN_MILESTONE]->(m:Milestone) WHERE w.id >= 1 AND w.id <= 10000 RETURN w.title, m.title, m.state LIMIT 20
+
+expect:
+  node_count: 3
+  referential_integrity: true
+  edge_exists:
+    IN_MILESTONE:
+      - [4000, 6000]
+      - [4001, 6000]
+  nodes:
+    Milestone:
+      rows:
+        - { id: 6000, title: "Sprint 1", state: active }

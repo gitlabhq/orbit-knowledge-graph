@@ -1,0 +1,11 @@
+name: context
+version: 1.0.0
+short: Print the source bodies of definitions by fqn or unqualified name
+description: >-
+  Print the source bodies of definitions by fqn or unqualified name
+
+
+  Bodies come from the working tree, so you can read several grep matches in
+  one call. A glob such as `crate::module::*` prints every match in file order.
+  Use `--file` to read a whole file as its definitions, or `--outline` to map a
+  large type before reading one method.

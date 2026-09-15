@@ -28,6 +28,10 @@ pub const TARGET_ID_COLUMN: &str = "target_id";
 
 pub const TARGET_KIND_COLUMN: &str = "target_kind";
 
+pub const SOURCE_TAGS_COLUMN: &str = "source_tags";
+
+pub const TARGET_TAGS_COLUMN: &str = "target_tags";
+
 pub const GL_TABLE_PREFIX: &str = "gl_";
 
 pub const EDGE_TABLE: &str = concatcp!(GL_TABLE_PREFIX, "edge");

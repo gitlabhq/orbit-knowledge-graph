@@ -315,29 +315,28 @@ Check what streams exist in NATS:
 nats stream ls
 ```
 
-The `events_stream_name` in `schedule.tasks.code_indexing_task` must match the Siphon stream name exactly. For example, staging Siphon may publish to `stg_siphon_event_stream` while GKG defaults to `siphon_stream_main_db`.
+The `events_stream_name` in `schedule.tasks.siphon` must match the Siphon stream name exactly. For example, staging Siphon may publish to `stg_siphon_event_stream` while GKG defaults to `siphon_stream_main_db`.
 
-Fix via Helm values or environment variable:
+Fix it in the dispatcher's configuration overlay (the Helm chart renders it into the ConfigMap mounted at `/app/config/default.yaml`):
 
-```shell
-# Helm
-helm upgrade gkg orbit-helm-charts/gkg \
-  --set dispatcher.extraEnv.GKG_SCHEDULE__TASKS__CODE_INDEXING_TASK__EVENTS_STREAM_NAME=stg_siphon_event_stream
-
-# Or in values.yaml under schedule.tasks.code_indexing_task.events_stream_name
+```yaml
+schedule:
+  tasks:
+    siphon:
+      events_stream_name: stg_siphon_event_stream
 ```
 
 ### Stale data accumulation
 
-The stale data cleaner runs after indexing and uses lightweight deletes (`DELETE FROM`) to remove stale rows. Failures are logged as warnings and do not block the pipeline.
+The cleanup stage runs after indexing but failures are logged as warnings and do not block the pipeline. Over time, stale rows from deleted files may accumulate.
 
-To force physical removal of lightweight-deleted rows manually:
+To clean up manually:
 
 ```sql
-ALTER TABLE `<gkg-database>`.gl_file APPLY DELETED MASK;
-ALTER TABLE `<gkg-database>`.gl_directory APPLY DELETED MASK;
-ALTER TABLE `<gkg-database>`.gl_imported_symbol APPLY DELETED MASK;
-ALTER TABLE `<gkg-database>`.gl_definition APPLY DELETED MASK;
+OPTIMIZE TABLE `<gkg-database>`.gl_file FINAL CLEANUP;
+OPTIMIZE TABLE `<gkg-database>`.gl_directory FINAL CLEANUP;
+OPTIMIZE TABLE `<gkg-database>`.gl_imported_symbol FINAL CLEANUP;
+OPTIMIZE TABLE `<gkg-database>`.gl_definition FINAL CLEANUP;
 ```
 
 ## Monitoring

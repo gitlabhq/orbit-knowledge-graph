@@ -1,0 +1,32 @@
+# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::traversal_user_authored_work_item_returns_correct_edges
+description: User-WorkItem AUTHORED traversal returns correct edges and node properties
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        {"id": "w", "entity": "WorkItem", "columns": ["title", "state"]}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "w"}],
+      "limit": 20
+    }
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(w:WorkItem) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, w.title, w.state LIMIT 20
+
+expect:
+  node_count: 9
+  referential_integrity: true
+  edge_exists:
+    AUTHORED:
+      - [1, 4000]
+      - [2, 4001]
+      - [1, 4002]
+      - [3, 4003]
+      - [7, 4010]
+  nodes:
+    WorkItem:
+      rows:
+        - { id: 4000, title: "Implement login page", state: opened }
+        - { id: 4001, title: "Fix auth bug", state: closed }

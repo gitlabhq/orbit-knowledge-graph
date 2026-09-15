@@ -6,25 +6,41 @@ use crate::handler::{Handler, HandlerRegistry};
 use crate::indexing_status::IndexingStatusStore;
 use crate::nats::{NatsBroker, NatsServices, NatsServicesImpl};
 use orbit_server_config::{
-    ClickHouseConfiguration, EngineConfiguration, EntityHandlerConfig, HandlersConfiguration,
+    AppConfig, ClickHouseConfiguration, CodeIndexingPipelineConfig, EngineConfiguration,
 };
 
+/// Worker cap for test engines. Production derives this from the container;
+/// tests pin it so concurrency assertions do not depend on the host.
+pub const TEST_MAX_CONCURRENT_WORKERS: usize = 16;
+pub const TEST_SMALL_INDEXING_SLOTS: usize = 6;
+pub const TEST_BIG_INDEXING_SLOTS: usize = 2;
+
+/// `config/default.yaml` engine section with the runtime-derived fields pinned.
+pub fn test_engine_configuration() -> EngineConfiguration {
+    let mut engine = AppConfig::embedded_defaults().engine;
+    engine.max_concurrent_workers = Some(TEST_MAX_CONCURRENT_WORKERS);
+    engine.handlers.entity_handler.datalake_batch_size = Some(1);
+    engine
+}
+
+/// `config/default.yaml` code-indexing pipeline with the runtime-derived slots pinned.
+pub fn test_pipeline_configuration() -> CodeIndexingPipelineConfig {
+    let mut pipeline = AppConfig::embedded_defaults()
+        .engine
+        .handlers
+        .code_indexing_task
+        .pipeline;
+    pipeline.small_indexing_slots = Some(TEST_SMALL_INDEXING_SLOTS);
+    pipeline.big_indexing_slots = Some(TEST_BIG_INDEXING_SLOTS);
+    pipeline
+}
+
 pub fn create_test_indexer_config(clickhouse_config: &ClickHouseConfiguration) -> IndexerConfig {
-    IndexerConfig {
-        graph: clickhouse_config.clone(),
-        datalake: clickhouse_config.clone(),
-        engine: EngineConfiguration {
-            handlers: HandlersConfiguration {
-                entity_handler: EntityHandlerConfig {
-                    datalake_batch_size: Some(1),
-                    ..EntityHandlerConfig::default()
-                },
-                ..HandlersConfiguration::default()
-            },
-            ..EngineConfiguration::default()
-        },
-        ..IndexerConfig::default()
-    }
+    let mut config = IndexerConfig::from(&AppConfig::embedded_defaults());
+    config.graph = clickhouse_config.clone();
+    config.datalake = clickhouse_config.clone();
+    config.engine = test_engine_configuration();
+    config
 }
 
 pub struct TestEngineBuilder {
@@ -40,7 +56,7 @@ impl TestEngineBuilder {
             broker,
             nats_services: None,
             registry: Arc::new(HandlerRegistry::default()),
-            configuration: EngineConfiguration::default(),
+            configuration: test_engine_configuration(),
         }
     }
 

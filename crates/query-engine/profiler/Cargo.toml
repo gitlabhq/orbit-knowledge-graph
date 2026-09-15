@@ -18,6 +18,7 @@ formatters = { path = "../formatters" }
 orbit-server = { path = "../../orbit-server" }
 orbit-server-config = { path = "../../orbit-server-config" }
 orbit-utils = { path = "../../utils" }
+orbit-versions = { path = "../../orbit-versions" }
 pipeline = { path = "../pipeline" }
 shared = { path = "../shared" }
 types = { path = "../types" }

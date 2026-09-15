@@ -16,22 +16,18 @@ title: GitLab Orbit
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)を使用して、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
+- GitLab 18.10で`knowledge_graph`[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 - GitLab 19.2.2でGitLab Self-Managed向けに[導入](https://gitlab.com/groups/gitlab-org/-/epics/22739)されました。
 
 {{< /history >}}
 
 > [!flag]
-> この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
+> この機能の利用可否は、機能フラグによって制御されます。詳細については、履歴を参照してください。この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-GitLab Orbitはお使いのGitLabインスタンスをインデックス作成し、SDLC全体をクエリ可能なプロパティグラフとして公開します。
-グループで有効にすると、GitLab Orbitはプロジェクト、ユーザー、マージリクエスト、パイプライン、
-作業アイテム、セキュリティの検出結果、ソースコード自体をすべてマップし、それらの関係性を示すプロパティグラフを構築します。
+GitLab Orbitはお使いのGitLabインスタンスをインデックス作成し、SDLC全体をクエリ可能なプロパティグラフとして公開します。グループで有効にすると、GitLab Orbitはプロジェクト、ユーザー、マージリクエスト、パイプライン、作業アイテム、セキュリティの検出結果、ソースコード自体をすべてマップし、それらの関係性を示すプロパティグラフを構築します。
 
-グラフをクエリすることで、インスタンスだけでは直接回答できない質問に答えられます。
+グラフをクエリすることで、インスタンスだけでは直接回答できない質問に答えられます:
 
 - このサービスを変更すると何が壊れるか？
 - 過去90日間でこのファイルに変更を加えたマージリクエストはどれか？
@@ -102,7 +98,7 @@ GitLab Self-Managedでは、インスタンスの隣にあるKubernetesクラス
 <!-- markdownlint-disable-next-line MD044 -->
 ## GitLab Orbitがインデックス作成する対象 {#what-gitlab-orbit-indexes}
 
-GitLab Orbitは2つのカテゴリのデータをインデックス作成します。
+GitLab Orbitは2つのカテゴリのデータをインデックス作成します:
 
 - GitLabインスタンスのSDLCオブジェクト: グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、ジョブ、作業アイテム、マイルストーン、ラベル、セキュリティの検出結果。
 
@@ -110,7 +106,7 @@ GitLab Orbitは2つのカテゴリのデータをインデックス作成しま�
 
 GitLab OrbitはRuby、Java、Kotlin、Python、TypeScript、JavaScript、Rust、Go、C#、C、C++、PHPのコードをインデックス作成します。
 
-[インデックス作成の対象範囲](remote/indexing.md) | [スキーマリファレンス](remote/schema.md)
+[インデックス作成の対象範囲](remote/indexing.md) \| [スキーマリファレンス](remote/schema.md)
 
 ## はじめに {#get-started}
 

@@ -236,6 +236,12 @@ etl:
 If either FK column is `Nullable` in the source, the ETL can emit null-target edges —
 filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
 
+Hot query shapes can be pre-joined by declaring a chain under `settings.denormalized_joins`
+in `schema.yaml` (see `docs/design-documents/querying/graph_engine.md`, Denormalized joins).
+This emits a `gl_denorm_<name>` table composed from the chain's own DDL plus one feeding
+materialized view per table. The table stores every column of every table in the chain and
+each declaration is a schema bump, so weigh write amplification before adding one.
+
 ### 5.3 Register in `config/ontology/schema.yaml` (the step that's easy to miss)
 
 Node/edge files are **NOT auto-discovered** — they're loaded from a registry in
@@ -257,8 +263,8 @@ edges:
 ### 5.4 Bump the schema version + regenerate DDL
 
 ```bash
-# bump the single integer in:
-config/SCHEMA_VERSION        # e.g. 64 -> 65
+# bump the `schema:` pin in:
+config/versions.yaml         # e.g. schema: 64 -> schema: 65
 
 # regenerate (do NOT hand-edit graph.sql):
 mise run schema:generate:ddl
@@ -349,7 +355,7 @@ knowledge-graph:
 - [ ] Node YAML (every property has `description`; nullable matches source).
 - [ ] Edge YAML (join FKs handled).
 - [ ] **Registered in `schema.yaml`** (nodes map + edges map).
-- [ ] `config/SCHEMA_VERSION` bumped; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
+- [ ] `schema` pin in `config/versions.yaml` bumped; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
 - [ ] `fixtures/siphon.sql` updated; SDLC YAML scenario(s) added.
 - [ ] `data_model.md` updated.
 - [ ] `cargo test -p ontology` + `scenario_indexing` green (correct toolchain).

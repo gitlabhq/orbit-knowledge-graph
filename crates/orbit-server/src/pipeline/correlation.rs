@@ -9,7 +9,6 @@ use base64::engine::general_purpose::STANDARD_NO_PAD;
 use serde::Serialize;
 
 const PAYLOAD_VERSION: u32 = 1;
-const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
 
 #[derive(Serialize)]
 struct AttributionPayload<'a> {
@@ -47,15 +46,15 @@ pub(crate) fn log_comment(suffix: Option<&str>) -> String {
 
 /// Base-query `log_comment`: the `gkg` prefix plus a base64 attribution payload
 /// carrying correlation ID, user, DSL query, and the compiler/schema versions.
-pub(crate) fn log_comment_base(user_id: u64, query_json: &str) -> String {
+pub(crate) fn log_comment_base(user_id: u64, query_json: &str, migration_version: u32) -> String {
     let payload = AttributionPayload {
         correlation_id: labkit::correlation::current(),
         user_id,
         query: query_json,
         versions: Versions {
             payload: PAYLOAD_VERSION,
-            dsl: QUERY_DSL_VERSION.trim().to_string(),
-            schema: *indexer::schema::version::SCHEMA_VERSION,
+            dsl: orbit_versions::VERSIONS.query_dsl.clone(),
+            schema: migration_version,
         },
     };
     let json = serde_json::to_vec(&payload).unwrap_or_default();
@@ -156,7 +155,11 @@ mod tests {
     #[test]
     fn base_payload_carries_attribution_and_versions() {
         let comment = with_correlation("req-abc-123", || {
-            log_comment_base(42, r#"{"query_type":"traversal"}"#)
+            log_comment_base(
+                42,
+                r#"{"query_type":"traversal"}"#,
+                *orbit_migrations::version::SCHEMA_VERSION,
+            )
         });
         let p = decode_base_payload(&comment);
 
@@ -164,16 +167,20 @@ mod tests {
         assert_eq!(p["user_id"], 42);
         assert_eq!(p["query"], r#"{"query_type":"traversal"}"#);
         assert_eq!(p["versions"]["payload"], PAYLOAD_VERSION);
-        assert_eq!(p["versions"]["dsl"], QUERY_DSL_VERSION.trim());
+        assert_eq!(p["versions"]["dsl"], orbit_versions::VERSIONS.query_dsl);
         assert_eq!(
             p["versions"]["schema"],
-            *indexer::schema::version::SCHEMA_VERSION
+            *orbit_migrations::version::SCHEMA_VERSION
         );
     }
 
     #[test]
     fn base_payload_omits_correlation_when_absent() {
-        let p = decode_base_payload(&log_comment_base(1, "{}"));
+        let p = decode_base_payload(&log_comment_base(
+            1,
+            "{}",
+            *orbit_migrations::version::SCHEMA_VERSION,
+        ));
         assert!(p.get("correlation_id").is_none());
         assert_eq!(p["user_id"], 1);
     }

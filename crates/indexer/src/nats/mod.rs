@@ -14,11 +14,7 @@
 //! ```ignore
 //! use etl_engine::nats::{NatsBroker, NatsConfiguration};
 //!
-//! let config = NatsConfiguration {
-//!     url: "localhost:4222".to_string(),
-//!     ..Default::default()
-//! };
-//!
+//! let config = AppConfig::load(None)?.nats;
 //! let broker = NatsBroker::connect(&config).await?;
 //! ```
 //!

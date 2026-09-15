@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/edge_cases/mod.rs::non_default_redaction_id_with_multiple_mrs
+description: Multiple MRs with allow-all redaction return all associated diffs
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]},
+            {"id": "d", "entity": "MergeRequestDiff"}
+        ],
+        "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
+        "limit": 20
+    }
+
+expect:
+  node_count: 5
+  referential_integrity: true
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001]
+    MergeRequestDiff:
+      ids: [5000, 5001, 5002]
+  edges:
+    HAS_DIFF: [[2000, 5000], [2000, 5001], [2001, 5002]]

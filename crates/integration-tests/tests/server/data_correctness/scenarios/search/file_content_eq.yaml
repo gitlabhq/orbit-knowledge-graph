@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_file_content_eq_exact
+description: File content eq filter matches exact content
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "f", "entity": "File",
+               "node_ids": [13000, 13001, 13002, 13003, 13004],
+               "columns": ["path", "project_id", "content"],
+               "filters": {
+                   "project_id": {"eq": 1000},
+                   "content": {"eq": "0.91.0"}
+               }}],
+      "limit": 10
+    }
+
+expect:
+  node_count: 1
+  nodes:
+    File:
+      ids: [13004]
+      filters:
+        project_id: { eq: 1000 }
+        content: { eq: "0.91.0" }

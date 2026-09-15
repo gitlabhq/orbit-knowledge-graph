@@ -302,7 +302,10 @@ mod tests {
             Arc::new(MockCheckpointStore),
             Arc::new(MockNatsServices::new()),
             ScheduledTaskMetrics::new(),
-            NamespaceDeletionSchedulerConfig::default(),
+            orbit_server_config::AppConfig::embedded_defaults()
+                .schedule
+                .tasks
+                .namespace_deletion,
         )
     }
 
@@ -341,7 +344,10 @@ mod tests {
             Arc::new(MockCheckpointStore),
             nats.clone(),
             ScheduledTaskMetrics::new(),
-            NamespaceDeletionSchedulerConfig::default(),
+            orbit_server_config::AppConfig::embedded_defaults()
+                .schedule
+                .tasks
+                .namespace_deletion,
         );
 
         scheduler.run().await.unwrap();
@@ -431,7 +437,10 @@ mod tests {
             Arc::new(MockCheckpointStore),
             nats,
             ScheduledTaskMetrics::new(),
-            NamespaceDeletionSchedulerConfig::default(),
+            orbit_server_config::AppConfig::embedded_defaults()
+                .schedule
+                .tasks
+                .namespace_deletion,
         );
 
         scheduler.run().await.unwrap();

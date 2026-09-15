@@ -1,0 +1,31 @@
+# source: crates/integration-tests/tests/server/data_correctness/aggregation.rs::aggregation_sort_orders_by_aggregate_value
+description: aggregation_sort orders results by descending aggregate value
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+        {"id": "u", "entity": "User"}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "group_by": ["g"],
+      "aggregations": [{"count": "u", "as": "member_count"}],
+      "aggregation_sort": "-member_count",
+      "limit": 10
+    }
+
+expect:
+  groups:
+    g:
+      entity: Group
+      order: [101, 100, 102]
+      rows:
+        - { entity: Group, id: 101, values: { member_count: 4 } }
+        - { entity: Group, id: 100, values: { member_count: 3 } }
+        - { entity: Group, id: 102, values: { member_count: 2 } }

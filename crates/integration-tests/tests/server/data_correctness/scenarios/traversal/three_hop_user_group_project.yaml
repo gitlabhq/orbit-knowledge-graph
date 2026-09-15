@@ -1,0 +1,34 @@
+# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_three_hop_returns_all_user_group_project_paths
+description: Three-hop traversal returns all User-Group-Project paths
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        {"id": "g", "entity": "Group", "columns": ["name"]},
+        {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
+      ],
+      "relationships": [
+        {"type": "MEMBER_OF", "from": "u", "to": "g"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "limit": 30
+    }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u.username, g.name, p.name LIMIT 30
+
+expect:
+  node_count: 14
+  referential_integrity: true
+  edge_exists:
+    MEMBER_OF: [[1,100], [1,102], [2,100]]
+    CONTAINS: [[100,1000], [100,1002], [101,1001], [102,1004]]
+  nodes:
+    User:
+      rows:
+        - { id: 1, username: alice }
+    Project:
+      rows:
+        - { id: 1000, name: Public Project }

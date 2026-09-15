@@ -17,7 +17,7 @@ GitLab Orbit Localを使用して、任意のローカルリポジトリのワ�
 
 GitLab Orbit LocalとGitLab Orbit Remoteは、異なる種類のデータのインデックスを作成します。以下のセクションでは、各機能がインデックス作成する内容を示します。
 
-GitLab Orbit RemoteおよびGitLab Orbit Localは、以下のデータのインデックスを作成しません。
+GitLab Orbit RemoteおよびGitLab Orbit Localは、以下のデータのインデックスを作成しません:
 
 - バイナリファイル
 - チェックアウト済みブランチ以外のブランチ（GitLab Orbit Localの場合）またはデフォルトブランチ以外のブランチ（GitLab Orbit Remoteの場合）
@@ -89,7 +89,7 @@ GitLab Orbit RemoteおよびGitLab Orbit Localは、以下のデータのイン�
 
 ## サポートされている言語 {#supported-languages}
 
-GitLab Orbit RemoteおよびLocalは、以下の言語のデータのインデックスを作成します。
+GitLab Orbit RemoteおよびLocalは、以下の言語のデータのインデックスを作成します:
 
 | 言語 | 定義 | クロスファイル参照 |
 |----------|-------------|----------------------|

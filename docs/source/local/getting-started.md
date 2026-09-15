@@ -73,11 +73,11 @@ self-contained `orbit.exe`, signed by GitLab Inc., so application
 allowlisting policies can authorize it by publisher:
 
 1. From the [latest release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases),
-   download `orbit-local-windows-x86_64.zip` and its `.sha256` file.
+   download `orbit-cli-windows-x86_64.zip` and its `.sha256` file.
 1. Verify the checksum:
 
    ```powershell
-   (Get-FileHash .\orbit-local-windows-x86_64.zip -Algorithm SHA256).Hash
+   (Get-FileHash .\orbit-cli-windows-x86_64.zip -Algorithm SHA256).Hash
    ```
 
    The output must match the hash in the `.sha256` file. The comparison is not
@@ -88,7 +88,7 @@ allowlisting policies can authorize it by publisher:
    prompt or be blocked by policy:
 
    ```powershell
-   Unblock-File .\orbit-local-windows-x86_64.zip
+   Unblock-File .\orbit-cli-windows-x86_64.zip
    ```
 
 1. Extract the archive, create the target directory, then move `orbit.exe` into
@@ -96,7 +96,7 @@ allowlisting policies can authorize it by publisher:
    the installer uses:
 
    ```powershell
-   Expand-Archive -Path .\orbit-local-windows-x86_64.zip -DestinationPath .
+   Expand-Archive -Path .\orbit-cli-windows-x86_64.zip -DestinationPath .
    New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\Programs\orbit"
    Move-Item .\orbit.exe "$env:LOCALAPPDATA\Programs\orbit\orbit.exe"
    ```
@@ -142,17 +142,17 @@ orbit help
 If you already have [`glab`](https://gitlab.com/gitlab-org/cli) installed:
 
 ```shell
-glab orbit local --install
+glab orbit --install
 ```
 
 Verify:
 
 ```shell
-glab orbit local help
+glab orbit help
 ```
 
-See the [`glab orbit local` reference](https://docs.gitlab.com/cli/orbit/local/)
-for details.
+See the [`glab orbit` reference](https://docs.gitlab.com/cli/orbit/) for
+details.
 
 {{< /tab >}}
 
@@ -162,9 +162,9 @@ for details.
 
 | Method | Best for | Setup |
 |---|---|---|
-| [The GitLab Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | One-line installer or `glab orbit local --install` |
-| [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit local --install` |
-| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `claude mcp add orbit-local -- orbit mcp serve` |
+| [The GitLab Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | One-line installer or `glab orbit --install` |
+| [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit --install` |
+| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `claude mcp add orbit-cli -- orbit mcp serve` |
 
 All three read the same local graph. GitLab Orbit Local is queried with DuckDB SQL;
 the structured JSON query DSL is [GitLab Orbit Remote](../remote/_index.md) only.
@@ -172,16 +172,16 @@ the structured JSON query DSL is [GitLab Orbit Remote](../remote/_index.md) only
 ## 60-second quickstart
 
 > [!note]
-> `glab orbit local` wraps the managed `orbit` binary. The binary downloads,
+> `glab orbit` wraps the managed `orbit` binary. The binary downloads,
 > is checksum-verified, and stays up to date on first use. Requires `glab`
-> 1.94 or later. To run the binary directly instead, see
+> 1.117 or later. To run the binary directly instead, see
 > [Use the `orbit` CLI directly](access/cli.md).
 
 Index a repository and inspect what GitLab Orbit found:
 
 ```shell
-glab orbit local index /path/to/your/repo
-glab orbit local schema
+glab orbit index /path/to/your/repo
+glab orbit schema
 ```
 
 That builds a local DuckDB graph at `~/.orbit/graph.duckdb` and prints every
@@ -192,7 +192,9 @@ Next:
 
 - Run a real query: [Use GitLab Orbit Local with glab](access/glab.md).
 - Wire it into your AI agent: run `glab orbit setup` to install the GitLab Orbit
-  skill, or [connect via MCP](access/mcp.md).
+  skill, or [connect via MCP](access/mcp.md). Setup edits your agent's
+  instruction file and hook configuration;
+  [see what it changes](access/cli.md#what-it-changes) before you run it.
 - Browse the table layout: [Schema reference](schema.md).
 
 ## Billing

@@ -5,7 +5,7 @@
 //!
 //! Path filtering strategy:
 //! - 1 path: `startsWith(path)`
-//! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
+//! - 2+ paths: `startsWith(p1) OR startsWith(p2) OR ...`
 //!
 //! # Per-entity role scoping
 //!
@@ -27,14 +27,13 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::ast::{Expr, Node, Query, TableRef};
-use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, global_tables};
+use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 use ontology::Ontology;
-use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie, lowest_common_prefix};
+use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 
-/// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
-static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
+static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 /// Per-alias role floors come from `ontology.min_access_level_for_table`;
 /// tables without a `redaction` block keep the historical Reporter floor.
@@ -71,7 +70,7 @@ pub fn apply_security_context(
 }
 
 fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
-    let aliased_tables = collect_aliased_tables(&q.from);
+    let aliased_tables = collect_aliased_tables(&q.from, ontology);
     if !aliased_tables.is_empty() {
         let security_conds = aliased_tables.iter().map(|(alias, table)| {
             let min_role = ontology
@@ -151,9 +150,7 @@ fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
             if collapsed.len() == 1 {
                 return starts_with_expr(alias, collapsed[0].as_str());
             }
-            let lcp = lowest_common_prefix(&collapsed);
-            let lcp_filter = starts_with_expr(alias, lcp.as_str());
-            Expr::and(lcp_filter, path_or_filter(alias, &collapsed))
+            path_or_filter(alias, &collapsed)
         }
     }
 }
@@ -181,8 +178,8 @@ fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }
 
-pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
-    collect_aliased_tables(table_ref)
+pub(crate) fn collect_node_aliases(table_ref: &TableRef, ontology: &Ontology) -> Vec<String> {
+    collect_aliased_tables(table_ref, ontology)
         .into_iter()
         .map(|(a, _)| a)
         .collect()
@@ -191,15 +188,18 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
 /// Collect `(alias, table)` pairs for every scan that should receive a
 /// security filter. Returning the table lets the caller pick a per-entity
 /// minimum role before building the `startsWith(...)` predicate.
-pub(crate) fn collect_aliased_tables(table_ref: &TableRef) -> Vec<(String, String)> {
+pub(crate) fn collect_aliased_tables(
+    table_ref: &TableRef,
+    ontology: &Ontology,
+) -> Vec<(String, String)> {
     match table_ref {
-        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table) => {
+        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table, ontology) => {
             vec![(alias.clone(), table.clone())]
         }
         TableRef::Scan { .. } => vec![],
         TableRef::Join { left, right, .. } => {
-            let mut aliases = collect_aliased_tables(left);
-            aliases.extend(collect_aliased_tables(right));
+            let mut aliases = collect_aliased_tables(left, ontology);
+            aliases.extend(collect_aliased_tables(right, ontology));
             aliases
         }
         // Derived tables don't have traversal_path columns themselves.
@@ -233,22 +233,16 @@ fn apply_security_to_from(
 
 /// Handles both unprefixed (`gl_user`) and schema-version-prefixed
 /// (`v1_gl_user`) table names. CTEs like `path_cte` are excluded.
-fn should_apply_security_filter(table: &str) -> bool {
-    let re = GL_TABLE_RE.get_or_init(|| {
+fn should_apply_security_filter(table: &str, ontology: &Ontology) -> bool {
+    let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
         Regex::new(&format!(
-            r"^(?:v\d+_)?({}.+)$",
+            r"^(?:v\d+_)?{}.+$",
             regex::escape(GL_TABLE_PREFIX)
         ))
         .expect("valid regex")
     });
 
-    let unprefixed = match re.captures(table).and_then(|c| c.get(1)) {
-        Some(m) => m.as_str(),
-        None => return false,
-    };
-
-    // Global hubs (User, Runner) are non-namespaced; names are unprefixed.
-    !global_tables().iter().any(|t| t == unprefixed)
+    graph_table_pattern.is_match(table) && !ontology.is_global_table(table)
 }
 
 #[cfg(test)]
@@ -298,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_paths_uses_prefix_and_or_starts_with() {
+    fn multiple_paths_use_or_of_starts_with_without_common_prefix() {
         let expr = build_path_filter(
             "u",
             &[
@@ -306,7 +300,10 @@ mod tests {
                 &TraversalPath::from("1/2/5/"),
             ],
         );
-        assert!(matches!(expr, Expr::BinaryOp { op: Op::And, .. }));
+        assert!(matches!(expr, Expr::BinaryOp { op: Op::Or, .. }));
+        let mut paths = starts_with_paths_for_alias(&expr, "u");
+        paths.sort();
+        assert_eq!(paths, vec!["1/2/4/".to_string(), "1/2/5/".to_string()]);
     }
 
     #[test]
@@ -609,6 +606,7 @@ mod tests {
 
     #[test]
     fn inject_includes_edge_table() {
+        let ontology = Ontology::new().with_nodes(["Project"]);
         let from = TableRef::join(
             JoinType::Inner,
             TableRef::scan("gl_project", "p"),
@@ -616,13 +614,13 @@ mod tests {
             Expr::eq(Expr::col("p", "id"), Expr::col("e", "source")),
         );
 
-        let aliases = collect_node_aliases(&from);
+        let aliases = collect_node_aliases(&from, &ontology);
         assert_eq!(aliases, vec!["p", "e"]);
     }
 
     #[test]
     fn inject_skips_user_table() {
-        // User visibility is determined through MEMBER_OF, not traversal path
+        let ontology = Ontology::load_embedded().unwrap();
         let from = TableRef::join(
             JoinType::Inner,
             TableRef::scan("gl_user", "u"),
@@ -630,23 +628,25 @@ mod tests {
             Expr::lit(true),
         );
 
-        let aliases = collect_node_aliases(&from);
+        let aliases = collect_node_aliases(&from, &ontology);
         assert_eq!(aliases, vec!["mr"]);
     }
 
     #[test]
     fn should_apply_security_filter_skips_user() {
-        assert!(!should_apply_security_filter("gl_user"));
-        assert!(should_apply_security_filter(EDGE_TABLE));
-        assert!(should_apply_security_filter("gl_project"));
-        assert!(should_apply_security_filter("gl_merge_request"));
+        let ontology = Ontology::load_embedded().unwrap();
+        assert!(!should_apply_security_filter("gl_user", &ontology));
+        assert!(should_apply_security_filter(EDGE_TABLE, &ontology));
+        assert!(should_apply_security_filter("gl_project", &ontology));
+        assert!(should_apply_security_filter("gl_merge_request", &ontology));
     }
 
     #[test]
     fn should_apply_security_filter_skips_ctes() {
-        assert!(!should_apply_security_filter("path_cte"));
-        assert!(!should_apply_security_filter("some_cte"));
-        assert!(!should_apply_security_filter("nodes"));
+        let ontology = Ontology::new();
+        assert!(!should_apply_security_filter("path_cte", &ontology));
+        assert!(!should_apply_security_filter("some_cte", &ontology));
+        assert!(!should_apply_security_filter("nodes", &ontology));
     }
 
     #[test]
@@ -662,13 +662,14 @@ mod tests {
             }],
             "hop_e0",
         );
-        let aliases = collect_node_aliases(&from);
+        let aliases = collect_node_aliases(&from, &Ontology::new());
         assert!(aliases.is_empty());
     }
 
     #[test]
     fn inject_recurses_into_union_from_arms() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ontology = Ontology::new().with_nodes(["Project"]);
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
                 expr: Expr::col("outer_e", "source_id"),
@@ -695,7 +696,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply_security_context(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -717,6 +718,34 @@ mod tests {
         } else {
             panic!("expected Join");
         }
+    }
+
+    #[test]
+    fn multi_path_authz_omits_redundant_common_prefix() {
+        let ctx = SecurityContext::new(1, vec!["1/9970/".into(), "1/6543/".into()]).unwrap();
+
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("e", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_edge", "e"),
+            limit: Some(10),
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let mut got = starts_with_paths_for_alias(q.where_clause.as_ref().unwrap(), "e");
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["1/6543/".to_string(), "1/9970/".to_string()],
+            "multi-path authz must be the OR of real prefixes with no redundant broad LCP, got:\n{got:?}"
+        );
     }
 
     #[test]

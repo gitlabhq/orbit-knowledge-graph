@@ -35,23 +35,38 @@ pub(super) async fn traversal_referential_integrity_on_complex_query(ctx: &TestC
     assert!(!contains.is_empty(), "should have CONTAINS edges");
 }
 
-pub(super) async fn giant_string_survives_pipeline(ctx: &TestContext) {
-    let resp = run_query(
-        ctx,
-        r#"{
+pub(super) async fn long_node_text_is_excerpted_only_on_wide_pages(ctx: &TestContext) {
+    let full_text = format!("{}tail", "🙂".repeat(10_000));
+    let query_with_limit = |limit: u32| {
+        format!(
+            r#"{{
             "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]}],
-            "limit": 10
-        }"#,
-        &allow_all(),
-    )
-    .await;
+            "nodes": [{{"id": "n", "entity": "Note", "node_ids": [3002],
+                       "columns": ["note", "discussion_id"],
+                       "filters": {{"note": {{"ends_with": "tail"}}}}}}],
+            "limit": {limit}
+        }}"#
+        )
+    };
 
-    resp.assert_node_count(1);
-    resp.assert_node_ids("Note", &[3002]);
-    resp.assert_node("Note", 3002, |n| {
-        n.prop_str("note")
-            .is_some_and(|s| s.len() == 10_000 && s.chars().all(|c| c == 'x'))
+    let single_row = run_query(ctx, &query_with_limit(1), &allow_all()).await;
+    single_row.assert_node_count(1);
+    single_row.assert_node_ids("Note", &[3002]);
+    single_row.assert_filter("Note", "note", |note| {
+        note.prop_str("note") == Some(&full_text)
+    });
+    single_row
+        .find_node("Note", 3002)
+        .unwrap()
+        .assert_prop("discussion_id", &"🙂".repeat(2048).into());
+
+    let wide_page = run_query(ctx, &query_with_limit(1000), &allow_all()).await;
+    wide_page.assert_node_count(1);
+    wide_page.assert_node_ids("Note", &[3002]);
+    wide_page.assert_filter("Note", "note", |note| {
+        note.prop_str("note").is_some_and(|excerpt| {
+            excerpt.ends_with(" [truncated]") && excerpt.chars().count() < full_text.chars().count()
+        })
     });
 }
 

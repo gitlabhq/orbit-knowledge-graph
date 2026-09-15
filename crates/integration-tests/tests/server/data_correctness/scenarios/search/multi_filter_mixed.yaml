@@ -1,0 +1,28 @@
+# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_multi_filter_mixed_with_single_filter
+description: Bare filter value works alongside array syntax on a different property
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest",
+               "id_range": {"start": 1, "end": 10000},
+               "columns": ["title", "state", "merged_at"],
+               "filters": {
+                   "state": "merged",
+                   "merged_at": [
+                       {"gte": "2024-06-01T00:00:00Z"}
+                   ]
+               }}],
+      "order_by": "mr.merged_at",
+      "limit": 10
+    }
+
+expect:
+  node_count: 2
+  nodes:
+    MergeRequest:
+      order: [2004, 2005]
+      filters:
+        state: merged
+        merged_at: { gte: "2024-06-01" }

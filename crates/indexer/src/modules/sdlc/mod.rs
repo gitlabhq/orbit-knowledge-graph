@@ -1,8 +1,8 @@
 mod datalake;
-mod deleted_rows;
 mod handler;
 mod metrics;
 pub(crate) mod observer;
+mod paging;
 mod partitioning;
 mod pipeline;
 
@@ -87,7 +87,6 @@ pub async fn register_handlers(
             Arc::clone(&checkpoint_store),
             metrics.clone(),
             config.engine.datalake_retry.clone(),
-            ontology,
         )
         .with_registry(Arc::clone(&transform_registry)),
     );

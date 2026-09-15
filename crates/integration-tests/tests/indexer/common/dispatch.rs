@@ -94,7 +94,10 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
         ctx.config.build_client(),
         checkpoint_store,
         ScheduledTaskMetrics::new(),
-        NamespaceDispatcherConfig::default(),
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .namespace,
         Arc::new(indexer::campaign::CampaignState::new()),
         &ontology,
     );
@@ -111,7 +114,10 @@ async fn run_global_dispatcher(nats_url: &str) -> Vec<DispatchedMessage> {
     let dispatcher = GlobalDispatcher::new(
         services.nats,
         ScheduledTaskMetrics::new(),
-        GlobalDispatcherConfig::default(),
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .global,
         Arc::new(CampaignState::new()),
     );
 
@@ -134,7 +140,11 @@ async fn dispatch_enabled_namespace_cdc(
         ctx.config.build_client(),
         ScheduledTaskMetrics::new(),
         Arc::new(CampaignState::new()),
-        orbit_server_config::CodeBackfillSweepConfig::default().publish_window,
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .code_backfill
+            .publish_window,
     ));
     let route = EnabledNamespacesRoute::new(
         NamespaceIndexingDispatch::new(services.nats),
@@ -264,6 +274,6 @@ async fn drain(nats_url: &str, subject: &str, kind: &str) -> Vec<DispatchedMessa
 fn nats_config(nats_url: &str) -> NatsConfiguration {
     NatsConfiguration {
         url: nats_url.to_string(),
-        ..Default::default()
+        ..orbit_server_config::AppConfig::embedded_defaults().nats
     }
 }

@@ -1,0 +1,29 @@
+# source: crates/integration-tests/tests/server/data_correctness/work_items.rs::traversal_work_item_in_project_returns_correct_edges
+description: WorkItem-Project IN_PROJECT traversal returns correct edges and project names
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
+        {"id": "p", "entity": "Project", "columns": ["name"]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "w", "to": "p"}],
+      "limit": 20
+    }
+  gql: |
+    MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE w.id >= 1 AND w.id <= 10000 RETURN w.title, p.name LIMIT 20
+
+expect:
+  node_count: 5
+  referential_integrity: true
+  edge_exists:
+    IN_PROJECT:
+      - [4000, 1000]
+      - [4001, 1000]
+      - [4010, 1010]
+  nodes:
+    Project:
+      rows:
+        - { id: 1000, name: "Public Project" }

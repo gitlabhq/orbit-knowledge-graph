@@ -1,0 +1,17 @@
+[package]
+name = "orbit-object-storage"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+bytes = { workspace = true }
+object_store = { workspace = true }
+orbit-server-config = { path = "../orbit-server-config" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

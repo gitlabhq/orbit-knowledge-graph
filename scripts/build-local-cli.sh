@@ -4,7 +4,7 @@ set -euo pipefail
 # Build the `orbit` local CLI binary and package it as
 # orbit-local-<platform>-<arch>.(tar.gz|zip) in the repository root.
 # The binary inside the archive is `orbit` (or `orbit.exe` on Windows); the
-# `orbit-local-` prefix on the archive matches the orbit-local crate name and
+# `orbit-local-` prefix on the archive is the legacy artifact name (the crate is orbit-cli) and
 # disambiguates from the gkg-server image release. PLATFORM/ARCH default to
 # the host (linux/macOS amd64 or arm64).
 #

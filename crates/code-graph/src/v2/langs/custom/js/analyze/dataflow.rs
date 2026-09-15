@@ -547,7 +547,7 @@ impl<'a> Visit<'a> for CallExtractor<'a, '_> {
     }
 }
 
-fn extract_type_name(
+pub(super) fn extract_type_name(
     type_annotation: Option<&oxc::ast::ast::TSTypeAnnotation<'_>>,
 ) -> Option<String> {
     let type_annotation = type_annotation?;

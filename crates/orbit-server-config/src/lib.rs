@@ -17,6 +17,7 @@ pub mod grpc;
 pub mod health_check;
 pub mod metrics;
 pub mod nats;
+pub mod object_storage;
 pub mod query;
 pub mod resources;
 pub mod schema;
@@ -24,12 +25,12 @@ pub mod secret_file_source;
 pub mod tls;
 
 pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
-pub use app::{AppConfig, ConfigError, SECRET_FILE_DIR, SharedAppConfig};
+pub use app::{AppConfig, ConfigError, EMBEDDED_DEFAULTS, SECRET_FILE_DIR, SharedAppConfig};
 pub use billing::{BillingConfig, QuotaConfig};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
-    DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
+    CronSchedule, DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
     GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
     NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, ScheduleConfig,
     ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
@@ -41,6 +42,7 @@ pub use grpc::GrpcConfig;
 pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
+pub use object_storage::{ObjectStorageAuth, ObjectStorageConfig, ObjectStorageProvider};
 pub use query::{CompilerDerivedSettings, PathResolverConfig, QueryConfig, QuerySettings};
 pub use resources::{ContainerResources, MIN_DATALAKE_BATCH_SIZE, derive_concurrency_groups};
 pub use schema::{SchemaConfig, SchemaConfigError};

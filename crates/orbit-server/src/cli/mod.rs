@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, ValueEnum};
 
 #[derive(Parser)]
@@ -5,6 +7,9 @@ use clap::{Parser, ValueEnum};
 pub struct Args {
     #[arg(long, value_enum, default_value = "webserver")]
     pub mode: Mode,
+    /// Config overlay applied over the embedded config/default.yaml; defaults to config/config.yaml when present.
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

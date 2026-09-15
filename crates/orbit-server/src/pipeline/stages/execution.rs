@@ -22,7 +22,9 @@ struct PreparedQuery {
 }
 
 #[derive(Clone)]
-pub struct ClickHouseExecutor;
+pub struct ClickHouseExecutor {
+    pub migration_version: u32,
+}
 
 impl PipelineStage for ClickHouseExecutor {
     type Input = ();
@@ -45,7 +47,8 @@ impl PipelineStage for ClickHouseExecutor {
             .get::<crate::auth::Claims>()
             .map(|c| c.user_id)
             .unwrap_or(0);
-        let log_comment = correlation::log_comment_base(user_id, &ctx.query_json);
+        let log_comment =
+            correlation::log_comment_base(user_id, &ctx.query_json, self.migration_version);
 
         let (prepared, result_context) = {
             let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;

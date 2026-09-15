@@ -1,0 +1,25 @@
+# source: crates/integration-tests/tests/server/data_correctness/security.rs::relationship_traversal_path_filter_outside_scope_rejects_at_compile
+description: Relationship traversal_path filter outside scope rejects at compile
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1]},
+        {"id": "g", "entity": "Group"}
+      ],
+      "relationships": [{
+        "type": "MEMBER_OF",
+        "from": "u",
+        "to": "g",
+        "filters": {"traversal_path": "1/102/"}
+      }],
+      "limit": 10
+    }
+
+expect:
+  compile_error: "authorized traversal_path scope"

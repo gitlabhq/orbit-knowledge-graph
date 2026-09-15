@@ -11,16 +11,16 @@ The product. Previously named GitLab Knowledge Graph. Builds a property graph fr
 _Avoid_: KGaaS, Knowledge Graph Service
 
 **GKG**:
-Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still present in the binary name (`gkg-server`), config prefixes (`GKG_*`), metrics, and pinned wire/database names.
+Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still present in the binary name (`gkg-server`), metrics, and pinned wire/database names.
 _Avoid_: using GKG in user-facing contexts
 
 **Orbit Remote**:
-The hosted Orbit service, queried via `glab orbit remote`. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated.
+The hosted Orbit service. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated. The flat `orbit` command tree reaches it with the `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` verbs.
 _Avoid_: "the server", "production GKG"
 
 **Orbit Local**:
-A standalone CLI that indexes a single repository into a local DuckDB database for offline analysis. Managed via `glab orbit local`.
-_Avoid_: "the CLI" (ambiguous — both Remote and Local have CLIs)
+The local backend of the `orbit` binary: indexes a single repository into a DuckDB database for offline analysis, reached in the same flat command tree with the `index`, `grep`, `context`, `sql`, `schema`, `list`, `repo-map`, and `mcp` verbs. `glab orbit` installs the binary and forwards all verbs to it.
+_Avoid_: "the CLI" (ambiguous — one binary serves both backends)
 
 ### Graph model
 
@@ -61,6 +61,10 @@ _Avoid_: namespace graph (outdated alias)
 **Code Graph**:
 The sub-graph of source code structure and relationships — branches, directories, files, definitions, imported symbols, and their connections (containment, calls, imports, inheritance). Distinguished from **SDLC Data**. Built by parsing repository contents via Gitaly.
 _Avoid_: call graph (refers only to invocation relationships, not the full sub-graph)
+
+**YAML Document Type**:
+A declarative config (one YAML file under `crates/code-graph/src/v2/langs/generic/yaml/document_types/`) that tells the **Code Graph** which YAML files it claims, by filename, directory, or top-level keys, and which of their keys become definitions or imports. Shipped types: GitLab CI, ArgoCD, Helm chart, Helm values, Docker Compose. YAML that no document type claims keeps only its `File` node plus anchor definitions and alias references.
+_Avoid_: YAML dialect, YAML schema (that is the JSON schema the configs are validated against)
 
 **Namespace Partitioning**:
 The physical `PARTITION BY` of every graph table carrying a **Traversal Path**, keyed by a hash bucket of the top-level **Namespace** (`sipHash64(top_level_ns) % N`, declared once in `settings.partition`). Gives each tenant bucket its own ClickHouse part budget so one tenant's reindex burst cannot dead-letter inserts for the rest. A query scoped to a single top-level namespace also prunes to one bucket: the compiler emits the same bucket expression as a predicate. A storage-layer property, distinct from the logical SDLC/Code sub-graphs and from the read-side extraction slices used for parallel initial loads.
@@ -116,6 +120,10 @@ _Avoid_: data lake, raw data tables, lake
 The JSON-based query language for the property graph. Supports four query types: traversal, aggregation, path_finding, and neighbors. Compiled to parameterized ClickHouse SQL. Versioned by `QUERY_DSL_VERSION`.
 _Avoid_: intermediate query language, intermediary LLM query language, JSON query language
 
+**Orbit Query Frontend**:
+A compiler-level interface for Orbit's read-only graph language. The `gql` frontend module converts Pest pairs into a typed syntax tree, then lowers it into compiler Input. It does not replace the deployed JSON **Query DSL**.
+_Avoid_: Describing Orbit Query as the deployed query language
+
 **Named Query**:
 A graph query defined in YAML under `config/named_queries/` and invoked by name, instead of the client authoring the **Query DSL** string. Compiled against the ontology at `orbit-server` build time so drift fails the build.
 _Avoid_: preset query, query template
@@ -123,6 +131,10 @@ _Avoid_: preset query, query template
 **Hop**:
 A single **Relationship** traversal in the graph. Multi-hop queries traverse multiple relationships in sequence. Hard-capped at 3 hops for security and performance.
 _Avoid_: depth (ambiguous with tree depth)
+
+**Denormalized Join**:
+A linear chain of tables declared under `settings.denormalized_joins` and pre-joined into one `gl_denorm_<name>` table, kept current by ClickHouse materialized views on each source table. Adjacent tables join on the ID that links them; every scoped table keeps its own **Traversal Path** in the row and the compiler filters each. Lets the compiler answer the matching **Hops** with one scan.
+_Avoid_: materialized table (the ClickHouse materialized views only feed it), projection (ClickHouse feature we deliberately do not use here). Distinct from the edge-tag `denormalization` settings block, which copies selected node properties onto edge rows.
 
 **Hydration**:
 Fetching properties for **Nodes** discovered dynamically during query execution. Required for PathFinding and Neighbors queries where the result set's node types aren't known upfront.

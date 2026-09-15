@@ -1,5 +1,5 @@
 use super::helpers::*;
-use query_engine::compiler::{AccessLevel, AuthorizedPath};
+use query_engine::compiler::{AccessLevel, AuthorizedPath, Frontend};
 
 pub(super) async fn search_scoped_path_excludes_other_namespaces(ctx: &TestContext) {
     let resp = run_query_with_security(
@@ -131,11 +131,12 @@ pub(super) async fn search_traversal_path_filter_outside_scope_rejects_at_compil
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
-            "limit": 10
-        }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "p", "entity": "Project",
+                 "filters": {"traversal_path": {"starts_with": "1/"}}}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
     );
@@ -182,19 +183,20 @@ pub(super) async fn relationship_traversal_path_filter_outside_scope_rejects_at_
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "g", "entity": "Group"}
-            ],
-            "relationships": [{
-                "type": "MEMBER_OF",
-                "from": "u",
-                "to": "g",
-                "filters": {"traversal_path": "1/102/"}
-            }],
-            "limit": 10
-        }"#,
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "node_ids": [1]},
+            {"id": "g", "entity": "Group"}
+        ],
+        "relationships": [{
+            "type": "MEMBER_OF",
+            "from": "u",
+            "to": "g",
+            "filters": {"traversal_path": "1/102/"}
+        }],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
     );
@@ -318,11 +320,12 @@ pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestCon
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"is_admin": true}}],
-            "limit": 10
-        }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                 "filters": {"is_admin": true}}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     );
@@ -340,11 +343,12 @@ pub(super) async fn admin_only_non_admin_order_by_rejects_at_compile(ctx: &TestC
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "order_by": "-u.is_admin",
-            "limit": 10
-        }"#,
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "order_by": "-u.is_admin",
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     );
@@ -362,19 +366,20 @@ pub(super) async fn admin_only_non_admin_max_aggregation_rejects_at_compile(ctx:
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
-                {"id": "u", "entity": "User", "columns": ["username"]}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{
-                "max": "u.is_admin",
-                "as": "has_admin"
-            }],
-            "limit": 10
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
+            {"id": "u", "entity": "User", "columns": ["username"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{
+            "max": "u.is_admin",
+            "as": "has_admin"
+        }],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     );
@@ -394,19 +399,20 @@ pub(super) async fn admin_only_non_admin_count_aggregation_on_auditor_rejects_at
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
-                {"id": "u", "entity": "User", "columns": ["username"]}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{
-                "count": "u.is_auditor",
-                "as": "auditor_count"
-            }],
-            "limit": 10
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
+            {"id": "u", "entity": "User", "columns": ["username"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{
+            "count": "u.is_auditor",
+            "as": "auditor_count"
+        }],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     );
@@ -509,40 +515,32 @@ pub(super) async fn admin_only_admin_filter_compiles(ctx: &TestContext) {
 pub(super) async fn admin_only_admin_order_by_compiles(ctx: &TestContext) {
     let _ = ctx;
     let ontology = Arc::new(load_ontology());
-    compile(
-        r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]}],
-            "order_by": "-u.is_admin",
-            "limit": 10
-        }"#,
-        &ontology,
-        &admin_ctx(),
-    )
+    compile(r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]}],
+        "order_by": "-u.is_admin",
+        "limit": 10
+    }"#, Frontend::JsonDsl, &ontology, &admin_ctx())
     .expect("admin order_by on is_admin must compile");
 }
 
 pub(super) async fn admin_only_admin_aggregation_compiles(ctx: &TestContext) {
     let _ = ctx;
     let ontology = Arc::new(load_ontology());
-    compile(
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{
-                "max": "u.is_admin",
-                "as": "has_admin"
-            }],
-            "limit": 10
-        }"#,
-        &ontology,
-        &admin_ctx(),
-    )
+    compile(r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{
+            "max": "u.is_admin",
+            "as": "has_admin"
+        }],
+        "limit": 10
+    }"#, Frontend::JsonDsl, &ontology, &admin_ctx())
     .expect("admin MAX(is_admin) grouped by Group must compile");
 }
 
@@ -837,21 +835,17 @@ pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestCon
     let ontology = Arc::new(load_ontology());
     let security_ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
 
-    let compiled = compile(
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{"count": "u", "as": "member_count"}],
-            "limit": 10
-        }"#,
-        &ontology,
-        &security_ctx,
-    )
+    let compiled = compile(r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{"count": "u", "as": "member_count"}],
+        "limit": 10
+    }"#, Frontend::JsonDsl, &ontology, &security_ctx)
     .unwrap();
 
     let sql = &compiled.base.sql;
@@ -882,21 +876,17 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
     let ontology = Arc::new(load_ontology());
     let security_ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/102/".into()]).unwrap();
 
-    let compiled = compile(
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{"count": "u", "as": "member_count"}],
-            "limit": 10
-        }"#,
-        &ontology,
-        &security_ctx,
-    )
+    let compiled = compile(r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{"count": "u", "as": "member_count"}],
+        "limit": 10
+    }"#, Frontend::JsonDsl, &ontology, &security_ctx)
     .unwrap();
 
     let sql = &compiled.base.sql;
@@ -1255,16 +1245,17 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
 
     let compiled = compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
-                {"id": "v", "entity": "Vulnerability"}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": ["v.severity"],
-            "aggregations": [{"count": "v", "as": "vuln_count"}],
-            "limit": 10
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+            {"id": "v", "entity": "Vulnerability"}
+        ],
+        "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+        "group_by": ["v.severity"],
+        "aggregations": [{"count": "v", "as": "vuln_count"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &security_ctx,
     )
@@ -1303,17 +1294,18 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_reporter_rej
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
-                {"id": "v", "entity": "Vulnerability",
-                 "filters": {"traversal_path": "1/100/1000/"}}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": ["p"],
-            "aggregations": [{"count": "v", "as": "c"}],
-            "limit": 10
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+            {"id": "v", "entity": "Vulnerability",
+             "filters": {"traversal_path": "1/100/1000/"}}
+        ],
+        "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+        "group_by": ["p"],
+        "aggregations": [{"count": "v", "as": "c"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap(),
     );
@@ -1367,21 +1359,17 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
     let ontology = Arc::new(load_ontology());
     let security_ctx = SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap();
 
-    let compiled = compile(
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "v", "entity": "Vulnerability"}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": ["p"],
-            "aggregations": [{"count": "v", "as": "vuln_count"}],
-            "limit": 10
-        }"#,
-        &ontology,
-        &security_ctx,
-    )
+    let compiled = compile(r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "v", "entity": "Vulnerability"}
+        ],
+        "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+        "group_by": ["p"],
+        "aggregations": [{"count": "v", "as": "vuln_count"}],
+        "limit": 10
+    }"#, Frontend::JsonDsl, &ontology, &security_ctx)
     .unwrap();
 
     let sql = &compiled.base.sql;
@@ -1445,11 +1433,12 @@ pub(super) async fn aggregation_user_only_rejects_at_compile(ctx: &TestContext) 
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "aggregations": [{"count": "u", "as": "cnt"}],
-            "limit": 10
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "aggregations": [{"count": "u", "as": "cnt"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     );
@@ -1467,14 +1456,15 @@ pub(super) async fn aggregation_user_only_with_pii_filter_rejects_at_compile(ctx
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [{
-                "id": "u", "entity": "User", "columns": ["username"],
-                "filters": {"email": "target@example.com"}
-            }],
-            "aggregations": [{"count": "u", "as": "hit"}],
-            "limit": 1
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [{
+            "id": "u", "entity": "User", "columns": ["username"],
+            "filters": {"email": "target@example.com"}
+        }],
+        "aggregations": [{"count": "u", "as": "hit"}],
+        "limit": 1
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     );
@@ -1486,37 +1476,29 @@ pub(super) async fn aggregation_user_only_with_pii_filter_rejects_at_compile(ctx
 pub(super) async fn aggregation_user_joined_to_scoped_group_compiles(ctx: &TestContext) {
     let _ = ctx;
     let ontology = Arc::new(load_ontology());
-    compile(
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": ["g"],
-            "aggregations": [{"count": "u", "as": "member_count"}],
-            "limit": 10
-        }"#,
-        &ontology,
-        &non_admin_ctx(),
-    )
+    compile(r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{"count": "u", "as": "member_count"}],
+        "limit": 10
+    }"#, Frontend::JsonDsl, &ontology, &non_admin_ctx())
     .expect("aggregation joined to Group (scoped) must compile for non-admin");
 }
 
 pub(super) async fn aggregation_user_only_admin_still_compiles(ctx: &TestContext) {
     let _ = ctx;
     let ontology = Arc::new(load_ontology());
-    compile(
-        r#"{
-            "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "aggregations": [{"count": "u", "as": "cnt"}],
-            "limit": 10
-        }"#,
-        &ontology,
-        &admin_ctx(),
-    )
+    compile(r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "aggregations": [{"count": "u", "as": "cnt"}],
+        "limit": 10
+    }"#, Frontend::JsonDsl, &ontology, &admin_ctx())
     .expect("admin caller bypasses User-only aggregation guard");
 }
 
@@ -1525,14 +1507,15 @@ pub(super) async fn aggregation_user_only_rejection_happens_before_sql_compile(c
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [{
-                "id": "u", "entity": "User",
-                "filters": {"email": "victim@example.com"}
-            }],
-            "aggregations": [{"count": "u", "as": "oracle"}],
-            "limit": 1
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [{
+            "id": "u", "entity": "User",
+            "filters": {"email": "victim@example.com"}
+        }],
+        "aggregations": [{"count": "u", "as": "oracle"}],
+        "limit": 1
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     );
@@ -1550,11 +1533,12 @@ pub(super) async fn aggregation_user_only_neighbors_query_is_not_blocked(ctx: &T
     let ontology = Arc::new(load_ontology());
     compile(
         r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
-            "limit": 10
-        }"#,
+        "query_type": "neighbors",
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+        "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     )
@@ -1571,15 +1555,16 @@ pub(super) async fn aggregation_user_disconnected_scoped_node_rejects_at_compile
     // would be unbounded by any edge join.
     let result = compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "filters": {"email": "target@example.com"}},
-                {"id": "g", "entity": "Group"}
-            ],
-            "group_by": ["g"],
-            "aggregations": [{"count": "u", "as": "hit"}],
-            "limit": 1
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User", "filters": {"email": "target@example.com"}},
+            {"id": "g", "entity": "Group"}
+        ],
+        "group_by": ["g"],
+        "aggregations": [{"count": "u", "as": "hit"}],
+        "limit": 1
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     );
@@ -1603,16 +1588,17 @@ pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestConte
     // Reachability is satisfied through the `path` config, not only `relationships`.
     compile(
         r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-                {"id": "p", "entity": "Project"}
-            ],
-            "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
-            "group_by": ["p"],
-            "aggregations": [{"count": "u", "as": "hit"}],
-            "limit": 10
-        }"#,
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "p", "entity": "Project"}
+        ],
+        "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
+        "group_by": ["p"],
+        "aggregations": [{"count": "u", "as": "hit"}],
+        "limit": 10
+    }"#,
+        Frontend::JsonDsl,
         &ontology,
         &non_admin_ctx(),
     )

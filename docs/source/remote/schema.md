@@ -31,7 +31,7 @@ GitLab Orbit indexes 27 node types across 6 domains. Use these as entity names i
 To fetch the live schema at any time:
 
 ```shell
-glab orbit remote schema
+glab orbit ontology
 ```
 
 ## Core
