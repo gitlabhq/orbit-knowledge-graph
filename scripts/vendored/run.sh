@@ -26,6 +26,10 @@ VENDOR_DIR_REL=$(yq ".vendored.$NAME.vendor_dir" "$VERSIONS_FILE")
 SCRIPT=$(yq ".vendored.$NAME.$SCRIPT_KEY" "$VERSIONS_FILE")
 VERSION=$(yq ".vendored.$NAME.version // \"\"" "$VERSIONS_FILE")
 
+if [[ "$VENDOR_DIR_REL" == "null" ]]; then
+    echo "No vendor_dir for vendored.$NAME" >&2
+    exit 1
+fi
 if [[ "$SCRIPT" == "null" ]]; then
     echo "No $SCRIPT_KEY for vendored.$NAME" >&2
     exit 1
@@ -40,7 +44,7 @@ export VENDOR_VERSIONS_FILE="$VERSIONS_FILE"
 export VENDOR_DIR="$REPO_ROOT/$VENDOR_DIR_REL"
 export VENDOR_VERSION="$VERSION"
 
-PRE_SHA=$(shasum -a 256 "$VERSIONS_FILE" | awk '{print $1}')
+PRE_SHA=$(sha256sum "$VERSIONS_FILE" | awk '{print $1}')
 
 bash "$REPO_ROOT/$SCRIPT"
 
@@ -56,7 +60,7 @@ if [[ "$MODE" == "vendor" ]]; then
 fi
 
 if [[ "$MODE" == "check" ]]; then
-    POST_SHA=$(shasum -a 256 "$VERSIONS_FILE" | awk '{print $1}')
+    POST_SHA=$(sha256sum "$VERSIONS_FILE" | awk '{print $1}')
     if [[ "$PRE_SHA" != "$POST_SHA" ]]; then
         echo "Postcondition failed: check_script modified $VERSIONS_FILE (must be read-only)" >&2
         exit 1

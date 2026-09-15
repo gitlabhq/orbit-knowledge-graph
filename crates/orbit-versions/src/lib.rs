@@ -49,18 +49,25 @@ impl Versions {
                 ));
             }
             if let Some(dir) = &dep.vendor_dir
-                && (dir.starts_with('/') || dir.contains(".."))
+                && (dir.is_empty() || dir.starts_with('/') || dir.contains(".."))
             {
                 return Err(format!(
-                    "vendored.{name}.vendor_dir must be relative without ..: {dir}"
+                    "vendored.{name}.vendor_dir must be non-empty, relative, without ..: {dir}"
                 ));
             }
-            for path in [&dep.vendor_script, &dep.check_script]
-                .into_iter()
-                .flatten()
-            {
-                if !path.ends_with(".sh") {
-                    return Err(format!("vendored.{name} script must end in .sh: {path}"));
+            for (label, path) in [
+                ("vendor_script", &dep.vendor_script),
+                ("check_script", &dep.check_script),
+            ] {
+                if let Some(path) = path {
+                    if !path.ends_with(".sh") {
+                        return Err(format!("vendored.{name}.{label} must end in .sh: {path}"));
+                    }
+                    if path.starts_with('/') || path.contains("..") {
+                        return Err(format!(
+                            "vendored.{name}.{label} must be relative without ..: {path}"
+                        ));
+                    }
                 }
             }
             if let Some(exts) = &dep.extensions {
@@ -195,6 +202,30 @@ mod tests {
         let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
         let duckdb = versions.vendored.get_mut("duckdb").unwrap();
         duckdb.vendor_dir = Some("crates/../../etc".into());
+        assert!(versions.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_empty_vendor_dir() {
+        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
+        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
+        duckdb.vendor_dir = Some(String::new());
+        assert!(versions.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_traversal_script_path() {
+        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
+        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
+        duckdb.vendor_script = Some("../escape/evil.sh".into());
+        assert!(versions.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_absolute_script_path() {
+        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
+        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
+        duckdb.check_script = Some("/tmp/evil.sh".into());
         assert!(versions.validate().is_err());
     }
 }
