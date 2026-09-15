@@ -86,9 +86,9 @@ pub(crate) fn run(
             }
             writeln!(
                 out,
-                "Rephrase and retry once — use synonyms or identifier fragments \
-                 from the code (e.g. \"throttle\" → \"rate limit\"). If the retry \
-                 also misses, fall back to text grep."
+                "Retry once with a source identifier. If raw search is still needed, \
+                 use it only to locate a file, then run `{launcher} context <path>`; \
+                 never read source with cat, head, or sed."
             )?;
             continue;
         }
