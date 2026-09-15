@@ -1,5 +1,5 @@
 use crate::lang::Lang;
-use crate::tree::{NONE, Node, Tree};
+use crate::tree::{MutableTree, NONE, Node};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -171,18 +171,15 @@ fn from_tree_sitter(
     ts_tree: &tree_sitter::Tree,
     lang: &mut Lang,
     label: &str,
-) -> Tree {
+) -> MutableTree {
     let root = ts_tree.root_node();
-    let mut nodes: Vec<Node> = Vec::with_capacity(root.descendant_count());
-    let mut parent_stack: Vec<u32> = Vec::with_capacity(64);
+    let mut tree = MutableTree::with_capacity(root.descendant_count(), Node::default());
+    let mut parent_stack = Vec::with_capacity(64);
     let mut cursor = root.walk();
     let mut done = false;
 
     loop {
         let ts = cursor.node();
-        let id = nodes.len() as u32;
-        let parent = parent_stack.last().copied().unwrap_or(NONE);
-
         let kind = lang.intern_kind(ts.kind());
         let field = cursor.field_name().map_or(0, |f| lang.intern_field(f));
         let sym = if ts.is_named() {
@@ -194,15 +191,13 @@ fn from_tree_sitter(
 
         let sp = ts.start_position();
         let ep = ts.end_position();
-        nodes.push(Node {
+        let node = Node {
             kind,
             field,
             named: ts.is_named(),
             synth: false,
-            dead: false,
-            id: 0,
             size: 0,
-            parent,
+            parent: NONE,
             sym,
             start: ts.start_byte() as u32,
             end: ts.end_byte() as u32,
@@ -210,14 +205,18 @@ fn from_tree_sitter(
             start_col: sp.column as u32,
             end_row: ep.row as u32,
             end_col: ep.column as u32,
-        });
+        };
+        let id = if let Some(&parent) = parent_stack.last() {
+            tree.append(parent, node)
+        } else {
+            *tree.node_mut(tree.root) = node;
+            tree.root
+        };
 
         if cursor.goto_first_child() {
             parent_stack.push(id);
             continue;
         }
-
-        nodes[id as usize].size = 1;
 
         if cursor.goto_next_sibling() {
             continue;
@@ -228,8 +227,7 @@ fn from_tree_sitter(
                 done = true;
                 break;
             }
-            let parent_id = parent_stack.pop().unwrap();
-            nodes[parent_id as usize].size = nodes.len() as u32 - parent_id;
+            parent_stack.pop().unwrap();
             if cursor.goto_next_sibling() {
                 break;
             }
@@ -238,15 +236,14 @@ fn from_tree_sitter(
             break;
         }
     }
-    let mut tree = Tree::from_nodes(nodes);
     tree.label = label.to_string();
-    if !label.is_empty() && !tree.nodes.is_empty() {
-        tree.nodes[0].sym = lang.syms.intern(label);
+    if !label.is_empty() {
+        tree.node_mut(tree.root).sym = lang.syms.intern(label);
     }
     tree
 }
 
-pub fn parse(source: &str, support_lang: SupportLang, lang: &mut Lang, label: &str) -> Tree {
+pub fn parse(source: &str, support_lang: SupportLang, lang: &mut Lang, label: &str) -> MutableTree {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&support_lang.ts_language()).unwrap();
     let ts_tree = parser.parse(source.as_bytes(), None).unwrap();

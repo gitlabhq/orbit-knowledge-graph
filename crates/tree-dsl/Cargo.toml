@@ -32,6 +32,7 @@ serde = { workspace = true }
 serde_yaml = "0.9"
 stacker = "0.1"
 rustc-hash = "2"
+indextree = { version = "4.9.1", default-features = false, features = ["std"] }
 strum = { workspace = true }
 rayon = { workspace = true }
 termtree = "1.0"
@@ -40,5 +41,3 @@ toml = { workspace = true }
 pest = { workspace = true }
 pest_derive = { workspace = true }
 pest_consume = { workspace = true }
-
-

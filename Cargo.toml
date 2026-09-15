@@ -81,7 +81,7 @@ rust-lapper = "1.2.0"
 rustc-hash = "2.1.1"
 rmcp = { version = "1.7", features = ["server", "macros", "transport-io"] }
 schemars = "1.2.1"
-rkyv = { version = "0.8.18", features = ["alloc"] }
+rkyv = { version = "0.8.18", features = ["alloc", "std"] }
 serde = { version = "1.0.228", features = ["derive"] }
 stop-words = { version = "0.10.0", default-features = false, features = ["nltk"] }
 serde_json = "1.0.149"

@@ -98,7 +98,11 @@ fn main() -> anyhow::Result<()> {
             replace,
             after,
         } => cmd_rewrite(file, stdin, lang, r#match, replace, after),
-        Commands::Index { path, lang, no_save } => cmd_index(&path, lang, no_save),
+        Commands::Index {
+            path,
+            lang,
+            no_save,
+        } => cmd_index(&path, lang, no_save),
         #[cfg(feature = "test-runner")]
         Commands::Test { file, inline } => cmd_test(file, inline),
     }
@@ -129,7 +133,7 @@ fn cmd_parse(
         Stage::Cst => {
             let mut lang = tree_dsl::lang::Lang::new();
             let tree = tree_dsl::grammar::parse(&source, lang_id, &mut lang, &path);
-            print_tree(&tree, &lang);
+            print_tree(&tree.freeze(), &lang);
         }
         Stage::Ast => {
             let (pipeline, mut lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
@@ -137,12 +141,12 @@ fn cmd_parse(
             for stage in &pipeline.rewrite_stages {
                 tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, stage);
             }
-            print_tree(&tree, &lang);
+            print_tree(&tree.freeze(), &lang);
         }
         Stage::Ssa => {
-            let (tree, lang, _) = tree_dsl::parse(lang_id, &path, &source);
+            let (tree, edges, lang, _) = tree_dsl::parse(lang_id, &path, &source);
             print_tree(&tree, &lang);
-            print_edges(&tree, &lang);
+            print_edges(&tree, &edges, &lang);
         }
     }
     Ok(())
@@ -192,24 +196,16 @@ fn cmd_rewrite(
     let rules: Vec<_> = patterns
         .iter()
         .zip(templates.iter())
-        .map(|(pat, tpl)| {
-            let tpl = tpl.clone();
-            tree_dsl::pattern::Rewrite::new(&mut lang, pat, move |c| {
-                tree_dsl::pattern::Out::Replace(c.template(&tpl))
-            })
-        })
+        .map(|(pat, tpl)| tree_dsl::pattern::Rewrite::new(&mut lang, pat, tpl))
         .collect();
     tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, &rules);
 
-    print_tree(&tree, &lang);
+    print_tree(&tree.freeze(), &lang);
     Ok(())
 }
 
 fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
     for (i, n) in tree.nodes.iter().enumerate() {
-        if n.dead {
-            continue;
-        }
         if !n.named && n.sym == 0 {
             continue;
         }
@@ -240,12 +236,16 @@ fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
     }
 }
 
-fn print_edges(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
-    if tree.edges().is_empty() {
+fn print_edges(
+    tree: &tree_dsl::tree::Tree,
+    edges: &[tree_dsl::tree::Edge],
+    lang: &tree_dsl::lang::Lang,
+) {
+    if edges.is_empty() {
         return;
     }
     println!("edges:");
-    for e in tree.edges().iter() {
+    for e in edges {
         let from = node_label(tree, lang, e.from.node);
         let to = node_label(tree, lang, e.to.node);
         println!("  {} --[{}]--> {}", from, edge_name(e.kind), to);
@@ -307,14 +307,10 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
 
     let mut total_defs = 0usize;
     let mut total_imports = 0usize;
-    let mut total_intra_edges = 0usize;
 
     for tree in &result.trees {
         for i in 0..tree.len() {
             let c = tree.cursor(i);
-            if c.is_dead() {
-                continue;
-            }
             if tree_dsl::canonical::has_def_type(c) {
                 total_defs += 1;
             } else if c.is(tree_dsl::canonical::Canonical::Import)
@@ -323,8 +319,12 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
                 total_imports += 1;
             }
         }
-        total_intra_edges += tree.edges().len();
     }
+    let total_intra_edges = result
+        .intra_edges
+        .iter()
+        .map(|edges| edges.len())
+        .sum::<usize>();
 
     eprintln!();
     eprintln!("--- stats ---");
@@ -351,7 +351,12 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
         result.save(&snap_path)?;
         let save_s = t_save.elapsed().as_secs_f64();
         let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
-        eprintln!("saved:        {} ({:.1} MB, {:.2}s)", snap_path.display(), size_mb, save_s);
+        eprintln!(
+            "saved:        {} ({:.1} MB, {:.2}s)",
+            snap_path.display(),
+            size_mb,
+            save_s
+        );
     }
     Ok(())
 }

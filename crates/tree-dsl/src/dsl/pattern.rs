@@ -1,52 +1,16 @@
+use indextree::NodeId;
+use smallvec::SmallVec;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 
 use crate::lang::Lang;
-use crate::tree::{NONE, Node, Tree, copy_subtree, elems, live};
+use crate::tree::{MutableTree, Node};
 
 // ── Phase markers ──
 
-pub struct Match;
-pub struct Template;
-
-pub trait Phase {
-    fn resolve_slot(
-        slots: &mut HashMap<Box<str>, u16>,
-        filters: &mut Vec<Vec<u16>>,
-        n: &str,
-    ) -> u16;
-    fn apply_filter(filters: &mut [Vec<u16>], slot: u16, kinds: Vec<u16>);
-}
-
-impl Phase for Match {
-    fn resolve_slot(
-        slots: &mut HashMap<Box<str>, u16>,
-        filters: &mut Vec<Vec<u16>>,
-        n: &str,
-    ) -> u16 {
-        let next = slots.len() as u16;
-        let s = *slots.entry(n.into()).or_insert(next);
-        if filters.len() <= s as usize {
-            filters.resize(s as usize + 1, Vec::new());
-        }
-        s
-    }
-    fn apply_filter(filters: &mut [Vec<u16>], slot: u16, kinds: Vec<u16>) {
-        filters[slot as usize] = kinds;
-    }
-}
-
-impl Phase for Template {
-    fn resolve_slot(
-        slots: &mut HashMap<Box<str>, u16>,
-        _filters: &mut Vec<Vec<u16>>,
-        n: &str,
-    ) -> u16 {
-        *slots
-            .get(n)
-            .unwrap_or_else(|| panic!("template references unknown slot: {n}"))
-    }
-    fn apply_filter(_filters: &mut [Vec<u16>], _slot: u16, _kinds: Vec<u16>) {}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParseMode {
+    Match,
+    Template,
 }
 
 #[derive(Clone)]
@@ -105,21 +69,23 @@ impl Tf {
         }
     }
 
-    fn apply_sym(&self, t: &Tree, lang: &mut Lang, i: u32) -> u32 {
+    fn apply_sym(&self, t: &MutableTree, lang: &mut Lang, i: NodeId) -> u32 {
         match self {
-            Tf::Id => t.sym(i),
-            Tf::Field(f) => t.child_by_field(i, *f).map_or(t.sym(i), |c| t.sym(c)),
+            Tf::Id => t.node(i).sym,
+            Tf::Field(f) => t
+                .child_by_field(i, *f)
+                .map_or(t.node(i).sym, |c| t.node(c).sym),
             Tf::Const(s) => lang.syms.intern(s),
             Tf::Child(k) => t
                 .children(i)
-                .find(|&c| t.kind(c) == *k)
-                .map_or(0, |c| t.sym(c)),
+                .find(|&c| t.node(c).kind == *k)
+                .map_or(0, |c| t.node(c).sym),
             Tf::FieldChild(f, k) => t
                 .child_by_field(i, *f)
-                .and_then(|n| t.children(n).find(|&c| t.kind(c) == *k))
-                .map_or(0, |c| t.sym(c)),
+                .and_then(|n| t.children(n).find(|&c| t.node(c).kind == *k))
+                .map_or(0, |c| t.node(c).sym),
             _ => {
-                let sym = t.sym(i);
+                let sym = t.node(i).sym;
                 if sym == 0 {
                     return 0;
                 }
@@ -137,7 +103,7 @@ pub enum Text {
     From(u16, Tf),
 }
 
-pub enum Pat {
+enum Pat {
     Node {
         kind: u16,
         field: u16,
@@ -146,21 +112,13 @@ pub enum Pat {
         optional: bool,
     },
     Cap {
-        slot: u16,
+        capture: CaptureSpec,
         field: u16,
-        kind: Option<u16>,
-        rekind: Option<u16>,
-        guard: Option<Box<Pat>>,
         optional: bool,
-        named_only: bool,
     },
     Var {
-        slot: u16,
-        field: u16,
-        rekind: Option<u16>,
+        capture: CaptureSpec,
         leaf_only: bool,
-        guard: Option<Box<Pat>>,
-        named_only: bool,
     },
     Not(Box<Pat>),
     Desc(Box<Pat>),
@@ -170,94 +128,117 @@ pub enum Pat {
     },
 }
 
-const EMPTY_CAP: (u32, u32) = (NONE, NONE);
-
-pub enum Out {
-    Replace(Pat),
+struct CaptureSpec {
+    slot: u16,
+    kind: Option<u16>,
+    rekind: Option<u16>,
+    guard: Option<Box<Pat>>,
+    named_only: bool,
 }
+
+type Capture = SmallVec<[NodeId; 4]>;
 
 pub struct Rewrite {
-    pub pat: Pat,
-    pub out: Out,
-    pub nslots: usize,
-    pub filters: Vec<Vec<u16>>,
-    pub guards: Vec<(u16, u16, bool)>,
-    pub slots: HashMap<Box<str>, u16>,
+    pat: Pat,
+    replacement: Pat,
+    nslots: usize,
+    filters: Vec<Vec<u16>>,
+    guards: Vec<(u16, u16, bool)>,
 }
 
-pub struct Ctx<'l, P: Phase> {
-    pub lang: &'l mut Lang,
+struct ParseCtx<'l> {
+    lang: &'l mut Lang,
     slots: HashMap<Box<str>, u16>,
     filters: Vec<Vec<u16>>,
-    _phase: PhantomData<P>,
+    mode: ParseMode,
 }
 
-impl<'l, P: Phase> Ctx<'l, P> {
-    pub fn slot(&mut self, n: &str) -> u16 {
-        P::resolve_slot(&mut self.slots, &mut self.filters, n)
+impl<'l> ParseCtx<'l> {
+    fn slot(&mut self, n: &str) -> u16 {
+        if let Some(&slot) = self.slots.get(n) {
+            return slot;
+        }
+        if self.mode == ParseMode::Template {
+            panic!("template references unknown slot: {n}");
+        }
+        let slot = self.slots.len() as u16;
+        self.slots.insert(n.into(), slot);
+        self.filters.push(Vec::new());
+        slot
     }
 
-    pub fn intern_kind(&mut self, k: &str) -> u16 {
+    fn intern_kind(&mut self, k: &str) -> u16 {
         self.lang.intern_kind(k)
     }
 
-    pub fn intern_field(&mut self, f: &str) -> u16 {
+    fn intern_field(&mut self, f: &str) -> u16 {
         self.lang.intern_field(f)
     }
 
     fn apply_filter(&mut self, slot: u16, kinds: Vec<u16>) {
-        P::apply_filter(&mut self.filters, slot, kinds);
-    }
-}
-
-impl<'l> Ctx<'l, Match> {
-    fn new(lang: &'l mut Lang) -> Self {
-        Ctx {
-            lang,
-            slots: HashMap::new(),
-            filters: Vec::new(),
-            _phase: PhantomData,
+        if self.mode == ParseMode::Match {
+            self.filters[slot as usize] = kinds;
         }
     }
 
-    fn freeze(self) -> Ctx<'l, Template> {
-        Ctx {
-            lang: self.lang,
-            slots: self.slots,
-            filters: self.filters,
-            _phase: PhantomData,
-        }
-    }
-}
-
-impl Ctx<'_, Template> {
-    pub fn template(&mut self, src: &str) -> Pat {
+    fn template(&mut self, src: &str) -> Pat {
+        self.mode = ParseMode::Template;
         parse(self, src)
     }
 }
 
 impl Rewrite {
-    pub fn new(lang: &mut Lang, src: &str, out: impl FnOnce(&mut Ctx<Template>) -> Out) -> Rewrite {
-        let mut mc = Ctx::<Match>::new(lang);
-        mc.slot("ROOT");
-        let pat = parse(&mut mc, src);
-        let mut tc = mc.freeze();
-        let out = out(&mut tc);
-        let nslots = tc.slots.len();
-        Rewrite {
-            pat,
-            out,
-            nslots,
-            slots: tc.slots.clone(),
-            filters: tc.filters,
-            guards: vec![],
-        }
+    pub fn new(lang: &mut Lang, src: &str, replacement: &str) -> Rewrite {
+        Self::compile(lang, src, replacement, None)
     }
 
-    pub fn with_guards(mut self, guards: Vec<(u16, u16, bool)>) -> Self {
-        self.guards = guards;
-        self
+    pub(crate) fn compile(
+        lang: &mut Lang,
+        src: &str,
+        replacement: &str,
+        where_clause: Option<&str>,
+    ) -> Rewrite {
+        let mut ctx = ParseCtx {
+            lang,
+            slots: HashMap::new(),
+            filters: Vec::new(),
+            mode: ParseMode::Match,
+        };
+        ctx.slot("ROOT");
+        let pat = parse(&mut ctx, src);
+        let replacement = ctx.template(replacement);
+        let nslots = ctx.slots.len();
+        let guards = where_clause.map_or_else(Vec::new, |clause| guards(clause, &ctx.slots));
+        Rewrite {
+            pat,
+            replacement,
+            nslots,
+            filters: ctx.filters,
+            guards,
+        }
     }
+}
+
+fn guards(clause: &str, slots: &HashMap<Box<str>, u16>) -> Vec<(u16, u16, bool)> {
+    clause
+        .split("&&")
+        .map(|part| {
+            let part = part.trim();
+            let (a, b, eq) = if let Some((l, r)) = part.split_once("==") {
+                (l.trim(), r.trim(), true)
+            } else if let Some((l, r)) = part.split_once("!=") {
+                (l.trim(), r.trim(), false)
+            } else {
+                panic!("invalid where clause: {part}");
+            };
+            let slot = |name: &str| {
+                *slots
+                    .get(name.trim_start_matches('$'))
+                    .unwrap_or_else(|| panic!("unknown capture in where: {name}"))
+            };
+            (slot(a), slot(b), eq)
+        })
+        .collect()
 }
 
 // ── Pest-based parser ──
@@ -274,7 +255,7 @@ struct PatParser;
 #[pest_consume::parser]
 impl PatParser {}
 
-fn parse<P: Phase>(c: &mut Ctx<'_, P>, src: &str) -> Pat {
+fn parse(c: &mut ParseCtx<'_>, src: &str) -> Pat {
     let root = <PatParser as pest_consume::Parser>::parse(Rule::Pattern, src)
         .unwrap_or_else(|e| panic!("pattern parse error: {e}"))
         .single()
@@ -284,7 +265,7 @@ fn parse<P: Phase>(c: &mut Ctx<'_, P>, src: &str) -> Pat {
 
 type PNode<'i> = pest_consume::Node<'i, Rule, ()>;
 
-fn visit_element<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat {
+fn visit_element(c: &mut ParseCtx<'_>, node: PNode<'_>, field: u16) -> Pat {
     match node.as_rule() {
         Rule::Node => visit_node(c, node, field),
         Rule::Variadic => visit_variadic(c, node, field),
@@ -304,7 +285,7 @@ fn visit_element<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
     }
 }
 
-fn visit_node<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat {
+fn visit_node(c: &mut ParseCtx<'_>, node: PNode<'_>, field: u16) -> Pat {
     let mut children = node.into_children();
     let kind = c.intern_kind(children.next().expect("Node has Ident").as_str());
 
@@ -368,7 +349,7 @@ fn set_optional(pat: &mut Pat) {
     }
 }
 
-fn visit_text_field<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>) -> (u16, Tf) {
+fn visit_text_field(c: &mut ParseCtx<'_>, node: PNode<'_>) -> (u16, Tf) {
     let mut children = node.into_children();
     let slot = c.slot(children.next().unwrap().as_str());
     let tf = match children.next() {
@@ -378,20 +359,22 @@ fn visit_text_field<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>) -> (u16, Tf) 
     (slot, tf)
 }
 
-fn visit_text_field_as_cap<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat {
+fn visit_text_field_as_cap(c: &mut ParseCtx<'_>, node: PNode<'_>, field: u16) -> Pat {
     let name = node.into_children().next().unwrap().as_str();
     Pat::Cap {
-        slot: c.slot(name),
+        capture: CaptureSpec {
+            slot: c.slot(name),
+            kind: None,
+            rekind: None,
+            guard: None,
+            named_only: false,
+        },
         field,
-        kind: None,
-        rekind: None,
-        guard: None,
         optional: false,
-        named_only: false,
     }
 }
 
-fn visit_variadic<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat {
+fn visit_variadic(c: &mut ParseCtx<'_>, node: PNode<'_>, _field: u16) -> Pat {
     let mut children = node.into_children();
     let slot = c.slot(children.next().unwrap().as_str());
 
@@ -419,16 +402,18 @@ fn visit_variadic<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> 
     }
 
     Pat::Var {
-        slot,
-        field,
-        rekind,
+        capture: CaptureSpec {
+            slot,
+            kind: None,
+            rekind,
+            guard,
+            named_only,
+        },
         leaf_only,
-        guard,
-        named_only,
     }
 }
 
-fn visit_spread<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>) -> Pat {
+fn visit_spread(c: &mut ParseCtx<'_>, node: PNode<'_>) -> Pat {
     let mut children = node.into_children();
     let name = children.next().unwrap().as_str();
     let slot = c.slot(name);
@@ -444,23 +429,25 @@ fn visit_spread<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>) -> Pat {
     Pat::Spread { slot, inject }
 }
 
-fn visit_cap_ref<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat {
+fn visit_cap_ref(c: &mut ParseCtx<'_>, node: PNode<'_>, field: u16) -> Pat {
     let mut children = node.into_children();
     let name = children.next().unwrap().as_str();
     let _arrow = children.next();
     let rekind = c.intern_kind(children.next().unwrap().as_str());
     Pat::Cap {
-        slot: c.slot(name),
+        capture: CaptureSpec {
+            slot: c.slot(name),
+            kind: None,
+            rekind: Some(rekind),
+            guard: None,
+            named_only: false,
+        },
         field,
-        kind: None,
-        rekind: Some(rekind),
-        guard: None,
         optional: false,
-        named_only: false,
     }
 }
 
-fn visit_capture<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> Pat {
+fn visit_capture(c: &mut ParseCtx<'_>, node: PNode<'_>, field: u16) -> Pat {
     let mut children = node.into_children();
     let name = children.next().unwrap().as_str();
     let mut kind = None;
@@ -477,17 +464,19 @@ fn visit_capture<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>, field: u16) -> P
         }
     }
     Pat::Cap {
-        slot: c.slot(name),
+        capture: CaptureSpec {
+            slot: c.slot(name),
+            kind,
+            rekind: None,
+            guard,
+            named_only,
+        },
         field,
-        kind,
-        rekind: None,
-        guard,
-        named_only,
         optional,
     }
 }
 
-fn visit_tf_chain<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>) -> Tf {
+fn visit_tf_chain(c: &mut ParseCtx<'_>, node: PNode<'_>) -> Tf {
     let tfs: Vec<Tf> = node.into_children().map(|e| visit_tf_expr(c, e)).collect();
     if tfs.len() == 1 {
         tfs.into_iter().next().unwrap()
@@ -496,7 +485,7 @@ fn visit_tf_chain<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>) -> Tf {
     }
 }
 
-fn visit_tf_expr<P: Phase>(c: &mut Ctx<'_, P>, node: PNode<'_>) -> Tf {
+fn visit_tf_expr(c: &mut ParseCtx<'_>, node: PNode<'_>) -> Tf {
     let inner = node.into_children().next().unwrap();
     match inner.as_rule() {
         Rule::TfFunc => {
@@ -553,32 +542,26 @@ fn quoted_inner<'i>(node: &PNode<'i>) -> &'i str {
 
 // ── Runtime: matching, materialization, rewriting ──
 
-fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
+fn matches(t: &MutableTree, i: NodeId, p: &Pat, caps: &mut [Capture]) -> bool {
     let n = t.node(i);
     let field_ok = |f: u16| f == 0 || f == n.field;
     match p {
         Pat::Var { .. } | Pat::Spread { .. } => false,
         Pat::Not(_) | Pat::Desc(_) => false,
-        Pat::Cap {
-            slot,
-            field,
-            kind,
-            guard,
-            named_only,
-            ..
-        } => {
-            if !field_ok(*field) || kind.is_some_and(|k| k != n.kind) {
+        Pat::Cap { capture, field, .. } => {
+            if !field_ok(*field) || capture.kind.is_some_and(|k| k != n.kind) {
                 return false;
             }
-            if *named_only && !n.named {
+            if capture.named_only && !n.named {
                 return false;
             }
-            if let Some(g) = guard {
-                if !matches(t, i, g, caps) {
-                    return false;
-                }
+            if let Some(g) = &capture.guard
+                && !matches(t, i, g, caps)
+            {
+                return false;
             }
-            caps[*slot as usize] = (i, t.hop(i));
+            caps[capture.slot as usize].clear();
+            caps[capture.slot as usize].push(i);
             true
         }
         Pat::Node {
@@ -588,7 +571,6 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
             kids,
             ..
         } => {
-
             if n.kind != *kind || !field_ok(*field) {
                 return false;
             }
@@ -597,56 +579,50 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
             {
                 return false;
             }
-            let end = t.hop(i);
-            let mut c = live(t, i + 1, end);
+            let children: SmallVec<[NodeId; 8]> = t.children(i).collect();
+            let mut c = 0;
             for (k, kid) in kids.iter().enumerate() {
                 match kid {
-                    Pat::Var { slot, guard, .. } => {
+                    Pat::Var { capture, .. } => {
                         let start = c;
-                        while c < end && !kids.get(k + 1).is_some_and(|nx| matches(t, c, nx, caps))
+                        while c < children.len()
+                            && !kids
+                                .get(k + 1)
+                                .is_some_and(|nx| matches(t, children[c], nx, caps))
                         {
-                            c = live(t, t.hop(c), end);
+                            c += 1;
                         }
-                        if let Some(g) = guard {
-                            let range = (start, c);
-                            let any_match = elems(t, range, &[])
-                                .any(|e| matches(t, e, g, caps));
-                            caps[*slot as usize] = if any_match {
-                                (start, c)
+                        if let Some(g) = &capture.guard {
+                            let any_match =
+                                children[start..c].iter().any(|&e| matches(t, e, g, caps));
+                            caps[capture.slot as usize] = if any_match {
+                                children[start..c].iter().copied().collect()
                             } else {
-                                EMPTY_CAP
+                                Capture::new()
                             };
                         } else {
-                            caps[*slot as usize] = (start, c);
+                            caps[capture.slot as usize] =
+                                children[start..c].iter().copied().collect();
                         }
                     }
                     Pat::Not(inner) => {
-                        let mut scan = c;
-                        while scan < end {
+                        for &scan in &children[c..] {
                             if matches(t, scan, inner, caps) {
                                 return false;
                             }
-                            scan = live(t, t.hop(scan), end);
                         }
                     }
                     Pat::Desc(inner) => {
-                        let mut found = false;
-                        for d in t.descendants(i) {
-                            if d != i && matches(t, d, inner, caps) {
-                                found = true;
-                                break;
-                            }
-                        }
-                        if !found {
+                        if !t.descendants(i).any(|d| matches(t, d, inner, caps)) {
                             return false;
                         }
                     }
                     _ => {
                         let saved = c;
-                        while c < end && !matches(t, c, kid, caps) {
-                            c = live(t, t.hop(c), end);
+                        while c < children.len() && !matches(t, children[c], kid, caps) {
+                            c += 1;
                         }
-                        if c >= end {
+                        if c >= children.len() {
                             if is_optional(kid) {
                                 mark_empty(kid, caps);
                                 c = saved;
@@ -654,7 +630,7 @@ fn matches(t: &Tree, i: u32, p: &Pat, caps: &mut [(u32, u32)]) -> bool {
                             }
                             return false;
                         }
-                        c = live(t, t.hop(c), end);
+                        c += 1;
                     }
                 }
             }
@@ -670,94 +646,90 @@ fn is_optional(p: &Pat) -> bool {
     )
 }
 
-fn mark_empty(p: &Pat, caps: &mut [(u32, u32)]) {
-    if let Pat::Cap { slot, .. } = p {
-        caps[*slot as usize] = EMPTY_CAP;
+fn mark_empty(p: &Pat, caps: &mut [Capture]) {
+    if let Pat::Cap { capture, .. } = p {
+        caps[capture.slot as usize].clear();
     }
 }
 
 fn materialize(
-    t: &Tree,
+    t: &mut MutableTree,
     lang: &mut Lang,
     p: &Pat,
-    caps: &[(u32, u32)],
+    caps: &[Capture],
     filters: &[Vec<u16>],
-    out: &mut Vec<Node>,
-    parent: u32,
+    parent: Option<NodeId>,
     span: (u32, u32),
-) {
+) -> Vec<NodeId> {
     match p {
-        Pat::Cap {
-            slot,
-            field,
-            rekind,
-            ..
-        } => {
-            if caps[*slot as usize] == EMPTY_CAP {
-                return;
+        Pat::Cap { capture, field, .. } => {
+            if caps[capture.slot as usize].is_empty() {
+                return Vec::new();
             }
-            let at = out.len();
-            copy_subtree(t, caps[*slot as usize].0, out, parent);
+            let root = t.clone_subtree(caps[capture.slot as usize][0], parent);
             if *field != 0 {
-                out[at].field = *field;
+                t.node_mut(root).field = *field;
             }
-            if let Some(k) = rekind {
-                out[at].kind = *k;
-                out[at].field = 0;
+            if let Some(k) = capture.rekind {
+                let node = t.node_mut(root);
+                node.kind = k;
+                node.field = 0;
             }
+            vec![root]
         }
-        Pat::Var {
-            slot,
-            rekind,
-            leaf_only,
-            guard,
-            named_only,
-            ..
-        } => {
-            let cap = caps[*slot as usize];
-            if cap == EMPTY_CAP {
-                return;
+        Pat::Var { capture, leaf_only } => {
+            let cap = &caps[capture.slot as usize];
+            if cap.is_empty() {
+                return Vec::new();
             }
-            let filter = &filters[*slot as usize];
-            let mut scratch = vec![(0u32, 0u32); caps.len()];
-            for e in elems(t, cap, filter) {
-                if *named_only && !t.node(e).named {
+            let filter = &filters[capture.slot as usize];
+            let mut scratch = vec![Capture::new(); caps.len()];
+            let mut roots = Vec::new();
+            for &e in cap {
+                if !filter.is_empty() && !filter.contains(&t.node(e).kind) {
                     continue;
                 }
-                if let Some(g) = guard {
-                    if !matches(t, e, g, &mut scratch) {
-                        continue;
-                    }
+                if capture.named_only && !t.node(e).named {
+                    continue;
                 }
-                let at = out.len();
-                if *leaf_only {
+                if let Some(g) = &capture.guard
+                    && !matches(t, e, g, &mut scratch)
+                {
+                    continue;
+                }
+                let root = if *leaf_only {
                     let n = t.node(e);
                     if n.sym == 0 {
                         continue;
                     }
-                    out.push(Node {
-                        kind: rekind.unwrap_or(n.kind),
-                        field: 0,
-                        named: true,
-                        synth: true,
-                        sym: n.sym,
-                        size: 1,
+                    t.create(
+                        Node {
+                            kind: capture.rekind.unwrap_or(n.kind),
+                            field: 0,
+                            named: true,
+                            synth: true,
+                            sym: n.sym,
+                            size: 1,
+                            start: n.start,
+                            end: n.end,
+                            start_row: n.start_row,
+                            start_col: n.start_col,
+                            end_row: n.end_row,
+                            end_col: n.end_col,
+                            ..Default::default()
+                        },
                         parent,
-                        start: n.start,
-                        end: n.end,
-                        start_row: n.start_row,
-                        start_col: n.start_col,
-                        end_row: n.end_row,
-                        end_col: n.end_col,
-                        ..Default::default()
-                    });
+                    )
                 } else {
-                    copy_subtree(t, e, out, parent);
-                    if let Some(k) = rekind {
-                        out[at].kind = *k;
+                    let root = t.clone_subtree(e, parent);
+                    if let Some(k) = capture.rekind {
+                        t.node_mut(root).kind = k;
                     }
-                }
+                    root
+                };
+                roots.push(root);
             }
+            roots
         }
         Pat::Node {
             kind,
@@ -768,88 +740,83 @@ fn materialize(
         } => {
             if *optional {
                 let text_empty =
-                    matches!(text, Text::From(slot, _) if caps[*slot as usize] == EMPTY_CAP);
+                    matches!(text, Text::From(slot, _) if caps[*slot as usize].is_empty());
                 let kids_empty = kids.is_empty()
                     || kids.iter().all(|k| match k {
-                        Pat::Cap { slot, .. } | Pat::Var { slot, .. } => {
-                            caps[*slot as usize] == EMPTY_CAP
+                        Pat::Cap { capture, .. } | Pat::Var { capture, .. } => {
+                            caps[capture.slot as usize].is_empty()
                         }
                         _ => false,
                     });
                 if text_empty || (kids_empty && matches!(text, Text::Any)) {
-                    return;
+                    return Vec::new();
                 }
             }
-            let at = out.len();
             let sym = match text {
                 Text::Any => 0,
                 Text::Lit(s) => *s,
                 Text::From(slot, tf) => {
-                    if caps[*slot as usize] == EMPTY_CAP {
-                        return;
+                    if caps[*slot as usize].is_empty() {
+                        return Vec::new();
                     }
-                    tf.apply_sym(t, lang, caps[*slot as usize].0)
+                    tf.apply_sym(t, lang, caps[*slot as usize][0])
                 }
             };
             let pos_src = match text {
-                Text::From(slot, _) if caps[*slot as usize] != EMPTY_CAP => caps[*slot as usize].0,
-                _ => caps[0].0,
+                Text::From(slot, _) if !caps[*slot as usize].is_empty() => caps[*slot as usize][0],
+                _ => caps[0][0],
             };
             let src = t.node(pos_src);
-            out.push(Node {
-                kind: *kind,
-                field: *field,
-                named: true,
-                synth: true,
-                sym,
+            let root = t.create(
+                Node {
+                    kind: *kind,
+                    field: *field,
+                    named: true,
+                    synth: true,
+                    sym,
+                    start: span.0,
+                    end: span.1,
+                    start_row: src.start_row,
+                    start_col: src.start_col,
+                    end_row: src.end_row,
+                    end_col: src.end_col,
+                    ..Default::default()
+                },
                 parent,
-                start: span.0,
-                end: span.1,
-                start_row: src.start_row,
-                start_col: src.start_col,
-                end_row: src.end_row,
-                end_col: src.end_col,
-                ..Default::default()
-            });
+            );
             for k in kids {
-                materialize(t, lang, k, caps, filters, out, at as u32, span);
+                materialize(t, lang, k, caps, filters, Some(root), span);
             }
-            out[at].size = (out.len() - at) as u32;
+            vec![root]
         }
         Pat::Spread { slot, inject } => {
-            if caps[*slot as usize] == EMPTY_CAP {
-                return;
+            if caps[*slot as usize].is_empty() {
+                return Vec::new();
             }
-            let at = out.len();
-            copy_subtree(t, caps[*slot as usize].0, out, parent);
-            let root_idx = at as u32;
+            let root = t.clone_subtree(caps[*slot as usize][0], parent);
             for kid in inject {
-                materialize(t, lang, kid, caps, filters, out, root_idx, span);
+                materialize(t, lang, kid, caps, filters, Some(root), span);
             }
-            out[at].size = (out.len() - at) as u32;
+            vec![root]
         }
-        Pat::Not(_) | Pat::Desc(_) => {}
+        Pat::Not(_) | Pat::Desc(_) => Vec::new(),
     }
 }
 
-pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) {
-    let mut caps = vec![(0u32, 0u32); rules.iter().map(|r| r.nslots).max().unwrap_or(1)];
-    let mut buf: Vec<Node> = Vec::new();
-    for i in (0..t.nodes.len() as u32).rev() {
-        if t.nodes[i as usize].dead {
-            continue;
-        }
-
+pub fn apply_rewrites(t: &mut MutableTree, lang: &mut Lang, rules: &[Rewrite]) {
+    let mut caps = vec![Capture::new(); rules.iter().map(|r| r.nslots).max().unwrap_or(1)];
+    for i in t.postorder() {
         for r in rules {
+            caps.iter_mut().for_each(SmallVec::clear);
             if !matches(t, i, &r.pat, &mut caps) {
                 continue;
             }
-            caps[0] = (i, t.hop(i));
+            caps[0].push(i);
             if !r.guards.is_empty() {
                 let mut guard_ok = true;
                 for &(a, b, eq) in &r.guards {
-                    let sym_a = t.sym(caps[a as usize].0);
-                    let sym_b = t.sym(caps[b as usize].0);
+                    let sym_a = t.node(caps[a as usize][0]).sym;
+                    let sym_b = t.node(caps[b as usize][0]).sym;
                     if (sym_a == sym_b) != eq {
                         guard_ok = false;
                         break;
@@ -859,26 +826,18 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) {
                     continue;
                 }
             }
-            let root = t.nodes[i as usize];
-            let Out::Replace(tpl) = &r.out;
-            let s = buf.len() as u32;
-            materialize(
+            let root = *t.node(i);
+            let replacement = materialize(
                 t,
                 lang,
-                tpl,
+                &r.replacement,
                 &caps,
                 &r.filters,
-                &mut buf,
-                NONE,
+                None,
                 (root.start, root.end),
             );
-
-            let l = buf.len() as u32 - s;
-            t.replace(i, &buf[s as usize..(s + l) as usize]);
-            buf.clear();
+            t.replace(i, replacement);
             break;
         }
     }
-    t.compact();
 }
-

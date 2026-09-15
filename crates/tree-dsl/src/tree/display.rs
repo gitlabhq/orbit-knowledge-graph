@@ -49,9 +49,7 @@ pub fn pretty_print(tree: &Tree, lang: &crate::lang::Lang, color: bool) -> Strin
         let label = format!("{field_prefix}{kind_str}{sym_suffix}");
         let mut tt = TTree::new(label);
         for c in tree.children(idx) {
-            if !tree.nodes[c as usize].dead {
-                tt.push(build(tree, lang, c, color));
-            }
+            tt.push(build(tree, lang, c, color));
         }
         tt
     }

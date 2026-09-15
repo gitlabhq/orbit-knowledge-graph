@@ -61,9 +61,6 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
         }
         for i in 0..tree.len() {
             let nr = tree.cursor(i);
-            if nr.is_dead() {
-                continue;
-            }
             if canonical::has_def_type(nr) {
                 next_def += 1;
                 defs.insert((fi, i), next_def);
@@ -124,7 +121,9 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
 
 pub fn to_datasets(
     trees: &[Tree],
+    intra_edges: &[Vec<tree_dsl::tree::Edge>],
     cross_edges: &[tree_dsl::tree::Edge],
+    resolved_paths: &std::collections::HashMap<(usize, u32), u32>,
     lang: &mut Lang,
     support_lang: SupportLang,
     resolve_config: &tree_dsl::file_tree::ResolveConfig,
@@ -140,18 +139,26 @@ pub fn to_datasets(
         .collect();
     ds.insert(
         "ImportedSymbol".into(),
-        build_imports(trees, lang, &ids, support_lang, resolve_config, &resolved_imports)?,
+        build_imports(
+            trees,
+            lang,
+            &ids,
+            support_lang,
+            resolve_config,
+            &resolved_imports,
+            resolved_paths,
+        )?,
     );
-    let (f2d, f2i) = build_file_edges(trees, &ids);
+    let (f2d, f2i) = build_file_edges(trees, intra_edges, &ids);
     ds.insert("FileToDefinition".into(), f2d?);
     ds.insert("FileToImportedSymbol".into(), f2i?);
     ds.insert(
         "DefinitionToDefinition".into(),
-        build_def2def(trees, cross_edges, &ids)?,
+        build_def2def(trees, intra_edges, cross_edges, &ids)?,
     );
     ds.insert(
         "DefinitionToImportedSymbol".into(),
-        build_def2imp(trees, cross_edges, &ids)?,
+        build_def2imp(trees, intra_edges, cross_edges, &ids)?,
     );
     ds.insert(
         "ImportedSymbolToDefinition".into(),
@@ -422,6 +429,7 @@ fn build_imports(
     support_lang: SupportLang,
     resolve_config: &tree_dsl::file_tree::ResolveConfig,
     resolved_imports: &std::collections::HashSet<(usize, u32)>,
+    resolved_paths: &std::collections::HashMap<(usize, u32), u32>,
 ) -> anyhow::Result<RecordBatch> {
     let use_resolved =
         resolve_config.display_source == tree_dsl::file_tree::DisplaySource::Resolved;
@@ -459,8 +467,9 @@ fn build_imports(
 
             let source_sym = nr.child_sym(C::Source).unwrap_or(0);
             let source_str = if use_resolved {
-                nr.child_sym(C::SourcePath)
-                    .map(|sp| lang.syms.resolve(sp).replace('/', fqn_sep))
+                resolved_paths
+                    .get(&(fi, i))
+                    .map(|&path| lang.syms.resolve(path).replace('/', fqn_sep))
                     .unwrap_or_else(|| lang.syms.resolve(source_sym).to_string())
             } else {
                 lang.syms.resolve(source_sym).to_string()
@@ -581,6 +590,7 @@ fn build_imports(
 
 fn build_file_edges(
     trees: &[Tree],
+    intra_edges: &[Vec<tree_dsl::tree::Edge>],
     ids: &IdMaps,
 ) -> (anyhow::Result<RecordBatch>, anyhow::Result<RecordBatch>) {
     let (mut ds, mut dt, mut dk) = (
@@ -614,7 +624,7 @@ fn build_file_edges(
                 }
             }
         }
-        for edge in tree.edges().iter() {
+        for edge in &intra_edges[fi] {
             if edge.from.node == 0
                 && edge.kind == tree_dsl::tree::EdgeKind::Calls
                 && let Some(&tid) = ids.defs.get(&(fi, edge.to.node))
@@ -629,7 +639,8 @@ fn build_file_edges(
 }
 
 fn build_def2def(
-    trees: &[Tree],
+    _trees: &[Tree],
+    intra_edges: &[Vec<tree_dsl::tree::Edge>],
     cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
@@ -638,8 +649,8 @@ fn build_def2def(
         Int64Builder::new(),
         StringBuilder::new(),
     );
-    for (fi, tree) in trees.iter().enumerate() {
-        for edge in tree.edges().iter() {
+    for (fi, edges) in intra_edges.iter().enumerate() {
+        for edge in edges {
             let label = match edge.kind {
                 tree_dsl::tree::EdgeKind::Calls => "Calls",
                 tree_dsl::tree::EdgeKind::Defines => "Defines",
@@ -680,7 +691,8 @@ fn build_def2def(
 }
 
 fn build_def2imp(
-    trees: &[Tree],
+    _trees: &[Tree],
+    intra_edges: &[Vec<tree_dsl::tree::Edge>],
     cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
@@ -694,8 +706,8 @@ fn build_def2imp(
         .filter(|ce| ce.kind == tree_dsl::tree::EdgeKind::Calls)
         .map(|ce| (ce.from.tree as usize, ce.from.node))
         .collect();
-    for (fi, tree) in trees.iter().enumerate() {
-        for edge in tree.edges().iter() {
+    for (fi, edges) in intra_edges.iter().enumerate() {
+        for edge in edges {
             if edge.kind != tree_dsl::tree::EdgeKind::Imports {
                 continue;
             }
@@ -722,7 +734,7 @@ fn build_def2imp(
 }
 
 fn build_imp2def(
-    trees: &[Tree],
+    _trees: &[Tree],
     cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
@@ -738,7 +750,11 @@ fn build_imp2def(
         let target_id = if let Some(&did) = ids.defs.get(&(ce.to.tree as usize, ce.to.node)) {
             did
         } else if ce.to.node == 0 {
-            if let Some(&mid) = ids.modules.get(&(ce.to.tree as usize)) { mid } else { continue; }
+            if let Some(&mid) = ids.modules.get(&(ce.to.tree as usize)) {
+                mid
+            } else {
+                continue;
+            }
         } else {
             continue;
         };

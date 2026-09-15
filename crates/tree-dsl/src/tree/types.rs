@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 pub const NONE: u32 = u32::MAX;
 
 #[repr(u16)]
@@ -30,7 +28,6 @@ impl std::fmt::Display for EdgeKind {
 
 #[derive(Clone, Copy, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Node {
-    pub id: u32,
     pub kind: u16,
     pub field: u16,
     pub parent: u32,
@@ -43,11 +40,12 @@ pub struct Node {
     pub end_col: u32,
     pub size: u32,
     pub synth: bool,
-    pub dead: bool,
     pub named: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct NodeRef {
     pub tree: u32,
     pub node: u32,
@@ -95,77 +93,34 @@ impl Edge {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Tree {
     pub nodes: Vec<Node>,
-    pub(crate) edges_cell: RefCell<Vec<Edge>>,
     pub label: String,
-    pub(crate) next_id: u32,
-    pub(crate) spare: Vec<Node>,
-    pub(crate) remap_buf: Vec<u32>,
-    pub(crate) appends: RefCell<Vec<(u32, Node)>>,
-    pub(crate) inserts: RefCell<Vec<(u32, u32, u32)>>,
-    pub(crate) insert_buf: RefCell<Vec<Node>>,
-}
-
-impl Clone for Tree {
-    fn clone(&self) -> Self {
-        Tree {
-            nodes: self.nodes.clone(),
-            edges_cell: RefCell::new(self.edges_cell.borrow().clone()),
-            label: self.label.clone(),
-            next_id: self.next_id,
-            spare: Vec::new(),
-            remap_buf: Vec::new(),
-            appends: RefCell::new(Vec::new()),
-            inserts: RefCell::new(Vec::new()),
-            insert_buf: RefCell::new(Vec::new()),
-        }
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct TreeSnapshot {
-    pub nodes: Vec<Node>,
-    pub edges: Vec<Edge>,
-    pub label: String,
-}
-
-impl From<&Tree> for TreeSnapshot {
-    fn from(t: &Tree) -> Self {
-        TreeSnapshot {
-            nodes: t.nodes.clone(),
-            edges: t.edges_cell.borrow().clone(),
-            label: t.label.clone(),
-        }
-    }
-}
-
-impl From<TreeSnapshot> for Tree {
-    fn from(s: TreeSnapshot) -> Self {
-        Tree {
-            nodes: s.nodes,
-            edges_cell: RefCell::new(s.edges),
-            label: s.label,
-            ..Default::default()
-        }
-    }
+    kinds: Vec<(u16, Vec<u32>)>,
 }
 
 impl Tree {
-    pub fn from_nodes(nodes: Vec<Node>) -> Self {
-        Self {
-            nodes,
-            ..Default::default()
-        }
+    pub(crate) fn new(nodes: Vec<Node>, label: String) -> Self {
+        let mut tree = Self::from_nodes(nodes);
+        tree.label = label;
+        tree
     }
 
-    pub fn release_buffers(&mut self) {
-        self.spare = Vec::new();
-        self.remap_buf = Vec::new();
-        self.appends = RefCell::new(Vec::new());
-        self.inserts = RefCell::new(Vec::new());
-        self.insert_buf = RefCell::new(Vec::new());
+    pub(crate) fn from_nodes(nodes: Vec<Node>) -> Self {
+        let mut kinds = Vec::<(u16, Vec<u32>)>::new();
+        for (i, node) in nodes.iter().enumerate() {
+            match kinds.iter_mut().find(|(kind, _)| *kind == node.kind) {
+                Some((_, ids)) => ids.push(i as u32),
+                None => kinds.push((node.kind, vec![i as u32])),
+            }
+        }
+        kinds.sort_unstable_by_key(|(kind, _)| *kind);
+        Self {
+            nodes,
+            kinds,
+            label: String::new(),
+        }
     }
 
     #[inline]
@@ -181,27 +136,13 @@ impl Tree {
         self.nodes[i as usize].sym
     }
     #[inline]
-    pub fn field_of(&self, i: u32) -> u16 {
-        self.nodes[i as usize].field
-    }
-    #[inline]
     pub fn hop(&self, i: u32) -> u32 {
         i + self.nodes[i as usize].size
-    }
-    #[inline]
-    pub fn text<'a>(&self, lang: &'a crate::lang::Lang, i: u32) -> &'a str {
-        lang.syms.resolve(self.nodes[i as usize].sym)
-    }
-
-    pub fn parent(&self, i: u32) -> Option<u32> {
-        let p = self.nodes[i as usize].parent;
-        (p != NONE).then_some(p)
     }
 
     pub fn children(&self, i: u32) -> impl Iterator<Item = u32> + '_ {
         let (end, mut c) = (self.hop(i), i + 1);
         std::iter::from_fn(move || {
-            c = live(self, c, end);
             (c < end).then(|| {
                 let r = c;
                 c = self.hop(c);
@@ -210,35 +151,15 @@ impl Tree {
         })
     }
 
-    pub fn child_by_field(&self, i: u32, f: u16) -> Option<u32> {
-        self.children(i).find(|&c| self.field_of(c) == f)
-    }
-
     pub fn descendants(&self, i: u32) -> impl Iterator<Item = u32> + '_ {
         let end = self.hop(i);
-        let mut c = live(self, i + 1, end);
-        std::iter::from_fn(move || {
-            if c >= end {
-                return None;
-            }
-            let r = c;
-            c = live(self, c + 1, end);
-            Some(r)
-        })
+        i + 1..end
     }
 
-    pub fn add_edge(&self, from: u32, to: u32, kind: EdgeKind) {
-        self.edges_cell
-            .borrow_mut()
-            .push(Edge::local(from, to, kind));
-    }
-
-    pub fn edges(&self) -> std::cell::Ref<'_, Vec<Edge>> {
-        self.edges_cell.borrow()
-    }
-
-    pub fn edges_mut(&mut self) -> &mut Vec<Edge> {
-        self.edges_cell.get_mut()
+    pub fn nodes_of_kind(&self, kind: u16) -> &[u32] {
+        self.kinds
+            .binary_search_by_key(&kind, |(kind, _)| *kind)
+            .map_or(&[], |i| self.kinds[i].1.as_slice())
     }
 
     /// Remap all sym IDs using the given table. Used after merging per-thread interners.
@@ -249,56 +170,4 @@ impl Tree {
             }
         }
     }
-
-    pub fn prune(&mut self) {
-        for i in 1..self.nodes.len() {
-            self.nodes[i].field = 0;
-            if self.nodes[i].dead {
-                continue;
-            }
-            if !crate::canonical::is_canonical(self.nodes[i].kind) {
-                self.nodes[i].dead = true;
-                self.nodes[i].size = 1;
-            }
-        }
-    }
-}
-
-#[inline]
-pub fn live(t: &Tree, mut c: u32, end: u32) -> u32 {
-    while c < end && t.nodes[c as usize].dead {
-        c = t.hop(c);
-    }
-    c
-}
-
-pub fn elems<'a>(
-    t: &'a Tree,
-    (a, b): (u32, u32),
-    kinds: &'a [u16],
-) -> impl Iterator<Item = u32> + 'a {
-    let mut c = live(t, a, b);
-    std::iter::from_fn(move || {
-        while c < b {
-            let r = c;
-            c = live(t, t.hop(c), b);
-            if kinds.is_empty() || kinds.contains(&t.kind(r)) {
-                return Some(r);
-            }
-        }
-        None
-    })
-}
-
-pub fn copy_subtree(t: &Tree, i: u32, out: &mut Vec<Node>, parent: u32) {
-    let at = out.len();
-    out.push(Node {
-        parent,
-        id: 0,
-        ..t.nodes[i as usize]
-    });
-    for c in t.children(i) {
-        copy_subtree(t, c, out, at as u32);
-    }
-    out[at].size = (out.len() - at) as u32;
 }

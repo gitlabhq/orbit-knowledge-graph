@@ -175,7 +175,10 @@ pub enum Canonical {
     Lambda,
     #[strum(serialize = "__field_def", props(def_type = "true", display = "Field"))]
     FieldDef,
-    #[strum(serialize = "__enum_variant", props(def_type = "true", callable = "true", display = "EnumVariant"))]
+    #[strum(
+        serialize = "__enum_variant",
+        props(def_type = "true", callable = "true", display = "EnumVariant")
+    )]
     EnumVariant,
 
     // ── Flavors ──

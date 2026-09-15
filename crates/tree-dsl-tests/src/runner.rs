@@ -26,7 +26,9 @@ async fn build_and_check(
 ) -> Vec<Failure> {
     let datasets = to_datasets(
         &result.trees,
+        &result.intra_edges,
         &result.cross_edges,
+        &result.resolved_paths,
         &mut result.lang,
         lang_id,
         &result.pipeline.resolve,
@@ -99,7 +101,9 @@ pub async fn run_yaml_suite(yaml: &str) {
     }
 
     let failed = all_failures.len();
-    let passed = total_tests.saturating_sub(total_skipped).saturating_sub(failed);
+    let passed = total_tests
+        .saturating_sub(total_skipped)
+        .saturating_sub(failed);
 
     eprintln!("---");
     eprintln!("suite: {:?}", suite.name);

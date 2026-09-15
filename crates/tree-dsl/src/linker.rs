@@ -1,7 +1,7 @@
 use crate::canonical::Canonical as C;
 use crate::lang::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{Cursor, EdgeKind, Step, Tree, infer_return_type};
+use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, infer_return_type};
 
 enum Linked {
     Def(u32),
@@ -10,6 +10,7 @@ enum Linked {
 }
 
 struct Fold {
+    edges: Vec<Edge>,
     ssa: SsaEngine,
     cur: BlockId,
     def_count: u32,
@@ -41,11 +42,6 @@ impl Fold {
     fn walk_range(&mut self, tree: &Tree, start: u32, range_end: u32) {
         let mut i = start;
         while i < range_end {
-            let n = tree.nodes[i as usize];
-            if n.dead {
-                i += n.size.max(1);
-                continue;
-            }
             self.close_scopes(i);
             self.enter_arm(i);
             i += self.dispatch(tree, i);
@@ -206,7 +202,7 @@ impl Fold {
                 .write_variable(alias.sym(), parent_block, Value::LocalDef(idx));
         }
         if let Some(&(Some(parent), _, _)) = self.def_stack.last() {
-            tree.add_edge(parent, i, EdgeKind::Defines);
+            self.edges.push(Edge::local(parent, i, EdgeKind::Defines));
         }
         for st in c
             .children()
@@ -215,7 +211,7 @@ impl Fold {
             let st_sym = st.sym();
             for &dn in &self.defs {
                 if tree.cursor(dn).child_sym(C::DefName) == Some(st_sym) {
-                    tree.add_edge(i, dn, EdgeKind::Extends);
+                    self.edges.push(Edge::local(i, dn, EdgeKind::Extends));
                     break;
                 }
             }
@@ -248,7 +244,7 @@ impl Fold {
             if ivar.sym() != 0 {
                 if let Some(cls) = self.enclosing_class(tree, from) {
                     if let Some(m) = self.find_method_in(tree, cls, ivar.sym()) {
-                        tree.add_edge(from, m, EdgeKind::Calls);
+                        self.edges.push(Edge::local(from, m, EdgeKind::Calls));
                     }
                 }
             }
@@ -271,7 +267,7 @@ impl Fold {
         for r in self.lookup(obj) {
             match r {
                 Linked::Type(ts) if method != 0 => self.resolve_method(tree, ts, method, from),
-                Linked::Import(node) => tree.add_edge(from, node, EdgeKind::Imports),
+                Linked::Import(node) => self.edges.push(Edge::local(from, node, EdgeKind::Imports)),
                 _ => {}
             }
         }
@@ -401,7 +397,8 @@ impl Fold {
     // ── SSA resolution ──
 
     fn lookup(&mut self, sym: u32) -> Vec<Linked> {
-        let result: Vec<Linked> = self.ssa
+        let result: Vec<Linked> = self
+            .ssa
             .read_variable(sym, self.cur)
             .iter()
             .filter_map(|pv| match pv {
@@ -415,7 +412,8 @@ impl Fold {
             .collect();
         if result.is_empty() {
             let entry = BlockId(0);
-            return self.ssa
+            return self
+                .ssa
                 .read_variable(sym, entry)
                 .iter()
                 .filter_map(|pv| match pv {
@@ -431,14 +429,14 @@ impl Fold {
         result
     }
 
-    fn emit(&self, tree: &Tree, r: &Linked, from: u32) {
+    fn emit(&mut self, tree: &Tree, r: &Linked, from: u32) {
         match r {
             Linked::Def(node) => {
                 if crate::canonical::is_callable_def(tree.cursor(*node)) {
-                    tree.add_edge(from, *node, EdgeKind::Calls);
+                    self.edges.push(Edge::local(from, *node, EdgeKind::Calls));
                 }
             }
-            Linked::Import(node) => tree.add_edge(from, *node, EdgeKind::Imports),
+            Linked::Import(node) => self.edges.push(Edge::local(from, *node, EdgeKind::Imports)),
             Linked::Type(_) => {}
         }
     }
@@ -461,7 +459,7 @@ impl Fold {
                 Linked::Type(ts) => self.resolve_method(tree, ts, method, from),
                 Linked::Def(node) => {
                     if let Some(m) = self.find_method_in(tree, node, method) {
-                        tree.add_edge(from, m, EdgeKind::Calls);
+                        self.edges.push(Edge::local(from, m, EdgeKind::Calls));
                     } else {
                         self.emit(tree, &Linked::Def(node), from);
                     }
@@ -486,10 +484,10 @@ impl Fold {
                         if let Linked::Def(target) = inner {
                             if let Some(callable) = tree.cursor(target).child_sym(C::Callable) {
                                 if let Some(m) = self.find_method_in(tree, target, callable) {
-                                    tree.add_edge(from, m, EdgeKind::Calls);
+                                    self.edges.push(Edge::local(from, m, EdgeKind::Calls));
                                 }
                             } else {
-                                tree.add_edge(from, target, EdgeKind::Calls);
+                                self.edges.push(Edge::local(from, target, EdgeKind::Calls));
                             }
                         }
                     }
@@ -503,7 +501,7 @@ impl Fold {
         for r in self.lookup(type_sym) {
             if let Linked::Def(cls) = r {
                 if let Some(m) = self.find_method_in(tree, cls, method) {
-                    tree.add_edge(from, m, EdgeKind::Calls);
+                    self.edges.push(Edge::local(from, m, EdgeKind::Calls));
                 }
             }
         }
@@ -656,12 +654,13 @@ fn root_object_sym(member: crate::tree::Cursor) -> u32 {
     0
 }
 
-pub fn link(tree: &Tree, lang: &mut Lang) {
+pub fn link(tree: &Tree, lang: &mut Lang) -> Vec<Edge> {
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
     ssa.seal_block(entry);
 
     let mut f = Fold {
+        edges: Vec::new(),
         ssa,
         cur: entry,
         def_count: 0,
@@ -702,6 +701,7 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
         }
     }
     for (from, to) in meta {
-        tree.add_edge(from, to, EdgeKind::Calls);
+        f.edges.push(Edge::local(from, to, EdgeKind::Calls));
     }
+    f.edges
 }
