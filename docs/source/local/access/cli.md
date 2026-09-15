@@ -174,15 +174,15 @@ It serves `run_sql`, `get_graph_schema`, and `index` against
 ## Set up your AI assistant
 
 `orbit setup` configures an AI coding assistant to consult the graph before it
-reaches for grep. Name the assistants you want to configure:
+reaches for grep. Choose an assistant:
 
-```shell
-orbit setup claude
+```plaintext
+orbit setup <duo|claude|codex|opencode|pi>
 ```
 
-Supported assistants are `claude`, `codex`, `opencode`, and `pi`. The guidance
-tells the assistant to run `orbit grep` and `orbit context` before it greps or
-reads raw source.
+Supported assistants are GitLab Duo, Claude Code, Codex, OpenCode, and Pi. The
+guidance tells them to run `orbit grep` and `orbit context` before raw source
+tools.
 
 ### What it changes
 
