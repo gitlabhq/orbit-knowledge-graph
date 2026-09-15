@@ -83,7 +83,6 @@ fn round_trip_save_load() {
     let loaded = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
 
     assert_eq!(loaded.trees.len(), result.trees.len());
-    assert_eq!(loaded.intra_edges.len(), result.intra_edges.len());
     assert_eq!(loaded.cross_edges.len(), result.cross_edges.len());
     assert_eq!(count_defs(&loaded), count_defs(&result));
     assert_eq!(file_set(&loaded), file_set(&result));
@@ -91,9 +90,7 @@ fn round_trip_save_load() {
     for (orig, restored) in result.trees.iter().zip(loaded.trees.iter()) {
         assert_eq!(orig.label, restored.label);
         assert_eq!(orig.nodes.len(), restored.nodes.len());
-    }
-    for (orig, restored) in result.intra_edges.iter().zip(&loaded.intra_edges) {
-        assert_eq!(orig.len(), restored.len());
+        assert_eq!(orig.edges().len(), restored.edges().len());
     }
     for (orig, restored) in result.cross_edges.iter().zip(loaded.cross_edges.iter()) {
         assert_eq!(orig.from.tree, restored.from.tree);
@@ -118,10 +115,7 @@ fn incremental_lifecycle_through_serialization() {
     result.save(&snap).unwrap();
 
     let mut current = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
-    assert_eq!(
-        file_set(&current),
-        HashSet::from_iter(["main.py".into(), "utils.py".into()])
-    );
+    assert_eq!(file_set(&current), HashSet::from_iter(["main.py".into(), "utils.py".into()]));
 
     for (i, step) in suite.steps.iter().enumerate() {
         let added: Vec<(String, String)> = step

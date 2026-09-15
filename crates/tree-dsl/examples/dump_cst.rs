@@ -28,18 +28,17 @@ fn main() {
         let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
         let mut tree = grammar::parse(&source, lang_id, &mut lang, "test");
         for (si, rules) in pipeline.rewrite_stages.iter().enumerate() {
-            let before = tree.nodes().count();
+            let before = tree.nodes.len();
             tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, rules);
-            let after = tree.nodes().count();
+            let after = tree.nodes.len();
             if before != after {
                 eprintln!("--- stage {si}: {before} → {after} nodes ---");
             }
         }
         if stage == "ssa" {
-            let (tree, edges) =
-                tree_dsl::pipeline::process_file("test", &source, &mut lang, &pipeline);
+            let tree = tree_dsl::pipeline::process_file("test", &source, &mut lang, &pipeline);
             dump(&tree, &lang);
-            for e in &edges {
+            for e in tree.edges().iter() {
                 let from_s = lang.syms.resolve(tree.nodes[e.from.node as usize].sym);
                 let to_s = lang.syms.resolve(tree.nodes[e.to.node as usize].sym);
                 let from = if from_s.len() > 30 {
@@ -51,17 +50,20 @@ fn main() {
                 eprintln!("  edge: {from} --[{}]--> {to}", e.kind);
             }
         } else {
-            dump(&tree.freeze(), &lang);
+            dump(&tree, &lang);
         }
     } else {
         let mut lang = Lang::new();
         let tree = grammar::parse(&source, lang_id, &mut lang, "test");
-        dump(&tree.freeze(), &lang);
+        dump(&tree, &lang);
     }
 }
 
 fn dump(tree: &tree_dsl::tree::Tree, lang: &Lang) {
     for (_i, n) in tree.nodes.iter().enumerate() {
+        if n.dead {
+            continue;
+        }
         let mut depth = 0;
         let mut p = n.parent;
         while p != tree_dsl::tree::NONE {

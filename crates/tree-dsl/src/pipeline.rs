@@ -24,9 +24,7 @@ use crate::{file_tree, linker, pattern, resolver};
 
 pub struct IndexResult {
     pub trees: Vec<Tree>,
-    pub intra_edges: Vec<Vec<crate::tree::Edge>>,
     pub cross_edges: Vec<crate::tree::Edge>,
-    pub resolved_paths: std::collections::HashMap<(usize, u32), u32>,
     pub lang: Lang,
     pub pipeline: Pipeline,
     pub timings: IndexTimings,
@@ -62,19 +60,17 @@ impl Pipeline {
     }
 }
 
-pub fn process_file(
-    path: &str,
-    source: &str,
-    lang: &mut Lang,
-    pipeline: &Pipeline,
-) -> (Tree, Vec<crate::tree::Edge>) {
+pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeline) -> Tree {
     let mut tree = grammar::parse(source, pipeline.lang_id, lang, path);
     for stage in &pipeline.rewrite_stages {
         pattern::apply_rewrites(&mut tree, lang, stage);
     }
-    let linked = tree.freeze();
-    let edges = linker::link(&linked, lang);
-    tree.finish(edges)
+    tree.compact();
+    linker::link(&tree, lang);
+    tree.prune();
+    tree.compact();
+    tree.release_buffers();
+    tree
 }
 
 pub fn process_file_timed(
@@ -82,7 +78,7 @@ pub fn process_file_timed(
     source: &str,
     lang: &mut Lang,
     pipeline: &Pipeline,
-) -> ((Tree, Vec<crate::tree::Edge>), [std::time::Duration; 4]) {
+) -> (Tree, [std::time::Duration; 4]) {
     use std::time::Instant;
     let t0 = Instant::now();
     let mut tree = grammar::parse(source, pipeline.lang_id, lang, path);
@@ -90,13 +86,14 @@ pub fn process_file_timed(
     for stage in &pipeline.rewrite_stages {
         pattern::apply_rewrites(&mut tree, lang, stage);
     }
-    let linked = tree.freeze();
+    tree.compact();
     let t2 = Instant::now();
-    let edges = linker::link(&linked, lang);
+    linker::link(&tree, lang);
     let t3 = Instant::now();
-    let (tree, edges) = tree.finish(edges);
+    tree.prune();
+    tree.compact();
     let t4 = Instant::now();
-    ((tree, edges), [t1 - t0, t2 - t1, t3 - t2, t4 - t3])
+    (tree, [t1 - t0, t2 - t1, t3 - t2, t4 - t3])
 }
 
 /// Unified indexing entrypoint. All files must be the same language.
@@ -112,7 +109,7 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
 
     let t0 = Instant::now();
 
-    let chunks: Vec<(Vec<(Tree, Vec<crate::tree::Edge>)>, Lang)> = {
+    let chunks: Vec<(Vec<Tree>, Lang)> = {
         use rayon::prelude::*;
         parseable
             .par_iter()
@@ -128,16 +125,12 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
     };
 
     let mut trees: Vec<Tree> = Vec::with_capacity(parseable.len());
-    let mut intra_edges = Vec::with_capacity(parseable.len());
     for (mut chunk_trees, chunk_lang) in chunks {
         let remap = lang.thread_merge(&chunk_lang);
-        for (tree, _) in &mut chunk_trees {
+        for tree in &mut chunk_trees {
             tree.remap_syms(&remap);
         }
-        for (tree, edges) in chunk_trees {
-            trees.push(tree);
-            intra_edges.push(edges);
-        }
+        trees.extend(chunk_trees);
     }
 
     let parse_s = t0.elapsed().as_secs_f64();
@@ -145,22 +138,20 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
 
     let file_paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
     let walk = file_tree::walk(&file_paths, files, &mut lang, &pipeline.resolve);
-    let resolved = resolver::resolve(
-        &trees,
-        &intra_edges,
+    let cross_edges = resolver::resolve(
+        &mut trees,
         &mut lang,
         lang_id,
         &walk.lookup_prefixes,
         &pipeline.resolve.external,
-    );
+    )
+    .cross_edges;
 
     let resolve_s = t1.elapsed().as_secs_f64();
 
     IndexResult {
         trees,
-        intra_edges,
-        cross_edges: resolved.cross_edges,
-        resolved_paths: resolved.resolved_paths,
+        cross_edges,
         lang,
         pipeline,
         timings: IndexTimings { parse_s, resolve_s },
@@ -168,12 +159,8 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
 }
 
 /// Parse a single file through rewrites + SSA, no resolver.
-pub fn parse(
-    lang_id: SupportLang,
-    path: &str,
-    source: &str,
-) -> (Tree, Vec<crate::tree::Edge>, Lang, Pipeline) {
+pub fn parse(lang_id: SupportLang, path: &str, source: &str) -> (Tree, Lang, Pipeline) {
     let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
     let tree = process_file(path, source, &mut lang, &pipeline);
-    (tree.0, tree.1, lang, pipeline)
+    (tree, lang, pipeline)
 }

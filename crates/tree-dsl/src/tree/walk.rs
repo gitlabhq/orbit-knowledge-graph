@@ -1,6 +1,6 @@
 use crate::canonical::Canonical;
 
-use super::types::{Edge, EdgeKind, NONE, Tree};
+use super::types::{Edge, EdgeKind, NONE, Tree, live};
 
 /// Control flow for `descend` and `ascend` traversals.
 pub enum Step<R> {
@@ -113,6 +113,11 @@ impl<'a> Cursor<'a> {
         self.tree().nodes[self.idx as usize].end_col
     }
 
+    #[inline]
+    pub fn is_dead(&self) -> bool {
+        self.tree().nodes[self.idx as usize].dead
+    }
+
     // ── Navigation ──
 
     pub fn parent(&self) -> Option<Cursor<'a>> {
@@ -138,19 +143,6 @@ impl<'a> Cursor<'a> {
         self.tree()
             .descendants(self.idx)
             .map(move |i| Cursor { trees, fi, idx: i })
-    }
-
-    pub fn descendants_of_kind(&self, kind: u16) -> impl Iterator<Item = Cursor<'a>> {
-        let trees = self.trees;
-        let fi = self.fi;
-        let start = self.idx + 1;
-        let end = self.idx + self.size();
-        let ids = self.tree().nodes_of_kind(kind);
-        let from = ids.partition_point(|&id| id < start);
-        let to = ids.partition_point(|&id| id < end);
-        ids[from..to]
-            .iter()
-            .map(move |&idx| Cursor { trees, fi, idx })
     }
 
     pub fn ancestors(&self) -> impl Iterator<Item = Cursor<'a>> {
@@ -201,16 +193,16 @@ impl<'a> Cursor<'a> {
         let trees = self.trees;
         let fi = self.fi;
         let end = tree.hop(self.idx);
-        let mut c = self.idx + 1;
+        let mut c = live(tree, self.idx + 1, end);
         while c < end {
             let cursor = Cursor { trees, fi, idx: c };
             match visitor(cursor) {
                 Step::Out(r) => return Some(r),
                 Step::Over => {
-                    c = tree.hop(c);
+                    c = live(tree, tree.hop(c), end);
                 }
                 Step::Into => {
-                    c += 1;
+                    c = live(tree, c + 1, end);
                 }
             }
         }

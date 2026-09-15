@@ -20,7 +20,7 @@
 //! ```
 
 use crate::lang::Lang;
-use crate::pattern::Rewrite;
+use crate::pattern::{Out, Rewrite};
 
 #[derive(serde::Deserialize)]
 struct RuleFile {
@@ -50,8 +50,8 @@ struct ParseFileEntry {
 
 #[derive(serde::Deserialize)]
 struct ResolveStageSpec {
-    #[serde(rename = "name")]
-    _name: Option<String>,
+    #[allow(dead_code)]
+    name: Option<String>,
     #[serde(default)]
     rules: Option<Vec<Rule>>,
     #[serde(default)]
@@ -66,8 +66,8 @@ struct ClimbSpec {
 
 #[derive(serde::Deserialize)]
 struct Stage {
-    #[serde(rename = "name")]
-    _name: Option<String>,
+    #[allow(dead_code)]
+    name: Option<String>,
     rules: Vec<Rule>,
 }
 
@@ -79,6 +79,15 @@ struct Rule {
     replace: Option<String>,
     #[serde(default, rename = "where")]
     where_clause: Option<String>,
+}
+
+/// Compile a YAML rule file into stages of rewrites.
+pub fn load_rules(yaml: &str, lang: &mut Lang) -> Vec<Vec<Rewrite>> {
+    let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
+    file.stages
+        .iter()
+        .map(|stage| compile_stage(stage, lang))
+        .collect()
 }
 
 /// Load both rewrite stages and resolve config from a language YAML file.
@@ -165,15 +174,38 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
     let pat = &rule.pattern;
 
     if let Some(ref tpl) = rule.replace {
-        return vec![Rewrite::compile(
-            lang,
-            pat,
-            tpl,
-            rule.where_clause.as_deref(),
-        )];
+        let tpl = tpl.clone();
+        let mut rw = Rewrite::new(lang, pat, move |c| Out::Replace(c.template(&tpl)));
+        if let Some(ref wc) = rule.where_clause {
+            rw.guards = parse_where_clause(wc, &rw.slots);
+        }
+        return vec![rw];
     }
 
     panic!("rule has no action: {:?}", pat);
+}
+
+fn parse_where_clause(clause: &str, slots: &std::collections::HashMap<Box<str>, u16>) -> Vec<(u16, u16, bool)> {
+    clause
+        .split("&&")
+        .map(|part| {
+            let part = part.trim();
+            let (a, b, eq) = if let Some((l, r)) = part.split_once("==") {
+                (l.trim(), r.trim(), true)
+            } else if let Some((l, r)) = part.split_once("!=") {
+                (l.trim(), r.trim(), false)
+            } else {
+                panic!("invalid where clause: {part}");
+            };
+            let sa = slots
+                .get(a.trim_start_matches('$'))
+                .unwrap_or_else(|| panic!("unknown capture in where: {a}"));
+            let sb = slots
+                .get(b.trim_start_matches('$'))
+                .unwrap_or_else(|| panic!("unknown capture in where: {b}"));
+            (*sa, *sb, eq)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -190,7 +222,7 @@ stages:
         replace: '(__ivar @$A)'
 "#;
         let mut lang = Lang::new();
-        let stages = load_lang(yaml, &mut lang).0;
+        let stages = load_rules(yaml, &mut lang);
         assert_eq!(stages.len(), 1);
         assert_eq!(stages[0].len(), 1);
     }
@@ -219,7 +251,7 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $B)'
 "#;
         let mut lang = Lang::new();
-        let stages = load_lang(yaml, &mut lang).0;
+        let stages = load_rules(yaml, &mut lang);
         assert_eq!(stages.len(), 3);
     }
 }

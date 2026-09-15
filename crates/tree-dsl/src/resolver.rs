@@ -11,12 +11,10 @@ type VisibleMap = Vec<FxHashMap<u32, (usize, u32)>>;
 
 pub struct ResolveResult {
     pub cross_edges: Vec<Edge>,
-    pub resolved_paths: std::collections::HashMap<(usize, u32), u32>,
 }
 
 pub fn resolve(
-    trees: &[Tree],
-    intra_edges: &[Vec<Edge>],
+    trees: &mut [Tree],
     lang: &mut Lang,
     support_lang: SupportLang,
     lookup_prefixes: &[String],
@@ -30,6 +28,17 @@ pub fn resolve(
 
     let ambiguous =
         propagate_reexports(trees, lang, &reqs, &mut visible, support_lang, index_names);
+
+    for req in &reqs {
+        let resolved_sym = lang.syms.intern(&req.target_path);
+        let sp_idx = trees[req.fi]
+            .cursor(req.node)
+            .child(C::SourcePath)
+            .map(|n| n.index());
+        if let Some(sn) = sp_idx {
+            trees[req.fi].nodes[sn as usize].sym = resolved_sym;
+        }
+    }
 
     let root = Cursor::new(trees, 0, 0);
 
@@ -45,21 +54,14 @@ pub fn resolve(
     );
     cross_edges.extend(import_edges);
     let (module_call_edges, call_edges) =
-        build_call_edges(root, intra_edges, lang, &cross_edges, &reqs, &visible);
+        build_call_edges(root, lang, &cross_edges, &reqs, &visible);
     let type_edges = build_type_edges(root, &call_edges, &cross_edges, &visible);
     let field_edges = build_typed_field_edges(root, &cross_edges);
     cross_edges.extend(module_call_edges);
     cross_edges.extend(call_edges);
     cross_edges.extend(type_edges);
     cross_edges.extend(field_edges);
-    let resolved_paths = reqs
-        .iter()
-        .map(|req| ((req.fi, req.node), lang.syms.intern(&req.target_path)))
-        .collect();
-    ResolveResult {
-        cross_edges,
-        resolved_paths,
-    }
+    ResolveResult { cross_edges }
 }
 
 fn build_file_index(
@@ -68,8 +70,7 @@ fn build_file_index(
     support_lang: SupportLang,
     index_names: &[String],
 ) -> FxHashMap<String, usize> {
-    let mut idx: FxHashMap<String, usize> =
-        FxHashMap::with_capacity_and_hasher(trees.len() * 3, Default::default());
+    let mut idx: FxHashMap<String, usize> = FxHashMap::with_capacity_and_hasher(trees.len() * 3, Default::default());
     for (fi, tree) in trees.iter().enumerate() {
         let path = lang.syms.resolve(tree.root().sym()).to_string();
         let file_lang = SupportLang::from_path(&path).unwrap_or(support_lang);
@@ -98,9 +99,13 @@ fn build_visible_names(trees: &[Tree]) -> VisibleMap {
         .map(|(fi, tree)| {
             let mut names = FxHashMap::with_capacity_and_hasher(16, Default::default());
             for i in 0..tree.len() {
+                if tree.nodes[i as usize].dead {
+                    continue;
+                }
                 let c = tree.cursor(i);
                 if crate::canonical::has_def_type(c) {
                     if let Some(ns) = c.child_sym(C::DefName) {
+
                         names.insert(ns, (fi, i));
                     }
                     if let Some(ds) = c.child_sym(C::DefaultExport) {
@@ -310,7 +315,6 @@ fn build_import_edges(
 
 fn build_call_edges(
     corpus: Cursor,
-    intra_edges: &[Vec<Edge>],
     lang: &Lang,
     cross_edges: &[Edge],
     reqs: &[ImportReq],
@@ -345,7 +349,7 @@ fn build_call_edges(
                 }
             }
         }
-        for edge in &intra_edges[fi] {
+        for edge in nodes.edges().iter() {
             if edge.kind != EdgeKind::Imports {
                 continue;
             }
@@ -374,7 +378,7 @@ fn build_call_edges(
     }
 
     let mut reverse_visible: FxHashMap<(usize, u32), u32> = FxHashMap::default();
-    for names in visible {
+    for (fi, names) in visible.iter().enumerate() {
         for (&sym, &(vfi, vn)) in names {
             reverse_visible.insert((vfi, vn), sym);
         }
@@ -388,7 +392,7 @@ fn build_call_edges(
             .unwrap_or(0);
         let ft = &corpus.trees_ref()[ce.from.tree as usize];
         let import_parent = ft.nodes[ce.from.node as usize].parent;
-        for edge in &intra_edges[ce.from.tree as usize] {
+        for edge in ft.edges().iter() {
             if edge.kind != EdgeKind::Imports {
                 continue;
             }
@@ -538,7 +542,9 @@ fn build_typed_field_edges(corpus: Cursor, cross_edges: &[Edge]) -> Vec<Edge> {
                 let Some(member) = callee.child(C::Member) else {
                     continue;
                 };
-                let obj_ivar = member.child(C::Object).and_then(|o| o.child(C::Ivar));
+                let obj_ivar = member
+                    .child(C::Object)
+                    .and_then(|o| o.child(C::Ivar));
                 if !obj_ivar.is_some_and(|iv| iv.sym() == ivar_sym) {
                     continue;
                 }

@@ -5892,12 +5892,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "indextree"
-version = "4.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "355c27a54366e073e1266ef91b1dd7910dc787294d7e8f92458e2e103bc95e33"
-
-[[package]]
 name = "indicatif"
 version = "0.18.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13704,7 +13698,6 @@ dependencies = [
 name = "tree-dsl"
 version = "0.1.0"
 dependencies = [
- "indextree",
  "pest",
  "pest_consume",
  "pest_derive",
