@@ -156,14 +156,22 @@ The search type determines how Orbit matches content. Filters determine which pr
 Invalid patterns and unsupported languages must return clear input errors.
 Candidate filtering must not discard valid matches, including patterns with little or no fixed text.
 
+#### Graph enrichment
+
 When a graph extension is requested, content matches, definitions, and relationships must retain their selected project-and-commit context. A relationship must not connect nodes from incompatible revisions or reveal a node outside the caller's permissions.
 
+Each row below follows the form `[content match scope] → [graph output]`. The scope says on which entity the match is applied, and the graph output says what is returned.
 
-| Type                        | Scenario                                            | Required result                                                                                                                |
-| --------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| File content → graph        | Find definitions in files whose content contains X. | Select matching files, then return their definitions. The text may appear anywhere in the file, outside the definition itself. |
-| Definition source → graph   | Find definitions whose source contains X.           | Apply the content match within each definition's source range. A match elsewhere in the file must not qualify.                 |
-| Definition source → callers | Find callers of definitions that match X.           | Select definitions by content, then return their callers from the same revision.                                               |
+
+| Type | Scenario | Required result |
+| --- | --- | --- |
+| File body match → definitions | Find definitions in files with a file body match on X. | Select files with a body match, then return their definitions. The match may appear anywhere in the file, outside any definition. |
+| File body match → relationships | Find callers, callees, or imports of definitions in files with a file body match on X. | Select files with a body match, traverse from their definitions, and return the requested relationships and their authorized endpoints from the same revision. |
+| Definition body match → definition | Find definitions with a definition body match on X. | Require the match to fall within the definition's source range. A file body match outside that range must not qualify. |
+| Definition body match → callers | Find callers of definitions with a definition body match on X. | Select definitions by body match, then return their callers from the same revision. |
+| Definition body match → callees or imports | Find callees or imports of definitions with a definition body match on X. | Select definitions by body match, then return the requested outbound relationships from the same revision. |
+| File body match → enclosing definition | Identify which definition each file body match location falls inside. | Annotate each file body match with its innermost enclosing definition. Matches outside any definition carry no enclosing definition. |
+| Reference match → definition | Resolve a file body match on a reference token to the definition it names. | Return the definition the matched reference resolves to at the selected revision. Unresolved references must be reported explicitly, not silently dropped. |
 
 
 
