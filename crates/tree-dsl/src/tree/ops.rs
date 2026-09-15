@@ -34,6 +34,35 @@ impl Tree {
 
         if sub.len() > old {
             let extra = sub.len() - old;
+            let end = i as usize + old;
+            let mut avail = 0;
+            let mut scan = end;
+            while avail < extra && scan < self.nodes.len() && self.nodes[scan].dead {
+                avail += self.nodes[scan].size.max(1) as usize;
+                scan += self.nodes[scan].size.max(1) as usize;
+            }
+
+            if avail >= extra {
+                let mut p = parent;
+                while p != NONE {
+                    self.nodes[p as usize].size += extra as u32;
+                    p = self.nodes[p as usize].parent;
+                }
+                let total = old + avail;
+                for (k, mut n) in sub.iter().copied().enumerate() {
+                    n.parent = if n.parent == NONE { parent } else { n.parent + i };
+                    if k == 0 { n.field = field; }
+                    n.dead = false;
+                    self.nodes[i as usize + k] = n;
+                }
+                if sub.len() < total {
+                    let d = &mut self.nodes[i as usize + sub.len()];
+                    d.dead = true;
+                    d.size = (total - sub.len()) as u32;
+                }
+                return;
+            }
+
             for j in i..(i + old as u32) {
                 self.nodes[j as usize].dead = true;
             }
