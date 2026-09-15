@@ -137,6 +137,48 @@ mod tests {
     }
 
     #[test]
+    fn source_population_skips_unreadable_files() {
+        let root = tempfile::tempdir().unwrap();
+        let content = "fn example() {}";
+        std::fs::write(root.path().join("a.rs"), content).unwrap();
+        std::fs::write(root.path().join("b.rs"), [0xff]).unwrap();
+        std::fs::create_dir(root.path().join("tests")).unwrap();
+        std::fs::write(root.path().join("tests/example.rs"), content).unwrap();
+        std::fs::write(root.path().join("z.txt"), content).unwrap();
+        let g = TestGraph::new("source-read-errors");
+        for (i, path) in ["a.rs", "b.rs", "missing.rs", "tests/example.rs", "z.txt"]
+            .iter()
+            .enumerate()
+        {
+            g.def(i as i64 + 1, path, "example", path);
+        }
+        g.client
+            .execute(
+                "UPDATE gl_definition SET end_byte = ?1",
+                &[serde_json::json!(content.len())],
+            )
+            .unwrap();
+        let search = g.search();
+        duckdb_client::search::populate_def_doc_sources(
+            search.client(),
+            "gl_def_doc_7",
+            &ontology::Ontology::load_embedded().unwrap(),
+            root.path(),
+            7,
+            "sha",
+        )
+        .unwrap();
+        let rows = search
+            .client()
+            .query_arrow("SELECT source FROM gl_def_doc_7 ORDER BY def_id")
+            .unwrap();
+        assert_eq!(
+            duckdb_client::string_column(&rows, "source"),
+            vec![content, "", "", content, ""]
+        );
+    }
+
+    #[test]
     fn grep_runs_end_to_end_against_a_real_local_graph() {
         let g = TestGraph::new("grep-e2e");
         g.def(1, "Dlq::publish", "publish", "app/services/dlq.rb");

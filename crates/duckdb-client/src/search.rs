@@ -207,6 +207,7 @@ pub fn populate_def_doc_sources(
        {start_byte} AS start_byte, {end_byte} AS end_byte
 FROM {table}
 WHERE {project_id} = ?1 AND {commit_sha} = ?2
+  AND regexp_matches({file_path}, {source_only})
 QUALIFY row_number() OVER (
   PARTITION BY {id} ORDER BY {file_path}, {start_byte}, {end_byte}
 ) = 1
@@ -215,6 +216,7 @@ ORDER BY {file_path}, {id}",
             file_path = node.column("file_path")?,
             start_byte = node.column("start_byte")?,
             end_byte = node.column("end_byte")?,
+            source_only = sql_lit(&ext_regex(&search_corpus_exts())),
             table = node.table(),
             project_id = node.column("project_id")?,
             commit_sha = node.column("commit_sha")?,
@@ -240,8 +242,13 @@ ORDER BY {file_path}, {id}",
         if current_path != paths[index] {
             current_path.clone_from(&paths[index]);
             let path = repository_root.join(&current_path);
-            content = std::fs::read_to_string(&path)
-                .with_context(|| format!("failed to read definition source {}", path.display()))?;
+            content = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                eprintln!(
+                    "warning: skipping body search for {}: {error}",
+                    path.display()
+                );
+                String::new()
+            });
         }
         let source = match (usize::try_from(starts[index]), usize::try_from(ends[index])) {
             (Ok(start), Ok(end)) if start < content.len() => content
