@@ -4,58 +4,13 @@
 use rustc_hash::FxHashMap;
 
 use crate::lang::Lang;
-use crate::pattern::{self, Rewrite};
+use crate::pattern;
+use crate::rules::{DisplaySource, ParseFileSpec, ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Node, Step, Tree};
 
-/// Result of walking the file tree.
 pub struct WalkResult {
     /// Paths to try as prefixes when resolving absolute imports.
     pub lookup_prefixes: Vec<String>,
-}
-
-/// Resolve-stage config parsed from a language YAML file.
-pub enum ResolveStage {
-    Rules(Vec<Rewrite>),
-    Climb { while_kind: u16, mark_kind: u16 },
-}
-
-#[derive(Clone)]
-pub struct ParseFileSpec {
-    pub name: String,
-    pub format: ParseFormat,
-}
-
-#[derive(Clone, Copy)]
-pub enum ParseFormat {
-    Json,
-    Toml,
-}
-
-pub struct ResolveConfig {
-    pub stages: Vec<ResolveStage>,
-    pub parse_files: Vec<ParseFileSpec>,
-    pub lookup_from: Vec<u16>,
-    pub external: Vec<String>,
-    pub display_source: DisplaySource,
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub enum DisplaySource {
-    #[default]
-    Original,
-    Resolved,
-}
-
-impl Default for ResolveConfig {
-    fn default() -> Self {
-        Self {
-            stages: vec![],
-            parse_files: vec![],
-            lookup_from: vec![],
-            external: vec![],
-            display_source: DisplaySource::Original,
-        }
-    }
 }
 
 /// Build a file tree from paths, run resolve stages, return results.

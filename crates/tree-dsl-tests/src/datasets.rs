@@ -125,7 +125,7 @@ pub fn to_datasets(
     cross_edges: &[tree_dsl::tree::Edge],
     lang: &mut Lang,
     support_lang: SupportLang,
-    resolve_config: &tree_dsl::file_tree::ResolveConfig,
+    resolve_config: &tree_dsl::rules::ResolveConfig,
 ) -> anyhow::Result<LanceDatasets> {
     let ids = assign_ids(trees, lang);
     let mut ds = HashMap::new();
@@ -424,11 +424,10 @@ fn build_imports(
     lang: &Lang,
     ids: &IdMaps,
     support_lang: SupportLang,
-    resolve_config: &tree_dsl::file_tree::ResolveConfig,
+    resolve_config: &tree_dsl::rules::ResolveConfig,
     resolved_imports: &std::collections::HashSet<(usize, u32)>,
 ) -> anyhow::Result<RecordBatch> {
-    let use_resolved =
-        resolve_config.display_source == tree_dsl::file_tree::DisplaySource::Resolved;
+    let use_resolved = resolve_config.display_source == tree_dsl::rules::DisplaySource::Resolved;
     let fqn_sep = support_lang.fqn_separator();
     let (mut id_b, mut fp_b, mut it_b, mut path_b, mut name_b, mut alias_b) = (
         Int64Builder::new(),

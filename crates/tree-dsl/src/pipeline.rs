@@ -25,7 +25,7 @@ pub struct IndexTimings {
 pub struct Pipeline {
     pub lang_id: SupportLang,
     pub rewrite_stages: Vec<Vec<crate::pattern::Rewrite>>,
-    pub resolve: crate::file_tree::ResolveConfig,
+    pub resolve: crate::rules::ResolveConfig,
 }
 
 impl Pipeline {
@@ -33,7 +33,7 @@ impl Pipeline {
         let mut lang = Lang::new();
         let (rewrite_stages, resolve) = match grammar::lang_yaml(lang_id) {
             Some(yaml) => crate::rules::load_lang(yaml, &mut lang),
-            None => (vec![], crate::file_tree::ResolveConfig::default()),
+            None => (vec![], crate::rules::ResolveConfig::default()),
         };
         (
             Pipeline {

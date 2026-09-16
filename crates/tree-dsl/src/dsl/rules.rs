@@ -22,6 +22,50 @@
 use crate::lang::Lang;
 use crate::pattern::{Out, Rewrite};
 
+pub enum ResolveStage {
+    Rules(Vec<Rewrite>),
+    Climb { while_kind: u16, mark_kind: u16 },
+}
+
+#[derive(Clone)]
+pub struct ParseFileSpec {
+    pub name: String,
+    pub format: ParseFormat,
+}
+
+#[derive(Clone, Copy)]
+pub enum ParseFormat {
+    Json,
+    Toml,
+}
+
+pub struct ResolveConfig {
+    pub stages: Vec<ResolveStage>,
+    pub parse_files: Vec<ParseFileSpec>,
+    pub lookup_from: Vec<u16>,
+    pub external: Vec<String>,
+    pub display_source: DisplaySource,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum DisplaySource {
+    #[default]
+    Original,
+    Resolved,
+}
+
+impl Default for ResolveConfig {
+    fn default() -> Self {
+        Self {
+            stages: vec![],
+            parse_files: vec![],
+            lookup_from: vec![],
+            external: vec![],
+            display_source: DisplaySource::Original,
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct RuleFile {
     stages: Vec<Stage>,
@@ -91,10 +135,7 @@ pub fn load_rules(yaml: &str, lang: &mut Lang) -> Vec<Vec<Rewrite>> {
 }
 
 /// Load both rewrite stages and resolve config from a language YAML file.
-pub fn load_lang(
-    yaml: &str,
-    lang: &mut Lang,
-) -> (Vec<Vec<Rewrite>>, crate::file_tree::ResolveConfig) {
+pub fn load_lang(yaml: &str, lang: &mut Lang) -> (Vec<Vec<Rewrite>>, ResolveConfig) {
     let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
     let rewrites = file
         .stages
@@ -103,14 +144,12 @@ pub fn load_lang(
         .collect();
     let resolve = match file.resolve {
         Some(section) => compile_resolve(&section, lang),
-        None => crate::file_tree::ResolveConfig::default(),
+        None => ResolveConfig::default(),
     };
     (rewrites, resolve)
 }
 
-fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tree::ResolveConfig {
-    use crate::file_tree::{ParseFileSpec, ParseFormat, ResolveStage};
-
+fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> ResolveConfig {
     let parse_files = section
         .parse_files
         .iter()
@@ -150,14 +189,14 @@ fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> crate::file_tre
         .iter()
         .map(|name| lang.intern_kind(name))
         .collect();
-    crate::file_tree::ResolveConfig {
+    ResolveConfig {
         stages,
         parse_files,
         lookup_from,
         external: section.external.clone(),
         display_source: match section.display_source.as_deref() {
-            Some("resolved") => crate::file_tree::DisplaySource::Resolved,
-            _ => crate::file_tree::DisplaySource::Original,
+            Some("resolved") => DisplaySource::Resolved,
+            _ => DisplaySource::Original,
         },
     }
 }
