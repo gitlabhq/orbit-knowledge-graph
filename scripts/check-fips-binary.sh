@@ -19,6 +19,11 @@ if grep -q ' _\?ring_core_' <<<"$symbols"; then
   exit 1
 fi
 
+if grep -q ' _\?aws_lc_[0-9]' <<<"$symbols"; then
+  echo "FAIL: $binary links the non-FIPS AWS-LC library next to the FIPS module" >&2
+  exit 1
+fi
+
 "$binary" --help >/dev/null
 
 echo "OK: $binary links the AWS-LC FIPS module ($fips_symbols symbols) and passes FIPS self-tests"
