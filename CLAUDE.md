@@ -38,6 +38,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads four sources (lowest to highest priority): the embedded `config/default.yaml` (compiled in via `include_str!`), an on-disk `config/default.yaml` when present (the Helm ConfigMap key), an overlay file (`--config <path>`, else `config/config.yaml` when present), and K8s secret files from `/etc/secrets/`. There is no environment-variable layer; the mise dev tasks generate `.dev/<mode>.yaml` from `config/dev.yaml`, GDK-derived connection details, and the Git-ignored `config/dev.local.yaml`, and pass that one file to `--config`.
   `config/default.yaml` is the single source of truth for defaults: every section and scalar is declared there; the Rust structs have no `Default` impls or `serde(default)` fallbacks (only `Option` fields and empty collections may be omitted). Add a setting by adding the struct field plus its value in `default.yaml`; tests start from `AppConfig::embedded_defaults()`. The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md`.
 - **Vendored dependencies.** Upstream artifacts committed to the repo (DuckDB FTS sources, extension binaries) are pinned in the `vendored:` section of `config/versions.yaml` with sub-pins, artifact directories, and vendor/check scripts. A generic runner (`scripts/vendored/run.sh`) invokes them with standardized `VENDOR_*` env vars. Vendor scripts write computed checksums back via `yq -i`; check scripts are read-only. Run `mise vendor -- <name>` to regenerate, `mise check:vendored -- <name>` to verify. See `docs/dev/runbooks/vendored_dependencies.md`.
+- **FIPS by default.** `gkg-server` links the AWS-LC FIPS module (`rustls` `fips` feature, `jsonwebtoken` `aws_lc_rs` backend, `async-nats` and `kube` without `ring`) and refuses to start outside FIPS mode (`crates/orbit-server/src/fips.rs`). There is no non-FIPS server variant; the `orbit` CLI is exempt. `scripts/check-fips-graph.sh` and `scripts/check-fips-binary.sh` are the gates. See `docs/design-documents/security.md`.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
 ## What CI enforces
@@ -52,6 +53,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Trailing newlines (`newline-check`, run locally with `mise lint:newlines`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
+- Server dependency graph and binary link the AWS-LC FIPS module and no `ring`; the CLI graph stays non-FIPS (`fips-check`)
 - Unit tests via nextest (`unit-test`)
 - Compiler integration tests: query compilation, ontology validation, pipeline infra (`compiler-integration-test`)
 - CLI integration tests: concurrency, worktrees, content resolution (`cli-integration-test`)
