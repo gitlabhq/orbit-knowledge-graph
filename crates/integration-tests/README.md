@@ -121,6 +121,18 @@ See the [integration-testkit README](../integration-testkit/README.md) for the
 4. If you need a new server test module, add `pub mod foo;` to
    `containers.rs` and create `server/foo.rs`.
 
+### Rust-only data correctness tests
+
+A small number of tests remain in the Rust modules because they need
+capabilities the YAML harness cannot express:
+
+| Test | Reason |
+|------|--------|
+| `cursor_after_token_with_sql_metacharacters_is_parameterized` | Constructs a cursor token via internal `cursor::encode()`. YAML covers this with a snapshotted token but the Rust test remains as the source of truth for the encoding. |
+| `long_node_text_is_excerpted_only_on_wide_pages` | Compares text length across two queries with different `limit` values. Each variant has a YAML fixture, but the cross-query comparison stays in Rust. |
+
+When removing the legacy Rust modules, keep these tests.
+
 ### Compiler tests
 
 1. Add to `compiler/mod.rs` and create `compiler/foo.rs`.

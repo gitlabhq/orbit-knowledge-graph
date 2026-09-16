@@ -264,8 +264,9 @@ Methods: `prop`, `prop_str`, `prop_i64`, `prop_f64`, `prop_bool`, `has_prop`,
 
 Query scenarios are YAML-driven data correctness tests that replace handwritten Rust
 assertion code. They are the preferred way to add new correctness coverage. Each scenario
-declares a query, optional config overrides, and expected results; the test harness seeds
-data, compiles and executes the query, and diffs the response against the expectations.
+declares a query, optional config overrides, and expected results. The harness seeds data,
+runs the full pipeline (compile, execute, redact, hydrate, paginate, format), and checks
+the response against the expectations.
 
 ### File structure
 
