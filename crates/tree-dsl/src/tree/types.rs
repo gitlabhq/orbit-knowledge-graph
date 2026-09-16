@@ -1,6 +1,8 @@
 use std::sync::RwLock;
 
-use indextree::{Arena, NodeId};
+use indextree::{Arena, NodeEdge, NodeId};
+
+use crate::canonical;
 
 pub(crate) const NONE: u32 = u32::MAX;
 
@@ -200,7 +202,6 @@ impl Tree {
     }
 
     pub(crate) fn postorder(&self) -> Vec<NodeId> {
-        use indextree::NodeEdge;
         self.root
             .reverse_traverse(&self.arena)
             .filter_map(|edge| match edge {
@@ -213,7 +214,7 @@ impl Tree {
     pub fn prune(&mut self) {
         let ids: Vec<NodeId> = self.root.descendants(&self.arena).skip(1).collect();
         for id in ids {
-            if !crate::canonical::is_canonical(self.arena[id].get().kind) {
+            if !canonical::is_canonical(self.arena[id].get().kind) {
                 let children: Vec<NodeId> = id.children(&self.arena).collect();
                 for child in children {
                     child.detach(&mut self.arena);

@@ -7,7 +7,7 @@ use crate::canonical::Canonical as C;
 use crate::intern::Lang;
 use crate::pattern;
 use crate::rules::{DisplaySource, ParseFileSpec, ParseFormat, ResolveConfig, ResolveStage};
-use crate::tree::{Node, Step, Tree};
+use crate::tree::{Cursor, Node, Step, Tree};
 
 pub struct WalkResult {
     /// Paths to try as prefixes when resolving absolute imports.
@@ -330,7 +330,7 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
 }
 
 /// Reconstruct the full path of a directory node by walking up parent pointers.
-fn node_path(cursor: crate::tree::Cursor, lang: &Lang) -> String {
+fn node_path(cursor: Cursor, lang: &Lang) -> String {
     let mut parts: Vec<String> = std::iter::once(cursor)
         .chain(cursor.ancestors())
         .take_while(|n| !n.is(C::Root))

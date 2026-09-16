@@ -1,4 +1,4 @@
-use crate::canonical::Canonical as C;
+use crate::canonical::{self as canonical, Canonical as C};
 
 use super::types::{Edge, EdgeKind, Tree};
 
@@ -273,7 +273,7 @@ pub fn infer_return_type(def: Cursor) -> Option<u32> {
 
 pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     class.descend(|n| {
-        if crate::canonical::is_def_type_kind(n.kind())
+        if canonical::is_def_type_kind(n.kind())
             && let Some(p) = n.parent()
             && p.index() != class.index()
             && p.child_sym(C::DefName) == Some(name)

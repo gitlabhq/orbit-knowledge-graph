@@ -1,7 +1,7 @@
-use crate::canonical::Canonical as C;
+use crate::canonical::{self as canonical, Canonical as C};
 use crate::intern::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{Cursor, EdgeKind, Step, Tree, infer_return_type};
+use crate::tree::{Cursor, EdgeKind, Step, Tree, find_method_in, infer_return_type};
 
 enum Linked {
     Def(u32),
@@ -70,7 +70,7 @@ impl Fold {
             self.handle_import(tree, idx);
             return;
         }
-        if crate::canonical::has_def_type(c) {
+        if canonical::has_def_type(c) {
             self.handle_def(tree, idx, stack);
             return;
         }
@@ -224,7 +224,7 @@ impl Fold {
                 }
             }
         }
-        if crate::canonical::is_scoped_def(c) {
+        if canonical::is_scoped_def(c) {
             self.def_stack.push((Some(idx), parent_block));
             stack.push(WorkItem::ExitScope);
             let children: Vec<u32> = c.children().map(|ch| ch.index()).collect();
@@ -426,7 +426,7 @@ impl Fold {
     fn emit(&self, tree: &Tree, r: &Linked, from: u32) {
         match r {
             Linked::Def(node) => {
-                if crate::canonical::is_callable_def(tree.cursor(*node)) {
+                if canonical::is_callable_def(tree.cursor(*node)) {
                     tree.add_edge(from, *node, EdgeKind::Calls);
                 }
             }
@@ -436,7 +436,7 @@ impl Fold {
     }
 
     fn is_class(&self, tree: &Tree, node: u32) -> bool {
-        crate::canonical::def_type_of(tree.cursor(node)) == Some(C::Class)
+        canonical::def_type_of(tree.cursor(node)) == Some(C::Class)
     }
 
     fn any_class(&self, tree: &Tree, resolved: &[Linked]) -> bool {
@@ -502,7 +502,7 @@ impl Fold {
     fn enclosing_class(&self, tree: &Tree, node: u32) -> Option<u32> {
         let c = tree.cursor(node);
         let check = |n: Cursor| {
-            crate::canonical::def_type_of(n)
+            canonical::def_type_of(n)
                 .is_some_and(|k| matches!(k, C::Class | C::ImplBlock | C::Trait))
         };
         if check(c) {
@@ -542,7 +542,7 @@ impl Fold {
         }
         let mut si = 0;
         while si < search.len() {
-            if let Some(m) = crate::tree::find_method_in(tree.cursor(search[si]), name) {
+            if let Some(m) = find_method_in(tree.cursor(search[si]), name) {
                 return Some(m.index());
             }
             for c in tree

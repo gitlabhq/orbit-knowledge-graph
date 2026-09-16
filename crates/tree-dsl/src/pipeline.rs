@@ -3,14 +3,20 @@
 //! Sequential `process_file` + `index` flow.
 //! Threading model: per-file processing fans out; resolve phase joins.
 
+use std::time::Instant;
+
+use rayon::prelude::*;
+
 use crate::intern::Lang;
-use crate::tree::Tree;
+use crate::pattern::Rewrite;
+use crate::rules::ResolveConfig;
+use crate::tree::{Edge, Tree};
 use crate::treesitter::{self as treesitter, SupportLang};
-use crate::{file_tree, linker, pattern, resolver};
+use crate::{file_tree, linker, pattern, resolver, rules};
 
 pub struct IndexResult {
     pub trees: Vec<Tree>,
-    pub cross_edges: Vec<crate::tree::Edge>,
+    pub cross_edges: Vec<Edge>,
     pub lang: Lang,
     pub pipeline: Pipeline,
     pub timings: IndexTimings,
@@ -24,16 +30,16 @@ pub struct IndexTimings {
 
 pub struct Pipeline {
     pub lang_id: SupportLang,
-    pub rewrite_stages: Vec<Vec<crate::pattern::Rewrite>>,
-    pub resolve: crate::rules::ResolveConfig,
+    pub rewrite_stages: Vec<Vec<Rewrite>>,
+    pub resolve: ResolveConfig,
 }
 
 impl Pipeline {
     pub fn for_lang(lang_id: SupportLang) -> (Pipeline, Lang) {
         let lang = Lang::new();
         let (rewrite_stages, resolve) = match treesitter::lang_yaml(lang_id) {
-            Some(yaml) => crate::rules::load_lang(yaml, &lang),
-            None => (vec![], crate::rules::ResolveConfig::default()),
+            Some(yaml) => rules::load_lang(yaml, &lang),
+            None => (vec![], ResolveConfig::default()),
         };
         (
             Pipeline {
@@ -63,7 +69,6 @@ pub fn process_file_timed(
     lang: &Lang,
     pipeline: &Pipeline,
 ) -> (Tree, [std::time::Duration; 4]) {
-    use std::time::Instant;
     let t0 = Instant::now();
     let mut tree = treesitter::parse(source, pipeline.lang_id, lang, path);
     let t1 = Instant::now();
@@ -80,8 +85,6 @@ pub fn process_file_timed(
 
 /// Unified indexing entrypoint. All files must be the same language.
 pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
-    use std::time::Instant;
-
     let (pipeline, lang) = Pipeline::for_lang(lang_id);
 
     let parseable: Vec<&(String, String)> = files
@@ -92,7 +95,6 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
     let t0 = Instant::now();
 
     let mut trees: Vec<Tree> = {
-        use rayon::prelude::*;
         parseable
             .par_iter()
             .map(|(path, content)| process_file(path, content, &lang, &pipeline))

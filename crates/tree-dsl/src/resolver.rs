@@ -7,7 +7,7 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::canonical::Canonical as C;
+use crate::canonical::{self as canonical, Canonical as C};
 use crate::intern::Lang;
 use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
 use crate::treesitter::SupportLang;
@@ -287,7 +287,7 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, all_cross: &[Edge]) -> Vec<Ed
 fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     let corpus = Cursor::new(ctx.trees, 0, 0);
     let target = corpus.follow(ce);
-    let target_dt = crate::canonical::def_type_of(target);
+    let target_dt = canonical::def_type_of(target);
     if !target_dt.is_some_and(|k| matches!(k, C::Class | C::Struct)) {
         return vec![];
     }
@@ -316,7 +316,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
             continue;
         }
         let class = nr.enclosing(|a| {
-            crate::canonical::def_type_of(a)
+            canonical::def_type_of(a)
                 .is_some_and(|k| matches!(k, C::Class | C::Struct | C::ImplBlock))
         });
         let Some(cls) = class else {
@@ -337,7 +337,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
             if method_sym == 0 {
                 continue;
             }
-            let caller_def = d.enclosing(|a| crate::canonical::has_def_type(a));
+            let caller_def = d.enclosing(|a| canonical::has_def_type(a));
             let Some(caller_def) = caller_def else {
                 continue;
             };
@@ -354,7 +354,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
 }
 
 fn is_callable(def: Cursor) -> bool {
-    crate::canonical::is_callable_def(def)
+    canonical::is_callable_def(def)
 }
 
 fn resolve_type(
@@ -414,7 +414,7 @@ fn build_visible_names(trees: &[Tree]) -> VisibleMap {
         .map(|(fi, tree)| {
             let mut names = FxHashMap::with_capacity_and_hasher(16, Default::default());
             for c in tree.root().descendants() {
-                if crate::canonical::has_def_type(c) {
+                if canonical::has_def_type(c) {
                     if let Some(ns) = c.child_sym(C::DefName) {
                         names.insert(ns, (fi, c.index()));
                     }

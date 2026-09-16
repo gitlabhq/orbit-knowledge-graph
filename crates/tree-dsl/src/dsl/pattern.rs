@@ -81,12 +81,7 @@ impl Tf {
         }
     }
 
-    pub(crate) fn apply_sym(
-        &self,
-        t: &crate::tree::Tree,
-        lang: &Lang,
-        id: indextree::NodeId,
-    ) -> u32 {
+    pub(crate) fn apply_sym(&self, t: &Tree, lang: &Lang, id: indextree::NodeId) -> u32 {
         match self {
             Tf::Id => t.node(id).sym,
             Tf::Field(f) => {

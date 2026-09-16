@@ -1,3 +1,7 @@
+use strum::{EnumProperty, IntoEnumIterator};
+
+use crate::tree::Cursor;
+
 pub const CANONICAL_BASE: u16 = 0xE000;
 
 #[repr(u16)]
@@ -242,24 +246,22 @@ impl Canonical {
     }
 }
 
-use strum::EnumProperty;
-
-pub fn def_type_of(cursor: crate::tree::Cursor) -> Option<Canonical> {
+pub fn def_type_of(cursor: Cursor) -> Option<Canonical> {
     cursor.children().find_map(|c| {
         let ck = Canonical::try_from_u16(c.kind())?;
         ck.is_def_type().then_some(ck)
     })
 }
 
-pub fn has_def_type(cursor: crate::tree::Cursor) -> bool {
+pub fn has_def_type(cursor: Cursor) -> bool {
     def_type_of(cursor).is_some()
 }
 
-pub fn is_callable_def(cursor: crate::tree::Cursor) -> bool {
+pub fn is_callable_def(cursor: Cursor) -> bool {
     def_type_of(cursor).is_some_and(|k| k.is_callable())
 }
 
-pub fn is_scoped_def(cursor: crate::tree::Cursor) -> bool {
+pub fn is_scoped_def(cursor: Cursor) -> bool {
     def_type_of(cursor).is_some_and(|k| k.is_scoped())
 }
 
@@ -268,7 +270,6 @@ impl Canonical {
         if kind < CANONICAL_BASE {
             return None;
         }
-        use strum::IntoEnumIterator;
         Self::iter().find(|c| *c as u16 == kind)
     }
 }

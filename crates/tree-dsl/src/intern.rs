@@ -1,4 +1,7 @@
 use lasso::{Key, Spur, ThreadedRodeo};
+use strum::IntoEnumIterator;
+
+use crate::canonical::{self, CANONICAL_BASE, Canonical};
 
 pub struct Interner {
     rodeo: ThreadedRodeo,
@@ -123,19 +126,19 @@ impl Lang {
     }
 
     pub fn intern_kind(&self, s: &str) -> u16 {
-        if let Ok(ck) = s.parse::<crate::canonical::Canonical>() {
+        if let Ok(ck) = s.parse::<Canonical>() {
             return ck as u16;
         }
         let id = self.kinds.intern(s) as u16;
         debug_assert!(
-            id < crate::canonical::CANONICAL_BASE,
+            id < CANONICAL_BASE,
             "dynamic kind ID {id} collides with canonical range"
         );
         id
     }
 
     pub fn lookup_kind(&self, s: &str) -> u16 {
-        if let Ok(ck) = s.parse::<crate::canonical::Canonical>() {
+        if let Ok(ck) = s.parse::<Canonical>() {
             return ck as u16;
         }
         self.kinds.lookup(s) as u16
@@ -146,9 +149,8 @@ impl Lang {
     }
 
     pub fn kind_name(&self, k: u16) -> &str {
-        if crate::canonical::is_canonical(k) {
-            use strum::IntoEnumIterator;
-            for ck in crate::canonical::Canonical::iter() {
+        if canonical::is_canonical(k) {
+            for ck in Canonical::iter() {
                 if ck as u16 == k {
                     let s: &'static str = ck.into();
                     return s;
