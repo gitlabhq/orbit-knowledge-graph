@@ -3,6 +3,7 @@ use std::io::Write;
 use self::error::{EXIT_GENERIC, RemoteError};
 
 pub(crate) mod client;
+pub(crate) mod context;
 pub(crate) mod dsl;
 pub(crate) mod error;
 pub(crate) mod graph_status;

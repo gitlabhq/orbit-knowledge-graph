@@ -20,6 +20,41 @@ glab orbit query --response-format raw /tmp/q.json | jq '.'
 
 For the full field reference see [`query_language.md`](query_language.md).
 
+## Read entity context by database ID
+
+```shell
+glab orbit context MergeRequest:123 'Issue[999]'
+glab orbit context 'MergeRequest[123]' Issue:999 --response-format json
+```
+
+This sends one authenticated GET to `/api/v4/orbit/context` with repeated
+URL-encoded `refs[]` values. Both spellings normalize to `Type[ID]`. The IDs
+are database IDs, not the IIDs used in the query recipes below. `Issue` normalizes
+to `WorkItem` with the same numeric ID, without an IID lookup or extra call. Other
+Ontology nodes such as Project, User, and typed File refs also route remotely;
+unknown names and relationship names fail preflight. The API decides node support
+and access.
+
+JSON output has `version` and `entities`. Each entity has `ref`, `type`, `id`,
+and `found`, plus `summary` when found, or `error: not_found` when missing.
+Nested users carry `id`, `username`, and `name`; linked entities carry `ref`,
+`iid`, `project_path`, and `title`. The CLI preserves all fields and bytes.
+It does not fetch linked entities or perform client-side redaction.
+
+The default `llm` output is plain text beginning
+`orbit_context version=1.0.0 entities=...`, not GOON. Use `json`, not the query
+command's `raw`, for structured context output. An HTTP success with a
+per-entity `found:false` stays a successful CLI response.
+
+Mix remote refs with local Definition refs OR one file. `--repo` and `--db` apply
+only to the local subset; `--tests` remains definition-only. Remote-only calls
+need no checkout or database and reject these local flags. Mixed output is local
+text, a separator, then unchanged remote bytes: composite text even with remote
+JSON. Remote-only JSON is a whole JSON payload. Local-only calls reject
+`--response-format`. A resolver failure exits nonzero without fallback; a remote
+failure can leave local text and the separator on stdout. Bare Definition refs
+stay local; scoped remote Definition resolution is not implemented.
+
 ## Look up a GitLab project's numeric ID
 
 Many filters (e.g. `project_id` on MergeRequest) need the numeric project ID.

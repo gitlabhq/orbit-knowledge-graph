@@ -12,8 +12,9 @@ description: >
   graph, or serve the local graph over MCP. For queries against already-indexed
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
-  for single-entity GitLab lookups or write operations use `glab`.
-version: 0.6.0
+  for remote Ontology node context use `orbit context` with a database ID.
+  For other single-entity GitLab lookups or write operations use `glab`.
+version: 0.7.0
 license: MIT
 metadata:
   audience: developers
@@ -74,7 +75,7 @@ wrapper flags, config keys, and pass-through rules:
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
 | `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions and print source for the top three, or list definitions under a path |
-| `orbit context <Definition:ID…\|FILE> [--tests]` | Read source and relationships for exact definitions, or one file; `--tests` expands hidden test connections |
+| `orbit context <TARGET…>` | Read local Definition references or one file; other Ontology node references route remotely, including in mixed batches |
 | `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
 | `orbit schema [TABLE…] [--raw]` | Describe graph tables/columns (index-storage tables hidden); scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
@@ -102,8 +103,39 @@ needed to locate a file, return to `context <path>` to read it. Built-in Read
 and shell reads are only for non-code or unavailable Orbit source. Never
 truncate Orbit output.
 
+`Definition[<id>]` also works locally. Quote bracket references in shells.
+Bare typed references take priority over same-named files, even with `--repo`.
+Use `./Issue[999]` or an absolute path to select local file context.
+Local file paths resolve from the Git root selected by `--repo`.
+
 `--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
 (`"Class|Method"`) also works. It is not repeatable.
+
+## Remote entity context
+
+```shell
+orbit context MergeRequest:123 'Issue[999]'
+orbit context 'MergeRequest[123]' Issue:999 --response-format json
+```
+
+Ontology node references other than bare Definition refs use the remote API,
+including Project, User, and typed File refs. `Issue` normalizes to `WorkItem`
+with the same database ID and no extra API call. IDs are database IDs, not
+project-scoped IIDs. Unknown node names and relationship names fail preflight;
+server support and access remain authoritative.
+
+Mix remote refs with local definitions OR one file. `--repo` and `--db` apply
+only to the local subset, and `--tests` is definition-only. Remote-only calls
+need no checkout or database and reject these unused local flags. Bare Definition
+refs stay local; scoped remote Definition resolution is not implemented.
+
+Remote `--response-format` accepts `llm` (default) or `json`. The CLI prints
+server bytes unchanged, including per-entity `found:false` results, without
+following links. Local-only output rejects `--response-format`. Mixed stdout is
+local text, a remote separator, then remote bytes: composite text even when the
+remote portion is JSON. Remote-only JSON remains a whole JSON payload. Either
+resolver failing exits nonzero without fallback; a remote failure can leave local
+text and the separator on stdout. The separate `query` command uses `raw|llm`.
 
 ## Quick start
 

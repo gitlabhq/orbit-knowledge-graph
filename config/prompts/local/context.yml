@@ -1,11 +1,33 @@
 name: context
-version: 1.3.0
-short: Read local definitions or one source file
+version: 1.4.0
+short: Read local source and remote entity context
 description: >-
-  Read local definitions or one source file.
+  Read local source and remote entity context, separately or in one batch.
 
 
-  Pass one or more `Definition:<id>` references from grep, or one existing file
-  path in the current checkout. Definition targets include source and relationships;
-  `--tests` expands hidden test connections. File targets show source and indexed
-  definitions once, without relationships.
+  Pass `Definition:<id>` references from grep for source and relationships, or one
+  file path for source and indexed definitions without relationships. The local
+  subset accepts definitions OR one file. `--repo` and `--db` select local storage;
+  `--tests` expands hidden test connections for definitions only.
+
+
+  Other Ontology node references, including typed File references, use the remote
+  context API. The CLI normalizes the `Issue` shorthand to `WorkItem` with the
+  same database ID, not an IID lookup. `Type:<id>` and `Type[<id>]` both work; quote brackets in shells.
+  Unknown node names and relationship names are rejected before any side effects.
+
+
+  The remote subset uses one authenticated GET. Remote-only calls need no local
+  checkout or database and reject `--repo`, `--db`, and `--tests`. Remote output is
+  unchanged server bytes: `--response-format llm` (default) or `json`. Local-only
+  calls retain their text output and reject `--response-format`. Mixed output is
+  local text followed by a remote separator and remote bytes: composite text even
+  when the remote portion is JSON. Remote-only JSON is a whole JSON payload.
+  Resolver failures exit nonzero without fallback; local output can precede a
+  remote failure.
+
+
+  Bare typed references take priority over same-named files, even with `--repo`.
+  Use an explicit path such as `./Issue[999]` or an absolute path to read locally.
+  Local file paths resolve from the Git root selected by `--repo`. Bare Definition
+  references stay local; scoped remote Definition resolution is not implemented.

@@ -16,6 +16,14 @@ fn serve_once(
     response_body: &'static str,
     content_type: &'static str,
 ) -> (String, thread::JoinHandle<CapturedRequest>) {
+    serve_response("200 OK", response_body, content_type)
+}
+
+fn serve_response(
+    status: &'static str,
+    response_body: &'static str,
+    content_type: &'static str,
+) -> (String, thread::JoinHandle<CapturedRequest>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("mock addr");
     let base_url = format!("http://{addr}");
@@ -55,7 +63,7 @@ fn serve_once(
         }
 
         let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
             response_body.len()
         );
         stream
@@ -99,13 +107,20 @@ fn accept_within(listener: &TcpListener, timeout: Duration) -> std::net::TcpStre
     }
 }
 
-fn run_orbit(base_url: &str, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_orbit"))
-        .args(args)
+fn orbit_command(base_url: &str) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_orbit"));
+    command
         .env("ORBIT_API_BASE_URL", base_url)
         .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
         .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
-        .env_remove("GITLAB_TOKEN")
+        .env("ORBIT_TELEMETRY_ENABLED", "false")
+        .env_remove("GITLAB_TOKEN");
+    command
+}
+
+fn run_orbit(base_url: &str, args: &[&str]) -> std::process::Output {
+    orbit_command(base_url)
+        .args(args)
         .output()
         .expect("run orbit binary")
 }
@@ -193,6 +208,7 @@ fn query_posts_envelope_with_resolved_response_format() {
             .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
             .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
             .env_remove("GITLAB_TOKEN")
+            .env("ORBIT_TELEMETRY_ENABLED", "false")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -250,4 +266,99 @@ fn http_403_exits_with_code_four() {
 
     assert_eq!(output.status.code(), Some(4));
     assert!(String::from_utf8_lossy(&output.stderr).contains("access denied"));
+}
+
+#[test]
+fn context_normalized_batch_preserves_bytes_and_404_does_not_fall_back() {
+    let response = "{\"entities\": [], \"future\": \"Café\"}\r\n";
+    for status in ["200 OK", "404 Not Found"] {
+        let (base_url, handle) = serve_response(status, response, "application/json");
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let output = orbit_command(&base_url)
+            .current_dir(dir.path())
+            .env("ORBIT_DATA_DIR", &data)
+            .args([
+                "context",
+                "MergeRequest:007",
+                "Issue[9]",
+                "Project:42",
+                "--response-format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        let request = handle.join().unwrap();
+        assert_eq!(
+            request.request_line,
+            "GET /api/v4/orbit/context?refs%5B%5D=MergeRequest%5B7%5D&refs%5B%5D=WorkItem%5B9%5D&refs%5B%5D=Project%5B42%5D&response_format=json HTTP/1.1"
+        );
+        assert_eq!(request.auth_header.as_deref(), Some("glpat-test"));
+        assert!(request.body.is_empty());
+        assert!(!data.exists());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if status == "200 OK" {
+            assert!(output.status.success(), "{stderr}");
+            assert_eq!(output.stdout, response.as_bytes());
+        } else {
+            assert_eq!(output.status.code(), Some(2), "{stderr}");
+            assert!(
+                stderr.contains("context endpoint returned HTTP 404"),
+                "{stderr}"
+            );
+            assert!(!stderr.contains("feature flag"), "{stderr}");
+            assert!(output.stdout.is_empty());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn context_preflight_rejects_bad_batches_before_storage_http_or_credentials() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let helper = dir.path().join("glab");
+    let marker = dir.path().join("called");
+    std::fs::write(&helper, "#!/bin/sh\nprintf called > \"$HELPER_MARKER\"\n").unwrap();
+    std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(dir.path().join("Issue[9]"), "local collision").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    for (targets, message) in [
+        (
+            ["Definition:2", "Issue[9]", "Project[bad]"],
+            "invalid context reference",
+        ),
+        (
+            ["Definition:2", "Issue[9]", "Issue[1/2]"],
+            "invalid context reference",
+        ),
+        (["Issue[9]", "--repo", "."], "local-only"),
+    ] {
+        for credential in ["glpat-test", ""] {
+            let output = orbit_command(&base_url)
+                .current_dir(dir.path())
+                .env("ORBIT_AUTH_HEADER_VALUE", credential)
+                .env("PATH", dir.path())
+                .env("HELPER_MARKER", &marker)
+                .env("ORBIT_DATA_DIR", dir.path().join("data"))
+                .env("ORBIT_TELEMETRY_ENABLED", "true")
+                .env("ORBIT_TELEMETRY_COLLECTOR_URL", &base_url)
+                .arg("context")
+                .args(targets)
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success());
+            assert!(stderr.contains(message), "{targets:?}: {stderr}");
+            assert!(output.stdout.is_empty());
+            assert!(!marker.exists());
+            assert!(!dir.path().join("data").exists());
+            assert_eq!(
+                listener.accept().unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+        }
+    }
 }

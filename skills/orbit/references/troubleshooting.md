@@ -58,6 +58,25 @@ Cause 1: the `knowledge_graph` feature flag is off for your user, so every endpo
 
 Cause 2: glab is older than v1.117.0 and does not know the flat `glab orbit` commands. Fix: check `glab --version` and upgrade.
 
+A remote `context` 404 does not establish that a feature flag is off. Check
+whether the instance supports `/api/v4/orbit/context` and whether you have access.
+The CLI does not fall back to local data after an HTTP or transport failure.
+An HTTP success containing `found:false` is a per-entity miss, not an endpoint
+error; the CLI prints it unchanged and exits successfully.
+
+For `context`, use Ontology node database IDs. `Issue` normalizes to `WorkItem`
+with the same ID; no IID lookup occurs. Unknown node or relationship names and
+malformed refs fail before telemetry, credentials, or storage. Mix local
+Definition refs OR one file with remote refs. Local flags apply only to that
+subset (`--tests` requires definitions); remote-only calls reject unused local
+flags and need no checkout or database. Bare Definition refs stay local; scoped
+remote Definition resolution is not implemented.
+
+Use `--response-format json`, not `raw`, for the remote portion. Mixed stdout is
+local text, a separator, then unchanged remote bytes, not one JSON document.
+Remote-only JSON remains a whole JSON payload. A remote error exits nonzero and
+can leave local text and the separator on stdout; there is no backend fallback.
+
 ## Exit 3: not authenticated
 
 Cause: missing or expired glab auth. Fix:

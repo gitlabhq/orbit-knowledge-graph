@@ -1218,8 +1218,8 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
     );
 }
 
-#[test]
-fn context_relationship_order_is_stable_across_overloads() {
+#[tokio::test(flavor = "multi_thread")]
+async fn context_relationship_order_is_stable_across_overloads() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
     let repo = workspace.path().join("repo");
@@ -1262,6 +1262,48 @@ fn context_relationship_order_is_stable_across_overloads() {
         let args = ["context", reference, "--repo", repo_arg];
         let (first, stderr, ok) = run_cmd(&args, dd);
         assert!(ok, "context {reference} failed: {stderr}");
+        if fqn == "Target.ping" {
+            let response = "{\"entities\": [{\"ref\": \"WorkItem[9]\"}]}\r\n";
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let app = axum::Router::new().route(
+                "/api/v4/orbit/context",
+                axum::routing::get(move || async move { response }),
+            );
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let unused_data = workspace.path().join("unused-data");
+            let output = orbit_cmd()
+                .env("ORBIT_TELEMETRY_ENABLED", "false")
+                .env("ORBIT_DATA_DIR", &unused_data)
+                .env("ORBIT_API_BASE_URL", base_url)
+                .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+                .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+                .args([
+                    "context",
+                    "Issue:9",
+                    reference,
+                    "--tests",
+                    "--repo",
+                    repo_arg,
+                    "--db",
+                    dd.join("graph.duckdb").to_str().unwrap(),
+                    "--response-format",
+                    "json",
+                ])
+                .output()
+                .unwrap();
+            server.abort();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                output.stdout,
+                format!("{first}\n--- Remote context ---\n{response}").as_bytes()
+            );
+            assert!(!unused_data.exists());
+        }
         assert!(
             first.find("public void ping() {}").unwrap() < first.find(section).unwrap(),
             "{first}"

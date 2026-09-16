@@ -15,11 +15,11 @@ Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still pre
 _Avoid_: using GKG in user-facing contexts
 
 **Orbit Remote**:
-The hosted Orbit service. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated. The flat `orbit` command tree reaches it with the `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` verbs.
+The hosted Orbit service. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated. The flat `orbit` command tree reaches it with `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status`. `context` also calls the remote API for Ontology node database-ID references other than bare Definition references.
 _Avoid_: "the server", "production GKG"
 
 **Orbit Local**:
-The local backend of the `orbit` binary: indexes a single repository into a DuckDB database for offline analysis, reached in the same flat command tree with the `index`, `grep`, `context`, `sql`, `schema`, `list`, `repo-map`, and `mcp` verbs. `glab orbit` installs the binary and forwards all verbs to it.
+The local backend of the `orbit` binary: indexes a single repository into a DuckDB database for offline analysis. The flat command tree exposes `index`, `grep`, `sql`, `schema`, `list`, `repo-map`, and `mcp`. `context` uses this backend for Definition references or one file path, and routes supported GitLab entity references remotely. `glab orbit` installs the binary and forwards all verbs to it.
 _Avoid_: "the CLI" (ambiguous — one binary serves both backends)
 
 ### Graph model
@@ -49,7 +49,7 @@ The YAML-defined schema of the property graph. Declares all **Node** types, **Re
 _Avoid_: schema (too generic), data model (refers to the broader design)
 
 **WorkItem**:
-The unified **Node** type for all trackable units of work — issues, epics, tasks, incidents, test cases, requirements, objectives, key results. Distinguished by the `work_item_type` property. There are no separate Issue or Epic node types.
+The unified **Node** type for all trackable units of work — issues, epics, tasks, incidents, test cases, requirements, objectives, key results. Distinguished by the `work_item_type` property. There are no separate Issue or Epic node types. For `context` input, the CLI accepts `Issue` as shorthand for WorkItem with the same database ID; graph queries still require WorkItem.
 _Avoid_: Issue, Epic (these are work item types, not separate graph entities)
 
 ### Graph partitions

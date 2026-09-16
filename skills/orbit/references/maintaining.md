@@ -36,19 +36,19 @@ then check the routing matches the expectations below. This is harness-agnostic:
 any agent runner that exposes skill descriptions to the model works.
 
 The sibling `glab` skill description used for routing is:
-`"GitLab workflow automation using glab CLI"`. Routing currently relies on
-orbit's deferral clause ("Do not use for single-entity…"); glab's description
-carries no counter-signal. Keep this in mind when evaluating borderline cases.
+`"GitLab workflow automation using glab CLI"`. Orbit's description defers most
+single-entity lookups without database IDs, but accepts Ontology node context by database ID.
+Keep this exception in mind when evaluating borderline cases.
 
-**Tie-break rule for boundary cases:** when a prompt names a **single known
-entity** (one MR, one project) but phrases the question relationally (e.g.
-"who reviewed MR !X?"), route to **glab** unless the question explicitly spans
-**multiple entities/projects** or requires a **group-by or multi-entity
-aggregation**. A simple single-entity count that `glab mr list | wc` can
-answer stays with glab; a group-by breakdown (e.g. "how many MRs per state")
-or a count that joins across entities needs Orbit. `glab mr view` and similar
-commands surface relationship metadata (reviewers, labels, pipelines) for a
-single entity without a graph query.
+**Tie-break rule for boundary cases:** route Ontology node context by
+known database ID to **orbit**, even for one entity. Use `orbit context` for
+these lookups; Issue normalizes to WorkItem without changing the ID. IIDs such as `!1216` and `#999` are not database IDs.
+
+Route IID lookups, diffs, writes, and single-entity kinds unsupported by
+`context` to **glab**. For example, "who reviewed MR !X?" stays with glab.
+Questions that span projects or require group-by or multi-entity aggregation
+need Orbit. A simple single-entity count that `glab mr list | wc` can answer
+stays with glab.
 
 ### Should fire orbit
 
@@ -60,6 +60,9 @@ single entity without a graph query.
 6. "How many MRs were merged per project in the gitlab-org group last month?"
 7. "Which projects depend on the gitlab-shell gem?"
 8. "Which MRs touched both app/models/user.rb and app/models/project.rb?"
+9. "Read context for MergeRequest database ID 123 and Issue database ID 999."
+10. "Read context for Issue database ID 999."
+11. "Read context for Project database ID 123 and User database ID 7."
 
 ### Should fire glab (not orbit)
 
@@ -71,3 +74,5 @@ single entity without a graph query.
 6. "Who are the reviewers on MR !1216?": single known entity, relationship metadata available via `glab mr view` (tie-break: glab)
 7. "What files did MR !1216 change?": single known entity, `glab mr diff` suffices (tie-break: glab)
 8. "How many open MRs are in gitlab-org/gitlab?": single-project count, `glab mr list | wc` suffices (tie-break: glab)
+9. "Show issue #999 in `gitlab-org/gitlab`": IID lookup (`glab issue view`)
+10. "Show project `gitlab-org/gitlab`": path lookup (`glab api projects/:fullpath`)

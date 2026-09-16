@@ -1,7 +1,7 @@
 ---
 name: orbit
-description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.27.0
+description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Use `context` for Ontology node database-ID lookups; use `glab` for other single-entity lookups or writes.
+version: 0.28.0
 license: MIT
 metadata:
   audience: developers
@@ -31,6 +31,38 @@ glab orbit ontology Project |
 Each `glab orbit query` has fixed per-call overhead. Prefer one `aggregation` query over N traversal queries for "how many X grouped by Y", and batch related lookups.
 
 When editing Orbit docs or skills, fence executable query JSON as `json orbit-query` so docs smoke tests run it.
+
+## Read entity context
+
+```shell
+glab orbit context MergeRequest:123 'Issue[999]'
+glab orbit context 'MergeRequest[123]' Issue:999 --response-format json
+```
+
+`context` routes Ontology node refs other than bare Definition refs remotely in
+one batch, including Project, User, and typed File refs. IDs are database IDs,
+not project-scoped IIDs. Both `Type:ID` and quoted `Type[ID]` work. The CLI accepts
+`Issue` as shorthand for `WorkItem`, preserving the same numeric ID with
+no extra lookup. Unknown node names and relationship names fail preflight;
+node support and access are server-authoritative.
+
+Remote output accepts `--response-format llm` (default) or `json`. The CLI
+prints server bytes unchanged, including per-entity misses, without following
+links. Remote-only calls need no checkout or database and reject `--tests`,
+`--repo`, and `--db`.
+
+Bare Definition refs and literal file paths stay local. Mix local definitions OR
+one file with remote refs; `--repo` and `--db` apply only to that local subset,
+and `--tests` remains definition-only. Local-only output is unchanged and rejects
+`--response-format`. Mixed stdout is local text, a remote separator, then remote
+bytes: composite text even when the remote portion is JSON. Remote-only JSON is
+a whole JSON payload. Either resolver failing exits nonzero without fallback;
+a remote failure can leave local text and the separator on stdout.
+
+A bare typed ref wins over a same-named file, even with `--repo`. Use
+`'./Issue[999]'` or an absolute path to read locally. `--repo` selects the Git root
+for local paths. Bare Definition misses stay local; scoped remote Definition
+resolution is not implemented.
 
 ## Running a query
 
@@ -76,7 +108,7 @@ Read the recipes before you construct a query. The same question often has one c
 - Pipelines for a merge request need the `source = "merge_request_event"` filter. See [the recipe](references/recipes.md#pipelines-that-ran-for-one-merge-request).
 - Prefer a single-node query when you can bound the target entity directly. Extra anchor nodes can change the row shape and skew `aggregation` counts.
 - File history needs `HAS_DIFF`, not `HAS_LATEST_DIFF`. See [the recipe](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
-- Issues, epics, tasks, and incidents are the `WorkItem` entity. There is no `Issue` node. See [the recipe](references/recipes.md#work-items-in-a-project).
+- Graph queries use `WorkItem` for issues, epics, tasks, and incidents. There is no `Issue` node; `context` alone accepts `Issue` as an input alias for `WorkItem`. See [the recipe](references/recipes.md#work-items-in-a-project).
 
 ## Iteration budget
 
@@ -92,7 +124,7 @@ For code-structure orientation before you plan a change, use `glab orbit repo-ma
 
 ## Managed CLI
 
-`glab orbit` downloads, verifies, and runs the Orbit binary from the `orbit-local` package (macOS, Linux, and Windows). The command selects the backend. `index`, `grep`, `context`, `sql`, `schema`, `list`, `mcp`, and `repo-map` use the local graph. `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` use Orbit Remote.
+`glab orbit` downloads, verifies, and runs the Orbit binary from the `orbit-local` package (macOS, Linux, and Windows). The command selects the backend. `index`, `grep`, `sql`, `schema`, `list`, `mcp`, and `repo-map` use the local graph. `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` use Orbit Remote. `context` selects local source or remote entity context from its targets.
 
 glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--install` and `--update` are mutually exclusive. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. `glab orbit --help` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
 

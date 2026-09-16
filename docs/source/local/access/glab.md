@@ -40,10 +40,13 @@ and configures supported AI agents.
 - `glab` 1.117 or later is installed.
 - A local Git repository to index.
 
-The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
-`mcp`, and `repo-map`) require no GitLab account or network connection once the
-binary is installed. Hosted verbs (`query`, `status`, `ontology`, `dsl`, `tools`,
-and `graph-status`) require an authenticated GitLab account and network access.
+The local-graph verbs (`index`, `grep`, `sql`, `schema`, `list`, `mcp`, and
+`repo-map`) require no GitLab account or network connection once the binary is
+installed. This also applies to local-only `context` with Definition references or a file.
+Hosted verbs (`query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status`)
+require an authenticated GitLab account and network access. Other Ontology node
+references use hosted [entity context](cli.md#read-source-or-entity-context),
+without a local repository for remote-only calls. Mixed calls use both backends.
 
 ## Install
 
@@ -152,7 +155,8 @@ with details on stderr. Scripts and agents can branch on success or failure.
 
 ## Billing
 
-The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
-`mcp`, and `repo-map`) process data locally and do not consume GitLab Credits.
-Hosted verbs require network access, and `query`
+The local-graph verbs (`index`, `grep`, `sql`, `schema`, `list`, `mcp`, and
+`repo-map`) process data locally and do not consume GitLab Credits. This also
+applies to the local Definition or file portion of `context`. Hosted verbs require network
+access, and `query`
 [consumes GitLab Credits](../../remote/access/glab.md#billing).

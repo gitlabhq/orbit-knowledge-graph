@@ -42,14 +42,27 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
     })
 }
 
-pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
-    let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
-    let (file, ids) = resolve_targets(&git.repo_path, &target.target)?;
+pub(crate) async fn run(target: crate::ContextArgs, targets: Targets) -> Result<()> {
+    if let Some(local) = targets.local {
+        run_local(&target, local)?;
+        if !targets.remote_refs.is_empty() {
+            println!("\n--- Remote context ---");
+        }
+    }
+    if !targets.remote_refs.is_empty() {
+        crate::remote::context::run(targets.remote_refs, target.response_format).await?;
+    }
+    Ok(())
+}
+
+fn run_local(target: &crate::ContextArgs, targets: LocalTargets) -> Result<()> {
+    let workspace::IndexedRepo { git, client } =
+        workspace::open_indexed(target.repo.clone(), target.db.clone())?;
+    let (file, ids) = match targets {
+        LocalTargets::File(path) => (Some(repo_relative(&git.repo_path, &path)?), Vec::new()),
+        LocalTargets::Definitions(ids) => (None, ids),
+    };
     let file_mode = file.is_some();
-    anyhow::ensure!(
-        !file_mode || !target.tests,
-        "--tests requires Definition:<id> targets"
-    );
     let hydrator = NodeHydrator::embedded("Definition")?;
     let nodes = if let Some(path) = file.as_deref() {
         let nodes = definitions_in_file(&client, &git, &hydrator, path)?;
@@ -144,30 +157,84 @@ pub(crate) fn render_bodies(
     Ok(out)
 }
 
-fn resolve_targets(
-    repo_path: &std::path::Path,
-    targets: &[String],
-) -> Result<(Option<String>, Vec<i64>)> {
-    if let [target] = targets
-        && repo_path.join(target).is_file()
-    {
-        return Ok((Some(repo_relative(repo_path, target)?), Vec::new()));
+#[derive(Debug, PartialEq)]
+pub(crate) struct Targets {
+    local: Option<LocalTargets>,
+    pub(crate) remote_refs: Vec<String>,
+}
+
+#[derive(Debug, PartialEq)]
+enum LocalTargets {
+    Definitions(Vec<i64>),
+    File(String),
+}
+
+pub(crate) fn classify(args: &crate::ContextArgs) -> Result<Targets> {
+    let ontology = ontology::Ontology::load_embedded()?;
+    let mut ids = Vec::new();
+    let mut refs = Vec::new();
+    let mut files = Vec::new();
+    for target in &args.target {
+        let delimiter = target.find([':', '[', ']']);
+        let path_prefix = target
+            .find(['/', '\\'])
+            .is_some_and(|separator| delimiter.is_none_or(|delimiter| separator < delimiter));
+        let windows_absolute = target
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+            && target.as_bytes().get(1) == Some(&b':')
+            && matches!(target.as_bytes().get(2), Some(b'/' | b'\\'));
+        if path_prefix || windows_absolute {
+            files.push(target.clone());
+            continue;
+        }
+        let Some(delimiter) = delimiter else {
+            files.push(target.clone());
+            continue;
+        };
+        let (kind, suffix) = target.split_at(delimiter);
+        let canonical = if kind == "Issue" { "WorkItem" } else { kind };
+        ontology.get_node(canonical).with_context(|| {
+            format!("unsupported context type {kind:?}; expected an ontology node name or Issue")
+        })?;
+        let id = suffix
+            .strip_prefix(':')
+            .or_else(|| suffix.strip_prefix('[').and_then(|id| id.strip_suffix(']')));
+        let id = id
+            .filter(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
+            .and_then(|id| id.parse::<i64>().ok())
+            .with_context(|| format!("invalid context reference {target:?}; expected {kind}:<id> or {kind}[<id>] with a non-negative 64-bit database ID"))?;
+        if canonical == "Definition" {
+            ids.push(id);
+        } else {
+            refs.push(format!("{canonical}[{id}]"));
+        }
     }
-    let ids = targets
-        .iter()
-        .map(|target| {
-            target
-                .strip_prefix("Definition:")
-                .and_then(|id| id.parse().ok())
-                .with_context(|| {
-                    format!(
-                        "{target:?} is not a Definition:<id> from `{} grep`; a file path is accepted only as the sole target",
-                        spec::launcher()
-                    )
-                })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok((None, ids))
+    anyhow::ensure!(
+        files.is_empty() || (files.len() == 1 && ids.is_empty()),
+        "a file path is accepted only as the sole local target"
+    );
+    let local = if let Some(file) = files.pop() {
+        anyhow::ensure!(!args.tests, "--tests requires Definition:<id> targets");
+        Some(LocalTargets::File(file))
+    } else if !ids.is_empty() {
+        Some(LocalTargets::Definitions(ids))
+    } else {
+        anyhow::ensure!(
+            !args.tests && args.repo.is_none() && args.db.is_none(),
+            "--tests, --repo, and --db are local-only options; remove them for remote-only entity context (use an explicit path for a local file)"
+        );
+        None
+    };
+    anyhow::ensure!(
+        !refs.is_empty() || args.response_format.is_none(),
+        "--response-format is only supported for remote entity context"
+    );
+    Ok(Targets {
+        local,
+        remote_refs: refs,
+    })
 }
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
@@ -357,20 +424,27 @@ mod tests {
     }
 
     #[test]
-    fn targets_resolve_definition_references_or_one_file() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join("src")).unwrap();
-        std::fs::write(root.path().join("src/lib.rs"), "").unwrap();
-        let repo = dunce::canonicalize(root.path()).unwrap();
+    fn targets_classify_definition_references_or_one_file() {
+        let classify_targets = |targets: &[&str]| {
+            classify(&crate::ContextArgs {
+                target: targets.iter().map(|target| (*target).into()).collect(),
+                response_format: None,
+                tests: false,
+                repo: None,
+                db: None,
+            })
+        };
         assert_eq!(
-            resolve_targets(&repo, &["src/lib.rs".into()]).unwrap(),
-            (Some("src/lib.rs".into()), Vec::new())
+            classify_targets(&["src/lib.rs"]).unwrap().local,
+            Some(LocalTargets::File("src/lib.rs".into()))
         );
+        let definitions = classify_targets(&["Definition:7", "Definition[9]"]).unwrap();
         assert_eq!(
-            resolve_targets(&repo, &["Definition:7".into(), "Definition:9".into()]).unwrap(),
-            (None, vec![7, 9])
+            definitions.local,
+            Some(LocalTargets::Definitions(vec![7, 9]))
         );
-        assert!(resolve_targets(&repo, &["Type::method".into()]).is_err());
+        assert!(definitions.remote_refs.is_empty());
+        assert!(classify_targets(&["Type::method"]).is_err());
     }
 
     #[test]

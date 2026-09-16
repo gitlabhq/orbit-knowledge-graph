@@ -17,6 +17,7 @@ const DSL_PATH: &str = "/api/v4/orbit/schema/dsl";
 const TOOLS_PATH: &str = "/api/v4/orbit/tools";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
 const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
+const CONTEXT_PATH: &str = "/api/v4/orbit/context";
 
 pub(crate) struct OrbitClient {
     endpoint: ResolvedEndpoint,
@@ -74,6 +75,22 @@ impl OrbitClient {
         params: &[(&str, String)],
     ) -> Result<Vec<u8>, RemoteError> {
         self.get_bytes(GRAPH_STATUS_PATH, params).await
+    }
+
+    pub(crate) async fn get_context(
+        &self,
+        params: &[(&str, String)],
+    ) -> Result<Vec<u8>, RemoteError> {
+        self.get_bytes(CONTEXT_PATH, params).await.map_err(|error| {
+            if error.exit_code == super::error::EXIT_UNAVAILABLE {
+                RemoteError::new(
+                    error.exit_code,
+                    "Orbit context endpoint returned HTTP 404; check that this instance supports /api/v4/orbit/context and that you have access",
+                )
+            } else {
+                error
+            }
+        })
     }
 
     pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {

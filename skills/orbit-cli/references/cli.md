@@ -67,12 +67,13 @@ glab config set orbit_local_binary_path /path/to/custom/orbit
 ## Binary subcommands and flags
 
 These belong to the `orbit` binary and are the same whether invoked directly or
-through `glab orbit`. Shared flag: `--db <PATH>` overrides the
-database (default `~/.orbit/graph.duckdb`).
+through `glab orbit`. Local commands accept `--db <PATH>` to override the
+database (default `~/.orbit/graph.duckdb`). Remote-only entity context rejects this flag; mixed calls apply it to the local subset.
 
 | Command | Flags |
 |---|---|
 | `index <PATH>` | `-t/--threads <N>` (0 = auto), `-s/--stats` (detailed timings), `-v/--verbose` (stderr logs), `--db` |
+| `context <TARGET…>` | Local Definition refs or one file: `--tests` (definitions only), `--repo`, `--db`. Other Ontology node refs (Issue normalizes to WorkItem, preserving the ID): `--response-format json\|llm` (default `llm`). Both `Type:ID` and quoted `Type[ID]` work; remote IDs are database IDs, not IIDs. Mixed batches apply local flags only to the local subset and emit local text, a separator, then unchanged remote bytes (composite text even with remote JSON). |
 | `sql [QUERY]` | positional `QUERY` or `-` for stdin, `-f/--file <PATH>`, `-F/--format table\|json\|ndjson\|csv` (default `table`), `--db` |
 | `schema [TABLE…]` | optional table names to scope output, `--raw` (JSON instead of table), `--db` |
 | `list` | `-F/--format …`, `--db` |

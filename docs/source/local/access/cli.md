@@ -22,7 +22,8 @@ title: Use GitLab Orbit Local with the GitLab Orbit CLI (`orbit`)
 {{< /history >}}
 
 The GitLab Orbit CLI (`orbit`) builds a code graph for any local repository and queries it
-against a local DuckDB file. No GitLab connection required.
+against a local DuckDB file. Local source commands need no GitLab connection.
+The same binary can read remote entity context from typed Ontology node references.
 
 ## Install
 
@@ -89,6 +90,80 @@ or worktree paths.
 | `--stats` | Include detailed statistics in the JSON output. |
 | `--verbose` | Verbose logging to stderr. |
 | `--db` | Override the DuckDB file path (default: `~/.orbit/graph.duckdb`). |
+
+## Read source or entity context
+
+Use `context` with Definition references from `orbit grep`, or with one source
+file in an indexed checkout:
+
+```shell
+orbit context Definition:481 'Definition[482]'
+orbit context src/lib.rs
+orbit context Definition:481 --tests
+```
+
+Definition targets include source and relationships. `--tests` includes test,
+fixture, and generated connections. A file target prints its source and indexed
+definitions without relationships. Use `--repo` to select a checkout, or `--db`
+to override its local database.
+
+Other Ontology node references select the remote context API:
+
+```shell
+orbit context MergeRequest:123 'Issue[999]'
+glab orbit context 'MergeRequest[123]' Issue:999 --response-format json
+```
+
+Both `Type:ID` and `Type[ID]` work. Quote bracket references to prevent shell
+expansion. Remote IDs are database IDs, not project-scoped IIDs such as `!123`
+or `#999`. The CLI accepts `Issue` as shorthand for `WorkItem`: both Issue
+spellings send `WorkItem[ID]` with the same database ID, without another API call.
+Other nodes such as Project, User, and typed File references also route remotely.
+Unknown node names and relationship names are rejected. Server support and
+access for each node remain authoritative.
+
+Remote context needs authentication and an instance that supports
+`GET /api/v4/orbit/context`, but remote-only calls need no checkout or local database. `glab orbit`
+forwards its credentials. Standalone `orbit` uses the existing credential
+environment, `GITLAB_TOKEN`, or the glab credential helper.
+
+The CLI sends one GET with repeated URL-encoded `refs[]` parameters. Remote
+`--response-format` accepts `llm` (default) or `json`. JSON contains `version`
+and `entities`, with each entity's `ref`, `type`, `id`, `found`, and `summary`
+or `error: not_found`. Text starts with `orbit_context version=1.0.0 entities=...`.
+The CLI prints bytes unchanged, including per-entity misses. It does not follow
+links or redact fields locally. The separate `query` command keeps `raw|llm`.
+
+Local and remote targets can be mixed:
+
+```shell
+orbit context Definition:481 'Issue[999]' Project:42 --repo . --tests
+orbit context src/lib.rs 'File[8]' User:7 --repo . --response-format json
+```
+
+The local subset must contain Definition references OR one file, not both.
+`--repo` and `--db` apply only to that subset; `--tests` remains definition-only.
+Remote-only calls reject these unused local options. `--response-format` controls
+only the remote portion; local-only calls retain their existing text output and
+reject that flag. Local text is emitted first, then `--- Remote context ---` on
+a separate line, then the unchanged remote bytes. Mixed stdout is composite
+text even with remote JSON; only remote-only JSON is a whole machine-readable
+JSON payload. Local ordering is unchanged, and remote refs retain their input
+order in the batch.
+
+Bare typed references take priority over same-named files, even with `--repo`.
+Use `'./Issue[999]'` or an absolute path to select local file context. Local paths
+resolve from the Git root, even when `--repo` points to a subdirectory.
+Malformed references, unknown types, and invalid batches fail before telemetry,
+credentials, requests, or local storage are opened. Either resolver failing exits
+nonzero, without retrying on another backend. Local resolution runs first: a
+local failure prevents the remote call; a remote failure can leave local text
+and the separator on stdout. A context HTTP 404 can mean the endpoint is
+unavailable; it does not prove that a feature flag is disabled.
+
+Bare Definition references remain local, with no remote fallback on a miss.
+Scoped remote Definition resolution requires a separate API contract and is not
+implemented by this command.
 
 ## Inspect the schema
 

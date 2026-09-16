@@ -232,7 +232,7 @@ fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
 
 fn context_target_help() -> String {
     format!(
-        "Definition:<id> references printed by `{} grep`, or one file path inside the current checkout. Repeat Definition references to read several definitions.",
+        "Definition:<id> references from `{} grep`, one local file path, and/or remote ontology Node:<id> database IDs. Issue normalizes to WorkItem. Type[<id>] is also accepted (quote it in shells).",
         commands::setup::spec::launcher()
     )
 }
@@ -251,6 +251,13 @@ fn sql_long_about() -> String {
 struct ContextArgs {
     #[arg(value_name = "TARGET", help = context_target_help(), required = true)]
     target: Vec<String>,
+
+    #[arg(
+        long,
+        value_enum,
+        help = "Remote entity response format (default: llm)"
+    )]
+    response_format: Option<remote::context::ResponseFormat>,
 
     /// Show relationships to test, fixture, and generated definitions.
     #[arg(long)]
@@ -450,16 +457,17 @@ enum Commands {
 }
 
 impl Commands {
-    fn targets_remote(&self) -> bool {
-        matches!(
-            self,
-            Commands::Query { .. }
-                | Commands::Status
-                | Commands::Ontology { .. }
-                | Commands::Dsl
-                | Commands::Tools
-                | Commands::GraphStatus { .. }
-        )
+    fn targets_remote(&self, context: Option<&commands::context::Targets>) -> bool {
+        context.is_some_and(|targets| !targets.remote_refs.is_empty())
+            || matches!(
+                self,
+                Commands::Query { .. }
+                    | Commands::Status
+                    | Commands::Ontology { .. }
+                    | Commands::Dsl
+                    | Commands::Tools
+                    | Commands::GraphStatus { .. }
+            )
     }
 }
 
@@ -492,6 +500,11 @@ async fn main() -> Result<()> {
     let matches = Cli::command().get_matches();
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
 
+    let context = match &cli.command {
+        Commands::Context(args) => Some(commands::context::classify(args)?),
+        _ => None,
+    };
+
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
 
     let tracker = telemetry::resolve_from_env().build_tracker();
@@ -499,7 +512,7 @@ async fn main() -> Result<()> {
         telemetry::emit_command_event(
             tracker,
             &subcommand_path(&matches),
-            cli.command.targets_remote(),
+            cli.command.targets_remote(context.as_ref()),
             coding_agent.as_deref(),
         );
         // One event never reaches labkit's batch threshold, so without this the
@@ -507,7 +520,7 @@ async fn main() -> Result<()> {
         tracker.flush();
     }
 
-    let result = dispatch(cli.command).await;
+    let result = dispatch(cli.command, context).await;
 
     flush_telemetry(tracker.as_ref()).await;
     if let Err(err) = &result
@@ -536,7 +549,7 @@ async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTrac
     }
 }
 
-async fn dispatch(command: Commands) -> Result<()> {
+async fn dispatch(command: Commands, context: Option<commands::context::Targets>) -> Result<()> {
     match command {
         Commands::Version => {
             println!("{}", env!("ORBIT_VERSION"));
@@ -585,7 +598,13 @@ async fn dispatch(command: Commands) -> Result<()> {
                 kinds: kind_names(kind),
             },
         ),
-        Commands::Context(args) => commands::context::run(args),
+        Commands::Context(args) => {
+            commands::context::run(
+                args,
+                context.expect("context was classified before telemetry"),
+            )
+            .await
+        }
         Commands::Sql(SqlArgs {
             query,
             file,
@@ -1121,7 +1140,10 @@ mod tests {
             &["orbit", "tools"],
             &["orbit", "graph-status", "--project-id", "1"],
         ] {
-            assert!(Cli::parse_from(argv).command.targets_remote(), "{argv:?}");
+            assert!(
+                Cli::parse_from(argv).command.targets_remote(None),
+                "{argv:?}"
+            );
         }
         for argv in [
             ["orbit", "grep", "x"].as_slice(),
@@ -1129,7 +1151,10 @@ mod tests {
             &["orbit", "sql", "SELECT 1"],
             &["orbit", "version"],
         ] {
-            assert!(!Cli::parse_from(argv).command.targets_remote(), "{argv:?}");
+            assert!(
+                !Cli::parse_from(argv).command.targets_remote(None),
+                "{argv:?}"
+            );
         }
     }
 
