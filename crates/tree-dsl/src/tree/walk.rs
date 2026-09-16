@@ -1,4 +1,4 @@
-use crate::canonical::Canonical;
+use crate::canonical::Canonical as C;
 
 use super::types::{Edge, EdgeKind, Tree};
 
@@ -65,7 +65,7 @@ impl<'a> Cursor<'a> {
     }
 
     #[inline]
-    pub fn is(self, ck: Canonical) -> bool {
+    pub fn is(self, ck: C) -> bool {
         self.kind() == ck
     }
 
@@ -192,15 +192,15 @@ impl<'a> Cursor<'a> {
         None
     }
 
-    pub fn child(self, ck: Canonical) -> Option<Self> {
+    pub fn child(self, ck: C) -> Option<Self> {
         self.children().find(|n| n.is(ck))
     }
 
-    pub fn child_sym(self, ck: Canonical) -> Option<u32> {
+    pub fn child_sym(self, ck: C) -> Option<u32> {
         self.child(ck).map(|n| n.sym()).filter(|&s| s != 0)
     }
 
-    pub fn has(self, ck: Canonical) -> bool {
+    pub fn has(self, ck: C) -> bool {
         self.children().any(|n| n.is(ck))
     }
 
@@ -224,8 +224,6 @@ impl<'a> Cursor<'a> {
         self.trees
     }
 }
-
-use crate::canonical::Canonical as C;
 
 /// Infer return type from annotation or body scan. Skips nested defs.
 pub fn infer_return_type(def: Cursor) -> Option<u32> {

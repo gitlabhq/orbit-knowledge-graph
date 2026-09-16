@@ -3,6 +3,7 @@
 
 use rustc_hash::FxHashMap;
 
+use crate::canonical::Canonical as C;
 use crate::lang::Lang;
 use crate::pattern;
 use crate::rules::{DisplaySource, ParseFileSpec, ParseFormat, ResolveConfig, ResolveStage};
@@ -58,11 +59,6 @@ fn build_file_tree(
     lang: &Lang,
     parse_files: &[ParseFileSpec],
 ) -> Tree {
-    use crate::canonical::Canonical as C;
-    let root_kind: u16 = C::Root.into();
-    let dir_kind: u16 = C::Dir.into();
-    let file_kind: u16 = C::File.into();
-
     let file_contents: FxHashMap<&str, &str> = files
         .iter()
         .map(|(p, c)| (p.as_str(), c.as_str()))
@@ -92,7 +88,7 @@ fn build_file_tree(
     }
 
     let mut tree = Tree::new(Node {
-        kind: root_kind,
+        kind: C::Root.into(),
         named: true,
         ..Default::default()
     });
@@ -105,14 +101,13 @@ fn build_file_tree(
         parse_files: &[ParseFileSpec],
         tree: &mut Tree,
         lang: &Lang,
-        dir_kind: u16,
-        file_kind: u16,
     ) {
+        use crate::canonical::Canonical as C;
         let Some(kids) = children_map.get(parent_path) else {
             return;
         };
         for (segment, is_file) in kids {
-            let kind = if *is_file { file_kind } else { dir_kind };
+            let kind: u16 = if *is_file { C::File } else { C::Dir }.into();
             let sym = lang.syms.intern(segment);
             let nid = tree.append(
                 parent_nid,
@@ -148,8 +143,6 @@ fn build_file_tree(
                     parse_files,
                     tree,
                     lang,
-                    dir_kind,
-                    file_kind,
                 );
             }
         }
@@ -163,8 +156,6 @@ fn build_file_tree(
         parse_files,
         &mut tree,
         lang,
-        dir_kind,
-        file_kind,
     );
 
     tree
@@ -212,8 +203,6 @@ fn emit_json_value(
     tree: &mut Tree,
     lang: &Lang,
 ) {
-    use crate::canonical::Canonical as C;
-
     match val {
         serde_json::Value::Object(map) => {
             let obj = tree.append(
@@ -325,10 +314,9 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
     if markers.is_empty() {
         return vec![];
     }
-    let root_node_kind: u16 = crate::canonical::Canonical::Root.into();
     let mut paths = Vec::new();
     for cursor in tree.root().descendants() {
-        if cursor.kind() == root_node_kind {
+        if cursor.is(C::Root) {
             continue;
         }
         if cursor.children().any(|c| markers.contains(&c.kind())) {
@@ -343,12 +331,10 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
 
 /// Reconstruct the full path of a directory node by walking up parent pointers.
 fn node_path(cursor: crate::tree::Cursor, lang: &Lang) -> String {
-    let dir_kind: u16 = crate::canonical::Canonical::Dir.into();
-    let root_kind: u16 = crate::canonical::Canonical::Root.into();
     let mut parts: Vec<String> = std::iter::once(cursor)
         .chain(cursor.ancestors())
-        .take_while(|n| n.kind() != root_kind)
-        .filter(|n| n.kind() == dir_kind && n.sym() != 0)
+        .take_while(|n| !n.is(C::Root))
+        .filter(|n| n.is(C::Dir) && n.sym() != 0)
         .map(|n| lang.syms.resolve(n.sym()).to_string())
         .collect();
     parts.reverse();
@@ -357,13 +343,9 @@ fn node_path(cursor: crate::tree::Cursor, lang: &Lang) -> String {
 
 /// Collect paths of directories marked `__package` by the resolve rules.
 fn collect_packages(tree: &Tree, lang: &Lang) -> Vec<String> {
-    let pkg_kind: u16 = crate::canonical::Canonical::Package.into();
-    if pkg_kind == 0 {
-        return vec![];
-    }
     let mut pkgs = Vec::new();
     for cursor in tree.root().descendants() {
-        if cursor.children().any(|c| c.kind() == pkg_kind) {
+        if cursor.children().any(|c| c.is(C::Package)) {
             pkgs.push(node_path(cursor, lang));
         }
     }
