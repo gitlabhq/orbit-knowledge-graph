@@ -435,8 +435,13 @@ value. Presets are defined in `tests/scenarios/presets/`.
 | `presets/redaction.yaml` | `allow_all` (permits all seeded entity IDs) | Named redaction configs |
 | `presets/seed.yaml` | — | Named extra seed data |
 
-When `config.security` or `config.redaction` is omitted, the default preset applies.
-To reference a preset by name: `security: admin_user`. To inline: provide the struct fields directly.
+When `config.redaction` is omitted, the `allow_all` preset is loaded from the file.
+When `config.security` is omitted, the harness uses a hardcoded fallback
+(`org_id: 1`, `paths: ["1/"]`, Reporter access) without reading the preset file.
+Writing `security: default` explicitly reads the `default` entry from
+`presets/security.yaml`, which happens to match today but is not guaranteed to stay
+in sync. To reference a preset by name: `security: admin`. To inline: provide the
+struct fields directly.
 
 ### Running scenarios
 
