@@ -132,9 +132,11 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     };
 
     let mut client = crate::sql::open_graph(Some(db.clone()))?;
-    if indexed_count(&client)? == 0 {
+    if stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() != Some(CODE_INDEX_REVISION)
+        || indexed_count(&client)? == 0
+    {
         eprintln!(
-            "current commit {} is not indexed — indexing {} first",
+            "current commit {} needs indexing — indexing {} first",
             git.short_sha(),
             git.repo_path.display()
         );
@@ -163,10 +165,14 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
 }
 
 const LOCAL_DDL_META_KEY: &str = "local_ddl";
+const CODE_INDEX_META_KEY: &str = "code_index_revision";
+const CODE_INDEX_REVISION: &str = "1";
 
 pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     let client = DuckDbClient::open(db_path).context("failed to open DuckDB")?;
-    if stored_local_ddl(&client)?.as_deref() == Some(ddl) {
+    if stored_meta(&client, LOCAL_DDL_META_KEY)?.as_deref() == Some(ddl)
+        && stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() == Some(CODE_INDEX_REVISION)
+    {
         return Ok(());
     }
     let had_data = table_exists(&client, "_orbit_manifest")?;
@@ -174,7 +180,7 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
 
     if had_data {
         tracing::warn!(
-            "local graph schema changed; rebuilding {} (previously indexed repositories must be re-indexed)",
+            "local graph schema or code index changed; rebuilding {} (previously indexed repositories must be re-indexed)",
             db_path.display()
         );
     }
@@ -186,21 +192,26 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
         .context("failed to create schema")?;
     client
         .execute(
-            "INSERT INTO _orbit_meta (key, value) VALUES (?1, ?2)",
-            &[json!(LOCAL_DDL_META_KEY), json!(ddl)],
+            "INSERT INTO _orbit_meta (key, value) VALUES (?1, ?2), (?3, ?4)",
+            &[
+                json!(LOCAL_DDL_META_KEY),
+                json!(ddl),
+                json!(CODE_INDEX_META_KEY),
+                json!(CODE_INDEX_REVISION),
+            ],
         )
         .context("failed to record schema fingerprint")?;
     Ok(())
 }
 
-fn stored_local_ddl(client: &DuckDbClient) -> Result<Option<String>> {
+fn stored_meta(client: &DuckDbClient, key: &str) -> Result<Option<String>> {
     if !table_exists(client, "_orbit_meta")? {
         return Ok(None);
     }
     let batches = client
         .query_arrow_json(
             "SELECT value FROM _orbit_meta WHERE key = ?1",
-            &[json!(LOCAL_DDL_META_KEY)],
+            &[json!(key)],
         )
         .context("failed to read _orbit_meta")?;
     Ok(duckdb_client::string_column(&batches, "value")
@@ -548,6 +559,29 @@ mod tests {
             .downcast_ref::<arrow::array::Int64Array>()
             .unwrap();
         assert_eq!(count.value(0), 1);
+        client
+            .execute(
+                "UPDATE _orbit_meta SET value = 'old' WHERE key = ?1",
+                &[json!(CODE_INDEX_META_KEY)],
+            )
+            .unwrap();
+        drop(client);
+        ensure_graph_schema(&db, LOCAL_DDL).unwrap();
+        let client = DuckDbClient::open(&db).unwrap();
+        assert_eq!(
+            duckdb_client::scalar_i64(
+                &client
+                    .query_arrow("SELECT count(*) FROM _orbit_manifest")
+                    .unwrap()
+            ),
+            0
+        );
+        assert_eq!(
+            stored_meta(&client, CODE_INDEX_META_KEY)
+                .unwrap()
+                .as_deref(),
+            Some(CODE_INDEX_REVISION)
+        );
     }
 
     #[test]
@@ -564,7 +598,7 @@ mod tests {
         assert!(!table_exists(&client, "old_table").unwrap());
         assert!(table_exists(&client, "gl_definition").unwrap());
         assert_eq!(
-            stored_local_ddl(&client).unwrap().as_deref(),
+            stored_meta(&client, LOCAL_DDL_META_KEY).unwrap().as_deref(),
             Some(LOCAL_DDL)
         );
     }

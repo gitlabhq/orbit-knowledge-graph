@@ -232,6 +232,16 @@ A declaration's display range does not define its lexical scope.
 Module-level external calls keep File endpoints; callable-level calls keep
 Definition endpoints.
 
+Orbit Local stores `code_index_revision` alongside `local_ddl` in `_orbit_meta`.
+A missing or changed revision uses the existing DDL rebuild path to replace
+the shared derived DuckDB graph. This invalidates every repo in that database
+once, even when their commits have not changed. `context` and `grep` index the
+requested checkout before serving source; other repos need re-indexing when used.
+The rebuild closes its DuckDB connection before file replacement. This path
+does not hold a global lock across replacement and recreation.
+The code-index revision is local-only and does not change Orbit Remote schema
+versions.
+
 ##### Inventory-driven indexing pipeline
 
 The indexing pipeline uses a repository inventory as the single file list. Pipeline callers must provide the inventory; the parser grouping, structural graph, and stats all derive from that same list. The stages are:
