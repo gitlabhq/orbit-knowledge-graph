@@ -36,8 +36,7 @@ start
 :Assert versions.yaml is still valid YAML;
 
 |cargo build|
-:Embed **versions.yaml** at compile time\n(orbit_versions::VERSIONS);
-:Run **Versions::validate()**\nHex format, path sanity, structural checks;
+:Embed **versions.yaml** at compile time\n(orbit_versions::VERSIONS, deny_unknown_fields);
 :Run **build.rs**;
 
 |build.rs|
@@ -139,15 +138,18 @@ invokes the script with standardized environment variables.
 
 ## Validation layers
 
-1. **Compile time.** `orbit_versions::Versions` deserializes with
-   `deny_unknown_fields`. `Versions::validate()` checks hex format, path
-   sanity, and structural invariants.
-2. **Build time.** `crates/duckdb-client/build.rs` asserts Cargo.lock matches
+1. **Schema validation.** `config/schemas/versions.schema.json` enforces key
+   patterns, hex lengths, path restrictions, script prefix, and structural
+   constraints. Validated in CI (`versions-schema-validate`) and locally
+   (`mise versions:validate`).
+2. **Compile time.** `orbit_versions::Versions` deserializes with
+   `deny_unknown_fields`, catching structural drift.
+3. **Build time.** `crates/duckdb-client/build.rs` asserts Cargo.lock matches
    the version pin, verifies archive checksums, and checks platform coverage.
-3. **Runner time.** `scripts/vendored/run.sh` validates preconditions (script
+4. **Runner time.** `scripts/vendored/run.sh` validates preconditions (script
    exists, YAML parses) and postconditions (vendor_dir non-empty, YAML still
    valid, check_script did not modify the file).
-4. **CI time.** The `duckdb-fts-sources-sync-check` job re-vendors the archive
+5. **CI time.** The `duckdb-fts-sources-sync-check` job re-vendors the archive
    from upstream and byte-compares it against the committed artifact.
 
 ## Operator workflows
