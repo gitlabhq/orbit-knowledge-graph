@@ -87,6 +87,18 @@ pub enum Canonical {
     #[strum(serialize = "__bool")]
     ConfigBool,
 
+    // ── File tree ──
+    #[strum(serialize = "__root")]
+    Root,
+    #[strum(serialize = "__dir")]
+    Dir,
+    #[strum(serialize = "__file")]
+    File,
+    #[strum(serialize = "__package")]
+    Package,
+    #[strum(serialize = "__source_root")]
+    SourceRoot,
+
     // ── Def-type kinds ──
     #[strum(
         serialize = "__function",

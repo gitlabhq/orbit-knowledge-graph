@@ -58,9 +58,10 @@ fn build_file_tree(
     lang: &Lang,
     parse_files: &[ParseFileSpec],
 ) -> Tree {
-    let root_kind = lang.intern_kind("__root");
-    let dir_kind = lang.intern_kind("__dir");
-    let file_kind = lang.intern_kind("__file");
+    use crate::canonical::Canonical as C;
+    let root_kind: u16 = C::Root.into();
+    let dir_kind: u16 = C::Dir.into();
+    let file_kind: u16 = C::File.into();
 
     let file_contents: FxHashMap<&str, &str> = files
         .iter()
@@ -324,7 +325,7 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
     if markers.is_empty() {
         return vec![];
     }
-    let root_node_kind = lang.lookup_kind("__root");
+    let root_node_kind: u16 = crate::canonical::Canonical::Root.into();
     let mut paths = Vec::new();
     for cursor in tree.root().descendants() {
         if cursor.kind() == root_node_kind {
@@ -342,8 +343,8 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
 
 /// Reconstruct the full path of a directory node by walking up parent pointers.
 fn node_path(cursor: crate::tree::Cursor, lang: &Lang) -> String {
-    let dir_kind = lang.lookup_kind("__dir");
-    let root_kind = lang.lookup_kind("__root");
+    let dir_kind: u16 = crate::canonical::Canonical::Dir.into();
+    let root_kind: u16 = crate::canonical::Canonical::Root.into();
     let mut parts: Vec<String> = std::iter::once(cursor)
         .chain(cursor.ancestors())
         .take_while(|n| n.kind() != root_kind)
@@ -356,7 +357,7 @@ fn node_path(cursor: crate::tree::Cursor, lang: &Lang) -> String {
 
 /// Collect paths of directories marked `__package` by the resolve rules.
 fn collect_packages(tree: &Tree, lang: &Lang) -> Vec<String> {
-    let pkg_kind = lang.lookup_kind("__package");
+    let pkg_kind: u16 = crate::canonical::Canonical::Package.into();
     if pkg_kind == 0 {
         return vec![];
     }
