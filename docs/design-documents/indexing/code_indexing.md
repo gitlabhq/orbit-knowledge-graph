@@ -223,6 +223,15 @@ For each file, the parser extracts three categories of information:
 For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path, plus export-member definitions. These let several constructs reuse the same nested and member resolution machinery as other v2 definitions. The constructs are namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation. They do this without exposing a magic synthetic prefix as the user-facing identity.
 A second OXC-driven pass records invocation sites, including React and Next.js JSX/TSX component usages. It feeds local bindings through the shared SSA engine. It resolves intrafile targets through the generic v2 `FileResolver`. It leaves JS-specific cross-file import and module resolution in the custom JS resolver layer. An imported call sometimes cannot resolve to a repository-local definition. Then the graph preserves the call as a `Definition` to `ImportedSymbol` `CALLS` edge, instead of dropping the call site.
 
+JavaScript and TypeScript definition ranges cover full AST declarations and
+method bodies. OXC symbol IDs still identify bindings for value flow and FQNs.
+Imported bindings carry the originating import's byte offset through captures,
+aliases, and fallback resolution. OXC symbol lookup selects the binding;
+its import offset identifies the exact ImportedSymbol, including shadowed requires.
+A declaration's display range does not define its lexical scope.
+Module-level external calls keep File endpoints; callable-level calls keep
+Definition endpoints.
+
 ##### Inventory-driven indexing pipeline
 
 The indexing pipeline uses a repository inventory as the single file list. Pipeline callers must provide the inventory; the parser grouping, structural graph, and stats all derive from that same list. The stages are:

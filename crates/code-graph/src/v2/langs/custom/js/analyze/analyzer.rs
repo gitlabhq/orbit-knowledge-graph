@@ -38,7 +38,6 @@ impl LineTable {
     }
 
     fn offset_to_line_col(&self, offset: usize) -> (usize, usize) {
-        let offset = offset.min(self.0.last().copied().unwrap_or(0) + 1);
         let line = self.0.partition_point(|&s| s <= offset).saturating_sub(1);
         (line, offset.saturating_sub(self.0[line]))
     }
@@ -264,8 +263,7 @@ fn extract_class_members(
     let mut member_defs = Vec::new();
     let mut classes = Vec::new();
 
-    for (class_id, elements) in class_table.elements.iter_enumerated() {
-        let class_node_id = class_table.declarations[class_id];
+    for class_node_id in class_table.declarations.iter().copied() {
         let (class_name, extends, class_ast) = match ctx.nodes.kind(class_node_id) {
             AstKind::Class(c) => {
                 let name = c.id.as_ref().map(|id| id.name.to_string());
@@ -298,27 +296,18 @@ fn extract_class_members(
             invocation_support: Some(JsInvocationSupport::function()),
         };
 
-        for element in elements.iter() {
-            if !element.kind.is_method() {
-                continue;
-            }
-
-            member_defs.push(make_method(
-                element.name.to_string(),
-                ctx.lt.span_to_range(element.span),
-                element.r#static,
-            ));
-        }
-
-        // OXC skips abstract methods during class table construction (body is None →
-        // is_typescript_syntax()), so walk the raw AST class body to catch them.
-        // `static abstract` is illegal in TypeScript (TS1243), so `r#static` is
-        // always false here; it flows through make_method for symmetry only.
         for element in &class_ast.body.body {
             if let oxc::ast::ast::ClassElement::MethodDefinition(method) = element
-                && method.r#type == oxc::ast::ast::MethodDefinitionType::TSAbstractMethodDefinition
                 && !method.kind.is_constructor()
-                && let Some(method_name) = method.key.static_name()
+                && let Some(method_name) = if method.r#type
+                    == oxc::ast::ast::MethodDefinitionType::TSAbstractMethodDefinition
+                {
+                    method.key.static_name()
+                } else if !method.value.is_typescript_syntax() {
+                    method.key.name()
+                } else {
+                    None
+                }
             {
                 member_defs.push(make_method(
                     method_name.to_string(),
@@ -412,7 +401,7 @@ fn collect_symbol_data(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> SymbolE
 
         let decl_node_id = ctx.scoping.symbol_declaration(symbol_id);
         let name = ctx.scoping.symbol_name(symbol_id).to_string();
-        let range = ctx.lt.span_to_range(ctx.scoping.symbol_span(symbol_id));
+        let range = ctx.lt.span_to_range(ctx.nodes.kind(decl_node_id).span());
         let invocation_support = invocation_support_for_symbol(flags, ctx.nodes, decl_node_id);
 
         if let Some(invocation_support) = invocation_support {
