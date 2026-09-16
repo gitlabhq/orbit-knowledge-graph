@@ -553,16 +553,6 @@ pub(crate) fn materialize(
     }
 }
 
-fn import_subtree(from: &Tree, id: NodeId, to: &mut Tree) -> NodeId {
-    let children: Vec<NodeId> = id.children(&from.arena).collect();
-    let new_id = to.arena.new_node(*from.node(id));
-    for child in children {
-        let imported = import_subtree(from, child, to);
-        new_id.append(imported, &mut to.arena);
-    }
-    new_id
-}
-
 pub fn apply_rewrites(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
     let mut caps: Vec<Cap> = (0..max_slots).map(|_| Cap::Empty).collect();
@@ -628,7 +618,7 @@ pub fn apply_rewrites(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
             let replacement_roots: Vec<NodeId> = staging.root.children(&staging.arena).collect();
             let mut moved: Vec<NodeId> = Vec::with_capacity(replacement_roots.len());
             for child in replacement_roots {
-                let imported = import_subtree(&staging, child, t);
+                let imported = t.clone_subtree_from(&staging, child, None);
                 moved.push(imported);
             }
 
