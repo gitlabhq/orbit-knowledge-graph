@@ -12,8 +12,14 @@ set -euo pipefail
 #   scripts/vendored/run.sh vendor --all
 #   scripts/vendored/run.sh check  --all
 
+# run.sh always lives at scripts/vendored/run.sh in the repo.
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 VERSIONS_FILE="$REPO_ROOT/config/versions.yaml"
+
+if [[ ! -f "$VERSIONS_FILE" ]]; then
+    echo "Cannot find $VERSIONS_FILE — run this script from the repo root or scripts/vendored/" >&2
+    exit 1
+fi
 
 resolve_mode() {
     case "$1" in
