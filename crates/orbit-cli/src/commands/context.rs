@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
@@ -7,10 +7,9 @@ use duckdb_client::search::{NodeHydrator, NodeValue};
 use crate::commands::{definition, relations, setup::spec};
 use crate::workspace;
 
-const SIGNATURE_LINES: usize = 3;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceRange {
+    pub(crate) id: i64,
     pub(crate) fqn: String,
     pub(crate) kind: String,
     pub(crate) file: String,
@@ -34,6 +33,7 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
             .context("node has an invalid source property")
     };
     Ok(SourceRange {
+        id: node.id,
         fqn: string("fqn")?,
         kind: string("definition_type")?,
         file: string("file_path")?,
@@ -44,27 +44,26 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
 
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
-    let (file, ids) = resolve_targets(&git.repo_path, &target.target)?;
-    let file_mode = file.is_some();
+    let (files, ids) = resolve_targets(&git.repo_path, &target.target)?;
     anyhow::ensure!(
-        !file_mode || !target.tests,
+        !target.tests || !ids.is_empty(),
         "--tests requires Definition:<id> targets"
     );
     let hydrator = NodeHydrator::embedded("Definition")?;
-    let nodes = if let Some(path) = file.as_deref() {
-        let nodes = definitions_in_file(&client, &git, &hydrator, path)?;
-        if nodes.is_empty() {
-            let launcher = spec::launcher();
-            anyhow::bail!(
-                "no indexed definitions in {path:?} for commit {} — run `{launcher} grep` or index the checkout",
-                git.commit_sha
-            );
-        }
-        nodes
+    let nodes = if ids.is_empty() {
+        Vec::new()
     } else {
         definition::resolve_ids(&client, &git, &hydrator, &ids)?
     };
     let mut defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
+    for path in &files {
+        defs.extend(
+            definitions_in_file(&client, &git, &hydrator, path)?
+                .iter()
+                .map(source_range)
+                .collect::<Result<Vec<_>>>()?,
+        );
+    }
     defs.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
@@ -74,29 +73,42 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     });
     defs.dedup();
 
+    let mut grouped = outline(&defs);
+    for file in &files {
+        grouped.entry(file.clone()).or_default();
+    }
     let mut out = String::new();
-    for (file, file_defs) in outline(&defs) {
-        let content = std::fs::read_to_string(git.repo_path.join(&file))
+    for (file, file_defs) in grouped {
+        let path = repo_relative(&git.repo_path, &file)?;
+        let content = std::fs::read_to_string(git.repo_path.join(path))
             .with_context(|| format!("failed to read {file}"))?;
         let lines: Vec<&str> = content.lines().collect();
         if !out.is_empty() {
             out.push('\n');
         }
-        if file_mode {
+        if files.contains(&file) {
             writeln!(
                 out,
                 "{file}  ({} definitions, {} lines)",
                 file_defs.len(),
                 lines.len()
             )?;
+            render(&mut out, &file_defs, &lines, true)?;
+        } else {
+            render(&mut out, &file_defs, &lines, false)?;
         }
-        render(&mut out, &file_defs, &lines, file_mode)?;
+    }
+    if !nodes.is_empty() {
+        out.push('\n');
+        out.push_str(&relations::render(
+            &client,
+            &git,
+            &hydrator,
+            &nodes,
+            target.tests,
+        )?);
     }
     print!("{out}");
-    if !file_mode {
-        println!();
-        relations::print(&client, &git, &hydrator, &nodes, target.tests)?;
-    }
     Ok(())
 }
 
@@ -108,18 +120,19 @@ pub(crate) fn render_bodies(
     nodes: &[NodeValue],
 ) -> Result<String> {
     let defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
-    let hydrator = defs
-        .iter()
-        .any(|def| def.end.saturating_sub(def.start) >= INLINE_BODY_LINES)
-        .then(|| NodeHydrator::embedded("Definition"))
-        .transpose()?;
+    let hydrator = NodeHydrator::embedded("Definition")?;
     let mut files = BTreeMap::new();
+    let mut shown = BTreeSet::new();
+    let mut remaining = INLINE_BODY_LINES;
     let mut out = String::new();
     for def in &defs {
         let content = match files.entry(def.file.clone()) {
             std::collections::btree_map::Entry::Vacant(entry) => entry.insert(
-                std::fs::read_to_string(git.repo_path.join(&def.file))
-                    .with_context(|| format!("failed to read {}", def.file))?,
+                std::fs::read_to_string(
+                    git.repo_path
+                        .join(repo_relative(&git.repo_path, &def.file)?),
+                )
+                .with_context(|| format!("failed to read {}", def.file))?,
             ),
             std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
         };
@@ -127,18 +140,36 @@ pub(crate) fn render_bodies(
         if !out.is_empty() {
             out.push('\n');
         }
-        if def.end.saturating_sub(def.start) < INLINE_BODY_LINES {
-            render(&mut out, std::slice::from_ref(def), &lines, false)?;
+        let uncovered: Vec<_> = (def.start..=def.end.min(lines.len()))
+            .filter(|line| !shown.contains(&(def.file.clone(), *line)))
+            .collect();
+        if uncovered.len() <= remaining && def.end.saturating_sub(def.start) < INLINE_BODY_LINES {
+            writeln!(
+                out,
+                "Definition:{}  {}  [{}]  {}:{}-{}",
+                def.id, def.fqn, def.kind, def.file, def.start, def.end
+            )?;
+            if uncovered.len() < def.end.saturating_sub(def.start) + 1 {
+                writeln!(out, "Overlapping source already shown above.")?;
+            }
+            remaining -= uncovered.len();
+            for line in uncovered {
+                write_lines(&mut out, &lines, line, line)?;
+                shown.insert((def.file.clone(), line));
+            }
         } else {
-            let hydrator = hydrator
-                .as_ref()
-                .context("definition hydrator unavailable")?;
-            let members = definitions_in_file(client, git, hydrator, &def.file)?;
+            let members = definitions_in_file(client, git, &hydrator, &def.file)?;
             let members = members
                 .iter()
                 .map(source_range)
                 .collect::<Result<Vec<_>>>()?;
-            render_outline(&mut out, std::slice::from_ref(def), &members, &lines)?;
+            render_outline(&mut out, std::slice::from_ref(def), &members)?;
+            writeln!(
+                out,
+                "Body omitted; run `{} context Definition:{}` for complete source and relationships.",
+                spec::launcher(),
+                def.id
+            )?;
         }
     }
     Ok(out)
@@ -147,32 +178,33 @@ pub(crate) fn render_bodies(
 fn resolve_targets(
     repo_path: &std::path::Path,
     targets: &[String],
-) -> Result<(Option<String>, Vec<i64>)> {
-    if let [target] = targets
-        && repo_path.join(target).is_file()
-    {
-        return Ok((Some(repo_relative(repo_path, target)?), Vec::new()));
+) -> Result<(Vec<String>, Vec<i64>)> {
+    let mut files = Vec::new();
+    let mut ids = Vec::new();
+    for target in targets {
+        if let Some(id) = target.strip_prefix("Definition:") {
+            let id = id
+                .parse::<i64>()
+                .ok()
+                .filter(|id| *id > 0)
+                .with_context(|| format!("{target:?} is not a valid Definition:<id>"))?;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        } else {
+            let path = repo_relative(repo_path, target)?;
+            if !files.contains(&path) {
+                files.push(path);
+            }
+        }
     }
-    let ids = targets
-        .iter()
-        .map(|target| {
-            target
-                .strip_prefix("Definition:")
-                .and_then(|id| id.parse().ok())
-                .with_context(|| {
-                    format!(
-                        "{target:?} is not a Definition:<id> from `{} grep`; a file path is accepted only as the sole target",
-                        spec::launcher()
-                    )
-                })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok((None, ids))
+    Ok((files, ids))
 }
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
     let canonical = dunce::canonicalize(repo_path.join(path))
         .with_context(|| format!("{path} does not exist"))?;
+    anyhow::ensure!(canonical.is_file(), "{path} is not a file");
     let relative = canonical.strip_prefix(repo_path).with_context(|| {
         format!(
             "{path} is outside the indexed repository {}",
@@ -209,7 +241,6 @@ pub(crate) fn render_outline(
     out: &mut String,
     defs: &[SourceRange],
     members: &[SourceRange],
-    lines: &[&str],
 ) -> std::fmt::Result {
     for (i, def) in defs.iter().enumerate() {
         if i > 0 {
@@ -217,10 +248,9 @@ pub(crate) fn render_outline(
         }
         writeln!(
             out,
-            "{}  [{}]  {}:{}-{}",
-            def.fqn, def.kind, def.file, def.start, def.end
+            "Definition:{}  {}  [{}]  {}:{}-{}",
+            def.id, def.fqn, def.kind, def.file, def.start, def.end
         )?;
-        write_signature(out, lines, def.start, def.end)?;
         let mut nested: Vec<&SourceRange> = members
             .iter()
             .filter(|m| m != &def && belongs_to(def, m))
@@ -234,10 +264,9 @@ pub(crate) fn render_outline(
             covered_until = member.end;
             writeln!(
                 out,
-                "  {}  [{}]  L{}-{}",
-                member.fqn, member.kind, member.start, member.end
+                "  Definition:{}  {}  [{}]  L{}-{}",
+                member.id, member.fqn, member.kind, member.start, member.end
             )?;
-            write_signature(out, lines, member.start, member.end)?;
         }
     }
     Ok(())
@@ -250,21 +279,6 @@ fn belongs_to(def: &SourceRange, member: &SourceRange) -> bool {
         .strip_prefix(&def.fqn)
         .is_some_and(|rest| rest.starts_with([':', '.', '#']));
     by_range || by_name
-}
-
-fn write_signature(out: &mut String, lines: &[&str], start: usize, end: usize) -> std::fmt::Result {
-    let last = end.min(start + SIGNATURE_LINES - 1).min(lines.len());
-    for n in start..=last {
-        let line = lines[n - 1];
-        writeln!(out, "{n}|{line}")?;
-        if line.trim_end().ends_with(['{', ':', ';']) {
-            return Ok(());
-        }
-    }
-    if last < end {
-        writeln!(out, "{}|…", last + 1)?;
-    }
-    Ok(())
 }
 
 pub(crate) fn outline(defs: &[SourceRange]) -> BTreeMap<String, Vec<SourceRange>> {
@@ -328,7 +342,11 @@ pub(crate) fn render(
             } else {
                 format!("{}:{}-{}", def.file, def.start, def.end)
             };
-            writeln!(out, "{}  [{}]  {loc}", def.fqn, def.kind)?;
+            writeln!(
+                out,
+                "Definition:{}  {}  [{}]  {loc}",
+                def.id, def.fqn, def.kind
+            )?;
         }
         write_lines(out, lines, start, end)?;
     }
@@ -348,6 +366,7 @@ mod tests {
 
     fn def(fqn: &str, kind: &str, start: usize, end: usize) -> SourceRange {
         SourceRange {
+            id: 1,
             fqn: fqn.to_string(),
             kind: kind.to_string(),
             file: "src/lib.rs".to_string(),
@@ -364,11 +383,11 @@ mod tests {
         let repo = dunce::canonicalize(root.path()).unwrap();
         assert_eq!(
             resolve_targets(&repo, &["src/lib.rs".into()]).unwrap(),
-            (Some("src/lib.rs".into()), Vec::new())
+            (vec!["src/lib.rs".into()], Vec::new())
         );
         assert_eq!(
             resolve_targets(&repo, &["Definition:7".into(), "Definition:9".into()]).unwrap(),
-            (None, vec![7, 9])
+            (Vec::new(), vec![7, 9])
         );
         assert!(resolve_targets(&repo, &["Type::method".into()]).is_err());
     }
@@ -392,7 +411,7 @@ mod tests {
         };
         let client = duckdb_client::DuckDbClient::open(&repo.path().join("graph.duckdb")).unwrap();
         let git = workspace::GitInfo {
-            repo_path: repo.path().to_path_buf(),
+            repo_path: dunce::canonicalize(repo.path()).unwrap(),
             project_id: 1,
             branch: "main".into(),
             commit_sha: "current".into(),
@@ -446,9 +465,9 @@ mod tests {
         render(&mut out, &defs, &lines, true).unwrap();
         assert_eq!(
             out,
-            "m::a  [Module]  L1-1\n1|pub mod a;\n\
-             m::b  [Module]  L2-2\n2|pub mod b;\n\n\
-             m::run  [Function]  L4-5\n4|fn run() {\n5|}\n"
+            "Definition:1  m::a  [Module]  L1-1\n1|pub mod a;\n\
+             Definition:1  m::b  [Module]  L2-2\n2|pub mod b;\n\n\
+             Definition:1  m::run  [Function]  L4-5\n4|fn run() {\n5|}\n"
         );
     }
 
@@ -462,7 +481,7 @@ mod tests {
         let mut out = String::new();
         render(&mut out, &defs, &lines, true).unwrap();
         assert!(out.contains("1|a\n2|b\n3|c\n"));
-        assert!(out.contains("m::b  [Function]  L20-25\n"));
+        assert!(out.contains("Definition:1  m::b  [Function]  L20-25\n"));
     }
 
     #[test]
@@ -475,7 +494,7 @@ mod tests {
         let mut out = String::new();
         render(&mut out, &defs, &lines, false).unwrap();
         assert_eq!(out.matches("2|b").count(), 1, "{out}");
-        assert!(out.contains("m::second  [Function]  src/lib.rs:2-3\n3|c"));
+        assert!(out.contains("Definition:1  m::second  [Function]  src/lib.rs:2-3\n3|c"));
     }
 
     #[test]
@@ -489,8 +508,8 @@ mod tests {
         render(&mut out, &defs, &lines, false).unwrap();
         assert_eq!(
             out,
-            "m::one  [Function]  src/lib.rs:3-4\n3|fn one() {\n4|}\n\n\
-             m::two  [Function]  src/lib.rs:6-7\n6|fn two() {\n7|}\n"
+            "Definition:1  m::one  [Function]  src/lib.rs:3-4\n3|fn one() {\n4|}\n\n\
+             Definition:1  m::two  [Function]  src/lib.rs:6-7\n6|fn two() {\n7|}\n"
         );
     }
 
@@ -521,7 +540,7 @@ mod tests {
             vec![1, 2, 3, 4, 6, 7, 8],
             "blank-only gaps are skipped"
         );
-        assert!(out.starts_with("1|use a;\n2|\n\nm::one  [Function]"));
+        assert!(out.starts_with("1|use a;\n2|\n\nDefinition:1  m::one  [Function]"));
         assert!(out.ends_with("7|}\n\n8|// tail\n"));
     }
 }

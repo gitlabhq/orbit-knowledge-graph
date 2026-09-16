@@ -232,7 +232,7 @@ fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
 
 fn context_target_help() -> String {
     format!(
-        "Definition:<id> references printed by `{} grep`, or one file path inside the current checkout. Repeat Definition references to read several definitions.",
+        "Definition:<id> references printed by `{} grep` and file paths inside the current checkout. Mix or repeat targets; quote paths with spaces.",
         commands::setup::spec::launcher()
     )
 }
@@ -252,8 +252,10 @@ struct ContextArgs {
     #[arg(value_name = "TARGET", help = context_target_help(), required = true)]
     target: Vec<String>,
 
-    /// Show relationships to test, fixture, and generated definitions.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Expand the sample of test, fixture, and generated connections"
+    )]
     tests: bool,
 
     /// Repository path (default: current directory).
