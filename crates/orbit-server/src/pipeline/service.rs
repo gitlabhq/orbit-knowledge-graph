@@ -88,8 +88,9 @@ impl QueryPipelineService {
     ) -> Result<QueryServiceOutput, PipelineError> {
         let coding_agent = request_context.coding_agent().map(String::from);
         let claims = request_context.claims;
+        let schema_obs = OTelPipelineObserver::start();
         let mut obs = MultiObserver::new(vec![
-            Box::new(OTelPipelineObserver::start()),
+            Box::new(schema_obs.clone()),
             Box::new(BillingObserver::new(
                 self.billing_tracker.clone(),
                 crate::billing_adapter::billing_inputs(&claims, coding_agent.clone()),
@@ -179,8 +180,11 @@ impl QueryPipelineService {
             }
         };
 
-        if let QueryServiceOutput::Graph(output) = &output {
-            obs.finish(output.row_count, output.redacted_count);
+        match &output {
+            QueryServiceOutput::Graph(output) => {
+                obs.finish(output.row_count, output.redacted_count)
+            }
+            QueryServiceOutput::Schema(_) => schema_obs.finish_schema(),
         }
         Ok(output)
     }

@@ -96,11 +96,12 @@ Only case-sensitive `db.schema` is allowed; `resolve_schema` rejects unknown or 
 The gRPC `QueryType` enum is `JSON=0`, `NAMED=1`, `GQL=2`; unknown values reject.
 REST and MCP `query_graph` accept `language: gql` with query text; omitted `language` keeps the JSON object.
 Rails maps the selector onto the gRPC query type. The CLI sends `--language gql` text unchanged.
-Rails rejects `language: gql` before the request reaches Workhorse unless the `orbit_gql_queries` feature flag is enabled for the user or for a root group where the user is Reporter or higher; GKG itself does not gate the frontend.
+Rails rejects `language: gql` before the request reaches Workhorse unless the `orbit_gql_queries` feature flag is enabled for the user or for a root group where the user is Developer or higher; GKG itself does not gate the frontend.
 The server routing stage parses GQL once and returns its result through `PipelineRunner`.
 For MATCH, it carries the lowered Input into path resolution and compilation; the `gql_parse` wrapper leaves that Input unchanged.
 For CALL, it returns schema metadata before security-context construction, path resolution, ClickHouse, row authorization, redaction, hydration, and graph formatting.
 Request authentication and query quota checks happen before this dispatch. Schema calls return raw JSON or TOON in the existing result envelope and do not emit graph-query billing events.
+Successful and failed schema calls each record one query outcome and its elapsed duration, without graph-stage or result-row metric samples.
 The base ClickHouse query's attribution payload records the language alongside the query text.
 
 ## Supported query statement
