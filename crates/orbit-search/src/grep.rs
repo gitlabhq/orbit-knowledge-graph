@@ -3,20 +3,17 @@ use std::fmt;
 
 use crate::rank::rank_and_trim;
 use crate::text::{camel_words, content_words};
-use crate::types::CorpusRow;
+use crate::types::SearchCandidate;
 use crate::vocab::SearchVocab;
 
 pub struct GrepOutcome {
     pub terms: Vec<String>,
     pub matches: Vec<GrepMatch>,
     pub total: usize,
-    pub weak: bool,
-    pub unmatched_terms: Vec<String>,
-    pub term_anchors: Vec<(String, String)>,
 }
 
 pub struct GrepMatch {
-    pub row: CorpusRow,
+    pub id: i64,
     pub score: f64,
 }
 
@@ -52,7 +49,7 @@ pub trait GrepSource {
         terms: &[String],
         filter: &RecallFilter,
     ) -> Result<Vec<TermRecall>, Self::Error>;
-    fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error>;
+    fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<SearchCandidate>, Self::Error>;
 }
 
 #[derive(Debug)]
@@ -76,15 +73,6 @@ impl<E> From<E> for GrepError<E> {
     fn from(e: E) -> Self {
         Self::Source(e)
     }
-}
-
-pub fn unmatched_terms(terms: &[String], recalls: &[TermRecall]) -> Vec<String> {
-    terms
-        .iter()
-        .zip(recalls)
-        .filter(|(_, recall)| recall.hits.is_empty())
-        .map(|(term, _)| term.clone())
-        .collect()
 }
 
 pub fn grep<S: GrepSource>(
@@ -132,8 +120,6 @@ pub fn grep<S: GrepSource>(
             recalls[*i] = recall;
         }
     }
-    let unmatched = unmatched_terms(&search_terms, &recalls);
-
     let mut ids: Vec<i64> = Vec::new();
     let mut seen: HashSet<i64> = HashSet::new();
     for &(id, _) in recalls.iter().flat_map(|r| r.hits.iter()) {
@@ -160,27 +146,11 @@ pub fn grep<S: GrepSource>(
         .map(|r| if r.hits.is_empty() { 0.0 } else { r.idf() })
         .collect();
 
-    let mut anchored: HashSet<&str> = HashSet::new();
-    let term_anchors: Vec<(String, String)> = search_terms
-        .iter()
-        .zip(&recalls)
-        .filter(|(term, _)| anchored.insert(term.as_str()))
-        .filter_map(|(term, recall)| {
-            recall
-                .hits
-                .iter()
-                .max_by(|a, b| a.1.total_cmp(&b.1))
-                .and_then(|&(id, _)| index.get(&id))
-                .map(|&i| (term.clone(), corpus[i].fqn.clone()))
-        })
-        .collect();
-
     let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
-    let weak = hits.first().is_none_or(|h| !h.confident());
     let matches: Vec<GrepMatch> = hits
         .into_iter()
         .map(|h| GrepMatch {
-            row: corpus[h.index].clone(),
+            id: corpus[h.index].id,
             score: h.score,
         })
         .collect();
@@ -188,9 +158,6 @@ pub fn grep<S: GrepSource>(
         terms,
         matches,
         total: corpus.len(),
-        weak,
-        unmatched_terms: unmatched,
-        term_anchors,
     })
 }
 
@@ -236,7 +203,7 @@ mod tests {
                 .collect())
         }
 
-        fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<CorpusRow>, Self::Error> {
+        fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<SearchCandidate>, Self::Error> {
             Ok(ids
                 .iter()
                 .map(|&id| {
@@ -262,9 +229,7 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.matches.len(), 2);
         assert_eq!(outcome.total, 2);
-        assert_eq!(outcome.matches[0].row.id, HOOK_ID);
-        assert!(!outcome.weak, "both terms fully anchor one row");
-        assert!(outcome.unmatched_terms.is_empty());
+        assert_eq!(outcome.matches[0].id, HOOK_ID);
     }
 
     #[test]
@@ -279,26 +244,6 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.matches.len(), 1);
         assert_eq!(outcome.total, 2);
-    }
-
-    #[test]
-    fn unrecalled_terms_are_reported_without_deflating_confidence() {
-        let outcome = grep(
-            &FakeRecallSource,
-            "commit zzzz yyyy",
-            5,
-            &test_vocab(),
-            &RecallFilter::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            outcome.unmatched_terms,
-            vec!["zzzz".to_string(), "yyyy".to_string()]
-        );
-        assert!(
-            !outcome.weak,
-            "terms no row can match must not count against coverage"
-        );
     }
 
     #[test]

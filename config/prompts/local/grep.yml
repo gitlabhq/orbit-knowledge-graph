@@ -1,13 +1,10 @@
 name: grep
-version: 1.2.0
-short: Search local code definitions and their relationships
+version: 1.5.0
+short: Search local definition names, paths, and bodies
 description: >-
-  Search local code definitions and their relationships
+  Search local definition names, paths, and bodies.
 
 
-  Ranks definitions by how many query terms they match, then lists the
-  connections of the top matches by graph proximity. Terms are plain words, not
-  regexes, and matches are resolved definitions, not text lines. Add
-  --related-to, --callers, or --callees with a positional FQN to look up
-  relationships. A target given after the flag wins over positional terms.
-  --path and --kind filter the connected definitions, not the target.
+  Returns ranked `Definition:<id>` references and source for the top three.
+  Use `--path` or `--kind` to narrow results, then pass a reference to context
+  for its body and relationships.

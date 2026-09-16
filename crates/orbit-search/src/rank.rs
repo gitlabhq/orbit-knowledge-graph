@@ -1,16 +1,15 @@
 use std::collections::HashMap;
 
-use crate::types::CorpusRow;
+use crate::types::SearchCandidate;
 
 const CANDIDATE_FACTOR: usize = 5;
 
 const MAX_PER_PARENT: usize = 2;
-const MAX_PER_FILE: usize = 3;
+const MAX_PER_GROUP: usize = 3;
 
 pub const ANCHOR_SIM: f64 = 0.999;
 pub const EXACT_NAME_SIM: f64 = 1.0;
 pub const EXACT_NAME_BOOST: f64 = 2.0;
-pub const CONFIDENT_COVERAGE: f64 = 0.5;
 pub const LENGTH_NORM_B: f64 = 0.75;
 pub const DEGREE_WEIGHT: f64 = 0.5;
 pub const DEGREE_CAP: u64 = 200;
@@ -18,22 +17,10 @@ pub const DEGREE_CAP: u64 = 200;
 pub struct Hit {
     pub index: usize,
     pub score: f64,
-    anchored: bool,
-    coverage: f64,
-}
-
-impl Hit {
-    pub fn anchored(&self) -> bool {
-        self.anchored
-    }
-
-    pub fn confident(&self) -> bool {
-        self.anchored && self.coverage >= CONFIDENT_COVERAGE
-    }
 }
 
 pub fn rank_and_trim(
-    corpus: &[CorpusRow],
+    corpus: &[SearchCandidate],
     sims: &[Vec<f64>],
     idfs: &[f64],
     limit: usize,
@@ -45,11 +32,11 @@ pub fn rank_and_trim(
     )
 }
 
-fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Vec<Hit> {
+fn rank(corpus: &[SearchCandidate], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Vec<Hit> {
     let measured: Vec<f64> = corpus
         .iter()
-        .filter(|r| r.grams > 0)
-        .map(|r| r.grams as f64)
+        .filter(|r| r.document_length > 0)
+        .map(|r| r.document_length as f64)
         .collect();
     let avgdl = if measured.is_empty() {
         1.0
@@ -63,18 +50,12 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
         if total <= 0.0 {
             continue;
         }
-        let len = corpus[index].grams.max(1) as f64;
+        let len = corpus[index].document_length.max(1) as f64;
         let length_norm = 1.0 - LENGTH_NORM_B + LENGTH_NORM_B * len / avgdl;
         let matched_idf: f64 = row_sims
             .iter()
             .zip(idfs)
             .filter(|&(&s, _)| s > 0.0)
-            .map(|(_, idf)| idf)
-            .sum();
-        let anchored_idf: f64 = row_sims
-            .iter()
-            .zip(idfs)
-            .filter(|&(&s, _)| s >= ANCHOR_SIM)
             .map(|(_, idf)| idf)
             .sum();
         let exact_idf: f64 = row_sims
@@ -90,83 +71,53 @@ fn rank(corpus: &[CorpusRow], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Ve
         hits.push(Hit {
             index,
             score: total * coverage * coverage * exactness * connectedness / length_norm,
-            anchored: anchored_idf > 0.0,
-            coverage,
         });
     }
     hits.sort_by(|a, b| {
-        b.score
+        let score = b
+            .score
             .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| corpus[a.index].fqn.len().cmp(&corpus[b.index].fqn.len()))
-            .then_with(|| corpus[a.index].id.cmp(&corpus[b.index].id))
+            .unwrap_or(std::cmp::Ordering::Equal);
+        let a = &corpus[a.index];
+        let b = &corpus[b.index];
+        score
+            .then_with(|| a.label.len().cmp(&b.label.len()))
+            .then_with(|| a.id.cmp(&b.id))
     });
     hits.truncate(cap);
     hits
 }
 
-fn dedupe_by_parent(results: Vec<Hit>, corpus: &[CorpusRow], limit: usize) -> Vec<Hit> {
+fn dedupe_by_parent(results: Vec<Hit>, corpus: &[SearchCandidate], limit: usize) -> Vec<Hit> {
     let mut per_parent: HashMap<String, usize> = HashMap::new();
-    let mut per_file: HashMap<String, usize> = HashMap::new();
+    let mut per_group: HashMap<String, usize> = HashMap::new();
     let mut kept: Vec<Hit> = Vec::with_capacity(limit);
     for r in results {
         if kept.len() >= limit {
             break;
         }
         let row = &corpus[r.index];
-        let file = row
-            .loc
-            .rsplit_once(':')
-            .map_or(row.loc.clone(), |(f, _)| f.to_string());
-        if !file.is_empty() && per_file.get(&file).is_some_and(|&n| n >= MAX_PER_FILE) {
+        let group = &row.diversity_group;
+        if !group.is_empty() && per_group.get(group).is_some_and(|&n| n >= MAX_PER_GROUP) {
             continue;
         }
-        let parent = parent_key(&row.fqn);
-        if per_parent
-            .get(&parent)
-            .is_some_and(|&n| n >= MAX_PER_PARENT)
-        {
+        let parent = &row.parent_group;
+        if per_parent.get(parent).is_some_and(|&n| n >= MAX_PER_PARENT) {
             continue;
         }
-        if !file.is_empty() {
-            *per_file.entry(file).or_insert(0) += 1;
+        if !group.is_empty() {
+            *per_group.entry(group.clone()).or_insert(0) += 1;
         }
-        *per_parent.entry(parent).or_insert(0) += 1;
+        *per_parent.entry(parent.clone()).or_insert(0) += 1;
         kept.push(r);
     }
     kept
-}
-
-fn parent_key(fqn: &str) -> String {
-    match fqn.rfind("::") {
-        Some(i) => fqn[..i].to_string(),
-        None => match fqn.rfind('.') {
-            Some(i) => fqn[..i].to_string(),
-            None => fqn.to_string(),
-        },
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::row;
-
-    #[test]
-    fn flood_terms_do_not_dilute_confidence() {
-        let corpus = vec![row(1, "Repo::commit_hook")];
-        let sims = vec![vec![1.0, 1.0, 0.0, 0.0, 0.0, 0.0]];
-        let high_idf_anchors = rank(&corpus, &sims, &[5.0, 5.0, 0.2, 0.2, 0.2, 0.2], 10);
-        assert!(
-            high_idf_anchors[0].confident(),
-            "anchoring the informative mass must clear the bar despite four flood terms"
-        );
-        let low_idf_anchors = rank(&corpus, &sims, &[0.2, 0.2, 5.0, 5.0, 5.0, 5.0], 10);
-        assert!(
-            !low_idf_anchors[0].confident(),
-            "anchoring only flood terms must stay weak"
-        );
-    }
 
     #[test]
     fn full_sim_outranks_fuzzy_and_coverage_squares_partial_matches() {
@@ -181,14 +132,11 @@ mod tests {
             vec![1.0, 0.0, 0.0],
         ];
         let hits = rank(&corpus, &sims, &[1.0, 1.0, 1.0], 10);
-        let order: Vec<&str> = hits.iter().map(|h| corpus[h.index].fqn.as_str()).collect();
+        let order: Vec<&str> = hits
+            .iter()
+            .map(|h| corpus[h.index].label.as_str())
+            .collect();
         assert_eq!(order, vec!["Repo::commit", "Repo::komit", "Repo::other"]);
-        assert!(hits[0].confident());
-        assert!(!hits[1].anchored());
-        assert!(
-            !hits[2].confident(),
-            "one anchored term of three must stay below the confidence floor"
-        );
         assert!(hits[0].score > 4.0 * hits[2].score);
     }
 
@@ -202,21 +150,17 @@ mod tests {
         let sims = vec![vec![1.0], vec![1.0], vec![0.0]];
         let hits = rank(&corpus, &sims, &[1.0], 10);
         assert_eq!(hits.len(), 2);
-        assert_eq!(corpus[hits[0].index].fqn, "Repo::commit");
+        assert_eq!(corpus[hits[0].index].label, "Repo::commit");
     }
 
     #[test]
-    fn rank_dedupe_and_parent_keys_respect_limits() {
+    fn rank_dedupe_respects_limits() {
         let corpus = vec![row(7, "Repo::commit_hook"), row(8, "Project::setup")];
         let sims = vec![vec![1.0], vec![0.0]];
         let hits = rank(&corpus, &sims, &[1.0], 10);
         assert_eq!(hits.len(), 1);
         let limited = dedupe_by_parent(hits, &corpus, 0);
         assert!(limited.is_empty());
-
-        assert_eq!(parent_key("a::B::field"), "a::B");
-        assert_eq!(parent_key("pkg.Func"), "pkg");
-        assert_eq!(parent_key("bare"), "bare");
     }
 
     #[test]
@@ -228,7 +172,7 @@ mod tests {
         let corpus = vec![leaf, hub];
         let sims = vec![vec![1.0], vec![1.0]];
         let hits = rank(&corpus, &sims, &[1.0], 10);
-        assert_eq!(corpus[hits[0].index].fqn, "Compiler::check_depth_limit");
+        assert_eq!(corpus[hits[0].index].label, "Compiler::check_depth_limit");
         assert!(
             hits[0].score < 2.0 * hits[1].score,
             "degree is a tiebreaker, not a dominant signal"
@@ -244,8 +188,7 @@ mod tests {
         let corpus = vec![stem, exact];
         let sims = vec![vec![ANCHOR_SIM], vec![EXACT_NAME_SIM]];
         let hits = rank(&corpus, &sims, &[1.0], 10);
-        assert_eq!(corpus[hits[0].index].fqn, "compiler::compile");
-        assert!(hits[0].anchored() && hits[1].anchored());
+        assert_eq!(corpus[hits[0].index].label, "compiler::compile");
     }
 
     #[test]
@@ -255,7 +198,7 @@ mod tests {
         let corpus = vec![hub, row(2, "Repo::commit_hook")];
         let sims = vec![vec![1.0, 0.0], vec![1.0, 1.0]];
         let hits = rank(&corpus, &sims, &[1.0, 1.0], 10);
-        assert_eq!(corpus[hits[0].index].fqn, "Repo::commit_hook");
+        assert_eq!(corpus[hits[0].index].label, "Repo::commit_hook");
     }
 
     #[test]
@@ -266,31 +209,24 @@ mod tests {
         ];
         let sims = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
         let hits = rank(&corpus, &sims, &[9.0, 1.1], 10);
-        assert_eq!(corpus[hits[0].index].fqn, "Ci::AutoCancel");
+        assert_eq!(corpus[hits[0].index].label, "Ci::AutoCancel");
         assert!(hits[0].score > 5.0 * hits[1].score);
     }
 
     #[test]
     fn parent_rejection_does_not_burn_file_quota() {
-        let row_at = |id: i64, fqn: &str, loc: &str| {
+        let row_at = |id: i64, fqn: &str, file: &str| {
             let mut r = row(id, fqn);
-            r.loc = loc.to_string();
+            r.diversity_group = file.to_string();
             r
         };
         let corpus = vec![
-            row_at(1, "A::x1", "f.rb:1"),
-            row_at(2, "A::x2", "f.rb:2"),
-            row_at(3, "A::x3", "f.rb:3"),
-            row_at(4, "B::y", "f.rb:4"),
+            row_at(1, "A::x1", "f.rb"),
+            row_at(2, "A::x2", "f.rb"),
+            row_at(3, "A::x3", "f.rb"),
+            row_at(4, "B::y", "f.rb"),
         ];
-        let hits = (0..4)
-            .map(|index| Hit {
-                index,
-                score: 1.0,
-                anchored: false,
-                coverage: 0.0,
-            })
-            .collect();
+        let hits = (0..4).map(|index| Hit { index, score: 1.0 }).collect();
         let kept = dedupe_by_parent(hits, &corpus, 10);
         let indices: Vec<usize> = kept.iter().map(|h| h.index).collect();
         assert_eq!(indices, vec![0, 1, 3]);

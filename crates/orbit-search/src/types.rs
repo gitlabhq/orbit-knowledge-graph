@@ -1,10 +1,9 @@
 #[derive(Clone)]
-pub struct CorpusRow {
+pub struct SearchCandidate {
     pub id: i64,
-    pub fqn: String,
-    pub kind: String,
-    pub loc: String,
-    pub end_line: i64,
+    pub label: String,
+    pub parent_group: String,
+    pub diversity_group: String,
     pub degree: u64,
-    pub grams: u64,
+    pub document_length: u64,
 }

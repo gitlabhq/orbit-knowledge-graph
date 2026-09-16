@@ -839,14 +839,15 @@ fn repo_map_yaml_fixture_suite() {
         .map(|(path, content)| (path.as_str(), content.as_str()))
         .collect();
     init_repo_at(repo_dir.path(), &files);
-    let repo_path = repo_dir.path().display().to_string();
-    let sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+    let repo = repo_dir.path().canonicalize().unwrap();
+    let repo_path = repo.display().to_string();
+    let sha = git(&repo, &["rev-parse", "HEAD"]);
     let dd = data_dir.path();
-    assert!(orbit_index(repo_dir.path(), dd));
+    assert!(orbit_index(&repo, dd));
 
     for command in fixture.commands {
         let args: Vec<_> = command.args.iter().map(String::as_str).collect();
-        let out = repo_map(repo_dir.path(), dd, &args);
+        let out = repo_map(&repo, dd, &args);
         assert!(
             out.status.success(),
             "repo-map {:?} failed: {}",
@@ -1193,14 +1194,14 @@ fn repo_map_omitted_subcommand_runs_overview() {
 }
 
 #[test]
-fn grep_loads_bundled_extension_in_fresh_data_dir() {
+fn grep_loads_bundled_extension_and_matches_definition_body() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let dd = data_dir.path();
     assert!(orbit_index(&repo.path, dd));
 
     let out = orbit_cmd()
-        .args(["grep", "how do we read a file", "--repo"])
+        .args(["grep", "open", "--repo"])
         .arg(&repo.path)
         .env("ORBIT_DATA_DIR", dd)
         .output()
@@ -1210,11 +1211,15 @@ fn grep_loads_bundled_extension_in_fresh_data_dir() {
         "grep failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("read_file"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Definition:") && stdout.contains("return open"),
+        "{stdout}"
+    );
 }
 
 #[test]
-fn grep_callers_order_is_stable_across_overloads() {
+fn context_relationship_order_is_stable_across_overloads() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
     let repo = workspace.path().join("repo");
@@ -1244,19 +1249,35 @@ fn grep_callers_order_is_stable_across_overloads() {
 
     let repo_arg = repo.to_str().unwrap();
     for (fqn, section) in [
-        ("Target.ping", "Connections (5):"),
+        ("Target.ping", "Connections (7):"),
         ("Target", "Used via members (5)"),
     ] {
-        let (first, stderr, ok) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-        assert!(ok, "grep {fqn} --callers failed: {stderr}");
-        assert!(first.contains(section), "{fqn}: {first}");
+        let (matches, stderr, ok) = run_cmd(&["grep", fqn, "--repo", repo_arg], dd);
+        assert!(ok, "grep {fqn} failed: {stderr}");
+        let reference = matches
+            .lines()
+            .find(|line| line.split_whitespace().nth(1) == Some(fqn))
+            .and_then(|line| line.split_whitespace().next())
+            .unwrap();
+        let args = ["context", reference, "--repo", repo_arg];
+        let (first, stderr, ok) = run_cmd(&args, dd);
+        assert!(ok, "context {reference} failed: {stderr}");
+        assert!(
+            first.find("public void ping() {}").unwrap() < first.find(section).unwrap(),
+            "{first}"
+        );
         assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
         assert_eq!(first.matches("<-- Caller.run ").count(), 3, "{first}");
         for _ in 0..10 {
-            let (again, _, _) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-            assert_eq!(first, again, "grep {fqn} --callers output must be stable");
+            assert_eq!(first, run_cmd(&args, dd).0, "{reference} output changed");
         }
     }
+    let (file, stderr, ok) = run_cmd(&["context", "src/Target.java", "--repo", repo_arg], dd);
+    assert!(ok, "{stderr}");
+    assert!(
+        file.contains("public class Target") && !file.contains("Connections ("),
+        "{file}"
+    );
 }
 
 #[test]

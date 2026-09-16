@@ -3,8 +3,8 @@ name: orbit-cli
 description: >
   Index and query a LOCAL checkout of a repository offline with the Orbit CLI
   (the `orbit` binary, run directly or via `glab orbit`). It builds a
-  DuckDB property graph from the working tree. Use grep for definitions and
-  relationships, context for source bodies, and read-only SQL for aggregations.
+  DuckDB property graph from the working tree. Use grep to find definitions,
+  context for source or relationships, and read-only SQL for aggregations.
   Use when the request targets the current checkout, working tree, or a
   branch that is not pushed/indexed remotely, or is explicitly offline/local:
   index this repo locally, who calls X in my checkout, list definitions in a
@@ -13,7 +13,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.5.3
+version: 0.6.0
 license: MIT
 metadata:
   audience: developers
@@ -73,10 +73,8 @@ wrapper flags, config keys, and pass-through rules:
 | Command | Purpose |
 |---|---|
 | `orbit index <PATH> [--stats] [--db P]` | Parse repos under `PATH` into DuckDB; prints graph stats as JSON |
-| `orbit grep [QUERY…] [--path P] [--kind K,K] [--body]` | Find definitions by name, or list definitions under a path; `--body` also prints the top three bodies |
-| `orbit grep FQN --related-to [--edge K] [--in] [--out]` | List connections, including uses through members |
-| `orbit grep FQN --callers` / `--callees` | List incoming or outgoing calls |
-| `orbit context [FQN…] [--file P] [--kind K,K] [--outline]` | Read source bodies by FQN, unique tail, glob, or file; `--outline` prints signatures and members only |
+| `orbit grep [QUERY…] [--path P] [--kind K,K]` | Find definitions and print source for the top three, or list definitions under a path |
+| `orbit context <Definition:ID…\|FILE> [--tests]` | Read source and relationships for exact definitions, or one file; `--tests` expands hidden test connections |
 | `orbit sql [QUERY] [-f FILE] [-F table\|json\|ndjson\|csv] [--all] [--repo P]` | Run read-only SQL scoped to the current checkout's commit; `-` reads from stdin, `--all` spans every indexed commit |
 | `orbit schema [TABLE…] [--raw]` | Describe graph tables/columns (index-storage tables hidden); scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
@@ -88,31 +86,21 @@ wrapper flags, config keys, and pass-through rules:
 
 ```bash
 orbit grep "rateLimit" --path src --kind Method,Function
-orbit context "Type::method"
-orbit context --file src/lib.rs
-orbit context "Type" --outline
-orbit grep "Type::method" --callers --path src --kind Method
-orbit grep "Type::method" --callees
-orbit grep "Type" --related-to --edge extends --in
+orbit context Definition:481
+orbit context src/lib.rs
+orbit context Definition:481 --tests
 ```
 
-Relationship selectors accept an FQN, a unique unqualified tail, or a glob.
-Pass one positional target with the flag, or a target immediately after it.
-An explicit flag target takes precedence over positional terms. Use one
-relationship selector per call, without `--limit`.
-`--path` and `--kind` filter connected results, not the target definition.
-Connections from test, fixture, and generated files are counted but hidden
-unless `--tests` is passed. Incoming lookups include uses through members.
-
-`grep --body` prints the bodies of the top matches (at most three) in the
-same call, for the common case where the first hit is the one you want.
-
-`context` accepts several names or globs in one call. `--file` takes a
-repo-relative or absolute path inside the checkout. `--file` alone reads
-all definitions and the lines between them. With names, it restricts lookup
-to that file and accepts bare names; `--kind` narrows the selection.
-`--outline` replaces bodies with each definition's signature and its nested
-members, so a large type or file can be mapped before reading one method.
+`grep` searches Definition names, FQNs, file paths, and bodies. It returns
+`Definition:<id>` references and source for its top three matches. Pass those
+exact references to `context`; it does not resolve names,
+FQNs, or globs. One existing repo-relative or absolute file path prints that
+file's source and definitions once. Definition targets also show relationships
+with direction and edge kind; file targets do not. `--tests` includes test,
+fixture, and generated connections. If raw search is
+needed to locate a file, return to `context <path>` to read it. Built-in Read
+and shell reads are only for non-code or unavailable Orbit source. Never
+truncate Orbit output.
 
 `--kind` is one comma-separated list (`Class,Method`); a quoted pipe list
 (`"Class|Method"`) also works. It is not repeatable.
