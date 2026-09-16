@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use crate::canonical::Canonical as C;
 use crate::intern::Lang;
 use crate::pattern;
-use crate::rules::{DisplaySource, ParseFileSpec, ParseFormat, ResolveConfig, ResolveStage};
+use crate::rules::{ParseFileSpec, ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tree};
 
 pub struct WalkResult {

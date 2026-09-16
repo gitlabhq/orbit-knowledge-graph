@@ -131,12 +131,12 @@ fn cmd_parse(
 
     match stage {
         Stage::Cst => {
-            let mut lang = tree_dsl::intern::Lang::new();
+            let lang = tree_dsl::intern::Lang::new();
             let tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path);
             print_tree(&tree, &lang);
         }
         Stage::Ast => {
-            let (pipeline, mut lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
+            let (pipeline, lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
             let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path);
             for stage in &pipeline.rewrite_stages {
                 tree_dsl::pattern::apply_rewrites(&mut tree, &lang, stage);
@@ -179,7 +179,7 @@ fn cmd_rewrite(
     };
 
     let lang_id = resolve_lang(lang_override.as_deref(), Some(&path));
-    let (pipeline, mut lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
+    let (pipeline, lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
     let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path);
 
     if let Some(ref stop) = after {

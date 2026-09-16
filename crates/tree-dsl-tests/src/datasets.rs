@@ -7,12 +7,12 @@ use arrow_56::record_batch::RecordBatch;
 
 use tree_dsl::canonical::{self, Canonical as C};
 use tree_dsl::intern::Lang;
-use tree_dsl::tree::Tree;
+use tree_dsl::tree::{Cursor, Edge, EdgeKind, Tree};
 use tree_dsl::treesitter::SupportLang;
 
 pub type LanceDatasets = HashMap<String, RecordBatch>;
 
-fn flavor_display<'a>(def: tree_dsl::tree::Cursor, dtk: C, lang: &'a Lang) -> &'a str {
+fn flavor_display<'a>(def: Cursor, dtk: C, lang: &'a Lang) -> &'a str {
     for c in def.children() {
         if let Some(ck) = C::try_from_u16(c.kind())
             && ck.is_flavor()
@@ -122,7 +122,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
 
 pub fn to_datasets(
     trees: &[Tree],
-    cross_edges: &[tree_dsl::tree::Edge],
+    cross_edges: &[Edge],
     lang: &Lang,
     support_lang: SupportLang,
     resolve_config: &tree_dsl::rules::ResolveConfig,
@@ -133,7 +133,7 @@ pub fn to_datasets(
     ds.insert("Definition".into(), build_defs(trees, lang, &ids)?);
     let resolved_imports: std::collections::HashSet<(usize, u32)> = cross_edges
         .iter()
-        .filter(|e| e.kind == tree_dsl::tree::EdgeKind::Imports)
+        .filter(|e| e.kind == EdgeKind::Imports)
         .map(|e| (e.from.tree as usize, e.from.node))
         .collect();
     ds.insert(
@@ -619,7 +619,7 @@ fn build_file_edges(
         }
         for edge in tree.edges().iter() {
             if edge.from.node == 0
-                && edge.kind == tree_dsl::tree::EdgeKind::Calls
+                && edge.kind == EdgeKind::Calls
                 && let Some(&tid) = ids.defs.get(&(fi, edge.to.node))
             {
                 ds.append_value(fid);
@@ -633,7 +633,7 @@ fn build_file_edges(
 
 fn build_def2def(
     trees: &[Tree],
-    cross_edges: &[tree_dsl::tree::Edge],
+    cross_edges: &[Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
     let (mut s, mut t, mut k) = (
@@ -643,12 +643,10 @@ fn build_def2def(
     );
     for (fi, tree) in trees.iter().enumerate() {
         for edge in tree.edges().iter() {
-            let label = match edge.kind {
-                tree_dsl::tree::EdgeKind::Calls => "Calls",
-                tree_dsl::tree::EdgeKind::Defines => "Defines",
-                tree_dsl::tree::EdgeKind::Extends => "Extends",
-                _ => continue,
-            };
+            if edge.kind == EdgeKind::Imports {
+                continue;
+            }
+            let label = edge.kind.name();
             if let (Some(&from), Some(&to)) = (
                 ids.defs.get(&(fi, edge.from.node)),
                 ids.defs.get(&(fi, edge.to.node)),
@@ -661,12 +659,10 @@ fn build_def2def(
     }
     let mut cross_seen = std::collections::HashSet::new();
     for ce in cross_edges {
-        let label = match ce.kind {
-            tree_dsl::tree::EdgeKind::Calls => "Calls",
-            tree_dsl::tree::EdgeKind::Defines => "Defines",
-            tree_dsl::tree::EdgeKind::Extends => "Extends",
-            _ => continue,
-        };
+        if ce.kind == EdgeKind::Imports {
+            continue;
+        }
+        let label = ce.kind.name();
         if let (Some(&from), Some(&to)) = (
             ids.defs.get(&(ce.from.tree as usize, ce.from.node)),
             ids.defs.get(&(ce.to.tree as usize, ce.to.node)),
@@ -684,7 +680,7 @@ fn build_def2def(
 
 fn build_def2imp(
     trees: &[Tree],
-    cross_edges: &[tree_dsl::tree::Edge],
+    cross_edges: &[Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
     let (mut s, mut t, mut k) = (
@@ -694,12 +690,12 @@ fn build_def2imp(
     );
     let resolved: std::collections::HashSet<(usize, u32)> = cross_edges
         .iter()
-        .filter(|ce| ce.kind == tree_dsl::tree::EdgeKind::Calls)
+        .filter(|ce| ce.kind == EdgeKind::Calls)
         .map(|ce| (ce.from.tree as usize, ce.from.node))
         .collect();
     for (fi, tree) in trees.iter().enumerate() {
         for edge in tree.edges().iter() {
-            if edge.kind != tree_dsl::tree::EdgeKind::Imports {
+            if edge.kind != EdgeKind::Imports {
                 continue;
             }
             if resolved.contains(&(fi, edge.from.node)) {
@@ -726,7 +722,7 @@ fn build_def2imp(
 
 fn build_imp2def(
     _trees: &[Tree],
-    cross_edges: &[tree_dsl::tree::Edge],
+    cross_edges: &[Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {
     let (mut s, mut t, mut k) = (
@@ -735,7 +731,7 @@ fn build_imp2def(
         StringBuilder::new(),
     );
     for ce in cross_edges {
-        if ce.kind != tree_dsl::tree::EdgeKind::Imports {
+        if ce.kind != EdgeKind::Imports {
             continue;
         }
         let target_id = if let Some(&did) = ids.defs.get(&(ce.to.tree as usize, ce.to.node)) {
