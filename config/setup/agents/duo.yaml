@@ -1,0 +1,4 @@
+name: duo
+instruction_file:
+  project: AGENTS.md
+  global: "~/.gitlab/duo/AGENTS.md"
