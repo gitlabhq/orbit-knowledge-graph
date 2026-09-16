@@ -8,7 +8,7 @@ title: GitLab Orbit
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
+- Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
@@ -121,22 +121,17 @@ on the same cluster or on a separate cluster. For more information, see
 ### Does GitLab Orbit write to my GitLab instance?
 
 No. GitLab Orbit is read-only from the GitLab perspective and never writes data back to GitLab.
-GitLab Orbit Remote receives SDLC changes through the Data Insights Platform, fetches source code
-through a GitLab internal API, and writes the resulting graph only to its own ClickHouse database.
-
-On GitLab Self-Managed, Siphon uses PostgreSQL logical replication to copy changes into ClickHouse.
-This requires replication access to PostgreSQL, not application write access. GitLab Orbit Local
-writes only to a DuckDB file on your machine.
+For both GitLab.com and GitLab Self-Managed, Siphon uses PostgreSQL logical replication to copy SDLC
+changes into ClickHouse. This requires replication access to PostgreSQL, not application write access.
+GitLab Orbit fetches source code through a GitLab internal API and writes the resulting graph only to
+its own ClickHouse database. GitLab Orbit Local writes only to a DuckDB file on your machine.
 
 ### What do I need to host or build?
 
-- **GitLab Orbit Remote on GitLab.com:** GitLab hosts and builds the service. You do not deploy any
-  infrastructure or build GitLab Orbit yourself.
-- **GitLab Orbit Local:** Install the prebuilt `orbit` binary on your computer. You do not need to
-  host a service or build the binary yourself.
-- **GitLab Self-Managed:** You host Kubernetes, ClickHouse, and NATS, and deploy the provided Siphon
-  and GitLab Orbit Helm charts. You do not build GitLab Orbit from source. Review the
-  [prerequisites and sizing guidance](self-managed/getting-started.md) before planning a deployment.
+GitLab.com and GitLab Orbit Local require you to host or build nothing; for Local, install the prebuilt
+`orbit` binary. On GitLab Self-Managed, you host Kubernetes, ClickHouse, and NATS and deploy the Siphon
+and GitLab Orbit Helm charts, but never build GitLab Orbit from source; review the
+[prerequisites and sizing guidance](self-managed/getting-started.md) before planning a deployment.
 
 ### How do GitLab Orbit Local and GitLab Orbit Remote differ?
 
