@@ -357,6 +357,7 @@ knowledge-graph:
 - [ ] **Registered in `schema.yaml`** (nodes map + edges map).
 - [ ] `schema` pin in `config/versions.yaml` bumped; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
 - [ ] `fixtures/siphon.sql` updated; SDLC YAML scenario(s) added.
+- [ ] Query-side YAML scenario(s) added under `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/` to verify the new entity is queryable end-to-end.
 - [ ] `data_model.md` updated.
 - [ ] `cargo test -p ontology` + `scenario_indexing` green (correct toolchain).
 

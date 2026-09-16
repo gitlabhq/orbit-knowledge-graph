@@ -21,13 +21,33 @@ tests/
     setup_test.rs            # Infrastructure canary (validates TestContext, macros, isolation)
   indexer/                   # Indexer integration tests (NATS, ClickHouse, SDLC, code, dispatcher)
   server/
-    data_correctness/        # Seeds data, runs full pipeline, asserts values via ResponseView
+    data_correctness/        # YAML-driven query correctness scenarios (preferred)
+      scenarios/             # YAML fixtures organized by category
+        aggregation/
+        dedup/
+        edge_cases/
+        neighbors/
+        pagination/
+        path_finding/
+        search/
+        security/
+        traversal/
+        traversal_scoping/
+        work_items/
+      presets/               # Shared security, redaction, and seed presets
+      helpers.rs             # Legacy Rust pipeline helpers (deprecated)
+      mod.rs                 # Orchestrators: data_correctness + data_correctness_scenarios
+      *.rs                   # Legacy Rust test modules (deprecated)
     querying_pipeline/       # Virtual column dispatch tests
     graph_formatter.rs       # Graph formatter end-to-end tests
     health.rs                # Health/readiness endpoint tests
     hydration.rs             # Hydration pipeline tests (compile -> execute -> hydrate -> format)
     redaction.rs             # Redaction pipeline tests (fail-closed, path finding, search, etc.)
 ```
+
+> **Deprecation:** The Rust test modules in `data_correctness/` (`search.rs`,
+> `traversal.rs`, etc.) are deprecated and will be removed. New data correctness
+> tests must be YAML scenarios under `data_correctness/scenarios/`.
 
 Test targets are auto-discovered by Cargo from `tests/*.rs` files. Shared helpers
 live in `tests/common/` (subdirectory, ignored by auto-discovery).
@@ -63,6 +83,10 @@ export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
 cargo nextest run --test containers                                      # all server tests
 cargo nextest run --test containers -E 'test(data_correctness)'          # one suite
 cargo nextest run --test containers -E 'test(infra_canary)'              # canary
+
+# Run YAML-driven scenarios, optionally filtered by category
+cargo nextest run --test containers -E 'test(data_correctness_scenarios)'
+SCENARIO_FILTER=search cargo nextest run --test containers -E 'test(data_correctness_scenarios)'
 ```
 
 ## Test architecture
@@ -81,14 +105,38 @@ between them.
 
 ## Adding tests
 
+### Data correctness (preferred)
+
+Add a `.yaml` file under `data_correctness/scenarios/<category>/`. Each file
+is a `QueryScenario` that declares seed data, a query, and expected results.
+See the [integration-testkit README](../integration-testkit/README.md) for the
+`QueryScenario` format reference.
+
+### Other server tests
+
 1. Write an `async fn my_test(ctx: &TestContext)` in the appropriate module.
 2. If it only reads seeded data, add it to the `run_subtests_shared!` block.
 3. If it writes extra data, add it to the `run_subtests!` block and call the seed
    function at the top of the test body.
 4. If you need a new server test module, add `pub mod foo;` to
    `containers.rs` and create `server/foo.rs`.
-5. For compiler tests, add to `compiler/mod.rs` and create `compiler/foo.rs`.
-6. For a new test binary, add a `tests/foo.rs` file -- Cargo auto-discovers it.
+
+### Rust-only data correctness tests
+
+A small number of tests remain in the Rust modules because they need
+capabilities the YAML harness cannot express:
+
+| Test | Reason |
+|------|--------|
+| `cursor_after_token_with_sql_metacharacters_is_parameterized` | Constructs a cursor token via internal `cursor::encode()`. YAML covers this with a snapshotted token but the Rust test remains as the source of truth for the encoding. |
+| `long_node_text_is_excerpted_only_on_wide_pages` | Compares text length across two queries with different `limit` values. Each variant has a YAML fixture, but the cross-query comparison stays in Rust. |
+
+When removing the legacy Rust modules, keep these tests.
+
+### Compiler tests
+
+1. Add to `compiler/mod.rs` and create `compiler/foo.rs`.
+2. For a new test binary, add a `tests/foo.rs` file -- Cargo auto-discovers it.
 
 ## Auto-discovery rules
 

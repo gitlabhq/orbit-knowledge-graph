@@ -184,17 +184,11 @@ JSON and text tokens never validate against each other because their hash source
 
 `DEBUG` sets the compiler's `include_debug_sql` presentation option and keeps its existing authorization rules.
 
-## Parity tests
+## Integration tests
 
-Handwritten text queries sit beside JSON fixtures in `crates/integration-tests/tests/compiler/dialects/clickhouse.rs`.
-The shared test helper compares SQL byte for byte, parameter names and typed values, query type, and hydration plans.
-Existing SQL assertions remain in place. Other tests cover syntax rejection, literals, and authorization.
+YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` are the canonical test surface for data correctness. Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations. The runner parses each key into a `Frontend` and passes it to `compiler::compile`. A scenario whose query has no text spelling carries only the `json` key. Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`. See the [integration-testkit README](../../../crates/integration-testkit/README.md) for the full `QueryScenario` format reference.
 
-The YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` run against ClickHouse in CI.
-Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations.
-The runner parses each key into a `Frontend` and passes it to `compiler::compile`.
-A scenario whose query has no text spelling carries only the `json` key.
-Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`.
+Handwritten text queries sit beside JSON fixtures in `crates/integration-tests/tests/compiler/dialects/clickhouse.rs` for compiler-level parity (SQL output, parameters, hydration plans). These are separate from the data correctness scenarios.
 
 ### GQL fuzzing
 

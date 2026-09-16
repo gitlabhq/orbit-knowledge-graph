@@ -31,6 +31,9 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query response JSON schema | `config/schemas/query_response.json` |
 | Query language reference (text-indexed properties table is generated) | `docs/source/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
 | Query test fixtures | `fixtures/queries/` |
+| YAML query scenarios (data correctness) | `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/*.yaml` (run with `mise test:integration:server`; filter with `SCENARIO_FILTER=<name>`) |
+| Query scenario presets | `crates/integration-tests/tests/server/data_correctness/presets/` (`seed.yaml`, `security.yaml`, `redaction.yaml`) |
+| Query scenario format reference | `crates/integration-testkit/README.md` ("Query scenarios" section) and `crates/integration-testkit/src/query_scenario/format.rs` (`QueryScenario`, `QueryExpect`, `NodeExpect`) |
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Ontology overlays for speculative schema shapes | `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, deep-merged over it; run data correctness against one with `mise test:integration:overlay <name>`) |
 | Graph DDL (ClickHouse, versioned) | `config/graph.sql` |
