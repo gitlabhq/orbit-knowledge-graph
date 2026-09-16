@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::sync::RwLock;
 
 use indextree::{Arena, NodeId};
 
@@ -98,7 +98,7 @@ impl Edge {
 pub struct Tree {
     pub(crate) arena: Arena<Node>,
     pub(crate) root: NodeId,
-    pub(crate) edges: RefCell<Vec<Edge>>,
+    pub(crate) edges: RwLock<Vec<Edge>>,
     pub label: String,
 }
 
@@ -107,7 +107,7 @@ impl Clone for Tree {
         Self {
             arena: self.arena.clone(),
             root: self.root,
-            edges: RefCell::new(self.edges.borrow().clone()),
+            edges: RwLock::new(self.edges.read().unwrap().clone()),
             label: self.label.clone(),
         }
     }
@@ -120,7 +120,7 @@ impl Tree {
         Self {
             arena,
             root,
-            edges: RefCell::new(Vec::new()),
+            edges: RwLock::new(Vec::new()),
             label: String::new(),
         }
     }
@@ -142,15 +142,18 @@ impl Tree {
     }
 
     pub fn add_edge(&self, from: u32, to: u32, kind: EdgeKind) {
-        self.edges.borrow_mut().push(Edge::local(from, to, kind));
+        self.edges
+            .write()
+            .unwrap()
+            .push(Edge::local(from, to, kind));
     }
 
-    pub fn edges(&self) -> std::cell::Ref<'_, Vec<Edge>> {
-        self.edges.borrow()
+    pub fn edges(&self) -> std::sync::RwLockReadGuard<'_, Vec<Edge>> {
+        self.edges.read().unwrap()
     }
 
     pub fn edges_mut(&mut self) -> &mut Vec<Edge> {
-        self.edges.get_mut()
+        self.edges.get_mut().unwrap()
     }
 
     /// Remap all sym IDs using the given table. Used after merging per-thread interners.
@@ -242,7 +245,7 @@ impl Tree {
         let new_root = id_map[&self.root];
         let old_arena = std::mem::replace(&mut self.arena, new_arena);
         self.root = new_root;
-        for edge in self.edges.get_mut() {
+        for edge in self.edges.get_mut().unwrap() {
             let from_nid = old_arena
                 .get_node_id_at(std::num::NonZeroUsize::new(edge.from.node as usize + 1).unwrap());
             if let Some(old) = from_nid
@@ -322,7 +325,8 @@ impl From<&Tree> for TreeSnapshot {
         };
         let edges = tree
             .edges
-            .borrow()
+            .read()
+            .unwrap()
             .iter()
             .map(|e| Edge {
                 from: NodeRef {
@@ -387,7 +391,7 @@ impl From<TreeSnapshot> for Tree {
             );
             id_map.push(id);
         }
-        tree.edges = RefCell::new(snap.edges);
+        tree.edges = RwLock::new(snap.edges);
         tree.label = snap.label;
         tree
     }
