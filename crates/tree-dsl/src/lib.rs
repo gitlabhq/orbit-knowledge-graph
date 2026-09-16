@@ -1,4 +1,5 @@
 pub mod canonical;
+pub mod constants;
 pub mod dsl;
 pub mod file_tree;
 pub mod intern;

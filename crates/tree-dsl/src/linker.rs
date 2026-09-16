@@ -1,4 +1,5 @@
 use crate::canonical::{self as canonical, Canonical as C};
+use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tree::{Cursor, EdgeKind, Step, Tree, find_method_in, infer_return_type};
@@ -657,7 +658,7 @@ pub fn link(tree: &Tree, lang: &Lang) {
         imports: Vec::new(),
         import_names: Vec::new(),
         def_stack: vec![(None, entry)],
-        wildcard: lang.syms.intern("*"),
+        wildcard: lang.syms.intern(WILDCARD),
     };
 
     f.walk(tree, tree.root());

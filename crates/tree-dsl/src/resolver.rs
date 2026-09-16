@@ -12,6 +12,8 @@ use crate::intern::Lang;
 use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
 use crate::treesitter::SupportLang;
 
+use crate::constants::{self as constants, WILDCARD};
+
 type VisibleMap = Vec<FxHashMap<u32, (usize, u32)>>;
 
 pub struct ResolveResult {
@@ -109,7 +111,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     for c in import.names() {
         let ns = c.sym();
         let name_str = ctx.lang.syms.resolve(ns);
-        if name_str == "*" {
+        if name_str == WILDCARD {
             if c.child_sym(C::Alias).is_some() {
                 edges.push(c.edge_to(c.jump(tfi as u32, 0), EdgeKind::Imports));
             } else {
@@ -220,7 +222,8 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             if !direct {
                 continue;
             }
-            if ctx.lang.syms.resolve(ft.cursor(ie.from.node).sym()) == "*" && target_name != 0 {
+            if ctx.lang.syms.resolve(ft.cursor(ie.from.node).sym()) == WILDCARD && target_name != 0
+            {
                 let found = corpus
                     .jump(ie.from.tree, intra.from.node)
                     .descendants()
@@ -455,7 +458,9 @@ fn gather_imports(
                 {
                     continue;
                 }
-                let target_path = if source_str.starts_with("./") || source_str.starts_with("../") {
+                let target_path = if source_str.starts_with(constants::RELATIVE_SELF)
+                    || source_str.starts_with(constants::RELATIVE_PARENT)
+                {
                     resolve_relative(lang.syms.resolve(tree.root().sym()), &source_str)
                 } else {
                     source_str.clone()
@@ -539,7 +544,7 @@ fn propagate_reexports(
                 .filter(|c| c.is(C::Name) && c.sym() != 0)
             {
                 let ns = c.sym();
-                if lang.syms.resolve(ns) == "*" {
+                if lang.syms.resolve(ns) == WILDCARD {
                     let target_entries: Vec<_> = visible[req.target_fi]
                         .iter()
                         .map(|(&s, &v)| (s, v))
@@ -626,34 +631,37 @@ struct ImportReq {
 }
 
 fn resolve_relative(current_file: &str, source: &str) -> String {
-    let dir = current_file.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+    let dir = current_file
+        .rsplit_once(constants::PATH_SEP)
+        .map(|(d, _)| d)
+        .unwrap_or("");
     let mut parts: Vec<&str> = if dir.is_empty() {
         Vec::new()
     } else {
-        dir.split('/').collect()
+        dir.split(constants::PATH_SEP).collect()
     };
     let mut rest = source;
     loop {
-        if let Some(r) = rest.strip_prefix("../") {
+        if let Some(r) = rest.strip_prefix(constants::RELATIVE_PARENT) {
             parts.pop();
             rest = r;
-        } else if let Some(r) = rest.strip_prefix("./") {
+        } else if let Some(r) = rest.strip_prefix(constants::RELATIVE_SELF) {
             rest = r;
         } else {
             break;
         }
     }
-    if rest == ".." {
+    if rest == constants::RELATIVE_DOTDOT {
         parts.pop();
         rest = "";
-    } else if rest == "." {
+    } else if rest == constants::RELATIVE_DOT {
         rest = "";
     }
     if rest.is_empty() {
-        parts.join("/")
+        parts.join(constants::PATH_SEP)
     } else if parts.is_empty() {
         rest.to_string()
     } else {
-        format!("{}/{rest}", parts.join("/"))
+        format!("{}/{rest}", parts.join(constants::PATH_SEP))
     }
 }

@@ -91,6 +91,9 @@ pub enum Canonical {
     #[strum(serialize = "__bool")]
     ConfigBool,
 
+    #[strum(serialize = "__unknown")]
+    Unknown,
+
     // ── File tree ──
     #[strum(serialize = "__root")]
     Root,

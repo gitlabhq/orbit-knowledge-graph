@@ -156,7 +156,8 @@ impl Lang {
                     return s;
                 }
             }
-            "__unknown"
+            let s: &'static str = Canonical::Unknown.into();
+            s
         } else {
             self.kinds.resolve(k as u32)
         }
