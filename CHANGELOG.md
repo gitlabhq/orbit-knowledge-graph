@@ -1,3 +1,22 @@
+## [0.124.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.123.0...v0.124.0) (2026-09-16)
+
+### Features
+
+* **cli:** support GitLab Duo setup ([02af127](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02af127a56f03e6e97f7bfe26532dc1315a966b5)) by Aaron Algutifan
+* **cli:** update [secure] search result model and return typed definitions from local grep ([aaef44a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aaef44a08905eb16a26e3ab03f4b3ab15ff062ab)) by Aaron Algutifan
+* **gql:** fuzzing and gql shape in every data correctness test ([d79e12a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d79e12af282eca8930510610175d1837e5f4e5c5)) by Aaron Algutifan
+
+### Fixes
+
+* **dashboards:** drop stale samples from SDLC watermark lag panels ([43ce77a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/43ce77a84e4edf86d15721b293bf733e1bfc1030)) by Bohdan Parkhomchuk
+
+### Other
+
+* **deps:** update rust crate flate2 to v1.1.10 ([3d4ac27](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3d4ac27f8aa129c7d2c25bd05dfd80e210a3038e)) by GitLab Renovate Bot
+* document YAML query scenario framework and deprecate Rust data correctness suite ([8498b45](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8498b45b2edbec2eaeaa9dcc42a23e6c6e4afd39)) by Michael Usachenko
+* **skill:** add a cross-repository recipe to the orbit-cli SQL reference ([241fc47](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/241fc47e7091135c255f963e84655868d7de1d85)) by Andrew Dunn
+* **tooling:** add cmake and go for the AWS-LC FIPS build ([6e73d72](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6e73d72629a4d5093240f7a9752357b2e6ac8148)) by Bohdan Parkhomchuk
+
 ## [0.123.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.122.0...v0.123.0) (2026-09-15)
 
 ### Features
