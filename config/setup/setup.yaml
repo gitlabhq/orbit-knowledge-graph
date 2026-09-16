@@ -10,12 +10,11 @@ instructions: |
 
   Use Orbit for code.
 
-  - Find: `{{orbit}} grep "<words>"`. Searches definition names/paths/bodies. Narrow with `--path <glob>` or `--kind Class,Method`; retry misses once with identifiers.
+  - Find: `{{orbit}} grep "<words>"` keyword search for definition names/paths/bodies. Narrow: `--path <glob>` or `--kind Class,Method`. Miss: retry with identifiers / synonyms.
   - Reuse returned source. Edit when enough.
-  - Need more? `{{orbit}} context <path> Definition:<id> [TARGET...]` accepts any mix of files and IDs. Batch known targets; skip grep. Quote paths with spaces.
-  - Context returns complete requested source once, even for large files. Grep bounds inline source and links omitted bodies.
-  - Definition context includes bounded indexed relationships and a small test sample; follow returned IDs. `--tests` expands the sample. Missing links do not prove no callers or tests exist.
-  - Raw Read/shell reads only for non-code or unavailable Orbit source. Never truncate Orbit output.
+  - Better context: `{{orbit}} context <path> Definition:<id> [TARGET...]`. Mix files/IDs. Batch known targets; skip grep. Quote paths with spaces.
+  - Context: full requested source once, even large files. Grep: capped inline source; links to omitted bodies. Never truncate Orbit output.
+  - Definition context: bounded indexed links + small test sample. Follow IDs; `--tests` expands sample. Missing links ≠ absent callers/tests.
 
 nudge_search: |
   Known targets? Batch paths and Definition IDs in `{{orbit}} context <TARGET...>` for complete source. Otherwise `{{orbit}} grep "<words>"` searches definition names/paths/bodies. Reuse returned source; edit when enough.
