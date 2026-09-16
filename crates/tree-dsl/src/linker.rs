@@ -118,8 +118,16 @@ impl Fold {
             let mut tmp = Vec::new();
             self.dispatch(tree, child, &mut tmp);
             while let Some(item) = tmp.pop() {
-                if let WorkItem::Visit(i) = item {
-                    self.dispatch(tree, i, &mut tmp);
+                match item {
+                    WorkItem::ExitScope => {
+                        if self.def_stack.len() > 1 {
+                            let (_, saved) = self.def_stack.pop().unwrap();
+                            self.cur = saved;
+                        }
+                    }
+                    WorkItem::Visit(i) => {
+                        self.dispatch(tree, i, &mut tmp);
+                    }
                 }
             }
         }
@@ -328,10 +336,13 @@ impl Fold {
         if let Some(callee) = rhs.child(C::Call).and_then(|call| call.child(C::Callee)) {
             if let Some(member) = callee.child(C::Member) {
                 let method = member.sym();
-                let obj_node = member.child(C::Object);
-                let ivar = obj_node.and_then(|o| o.child(C::Ivar));
-                let obj_sym = ivar.or(obj_node).map(|n| n.sym()).unwrap_or(0);
-                return self.value_from_method(tree, obj_sym, method, binding, ivar.is_some());
+                let ivar = member.child(C::Object).and_then(|o| o.child(C::Ivar));
+                let (obj_sym, is_ivar) = if let Some(iv) = ivar {
+                    (iv.sym(), true)
+                } else {
+                    (root_object_sym(member), false)
+                };
+                return self.value_from_method(tree, obj_sym, method, binding, is_ivar);
             }
             if callee.child(C::Ivar).is_some() {
                 return Value::Opaque;
@@ -466,9 +477,6 @@ impl Fold {
         let mut targets = self.lookup(sym);
         if targets.is_empty() {
             targets = self.lookup(self.wildcard);
-            for r in &targets {
-                self.emit(tree, r, from);
-            }
         }
         for r in &targets {
             match r {

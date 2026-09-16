@@ -172,13 +172,6 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             target_files.push(tfi);
         }
     }
-    for child in nodes.cursor(import_node).children() {
-        for ie in &import_edges {
-            if ie.from.node == child.index() && !target_files.contains(&(ie.to.tree as usize)) {
-                target_files.push(ie.to.tree as usize);
-            }
-        }
-    }
 
     for edge in nodes.edges().iter() {
         if edge.kind != EdgeKind::Imports {
