@@ -123,7 +123,7 @@ can run on the same cluster as GitLab or on a separate cluster. For more informa
 
 No. GitLab Orbit reads GitLab data and never writes data back to GitLab. Siphon uses PostgreSQL logical
 replication to copy SDLC changes through NATS into ClickHouse. This requires replication access to
-PostgreSQL, not application write access. GitLab Orbit fetches source code through the GitLab Rails
+PostgreSQL, not application write access. GitLab Orbit fetches source code through Gitaly 
 internal API and writes the property graph to its own ClickHouse database. GitLab Orbit Local writes
 its property graph to a DuckDB file on your machine.
 
