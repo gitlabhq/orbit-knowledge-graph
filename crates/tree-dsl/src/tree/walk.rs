@@ -1,21 +1,78 @@
+use std::ops::ControlFlow;
+
 use crate::canonical::{self as canonical, Canonical as C};
 
-use super::types::{Edge, EdgeKind, Tree};
+use super::types::{Edge, EdgeKind, Node, Tree};
 
-/// Control flow for `descend` and `ascend` traversals.
 pub enum Step<R> {
-    /// Continue into children (descend) or continue up (ascend).
     Into,
-    /// Skip this subtree, continue with next sibling.
     Over,
-    /// Halt traversal and return a value.
     Out(R),
 }
 
-/// Read-only position in a tree or forest of trees.
-///
-/// Single-tree: `tree.cursor(id)`. Cross-tree: `Cursor::new(trees, fi, node)`.
-/// All navigation returns another Cursor. Edges are created via `edge_to`.
+pub struct Walk<'a> {
+    cur: Cursor<'a>,
+    iter: std::iter::Skip<indextree::Traverse<'a, Node>>,
+    last: Option<indextree::NodeId>,
+}
+
+impl<'a> Iterator for Walk<'a> {
+    type Item = Cursor<'a>;
+    fn next(&mut self) -> Option<Cursor<'a>> {
+        loop {
+            if let indextree::NodeEdge::Start(id) = self.iter.next()? {
+                self.last = Some(id);
+                return Some(self.cur.at(id));
+            }
+        }
+    }
+}
+
+impl<'a> Walk<'a> {
+    pub fn skip_subtree(&mut self) {
+        if let Some(id) = self.last.take() {
+            self.iter
+                .by_ref()
+                .find(|e| *e == indextree::NodeEdge::End(id));
+        }
+    }
+
+    /// Eager primitive: visit each node with `&mut Walk` for skip control.
+    /// Return `Break(v)` to halt early, `Continue(())` to keep going.
+    pub fn run<B>(
+        mut self,
+        mut f: impl FnMut(Cursor<'a>, &mut Self) -> ControlFlow<B>,
+    ) -> Option<B> {
+        while let Some(n) = self.next() {
+            if let ControlFlow::Break(v) = f(n, &mut self) {
+                return Some(v);
+            }
+        }
+        None
+    }
+}
+
+pub fn reachable<N, I>(start: N, succ: impl Fn(N) -> I) -> impl Iterator<Item = N>
+where
+    N: Copy + Eq,
+    I: IntoIterator<Item = N>,
+{
+    let mut seen: smallvec::SmallVec<[N; 8]> = smallvec::smallvec![start];
+    let mut stack: smallvec::SmallVec<[N; 8]> = smallvec::smallvec![start];
+    std::iter::from_fn(move || {
+        let n = stack.pop()?;
+        stack.extend(succ(n).into_iter().filter(|m| {
+            if seen.contains(m) {
+                false
+            } else {
+                seen.push(*m);
+                true
+            }
+        }));
+        Some(n)
+    })
+}
+
 #[derive(Clone, Copy)]
 pub struct Cursor<'a> {
     trees: &'a [Tree],
@@ -62,6 +119,11 @@ impl<'a> Cursor<'a> {
     #[inline]
     pub fn sym(self) -> u32 {
         self.tree().node(self.nid()).sym
+    }
+
+    #[inline]
+    pub fn sym_opt(self) -> Option<u32> {
+        Some(self.sym()).filter(|&s| s != 0)
     }
 
     #[inline]
@@ -127,6 +189,20 @@ impl<'a> Cursor<'a> {
             .map(move |id| self.at(id))
     }
 
+    pub fn children_rev(self) -> impl Iterator<Item = Self> + 'a {
+        let ids: Vec<_> = self.nid().children(&self.tree().arena).collect();
+        ids.into_iter().rev().map(move |id| self.at(id))
+    }
+
+    pub fn children_of(self, ck: C) -> impl Iterator<Item = Self> + 'a {
+        self.children()
+            .filter(move |c| c.is(ck) && c.sym_opt().is_some())
+    }
+
+    pub fn last_named(self) -> Option<Self> {
+        self.children().filter(|c| c.named()).last()
+    }
+
     pub fn descendants(self) -> impl Iterator<Item = Self> + 'a {
         self.nid()
             .descendants(&self.tree().arena)
@@ -139,6 +215,40 @@ impl<'a> Cursor<'a> {
             .ancestors(&self.tree().arena)
             .skip(1)
             .map(move |id| self.at(id))
+    }
+
+    pub fn walk(self) -> Walk<'a> {
+        Walk {
+            cur: self,
+            iter: self.nid().traverse(&self.tree().arena).skip(1),
+            last: None,
+        }
+    }
+
+    pub fn calls(self) -> impl Iterator<Item = Self> + 'a {
+        self.descendants().filter(|d| d.is(C::Call))
+    }
+
+    pub fn member_calls(self) -> impl Iterator<Item = (Self, Self)> + 'a {
+        self.calls()
+            .filter_map(|c| Some((c, c.member()?)))
+            .filter(|(_, m)| m.sym_opt().is_some())
+    }
+
+    pub fn member(self) -> Option<Self> {
+        self.child(C::Callee)?.child(C::Member)
+    }
+
+    pub fn object_ivar(self) -> Option<Self> {
+        self.child(C::Object)?.child(C::Ivar)
+    }
+
+    pub fn rhs_callee(self) -> Option<u32> {
+        self.child(C::Rhs)?.child(C::Call)?.child_sym(C::Callee)
+    }
+
+    pub fn enclosing_def(self, kinds: &'a [C]) -> Option<Self> {
+        self.enclosing(move |a| canonical::def_type_of(a).is_some_and(|k| kinds.contains(&k)))
     }
 
     pub fn jump(self, fi: u32, id: u32) -> Self {
@@ -158,28 +268,43 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn descend<R>(self, mut visitor: impl FnMut(Self) -> Step<R>) -> Option<R> {
-        let tree = self.tree();
-        let mut iter = self.nid().traverse(&tree.arena).skip(1);
-        while let Some(edge) = iter.next() {
-            let indextree::NodeEdge::Start(id) = edge else {
-                continue;
-            };
-            match visitor(self.at(id)) {
-                Step::Out(r) => return Some(r),
-                Step::Over => {
-                    let mut depth = 1u32;
-                    for edge in iter.by_ref() {
-                        match edge {
-                            indextree::NodeEdge::Start(_) => depth += 1,
-                            indextree::NodeEdge::End(_) if depth == 1 => break,
-                            indextree::NodeEdge::End(_) => depth -= 1,
-                        }
-                    }
-                }
-                Step::Into => {}
+        self.walk().run(|n, w| match visitor(n) {
+            Step::Out(r) => ControlFlow::Break(r),
+            Step::Over => {
+                w.skip_subtree();
+                ControlFlow::Continue(())
             }
-        }
-        None
+            Step::Into => ControlFlow::Continue(()),
+        })
+    }
+
+    pub fn for_each(self, mut f: impl FnMut(Self, &mut Walk<'a>)) {
+        self.walk().run(|n, w| {
+            f(n, w);
+            ControlFlow::<()>::Continue(())
+        });
+    }
+
+    pub fn fold_tree<A>(self, mut init: A, mut f: impl FnMut(&mut A, Self, &mut Walk<'a>)) -> A {
+        self.walk().run(|n, w| {
+            f(&mut init, n, w);
+            ControlFlow::<()>::Continue(())
+        });
+        init
+    }
+
+    pub fn descendants_pruned(
+        self,
+        prune: impl Fn(Self) -> bool + 'a,
+    ) -> impl Iterator<Item = Self> + 'a {
+        let mut w = self.walk();
+        std::iter::from_fn(move || {
+            let n = w.next()?;
+            if prune(n) {
+                w.skip_subtree();
+            }
+            Some(n)
+        })
     }
 
     pub fn ascend<R>(self, mut visitor: impl FnMut(Self) -> Step<R>) -> Option<R> {
@@ -205,7 +330,8 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn names(self) -> impl Iterator<Item = Self> + 'a {
-        self.children().filter(|c| c.is(C::Name) && c.sym() != 0)
+        self.children()
+            .filter(|c| c.is(C::Name) && c.sym_opt().is_some())
     }
 
     pub fn find_desc(self, pred: impl Fn(Self) -> bool) -> Option<Self> {
@@ -225,50 +351,43 @@ impl<'a> Cursor<'a> {
     }
 }
 
-/// Infer return type from annotation or body scan. Skips nested defs.
 pub fn infer_return_type(def: Cursor) -> Option<u32> {
-    def.child_sym(C::SsaReturnType).or_else(|| {
-        let mut binds: Vec<(u32, u32)> = Vec::new();
-        let mut result = None;
-        def.descend(|n| -> Step<u32> {
-            if n.is(C::Def) && n.index() != def.index() {
-                return Step::Over;
+    if let Some(s) = def.child_sym(C::SsaReturnType) {
+        return Some(s);
+    }
+    let mut binds: rustc_hash::FxHashMap<u32, u32> = rustc_hash::FxHashMap::default();
+    def.walk().run(|n, w| {
+        if n.is(C::Def) && n.index() != def.index() {
+            w.skip_subtree();
+            return ControlFlow::Continue(());
+        }
+        if n.is(C::Binding) && n.sym_opt().is_some() {
+            if let Some(callee) = n.rhs_callee() {
+                binds.insert(n.sym(), callee);
             }
-            if n.is(C::Binding) && n.sym() != 0 {
-                if let Some(callee) = n
-                    .child(C::Rhs)
-                    .and_then(|r| r.child(C::Call))
-                    .and_then(|c| c.child_sym(C::Callee))
-                {
-                    binds.push((n.sym(), callee));
-                }
-                return Step::Over;
+            w.skip_subtree();
+            return ControlFlow::Continue(());
+        }
+        if n.is(C::SsaReturn) {
+            let r = return_sym(n, &binds);
+            w.skip_subtree();
+            if let Some(v) = r {
+                return ControlFlow::Break(v);
             }
-            if n.is(C::SsaReturn) && result.is_none() {
-                for ch in n.children() {
-                    if ch.is(C::Call) {
-                        if let Some(s) = ch.child_sym(C::Callee) {
-                            result = Some(s);
-                        }
-                        break;
-                    }
-                    if ch.sym() != 0 {
-                        result = Some(
-                            binds
-                                .iter()
-                                .find(|(l, _)| *l == ch.sym())
-                                .map(|(_, c)| *c)
-                                .unwrap_or(ch.sym()),
-                        );
-                        break;
-                    }
-                }
-                return Step::Over;
-            }
-            Step::Into
-        });
-        result
+        }
+        ControlFlow::Continue(())
     })
+}
+
+fn return_sym(ret: Cursor, binds: &rustc_hash::FxHashMap<u32, u32>) -> Option<u32> {
+    let ch = ret
+        .children()
+        .find(|c| c.is(C::Call) || c.sym_opt().is_some())?;
+    if ch.is(C::Call) {
+        ch.child_sym(C::Callee)
+    } else {
+        Some(binds.get(&ch.sym()).copied().unwrap_or(ch.sym()))
+    }
 }
 
 pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
@@ -283,6 +402,8 @@ pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
         Step::Into
     })
 }
+
+pub const CLASS_LIKE: &[C] = &[C::Class, C::Struct, C::ImplBlock];
 
 impl Tree {
     #[inline]

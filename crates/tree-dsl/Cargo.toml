@@ -32,6 +32,8 @@ serde = { workspace = true }
 serde_yaml = "0.9"
 stacker = "0.1"
 rustc-hash = "2"
+itertools = "0.14"
+either = { workspace = true }
 indextree = "4.9"
 lasso = { version = "0.7", features = ["multi-threaded", "ahasher"] }
 strum = { workspace = true }

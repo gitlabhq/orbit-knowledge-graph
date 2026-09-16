@@ -278,11 +278,9 @@ fn emit_json_value(
 
 /// Walk up from each node with `while_kind`, mark the first ancestor without it.
 fn climb(tree: &mut Tree, while_kind: u16, mark_kind: u16) {
-    let mut marked: Vec<u32> = Vec::new();
-
-    for cursor in tree.root().descendants() {
+    let marked: Vec<u32> = tree.root().fold_tree(Vec::new(), |marked, cursor, _w| {
         if !cursor.children().any(|c| c.kind() == while_kind) {
-            continue;
+            return;
         }
         if let Some(target) = cursor.ascend(|anc| {
             if anc.children().any(|c| c.kind() == while_kind) {
@@ -294,7 +292,7 @@ fn climb(tree: &mut Tree, while_kind: u16, mark_kind: u16) {
         {
             marked.push(target);
         }
-    }
+    });
 
     for node in marked {
         let nid = tree.to_id(node);
@@ -314,10 +312,9 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
     if markers.is_empty() {
         return vec![];
     }
-    let mut paths = Vec::new();
-    for cursor in tree.root().descendants() {
+    tree.root().fold_tree(Vec::new(), |paths, cursor, _w| {
         if cursor.is(C::Root) {
-            continue;
+            return;
         }
         if cursor.children().any(|c| markers.contains(&c.kind())) {
             let path = node_path(cursor, lang);
@@ -325,8 +322,7 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
                 paths.push(path);
             }
         }
-    }
-    paths
+    })
 }
 
 /// Reconstruct the full path of a directory node by walking up parent pointers.
@@ -343,13 +339,11 @@ fn node_path(cursor: Cursor, lang: &Lang) -> String {
 
 /// Collect paths of directories marked `__package` by the resolve rules.
 fn collect_packages(tree: &Tree, lang: &Lang) -> Vec<String> {
-    let mut pkgs = Vec::new();
-    for cursor in tree.root().descendants() {
+    tree.root().fold_tree(Vec::new(), |pkgs, cursor, _w| {
         if cursor.children().any(|c| c.is(C::Package)) {
             pkgs.push(node_path(cursor, lang));
         }
-    }
-    pkgs
+    })
 }
 
 /// Add top-level directories that aren't descendants of any detected root
