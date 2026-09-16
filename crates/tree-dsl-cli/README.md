@@ -1,6 +1,6 @@
 # tree-dsl-cli
 
-Code indexing CLI for tree-dsl. Parses source files into a tagged property graph with definitions, imports, references, and cross-file call edges.
+Code indexing CLI for tree-dsl. Parses source files into a canonical tree with definitions, imports, call edges, and cross-file resolution.
 
 ## Build
 
@@ -14,130 +14,89 @@ The binary is `tree-dsl`.
 
 ### `parse` -- inspect a single file
 
-Parse one file through the tree-dsl pipeline and print the annotation stream. No cross-file resolution. Useful for debugging rewrites, colorings, and tag assignment.
+Parse one file through the tree-dsl pipeline and print the annotation stream. No cross-file resolution.
 
 ```
 tree-dsl parse main.py
 tree-dsl parse main.ts --stage cst     # raw tree-sitter CST
-tree-dsl parse main.ts --stage ast     # after rewrites, before coloring
-tree-dsl parse main.ts --stage tagged  # after coloring (default)
+tree-dsl parse main.ts --stage ast     # after rewrites, before linking
+tree-dsl parse main.ts --stage ssa     # full pipeline with edges (default)
 tree-dsl parse --stdin --lang python   # read from stdin
 ```
 
 Stages:
 - **cst** -- raw tree-sitter parse (before any rewrites)
-- **ast** -- after canonical rewrites (K_MEMBER, K_CALL, K_IVAR, __supertype), before coloring
-- **tagged** -- after coloring, with tags (def/import/ref/binding/branch/loop/scope)
-- **ssa** -- same as tagged (SSA is part of the pipeline, not a separate stage)
+- **ast** -- after canonical rewrites, before SSA linking
+- **ssa** -- full pipeline: rewrites + SSA linking + prune (default)
 
 Example:
 
 ```
-$ tree-dsl parse example.py
-   0  module                         tag=scope sym="example.py" [0-106]
-   1  class_definition               tag=def sym="class User:..." [0-66]
-   3  identifier                     field=name sym="User" [6-10]
-   6  function_definition            tag=def sym="def __init__..." [16-66]
-   8  identifier                     field=name sym="__init__" [20-28]
-  18  assignment                     tag=binding sym="self.name = name" [50-66]
-  19  ____ivar                       field=left tag=ref sym="name" [50-59]
-  22  function_definition            tag=def sym="def greet..." [68-105]
-  33  ____member                     tag=ref sym="user.name" [96-105]
-  34  identifier                     field=object sym="user" [96-100]
-  36  identifier                     field=member sym="name" [101-105]
+$ tree-dsl parse example.py --stage ssa
+   1  __def                          [0-66]
+   2  __defname                      sym="User" [6-10]
+   3  __class                        [0-66]
+   5  __def                          [16-66]
+   6  __defname                      sym="__init__" [20-28]
+   7  __function                     [16-66]
+   8  __self_method                  [16-66]
+  15  __binding                      sym="name" [50-66]
+  16  __ivar                         sym="name" [50-59]
 edges:
-  User[1] --[Defines]--> __init__[6]
+  ?1 --[Defines]--> ?5
 ```
 
-Each line: node index, kind (prefixed `__` for synthetic/canonical kinds), field name, tag, interned symbol text, byte span.
+Each line: node index, kind (`__` prefix for canonical kinds), field name if present, interned symbol text, byte span.
+
+### `rewrite` -- test pattern rules
+
+Apply match/replace patterns to a file. Useful for developing new rewrite rules.
+
+```
+tree-dsl rewrite main.py --match '(return_statement $$$V)' --replace '(__ssa_return $$$V)'
+tree-dsl rewrite main.py --after all --match '...' --replace '...'
+```
 
 ### `index` -- index a file or directory
 
-Run the full pipeline including cross-file import resolution. Prints per-file summaries to stdout and stats to stderr.
+Run the full pipeline including cross-file import resolution.
 
 ```
 tree-dsl index src/
 tree-dsl index main.py
-tree-dsl index src/ --lang python   # override language detection
+tree-dsl index src/ --lang python
+tree-dsl index src/ --no-save        # skip saving the serialized graph
 ```
 
 Example:
 
 ```
 $ tree-dsl index project/
-models.py: 4 defs, 0 imports, 2 refs, 4 edges
-services.py: 2 defs, 1 imports, 1 refs, 3 edges
-
-cross-file edges: 1
-  services.py:create_user[13] --> models.py:User[1]
 
 --- stats ---
 files:        2
 definitions:  6
 imports:      1
-refs:         3
 intra edges:  7
 cross edges:  1
-time:         0.01s
+parse:        0.01s
+resolve:      0.00s
+total:        0.01s
+saved:        ~/.orbit/var/graphs/project.bin (0.1 MB, 0.00s)
 ```
 
 ### `test` -- run YAML test suites
 
-Run integration tests defined in YAML. Same format as the test fixtures in `crates/tree-dsl-tests/fixtures/`.
+Run integration tests defined in YAML.
 
 ```
 tree-dsl test fixtures/python/simple_call.yaml
 tree-dsl test --inline '<yaml>'
 ```
 
-YAML format:
-
-```yaml
-name: "example test"
-pipeline: python                      # optional: python, typescript, js, rust
-fixtures:
-  - path: main.py
-    content: |
-      def foo():
-          pass
-      foo()
-tests:
-  - name: foo is defined
-    query: |
-      MATCH (d:Definition)
-      WHERE d.name = 'foo'
-      RETURN d.fqn AS fqn
-    assert:
-      - { row_count: 1 }
-      - { row: { fqn: "main.foo" } }
-```
-
-Example:
-
-```
-$ tree-dsl test --inline '
-name: quick check
-fixtures:
-  - path: main.py
-    content: |
-      def hello(): pass
-tests:
-  - name: hello exists
-    query: "MATCH (d:Definition) WHERE d.name = '\''hello'\'' RETURN d.name AS n"
-    assert:
-      - { row_count: 1 }
-'
----
-suite: "quick check"
-tests: 1
-passed: 1
-failed: 0
-skipped: 0
-```
-
 ## Architecture
 
-All three commands route through the same library functions in `tree-dsl`:
+All commands route through the same library functions in `tree-dsl`:
 
 | Command | Library function | Resolver |
 |---|---|---|
@@ -145,19 +104,17 @@ All three commands route through the same library functions in `tree-dsl`:
 | `index` | `tree_dsl::index(lang_id, files)` | Yes |
 | `test` | `tree_dsl::index(lang_id, files)` + query/assert | Yes |
 
-The pipeline stages per file:
+Pipeline stages per file:
 
-1. **Parse** -- tree-sitter CST (`bridge::parse`)
-2. **Rewrite** -- canonical vocabulary (K_MEMBER, K_CALL, K_IVAR, __supertype, __decorator)
-3. **Color** -- tag nodes as def/import/ref/binding/branch/loop/scope
-4. **SSA fold** -- reaching definitions, E_CALLS/E_DEFINES/E_IMPORTS edges
-5. **Post-SSA** -- return type propagation, callable dispatch, MRO inheritance
-6. **Resolve** (index/test only) -- cross-file import resolution via the resolver DSL
+1. **Parse** -- tree-sitter CST to indextree arena
+2. **Rewrite** -- YAML rules transform CST nodes into canonical `__def`, `__call`, `__import`, etc.
+3. **Link** -- SSA-based value flow emits Defines/Calls/Imports/Extends edges
+4. **Prune** -- remove non-canonical nodes, promote their children
+5. **Compact** -- rebuild dense arena for cache-friendly resolution
+6. **Resolve** (index/test only) -- parallel cross-file import and call resolution
 
 ## Supported languages
 
-Full pipeline (rewrites + colorings + resolver): **Python**
+Full pipeline (rewrites + linking + resolver): **Python**, **TypeScript**, **JavaScript**, **Rust**
 
-Rewrites + colorings (no resolver yet): **TypeScript**, **JavaScript**, **Rust**
-
-Parsing only (tree-sitter grammar, no colorings): Bash, C, C++, C#, Elixir, Go, HCL, Java, Kotlin, Lua, PHP, Ruby, Scala, Swift, Zig
+Parsing only (tree-sitter grammar, no rewrites): Bash, C, C++, C#, Elixir, Go, HCL, Haskell, Java, Kotlin, Lua, OCaml, PHP, Ruby, Scala, Swift, Zig

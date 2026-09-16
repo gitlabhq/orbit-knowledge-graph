@@ -5,11 +5,13 @@ YAML-driven tree rewrite engine for multi-language code analysis. Transforms tre
 ## Pipeline
 
 ```
-source ─→ tree-sitter CST ─→ YAML rewrites (bottom-up) ─→ classify_methods
-       ─→ SSA fold (linker) ─→ prune ─→ canonical tree + edges
+source ─→ tree-sitter CST ─→ indextree arena ─→ YAML rewrites (bottom-up, per stage)
+       ─→ SSA link (value flow + edges) ─→ prune ─→ compact ─→ canonical tree + edges
 ```
 
 Each language defines its rewrites in `langs/<language>.yaml`. The engine applies them bottom-up in a single pass per stage. All rules use one action: `replace:`.
+
+Tree storage uses `indextree::Arena<Node>` with stable `NodeId` handles. All external access goes through a `Cursor` API. The arena is compacted after pruning for cache-friendly resolution. Interning uses `lasso::ThreadedRodeo` for lock-free concurrent access during parallel parse.
 
 ## Pattern Language Reference
 
@@ -165,7 +167,7 @@ Because inner nodes are processed first:
 
 ## Resolution
 
-After per-file rewriting and SSA linking, the resolver runs across all files to produce cross-file edges (Imports, Calls). This is a three-phase process.
+After per-file rewriting and SSA linking, the resolver runs across all files to produce cross-file edges (Imports, Calls). Resolution runs in parallel using two waves.
 
 ### Phase 1: File tree walk
 
@@ -218,15 +220,21 @@ Special cases:
 - **Import chains**: follow re-export chains up to 10 hops to find the defining file
 - **Aliased imports**: `__alias` children on `__name` nodes map the alias sym to the original name for SSA resolution
 
-### Phase 3: Cross-file call and type edges
+### Wave 1: Import and call edges (parallel per import req)
 
-After import edges are established:
+Each import request independently:
+1. Resolves `__name` children to target definitions via the visible map
+2. Follows re-export chains and submodule resolution
+3. Scans callers for module-level method calls matching target definitions
+4. Promotes intra-file `Imports` edges to cross-file `Calls` edges
 
-1. **Module-level calls**: for each intra-file `Imports` edge, scan the caller's descendants for `__call` nodes whose `__callee` → `__member` name matches a definition in the target file. Emit cross-file `Calls` edges.
+### Wave 2: Type and field edges (parallel per call edge)
 
-2. **Call edges through imports**: for each cross-file `Imports` edge, find intra-file `Imports` edges that reference the same import node and promote them to cross-file `Calls` edges.
-
-3. **Type-flow edges**: for each cross-file `Calls` edge, check if the target definition has a `__return_type` or a `__return → __call → __callee` chain. If the return type resolves to a class (in the same file or via imports), find bindings in the caller that capture the call result, then resolve method calls on those bindings to the return type's methods.
+Each call edge from wave 1 independently:
+1. Infers the target's return type via `__ssa_return_type` or body scan
+2. Resolves the return type to a class definition
+3. Finds bindings that capture the call result, then resolves method calls on those bindings to the return type's methods
+4. Finds typed instance fields and resolves method calls through them
 
 ### Resolve config reference
 
@@ -260,40 +268,60 @@ resolve:
 After all rewrites and pruning, every surviving node has one of these kinds:
 
 ```
-__def          Definition (function, class, method, struct, etc.)
-  __defname    Name of the definition
-  __deftype    Classification: "Function", "Class", "Method", etc.
-  __scope      SSA scope boundary
-  __return_type  Return type annotation
-  __supertype  Inheritance / implements
-  __decorator  Decorator reference
+__def            Definition wrapper
+  __defname      Name of the definition
+  __function     Def-type: function (callable, scoped)
+  __method       Def-type: method (callable, scoped)
+  __class        Def-type: class (callable, scoped)
+  __struct       Def-type: struct (scoped)
+  __impl         Def-type: impl block (scoped)
+  __trait        Def-type: trait (scoped)
+  __interface    Def-type: interface
+  __enum         Def-type: enum (scoped)
+  __variable     Def-type: variable
+  __constant     Def-type: constant
+  __type_alias   Def-type: type alias
+  __property     Def-type: property
+  __lambda       Def-type: lambda (callable)
+  __field_def    Def-type: field
+  __enum_variant Def-type: enum variant (callable)
+  __ssa_return_type  Return type annotation
+  __supertype    Inheritance / implements
+  __decorator    Decorator reference
   __self_method  Has self/this parameter
-  __callable   Has __call__ protocol
-  __visibility Access modifier
+  __callable     Has __call__ protocol
+  __visibility   Access modifier
+  __default_export  Default export marker
+  __alias        Alias for this definition
 
-__import       Runtime import
-__import_type  Type-only import
-  __source     Display text of source
+__import         Runtime import
+__import_type    Type-only import
+  __source       Display text of source
   __source_path  Resolved path
-  __name       Imported name
-    __alias    Alias for this name
+  __name         Imported name
+    __alias      Alias for this name
+    __ssa_hint   SSA resolution hint
+  __cjs_require  CommonJS require marker
 
-__call         Call expression
-  __callee     What is being called
-    __member   Method name
-      __object Receiver
-    __ivar     Self-method call
-  __args       Arguments
+__module_export  Re-export wrapper
 
-__binding      Variable binding
-  __rhs        Right-hand side value
-__ivar         Instance variable (self.x)
-__member       Standalone member access
+__call           Call expression
+  __callee       What is being called
+    __member     Method name
+      __object   Receiver
+    __ivar       Self-method call
+  __args         Arguments
 
-__branch       SSA fork (if/match/try)
-  __arm        Branch arm
-__loop         SSA back-edge (for/while)
-__return       Return expression
+__binding        Variable binding
+  __rhs          Right-hand side value
+  __ssa_typed    Type annotation on binding
+__ivar           Instance variable (self.x)
+__member         Standalone member access
+
+__ssa_branch     SSA fork (if/match/try)
+  __ssa_arm      Branch arm
+__ssa_loop       SSA back-edge (for/while)
+__ssa_return     Return expression
 ```
 
 ## Examples
