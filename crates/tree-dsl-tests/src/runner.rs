@@ -1,4 +1,4 @@
-use tree_dsl::grammar::SupportLang;
+use tree_dsl::treesitter::SupportLang;
 
 use super::assertions::{Severity, TestSuite};
 use super::config::make_graph_config;

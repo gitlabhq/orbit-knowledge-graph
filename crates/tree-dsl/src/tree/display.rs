@@ -1,6 +1,6 @@
 use super::walk::Cursor;
 
-pub fn pretty_print(tree: &super::Tree, lang: &crate::lang::Lang, color: bool) -> String {
+pub fn pretty_print(tree: &super::Tree, lang: &crate::intern::Lang, color: bool) -> String {
     use termtree::Tree as TTree;
 
     const BOLD_CYAN: &str = "\x1b[1;36m";
@@ -8,7 +8,7 @@ pub fn pretty_print(tree: &super::Tree, lang: &crate::lang::Lang, color: bool) -
     const RESET: &str = "\x1b[0m";
     const GREEN: &str = "\x1b[32m";
 
-    fn build(cursor: Cursor, lang: &crate::lang::Lang, color: bool) -> TTree<String> {
+    fn build(cursor: Cursor, lang: &crate::intern::Lang, color: bool) -> TTree<String> {
         let kind = lang.kind_name(cursor.kind());
         let is_canonical = kind.starts_with("__");
         let field_prefix = if cursor.field() != 0 {

@@ -19,7 +19,7 @@
 //!           fields: { O: object, M: member }
 //! ```
 
-use crate::lang::Lang;
+use crate::intern::Lang;
 use crate::pattern::{Out, Rewrite};
 
 pub enum ResolveStage {

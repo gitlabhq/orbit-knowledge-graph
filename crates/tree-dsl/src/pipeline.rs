@@ -3,9 +3,9 @@
 //! Sequential `process_file` + `index` flow.
 //! Threading model: per-file processing fans out; resolve phase joins.
 
-use crate::grammar::{self, SupportLang};
-use crate::lang::Lang;
+use crate::intern::Lang;
 use crate::tree::Tree;
+use crate::treesitter::{self as treesitter, SupportLang};
 use crate::{file_tree, linker, pattern, resolver};
 
 pub struct IndexResult {
@@ -31,7 +31,7 @@ pub struct Pipeline {
 impl Pipeline {
     pub fn for_lang(lang_id: SupportLang) -> (Pipeline, Lang) {
         let lang = Lang::new();
-        let (rewrite_stages, resolve) = match grammar::lang_yaml(lang_id) {
+        let (rewrite_stages, resolve) = match treesitter::lang_yaml(lang_id) {
             Some(yaml) => crate::rules::load_lang(yaml, &lang),
             None => (vec![], crate::rules::ResolveConfig::default()),
         };
@@ -47,7 +47,7 @@ impl Pipeline {
 }
 
 pub fn process_file(path: &str, source: &str, lang: &Lang, pipeline: &Pipeline) -> Tree {
-    let mut tree = grammar::parse(source, pipeline.lang_id, lang, path);
+    let mut tree = treesitter::parse(source, pipeline.lang_id, lang, path);
     for stage in &pipeline.rewrite_stages {
         pattern::apply_rewrites(&mut tree, lang, stage);
     }
@@ -65,7 +65,7 @@ pub fn process_file_timed(
 ) -> (Tree, [std::time::Duration; 4]) {
     use std::time::Instant;
     let t0 = Instant::now();
-    let mut tree = grammar::parse(source, pipeline.lang_id, lang, path);
+    let mut tree = treesitter::parse(source, pipeline.lang_id, lang, path);
     let t1 = Instant::now();
     for stage in &pipeline.rewrite_stages {
         pattern::apply_rewrites(&mut tree, lang, stage);

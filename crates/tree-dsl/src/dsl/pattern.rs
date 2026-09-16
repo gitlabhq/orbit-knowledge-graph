@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use indextree::NodeId;
 
-use crate::lang::Lang;
+use crate::intern::Lang;
 use crate::tree::{Node, Tree};
 
 use super::parser::parse;

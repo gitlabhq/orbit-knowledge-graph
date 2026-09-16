@@ -1,17 +1,15 @@
 pub mod canonical;
 pub mod dsl;
 pub mod file_tree;
-pub mod grammar;
 pub mod intern;
-pub use intern as lang;
 pub mod linker;
 pub mod pipeline;
 pub mod resolver;
 pub mod snapshot;
 pub mod ssa;
 pub mod tree;
+pub mod treesitter;
 
-// Re-export pattern/rules at old paths for existing consumers
 pub mod pattern {
     pub use crate::dsl::pattern::*;
 }

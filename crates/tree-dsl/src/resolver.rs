@@ -8,9 +8,9 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
-use crate::grammar::SupportLang;
-use crate::lang::Lang;
+use crate::intern::Lang;
 use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
+use crate::treesitter::SupportLang;
 
 type VisibleMap = Vec<FxHashMap<u32, (usize, u32)>>;
 

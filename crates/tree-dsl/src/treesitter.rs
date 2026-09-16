@@ -1,4 +1,4 @@
-use crate::lang::Lang;
+use crate::intern::Lang;
 use crate::tree::{Node, Tree};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize)]

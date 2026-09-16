@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use tree_dsl::grammar::SupportLang;
+use tree_dsl::treesitter::SupportLang;
 
 #[derive(serde::Deserialize)]
 struct FixtureFile {

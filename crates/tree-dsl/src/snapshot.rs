@@ -1,10 +1,10 @@
 use std::io::{self, Read, Write};
 use std::path::Path;
 
-use crate::grammar::SupportLang;
-use crate::lang::{Lang, LangSnapshot};
+use crate::intern::{Lang, LangSnapshot};
 use crate::pipeline::{IndexResult, Pipeline, process_file};
 use crate::tree::{Edge, TreeSnapshot};
+use crate::treesitter::SupportLang;
 use crate::{file_tree, resolver};
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

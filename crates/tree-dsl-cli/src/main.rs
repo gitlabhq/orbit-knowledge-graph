@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
-use tree_dsl::grammar::SupportLang;
 use tree_dsl::tree::EdgeKind;
+use tree_dsl::treesitter::SupportLang;
 
 #[derive(Parser)]
 #[command(name = "tree-dsl", about = "Code indexing CLI")]
@@ -131,13 +131,13 @@ fn cmd_parse(
 
     match stage {
         Stage::Cst => {
-            let mut lang = tree_dsl::lang::Lang::new();
-            let tree = tree_dsl::grammar::parse(&source, lang_id, &lang, &path);
+            let mut lang = tree_dsl::intern::Lang::new();
+            let tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path);
             print_tree(&tree, &lang);
         }
         Stage::Ast => {
             let (pipeline, mut lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
-            let mut tree = tree_dsl::grammar::parse(&source, lang_id, &lang, &path);
+            let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path);
             for stage in &pipeline.rewrite_stages {
                 tree_dsl::pattern::apply_rewrites(&mut tree, &lang, stage);
             }
@@ -180,7 +180,7 @@ fn cmd_rewrite(
 
     let lang_id = resolve_lang(lang_override.as_deref(), Some(&path));
     let (pipeline, mut lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
-    let mut tree = tree_dsl::grammar::parse(&source, lang_id, &lang, &path);
+    let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path);
 
     if let Some(ref stop) = after {
         let limit: usize = if stop == "all" {
@@ -209,7 +209,7 @@ fn cmd_rewrite(
     Ok(())
 }
 
-fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
+fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::intern::Lang) {
     for c in std::iter::once(tree.root()).chain(tree.root().descendants()) {
         if !c.named() && c.sym() == 0 {
             continue;
@@ -246,7 +246,7 @@ fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
     }
 }
 
-fn print_edges(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
+fn print_edges(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::intern::Lang) {
     if tree.edges().is_empty() {
         return;
     }
@@ -258,7 +258,7 @@ fn print_edges(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
     }
 }
 
-fn node_label(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang, node: u32) -> String {
+fn node_label(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::intern::Lang, node: u32) -> String {
     let c = tree.cursor(node);
     for child in c.children() {
         if child.field() != 0 && child.sym() != 0 {

@@ -1,5 +1,5 @@
 use crate::canonical::Canonical as C;
-use crate::lang::Lang;
+use crate::intern::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tree::{Cursor, EdgeKind, Step, Tree, infer_return_type};
 

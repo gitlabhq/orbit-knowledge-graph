@@ -4,7 +4,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::canonical::Canonical as C;
-use crate::lang::Lang;
+use crate::intern::Lang;
 use crate::pattern;
 use crate::rules::{DisplaySource, ParseFileSpec, ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Node, Step, Tree};

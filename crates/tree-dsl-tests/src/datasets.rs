@@ -6,9 +6,9 @@ use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
 
 use tree_dsl::canonical::{self, Canonical as C};
-use tree_dsl::grammar::SupportLang;
-use tree_dsl::lang::Lang;
+use tree_dsl::intern::Lang;
 use tree_dsl::tree::Tree;
+use tree_dsl::treesitter::SupportLang;
 
 pub type LanceDatasets = HashMap<String, RecordBatch>;
 
