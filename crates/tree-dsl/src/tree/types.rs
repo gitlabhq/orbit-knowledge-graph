@@ -175,18 +175,6 @@ impl Tree {
         parent.append_value(child, &mut self.arena)
     }
 
-    pub(crate) fn clone_subtree(&mut self, source: NodeId, parent: Option<NodeId>) -> NodeId {
-        let children: smallvec::SmallVec<[NodeId; 8]> = source.children(&self.arena).collect();
-        let copy = self.arena.new_node(*self.node(source));
-        if let Some(parent) = parent {
-            parent.append(copy, &mut self.arena);
-        }
-        for child in children {
-            self.clone_subtree(child, Some(copy));
-        }
-        copy
-    }
-
     pub(crate) fn replace(&mut self, target: NodeId, replacements: Vec<NodeId>) {
         let field = self.node(target).field;
         if target == self.root && replacements.len() != 1 {

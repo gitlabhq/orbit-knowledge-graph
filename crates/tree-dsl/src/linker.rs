@@ -12,8 +12,6 @@ enum Linked {
 enum WorkItem {
     Visit(u32),
     ExitScope,
-    ExitBranch,
-    ExitLoop,
 }
 
 struct Fold {
@@ -49,10 +47,7 @@ impl Fold {
                         self.cur = saved;
                     }
                 }
-                WorkItem::ExitLoop => {
-                    self.cur = self.ssa.finish_loop(BlockId(0), self.cur);
-                }
-                WorkItem::ExitBranch => {}
+
                 WorkItem::Visit(idx) => {
                     self.dispatch(tree, idx, &mut stack);
                 }
@@ -167,7 +162,7 @@ impl Fold {
                         self.cur = saved;
                     }
                 }
-                WorkItem::ExitLoop | WorkItem::ExitBranch => {}
+
                 WorkItem::Visit(i) => {
                     self.dispatch(tree, i, &mut child_stack);
                 }
