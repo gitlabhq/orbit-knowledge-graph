@@ -94,6 +94,32 @@ tree-dsl test fixtures/python/simple_call.yaml
 tree-dsl test --inline '<yaml>'
 ```
 
+YAML format:
+
+```yaml
+name: "example test"
+pipeline: python
+fixtures:
+  - path: main.py
+    content: |
+      def foo():
+          pass
+      foo()
+tests:
+  - name: foo is defined
+    entity: Definition
+    expect:
+      - fqn: main.foo
+        name: foo
+        definition_type: Function
+  - name: foo is called
+    entity: DefinitionToDefinition
+    expect:
+      - caller: main.foo
+        callee: main.foo
+        edge_kind: Calls
+```
+
 ## Architecture
 
 All commands route through the same library functions in `tree-dsl`:

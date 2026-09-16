@@ -220,7 +220,7 @@ Special cases:
 - **Import chains**: follow re-export chains up to 10 hops to find the defining file
 - **Aliased imports**: `__alias` children on `__name` nodes map the alias sym to the original name for SSA resolution
 
-### Wave 1: Import and call edges (parallel per import req)
+#### Wave 1: Import and call edges (parallel per import req)
 
 Each import request independently:
 1. Resolves `__name` children to target definitions via the visible map
@@ -228,7 +228,7 @@ Each import request independently:
 3. Scans callers for module-level method calls matching target definitions
 4. Promotes intra-file `Imports` edges to cross-file `Calls` edges
 
-### Wave 2: Type and field edges (parallel per call edge)
+#### Wave 2: Type and field edges (parallel per call edge)
 
 Each call edge from wave 1 independently:
 1. Infers the target's return type via `__ssa_return_type` or body scan
@@ -265,63 +265,103 @@ resolve:
 
 ## Canonical Alphabet
 
-After all rewrites and pruning, every surviving node has one of these kinds:
+After all rewrites and pruning, every surviving node has one of these kinds. The full list is defined in `canonical.rs`.
+
+### Definitions
 
 ```
-__def            Definition wrapper
-  __defname      Name of the definition
-  __function     Def-type: function (callable, scoped)
-  __method       Def-type: method (callable, scoped)
-  __class        Def-type: class (callable, scoped)
-  __struct       Def-type: struct (scoped)
-  __impl         Def-type: impl block (scoped)
-  __trait        Def-type: trait (scoped)
-  __interface    Def-type: interface
-  __enum         Def-type: enum (scoped)
-  __variable     Def-type: variable
-  __constant     Def-type: constant
-  __type_alias   Def-type: type alias
-  __property     Def-type: property
-  __lambda       Def-type: lambda (callable)
-  __field_def    Def-type: field
-  __enum_variant Def-type: enum variant (callable)
+__def                Definition wrapper
+  __defname          Name of the definition
   __ssa_return_type  Return type annotation
-  __supertype    Inheritance / implements
-  __decorator    Decorator reference
-  __self_method  Has self/this parameter
-  __callable     Has __call__ protocol
-  __visibility   Access modifier
-  __default_export  Default export marker
-  __alias        Alias for this definition
+  __supertype        Inheritance / implements
+  __decorator        Decorator reference
+  __callable         Has __call__ protocol
+  __visibility       Access modifier
+  __default_export   Default export marker
+  __alias            Alias for this definition
+```
 
-__import         Runtime import
-__import_type    Type-only import
-  __source       Display text of source
-  __source_path  Resolved path
-  __name         Imported name
-    __alias      Alias for this name
-    __ssa_hint   SSA resolution hint
-  __cjs_require  CommonJS require marker
+Def-type children (exactly one per `__def`, determines the definition kind):
 
-__module_export  Re-export wrapper
+```
+__function           Function (callable, scoped)
+__method             Method (callable, scoped)
+__class              Class (callable, scoped)
+__struct             Struct (scoped)
+__impl               Impl block (scoped)
+__trait              Trait (scoped)
+__interface          Interface
+__enum               Enum (scoped)
+__variable           Variable
+__constant           Constant
+__static_constant    Static constant
+__type_alias         Type alias
+__property           Property
+__lambda             Lambda (callable)
+__field_def          Field
+__enum_variant       Enum variant (callable)
+```
 
-__call           Call expression
-  __callee       What is being called
-    __member     Method name
-      __object   Receiver
-    __ivar       Self-method call
-  __args         Arguments
+Flavor children (zero or more per `__def`):
 
-__binding        Variable binding
-  __rhs          Right-hand side value
-  __ssa_typed    Type annotation on binding
-__ivar           Instance variable (self.x)
-__member         Standalone member access
+```
+__async              Async modifier
+__static             Static modifier
+__abstract           Abstract modifier
+__generator          Generator modifier
+__self_method        Has self/this parameter
+```
 
-__ssa_branch     SSA fork (if/match/try)
-  __ssa_arm      Branch arm
-__ssa_loop       SSA back-edge (for/while)
-__ssa_return     Return expression
+### Imports
+
+```
+__import             Runtime import
+__import_type        Type-only import
+  __source           Display text of source
+  __source_path      Resolved path
+  __name             Imported name
+    __alias          Alias for this name
+    __ssa_hint       SSA resolution hint
+  __cjs_require      CommonJS require marker
+
+__module_export      Re-export wrapper
+```
+
+### Calls and references
+
+```
+__call               Call expression
+  __callee           What is being called
+    __member         Method name
+      __object       Receiver
+    __ivar           Self-method call
+  __args             Arguments
+
+__binding            Variable binding
+  __rhs              Right-hand side value
+  __ssa_typed        Type annotation on binding
+__ivar               Instance variable (self.x)
+__member             Standalone member access
+```
+
+### SSA control flow
+
+```
+__ssa_branch         SSA fork (if/match/try)
+  __ssa_arm          Branch arm
+__ssa_loop           SSA back-edge (for/while)
+__ssa_return         Return expression
+```
+
+### Config inlining (file tree only)
+
+```
+__obj                JSON/TOML object
+__arr                JSON/TOML array
+__field              Object field (sym = key name)
+__str                String value
+__num                Numeric value
+__bool               Boolean value
 ```
 
 ## Examples
