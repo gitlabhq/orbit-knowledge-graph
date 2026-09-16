@@ -1,7 +1,7 @@
 use crate::canonical::Canonical as C;
 use crate::lang::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, infer_return_type};
+use crate::tree::{Cursor, EdgeKind, Step, Tree, infer_return_type};
 
 enum Linked {
     Def(u32),
@@ -146,7 +146,7 @@ impl Fold {
         self.cur = self.ssa.add_sealed_join(exit_blocks);
     }
 
-    fn handle_loop(&mut self, tree: &Tree, idx: u32, stack: &mut Vec<WorkItem>) {
+    fn handle_loop(&mut self, tree: &Tree, idx: u32, _stack: &mut Vec<WorkItem>) {
         let (header, body) = self.ssa.begin_loop(self.cur);
         self.cur = body;
         self.walk_children(tree, idx);
@@ -184,14 +184,14 @@ impl Fold {
             self.ssa
                 .write_variable(sym, self.cur, Value::ImportRef(self.import_count - 1));
             for kind in [C::Alias, C::SsaHint] {
-                if let Some(alias) = c.child_sym(kind) {
-                    if alias != sym {
-                        self.ssa.write_variable(
-                            alias,
-                            self.cur,
-                            Value::ImportRef(self.import_count - 1),
-                        );
-                    }
+                if let Some(alias) = c.child_sym(kind)
+                    && alias != sym
+                {
+                    self.ssa.write_variable(
+                        alias,
+                        self.cur,
+                        Value::ImportRef(self.import_count - 1),
+                    );
                 }
             }
         }
@@ -249,22 +249,21 @@ impl Fold {
         if let Some(member) = callee.child(C::Member) {
             let method = member.sym();
             if let Some(ivar) = member.child(C::Object).and_then(|o| o.child(C::Ivar)) {
-                if let Some(cls) = self.enclosing_class(tree, from) {
-                    if let Some(ts) = self.ivar_type(tree, cls, ivar.sym()) {
-                        self.resolve_method(tree, ts, method, from);
-                    }
+                if let Some(cls) = self.enclosing_class(tree, from)
+                    && let Some(ts) = self.ivar_type(tree, cls, ivar.sym())
+                {
+                    self.resolve_method(tree, ts, method, from);
                 }
             } else {
                 let obj_sym = root_object_sym(member);
                 self.resolve_obj(tree, obj_sym, method, from);
             }
         } else if let Some(ivar) = callee.child(C::Ivar) {
-            if ivar.sym() != 0 {
-                if let Some(cls) = self.enclosing_class(tree, from) {
-                    if let Some(m) = self.find_method_in(tree, cls, ivar.sym()) {
-                        tree.add_edge(from, m, EdgeKind::Calls);
-                    }
-                }
+            if ivar.sym() != 0
+                && let Some(cls) = self.enclosing_class(tree, from)
+                && let Some(m) = self.find_method_in(tree, cls, ivar.sym())
+            {
+                tree.add_edge(from, m, EdgeKind::Calls);
             }
         } else if callee.sym() != 0 {
             self.resolve_name(tree, callee.sym(), from);
@@ -497,10 +496,10 @@ impl Fold {
 
     fn resolve_method(&mut self, tree: &Tree, type_sym: u32, method: u32, from: u32) {
         for r in self.lookup(type_sym) {
-            if let Linked::Def(cls) = r {
-                if let Some(m) = self.find_method_in(tree, cls, method) {
-                    tree.add_edge(from, m, EdgeKind::Calls);
-                }
+            if let Linked::Def(cls) = r
+                && let Some(m) = self.find_method_in(tree, cls, method)
+            {
+                tree.add_edge(from, m, EdgeKind::Calls);
             }
         }
     }
@@ -520,14 +519,14 @@ impl Fold {
 
     fn ivar_type(&self, tree: &Tree, class: u32, attr: u32) -> Option<u32> {
         tree.cursor(class).descend(|n| {
-            if n.is(C::Binding) && n.child(C::Ivar).is_some_and(|iv| iv.sym() == attr) {
-                if let Some(s) = n
+            if n.is(C::Binding)
+                && n.child(C::Ivar).is_some_and(|iv| iv.sym() == attr)
+                && let Some(s) = n
                     .child(C::Rhs)
                     .and_then(|r| r.child(C::Call))
                     .and_then(|c| c.child_sym(C::Callee))
-                {
-                    return Step::Out(s);
-                }
+            {
+                return Step::Out(s);
             }
             Step::Into
         })
@@ -575,10 +574,10 @@ impl Fold {
             return Value::Type(sym);
         }
         for r in &resolved {
-            if let Linked::Def(node) = r {
-                if let Some(rt) = infer_return_type(tree.cursor(*node)) {
-                    return self.classify_return(tree, rt);
-                }
+            if let Linked::Def(node) = r
+                && let Some(rt) = infer_return_type(tree.cursor(*node))
+            {
+                return self.classify_return(tree, rt);
             }
         }
         Value::Opaque
@@ -610,12 +609,11 @@ impl Fold {
             return Value::Opaque;
         };
         for r in self.lookup(ts) {
-            if let Linked::Def(cls) = r {
-                if let Some(m) = self.find_method_in(tree, cls, method) {
-                    if let Some(rt) = infer_return_type(tree.cursor(m)) {
-                        return Value::Type(rt);
-                    }
-                }
+            if let Linked::Def(cls) = r
+                && let Some(m) = self.find_method_in(tree, cls, method)
+                && let Some(rt) = infer_return_type(tree.cursor(m))
+            {
+                return Value::Type(rt);
             }
         }
         Value::Opaque

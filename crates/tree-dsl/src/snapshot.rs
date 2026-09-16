@@ -21,8 +21,7 @@ impl IndexResult {
             cross_edges: self.cross_edges.clone(),
             lang: LangSnapshot::from(&self.lang),
         };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::BoxedError>(&snap)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let bytes = rkyv::to_bytes::<rkyv::rancor::BoxedError>(&snap).map_err(io::Error::other)?;
         let mut f = std::fs::File::create(path)?;
         f.write_all(&bytes)
     }
@@ -32,7 +31,7 @@ impl IndexResult {
         let mut bytes = Vec::new();
         f.read_to_end(&mut bytes)?;
         let snap: Snapshot = rkyv::from_bytes::<Snapshot, rkyv::rancor::BoxedError>(&bytes)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         let (pipeline, _) = Pipeline::for_lang(lang_id);
         Ok(IndexResult {
             trees: snap.trees.into_iter().map(|t| t.into()).collect(),

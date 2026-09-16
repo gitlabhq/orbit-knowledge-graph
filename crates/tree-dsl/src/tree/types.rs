@@ -257,17 +257,17 @@ impl Tree {
         for edge in self.edges.get_mut() {
             let from_nid = old_arena
                 .get_node_id_at(std::num::NonZeroUsize::new(edge.from.node as usize + 1).unwrap());
-            if let Some(old) = from_nid {
-                if let Some(&new) = id_map.get(&old) {
-                    edge.from.node = Self::to_raw(new);
-                }
+            if let Some(old) = from_nid
+                && let Some(&new) = id_map.get(&old)
+            {
+                edge.from.node = Self::to_raw(new);
             }
             let to_nid = old_arena
                 .get_node_id_at(std::num::NonZeroUsize::new(edge.to.node as usize + 1).unwrap());
-            if let Some(old) = to_nid {
-                if let Some(&new) = id_map.get(&old) {
-                    edge.to.node = Self::to_raw(new);
-                }
+            if let Some(old) = to_nid
+                && let Some(&new) = id_map.get(&old)
+            {
+                edge.to.node = Self::to_raw(new);
             }
         }
     }

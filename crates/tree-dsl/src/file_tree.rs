@@ -345,10 +345,9 @@ fn climb(tree: &mut Tree, while_kind: u16, mark_kind: u16) {
             } else {
                 Step::Out(anc.index())
             }
-        }) {
-            if !marked.contains(&target) {
-                marked.push(target);
-            }
+        }) && !marked.contains(&target)
+        {
+            marked.push(target);
         }
     }
 

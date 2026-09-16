@@ -14,18 +14,19 @@ pub type LanceDatasets = HashMap<String, RecordBatch>;
 
 fn flavor_display<'a>(def: tree_dsl::tree::Cursor, dtk: C, lang: &'a Lang) -> &'a str {
     for c in def.children() {
-        if let Some(ck) = C::try_from_u16(c.kind()) {
-            if ck.is_flavor() && c.sym() != 0 {
-                return lang.syms.resolve(c.sym());
-            }
+        if let Some(ck) = C::try_from_u16(c.kind())
+            && ck.is_flavor()
+            && c.sym() != 0
+        {
+            return lang.syms.resolve(c.sym());
         }
     }
-    if dtk == C::Function {
-        if let Some(parent) = def.parent() {
-            let pk = canonical::def_type_of(parent);
-            if pk == Some(C::ImplBlock) || pk == Some(C::Trait) {
-                return "AssociatedFunction";
-            }
+    if dtk == C::Function
+        && let Some(parent) = def.parent()
+    {
+        let pk = canonical::def_type_of(parent);
+        if pk == Some(C::ImplBlock) || pk == Some(C::Trait) {
+            return "AssociatedFunction";
         }
     }
     dtk.display_name()
@@ -725,7 +726,7 @@ fn build_def2imp(
 }
 
 fn build_imp2def(
-    trees: &[Tree],
+    _trees: &[Tree],
     cross_edges: &[tree_dsl::tree::Edge],
     ids: &IdMaps,
 ) -> anyhow::Result<RecordBatch> {

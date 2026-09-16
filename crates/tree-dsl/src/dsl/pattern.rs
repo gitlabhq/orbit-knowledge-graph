@@ -569,10 +569,10 @@ pub(crate) fn matches(t: &Tree, id: NodeId, p: &Pat, caps: &mut [Cap]) -> bool {
             if *named_only && !n.named {
                 return false;
             }
-            if let Some(g) = guard {
-                if !matches(t, id, g, caps) {
-                    return false;
-                }
+            if let Some(g) = guard
+                && !matches(t, id, g, caps)
+            {
+                return false;
             }
             caps[*slot as usize] = Cap::One(id);
             true
@@ -587,10 +587,10 @@ pub(crate) fn matches(t: &Tree, id: NodeId, p: &Pat, caps: &mut [Cap]) -> bool {
             if n.kind != *kind || !field_ok(*field) {
                 return false;
             }
-            if let Text::Lit(s) = text {
-                if n.sym != *s {
-                    return false;
-                }
+            if let Text::Lit(s) = text
+                && n.sym != *s
+            {
+                return false;
             }
             let children: Vec<NodeId> = id.children(&t.arena).collect();
             let mut ci = 0;
@@ -725,10 +725,10 @@ pub(crate) fn materialize(
                 if *named_only && !en.named {
                     continue;
                 }
-                if let Some(g) = guard {
-                    if !matches(t, e, g, &mut scratch) {
-                        continue;
-                    }
+                if let Some(g) = guard
+                    && !matches(t, e, g, &mut scratch)
+                {
+                    continue;
                 }
                 if *leaf_only {
                     if en.sym == 0 {

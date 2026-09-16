@@ -275,12 +275,12 @@ pub fn infer_return_type(def: Cursor) -> Option<u32> {
 
 pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     class.descend(|n| {
-        if crate::canonical::is_def_type_kind(n.kind()) {
-            if let Some(p) = n.parent() {
-                if p.index() != class.index() && p.child_sym(C::DefName) == Some(name) {
-                    return Step::Out(p);
-                }
-            }
+        if crate::canonical::is_def_type_kind(n.kind())
+            && let Some(p) = n.parent()
+            && p.index() != class.index()
+            && p.child_sym(C::DefName) == Some(name)
+        {
+            return Step::Out(p);
         }
         Step::Into
     })

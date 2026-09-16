@@ -227,10 +227,10 @@ fn propagate_reexports(
                             new_exports.push((req.fi, ds, tfi, tn));
                         }
                     }
-                } else if let Some(&(tfi, tn)) = visible[req.target_fi].get(&ns) {
-                    if !visible[req.fi].contains_key(&ns) {
-                        new_exports.push((req.fi, ns, tfi, tn));
-                    }
+                } else if let Some(&(tfi, tn)) = visible[req.target_fi].get(&ns)
+                    && !visible[req.fi].contains_key(&ns)
+                {
+                    new_exports.push((req.fi, ns, tfi, tn));
                 }
             }
         }
@@ -298,10 +298,9 @@ fn build_import_edges(
                     if let Some(dir) = index_names
                         .iter()
                         .find_map(|idx| target_stem.strip_suffix(&format!("/{idx}")))
+                        && let Some(&sub_fi) = file_index.get(&format!("{dir}/{name_str}"))
                     {
-                        if let Some(&sub_fi) = file_index.get(&format!("{dir}/{name_str}")) {
-                            edges.push(c.edge_to(c.jump(sub_fi as u32, 0), EdgeKind::Imports));
-                        }
+                        edges.push(c.edge_to(c.jump(sub_fi as u32, 0), EdgeKind::Imports));
                     }
                 }
             }
@@ -355,7 +354,7 @@ fn build_call_edges(
                 && nodes
                     .cursor(et)
                     .parent()
-                    .map_or(true, |p| p.index() != import_node)
+                    .is_none_or(|p| p.index() != import_node)
             {
                 continue;
             }
@@ -380,7 +379,7 @@ fn build_call_edges(
     }
 
     let mut reverse_visible: FxHashMap<(usize, u32), u32> = FxHashMap::default();
-    for (fi, names) in visible.iter().enumerate() {
+    for names in visible.iter() {
         for (&sym, &(vfi, vn)) in names {
             reverse_visible.insert((vfi, vn), sym);
         }
@@ -467,10 +466,10 @@ fn build_type_edges(
                     continue;
                 }
                 let method = mn.sym();
-                if method != 0 {
-                    if let Some(m) = find_method_in(class, method) {
-                        type_edges.push(caller.edge_to(m, EdgeKind::Calls));
-                    }
+                if method != 0
+                    && let Some(m) = find_method_in(class, method)
+                {
+                    type_edges.push(caller.edge_to(m, EdgeKind::Calls));
                 }
             }
         }
@@ -489,10 +488,11 @@ fn resolve_type(
         return Some(loc);
     }
     for ce in cross_edges {
-        if ce.from.tree as usize == target_fi && ce.kind == EdgeKind::Imports {
-            if corpus.follow(ce).child_sym(C::DefName) == Some(ret_sym) {
-                return Some((ce.to.tree as usize, ce.to.node));
-            }
+        if ce.from.tree as usize == target_fi
+            && ce.kind == EdgeKind::Imports
+            && corpus.follow(ce).child_sym(C::DefName) == Some(ret_sym)
+        {
+            return Some((ce.to.tree as usize, ce.to.node));
         }
     }
     None
@@ -544,7 +544,7 @@ fn build_typed_field_edges(corpus: Cursor, cross_edges: &[Edge]) -> Vec<Edge> {
                     continue;
                 };
                 let obj_ivar = member.child(C::Object).and_then(|o| o.child(C::Ivar));
-                if !obj_ivar.is_some_and(|iv| iv.sym() == ivar_sym) {
+                if obj_ivar.is_none_or(|iv| iv.sym() != ivar_sym) {
                     continue;
                 }
                 let method_sym = member.sym();
