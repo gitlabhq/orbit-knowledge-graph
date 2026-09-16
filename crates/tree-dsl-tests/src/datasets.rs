@@ -123,7 +123,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
 pub fn to_datasets(
     trees: &[Tree],
     cross_edges: &[tree_dsl::tree::Edge],
-    lang: &mut Lang,
+    lang: &Lang,
     support_lang: SupportLang,
     resolve_config: &tree_dsl::rules::ResolveConfig,
 ) -> anyhow::Result<LanceDatasets> {

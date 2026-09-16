@@ -166,12 +166,7 @@ fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
     }
 }
 
-fn from_tree_sitter(
-    source: &str,
-    ts_tree: &tree_sitter::Tree,
-    lang: &mut Lang,
-    label: &str,
-) -> Tree {
+fn from_tree_sitter(source: &str, ts_tree: &tree_sitter::Tree, lang: &Lang, label: &str) -> Tree {
     let ts_root = ts_tree.root_node();
     let mut cursor = ts_root.walk();
 
@@ -264,7 +259,7 @@ fn from_tree_sitter(
     }
 }
 
-pub fn parse(source: &str, support_lang: SupportLang, lang: &mut Lang, label: &str) -> Tree {
+pub fn parse(source: &str, support_lang: SupportLang, lang: &Lang, label: &str) -> Tree {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&support_lang.ts_language()).unwrap();
     let ts_tree = parser.parse(source.as_bytes(), None).unwrap();

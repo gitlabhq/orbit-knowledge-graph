@@ -1,9 +1,31 @@
-use rustc_hash::FxHashMap;
+use lasso::{Key, Spur, ThreadedRodeo};
 
-#[derive(Default, Clone)]
 pub struct Interner {
-    map: FxHashMap<Box<str>, u32>,
-    names: Vec<Box<str>>,
+    rodeo: ThreadedRodeo,
+}
+
+impl Default for Interner {
+    fn default() -> Self {
+        Self {
+            rodeo: ThreadedRodeo::new(),
+        }
+    }
+}
+
+impl Clone for Interner {
+    fn clone(&self) -> Self {
+        let new = Self::default();
+        let mut pairs: Vec<(usize, &str)> = self
+            .rodeo
+            .iter()
+            .map(|(k, v)| (k.into_usize(), v))
+            .collect();
+        pairs.sort_by_key(|(k, _)| *k);
+        for (_, s) in pairs {
+            new.rodeo.get_or_intern(s);
+        }
+        new
+    }
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -13,59 +35,51 @@ pub struct InternerSnapshot {
 
 impl From<&Interner> for InternerSnapshot {
     fn from(i: &Interner) -> Self {
+        let mut pairs: Vec<(usize, String)> = i
+            .rodeo
+            .iter()
+            .map(|(k, v)| (k.into_usize(), v.to_string()))
+            .collect();
+        pairs.sort_by_key(|(k, _)| *k);
         InternerSnapshot {
-            names: i.names.iter().map(|s| s.to_string()).collect(),
+            names: pairs.into_iter().map(|(_, v)| v).collect(),
         }
     }
 }
 
 impl From<InternerSnapshot> for Interner {
     fn from(s: InternerSnapshot) -> Self {
-        let mut interner = Interner::default();
+        let i = Interner::default();
         for name in &s.names {
-            interner.intern(name);
+            i.intern(name);
         }
-        interner
+        i
     }
 }
 
 impl Interner {
-    pub fn intern(&mut self, s: &str) -> u32 {
-        if let Some(&i) = self.map.get(s) {
-            return i;
-        }
-        self.names.push(s.into());
-        let i = self.names.len() as u32;
-        self.map.insert(s.into(), i);
-        i
+    pub fn intern(&self, s: &str) -> u32 {
+        let spur = self.rodeo.get_or_intern(s);
+        spur.into_usize() as u32 + 1
     }
 
     pub fn resolve(&self, i: u32) -> &str {
         if i == 0 {
-            ""
-        } else {
-            &self.names[i as usize - 1]
+            return "";
         }
+        let spur = Spur::try_from_usize(i as usize - 1).expect("invalid spur");
+        self.rodeo.resolve(&spur)
     }
 
     pub fn lookup(&self, s: &str) -> u32 {
-        self.map.get(s).copied().unwrap_or(0)
+        self.rodeo
+            .get(s)
+            .map(|spur| spur.into_usize() as u32 + 1)
+            .unwrap_or(0)
     }
 
     pub fn len(&self) -> u32 {
-        self.names.len() as u32
-    }
-
-    /// Merge another interner into self, returning a remap table.
-    /// remap[old_id] = new_id in self's address space.
-    pub fn merge(&mut self, other: &Interner) -> Vec<u32> {
-        let mut remap = vec![0u32; other.names.len() + 1];
-        for (i, name) in other.names.iter().enumerate() {
-            let old_id = (i + 1) as u32;
-            let new_id = self.intern(name);
-            remap[old_id as usize] = new_id;
-        }
-        remap
+        self.rodeo.len() as u32
     }
 }
 
@@ -108,7 +122,7 @@ impl Lang {
         Lang::default()
     }
 
-    pub fn intern_kind(&mut self, s: &str) -> u16 {
+    pub fn intern_kind(&self, s: &str) -> u16 {
         if let Ok(ck) = s.parse::<crate::canonical::Canonical>() {
             return ck as u16;
         }
@@ -127,7 +141,7 @@ impl Lang {
         self.kinds.lookup(s) as u16
     }
 
-    pub fn intern_field(&mut self, s: &str) -> u16 {
+    pub fn intern_field(&self, s: &str) -> u16 {
         self.fields.intern(s) as u16
     }
 
@@ -148,20 +162,5 @@ impl Lang {
 
     pub fn field_name(&self, f: u16) -> &str {
         self.fields.resolve(f as u32)
-    }
-
-    /// Create a per-thread Lang that shares kinds/fields and pre-populated syms.
-    /// Pre-populating syms ensures pattern-compiled literal IDs stay valid.
-    pub fn thread_fork(&self) -> Lang {
-        Lang {
-            kinds: self.kinds.clone(),
-            fields: self.fields.clone(),
-            syms: self.syms.clone(),
-        }
-    }
-
-    /// Merge a per-thread Lang's syms back, returning a sym remap table.
-    pub fn thread_merge(&mut self, other: &Lang) -> Vec<u32> {
-        self.syms.merge(&other.syms)
     }
 }

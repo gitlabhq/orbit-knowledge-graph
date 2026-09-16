@@ -57,7 +57,7 @@ impl IndexResult {
 
         let new_files: Vec<&(String, String)> = modified.iter().chain(added.iter()).collect();
         for (path, source) in &new_files {
-            let tree = process_file(path, source, &mut self.lang, &self.pipeline);
+            let tree = process_file(path, source, &self.lang, &self.pipeline);
             self.trees.push(tree);
         }
 
@@ -66,15 +66,10 @@ impl IndexResult {
             .iter()
             .map(|p| (p.clone(), String::new()))
             .collect();
-        let walk = file_tree::walk(
-            &all_paths,
-            &all_files,
-            &mut self.lang,
-            &self.pipeline.resolve,
-        );
+        let walk = file_tree::walk(&all_paths, &all_files, &self.lang, &self.pipeline.resolve);
         self.cross_edges = resolver::resolve(
             &mut self.trees,
-            &mut self.lang,
+            &self.lang,
             self.pipeline.lang_id,
             &walk.lookup_prefixes,
             &self.pipeline.resolve.external,

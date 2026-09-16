@@ -132,14 +132,14 @@ fn cmd_parse(
     match stage {
         Stage::Cst => {
             let mut lang = tree_dsl::lang::Lang::new();
-            let tree = tree_dsl::grammar::parse(&source, lang_id, &mut lang, &path);
+            let tree = tree_dsl::grammar::parse(&source, lang_id, &lang, &path);
             print_tree(&tree, &lang);
         }
         Stage::Ast => {
             let (pipeline, mut lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
-            let mut tree = tree_dsl::grammar::parse(&source, lang_id, &mut lang, &path);
+            let mut tree = tree_dsl::grammar::parse(&source, lang_id, &lang, &path);
             for stage in &pipeline.rewrite_stages {
-                tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, stage);
+                tree_dsl::pattern::apply_rewrites(&mut tree, &lang, stage);
             }
             print_tree(&tree, &lang);
         }
@@ -180,7 +180,7 @@ fn cmd_rewrite(
 
     let lang_id = resolve_lang(lang_override.as_deref(), Some(&path));
     let (pipeline, mut lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
-    let mut tree = tree_dsl::grammar::parse(&source, lang_id, &mut lang, &path);
+    let mut tree = tree_dsl::grammar::parse(&source, lang_id, &lang, &path);
 
     if let Some(ref stop) = after {
         let limit: usize = if stop == "all" {
@@ -189,7 +189,7 @@ fn cmd_rewrite(
             stop.parse().unwrap_or(pipeline.rewrite_stages.len())
         };
         for stage in pipeline.rewrite_stages.iter().take(limit) {
-            tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, stage);
+            tree_dsl::pattern::apply_rewrites(&mut tree, &lang, stage);
         }
     }
 
@@ -198,12 +198,12 @@ fn cmd_rewrite(
         .zip(templates.iter())
         .map(|(pat, tpl)| {
             let tpl = tpl.clone();
-            tree_dsl::pattern::Rewrite::new(&mut lang, pat, move |c| {
+            tree_dsl::pattern::Rewrite::new(&lang, pat, move |c| {
                 tree_dsl::pattern::Out::Replace(c.template(&tpl))
             })
         })
         .collect();
-    tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, &rules);
+    tree_dsl::pattern::apply_rewrites(&mut tree, &lang, &rules);
 
     print_tree(&tree, &lang);
     Ok(())

@@ -66,7 +66,7 @@ impl Tf {
     pub(crate) fn apply_sym(
         &self,
         t: &crate::tree::Tree,
-        lang: &mut Lang,
+        lang: &Lang,
         id: indextree::NodeId,
     ) -> u32 {
         match self {
@@ -153,14 +153,14 @@ pub struct Rewrite {
 }
 
 pub struct Ctx<'l> {
-    pub lang: &'l mut Lang,
+    pub lang: &'l Lang,
     pub(crate) slots: HashMap<Box<str>, u16>,
     pub(crate) filters: Vec<Vec<u16>>,
     is_template: bool,
 }
 
 impl<'l> Ctx<'l> {
-    pub(crate) fn new(lang: &'l mut Lang) -> Self {
+    pub(crate) fn new(lang: &'l Lang) -> Self {
         Ctx {
             lang,
             slots: HashMap::new(),
@@ -238,7 +238,7 @@ impl Cap {
 }
 
 impl Rewrite {
-    pub fn new(lang: &mut Lang, src: &str, out: impl FnOnce(&mut Ctx) -> Out) -> Rewrite {
+    pub fn new(lang: &Lang, src: &str, out: impl FnOnce(&mut Ctx) -> Out) -> Rewrite {
         let mut ctx = Ctx::new(lang);
         ctx.slot("ROOT");
         let pat = parse(&mut ctx, src);
@@ -384,7 +384,7 @@ fn mark_empty(p: &Pat, caps: &mut [Cap]) {
 
 pub(crate) fn materialize(
     t: &Tree,
-    lang: &mut Lang,
+    lang: &Lang,
     p: &Pat,
     caps: &[Cap],
     filters: &[Vec<u16>],
@@ -550,7 +550,7 @@ fn import_subtree(from: &Tree, id: NodeId, to: &mut Tree) -> NodeId {
     new_id
 }
 
-pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) {
+pub fn apply_rewrites(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
     let mut caps: Vec<Cap> = (0..max_slots).map(|_| Cap::Empty).collect();
 

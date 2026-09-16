@@ -126,7 +126,7 @@ struct Rule {
 }
 
 /// Compile a YAML rule file into stages of rewrites.
-pub fn load_rules(yaml: &str, lang: &mut Lang) -> Vec<Vec<Rewrite>> {
+pub fn load_rules(yaml: &str, lang: &Lang) -> Vec<Vec<Rewrite>> {
     let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
     file.stages
         .iter()
@@ -135,7 +135,7 @@ pub fn load_rules(yaml: &str, lang: &mut Lang) -> Vec<Vec<Rewrite>> {
 }
 
 /// Load both rewrite stages and resolve config from a language YAML file.
-pub fn load_lang(yaml: &str, lang: &mut Lang) -> (Vec<Vec<Rewrite>>, ResolveConfig) {
+pub fn load_lang(yaml: &str, lang: &Lang) -> (Vec<Vec<Rewrite>>, ResolveConfig) {
     let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
     let rewrites = file
         .stages
@@ -149,7 +149,7 @@ pub fn load_lang(yaml: &str, lang: &mut Lang) -> (Vec<Vec<Rewrite>>, ResolveConf
     (rewrites, resolve)
 }
 
-fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> ResolveConfig {
+fn compile_resolve(section: &ResolveSection, lang: &Lang) -> ResolveConfig {
     let parse_files = section
         .parse_files
         .iter()
@@ -201,7 +201,7 @@ fn compile_resolve(section: &ResolveSection, lang: &mut Lang) -> ResolveConfig {
     }
 }
 
-fn compile_stage(stage: &Stage, lang: &mut Lang) -> Vec<Rewrite> {
+fn compile_stage(stage: &Stage, lang: &Lang) -> Vec<Rewrite> {
     stage
         .rules
         .iter()
@@ -209,7 +209,7 @@ fn compile_stage(stage: &Stage, lang: &mut Lang) -> Vec<Rewrite> {
         .collect()
 }
 
-fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
+fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
     let pat = &rule.pattern;
 
     if let Some(ref tpl) = rule.replace {
@@ -264,7 +264,7 @@ stages:
         replace: '(__ivar @$A)'
 "#;
         let mut lang = Lang::new();
-        let stages = load_rules(yaml, &mut lang);
+        let stages = load_rules(yaml, &lang);
         assert_eq!(stages.len(), 1);
         assert_eq!(stages[0].len(), 1);
     }
@@ -293,7 +293,7 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $B)'
 "#;
         let mut lang = Lang::new();
-        let stages = load_rules(yaml, &mut lang);
+        let stages = load_rules(yaml, &lang);
         assert_eq!(stages.len(), 3);
     }
 }

@@ -18,7 +18,7 @@ pub struct WalkResult {
 pub fn walk(
     paths: &[String],
     files: &[(String, String)],
-    lang: &mut Lang,
+    lang: &Lang,
     config: &ResolveConfig,
 ) -> WalkResult {
     if config.stages.is_empty() && config.lookup_from.is_empty() {
@@ -55,7 +55,7 @@ pub fn walk(
 fn build_file_tree(
     paths: &[String],
     files: &[(String, String)],
-    lang: &mut Lang,
+    lang: &Lang,
     parse_files: &[ParseFileSpec],
 ) -> Tree {
     let root_kind = lang.intern_kind("__root");
@@ -103,7 +103,7 @@ fn build_file_tree(
         file_contents: &FxHashMap<&str, &str>,
         parse_files: &[ParseFileSpec],
         tree: &mut Tree,
-        lang: &mut Lang,
+        lang: &Lang,
         dir_kind: u16,
         file_kind: u16,
     ) {
@@ -174,7 +174,7 @@ fn inline_config(
     format: ParseFormat,
     parent: indextree::NodeId,
     tree: &mut Tree,
-    lang: &mut Lang,
+    lang: &Lang,
 ) {
     let value: serde_json::Value = match format {
         ParseFormat::Json => match serde_json::from_str(content) {
@@ -209,7 +209,7 @@ fn emit_json_value(
     val: &serde_json::Value,
     parent: indextree::NodeId,
     tree: &mut Tree,
-    lang: &mut Lang,
+    lang: &Lang,
 ) {
     use crate::canonical::Canonical as C;
 

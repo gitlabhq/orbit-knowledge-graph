@@ -25,17 +25,17 @@ fn main() {
 
     if stage == "rewrite" || stage == "ssa" {
         let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
-        let mut tree = grammar::parse(&source, lang_id, &mut lang, "test");
+        let mut tree = grammar::parse(&source, lang_id, &lang, "test");
         let before = tree.len();
         for rules in &pipeline.rewrite_stages {
-            tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, rules);
+            tree_dsl::pattern::apply_rewrites(&mut tree, &lang, rules);
         }
         let after = tree.len();
         if before != after {
             eprintln!("--- rewrites: {before} -> {after} nodes ---");
         }
         if stage == "ssa" {
-            let tree = tree_dsl::pipeline::process_file("test", &source, &mut lang, &pipeline);
+            let tree = tree_dsl::pipeline::process_file("test", &source, &lang, &pipeline);
             dump(&tree, &lang);
             for e in tree.edges().iter() {
                 let from_s = lang.syms.resolve(tree.cursor(e.from.node).sym());
@@ -53,7 +53,7 @@ fn main() {
         }
     } else {
         let mut lang = Lang::new();
-        let tree = grammar::parse(&source, lang_id, &mut lang, "test");
+        let tree = grammar::parse(&source, lang_id, &lang, "test");
         dump(&tree, &lang);
     }
 }

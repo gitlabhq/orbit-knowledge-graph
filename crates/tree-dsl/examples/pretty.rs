@@ -38,20 +38,20 @@ fn main() {
     match stage.as_str() {
         "cst" => {
             let mut lang = Lang::new();
-            let tree = grammar::parse(&source, lang_id, &mut lang, "test");
+            let tree = grammar::parse(&source, lang_id, &lang, "test");
             println!("{}", pretty_print(&tree, &lang, color));
         }
         "rewrite" => {
             let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
-            let mut tree = grammar::parse(&source, lang_id, &mut lang, "test");
+            let mut tree = grammar::parse(&source, lang_id, &lang, "test");
             for rules in &pipeline.rewrite_stages {
-                tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, rules);
+                tree_dsl::pattern::apply_rewrites(&mut tree, &lang, rules);
             }
             println!("{}", pretty_print(&tree, &lang, color));
         }
         "ssa" => {
             let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
-            let tree = tree_dsl::pipeline::process_file("test", &source, &mut lang, &pipeline);
+            let tree = tree_dsl::pipeline::process_file("test", &source, &lang, &pipeline);
             println!("{}", pretty_print(&tree, &lang, color));
             if !tree.edges().is_empty() {
                 println!("edges:");

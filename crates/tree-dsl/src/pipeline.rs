@@ -30,9 +30,9 @@ pub struct Pipeline {
 
 impl Pipeline {
     pub fn for_lang(lang_id: SupportLang) -> (Pipeline, Lang) {
-        let mut lang = Lang::new();
+        let lang = Lang::new();
         let (rewrite_stages, resolve) = match grammar::lang_yaml(lang_id) {
-            Some(yaml) => crate::rules::load_lang(yaml, &mut lang),
+            Some(yaml) => crate::rules::load_lang(yaml, &lang),
             None => (vec![], crate::rules::ResolveConfig::default()),
         };
         (
@@ -46,7 +46,7 @@ impl Pipeline {
     }
 }
 
-pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeline) -> Tree {
+pub fn process_file(path: &str, source: &str, lang: &Lang, pipeline: &Pipeline) -> Tree {
     let mut tree = grammar::parse(source, pipeline.lang_id, lang, path);
     for stage in &pipeline.rewrite_stages {
         pattern::apply_rewrites(&mut tree, lang, stage);
@@ -60,7 +60,7 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
 pub fn process_file_timed(
     path: &str,
     source: &str,
-    lang: &mut Lang,
+    lang: &Lang,
     pipeline: &Pipeline,
 ) -> (Tree, [std::time::Duration; 4]) {
     use std::time::Instant;
@@ -82,7 +82,7 @@ pub fn process_file_timed(
 pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
     use std::time::Instant;
 
-    let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
+    let (pipeline, lang) = Pipeline::for_lang(lang_id);
 
     let parseable: Vec<&(String, String)> = files
         .iter()
@@ -91,38 +91,22 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
 
     let t0 = Instant::now();
 
-    let chunks: Vec<(Vec<Tree>, Lang)> = {
+    let mut trees: Vec<Tree> = {
         use rayon::prelude::*;
         parseable
             .par_iter()
-            .fold(
-                || (Vec::new(), lang.thread_fork()),
-                |(mut trees, mut tl), (path, content)| {
-                    let tree = process_file(path, content, &mut tl, &pipeline);
-                    trees.push(tree);
-                    (trees, tl)
-                },
-            )
+            .map(|(path, content)| process_file(path, content, &lang, &pipeline))
             .collect()
     };
-
-    let mut trees: Vec<Tree> = Vec::with_capacity(parseable.len());
-    for (mut chunk_trees, chunk_lang) in chunks {
-        let remap = lang.thread_merge(&chunk_lang);
-        for tree in &mut chunk_trees {
-            tree.remap_syms(&remap);
-        }
-        trees.extend(chunk_trees);
-    }
 
     let parse_s = t0.elapsed().as_secs_f64();
     let t1 = Instant::now();
 
     let file_paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
-    let walk = file_tree::walk(&file_paths, files, &mut lang, &pipeline.resolve);
+    let walk = file_tree::walk(&file_paths, files, &lang, &pipeline.resolve);
     let cross_edges = resolver::resolve(
         &mut trees,
-        &mut lang,
+        &lang,
         lang_id,
         &walk.lookup_prefixes,
         &pipeline.resolve.external,
@@ -141,7 +125,7 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
 }
 
 pub fn parse(lang_id: SupportLang, path: &str, source: &str) -> (Tree, Lang, Pipeline) {
-    let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
-    let tree = process_file(path, source, &mut lang, &pipeline);
+    let (pipeline, lang) = Pipeline::for_lang(lang_id);
+    let tree = process_file(path, source, &lang, &pipeline);
     (tree, lang, pipeline)
 }

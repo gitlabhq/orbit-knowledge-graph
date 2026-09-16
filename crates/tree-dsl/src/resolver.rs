@@ -15,7 +15,7 @@ pub struct ResolveResult {
 
 pub fn resolve(
     trees: &mut [Tree],
-    lang: &mut Lang,
+    lang: &Lang,
     support_lang: SupportLang,
     lookup_prefixes: &[String],
     external: &[String],

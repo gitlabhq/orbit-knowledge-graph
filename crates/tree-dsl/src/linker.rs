@@ -643,7 +643,7 @@ fn root_object_sym(member: Cursor) -> u32 {
     0
 }
 
-pub fn link(tree: &Tree, lang: &mut Lang) {
+pub fn link(tree: &Tree, lang: &Lang) {
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
     ssa.seal_block(entry);
