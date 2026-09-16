@@ -1288,6 +1288,32 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
         stdout.contains("Definition:") && stdout.contains("return open"),
         "{stdout}"
     );
+    let reference = stdout
+        .lines()
+        .find_map(|line| {
+            line.split_whitespace()
+                .find(|word| word.starts_with("Definition:"))
+        })
+        .unwrap();
+    let repo_arg = repo.path.to_str().unwrap();
+    let args = [
+        "context",
+        reference,
+        "src/main.py",
+        "src/utils.py",
+        "./src/main.py",
+        "--repo",
+        repo_arg,
+    ];
+    let (context, err, ok) = run_cmd(&args, dd);
+    assert!(ok, "{err}");
+    assert_eq!(context.matches("def hello():").count(), 1, "{context}");
+    assert_eq!(
+        context.matches("return open(path).read()").count(),
+        1,
+        "{context}"
+    );
+    assert!(context.contains(reference) && context.contains("Definition:"));
 }
 
 #[test]
@@ -1321,8 +1347,8 @@ fn context_relationship_order_is_stable_across_overloads() {
 
     let repo_arg = repo.to_str().unwrap();
     for (fqn, section) in [
-        ("Target.ping", "Connections (7):"),
-        ("Target", "Used via members (5)"),
+        ("Target.ping", "Connections (showing 5 of 5 indexed):"),
+        ("Target", "Used via members (showing 5 of 5 indexed):"),
     ] {
         let (matches, stderr, ok) = run_cmd(&["grep", fqn, "--repo", repo_arg], dd);
         assert!(ok, "grep {fqn} failed: {stderr}");

@@ -1,11 +1,14 @@
 name: context
-version: 1.3.0
-short: Read local definitions or one source file
+version: 1.4.0
+short: Read complete local source for files or definitions
 description: >-
-  Read local definitions or one source file.
+  Read complete local source for files or definitions.
 
 
-  Pass one or more `Definition:<id>` references from grep, or one existing file
-  path in the current checkout. Definition targets include source and relationships;
-  `--tests` expands hidden test connections. File targets show source and indexed
-  definitions once, without relationships.
+  Pass one or more `Definition:<id>` references or existing file paths inside
+  the current checkout. Mix targets and quote paths with spaces. Source prints
+  once where targets overlap, without a line limit. Definition targets also
+  show bounded indexed relationships with followable IDs, including a small
+  test sample; `--tests` expands that sample. File targets return full source
+  with definition IDs, without relationships. Missing graph links do not prove
+  there are no callers or tests.

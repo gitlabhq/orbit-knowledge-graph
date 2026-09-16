@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use duckdb_client::search::{NodeHydrator, NodeValue, excluded_path_predicate};
@@ -6,18 +8,22 @@ use duckdb_client::{DuckDbClient, bool_column, i64_column, string_column};
 use crate::commands::context;
 use crate::workspace;
 
+const CONNECTION_LIMIT: usize = 10;
+const TEST_CONNECTION_LIMIT: usize = 3;
+
 fn labels_cte(definition: &NodeHydrator) -> Result<String> {
     Ok(format!(
         "labels AS (
   SELECT {id} AS id, {fqn} AS label,
-         {file} || ':' || CAST({start} AS VARCHAR) AS loc, {file} AS path
+         {file} || ':' || CAST({start} AS VARCHAR) AS loc, {file} AS path,
+         'Definition:' || CAST({id} AS VARCHAR) AS reference
   FROM {table} WHERE {project} = ?1 AND {commit} = ?2
   UNION ALL
-  SELECT id, path, '', path FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2
+  SELECT id, path, '', path, '' FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2
   UNION ALL
-  SELECT id, path, '', path FROM gl_directory WHERE project_id = ?1 AND commit_sha = ?2
+  SELECT id, path, '', path, '' FROM gl_directory WHERE project_id = ?1 AND commit_sha = ?2
   UNION ALL
-  SELECT id, identifier_name, '', file_path FROM gl_imported_symbol
+  SELECT id, identifier_name, '', file_path, 'external/unresolved' FROM gl_imported_symbol
   WHERE project_id = ?1 AND commit_sha = ?2
 )",
         id = definition.column("id")?,
@@ -35,6 +41,7 @@ struct Row {
     kind: String,
     dir: String,
     label: String,
+    reference: String,
     loc: String,
     via: String,
     hidden: bool,
@@ -45,6 +52,7 @@ fn rows_from(batches: &[RecordBatch]) -> Vec<Row> {
     let kinds = string_column(batches, "kind");
     let dirs = string_column(batches, "dir");
     let labels = string_column(batches, "label");
+    let references = string_column(batches, "reference");
     let locs = string_column(batches, "loc");
     let vias = string_column(batches, "via");
     let hidden = bool_column(batches, "hidden");
@@ -54,6 +62,7 @@ fn rows_from(batches: &[RecordBatch]) -> Vec<Row> {
             kind: kinds[i].clone(),
             dir: dirs[i].clone(),
             label: labels[i].clone(),
+            reference: references[i].clone(),
             loc: locs[i].clone(),
             via: vias[i].clone(),
             hidden: hidden[i],
@@ -61,15 +70,15 @@ fn rows_from(batches: &[RecordBatch]) -> Vec<Row> {
         .collect()
 }
 
-pub(crate) fn print(
+pub(crate) fn render(
     client: &DuckDbClient,
     git: &workspace::GitInfo,
     hydrator: &NodeHydrator,
     defs: &[NodeValue],
     show_tests: bool,
-) -> Result<()> {
+) -> Result<String> {
     if defs.is_empty() {
-        return Ok(());
+        return Ok(String::new());
     }
     let labels_cte = labels_cte(hydrator)?;
     let definition_id = hydrator.column("id")?;
@@ -88,11 +97,12 @@ pub(crate) fn print(
             "WITH {labels_cte}, targets(ord, target_id) AS (VALUES {targets})
 SELECT DISTINCT t.ord, t.target_id, e.relationship_kind AS kind,
        CASE WHEN e.source_id = t.target_id THEN '-->' ELSE '<--' END AS dir,
-       l.label, l.loc, '' AS via, {hidden_expr} AS hidden
+       l.label, l.reference, l.loc, '' AS via, {hidden_expr} AS hidden
 FROM targets t
 JOIN gl_edge e ON e.source_id = t.target_id OR e.target_id = t.target_id
 JOIN labels l ON l.id = CASE WHEN e.source_id = t.target_id THEN e.target_id ELSE e.source_id END
-ORDER BY t.ord, kind, dir DESC, l.path, l.label, l.loc"
+WHERE e.relationship_kind <> 'DEFINES'
+ORDER BY t.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
         ),
         &params,
     )?;
@@ -103,7 +113,7 @@ members AS (
   SELECT t.ord, t.target_id, e.target_id AS id FROM targets t
   JOIN gl_edge e ON e.source_id = t.target_id AND e.relationship_kind = 'DEFINES'
 )
-SELECT members.target_id, e.relationship_kind AS kind, '<--' AS dir, l.label, l.loc,
+SELECT members.target_id, e.relationship_kind AS kind, '<--' AS dir, l.label, l.reference, l.loc,
        string_agg(DISTINCT def_name(m.{definition_fqn}), ', ' ORDER BY def_name(m.{definition_fqn})) AS via,
        {hidden_expr} AS hidden
 FROM gl_edge e
@@ -115,108 +125,95 @@ WHERE e.relationship_kind <> 'DEFINES'
   AND e.source_id NOT IN (
     SELECT own.id FROM members own WHERE own.target_id = members.target_id
   )
-GROUP BY members.ord, members.target_id, kind, l.label, l.loc, l.path
-ORDER BY members.ord, kind, l.path, l.label, l.loc"
+GROUP BY members.ord, members.target_id, kind, l.label, l.reference, l.loc, l.path
+ORDER BY members.ord, kind, l.path, l.label, l.loc, l.reference"
         ),
         &params,
     )?;
     let edges = rows_from(&edges);
     let via = rows_from(&via);
-
-    for (i, def) in defs.iter().enumerate() {
-        if i > 0 {
-            println!();
+    let mut out = String::new();
+    for def in defs {
+        if !out.is_empty() {
+            out.push('\n');
         }
         let range = context::source_range(def)?;
+        writeln!(
+            out,
+            "Definition:{}  {}  [{}]  {}:{}-{}",
+            def.id, range.fqn, range.kind, range.file, range.start, range.end
+        )?;
         let links: Vec<_> = edges
             .iter()
-            .filter(|row| row.target_id == def.id && (show_tests || !row.hidden))
+            .filter(|row| row.target_id == def.id && !row.hidden)
             .collect();
         let used_via: Vec<_> = via
             .iter()
-            .filter(|row| row.target_id == def.id && (show_tests || !row.hidden))
+            .filter(|row| row.target_id == def.id && !row.hidden)
             .collect();
-        let links_hidden = if show_tests {
-            0
-        } else {
-            edges
-                .iter()
-                .filter(|row| row.target_id == def.id && row.hidden)
-                .count()
-        };
-        let via_hidden = if show_tests {
-            0
-        } else {
-            via.iter()
-                .filter(|row| row.target_id == def.id && row.hidden)
-                .count()
-        };
-        let hidden = links_hidden + via_hidden;
-        println!(
-            "Definition:{}  {}  [{}]  {}:{}-{}  (links {}, via members {})",
-            def.id,
-            range.fqn,
-            range.kind,
-            range.file,
-            range.start,
-            range.end,
-            links.len(),
-            used_via.len(),
-        );
-        if links.is_empty() && used_via.is_empty() {
-            if hidden > 0 {
-                println!(
-                    "\nNo connections outside test, fixture, or generated files \
-                     ({hidden} hidden; pass --tests to show them)."
-                );
-            } else {
-                println!("\nNo connections.");
-            }
+        let tests: Vec<_> = edges
+            .iter()
+            .chain(&via)
+            .filter(|row| row.target_id == def.id && row.hidden)
+            .collect();
+        if links.is_empty() && used_via.is_empty() && tests.is_empty() {
+            writeln!(out, "\nNo indexed connections.")?;
             continue;
         }
-        let sections = [
+        for (title, rows, limit) in [
+            ("Connections", links, CONNECTION_LIMIT),
+            ("Used via members", used_via, CONNECTION_LIMIT),
             (
-                format!("Connections ({}):", links.len()),
-                links,
-                links_hidden,
+                "Test, fixture, or generated connections",
+                tests,
+                if show_tests {
+                    CONNECTION_LIMIT
+                } else {
+                    TEST_CONNECTION_LIMIT
+                },
             ),
-            (
-                format!(
-                    "Used via members ({}) — callers of this definition's fields, methods, or items:",
-                    used_via.len()
-                ),
-                used_via,
-                via_hidden,
-            ),
-        ];
-        for (title, rows, hidden) in sections {
-            if rows.is_empty() && hidden == 0 {
+        ] {
+            if rows.is_empty() {
                 continue;
             }
-            println!("\n{title}");
+            writeln!(
+                out,
+                "\n{title} (showing {} of {} indexed):",
+                rows.len().min(limit),
+                rows.len()
+            )?;
             let mut prev_path = String::new();
-            for row in rows {
+            for row in rows.iter().take(limit) {
                 let via = if row.via.is_empty() {
                     String::new()
                 } else {
                     format!("  via {}", row.via)
                 };
-                println!(
-                    "  {} {}  [{}]{via}{}",
+                writeln!(
+                    out,
+                    "  {} {}  [{}]  {}{via}{}",
                     row.dir,
                     row.label,
                     row.kind.to_lowercase(),
+                    row.reference,
                     loc_suffix(&row.loc, &mut prev_path)
-                );
+                )?;
             }
-            if hidden > 0 {
-                println!(
-                    "  … {hidden} more in test, fixture, or generated files — pass --tests to show them"
-                );
+            if rows.len() > limit {
+                writeln!(
+                    out,
+                    "  … {} omitted; follow a Definition:<id> for focused context{}.",
+                    rows.len() - limit,
+                    if title.starts_with("Test") && !show_tests {
+                        "; --tests expands this sample"
+                    } else {
+                        ""
+                    }
+                )?;
             }
         }
     }
-    Ok(())
+    Ok(out)
 }
 
 fn loc_suffix(loc: &str, prev_path: &mut String) -> String {
