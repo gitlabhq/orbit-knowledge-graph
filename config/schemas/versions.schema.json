@@ -8,22 +8,30 @@
   "additionalProperties": false,
   "properties": {
     "schema": {
+      "description": "Graph schema version; prefixes every versioned ClickHouse table.",
       "type": "integer",
       "minimum": 1
     },
     "query_dsl": {
+      "description": "Accepted query-DSL shape version (semver).",
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "maxLength": 20
     },
     "raw_output_format": {
+      "description": "Response envelope version of the raw (JSON) formatter (semver).",
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "maxLength": 20
     },
     "goon_output_format": {
+      "description": "Response envelope version of the GOON formatter (semver).",
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "maxLength": 20
     },
     "vendored": {
+      "description": "Vendored dependencies with sub-pins, artifact locations, and vendor/check scripts.",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": false,
@@ -36,29 +44,47 @@
   },
   "definitions": {
     "vendored_dependency": {
+      "description": "A vendored upstream dependency with its version pin, artifact location, and scripts.",
       "type": "object",
       "additionalProperties": false,
+      "anyOf": [
+        { "required": ["version"] },
+        { "required": ["vendor_dir"] }
+      ],
       "properties": {
         "version": {
+          "description": "Primary version pin (tag, SHA, or semver).",
           "type": "string",
           "minLength": 1,
-          "pattern": "^\\S(.*\\S)?$"
+          "maxLength": 100,
+          "pattern": "^[a-zA-Z0-9._-]+$"
         },
         "vendor_dir": {
+          "description": "Repository-relative path where vendored artifacts live.",
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!/)(?!.*\\.\\.).*$"
+          "maxLength": 200,
+          "pattern": "^[a-zA-Z0-9/_.-]+$",
+          "not": {
+            "pattern": "(^/|/\\.\\.(/|$)|\\.\\./)"
+          }
         },
         "vendor_script": {
+          "description": "Script that regenerates artifacts from pins. Must live under scripts/vendored/.",
           "type": "string",
+          "maxLength": 200,
           "pattern": "^scripts/vendored/[a-z0-9_/-]+\\.sh$"
         },
         "check_script": {
+          "description": "Read-only script that validates artifacts match pins. Must live under scripts/vendored/.",
           "type": "string",
+          "maxLength": 200,
           "pattern": "^scripts/vendored/[a-z0-9_/-]+\\.sh$"
         },
         "extensions": {
+          "description": "Named sub-dependencies (e.g. DuckDB extensions) with source and binary pins.",
           "type": "object",
+          "minProperties": 1,
           "additionalProperties": false,
           "patternProperties": {
             "^[a-z0-9_-]+$": {
@@ -67,12 +93,15 @@
           }
         },
         "pins": {
+          "description": "Flat key-value sub-pins (e.g. Iglu schema name to version).",
           "type": "object",
+          "minProperties": 1,
           "additionalProperties": false,
           "patternProperties": {
             "^[a-z0-9_-]+$": {
               "type": "string",
               "minLength": 1,
+              "maxLength": 50,
               "pattern": "^[a-z0-9._-]+$"
             }
           }
@@ -80,19 +109,28 @@
       }
     },
     "extension": {
+      "description": "A vendored extension with optional source archive and per-platform binary pins.",
       "type": "object",
       "additionalProperties": false,
+      "anyOf": [
+        { "required": ["source_revision"] },
+        { "required": ["binaries"] }
+      ],
       "properties": {
         "source_revision": {
+          "description": "Git commit SHA of the upstream extension source.",
           "type": "string",
           "pattern": "^[0-9a-f]{40}$"
         },
         "source_archive_sha256": {
+          "description": "SHA-256 of the vendored source archive.",
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
         "binaries": {
+          "description": "Per-platform SHA-256 checksums of pre-built extension binaries.",
           "type": "object",
+          "minProperties": 1,
           "additionalProperties": false,
           "patternProperties": {
             "^[a-z0-9_]+$": {
