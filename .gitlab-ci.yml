@@ -9,6 +9,8 @@ variables:
   WI_POOL_PROVIDER: //iam.googleapis.com/projects/8522242139/locations/global/workloadIdentityPools/gitlab-pool-oidc-$CI_PROJECT_ID/providers/gitlab-jwt-$CI_PROJECT_ID
   RUNNER_LARGE: saas-linux-large-amd64
   RUNNER_LARGE_ARM: saas-linux-large-arm64
+  COSIGN_VERSION: v3.1.3
+  COSIGN_SHA256_AMD64: "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"
 
 workflow:
   rules:
@@ -886,6 +888,13 @@ code-indexing-benchmark-v2-analyze:
 
 # Build Stage
 
+# Keyless signing needs a GitLab OIDC token with the sigstore audience; the
+# script itself refuses to sign outside the canonical project.
+.sign-image:
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+
 .docker-build:
   stage: build
   image: docker:29
@@ -921,6 +930,7 @@ docker-build-arm64:
     ARCH: arm64
 
 docker-manifest:
+  extends: .sign-image
   stage: build
   image: docker:29
   tags:
@@ -940,8 +950,10 @@ docker-manifest:
         -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64"
+    - ./scripts/sign-image.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
 
 docker-build-mr:
+  extends: .sign-image
   stage: build
   image: docker:29
   tags:
@@ -960,6 +972,7 @@ docker-build-mr:
       allow_failure: true
   script:
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
+    - ./scripts/sign-image.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
 # Tag = Dockerfile hash; the e2e job resolves the same tag.
 e2e-robot-image:
@@ -1125,6 +1138,7 @@ release-build-arm64:
     ARCH: arm64
 
 release-manifest:
+  extends: .sign-image
   stage: build
   image: docker:29
   tags:
@@ -1144,6 +1158,7 @@ release-manifest:
         -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
+    - ./scripts/sign-image.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
 
 # Review stage
 

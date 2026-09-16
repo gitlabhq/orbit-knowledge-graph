@@ -393,6 +393,21 @@ The Orbit service connects to ClickHouse with restricted privileges:
 - **Table-Level Restrictions**: The reader needs SELECT on its Orbit graph tables and visibility of their metadata in `system.tables` for readiness checks. It must not have SELECT on other tenants' data.
 - **Connection Pooling**: Connections are pooled and rate-limited to prevent resource exhaustion.
 
+## Release Artifact Integrity
+
+### Image Signing
+
+Every `gkg` image digest pushed from the canonical project is signed with keyless [Sigstore](https://www.sigstore.dev/) cosign, and the pushing job verifies its own signature before it succeeds.
+
+- **Where**: `scripts/sign-image.sh`, called by the `docker-manifest` job (development images on `main`), the `release-manifest` job (release tags), and the manual `docker-build-mr` job. The script resolves the pushed tag to its digest and signs the digest, so the signature stays valid when `latest` or the `dev` alias moves to a newer build.
+- **Identity**: the job exchanges a GitLab OIDC token (`id_tokens` with audience `sigstore`) for a Fulcio certificate that lives for ten minutes. The certificate identity is `https://gitlab.com/gitlab-org/orbit/knowledge-graph//.gitlab-ci.yml@<ref>`, where `<ref>` is `refs/tags/vX.Y.Z` on a release and `refs/heads/<branch>` otherwise, and the issuer is `https://gitlab.com`. No long-lived signing key exists, so there is nothing to store, rotate, or leak.
+- **Coverage**: `cosign sign --recursive` signs the multi-arch index and each platform manifest it references, so the `-amd64` and `-arm64` tags are covered by the same run. Build-cache images and the e2e robot image are not release artifacts and are not signed.
+- **Canonical only**: the script exits without signing when `CI_PROJECT_ID` differs from `CANONICAL_PROJECT_ID`. Do not sign in forks, including private forks: keyless signing records the certificate, with project path, ref, and commit, in the public Rekor transparency log, which would disclose them.
+- **Format**: signatures use the cosign 3 bundle format. Verifiers need cosign 3.0 or later; Dedicated's `container-loader` verifies with the cosign 3 library.
+- **Tool pin**: the job downloads cosign `COSIGN_VERSION` and checks it against `COSIGN_SHA256_AMD64` before signing anything. Both are set in `.gitlab-ci.yml`.
+
+Verification commands and failure handling are in the [image signing runbook](../dev/runbooks/image_signing.md).
+
 ## Handling Aggregations
 
 Aggregation queries (counts, averages, ...) do not return individual resource rows, so Layer 3 (Rails redaction) cannot be applied after the fact. Earlier versions of the query engine therefore relied entirely on Layer 2 (traversal path filtering at the Reporter floor), which left an oracle: a Reporter user aggregating `count(Vulnerability) group_by Project` could observe vulnerability details through filter-driven counts even though they did not hold `read_vulnerability` on the target entity.
