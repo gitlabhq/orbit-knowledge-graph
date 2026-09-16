@@ -98,7 +98,11 @@ fn main() -> anyhow::Result<()> {
             replace,
             after,
         } => cmd_rewrite(file, stdin, lang, r#match, replace, after),
-        Commands::Index { path, lang, no_save } => cmd_index(&path, lang, no_save),
+        Commands::Index {
+            path,
+            lang,
+            no_save,
+        } => cmd_index(&path, lang, no_save),
         #[cfg(feature = "test-runner")]
         Commands::Test { file, inline } => cmd_test(file, inline),
     }
@@ -206,24 +210,21 @@ fn cmd_rewrite(
 }
 
 fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
-    for (i, n) in tree.nodes.iter().enumerate() {
-        if n.dead {
-            continue;
-        }
-        if !n.named && n.sym == 0 {
+    for c in std::iter::once(tree.root()).chain(tree.root().descendants()) {
+        if !c.named() && c.sym() == 0 {
             continue;
         }
 
-        let kind_display = lang.kind_name(n.kind).to_string();
+        let kind_display = lang.kind_name(c.kind()).to_string();
 
-        let field_str = if n.field != 0 {
-            format!(" field={}", lang.fields.resolve(n.field as u32))
+        let field_str = if c.field() != 0 {
+            format!(" field={}", lang.fields.resolve(c.field() as u32))
         } else {
             String::new()
         };
 
-        let sym_str = if n.sym != 0 {
-            let text = lang.syms.resolve(n.sym);
+        let sym_str = if c.sym() != 0 {
+            let text = lang.syms.resolve(c.sym());
             if text.len() > 40 {
                 format!(" sym={:?}", &text[..40])
             } else {
@@ -235,7 +236,12 @@ fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
 
         println!(
             "{:>4}  {:<30}{}{} [{}-{}]",
-            i, kind_display, field_str, sym_str, n.start, n.end
+            c.index(),
+            kind_display,
+            field_str,
+            sym_str,
+            c.start(),
+            c.end()
         );
     }
 }
@@ -253,21 +259,14 @@ fn print_edges(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang) {
 }
 
 fn node_label(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::lang::Lang, node: u32) -> String {
-    if node == 0 {
-        return "<root>".to_string();
-    }
-    if node as usize >= tree.nodes.len() {
-        return format!("?{node}");
-    }
-    for c in tree.children(node) {
-        let cn = tree.node(c);
-        if cn.field != 0 && cn.sym != 0 {
-            return format!("{}[{}]", lang.syms.resolve(cn.sym), node);
+    let c = tree.cursor(node);
+    for child in c.children() {
+        if child.field() != 0 && child.sym() != 0 {
+            return format!("{}[{}]", lang.syms.resolve(child.sym()), node);
         }
     }
-    let n = &tree.nodes[node as usize];
-    if n.sym != 0 {
-        let s = lang.syms.resolve(n.sym);
+    if c.sym() != 0 {
+        let s = lang.syms.resolve(c.sym());
         let short = s.lines().next().unwrap_or(s);
         if short.len() > 40 {
             format!("{}...[{}]", &short[..40], node)
@@ -310,11 +309,7 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
     let mut total_intra_edges = 0usize;
 
     for tree in &result.trees {
-        for i in 0..tree.len() {
-            let c = tree.cursor(i);
-            if c.is_dead() {
-                continue;
-            }
+        for c in tree.root().descendants() {
             if tree_dsl::canonical::has_def_type(c) {
                 total_defs += 1;
             } else if c.is(tree_dsl::canonical::Canonical::Import)
@@ -351,7 +346,12 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
         result.save(&snap_path)?;
         let save_s = t_save.elapsed().as_secs_f64();
         let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
-        eprintln!("saved:        {} ({:.1} MB, {:.2}s)", snap_path.display(), size_mb, save_s);
+        eprintln!(
+            "saved:        {} ({:.1} MB, {:.2}s)",
+            snap_path.display(),
+            size_mb,
+            save_s
+        );
     }
     Ok(())
 }

@@ -185,7 +185,10 @@ fn compile_rule(rule: &Rule, lang: &mut Lang) -> Vec<Rewrite> {
     panic!("rule has no action: {:?}", pat);
 }
 
-fn parse_where_clause(clause: &str, slots: &std::collections::HashMap<Box<str>, u16>) -> Vec<(u16, u16, bool)> {
+fn parse_where_clause(
+    clause: &str,
+    slots: &std::collections::HashMap<Box<str>, u16>,
+) -> Vec<(u16, u16, bool)> {
     clause
         .split("&&")
         .map(|part| {

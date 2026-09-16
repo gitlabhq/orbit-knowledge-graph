@@ -59,11 +59,8 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
             next_mod += 1;
             modules.insert(fi, next_mod);
         }
-        for i in 0..tree.len() {
-            let nr = tree.cursor(i);
-            if nr.is_dead() {
-                continue;
-            }
+        for nr in tree.root().descendants() {
+            let i = nr.index();
             if canonical::has_def_type(nr) {
                 next_def += 1;
                 defs.insert((fi, i), next_def);
@@ -140,7 +137,14 @@ pub fn to_datasets(
         .collect();
     ds.insert(
         "ImportedSymbol".into(),
-        build_imports(trees, lang, &ids, support_lang, resolve_config, &resolved_imports)?,
+        build_imports(
+            trees,
+            lang,
+            &ids,
+            support_lang,
+            resolve_config,
+            &resolved_imports,
+        )?,
     );
     let (f2d, f2i) = build_file_edges(trees, &ids);
     ds.insert("FileToDefinition".into(), f2d?);
@@ -317,8 +321,8 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<Recor
 
     for (fi, tree) in trees.iter().enumerate() {
         let path = lang.syms.resolve(tree.root().sym()).to_string();
-        for i in 0..tree.len() {
-            let nr = tree.cursor(i);
+        for nr in tree.root().descendants() {
+            let i = nr.index();
             let Some(dtk) = canonical::def_type_of(nr) else {
                 continue;
             };
@@ -342,8 +346,7 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<Recor
     }
     for (fi, tree) in trees.iter().enumerate() {
         let path = lang.syms.resolve(tree.root().sym()).to_string();
-        for i in 0..tree.len() {
-            let nr = tree.cursor(i);
+        for nr in tree.root().descendants() {
             if !nr.is(C::ModuleExport) {
                 continue;
             }
@@ -446,8 +449,8 @@ fn build_imports(
 
     for (fi, tree) in trees.iter().enumerate() {
         let fp = lang.syms.resolve(tree.root().sym()).to_string();
-        for i in 0..tree.len() {
-            let nr = tree.cursor(i);
+        for nr in tree.root().descendants() {
+            let i = nr.index();
             if !(nr.is(C::Import) || nr.is(C::ImportType))
                 || nr.parent().is_some_and(|p| p.is(C::ModuleExport))
             {
@@ -595,8 +598,8 @@ fn build_file_edges(
     );
     for (fi, tree) in trees.iter().enumerate() {
         let fid = fi as i64 + 1;
-        for i in 0..tree.len() {
-            let nr = tree.cursor(i);
+        for nr in tree.root().descendants() {
+            let i = nr.index();
             if canonical::has_def_type(nr) {
                 if let Some(&did) = ids.defs.get(&(fi, i)) {
                     ds.append_value(fid);
@@ -738,7 +741,11 @@ fn build_imp2def(
         let target_id = if let Some(&did) = ids.defs.get(&(ce.to.tree as usize, ce.to.node)) {
             did
         } else if ce.to.node == 0 {
-            if let Some(&mid) = ids.modules.get(&(ce.to.tree as usize)) { mid } else { continue; }
+            if let Some(&mid) = ids.modules.get(&(ce.to.tree as usize)) {
+                mid
+            } else {
+                continue;
+            }
         } else {
             continue;
         };

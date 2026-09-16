@@ -1,273 +1,229 @@
 use crate::canonical::Canonical;
 
-use super::types::{Edge, EdgeKind, NONE, Tree, live};
+use super::types::{Edge, EdgeKind, Tree};
 
 /// Control flow for `descend` and `ascend` traversals.
 pub enum Step<R> {
     /// Continue into children (descend) or continue up (ascend).
     Into,
-    /// Skip this subtree, continue with next sibling. In ascend, treated as Into.
+    /// Skip this subtree, continue with next sibling.
     Over,
     /// Halt traversal and return a value.
     Out(R),
 }
 
-/// Read-only position in a forest of trees. Copy, 24 bytes.
+/// Read-only position in a tree or forest of trees.
 ///
-/// Single-tree: `tree.cursor(i)`. Cross-tree: `Cursor::new(trees, fi, node)`.
-/// All navigation returns another Cursor. Edges are created via `edge_to`
-/// and stored by the caller.
+/// Single-tree: `tree.cursor(id)`. Cross-tree: `Cursor::new(trees, fi, node)`.
+/// All navigation returns another Cursor. Edges are created via `edge_to`.
 #[derive(Clone, Copy)]
 pub struct Cursor<'a> {
     trees: &'a [Tree],
     fi: u32,
-    idx: u32,
+    id: u32,
 }
 
 impl<'a> Cursor<'a> {
-    /// Cross-tree constructor.
-    pub fn new(trees: &'a [Tree], fi: u32, idx: u32) -> Self {
-        Self { trees, fi, idx }
+    pub fn new(trees: &'a [Tree], fi: u32, id: u32) -> Self {
+        Self { trees, fi, id }
     }
 
     #[inline]
-    fn tree(&self) -> &'a Tree {
+    fn tree(self) -> &'a Tree {
         &self.trees[self.fi as usize]
     }
 
-    /// Access the underlying tree slice (for raw node access in edge filtering).
-    #[inline]
-    pub fn trees_ref(&self) -> &'a [Tree] {
-        self.trees
+    fn nid(self) -> indextree::NodeId {
+        self.tree().to_id(self.id)
     }
 
-    // ── Properties ──
-
-    #[inline]
-    pub fn index(&self) -> u32 {
-        self.idx
+    fn at(self, nid: indextree::NodeId) -> Self {
+        Self {
+            id: Tree::to_raw(nid),
+            ..self
+        }
     }
 
     #[inline]
-    pub fn fi(&self) -> u32 {
+    pub fn index(self) -> u32 {
+        self.id
+    }
+
+    #[inline]
+    pub fn fi(self) -> u32 {
         self.fi
     }
 
     #[inline]
-    pub fn kind(&self) -> u16 {
-        self.tree().nodes[self.idx as usize].kind
+    pub fn kind(self) -> u16 {
+        self.tree().node(self.nid()).kind
     }
 
     #[inline]
-    pub fn sym(&self) -> u32 {
-        self.tree().nodes[self.idx as usize].sym
+    pub fn sym(self) -> u32 {
+        self.tree().node(self.nid()).sym
     }
 
     #[inline]
-    pub fn is(&self, ck: Canonical) -> bool {
+    pub fn is(self, ck: Canonical) -> bool {
         self.kind() == ck
     }
 
     #[inline]
-    pub fn named(&self) -> bool {
-        self.tree().nodes[self.idx as usize].named
+    pub fn named(self) -> bool {
+        self.tree().node(self.nid()).named
     }
 
     #[inline]
-    pub fn size(&self) -> u32 {
-        self.tree().nodes[self.idx as usize].size
+    pub fn field(self) -> u16 {
+        self.tree().node(self.nid()).field
     }
 
     #[inline]
-    pub fn field(&self) -> u16 {
-        self.tree().nodes[self.idx as usize].field
+    pub fn start(self) -> u32 {
+        self.tree().node(self.nid()).start
     }
 
     #[inline]
-    pub fn start(&self) -> u32 {
-        self.tree().nodes[self.idx as usize].start
+    pub fn end(self) -> u32 {
+        self.tree().node(self.nid()).end
     }
 
     #[inline]
-    pub fn end(&self) -> u32 {
-        self.tree().nodes[self.idx as usize].end
+    pub fn start_row(self) -> u32 {
+        self.tree().node(self.nid()).start_row
     }
 
     #[inline]
-    pub fn start_row(&self) -> u32 {
-        self.tree().nodes[self.idx as usize].start_row
+    pub fn start_col(self) -> u32 {
+        self.tree().node(self.nid()).start_col
     }
 
     #[inline]
-    pub fn start_col(&self) -> u32 {
-        self.tree().nodes[self.idx as usize].start_col
+    pub fn end_row(self) -> u32 {
+        self.tree().node(self.nid()).end_row
     }
 
     #[inline]
-    pub fn end_row(&self) -> u32 {
-        self.tree().nodes[self.idx as usize].end_row
+    pub fn end_col(self) -> u32 {
+        self.tree().node(self.nid()).end_col
     }
 
-    #[inline]
-    pub fn end_col(&self) -> u32 {
-        self.tree().nodes[self.idx as usize].end_col
+    pub fn size(self) -> u32 {
+        self.nid().descendants(&self.tree().arena).count() as u32
     }
 
-    #[inline]
-    pub fn is_dead(&self) -> bool {
-        self.tree().nodes[self.idx as usize].dead
+    pub fn is_synth(self) -> bool {
+        self.tree().node(self.nid()).synth
     }
 
-    // ── Navigation ──
-
-    pub fn parent(&self) -> Option<Cursor<'a>> {
-        let p = self.tree().nodes[self.idx as usize].parent;
-        (p != NONE).then(|| Cursor {
-            trees: self.trees,
-            fi: self.fi,
-            idx: p,
-        })
+    pub fn parent(self) -> Option<Self> {
+        self.nid().parent(&self.tree().arena).map(|p| self.at(p))
     }
 
-    pub fn children(&self) -> impl Iterator<Item = Cursor<'a>> {
-        let trees = self.trees;
-        let fi = self.fi;
-        self.tree()
-            .children(self.idx)
-            .map(move |i| Cursor { trees, fi, idx: i })
+    pub fn children(self) -> impl Iterator<Item = Self> + 'a {
+        self.nid()
+            .children(&self.tree().arena)
+            .map(move |id| self.at(id))
     }
 
-    pub fn descendants(&self) -> impl Iterator<Item = Cursor<'a>> {
-        let trees = self.trees;
-        let fi = self.fi;
-        self.tree()
-            .descendants(self.idx)
-            .map(move |i| Cursor { trees, fi, idx: i })
+    pub fn descendants(self) -> impl Iterator<Item = Self> + 'a {
+        self.nid()
+            .descendants(&self.tree().arena)
+            .skip(1)
+            .map(move |id| self.at(id))
     }
 
-    pub fn ancestors(&self) -> impl Iterator<Item = Cursor<'a>> {
-        let trees = self.trees;
-        let fi = self.fi;
-        let tree = self.tree();
-        let mut cur = tree.nodes[self.idx as usize].parent;
-        std::iter::from_fn(move || {
-            if cur == NONE {
-                return None;
-            }
-            let r = cur;
-            cur = tree.nodes[r as usize].parent;
-            Some(Cursor { trees, fi, idx: r })
-        })
+    pub fn ancestors(self) -> impl Iterator<Item = Self> + 'a {
+        self.nid()
+            .ancestors(&self.tree().arena)
+            .skip(1)
+            .map(move |id| self.at(id))
     }
 
-    // ── Cross-tree ──
-
-    /// Jump to a node in a different tree.
-    pub fn jump(&self, fi: u32, idx: u32) -> Cursor<'a> {
-        Cursor {
+    pub fn jump(self, fi: u32, id: u32) -> Self {
+        Self {
             trees: self.trees,
             fi,
-            idx,
+            id,
         }
     }
 
-    /// Follow an edge to its target position.
-    pub fn follow(&self, edge: &Edge) -> Cursor<'a> {
-        Cursor {
-            trees: self.trees,
-            fi: edge.to.tree,
-            idx: edge.to.node,
-        }
+    pub fn follow(self, edge: &Edge) -> Self {
+        self.jump(edge.to.tree, edge.to.node)
     }
 
-    /// Create an Edge value from self to target. Caller stores it.
-    pub fn edge_to(&self, to: Cursor<'a>, kind: EdgeKind) -> Edge {
-        Edge::new(self.fi as usize, self.idx, to.fi as usize, to.idx, kind)
+    pub fn edge_to(self, to: Self, kind: EdgeKind) -> Edge {
+        Edge::new(self.fi as usize, self.id, to.fi as usize, to.id, kind)
     }
 
-    // ── Traversal primitives ──
-
-    /// Depth-first pre-order descent with subtree control.
-    pub fn descend<R>(&self, mut visitor: impl FnMut(Cursor<'a>) -> Step<R>) -> Option<R> {
+    pub fn descend<R>(self, mut visitor: impl FnMut(Self) -> Step<R>) -> Option<R> {
         let tree = self.tree();
-        let trees = self.trees;
-        let fi = self.fi;
-        let end = tree.hop(self.idx);
-        let mut c = live(tree, self.idx + 1, end);
-        while c < end {
-            let cursor = Cursor { trees, fi, idx: c };
-            match visitor(cursor) {
+        let mut iter = self.nid().traverse(&tree.arena).skip(1);
+        while let Some(edge) = iter.next() {
+            let indextree::NodeEdge::Start(id) = edge else {
+                continue;
+            };
+            match visitor(self.at(id)) {
                 Step::Out(r) => return Some(r),
                 Step::Over => {
-                    c = live(tree, tree.hop(c), end);
+                    let mut depth = 1u32;
+                    for edge in iter.by_ref() {
+                        match edge {
+                            indextree::NodeEdge::Start(_) => depth += 1,
+                            indextree::NodeEdge::End(_) if depth == 1 => break,
+                            indextree::NodeEdge::End(_) => depth -= 1,
+                        }
+                    }
                 }
-                Step::Into => {
-                    c = live(tree, c + 1, end);
-                }
+                Step::Into => {}
             }
         }
         None
     }
 
-    /// Walk the parent chain with early exit.
-    pub fn ascend<R>(&self, mut visitor: impl FnMut(Cursor<'a>) -> Step<R>) -> Option<R> {
-        let tree = self.tree();
-        let trees = self.trees;
-        let fi = self.fi;
-        let mut cur = tree.nodes[self.idx as usize].parent;
-        while cur != NONE {
-            let cursor = Cursor {
-                trees,
-                fi,
-                idx: cur,
-            };
-            match visitor(cursor) {
+    pub fn ascend<R>(self, mut visitor: impl FnMut(Self) -> Step<R>) -> Option<R> {
+        for anc in self.ancestors() {
+            match visitor(anc) {
                 Step::Out(r) => return Some(r),
-                Step::Into | Step::Over => {
-                    cur = tree.nodes[cur as usize].parent;
-                }
+                Step::Into | Step::Over => {}
             }
         }
         None
     }
 
-    // ── Child queries ──
-
-    pub fn child(&self, ck: Canonical) -> Option<Cursor<'a>> {
+    pub fn child(self, ck: Canonical) -> Option<Self> {
         self.children().find(|n| n.is(ck))
     }
 
-    pub fn child_sym(&self, ck: Canonical) -> Option<u32> {
+    pub fn child_sym(self, ck: Canonical) -> Option<u32> {
         self.child(ck).map(|n| n.sym()).filter(|&s| s != 0)
     }
 
-    pub fn has(&self, ck: Canonical) -> bool {
+    pub fn has(self, ck: Canonical) -> bool {
         self.children().any(|n| n.is(ck))
     }
 
-    /// Children that are __name nodes with nonzero sym.
-    pub fn names(&self) -> impl Iterator<Item = Cursor<'a>> {
+    pub fn names(self) -> impl Iterator<Item = Self> + 'a {
         self.children().filter(|c| c.is(C::Name) && c.sym() != 0)
     }
 
-    // ── Descendant queries ──
-
-    pub fn find_desc(&self, pred: impl Fn(Cursor<'a>) -> bool) -> Option<Cursor<'a>> {
+    pub fn find_desc(self, pred: impl Fn(Self) -> bool) -> Option<Self> {
         self.descend(|n| if pred(n) { Step::Out(n) } else { Step::Into })
     }
 
-    pub fn any_desc(&self, pred: impl Fn(Cursor<'a>) -> bool) -> bool {
+    pub fn any_desc(self, pred: impl Fn(Self) -> bool) -> bool {
         self.find_desc(pred).is_some()
     }
 
-    // ── Ancestor queries ──
-
-    pub fn enclosing(&self, pred: impl Fn(Cursor<'a>) -> bool) -> Option<Cursor<'a>> {
+    pub fn enclosing(self, pred: impl Fn(Self) -> bool) -> Option<Self> {
         self.ascend(|n| if pred(n) { Step::Out(n) } else { Step::Into })
     }
-}
 
-// ── Shared tree queries ──
+    pub(crate) fn trees_ref(self) -> &'a [Tree] {
+        self.trees
+    }
+}
 
 use crate::canonical::Canonical as C;
 
@@ -330,28 +286,14 @@ pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     })
 }
 
-// ── Tree entry points ──
-
 impl Tree {
-    /// Single-tree cursor for the given index.
     #[inline]
-    pub fn cursor(&self, i: u32) -> Cursor<'_> {
-        Cursor {
-            trees: std::slice::from_ref(self),
-            fi: 0,
-            idx: i,
-        }
+    pub fn cursor(&self, id: u32) -> Cursor<'_> {
+        Cursor::new(std::slice::from_ref(self), 0, id)
     }
 
-    /// Cursor for the root node.
     #[inline]
     pub fn root(&self) -> Cursor<'_> {
-        self.cursor(0)
-    }
-
-    /// Number of nodes (including dead).
-    #[inline]
-    pub fn len(&self) -> u32 {
-        self.nodes.len() as u32
+        self.cursor(Tree::to_raw(self.root))
     }
 }

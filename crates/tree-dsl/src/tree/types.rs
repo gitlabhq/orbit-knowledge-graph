@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 
-pub const NONE: u32 = u32::MAX;
+use indextree::{Arena, NodeId};
+
+pub(crate) const NONE: u32 = u32::MAX;
 
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -28,26 +30,24 @@ impl std::fmt::Display for EdgeKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Node {
-    pub id: u32,
-    pub kind: u16,
-    pub field: u16,
-    pub parent: u32,
-    pub sym: u32,
-    pub start: u32,
-    pub end: u32,
-    pub start_row: u32,
-    pub start_col: u32,
-    pub end_row: u32,
-    pub end_col: u32,
-    pub size: u32,
-    pub synth: bool,
-    pub dead: bool,
-    pub named: bool,
+    pub(crate) kind: u16,
+    pub(crate) field: u16,
+    pub(crate) sym: u32,
+    pub(crate) start: u32,
+    pub(crate) end: u32,
+    pub(crate) start_row: u32,
+    pub(crate) start_col: u32,
+    pub(crate) end_row: u32,
+    pub(crate) end_col: u32,
+    pub(crate) synth: bool,
+    pub(crate) named: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct NodeRef {
     pub tree: u32,
     pub node: u32,
@@ -95,210 +95,312 @@ impl Edge {
     }
 }
 
-#[derive(Default)]
 pub struct Tree {
-    pub nodes: Vec<Node>,
-    pub(crate) edges_cell: RefCell<Vec<Edge>>,
+    pub(crate) arena: Arena<Node>,
+    pub(crate) root: NodeId,
+    pub(crate) edges: RefCell<Vec<Edge>>,
     pub label: String,
-    pub(crate) next_id: u32,
-    pub(crate) spare: Vec<Node>,
-    pub(crate) remap_buf: Vec<u32>,
-    pub(crate) appends: RefCell<Vec<(u32, Node)>>,
-    pub(crate) inserts: RefCell<Vec<(u32, u32, u32)>>,
-    pub(crate) insert_buf: RefCell<Vec<Node>>,
 }
 
 impl Clone for Tree {
     fn clone(&self) -> Self {
-        Tree {
-            nodes: self.nodes.clone(),
-            edges_cell: RefCell::new(self.edges_cell.borrow().clone()),
+        Self {
+            arena: self.arena.clone(),
+            root: self.root,
+            edges: RefCell::new(self.edges.borrow().clone()),
             label: self.label.clone(),
-            next_id: self.next_id,
-            spare: Vec::new(),
-            remap_buf: Vec::new(),
-            appends: RefCell::new(Vec::new()),
-            inserts: RefCell::new(Vec::new()),
-            insert_buf: RefCell::new(Vec::new()),
-        }
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct TreeSnapshot {
-    pub nodes: Vec<Node>,
-    pub edges: Vec<Edge>,
-    pub label: String,
-}
-
-impl From<&Tree> for TreeSnapshot {
-    fn from(t: &Tree) -> Self {
-        TreeSnapshot {
-            nodes: t.nodes.clone(),
-            edges: t.edges_cell.borrow().clone(),
-            label: t.label.clone(),
-        }
-    }
-}
-
-impl From<TreeSnapshot> for Tree {
-    fn from(s: TreeSnapshot) -> Self {
-        Tree {
-            nodes: s.nodes,
-            edges_cell: RefCell::new(s.edges),
-            label: s.label,
-            ..Default::default()
         }
     }
 }
 
 impl Tree {
-    pub fn from_nodes(nodes: Vec<Node>) -> Self {
+    pub fn with_capacity(capacity: usize, root_node: Node) -> Self {
+        let mut arena = Arena::with_capacity(capacity);
+        let root = arena.new_node(root_node);
         Self {
-            nodes,
-            ..Default::default()
+            arena,
+            root,
+            edges: RefCell::new(Vec::new()),
+            label: String::new(),
         }
     }
 
-    pub fn release_buffers(&mut self) {
-        self.spare = Vec::new();
-        self.remap_buf = Vec::new();
-        self.appends = RefCell::new(Vec::new());
-        self.inserts = RefCell::new(Vec::new());
-        self.insert_buf = RefCell::new(Vec::new());
+    pub fn new(root_node: Node) -> Self {
+        Self::with_capacity(1, root_node)
     }
 
     #[inline]
-    pub fn node(&self, i: u32) -> &Node {
-        &self.nodes[i as usize]
-    }
-    #[inline]
-    pub fn kind(&self, i: u32) -> u16 {
-        self.nodes[i as usize].kind
-    }
-    #[inline]
-    pub fn sym(&self, i: u32) -> u32 {
-        self.nodes[i as usize].sym
-    }
-    #[inline]
-    pub fn field_of(&self, i: u32) -> u16 {
-        self.nodes[i as usize].field
-    }
-    #[inline]
-    pub fn hop(&self, i: u32) -> u32 {
-        i + self.nodes[i as usize].size
-    }
-    #[inline]
-    pub fn text<'a>(&self, lang: &'a crate::lang::Lang, i: u32) -> &'a str {
-        lang.syms.resolve(self.nodes[i as usize].sym)
+    pub(crate) fn to_id(&self, raw: u32) -> NodeId {
+        self.arena
+            .get_node_id_at(std::num::NonZeroUsize::new(raw as usize + 1).unwrap())
+            .unwrap()
     }
 
-    pub fn parent(&self, i: u32) -> Option<u32> {
-        let p = self.nodes[i as usize].parent;
-        (p != NONE).then_some(p)
-    }
-
-    pub fn children(&self, i: u32) -> impl Iterator<Item = u32> + '_ {
-        let (end, mut c) = (self.hop(i), i + 1);
-        std::iter::from_fn(move || {
-            c = live(self, c, end);
-            (c < end).then(|| {
-                let r = c;
-                c = self.hop(c);
-                r
-            })
-        })
-    }
-
-    pub fn child_by_field(&self, i: u32, f: u16) -> Option<u32> {
-        self.children(i).find(|&c| self.field_of(c) == f)
-    }
-
-    pub fn descendants(&self, i: u32) -> impl Iterator<Item = u32> + '_ {
-        let end = self.hop(i);
-        let mut c = live(self, i + 1, end);
-        std::iter::from_fn(move || {
-            if c >= end {
-                return None;
-            }
-            let r = c;
-            c = live(self, c + 1, end);
-            Some(r)
-        })
+    #[inline]
+    pub(crate) fn to_raw(id: NodeId) -> u32 {
+        usize::from(id) as u32 - 1
     }
 
     pub fn add_edge(&self, from: u32, to: u32, kind: EdgeKind) {
-        self.edges_cell
-            .borrow_mut()
-            .push(Edge::local(from, to, kind));
+        self.edges.borrow_mut().push(Edge::local(from, to, kind));
     }
 
     pub fn edges(&self) -> std::cell::Ref<'_, Vec<Edge>> {
-        self.edges_cell.borrow()
+        self.edges.borrow()
     }
 
     pub fn edges_mut(&mut self) -> &mut Vec<Edge> {
-        self.edges_cell.get_mut()
+        self.edges.get_mut()
     }
 
     /// Remap all sym IDs using the given table. Used after merging per-thread interners.
     pub fn remap_syms(&mut self, remap: &[u32]) {
-        for n in &mut self.nodes {
-            if n.sym != 0 && (n.sym as usize) < remap.len() {
-                n.sym = remap[n.sym as usize];
+        for node in self.arena.iter_mut().filter(|n| !n.is_removed()) {
+            let data = node.get_mut();
+            if data.sym != 0 && (data.sym as usize) < remap.len() {
+                data.sym = remap[data.sym as usize];
             }
         }
+    }
+
+    pub(crate) fn node(&self, id: NodeId) -> &Node {
+        self.arena[id].get()
+    }
+
+    pub(crate) fn node_mut(&mut self, id: NodeId) -> &mut Node {
+        self.arena[id].get_mut()
+    }
+
+    pub(crate) fn append(&mut self, parent: NodeId, child: Node) -> NodeId {
+        parent.append_value(child, &mut self.arena)
+    }
+
+    pub(crate) fn clone_subtree(&mut self, source: NodeId, parent: Option<NodeId>) -> NodeId {
+        let children: smallvec::SmallVec<[NodeId; 8]> = source.children(&self.arena).collect();
+        let copy = self.arena.new_node(*self.node(source));
+        if let Some(parent) = parent {
+            parent.append(copy, &mut self.arena);
+        }
+        for child in children {
+            self.clone_subtree(child, Some(copy));
+        }
+        copy
+    }
+
+    pub(crate) fn replace(&mut self, target: NodeId, replacements: Vec<NodeId>) {
+        let field = self.node(target).field;
+        if target == self.root && replacements.len() != 1 {
+            for r in replacements {
+                r.remove_subtree(&mut self.arena);
+            }
+            return;
+        }
+        if let Some(&first) = replacements.first() {
+            self.arena[first].get_mut().field = field;
+        }
+        if target == self.root {
+            self.root = replacements[0];
+        } else {
+            for r in replacements {
+                target.insert_before(r, &mut self.arena);
+            }
+        }
+        target.remove_subtree(&mut self.arena);
+    }
+
+    pub(crate) fn postorder(&self) -> Vec<NodeId> {
+        use indextree::NodeEdge;
+        self.root
+            .reverse_traverse(&self.arena)
+            .filter_map(|edge| match edge {
+                NodeEdge::Start(id) => Some(id),
+                NodeEdge::End(_) => None,
+            })
+            .collect()
     }
 
     pub fn prune(&mut self) {
-        for i in 1..self.nodes.len() {
-            self.nodes[i].field = 0;
-            if self.nodes[i].dead {
-                continue;
+        let ids: Vec<NodeId> = self.root.descendants(&self.arena).skip(1).collect();
+        for id in ids {
+            if !crate::canonical::is_canonical(self.arena[id].get().kind) {
+                let children: Vec<NodeId> = id.children(&self.arena).collect();
+                for child in children {
+                    child.detach(&mut self.arena);
+                    id.insert_before(child, &mut self.arena);
+                }
+                id.remove(&mut self.arena);
+            } else {
+                self.arena[id].get_mut().field = 0;
             }
-            if !crate::canonical::is_canonical(self.nodes[i].kind) {
-                self.nodes[i].dead = true;
-                self.nodes[i].size = 1;
+        }
+    }
+
+    pub fn len(&self) -> u32 {
+        self.root.descendants(&self.arena).count() as u32
+    }
+
+    pub fn compact(&mut self) {
+        let mut new_arena = Arena::with_capacity(self.root.descendants(&self.arena).count());
+        let mut id_map = rustc_hash::FxHashMap::default();
+        for id in self.root.descendants(&self.arena) {
+            let parent: Option<NodeId> =
+                id.parent(&self.arena).and_then(|p| id_map.get(&p).copied());
+            let new_id = match parent {
+                Some(p) => p.append_value(*self.arena[id].get(), &mut new_arena),
+                None => new_arena.new_node(*self.arena[id].get()),
+            };
+            id_map.insert(id, new_id);
+        }
+        let new_root = id_map[&self.root];
+        let old_arena = std::mem::replace(&mut self.arena, new_arena);
+        self.root = new_root;
+        for edge in self.edges.get_mut() {
+            let from_nid = old_arena
+                .get_node_id_at(std::num::NonZeroUsize::new(edge.from.node as usize + 1).unwrap());
+            if let Some(old) = from_nid {
+                if let Some(&new) = id_map.get(&old) {
+                    edge.from.node = Self::to_raw(new);
+                }
+            }
+            let to_nid = old_arena
+                .get_node_id_at(std::num::NonZeroUsize::new(edge.to.node as usize + 1).unwrap());
+            if let Some(old) = to_nid {
+                if let Some(&new) = id_map.get(&old) {
+                    edge.to.node = Self::to_raw(new);
+                }
             }
         }
     }
 }
 
-#[inline]
-pub fn live(t: &Tree, mut c: u32, end: u32) -> u32 {
-    while c < end && t.nodes[c as usize].dead {
-        c = t.hop(c);
-    }
-    c
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct SnapshotNode {
+    pub kind: u16,
+    pub field: u16,
+    pub sym: u32,
+    pub start: u32,
+    pub end: u32,
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+    pub size: u32,
+    pub synth: bool,
+    pub named: bool,
+    pub parent: u32,
 }
 
-pub fn elems<'a>(
-    t: &'a Tree,
-    (a, b): (u32, u32),
-    kinds: &'a [u16],
-) -> impl Iterator<Item = u32> + 'a {
-    let mut c = live(t, a, b);
-    std::iter::from_fn(move || {
-        while c < b {
-            let r = c;
-            c = live(t, t.hop(c), b);
-            if kinds.is_empty() || kinds.contains(&t.kind(r)) {
-                return Some(r);
-            }
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct TreeSnapshot {
+    pub nodes: Vec<SnapshotNode>,
+    pub edges: Vec<Edge>,
+    pub label: String,
+}
+
+impl From<&Tree> for TreeSnapshot {
+    fn from(tree: &Tree) -> Self {
+        let ids: Vec<NodeId> = tree.root.descendants(&tree.arena).collect();
+        let id_to_pos: rustc_hash::FxHashMap<NodeId, u32> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (id, i as u32))
+            .collect();
+        let mut nodes = Vec::with_capacity(ids.len());
+        for &id in &ids {
+            let n = tree.arena[id].get();
+            let parent = id.parent(&tree.arena).map_or(NONE, |p| id_to_pos[&p]);
+            let size = id.descendants(&tree.arena).count() as u32;
+            nodes.push(SnapshotNode {
+                kind: n.kind,
+                field: n.field,
+                sym: n.sym,
+                start: n.start,
+                end: n.end,
+                start_row: n.start_row,
+                start_col: n.start_col,
+                end_row: n.end_row,
+                end_col: n.end_col,
+                size,
+                synth: n.synth,
+                named: n.named,
+                parent,
+            });
         }
-        None
-    })
+        let remap_node = |raw: u32| -> u32 {
+            std::num::NonZeroUsize::new(raw as usize + 1)
+                .and_then(|idx| tree.arena.get_node_id_at(idx))
+                .and_then(|nid| id_to_pos.get(&nid).copied())
+                .unwrap_or(raw)
+        };
+        let edges = tree
+            .edges
+            .borrow()
+            .iter()
+            .map(|e| Edge {
+                from: NodeRef {
+                    tree: e.from.tree,
+                    node: remap_node(e.from.node),
+                },
+                to: NodeRef {
+                    tree: e.to.tree,
+                    node: remap_node(e.to.node),
+                },
+                kind: e.kind,
+            })
+            .collect();
+        Self {
+            nodes,
+            edges,
+            label: tree.label.clone(),
+        }
+    }
 }
 
-pub fn copy_subtree(t: &Tree, i: u32, out: &mut Vec<Node>, parent: u32) {
-    let at = out.len();
-    out.push(Node {
-        parent,
-        id: 0,
-        ..t.nodes[i as usize]
-    });
-    for c in t.children(i) {
-        copy_subtree(t, c, out, at as u32);
+impl From<TreeSnapshot> for Tree {
+    fn from(snap: TreeSnapshot) -> Self {
+        if snap.nodes.is_empty() {
+            return Tree::new(Node::default());
+        }
+        let first = &snap.nodes[0];
+        let mut tree = Tree::with_capacity(
+            snap.nodes.len(),
+            Node {
+                kind: first.kind,
+                field: first.field,
+                sym: first.sym,
+                start: first.start,
+                end: first.end,
+                start_row: first.start_row,
+                start_col: first.start_col,
+                end_row: first.end_row,
+                end_col: first.end_col,
+                synth: first.synth,
+                named: first.named,
+            },
+        );
+        let mut id_map = vec![tree.root];
+        for sn in &snap.nodes[1..] {
+            let parent = id_map[sn.parent as usize];
+            let id = tree.append(
+                parent,
+                Node {
+                    kind: sn.kind,
+                    field: sn.field,
+                    sym: sn.sym,
+                    start: sn.start,
+                    end: sn.end,
+                    start_row: sn.start_row,
+                    start_col: sn.start_col,
+                    end_row: sn.end_row,
+                    end_col: sn.end_col,
+                    synth: sn.synth,
+                    named: sn.named,
+                },
+            );
+            id_map.push(id);
+        }
+        tree.edges = RefCell::new(snap.edges);
+        tree.label = snap.label;
+        tree
     }
-    out[at].size = (out.len() - at) as u32;
 }

@@ -1,12 +1,19 @@
 use crate::canonical::Canonical as C;
 use crate::lang::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{Cursor, EdgeKind, Step, Tree, infer_return_type};
+use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, infer_return_type};
 
 enum Linked {
     Def(u32),
     Import(u32),
     Type(u32),
+}
+
+enum WorkItem {
+    Visit(u32),
+    ExitScope,
+    ExitBranch,
+    ExitLoop,
 }
 
 struct Fold {
@@ -17,157 +24,159 @@ struct Fold {
     defs: Vec<u32>,
     imports: Vec<u32>,
     import_names: Vec<u32>,
-    def_stack: Vec<(Option<u32>, u32, BlockId)>,
-    branch_stack: Vec<BranchFrame>,
+    def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
-    loop_stack: Vec<(BlockId, u32)>,
-}
-
-struct BranchFrame {
-    arms: Vec<(u32, u32)>,
-    entries: Vec<BlockId>,
-    exits: Vec<BlockId>,
-    pre: BlockId,
-    end: u32,
 }
 
 impl Fold {
     fn enclosing(&self) -> u32 {
-        self.def_stack.last().and_then(|&(d, _, _)| d).unwrap_or(0)
+        self.def_stack.last().and_then(|&(d, _)| d).unwrap_or(0)
     }
 
-    // ── Walk ──
+    fn walk(&mut self, tree: &Tree, root: Cursor) {
+        let mut stack: Vec<WorkItem> = Vec::new();
 
-    fn walk_range(&mut self, tree: &Tree, start: u32, range_end: u32) {
-        let mut i = start;
-        while i < range_end {
-            let n = tree.nodes[i as usize];
-            if n.dead {
-                i += n.size.max(1);
-                continue;
-            }
-            self.close_scopes(i);
-            self.enter_arm(i);
-            i += self.dispatch(tree, i);
+        let children: Vec<u32> = root.children().map(|c| c.index()).collect();
+        for &child in children.iter().rev() {
+            stack.push(WorkItem::Visit(child));
         }
-    }
 
-    fn close_scopes(&mut self, i: u32) {
-        while self.def_stack.len() > 1 {
-            let &(_, e, saved) = self.def_stack.last().unwrap();
-            if i >= e {
-                self.def_stack.pop();
-                self.cur = saved;
-            } else {
-                break;
-            }
-        }
-        while let Some(br) = self.branch_stack.last() {
-            if i >= br.end {
-                let mut preds = br.exits.clone();
-                preds.push(br.pre);
-                let br_end = br.end;
-                self.cur = self.ssa.add_sealed_join(preds);
-                self.branch_stack.pop();
-                if let Some(outer) = self.branch_stack.last_mut() {
-                    for (idx, &(a, b)) in outer.arms.iter().enumerate() {
-                        if br_end > a && br_end <= b {
-                            outer.exits[idx] = self.cur;
-                            break;
-                        }
+        while let Some(item) = stack.pop() {
+            match item {
+                WorkItem::ExitScope => {
+                    if self.def_stack.len() > 1 {
+                        let (_, saved) = self.def_stack.pop().unwrap();
+                        self.cur = saved;
                     }
                 }
-            } else {
-                break;
-            }
-        }
-        while self.loop_stack.last().is_some_and(|&(_, end)| i >= end) {
-            let (header, _) = self.loop_stack.pop().unwrap();
-            self.cur = self.ssa.finish_loop(header, self.cur);
-        }
-    }
-
-    fn enter_arm(&mut self, i: u32) {
-        if let Some(br) = self.branch_stack.last() {
-            for (idx, &(a, b)) in br.arms.iter().enumerate() {
-                if i >= a && i < b {
-                    self.cur = br.entries[idx];
-                    break;
+                WorkItem::ExitLoop => {
+                    self.cur = self.ssa.finish_loop(BlockId(0), self.cur);
+                }
+                WorkItem::ExitBranch => {}
+                WorkItem::Visit(idx) => {
+                    self.dispatch(tree, idx, &mut stack);
                 }
             }
         }
     }
 
-    fn dispatch(&mut self, tree: &Tree, i: u32) -> u32 {
-        let n = &tree.nodes[i as usize];
-        let k = n.kind;
-        let size = n.size;
+    fn push_children(&self, tree: &Tree, idx: u32, stack: &mut Vec<WorkItem>) {
+        let children: Vec<u32> = tree.cursor(idx).children().map(|ch| ch.index()).collect();
+        for &child in children.iter().rev() {
+            stack.push(WorkItem::Visit(child));
+        }
+    }
+
+    fn dispatch(&mut self, tree: &Tree, idx: u32, stack: &mut Vec<WorkItem>) {
+        let c = tree.cursor(idx);
+        let k = c.kind();
 
         if k == C::Import || k == C::ImportType {
-            self.handle_import(tree, i);
-            return size.max(1);
+            self.handle_import(tree, idx);
+            return;
         }
-        if crate::canonical::has_def_type(tree.cursor(i)) {
-            self.handle_def(tree, i, i + size);
-            return 1;
+        if crate::canonical::has_def_type(c) {
+            self.handle_def(tree, idx, stack);
+            return;
         }
         if k == C::Call {
-            self.handle_call(tree, i);
-            return 1;
+            self.handle_call(tree, idx);
+            self.push_children(tree, idx, stack);
+            return;
         }
         if k == C::Member {
-            if tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Call
-                && tree.cursor(i).parent().map_or(0, |p| p.kind()) != C::Callee
+            if c.parent().map_or(0, |p| p.kind()) != C::Call
+                && c.parent().map_or(0, |p| p.kind()) != C::Callee
             {
-                self.handle_standalone_member(tree, i);
+                self.handle_standalone_member(tree, idx);
             }
-            return 1;
+            self.push_children(tree, idx, stack);
+            return;
         }
         if k == C::Binding {
-            if self.handle_binding(tree, i) {
-                return size.max(1);
+            if !self.handle_binding(tree, idx, stack) {
+                self.push_children(tree, idx, stack);
             }
-            return 1;
+            return;
         }
         if k == C::SsaBranch {
-            self.open_branch(tree, i, i + size);
-            return 1;
+            self.handle_branch(tree, idx, stack);
+            return;
         }
         if k == C::SsaLoop {
-            let (header, body) = self.ssa.begin_loop(self.cur);
-            self.loop_stack.push((header, tree.hop(i)));
-            self.cur = body;
-            return 1;
+            self.handle_loop(tree, idx, stack);
+            return;
         }
-        1
+
+        self.push_children(tree, idx, stack);
     }
 
-    fn open_branch(&mut self, tree: &Tree, i: u32, end: u32) {
+    fn handle_branch(&mut self, tree: &Tree, idx: u32, _stack: &mut Vec<WorkItem>) {
+        let branch = tree.cursor(idx);
+        let non_arms: Vec<u32> = branch
+            .children()
+            .filter(|c| !c.is(C::SsaArm))
+            .map(|c| c.index())
+            .collect();
+        for &child in &non_arms {
+            let mut tmp = Vec::new();
+            self.dispatch(tree, child, &mut tmp);
+            while let Some(item) = tmp.pop() {
+                if let WorkItem::Visit(i) = item {
+                    self.dispatch(tree, i, &mut tmp);
+                }
+            }
+        }
+
         let pre = self.cur;
-        let arms: Vec<(u32, u32)> = tree
-            .cursor(i)
+        let arms: Vec<u32> = branch
             .children()
             .filter(|c| c.is(C::SsaArm))
-            .map(|c| (c.index(), c.index() + c.size()))
+            .map(|c| c.index())
             .collect();
-        let entries: Vec<BlockId> = arms
-            .iter()
-            .map(|_| self.ssa.add_sealed_successor(pre))
-            .collect();
-        let exits = entries.clone();
-        self.branch_stack.push(BranchFrame {
-            arms,
-            entries,
-            exits,
-            pre,
-            end,
-        });
+
+        let mut exit_blocks = Vec::with_capacity(arms.len());
+        for &arm in &arms {
+            let entry = self.ssa.add_sealed_successor(pre);
+            self.cur = entry;
+            self.walk_children(tree, arm);
+            exit_blocks.push(self.cur);
+        }
+        exit_blocks.push(pre);
+        self.cur = self.ssa.add_sealed_join(exit_blocks);
     }
 
-    // ── Handlers ──
+    fn handle_loop(&mut self, tree: &Tree, idx: u32, stack: &mut Vec<WorkItem>) {
+        let (header, body) = self.ssa.begin_loop(self.cur);
+        self.cur = body;
+        self.walk_children(tree, idx);
+        self.cur = self.ssa.finish_loop(header, self.cur);
+    }
 
-    fn handle_import(&mut self, tree: &Tree, i: u32) {
-        for c in tree.cursor(i).names() {
+    fn walk_children(&mut self, tree: &Tree, idx: u32) {
+        let mut child_stack: Vec<WorkItem> = Vec::new();
+        let children: Vec<u32> = tree.cursor(idx).children().map(|c| c.index()).collect();
+        for &child in children.iter().rev() {
+            child_stack.push(WorkItem::Visit(child));
+        }
+        while let Some(item) = child_stack.pop() {
+            match item {
+                WorkItem::ExitScope => {
+                    if self.def_stack.len() > 1 {
+                        let (_, saved) = self.def_stack.pop().unwrap();
+                        self.cur = saved;
+                    }
+                }
+                WorkItem::ExitLoop | WorkItem::ExitBranch => {}
+                WorkItem::Visit(i) => {
+                    self.dispatch(tree, i, &mut child_stack);
+                }
+            }
+        }
+    }
+
+    fn handle_import(&mut self, tree: &Tree, idx: u32) {
+        for c in tree.cursor(idx).names() {
             let sym = c.sym();
             self.import_count += 1;
             self.imports.push(c.index());
@@ -188,25 +197,25 @@ impl Fold {
         }
     }
 
-    fn handle_def(&mut self, tree: &Tree, i: u32, end: u32) {
-        let c = tree.cursor(i);
+    fn handle_def(&mut self, tree: &Tree, idx: u32, stack: &mut Vec<WorkItem>) {
+        let c = tree.cursor(idx);
         let name = match c.child_sym(C::DefName) {
             Some(n) => n,
             None => return,
         };
         let parent_block = self.cur;
         self.cur = self.ssa.add_sealed_successor(parent_block);
-        let idx = self.def_count;
+        let def_idx = self.def_count;
         self.def_count += 1;
-        self.defs.push(i);
+        self.defs.push(idx);
         self.ssa
-            .write_variable(name, parent_block, Value::LocalDef(idx));
+            .write_variable(name, parent_block, Value::LocalDef(def_idx));
         for alias in c.children().filter(|ch| ch.is(C::Alias) && ch.sym() != 0) {
             self.ssa
-                .write_variable(alias.sym(), parent_block, Value::LocalDef(idx));
+                .write_variable(alias.sym(), parent_block, Value::LocalDef(def_idx));
         }
-        if let Some(&(Some(parent), _, _)) = self.def_stack.last() {
-            tree.add_edge(parent, i, EdgeKind::Defines);
+        if let Some(&(Some(parent), _)) = self.def_stack.last() {
+            tree.add_edge(parent, idx, EdgeKind::Defines);
         }
         for st in c
             .children()
@@ -215,18 +224,23 @@ impl Fold {
             let st_sym = st.sym();
             for &dn in &self.defs {
                 if tree.cursor(dn).child_sym(C::DefName) == Some(st_sym) {
-                    tree.add_edge(i, dn, EdgeKind::Extends);
+                    tree.add_edge(idx, dn, EdgeKind::Extends);
                     break;
                 }
             }
         }
-        if crate::canonical::is_scoped_def(tree.cursor(i)) {
-            self.def_stack.push((Some(i), end, parent_block));
+        if crate::canonical::is_scoped_def(c) {
+            self.def_stack.push((Some(idx), parent_block));
+            stack.push(WorkItem::ExitScope);
+            let children: Vec<u32> = c.children().map(|ch| ch.index()).collect();
+            for &child in children.iter().rev() {
+                stack.push(WorkItem::Visit(child));
+            }
         }
     }
 
-    fn handle_call(&mut self, tree: &Tree, i: u32) {
-        let callee = match tree.cursor(i).child(C::Callee) {
+    fn handle_call(&mut self, tree: &Tree, idx: u32) {
+        let callee = match tree.cursor(idx).child(C::Callee) {
             Some(c) => c,
             None => return,
         };
@@ -257,16 +271,16 @@ impl Fold {
         }
     }
 
-    fn handle_standalone_member(&mut self, tree: &Tree, i: u32) {
+    fn handle_standalone_member(&mut self, tree: &Tree, idx: u32) {
         let obj = tree
-            .cursor(i)
+            .cursor(idx)
             .child(C::Object)
             .map(|o| o.sym())
             .unwrap_or(0);
         if obj == 0 {
             return;
         }
-        let method = tree.sym(i);
+        let method = tree.cursor(idx).sym();
         let from = self.enclosing();
         for r in self.lookup(obj) {
             match r {
@@ -277,31 +291,27 @@ impl Fold {
         }
     }
 
-    fn handle_binding(&mut self, tree: &Tree, i: u32) -> bool {
-        let lhs = tree.sym(i);
-        if lhs == 0 || tree.cursor(i).has(C::Ivar) {
+    fn handle_binding(&mut self, tree: &Tree, idx: u32, _stack: &mut Vec<WorkItem>) -> bool {
+        let lhs = tree.cursor(idx).sym();
+        if lhs == 0 || tree.cursor(idx).has(C::Ivar) {
             return false;
         }
         if self.ssa.has_variable_in_block(lhs, self.cur) {
             self.cur = self.ssa.add_sealed_successor(self.cur);
         }
 
-        let c = tree.cursor(i);
+        let c = tree.cursor(idx);
 
         if let Some(rhs) = c.child(C::Rhs) {
             if let Some(branch) = rhs.child(C::SsaBranch) {
                 self.walk_branch_binding(tree, branch, lhs);
-                self.update_branch_exit(i);
                 return true;
             }
 
-            let rhs_idx = rhs.index();
-            let rhs_end = rhs_idx + rhs.size();
-            self.walk_range(tree, rhs_idx + 1, rhs_end);
+            self.walk_children(tree, rhs.index());
 
-            let val = self.classify_rhs_value(tree, rhs, i);
+            let val = self.classify_rhs_value(tree, rhs, idx);
             self.ssa.write_variable(lhs, self.cur, val);
-            self.update_branch_exit(i);
             return true;
         }
 
@@ -312,7 +322,6 @@ impl Fold {
         };
 
         self.ssa.write_variable(lhs, self.cur, val);
-        self.update_branch_exit(i);
         true
     }
 
@@ -358,7 +367,7 @@ impl Fold {
         for arm in branch.children().filter(|c| c.is(C::SsaArm)) {
             let block = self.ssa.add_sealed_successor(pre);
             self.cur = block;
-            self.walk_range(tree, arm.index() + 1, arm.index() + arm.size());
+            self.walk_children(tree, arm.index());
             let sym = self.tail_sym(arm);
             if sym != 0 {
                 let val = {
@@ -387,21 +396,9 @@ impl Fold {
         }
     }
 
-    fn update_branch_exit(&mut self, i: u32) {
-        if let Some(br) = self.branch_stack.last_mut() {
-            for (idx, &(start, end)) in br.arms.iter().enumerate() {
-                if i >= start && i < end {
-                    br.exits[idx] = self.cur;
-                    break;
-                }
-            }
-        }
-    }
-
-    // ── SSA resolution ──
-
     fn lookup(&mut self, sym: u32) -> Vec<Linked> {
-        let result: Vec<Linked> = self.ssa
+        let result: Vec<Linked> = self
+            .ssa
             .read_variable(sym, self.cur)
             .iter()
             .filter_map(|pv| match pv {
@@ -415,7 +412,8 @@ impl Fold {
             .collect();
         if result.is_empty() {
             let entry = BlockId(0);
-            return self.ssa
+            return self
+                .ssa
                 .read_variable(sym, entry)
                 .iter()
                 .filter_map(|pv| match pv {
@@ -452,8 +450,6 @@ impl Fold {
             .iter()
             .any(|r| matches!(r, Linked::Def(n) if self.is_class(tree, *n)))
     }
-
-    // ── Resolution ──
 
     fn resolve_obj(&mut self, tree: &Tree, obj: u32, method: u32, from: u32) {
         for r in self.lookup(obj) {
@@ -508,8 +504,6 @@ impl Fold {
             }
         }
     }
-
-    // ── Helpers ──
 
     fn enclosing_class(&self, tree: &Tree, node: u32) -> Option<u32> {
         let c = tree.cursor(node);
@@ -640,7 +634,7 @@ impl Fold {
     }
 }
 
-fn root_object_sym(member: crate::tree::Cursor) -> u32 {
+fn root_object_sym(member: Cursor) -> u32 {
     let Some(obj) = member.child(C::Object) else {
         return 0;
     };
@@ -669,20 +663,11 @@ pub fn link(tree: &Tree, lang: &mut Lang) {
         defs: Vec::new(),
         imports: Vec::new(),
         import_names: Vec::new(),
-        def_stack: vec![(None, u32::MAX, entry)],
-        branch_stack: Vec::new(),
+        def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern("*"),
-        loop_stack: Vec::new(),
     };
 
-    f.walk_range(tree, 0, tree.len());
-
-    while !f.branch_stack.is_empty() {
-        let br = f.branch_stack.pop().unwrap();
-        let mut preds = br.exits;
-        preds.push(br.pre);
-        let _ = f.ssa.add_sealed_join(preds);
-    }
+    f.walk(tree, tree.root());
 
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();

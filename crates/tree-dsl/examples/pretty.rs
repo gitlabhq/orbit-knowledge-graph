@@ -1,10 +1,3 @@
-//! Pretty-print a tree at each pipeline stage.
-//!
-//! Usage: cargo run --example pretty -- <file> <lang> [stage]
-//!
-//! Stages: cst, rewrite, ssa (default: ssa)
-//! Languages: py, ts, js, rs
-
 use std::io::IsTerminal;
 
 use tree_dsl::Pipeline;
@@ -63,8 +56,8 @@ fn main() {
             if !tree.edges().is_empty() {
                 println!("edges:");
                 for e in tree.edges().iter() {
-                    let from = lang.syms.resolve(tree.nodes[e.from.node as usize].sym);
-                    let to = lang.syms.resolve(tree.nodes[e.to.node as usize].sym);
+                    let from = lang.syms.resolve(tree.cursor(e.from.node).sym());
+                    let to = lang.syms.resolve(tree.cursor(e.to.node).sym());
                     println!(
                         "  {} --[{}]--> {}",
                         truncate(from, 40),

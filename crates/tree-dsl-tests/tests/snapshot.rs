@@ -38,7 +38,7 @@ fn count_defs(result: &tree_dsl::IndexResult) -> usize {
     result
         .trees
         .iter()
-        .flat_map(|t| (0..t.len()).map(move |i| t.cursor(i)))
+        .flat_map(|t| t.root().descendants())
         .filter(|c| tree_dsl::canonical::has_def_type(*c))
         .count()
 }
@@ -52,11 +52,12 @@ fn def_names(result: &tree_dsl::IndexResult) -> Vec<String> {
         .trees
         .iter()
         .flat_map(|t| {
-            (0..t.len())
-                .map(move |i| t.cursor(i))
+            t.root()
+                .descendants()
                 .filter(|c| tree_dsl::canonical::has_def_type(*c))
                 .filter_map(|c| c.child_sym(tree_dsl::canonical::Canonical::DefName))
                 .map(|s| result.lang.syms.resolve(s).to_string())
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -89,7 +90,7 @@ fn round_trip_save_load() {
 
     for (orig, restored) in result.trees.iter().zip(loaded.trees.iter()) {
         assert_eq!(orig.label, restored.label);
-        assert_eq!(orig.nodes.len(), restored.nodes.len());
+        assert_eq!(orig.len(), restored.len());
         assert_eq!(orig.edges().len(), restored.edges().len());
     }
     for (orig, restored) in result.cross_edges.iter().zip(loaded.cross_edges.iter()) {
@@ -115,7 +116,10 @@ fn incremental_lifecycle_through_serialization() {
     result.save(&snap).unwrap();
 
     let mut current = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
-    assert_eq!(file_set(&current), HashSet::from_iter(["main.py".into(), "utils.py".into()]));
+    assert_eq!(
+        file_set(&current),
+        HashSet::from_iter(["main.py".into(), "utils.py".into()])
+    );
 
     for (i, step) in suite.steps.iter().enumerate() {
         let added: Vec<(String, String)> = step

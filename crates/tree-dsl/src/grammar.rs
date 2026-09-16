@@ -1,5 +1,5 @@
 use crate::lang::Lang;
-use crate::tree::{NONE, Node, Tree};
+use crate::tree::{Node, Tree};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -172,17 +172,48 @@ fn from_tree_sitter(
     lang: &mut Lang,
     label: &str,
 ) -> Tree {
-    let root = ts_tree.root_node();
-    let mut nodes: Vec<Node> = Vec::with_capacity(root.descendant_count());
-    let mut parent_stack: Vec<u32> = Vec::with_capacity(64);
-    let mut cursor = root.walk();
-    let mut done = false;
+    let ts_root = ts_tree.root_node();
+    let mut cursor = ts_root.walk();
+
+    let kind = lang.intern_kind(cursor.node().kind());
+    let sp = cursor.node().start_position();
+    let ep = cursor.node().end_position();
+    let root_sym = if !label.is_empty() {
+        lang.syms.intern(label)
+    } else if cursor.node().is_named() {
+        let text = &source[cursor.node().start_byte()..cursor.node().end_byte()];
+        lang.syms.intern(text)
+    } else {
+        0
+    };
+
+    let mut tree = Tree::with_capacity(
+        ts_root.descendant_count(),
+        Node {
+            kind,
+            field: 0,
+            named: cursor.node().is_named(),
+            synth: false,
+            sym: root_sym,
+            start: cursor.node().start_byte() as u32,
+            end: cursor.node().end_byte() as u32,
+            start_row: sp.row as u32,
+            start_col: sp.column as u32,
+            end_row: ep.row as u32,
+            end_col: ep.column as u32,
+        },
+    );
+    tree.label = label.to_string();
+
+    let root_nid = tree.root;
+    let mut parent_stack: Vec<indextree::NodeId> = vec![root_nid];
+
+    if !cursor.goto_first_child() {
+        return tree;
+    }
 
     loop {
         let ts = cursor.node();
-        let id = nodes.len() as u32;
-        let parent = parent_stack.last().copied().unwrap_or(NONE);
-
         let kind = lang.intern_kind(ts.kind());
         let field = cursor.field_name().map_or(0, |f| lang.intern_field(f));
         let sym = if ts.is_named() {
@@ -191,33 +222,31 @@ fn from_tree_sitter(
         } else {
             0
         };
-
         let sp = ts.start_position();
         let ep = ts.end_position();
-        nodes.push(Node {
-            kind,
-            field,
-            named: ts.is_named(),
-            synth: false,
-            dead: false,
-            id: 0,
-            size: 0,
+
+        let parent = *parent_stack.last().unwrap();
+        let nid = tree.append(
             parent,
-            sym,
-            start: ts.start_byte() as u32,
-            end: ts.end_byte() as u32,
-            start_row: sp.row as u32,
-            start_col: sp.column as u32,
-            end_row: ep.row as u32,
-            end_col: ep.column as u32,
-        });
+            Node {
+                kind,
+                field,
+                named: ts.is_named(),
+                synth: false,
+                sym,
+                start: ts.start_byte() as u32,
+                end: ts.end_byte() as u32,
+                start_row: sp.row as u32,
+                start_col: sp.column as u32,
+                end_row: ep.row as u32,
+                end_col: ep.column as u32,
+            },
+        );
 
         if cursor.goto_first_child() {
-            parent_stack.push(id);
+            parent_stack.push(nid);
             continue;
         }
-
-        nodes[id as usize].size = 1;
 
         if cursor.goto_next_sibling() {
             continue;
@@ -225,25 +254,14 @@ fn from_tree_sitter(
 
         loop {
             if !cursor.goto_parent() {
-                done = true;
-                break;
+                return tree;
             }
-            let parent_id = parent_stack.pop().unwrap();
-            nodes[parent_id as usize].size = nodes.len() as u32 - parent_id;
+            parent_stack.pop();
             if cursor.goto_next_sibling() {
                 break;
             }
         }
-        if done {
-            break;
-        }
     }
-    let mut tree = Tree::from_nodes(nodes);
-    tree.label = label.to_string();
-    if !label.is_empty() && !tree.nodes.is_empty() {
-        tree.nodes[0].sym = lang.syms.intern(label);
-    }
-    tree
 }
 
 pub fn parse(source: &str, support_lang: SupportLang, lang: &mut Lang, label: &str) -> Tree {

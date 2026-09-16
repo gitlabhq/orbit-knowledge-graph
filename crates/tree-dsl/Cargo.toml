@@ -32,6 +32,7 @@ serde = { workspace = true }
 serde_yaml = "0.9"
 stacker = "0.1"
 rustc-hash = "2"
+indextree = "4.9"
 strum = { workspace = true }
 rayon = { workspace = true }
 termtree = "1.0"

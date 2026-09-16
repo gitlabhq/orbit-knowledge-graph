@@ -1,6 +1,6 @@
-use super::types::Tree;
+use super::walk::Cursor;
 
-pub fn pretty_print(tree: &Tree, lang: &crate::lang::Lang, color: bool) -> String {
+pub fn pretty_print(tree: &super::Tree, lang: &crate::lang::Lang, color: bool) -> String {
     use termtree::Tree as TTree;
 
     const BOLD_CYAN: &str = "\x1b[1;36m";
@@ -8,12 +8,11 @@ pub fn pretty_print(tree: &Tree, lang: &crate::lang::Lang, color: bool) -> Strin
     const RESET: &str = "\x1b[0m";
     const GREEN: &str = "\x1b[32m";
 
-    fn build(tree: &Tree, lang: &crate::lang::Lang, idx: u32, color: bool) -> TTree<String> {
-        let n = &tree.nodes[idx as usize];
-        let kind = lang.kind_name(n.kind);
+    fn build(cursor: Cursor, lang: &crate::lang::Lang, color: bool) -> TTree<String> {
+        let kind = lang.kind_name(cursor.kind());
         let is_canonical = kind.starts_with("__");
-        let field_prefix = if n.field != 0 {
-            let f = lang.field_name(n.field);
+        let field_prefix = if cursor.field() != 0 {
+            let f = lang.field_name(cursor.field());
             if color {
                 format!("{DIM}{f}:{RESET}")
             } else {
@@ -22,8 +21,8 @@ pub fn pretty_print(tree: &Tree, lang: &crate::lang::Lang, color: bool) -> Strin
         } else {
             String::new()
         };
-        let sym_suffix = if n.sym != 0 {
-            let s = lang.syms.resolve(n.sym);
+        let sym_suffix = if cursor.sym() != 0 {
+            let s = lang.syms.resolve(cursor.sym());
             let truncated = if s.len() > 50 {
                 format!("{:?}...", &s[..50])
             } else {
@@ -48,16 +47,14 @@ pub fn pretty_print(tree: &Tree, lang: &crate::lang::Lang, color: bool) -> Strin
         };
         let label = format!("{field_prefix}{kind_str}{sym_suffix}");
         let mut tt = TTree::new(label);
-        for c in tree.children(idx) {
-            if !tree.nodes[c as usize].dead {
-                tt.push(build(tree, lang, c, color));
-            }
+        for child in cursor.children() {
+            tt.push(build(child, lang, color));
         }
         tt
     }
 
-    if tree.nodes.is_empty() {
+    if tree.len() == 0 {
         return String::from("(empty)");
     }
-    build(tree, lang, 0, color).to_string()
+    build(tree.root(), lang, color).to_string()
 }

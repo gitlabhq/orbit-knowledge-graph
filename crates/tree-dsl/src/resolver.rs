@@ -36,7 +36,8 @@ pub fn resolve(
             .child(C::SourcePath)
             .map(|n| n.index());
         if let Some(sn) = sp_idx {
-            trees[req.fi].nodes[sn as usize].sym = resolved_sym;
+            let nid = trees[req.fi].to_id(sn);
+            trees[req.fi].node_mut(nid).sym = resolved_sym;
         }
     }
 
@@ -70,7 +71,8 @@ fn build_file_index(
     support_lang: SupportLang,
     index_names: &[String],
 ) -> FxHashMap<String, usize> {
-    let mut idx: FxHashMap<String, usize> = FxHashMap::with_capacity_and_hasher(trees.len() * 3, Default::default());
+    let mut idx: FxHashMap<String, usize> =
+        FxHashMap::with_capacity_and_hasher(trees.len() * 3, Default::default());
     for (fi, tree) in trees.iter().enumerate() {
         let path = lang.syms.resolve(tree.root().sym()).to_string();
         let file_lang = SupportLang::from_path(&path).unwrap_or(support_lang);
@@ -98,18 +100,13 @@ fn build_visible_names(trees: &[Tree]) -> VisibleMap {
         .enumerate()
         .map(|(fi, tree)| {
             let mut names = FxHashMap::with_capacity_and_hasher(16, Default::default());
-            for i in 0..tree.len() {
-                if tree.nodes[i as usize].dead {
-                    continue;
-                }
-                let c = tree.cursor(i);
+            for c in tree.root().descendants() {
                 if crate::canonical::has_def_type(c) {
                     if let Some(ns) = c.child_sym(C::DefName) {
-
-                        names.insert(ns, (fi, i));
+                        names.insert(ns, (fi, c.index()));
                     }
                     if let Some(ds) = c.child_sym(C::DefaultExport) {
-                        names.insert(ds, (fi, i));
+                        names.insert(ds, (fi, c.index()));
                     }
                 }
             }
@@ -125,15 +122,14 @@ fn gather_imports(
     lookup_prefixes: &[String],
     external: &[String],
 ) -> (Vec<ImportReq>, Vec<Edge>) {
-    let import_estimate = trees.iter().map(|t| t.nodes.len()).sum::<usize>() / 20;
+    let import_estimate = trees.iter().map(|t| t.len() as usize).sum::<usize>() / 20;
     let mut reqs = Vec::with_capacity(import_estimate);
     let mut cross_edges = Vec::with_capacity(import_estimate);
     for (fi, tree) in trees.iter().enumerate() {
-        for (i, n) in tree.nodes.iter().enumerate() {
-            if n.kind != C::Import && n.kind != C::ImportType {
+        for cur in tree.root().descendants() {
+            if cur.kind() != C::Import && cur.kind() != C::ImportType {
                 continue;
             }
-            let cur = tree.cursor(i as u32);
             let Some(source_sym) = cur.child_sym(C::SourcePath) else {
                 continue;
             };
@@ -149,10 +145,11 @@ fn gather_imports(
             } else {
                 source_str.clone()
             };
+            let node_idx = cur.index();
             if let Some(tfi) = resolve_path(&target_path, file_index, lookup_prefixes) {
                 reqs.push(ImportReq {
                     fi,
-                    node: i as u32,
+                    node: node_idx,
                     target_fi: tfi,
                     target_path,
                 });
@@ -160,10 +157,10 @@ fn gather_imports(
                 for c in cur.names() {
                     let submod = format!("{target_path}/{}", lang.syms.resolve(c.sym()));
                     if let Some(sub_fi) = resolve_path(&submod, file_index, lookup_prefixes) {
-                        cross_edges.push(Edge::new(fi, i as u32, sub_fi, 0, EdgeKind::Imports));
+                        cross_edges.push(Edge::new(fi, node_idx, sub_fi, 0, EdgeKind::Imports));
                         reqs.push(ImportReq {
                             fi,
-                            node: i as u32,
+                            node: node_idx,
                             target_fi: sub_fi,
                             target_path: submod,
                         });
@@ -340,8 +337,8 @@ fn build_call_edges(
                 }
             }
         }
-        for child in nodes.children(import_node) {
-            if let Some(targets) = import_targets.get(&(fi, child)) {
+        for child in nodes.cursor(import_node).children() {
+            if let Some(targets) = import_targets.get(&(fi, child.index())) {
                 for &tfi in targets {
                     if !target_files.contains(&tfi) {
                         target_files.push(tfi);
@@ -354,7 +351,12 @@ fn build_call_edges(
                 continue;
             }
             let et = edge.to.node;
-            if et != import_node && nodes.nodes[et as usize].parent != import_node {
+            if et != import_node
+                && nodes
+                    .cursor(et)
+                    .parent()
+                    .map_or(true, |p| p.index() != import_node)
+            {
                 continue;
             }
             let caller = corpus.jump(fi as u32, edge.from.node);
@@ -391,19 +393,19 @@ fn build_call_edges(
             .copied()
             .unwrap_or(0);
         let ft = &corpus.trees_ref()[ce.from.tree as usize];
-        let import_parent = ft.nodes[ce.from.node as usize].parent;
+        let import_parent = ft.cursor(ce.from.node).parent().map(|p| p.index());
         for edge in ft.edges().iter() {
             if edge.kind != EdgeKind::Imports {
                 continue;
             }
             let ei = edge.to.node;
             let direct = ei == ce.from.node
-                || ft.nodes[ei as usize].parent == ce.from.node
-                || ei == import_parent;
+                || ft.cursor(ei).parent().map(|p| p.index()) == Some(ce.from.node)
+                || import_parent == Some(ei);
             if !direct {
                 continue;
             }
-            if lang.syms.resolve(ft.sym(ce.from.node)) == "*" && target_name != 0 {
+            if lang.syms.resolve(ft.cursor(ce.from.node).sym()) == "*" && target_name != 0 {
                 let found = corpus
                     .jump(ce.from.tree, edge.from.node)
                     .descendants()
@@ -509,8 +511,7 @@ fn build_typed_field_edges(corpus: Cursor, cross_edges: &[Edge]) -> Vec<Edge> {
             continue;
         }
         let ft = &corpus.trees_ref()[ce.from.tree as usize];
-        for i in 0..ft.len() {
-            let nr = ft.cursor(i);
+        for nr in ft.root().descendants() {
             if !nr.is(C::Binding) {
                 continue;
             }
@@ -542,9 +543,7 @@ fn build_typed_field_edges(corpus: Cursor, cross_edges: &[Edge]) -> Vec<Edge> {
                 let Some(member) = callee.child(C::Member) else {
                     continue;
                 };
-                let obj_ivar = member
-                    .child(C::Object)
-                    .and_then(|o| o.child(C::Ivar));
+                let obj_ivar = member.child(C::Object).and_then(|o| o.child(C::Ivar));
                 if !obj_ivar.is_some_and(|iv| iv.sym() == ivar_sym) {
                     continue;
                 }
@@ -591,11 +590,10 @@ fn follow_import_chain(
             continue;
         }
         let tree = &corpus.trees_ref()[fi];
-        for (i, n) in tree.nodes.iter().enumerate() {
-            if n.kind != C::Import {
+        for nc in tree.root().descendants() {
+            if nc.kind() != C::Import {
                 continue;
             }
-            let nc = corpus.jump(fi as u32, i as u32);
             for c in nc.children().filter(|c| c.is(C::Name)) {
                 let import_name = c.sym();
                 let alias = c.child_sym(C::Alias).unwrap_or(0);
@@ -603,7 +601,7 @@ fn follow_import_chain(
                     continue;
                 }
                 for req in reqs {
-                    if req.fi == fi && req.node == i as u32 {
+                    if req.fi == fi && req.node == nc.index() {
                         stack.push((req.target_fi, import_name));
                     }
                 }

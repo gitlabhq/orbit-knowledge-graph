@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 
 use crate::lang::Lang;
 use crate::pattern::{self, Rewrite};
-use crate::tree::{NONE, Node, Step, Tree};
+use crate::tree::{Node, Step, Tree};
 
 /// Result of walking the file tree.
 pub struct WalkResult {
@@ -84,7 +84,6 @@ pub fn walk(
                 mark_kind,
             } => {
                 climb(&mut tree, *while_kind, *mark_kind);
-                tree.compact();
             }
         }
     }
@@ -113,7 +112,7 @@ fn build_file_tree(
         .map(|(p, c)| (p.as_str(), c.as_str()))
         .collect();
 
-    let mut children: FxHashMap<String, Vec<(String, bool)>> = FxHashMap::default();
+    let mut children_map: FxHashMap<String, Vec<(String, bool)>> = FxHashMap::default();
 
     for path in paths {
         let parts: Vec<&str> = path.split('/').collect();
@@ -125,54 +124,49 @@ fn build_file_tree(
             };
             let segment = parts[i].to_string();
             let is_file = i == parts.len() - 1;
-            let entry = children.entry(parent).or_default();
+            let entry = children_map.entry(parent).or_default();
             if !entry.iter().any(|(s, f)| s == &segment && *f == is_file) {
                 entry.push((segment, is_file));
             }
         }
     }
 
-    for v in children.values_mut() {
+    for v in children_map.values_mut() {
         v.sort();
     }
 
-    let mut nodes: Vec<Node> = Vec::new();
-    let root_idx = nodes.len() as u32;
-    nodes.push(Node {
+    let mut tree = Tree::new(Node {
         kind: root_kind,
         named: true,
-        parent: NONE,
-        sym: 0,
-        size: 0,
         ..Default::default()
     });
 
     fn add_children(
         parent_path: &str,
-        parent_idx: u32,
-        children: &FxHashMap<String, Vec<(String, bool)>>,
+        parent_nid: indextree::NodeId,
+        children_map: &FxHashMap<String, Vec<(String, bool)>>,
         file_contents: &FxHashMap<&str, &str>,
         parse_files: &[ParseFileSpec],
-        nodes: &mut Vec<Node>,
+        tree: &mut Tree,
         lang: &mut Lang,
         dir_kind: u16,
         file_kind: u16,
     ) {
-        let Some(kids) = children.get(parent_path) else {
+        let Some(kids) = children_map.get(parent_path) else {
             return;
         };
         for (segment, is_file) in kids {
-            let idx = nodes.len() as u32;
             let kind = if *is_file { file_kind } else { dir_kind };
             let sym = lang.syms.intern(segment);
-            nodes.push(Node {
-                kind,
-                named: true,
-                parent: parent_idx,
-                sym,
-                size: 0,
-                ..Default::default()
-            });
+            let nid = tree.append(
+                parent_nid,
+                Node {
+                    kind,
+                    named: true,
+                    sym,
+                    ..Default::default()
+                },
+            );
             if *is_file {
                 if let Some(spec) = parse_files.iter().find(|pf| pf.name == *segment) {
                     let full_path = if parent_path.is_empty() {
@@ -181,7 +175,7 @@ fn build_file_tree(
                         format!("{parent_path}/{segment}")
                     };
                     if let Some(content) = file_contents.get(full_path.as_str()) {
-                        inline_config(content, spec.format, idx, nodes, lang);
+                        inline_config(content, spec.format, nid, tree, lang);
                     }
                 }
             } else {
@@ -192,41 +186,39 @@ fn build_file_tree(
                 };
                 add_children(
                     &child_path,
-                    idx,
-                    children,
+                    nid,
+                    children_map,
                     file_contents,
                     parse_files,
-                    nodes,
+                    tree,
                     lang,
                     dir_kind,
                     file_kind,
                 );
             }
-            nodes[idx as usize].size = (nodes.len() as u32) - idx;
         }
     }
 
     add_children(
         "",
-        root_idx,
-        &children,
+        tree.root,
+        &children_map,
         &file_contents,
         parse_files,
-        &mut nodes,
+        &mut tree,
         lang,
         dir_kind,
         file_kind,
     );
-    nodes[root_idx as usize].size = nodes.len() as u32;
 
-    Tree::from_nodes(nodes)
+    tree
 }
 
 fn inline_config(
     content: &str,
     format: ParseFormat,
-    parent: u32,
-    nodes: &mut Vec<Node>,
+    parent: indextree::NodeId,
+    tree: &mut Tree,
     lang: &mut Lang,
 ) {
     let value: serde_json::Value = match format {
@@ -239,7 +231,7 @@ fn inline_config(
             Err(_) => return,
         },
     };
-    emit_json_value(&value, parent, nodes, lang);
+    emit_json_value(&value, parent, tree, lang);
 }
 
 fn toml_to_json(v: toml::Value) -> serde_json::Value {
@@ -258,77 +250,82 @@ fn toml_to_json(v: toml::Value) -> serde_json::Value {
     }
 }
 
-fn emit_json_value(val: &serde_json::Value, parent: u32, nodes: &mut Vec<Node>, lang: &mut Lang) {
+fn emit_json_value(
+    val: &serde_json::Value,
+    parent: indextree::NodeId,
+    tree: &mut Tree,
+    lang: &mut Lang,
+) {
     use crate::canonical::Canonical as C;
 
     match val {
         serde_json::Value::Object(map) => {
-            let idx = nodes.len() as u32;
-            nodes.push(Node {
-                kind: C::Obj.into(),
-                named: true,
+            let obj = tree.append(
                 parent,
-                size: 0,
-                ..Default::default()
-            });
-            for (key, child) in map {
-                let fidx = nodes.len() as u32;
-                nodes.push(Node {
-                    kind: C::ConfigField.into(),
+                Node {
+                    kind: C::Obj.into(),
                     named: true,
-                    parent: idx,
-                    sym: lang.syms.intern(key),
-                    size: 0,
                     ..Default::default()
-                });
-                emit_json_value(child, fidx, nodes, lang);
-                nodes[fidx as usize].size = (nodes.len() as u32) - fidx;
+                },
+            );
+            for (key, child) in map {
+                let field = tree.append(
+                    obj,
+                    Node {
+                        kind: C::ConfigField.into(),
+                        named: true,
+                        sym: lang.syms.intern(key),
+                        ..Default::default()
+                    },
+                );
+                emit_json_value(child, field, tree, lang);
             }
-            nodes[idx as usize].size = (nodes.len() as u32) - idx;
         }
         serde_json::Value::Array(arr) => {
-            let idx = nodes.len() as u32;
-            nodes.push(Node {
-                kind: C::Arr.into(),
-                named: true,
+            let arr_node = tree.append(
                 parent,
-                size: 0,
-                ..Default::default()
-            });
+                Node {
+                    kind: C::Arr.into(),
+                    named: true,
+                    ..Default::default()
+                },
+            );
             for child in arr {
-                emit_json_value(child, idx, nodes, lang);
+                emit_json_value(child, arr_node, tree, lang);
             }
-            nodes[idx as usize].size = (nodes.len() as u32) - idx;
         }
         serde_json::Value::String(s) => {
-            nodes.push(Node {
-                kind: C::Str.into(),
-                named: true,
+            tree.append(
                 parent,
-                sym: lang.syms.intern(s),
-                size: 1,
-                ..Default::default()
-            });
+                Node {
+                    kind: C::Str.into(),
+                    named: true,
+                    sym: lang.syms.intern(s),
+                    ..Default::default()
+                },
+            );
         }
         serde_json::Value::Number(n) => {
-            nodes.push(Node {
-                kind: C::ConfigNum.into(),
-                named: true,
+            tree.append(
                 parent,
-                sym: lang.syms.intern(&n.to_string()),
-                size: 1,
-                ..Default::default()
-            });
+                Node {
+                    kind: C::ConfigNum.into(),
+                    named: true,
+                    sym: lang.syms.intern(&n.to_string()),
+                    ..Default::default()
+                },
+            );
         }
         serde_json::Value::Bool(b) => {
-            nodes.push(Node {
-                kind: C::ConfigBool.into(),
-                named: true,
+            tree.append(
                 parent,
-                sym: lang.syms.intern(if *b { "true" } else { "false" }),
-                size: 1,
-                ..Default::default()
-            });
+                Node {
+                    kind: C::ConfigBool.into(),
+                    named: true,
+                    sym: lang.syms.intern(if *b { "true" } else { "false" }),
+                    ..Default::default()
+                },
+            );
         }
         serde_json::Value::Null => {}
     }
@@ -338,11 +335,11 @@ fn emit_json_value(val: &serde_json::Value, parent: u32, nodes: &mut Vec<Node>, 
 fn climb(tree: &mut Tree, while_kind: u16, mark_kind: u16) {
     let mut marked: Vec<u32> = Vec::new();
 
-    for i in 0..tree.len() {
-        if !tree.cursor(i).children().any(|c| c.kind() == while_kind) {
+    for cursor in tree.root().descendants() {
+        if !cursor.children().any(|c| c.kind() == while_kind) {
             continue;
         }
-        if let Some(target) = tree.cursor(i).ascend(|anc| {
+        if let Some(target) = cursor.ascend(|anc| {
             if anc.children().any(|c| c.kind() == while_kind) {
                 Step::Into
             } else {
@@ -356,14 +353,12 @@ fn climb(tree: &mut Tree, while_kind: u16, mark_kind: u16) {
     }
 
     for node in marked {
+        let nid = tree.to_id(node);
         tree.append(
-            node,
+            nid,
             Node {
                 kind: mark_kind,
                 named: true,
-                sym: 0,
-                size: 1,
-                parent: node,
                 ..Default::default()
             },
         );
@@ -377,13 +372,12 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
     }
     let root_node_kind = lang.lookup_kind("__root");
     let mut paths = Vec::new();
-    for i in 0..tree.len() {
-        let nr = tree.cursor(i);
-        if nr.kind() == root_node_kind {
+    for cursor in tree.root().descendants() {
+        if cursor.kind() == root_node_kind {
             continue;
         }
-        if nr.children().any(|c| markers.contains(&c.kind())) {
-            let path = node_path(tree, i, lang);
+        if cursor.children().any(|c| markers.contains(&c.kind())) {
+            let path = node_path(cursor, lang);
             if !paths.contains(&path) {
                 paths.push(path);
             }
@@ -393,11 +387,11 @@ fn collect_marked_paths(tree: &Tree, lang: &Lang, markers: &[u16]) -> Vec<String
 }
 
 /// Reconstruct the full path of a directory node by walking up parent pointers.
-fn node_path(tree: &Tree, node: u32, lang: &Lang) -> String {
+fn node_path(cursor: crate::tree::Cursor, lang: &Lang) -> String {
     let dir_kind = lang.lookup_kind("__dir");
     let root_kind = lang.lookup_kind("__root");
-    let mut parts: Vec<String> = std::iter::once(tree.cursor(node))
-        .chain(tree.cursor(node).ancestors())
+    let mut parts: Vec<String> = std::iter::once(cursor)
+        .chain(cursor.ancestors())
         .take_while(|n| n.kind() != root_kind)
         .filter(|n| n.kind() == dir_kind && n.sym() != 0)
         .map(|n| lang.syms.resolve(n.sym()).to_string())
@@ -413,9 +407,9 @@ fn collect_packages(tree: &Tree, lang: &Lang) -> Vec<String> {
         return vec![];
     }
     let mut pkgs = Vec::new();
-    for i in 0..tree.len() {
-        if tree.cursor(i).children().any(|c| c.kind() == pkg_kind) {
-            pkgs.push(node_path(tree, i, lang));
+    for cursor in tree.root().descendants() {
+        if cursor.children().any(|c| c.kind() == pkg_kind) {
+            pkgs.push(node_path(cursor, lang));
         }
     }
     pkgs

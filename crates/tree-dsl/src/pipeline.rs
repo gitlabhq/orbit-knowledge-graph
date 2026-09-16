@@ -1,20 +1,6 @@
 //! Pipeline orchestration for tree-dsl.
 //!
-//! Today: sequential `process_file` + `index` flow.
-//!
-//! Future: compile-time phase markers for observability and pre-emption.
-//!
-//! ```text
-//! trait PhaseDef { const NAME: &'static str; }
-//! struct Parse;  impl PhaseDef for Parse  { const NAME: &str = "parse"; }
-//! struct Rewrite; struct Classify; struct Link; struct Prune; struct Resolve;
-//!
-//! fn phase<P: PhaseDef, T>(ctx: &PipelineCtx, f: impl FnOnce() -> T) -> Result<T, Cancelled>
-//! ```
-//!
-//! `PipelineCtx` carries a cancel token, metrics collector, and mailbox handle.
-//! Each `PhaseDef` is a ZST — zero cost, fully monomorphized.
-//! `phase()` checks cancellation, opens a tracing span, records duration.
+//! Sequential `process_file` + `index` flow.
 //! Threading model: per-file processing fans out; resolve phase joins.
 
 use crate::grammar::{self, SupportLang};
@@ -65,11 +51,9 @@ pub fn process_file(path: &str, source: &str, lang: &mut Lang, pipeline: &Pipeli
     for stage in &pipeline.rewrite_stages {
         pattern::apply_rewrites(&mut tree, lang, stage);
     }
-    tree.compact();
     linker::link(&tree, lang);
     tree.prune();
     tree.compact();
-    tree.release_buffers();
     tree
 }
 
@@ -86,12 +70,10 @@ pub fn process_file_timed(
     for stage in &pipeline.rewrite_stages {
         pattern::apply_rewrites(&mut tree, lang, stage);
     }
-    tree.compact();
     let t2 = Instant::now();
     linker::link(&tree, lang);
     let t3 = Instant::now();
     tree.prune();
-    tree.compact();
     let t4 = Instant::now();
     (tree, [t1 - t0, t2 - t1, t3 - t2, t4 - t3])
 }
@@ -158,7 +140,6 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
     }
 }
 
-/// Parse a single file through rewrites + SSA, no resolver.
 pub fn parse(lang_id: SupportLang, path: &str, source: &str) -> (Tree, Lang, Pipeline) {
     let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
     let tree = process_file(path, source, &mut lang, &pipeline);

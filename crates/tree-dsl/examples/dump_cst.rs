@@ -11,7 +11,6 @@ fn main() {
         _ => SupportLang::TypeScript,
     };
 
-    // Third arg: "cst" (default), "rewrite", or "ssa"
     let stage = std::env::args().nth(3).unwrap_or_default();
 
     let source = std::env::args()
@@ -27,20 +26,20 @@ fn main() {
     if stage == "rewrite" || stage == "ssa" {
         let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
         let mut tree = grammar::parse(&source, lang_id, &mut lang, "test");
-        for (si, rules) in pipeline.rewrite_stages.iter().enumerate() {
-            let before = tree.nodes.len();
+        let before = tree.len();
+        for rules in &pipeline.rewrite_stages {
             tree_dsl::pattern::apply_rewrites(&mut tree, &mut lang, rules);
-            let after = tree.nodes.len();
-            if before != after {
-                eprintln!("--- stage {si}: {before} → {after} nodes ---");
-            }
+        }
+        let after = tree.len();
+        if before != after {
+            eprintln!("--- rewrites: {before} -> {after} nodes ---");
         }
         if stage == "ssa" {
             let tree = tree_dsl::pipeline::process_file("test", &source, &mut lang, &pipeline);
             dump(&tree, &lang);
             for e in tree.edges().iter() {
-                let from_s = lang.syms.resolve(tree.nodes[e.from.node as usize].sym);
-                let to_s = lang.syms.resolve(tree.nodes[e.to.node as usize].sym);
+                let from_s = lang.syms.resolve(tree.cursor(e.from.node).sym());
+                let to_s = lang.syms.resolve(tree.cursor(e.to.node).sym());
                 let from = if from_s.len() > 30 {
                     &from_s[..30]
                 } else {
@@ -60,25 +59,17 @@ fn main() {
 }
 
 fn dump(tree: &tree_dsl::tree::Tree, lang: &Lang) {
-    for (_i, n) in tree.nodes.iter().enumerate() {
-        if n.dead {
-            continue;
-        }
-        let mut depth = 0;
-        let mut p = n.parent;
-        while p != tree_dsl::tree::NONE {
-            depth += 1;
-            p = tree.nodes[p as usize].parent;
-        }
-        let kind = lang.kind_name(n.kind);
-        let synth = if n.synth { "__" } else { "" };
-        let field = if n.field != 0 {
-            format!("{}:", lang.field_name(n.field))
+    for c in std::iter::once(tree.root()).chain(tree.root().descendants()) {
+        let depth = c.ancestors().count();
+        let kind = lang.kind_name(c.kind());
+        let synth = if c.is_synth() { "__" } else { "" };
+        let field = if c.field() != 0 {
+            format!("{}:", lang.field_name(c.field()))
         } else {
             String::new()
         };
-        let sym = if n.sym != 0 {
-            let s = lang.syms.resolve(n.sym);
+        let sym = if c.sym() != 0 {
+            let s = lang.syms.resolve(c.sym());
             if s.len() > 50 {
                 format!(" {:?}...", &s[..50])
             } else {
