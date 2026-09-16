@@ -12,7 +12,8 @@ use crate::intern::Lang;
 use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
 use crate::treesitter::SupportLang;
 
-use crate::constants::{self as constants, WILDCARD};
+use crate::constants::WILDCARD;
+use crate::paths;
 
 type VisibleMap = Vec<FxHashMap<u32, (usize, u32)>>;
 
@@ -28,13 +29,21 @@ pub fn resolve(
     external: &[String],
 ) -> ResolveResult {
     let index_names = support_lang.index_names();
-    let file_index = build_file_index(trees, lang, support_lang, index_names);
+    let labels: Vec<String> = trees.iter().map(|t| t.label.clone()).collect();
+    let file_index = paths::build_file_index(&labels, support_lang, index_names);
     let mut visible = build_visible_names(trees);
     let (reqs, mut cross_edges) =
         gather_imports(trees, lang, &file_index, lookup_prefixes, external);
 
-    let ambiguous =
-        propagate_reexports(trees, lang, &reqs, &mut visible, support_lang, index_names);
+    let wildcard_sym = lang.syms.intern(WILDCARD);
+    let ambiguous = propagate_reexports(
+        trees,
+        &reqs,
+        &mut visible,
+        support_lang,
+        index_names,
+        wildcard_sym,
+    );
 
     for req in &reqs {
         let resolved_sym = lang.syms.intern(&req.target_path);
@@ -63,6 +72,7 @@ pub fn resolve(
         reverse_visible: &reverse_visible,
         support_lang,
         index_names,
+        wildcard_sym: lang.syms.intern(WILDCARD),
     };
 
     let wave1: Vec<Edge> = reqs
@@ -98,6 +108,7 @@ struct ResolveCtx<'a> {
     reverse_visible: &'a FxHashMap<(usize, u32), u32>,
     support_lang: SupportLang,
     index_names: &'a [String],
+    wildcard_sym: u32,
 }
 
 unsafe impl<'a> Sync for ResolveCtx<'a> {}
@@ -110,8 +121,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
 
     for c in import.names() {
         let ns = c.sym();
-        let name_str = ctx.lang.syms.resolve(ns);
-        if name_str == WILDCARD {
+        if ns == ctx.wildcard_sym {
             if c.child_sym(C::Alias).is_some() {
                 edges.push(c.edge_to(c.jump(tfi as u32, 0), EdgeKind::Imports));
             } else {
@@ -133,16 +143,15 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             if results.len() == 1 {
                 edges.push(c.edge_to(c.jump(results[0].0 as u32, results[0].1), EdgeKind::Imports));
             } else {
-                let tgt = corpus.jump(tfi as u32, 0);
-                let target_stem = ctx
-                    .support_lang
-                    .strip_extension(ctx.lang.syms.resolve(tgt.sym()));
-                if let Some(dir) = ctx
-                    .index_names
-                    .iter()
-                    .find_map(|idx| target_stem.strip_suffix(&format!("/{idx}")))
-                    && let Some(&sub_fi) = ctx.file_index.get(&format!("{dir}/{name_str}"))
-                {
+                let target_path = ctx.lang.syms.resolve(corpus.jump(tfi as u32, 0).sym());
+                let name_resolved = ctx.lang.syms.resolve(ns);
+                if let Some(sub_fi) = paths::resolve_submodule(
+                    target_path,
+                    name_resolved,
+                    ctx.support_lang,
+                    ctx.index_names,
+                    ctx.file_index,
+                ) {
                     edges.push(c.edge_to(c.jump(sub_fi as u32, 0), EdgeKind::Imports));
                 }
             }
@@ -222,8 +231,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             if !direct {
                 continue;
             }
-            if ctx.lang.syms.resolve(ft.cursor(ie.from.node).sym()) == WILDCARD && target_name != 0
-            {
+            if ft.cursor(ie.from.node).sym() == ctx.wildcard_sym && target_name != 0 {
                 let found = corpus
                     .jump(ie.from.tree, intra.from.node)
                     .descendants()
@@ -381,35 +389,6 @@ fn resolve_type(
     None
 }
 
-fn build_file_index(
-    trees: &[Tree],
-    lang: &Lang,
-    support_lang: SupportLang,
-    index_names: &[String],
-) -> FxHashMap<String, usize> {
-    let mut idx: FxHashMap<String, usize> =
-        FxHashMap::with_capacity_and_hasher(trees.len() * 3, Default::default());
-    for (fi, tree) in trees.iter().enumerate() {
-        let path = lang.syms.resolve(tree.root().sym()).to_string();
-        let file_lang = SupportLang::from_path(&path).unwrap_or(support_lang);
-        let stem = file_lang.strip_extension(&path);
-        idx.insert(path.clone(), fi);
-        idx.insert(stem.to_string(), fi);
-        for name in index_names {
-            let suffix = format!("/{name}");
-            if stem.ends_with(&suffix) {
-                let pkg = &stem[..stem.len() - suffix.len()];
-                if !pkg.is_empty() {
-                    idx.insert(pkg.to_string(), fi);
-                }
-            } else if stem == name.as_str() {
-                idx.insert(String::new(), fi);
-            }
-        }
-    }
-    idx
-}
-
 fn build_visible_names(trees: &[Tree]) -> VisibleMap {
     trees
         .par_iter()
@@ -452,21 +431,13 @@ fn gather_imports(
                     continue;
                 };
                 let source_str = lang.syms.resolve(source_sym).to_string();
-                if external
-                    .iter()
-                    .any(|e| e == source_str.split('/').next().unwrap_or(&source_str))
-                {
+                if paths::is_external(&source_str, external) {
                     continue;
                 }
-                let target_path = if source_str.starts_with(constants::RELATIVE_SELF)
-                    || source_str.starts_with(constants::RELATIVE_PARENT)
-                {
-                    resolve_relative(lang.syms.resolve(tree.root().sym()), &source_str)
-                } else {
-                    source_str.clone()
-                };
+                let current_file = lang.syms.resolve(tree.root().sym());
+                let target_path = paths::resolve_import_source(&source_str, current_file);
                 let node_idx = cur.index();
-                if let Some(tfi) = resolve_path(&target_path, file_index, lookup_prefixes) {
+                if let Some(tfi) = paths::resolve_path(&target_path, file_index, lookup_prefixes) {
                     reqs.push(ImportReq {
                         fi,
                         node: node_idx,
@@ -475,8 +446,10 @@ fn gather_imports(
                     });
                 } else {
                     for c in cur.names() {
-                        let submod = format!("{target_path}/{}", lang.syms.resolve(c.sym()));
-                        if let Some(sub_fi) = resolve_path(&submod, file_index, lookup_prefixes) {
+                        let submod = paths::join(&target_path, lang.syms.resolve(c.sym()));
+                        if let Some(sub_fi) =
+                            paths::resolve_path(&submod, file_index, lookup_prefixes)
+                        {
                             edges.push(Edge::new(fi, node_idx, sub_fi, 0, EdgeKind::Imports));
                             reqs.push(ImportReq {
                                 fi,
@@ -500,42 +473,19 @@ fn gather_imports(
     (all_reqs, all_edges)
 }
 
-fn resolve_path(
-    target: &str,
-    file_index: &FxHashMap<String, usize>,
-    prefixes: &[String],
-) -> Option<usize> {
-    file_index.get(target).copied().or_else(|| {
-        prefixes.iter().find_map(|p| {
-            let c = if p.is_empty() {
-                target.to_string()
-            } else {
-                format!("{p}/{target}")
-            };
-            file_index.get(&c).copied()
-        })
-    })
-}
-
 fn propagate_reexports(
     trees: &[Tree],
-    lang: &Lang,
     reqs: &[ImportReq],
     visible: &mut VisibleMap,
     support_lang: SupportLang,
     index_names: &[String],
+    wildcard_sym: u32,
 ) -> FxHashSet<(usize, u32)> {
     let mut ambiguous: FxHashSet<(usize, u32)> = FxHashSet::default();
     for _round in 0..3 {
         let mut new_exports: Vec<(usize, u32, usize, u32)> = Vec::new();
         for req in reqs {
-            let path = lang.syms.resolve(trees[req.fi].root().sym());
-            let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
-            let stem = file_lang.strip_extension(path);
-            if !index_names
-                .iter()
-                .any(|idx| stem.ends_with(&format!("/{idx}")) || stem == idx.as_str())
-            {
+            if !paths::is_index_file(&trees[req.fi].label, support_lang, index_names) {
                 continue;
             }
             for c in trees[req.fi]
@@ -544,7 +494,7 @@ fn propagate_reexports(
                 .filter(|c| c.is(C::Name) && c.sym() != 0)
             {
                 let ns = c.sym();
-                if lang.syms.resolve(ns) == WILDCARD {
+                if ns == wildcard_sym {
                     let target_entries: Vec<_> = visible[req.target_fi]
                         .iter()
                         .map(|(&s, &v)| (s, v))
@@ -628,40 +578,4 @@ struct ImportReq {
     node: u32,
     target_fi: usize,
     target_path: String,
-}
-
-fn resolve_relative(current_file: &str, source: &str) -> String {
-    let dir = current_file
-        .rsplit_once(constants::PATH_SEP)
-        .map(|(d, _)| d)
-        .unwrap_or("");
-    let mut parts: Vec<&str> = if dir.is_empty() {
-        Vec::new()
-    } else {
-        dir.split(constants::PATH_SEP).collect()
-    };
-    let mut rest = source;
-    loop {
-        if let Some(r) = rest.strip_prefix(constants::RELATIVE_PARENT) {
-            parts.pop();
-            rest = r;
-        } else if let Some(r) = rest.strip_prefix(constants::RELATIVE_SELF) {
-            rest = r;
-        } else {
-            break;
-        }
-    }
-    if rest == constants::RELATIVE_DOTDOT {
-        parts.pop();
-        rest = "";
-    } else if rest == constants::RELATIVE_DOT {
-        rest = "";
-    }
-    if rest.is_empty() {
-        parts.join(constants::PATH_SEP)
-    } else if parts.is_empty() {
-        rest.to_string()
-    } else {
-        format!("{}/{rest}", parts.join(constants::PATH_SEP))
-    }
 }
