@@ -36,8 +36,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `orbit-search` | Store-agnostic definition search: recall stays behind the `GrepSource` trait (`recall(term) → (id, sim)`; DuckDB FTS (BM25) locally, orbit-next remotely later), sim-based scoring with term coverage, exact-name and degree boosts, length normalisation, and weak-match signaling (`rank`), ontology-derived relational-verb vocab (`vocab`), and the grep orchestration (`grep`). Shared corpus policy (source extensions, test/vendor exclusions) in `corpus` |
 | `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter, shared SQL-literal/Arrow-column helpers |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
-| `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, CLI test harness (`cli` module) for CLI integration tests |
-| `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness, graph formatting) + cli (concurrency, worktrees); depends on orbit-server, compiler, integration-testkit |
+| `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), CLI test harness (`cli` module) for CLI integration tests |
+| `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness via YAML scenarios, graph formatting) + cli (concurrency, worktrees); depends on orbit-server, compiler, integration-testkit |
 | `integration-tests-codegraph` | Code-graph-specific integration tests (linker, lance-graph) |
 | `fuzz` | Fuzz testing harness (bolero) for the query compiler, code parsers, and indexer message handling |
 | `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |
