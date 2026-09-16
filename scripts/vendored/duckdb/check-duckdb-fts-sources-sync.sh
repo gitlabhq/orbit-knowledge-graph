@@ -4,13 +4,19 @@ set -euo pipefail
 # Verify the vendored DuckDB FTS source archive matches its pins in
 # config/versions.yaml. Read-only: must not modify any files.
 #
-# Called by `mise check:vendored -- duckdb` which sets:
+# Called by `mise check:vendored -- duckdb` via scripts/vendored/run.sh
+# which sets:
 #   VENDOR_VERSIONS_FILE  — absolute path to config/versions.yaml
 #   VENDOR_DIR            — absolute path to the vendor directory
 #   VENDOR_VERSION        — duckdb version (e.g. v1.5.5)
 #   VENDOR_NAME           — "duckdb"
 #
-# Can also be called directly; falls back to repo-relative paths.
+# Must be invoked through the runner; requires VENDOR_* env vars.
+#
+# The archive-build recipe below must match fts-vendor.sh's
+# vendor_fts_source_archive. It is duplicated here because the vendor
+# script writes checksums back (violating the check-script read-only
+# contract). Keep the two in sync when changing the archive layout.
 
 VERSIONS_FILE="${VENDOR_VERSIONS_FILE:?Set VENDOR_VERSIONS_FILE or call via scripts/vendored/run.sh}"
 VENDOR_DIR="${VENDOR_DIR:?Set VENDOR_DIR or call via scripts/vendored/run.sh}"

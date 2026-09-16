@@ -9,7 +9,7 @@
 #   VENDOR_VERSION        — the pinned Rails commit SHA
 #   VENDOR_NAME           — "gitlab_system_note_actions"
 #
-# Can also be called directly; falls back to repo-relative paths.
+# Must be invoked through the runner; requires VENDOR_* env vars.
 #
 # Fetches the Rails source from gitlab.com; requires network access.
 # Skippable via [skip system-note-actions-check] in the MR description,

@@ -224,6 +224,17 @@ named-query-schema-validate:
   script:
     - find config/named_queries -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/named_query.schema.json
 
+versions-schema-validate:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - uvx check-jsonschema --verbose --schemafile config/schemas/versions.schema.json config/versions.yaml
+
 migration-ledger-schema-validate:
   stage: lint
   image: ghcr.io/astral-sh/uv:python3.12-alpine

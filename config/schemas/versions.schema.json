@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gitlab.com/knowledge-graph/versions.schema.json",
+  "title": "GitLab Orbit Versions",
+  "description": "Schema for config/versions.yaml: pinned versions and vendored dependencies.",
+  "type": "object",
+  "required": ["schema", "query_dsl", "raw_output_format", "goon_output_format", "vendored"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "query_dsl": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "raw_output_format": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "goon_output_format": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "vendored": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z0-9_-]+$": {
+          "$ref": "#/definitions/vendored_dependency"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "vendored_dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(.*\\S)?$"
+        },
+        "vendor_dir": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*\\.\\.).*$"
+        },
+        "vendor_script": {
+          "type": "string",
+          "pattern": "^scripts/vendored/[a-z0-9_/-]+\\.sh$"
+        },
+        "check_script": {
+          "type": "string",
+          "pattern": "^scripts/vendored/[a-z0-9_/-]+\\.sh$"
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z0-9_-]+$": {
+              "$ref": "#/definitions/extension"
+            }
+          }
+        },
+        "pins": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z0-9_-]+$": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-z0-9._-]+$"
+            }
+          }
+        }
+      }
+    },
+    "extension": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "source_archive_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "binaries": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z0-9_]+$": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

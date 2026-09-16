@@ -376,6 +376,10 @@ usage = 'arg "<name>"'
 run = "bash ./scripts/vendored/run.sh check --all"
 description = "Run check_script for every vendored dependency that has one"
 
+[tasks."versions:validate"]
+run = "uvx check-jsonschema --verbose --schemafile config/schemas/versions.schema.json config/versions.yaml"
+description = "Validate config/versions.yaml against JSON schema"
+
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"

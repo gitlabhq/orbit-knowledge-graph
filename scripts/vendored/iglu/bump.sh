@@ -8,7 +8,7 @@ set -euo pipefail
 #   VENDOR_DIR            — absolute path to config/schemas/iglu
 #   VENDOR_NAME           — "iglu"
 #
-# Can also be called directly; falls back to repo-relative paths.
+# Must be invoked through the runner; requires VENDOR_* env vars.
 #
 # Workflow: edit a pin in versions.yaml, then run `mise vendor -- iglu`.
 
@@ -24,13 +24,13 @@ for name in $(yq '.vendored.iglu.pins | keys | .[]' "$VERSIONS_FILE"); do
     mkdir -p "$schema_dir"
 
     echo "Fetching $name/$version from live Iglu..."
-    if ! curl -sfL "$IGLU_BASE/$name/jsonschema/$version" -o "$schema_file"; then
+    if ! curl -sfL --max-filesize 1048576 "$IGLU_BASE/$name/jsonschema/$version" -o "$schema_file"; then
         echo "ERROR: $name/$version not found at $IGLU_BASE" >&2
         rm -f "$schema_file"
         exit 1
     fi
 
-    python3 -c "import json,sys; json.load(open('$schema_file'))" || {
+    python3 -c "import json,sys; json.load(sys.stdin)" < "$schema_file" || {
         echo "ERROR: fetched $schema_file is not valid JSON" >&2
         exit 1
     }

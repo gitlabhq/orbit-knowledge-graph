@@ -6,7 +6,7 @@
 #   VENDOR_DIR            — absolute path to config/schemas/iglu
 #   VENDOR_NAME           — "iglu"
 #
-# Can also be called directly; falls back to repo-relative paths.
+# Must be invoked through the runner; requires VENDOR_* env vars.
 #
 # Without flags: full check (committed file exists + matches upstream).
 # With --remote-only: only verifies upstream has the pinned version.
@@ -34,7 +34,7 @@ for name in $(yq '.vendored.iglu.pins | keys | .[]' "$VERSIONS_FILE"); do
     continue
   fi
 
-  remote=$(curl -sf "$IGLU_BASE/$name/jsonschema/$version") || {
+  remote=$(curl -sf --max-filesize 1048576 "$IGLU_BASE/$name/jsonschema/$version") || {
     echo "ERROR: $name/$version not found on live Iglu"
     failed=1
     continue
