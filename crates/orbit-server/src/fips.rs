@@ -10,21 +10,35 @@ use anyhow::Context;
 /// compliance event, not a routine dependency bump.
 pub const DECLARED_MODULE_GENERATION: u32 = 4;
 
+const BUILD_DEFECT_HINT: &str = "This is a defect in how this binary was built, not a configuration \
+problem: no setting turns FIPS mode on or off. Run an official GitLab Orbit image, or rebuild \
+gkg-server from an unmodified checkout so the FIPS build features apply.";
+
 /// Installs the FIPS-restricted rustls provider as the process default and
 /// returns the linked AWS-LC version. Must run before any TLS client or JWT
 /// operation so that every rustls consumer picks up this provider.
 pub fn install_crypto_provider() -> anyhow::Result<&'static str> {
     aws_lc_rs::try_fips_mode()
         .map_err(anyhow::Error::msg)
-        .context("gkg-server must link the AWS-LC FIPS module")?;
+        .with_context(|| {
+            format!(
+                "GitLab Orbit was built with an incorrectly linked AWS-LC FIPS module: the \
+                 linked AWS-LC {} does not run in FIPS mode. {BUILD_DEFECT_HINT}",
+                aws_lc_rs::awslc_version()
+            )
+        })?;
     let provider = rustls::crypto::aws_lc_rs::default_provider();
     anyhow::ensure!(
         provider.fips(),
-        "rustls default provider carries a non-FIPS component"
+        "GitLab Orbit was built with a TLS provider that includes non-FIPS algorithms. \
+         {BUILD_DEFECT_HINT}"
     );
-    provider
-        .install_default()
-        .map_err(|_| anyhow::anyhow!("a rustls crypto provider was already installed"))?;
+    provider.install_default().map_err(|_| {
+        anyhow::anyhow!(
+            "GitLab Orbit started a TLS component before its FIPS provider was installed. \
+             This is a bug in gkg-server startup ordering; report it with the exact version."
+        )
+    })?;
     Ok(aws_lc_rs::awslc_version())
 }
 
