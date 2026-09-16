@@ -166,11 +166,21 @@ fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
     }
 }
 
-fn from_tree_sitter(source: &str, ts_tree: &tree_sitter::Tree, lang: &Lang, label: &str) -> Tree {
+fn from_tree_sitter(
+    source: &str,
+    ts_tree: &tree_sitter::Tree,
+    lang: &Lang,
+    kind_map: &[u16],
+    field_map: &[u16],
+    label: &str,
+) -> Tree {
     let ts_root = ts_tree.root_node();
     let mut cursor = ts_root.walk();
 
-    let kind = lang.intern_kind(cursor.node().kind());
+    let kind = kind_map
+        .get(cursor.node().kind_id() as usize)
+        .copied()
+        .unwrap_or(0);
     let sp = cursor.node().start_position();
     let ep = cursor.node().end_position();
     let root_sym = if !label.is_empty() {
@@ -209,8 +219,10 @@ fn from_tree_sitter(source: &str, ts_tree: &tree_sitter::Tree, lang: &Lang, labe
 
     loop {
         let ts = cursor.node();
-        let kind = lang.intern_kind(ts.kind());
-        let field = cursor.field_name().map_or(0, |f| lang.intern_field(f));
+        let kind = kind_map.get(ts.kind_id() as usize).copied().unwrap_or(0);
+        let field = cursor
+            .field_id()
+            .map_or(0, |f| field_map.get(f.get() as usize).copied().unwrap_or(0));
         let sym = if ts.is_named() {
             let len = ts.end_byte() - ts.start_byte();
             if len <= 1024 {
@@ -264,15 +276,45 @@ fn from_tree_sitter(source: &str, ts_tree: &tree_sitter::Tree, lang: &Lang, labe
     }
 }
 
+struct TsCache {
+    lang: Option<SupportLang>,
+    kinds: Vec<u16>,
+    fields: Vec<u16>,
+    parser: tree_sitter::Parser,
+}
+
+impl TsCache {
+    fn ensure(&mut self, support_lang: SupportLang, lang: &Lang) {
+        if self.lang == Some(support_lang) {
+            return;
+        }
+        let ts = support_lang.ts_language();
+        self.kinds = (0..ts.node_kind_count() as u16)
+            .map(|id| ts.node_kind_for_id(id).map_or(0, |s| lang.intern_kind(s)))
+            .collect();
+        self.fields = std::iter::once(0)
+            .chain(
+                (1..=ts.field_count() as u16)
+                    .map(|id| ts.field_name_for_id(id).map_or(0, |s| lang.intern_field(s))),
+            )
+            .collect();
+        self.parser.set_language(&ts).unwrap();
+        self.lang = Some(support_lang);
+    }
+}
+
 thread_local! {
-    static PARSER: std::cell::RefCell<tree_sitter::Parser> = std::cell::RefCell::new(tree_sitter::Parser::new());
+    static CACHE: std::cell::RefCell<TsCache> = std::cell::RefCell::new(TsCache {
+        lang: None, kinds: Vec::new(), fields: Vec::new(),
+        parser: tree_sitter::Parser::new(),
+    });
 }
 
 pub fn parse(source: &str, support_lang: SupportLang, lang: &Lang, label: &str) -> Tree {
-    PARSER.with(|parser| {
-        let mut parser = parser.borrow_mut();
-        parser.set_language(&support_lang.ts_language()).unwrap();
-        let ts_tree = parser.parse(source.as_bytes(), None).unwrap();
-        from_tree_sitter(source, &ts_tree, lang, label)
+    CACHE.with(|cache| {
+        let mut c = cache.borrow_mut();
+        c.ensure(support_lang, lang);
+        let ts_tree = c.parser.parse(source.as_bytes(), None).unwrap();
+        from_tree_sitter(source, &ts_tree, lang, &c.kinds, &c.fields, label)
     })
 }
