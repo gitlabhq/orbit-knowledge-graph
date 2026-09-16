@@ -106,6 +106,51 @@ ClickHouse. The graph and the query surfaces match GitLab.com.
 
 [Get started with GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
 
+## Frequently asked questions
+
+### Is GitLab Orbit separate from my GitLab instance?
+
+Yes. GitLab Orbit Remote runs as a separate service on GitLab infrastructure. It depends on your
+GitLab instance for source data, authentication, and authorization, but it does not run inside the
+instance. GitLab Orbit Local runs only on your machine and does not require a GitLab instance.
+
+On GitLab Self-Managed, you deploy GitLab Orbit to Kubernetes next to your GitLab instance, either
+on the same cluster or on a separate cluster. For more information, see
+[GitLab Orbit on GitLab Self-Managed](self-managed/_index.md#architecture).
+
+### Does GitLab Orbit write to my GitLab instance?
+
+No. GitLab Orbit is read-only from the GitLab perspective and never writes data back to GitLab.
+GitLab Orbit Remote receives SDLC changes through the Data Insights Platform, fetches source code
+through a GitLab internal API, and writes the resulting graph only to its own ClickHouse database.
+
+On GitLab Self-Managed, Siphon uses PostgreSQL logical replication to copy changes into ClickHouse.
+This requires replication access to PostgreSQL, not application write access. GitLab Orbit Local
+writes only to a DuckDB file on your machine.
+
+### What do I need to host or build?
+
+- **GitLab Orbit Remote on GitLab.com:** GitLab hosts and builds the service. You do not deploy any
+  infrastructure or build GitLab Orbit yourself.
+- **GitLab Orbit Local:** Install the prebuilt `orbit` binary on your computer. You do not need to
+  host a service or build the binary yourself.
+- **GitLab Self-Managed:** You host Kubernetes, ClickHouse, and NATS, and deploy the provided Siphon
+  and GitLab Orbit Helm charts. You do not build GitLab Orbit from source. Review the
+  [prerequisites and sizing guidance](self-managed/getting-started.md) before planning a deployment.
+
+### How do GitLab Orbit Local and GitLab Orbit Remote differ?
+
+| | GitLab Orbit Local | GitLab Orbit Remote |
+|---|---|---|
+| Data | Code in one local working tree | Code and SDLC data, including merge requests, pipelines, work items, and vulnerabilities |
+| Where it runs | On your computer | On GitLab-managed infrastructure |
+| GitLab tier | Free, Premium, or Ultimate | Ultimate for the namespace you query |
+| Setup | Install the prebuilt `orbit` binary | Enable the `knowledge_graph` feature flag and GitLab Orbit for a top-level group |
+| Access | Access to the local repository | Owner role to enable; Reporter role or higher for each user who queries |
+
+For security data in GitLab Orbit Remote, users need the Security Manager role. For more information,
+see [roles required to query GitLab Orbit](remote/security.md#roles-required-to-query-gitlab-orbit).
+
 ## What GitLab Orbit indexes
 
 GitLab Orbit indexes two categories of data:
