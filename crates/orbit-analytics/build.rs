@@ -1,8 +1,9 @@
 //! Proto-style codegen for Iglu schemas.
 //!
-//! For each `<name>` in [`SCHEMAS`], reads
-//! `SCHEMA_DIR/iglu/<name>.version` and
-//! `SCHEMA_DIR/iglu/<name>/<version>.json`, runs the JSON Schema through
+//! For each `<name>` in [`SCHEMAS`], reads the pinned version from
+//! `vendored.iglu.pins.<name>` in `config/versions.yaml` (via
+//! `orbit_versions::VERSIONS`) and the schema JSON from
+//! `SCHEMA_DIR/iglu/<name>/<version>.json`, runs it through
 //! [`typify::TypeSpace`] to produce idiomatic Rust types, and emits one
 //! `pub mod <name> { ... }` block per schema into
 //! `OUT_DIR/iglu_schemas.rs`. Each module exposes:
@@ -10,7 +11,7 @@
 //! - A `<TypeName>` struct (and any supporting enums) generated from the
 //!   schema's `properties` / `enum` constraints. The runtime owns these
 //!   directly — they implement `Serialize` + `Deserialize`.
-//! - `pub const VERSION: &str` — the pinned version from `<name>.version`.
+//! - `pub const VERSION: &str` — the pinned version from `versions.yaml`.
 //! - `pub const SCHEMA_URI: &str` — the full Iglu URI.
 //! - `pub const SCHEMA_JSON: &str` — the raw JSON body, embedded for
 //!   test-time validator compilation.
@@ -55,19 +56,29 @@ fn main() {
     fs::write(out_dir.join("iglu_schemas.rs"), emitted).expect("write generated iglu_schemas.rs");
 }
 
+fn iglu_pins() -> &'static std::collections::BTreeMap<String, String> {
+    orbit_versions::VERSIONS
+        .vendored
+        .get("iglu")
+        .expect("vendored.iglu missing from config/versions.yaml")
+        .pins
+        .as_ref()
+        .expect("vendored.iglu.pins missing")
+}
+
 fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String {
-    let version_path = iglu_dir.join(format!("{schema_name}.version"));
-    println!("cargo:rerun-if-changed={}", version_path.display());
-    let version = fs::read_to_string(&version_path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", version_path.display()))
-        .trim()
-        .to_string();
+    let version = iglu_pins()
+        .get(schema_name)
+        .unwrap_or_else(|| {
+            panic!("vendored.iglu.pins.{schema_name} missing from config/versions.yaml")
+        })
+        .clone();
 
     let schema_path = iglu_dir.join(schema_name).join(format!("{version}.json"));
     println!("cargo:rerun-if-changed={}", schema_path.display());
     let schema_raw = fs::read_to_string(&schema_path).unwrap_or_else(|e| {
         panic!(
-            "read {}: {e} (run `mise iglu:bump` to re-fetch)",
+            "read {}: {e} (run `mise vendor -- iglu` to re-fetch)",
             schema_path.display()
         )
     });
@@ -189,7 +200,7 @@ fn assert_self_matches_path(parsed: &Value, schema_path: &Path, schema_name: &st
     assert_eq!(
         self_block.get("version").and_then(Value::as_str),
         Some(version),
-        "{}: self.version must match pinned `{schema_name}.version`",
+        "{}: self.version must match vendored.iglu.pins.{schema_name}",
         schema_path.display()
     );
 }

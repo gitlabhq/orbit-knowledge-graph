@@ -16,10 +16,6 @@ raw_output_format: 5.0.1
 # Response envelope of the GOON formatter.
 goon_output_format: 4.0.1
 
-# gitlab-org/gitlab commit whose SystemNoteMetadata::ICON_TYPES is vendored
-# in config/vendored/system_note_metadata.actions.
-gitlab_system_note_actions: ea52f8c3adc370db76545ecd82728710f2609800
-
 # Vendored dependencies. Each entry declares its pins, artifact location,
 # and vendor/check scripts. Vendor scripts read pins and write computed
 # checksums back into this file via `yq -i`. Run `mise vendor <name>`.
@@ -29,7 +25,7 @@ vendored:
     # 1.10505.x is DuckDB 1.5.5.
     version: v1.5.5
     vendor_dir: crates/duckdb-client/third_party
-    vendor_script: scripts/vendored/duckdb/vendor-duckdb-fts-sources.sh
+    vendor_script: scripts/vendored/duckdb/fts-vendor.sh
     check_script: scripts/vendored/duckdb/check-duckdb-fts-sources-sync.sh
     extensions:
       fts:
@@ -43,3 +39,21 @@ vendored:
           osx_amd64: c3da1ea86c107650edf06a8296094640b9f4886b8ceab4ad42912b6ff5c880bc
           osx_arm64: b6b8d0a13e0457f3ce368e4e7c2ff8de48637eea5ca61e5ff983c05018e7f315
           windows_amd64: 24a328d189aa87a22cd3c2ac6c3f484a49ba30adfd6ce05572fe5841429f2ab5
+
+  # gitlab-org/gitlab commit whose SystemNoteMetadata::ICON_TYPES is vendored.
+  gitlab_system_note_actions:
+    version: ea52f8c3adc370db76545ecd82728710f2609800
+    vendor_dir: config/vendored
+    check_script: scripts/vendored/gitlab_system_note_actions/check.sh
+
+  # Iglu schema version pins. Edit a pin here, then run `mise vendor -- iglu`
+  # to fetch the schema JSON from the upstream Iglu registry.
+  iglu:
+    vendor_dir: config/schemas/iglu
+    vendor_script: scripts/vendored/iglu/bump.sh
+    check_script: scripts/vendored/iglu/check.sh
+    pins:
+      orbit_query: 2-2-0
+      orbit_common: 1-0-3
+      orbit_code_indexing: 2-0-0
+      orbit_sdlc_indexing: 3-0-0
