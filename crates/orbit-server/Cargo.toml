@@ -41,7 +41,8 @@ tower = { workspace = true }
 opentelemetry = { workspace = true }
 prost = { workspace = true }
 reqwest = { workspace = true }
-rustls = { workspace = true }
+rustls = { workspace = true, features = ["fips"] }
+aws-lc-rs = { workspace = true, features = ["fips"] }
 query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonschema = { workspace = true }

@@ -106,11 +106,11 @@ run = "cargo +nightly bolero test fuzz_indexer_messages -p orbit-fuzz"
 description = "Fuzz indexer message deserialization"
 
 [tasks.build]
-run = "cargo build --release"
+run = "cargo build --release --workspace --exclude orbit-cli && cargo build --release -p orbit-cli"
 description = "Build the crates"
 
 [tasks."build:cli"]
-run = "cargo build --bin orbit --release --features duckdb-client/bundled"
+run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled"
 description = "Build the CLI"
 
 [tasks.test]
@@ -250,13 +250,13 @@ description = "Download benchmark repositories"
 
 [tasks."bench:run"]
 depends = ["bench:download-repos"]
-run = "cargo build --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
+run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
 description = "Run code indexing benchmark"
 
 [tasks."bench:v2"]
 depends = ["bench:download-repos"]
 run = """
-cargo build --bin orbit --release --features duckdb-client/bundled
+cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled
 for repo in output/repos/*/; do
   name=$(basename "$repo")
   echo "=== Indexing $name with v2 ==="

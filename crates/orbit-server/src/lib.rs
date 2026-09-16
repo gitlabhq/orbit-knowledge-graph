@@ -5,6 +5,7 @@ mod billing_adapter;
 pub mod cli;
 pub mod cluster_health;
 pub mod content;
+pub mod fips;
 pub mod graph_status;
 pub mod grpc;
 pub mod health_check;

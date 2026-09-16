@@ -47,8 +47,9 @@ members = [
 
 [workspace.dependencies]
 orbit-observability = { path = "crates/orbit-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "80a372d1a9aa13720e74166405aff98f26873690" }
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "80a372d1a9aa13720e74166405aff98f26873690" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "19b6b139a284a28a078267072cc751f6f2536837" }
+# No bundled ring provider: every binary installs its rustls provider before building a Tracker.
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "19b6b139a284a28a078267072cc751f6f2536837", default-features = false }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
@@ -116,7 +117,22 @@ tracing = "0.1.44"
 # Build-time fetch over plain HTTP; integrity comes from pinned checksums.
 ureq = { version = "3", default-features = false }
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
-async-nats = { version = "0.49.0", features = ["server_2_11"] }
+# Drop transitive crypto providers; hint aws-lc usage so orbit-server's `fips` feature
+# resolves it implicitly. Do not add `fips` here: it would leak into build scripts,
+# which cannot load the FIPS shared library on macOS.
+async-nats = { version = "0.49.0", default-features = false, features = [
+  "server_2_10",
+  "server_2_11",
+  "server_2_12",
+  "server_2_14",
+  "service",
+  "jetstream",
+  "kv",
+  "object-store",
+  "crypto",
+  "nuid",
+  "aws-lc-rs",
+] }
 arrow-ipc = "58.0.0"
 clickhouse = { version = "0.15", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
 testcontainers = "0.27.3"
@@ -183,7 +199,7 @@ minijinja = "2.21.0"
 
 # Server dependencies
 axum = { version = "0.8.8", features = ["macros"] }
-jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
+jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
 semver = { version = "1.0", features = ["serde"] }
 
@@ -192,10 +208,11 @@ insta = { version = "1.40", features = ["yaml"] }
 proptest = "1.5"
 
 # Health check dependencies
-kube = { version = "4.2", features = ["client", "runtime", "ws"] }
+kube = { version = "4.2", default-features = false, features = ["client", "runtime", "ws", "rustls-tls", "aws-lc-rs"] }
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls-no-provider"] }
 rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs"] }
+aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
 
