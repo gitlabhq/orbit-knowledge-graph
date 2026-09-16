@@ -1,7 +1,6 @@
 pub mod config;
 pub mod dsl;
 pub mod error;
-pub mod inventory;
 pub mod langs;
 pub mod linker;
 pub mod pipeline;
@@ -18,9 +17,10 @@ pub use error::{
     SkippedFile,
 };
 pub use pipeline::{
-    BatchTx, CancellationToken, Decision, FamilyPipeline, FileInventoryEntry, FileTimingEntry,
-    GenericPipeline, GraphStatsCounters, LanguageContext, LanguagePipeline, LanguageTimings,
-    PhaseCpuObserver, PhaseTimings, Pipeline, PipelineConfig, PipelineContext, PipelineResult,
+    BatchTx, CancellationToken, Decision, FamilyFileInput, FamilyPipeline, FileInput,
+    FileInventory, FileInventoryEntry, FileTimingEntry, GenericPipeline, GraphStatsCounters,
+    LanguageContext, LanguagePipeline, LanguageTimings, PhaseCpuObserver, PhaseTimings, Pipeline,
+    PipelineConfig, PipelineContext, PipelineResult,
 };
 pub use registry::{dispatch_by_tag, dispatch_family, dispatch_language};
 pub use sink::{GraphConverter, OnBatch, SinkError};

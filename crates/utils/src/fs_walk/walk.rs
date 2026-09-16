@@ -6,7 +6,8 @@ use std::path::Path;
 
 use ignore::WalkBuilder;
 
-use crate::fs_stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
+use super::inventory::FileInventory;
+use super::stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
 
 /// Walk `root` (honoring `.gitignore`, including dotfiles so resolver inputs
 /// survive), running every file through `hooks`. Returns the inventory of
@@ -14,7 +15,7 @@ use crate::fs_stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamErro
 pub fn walk_dir<H: FileStreamHooks>(
     root: &Path,
     hooks: &mut H,
-) -> Result<Vec<FileInventoryEntry>, StreamError> {
+) -> Result<FileInventory, StreamError> {
     let mut inventory = Vec::new();
     let mut content = Vec::new();
 
@@ -65,7 +66,7 @@ pub fn walk_dir<H: FileStreamHooks>(
         }
     }
 
-    Ok(crate::fs_stream::canonicalize_inventory(inventory))
+    Ok(FileInventory::new(inventory))
 }
 
 #[cfg(test)]

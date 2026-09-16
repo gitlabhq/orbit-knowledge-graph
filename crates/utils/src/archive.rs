@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use flate2::read::GzDecoder;
 use tracing::warn;
 
-use crate::fs_stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
+use crate::fs_walk::{
+    Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step,
+};
 
 /// Extract a gzipped tar from `reader` into `target_dir`, running every regular
 /// file through `hooks`. Loaded files are written to disk; every non-dropped
@@ -18,7 +20,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     reader: R,
     target_dir: &Path,
     hooks: &mut H,
-) -> Result<Vec<FileInventoryEntry>, StreamError> {
+) -> Result<FileInventory, StreamError> {
     std::fs::create_dir_all(target_dir)?;
 
     let mut archive = tar::Archive::new(GzDecoder::new(reader));
@@ -175,7 +177,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         inventory.retain(|entry| !removed.contains(&entry.path));
     }
 
-    Ok(crate::fs_stream::canonicalize_inventory(inventory))
+    Ok(FileInventory::new(inventory))
 }
 
 /// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the

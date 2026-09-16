@@ -5,7 +5,7 @@ use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
 use code_graph::v2::linker::CodeGraph;
 use code_graph::v2::linker::graph::GraphNode;
 use code_graph::v2::types::EdgeKind;
-use code_graph::v2::{FileInventoryEntry, GraphConverter, Pipeline, PipelineConfig, SinkError};
+use code_graph::v2::{FileInventory, GraphConverter, Pipeline, PipelineConfig, SinkError};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use orbit_utils::archive::extract_tar_gz;
@@ -59,7 +59,7 @@ impl GraphConverter for CapturingConverter {
 async fn extract_via_archive_endpoint(
     entries: &[Entry<'_>],
     target: &Path,
-) -> (Vec<FileInventoryEntry>, FxHashMap<String, FilterSkip>) {
+) -> (FileInventory, FxHashMap<String, FilterSkip>) {
     use axum::Router;
     use axum::body::Body;
     use axum::http::header;
@@ -112,7 +112,7 @@ async fn extract_via_archive_endpoint(
 
 async fn run_pipeline(
     root: &Path,
-    file_inventory: Vec<FileInventoryEntry>,
+    file_inventory: FileInventory,
     stream_reasons: FxHashMap<String, FilterSkip>,
 ) -> CapturedPipelineRun {
     let capturer = Arc::new(CapturingConverter {
@@ -125,7 +125,7 @@ async fn run_pipeline(
             Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
         Pipeline::run(
             &root,
-            Arc::from(file_inventory),
+            Arc::new(file_inventory),
             PipelineConfig::default(),
             &stream_reasons,
             capturer_for_pipeline as Arc<dyn GraphConverter>,

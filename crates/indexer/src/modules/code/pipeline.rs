@@ -399,7 +399,10 @@ impl CodeIndexer {
         within: Duration,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
-        let parseable = code_graph::v2::inventory::parseable_file_count(&repository.file_inventory);
+        let parseable = repository.file_inventory.count_by(|e| {
+            e.decision == code_graph::v2::Decision::Parse
+                && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
+        });
         let lane = if parseable <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {

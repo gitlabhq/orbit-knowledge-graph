@@ -1,6 +1,6 @@
 //! One filtering and limit surface for every file source. A repository's files
 //! arrive two ways — a Gitaly tar ([`crate::archive`]) and a directory walk
-//! ([`crate::walk`]) — and both run every entry through one [`FileStreamHooks`]
+//! ([`super::walk`]) — and both run every entry through one [`FileStreamHooks`]
 //! policy via [`step`]; the sources carry no filtering of their own.
 
 use std::path::{Component, Path};
@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 /// Per-file outcome of the hook pipeline. The two loaded states split the
 /// materialize axis from the parse axis: both `Parse` and `Load` make the bytes
 /// available (on disk for the tar source); only `Parse` is sent to a parser.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, strum::Display, strum::AsRefStr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, strum::Display, strum::AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum Decision {
     /// Load the bytes and parse them. The only parse candidate downstream.

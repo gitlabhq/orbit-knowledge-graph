@@ -2,11 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use code_graph::v2::FileInventoryEntry;
 use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
 use futures::StreamExt;
 use orbit_utils::archive::extract_tar_gz;
-use orbit_utils::fs_stream::StreamError;
+use orbit_utils::fs_walk::{FileInventory, StreamError};
 use rustc_hash::FxHashMap;
 use tempfile::TempDir;
 use tokio_util::io::{StreamReader, SyncIoBridge};
@@ -37,7 +36,7 @@ pub enum RepositoryCacheError {
 #[derive(Debug)]
 pub struct CachedRepository {
     dir: TempDir,
-    pub file_inventory: Arc<[FileInventoryEntry]>,
+    pub file_inventory: Arc<FileInventory>,
     /// Per-path reason for files the stream settled as bare nodes, carried to the
     /// pipeline so each File node's `gl_file.reason` reflects the stream skip.
     pub stream_reasons: FxHashMap<String, FilterSkip>,
@@ -141,7 +140,7 @@ impl RepositoryCache for LocalRepositoryCache {
 
         Ok(CachedRepository {
             dir,
-            file_inventory: Arc::from(file_inventory),
+            file_inventory: Arc::new(file_inventory),
             stream_reasons: filter.file_reasons().clone(),
         })
     }
