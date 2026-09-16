@@ -3,6 +3,7 @@ use std::path::Path;
 use bytes::Bytes;
 use orbit_object_storage::ObjectStorage;
 use orbit_server_config::{AppConfig, SECRET_FILE_DIR};
+use tls_trust::TrustStore;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,7 +13,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("usage: roundtrip <config.yaml> [secrets-dir]")?;
     let secrets = args.get(2).map_or(SECRET_FILE_DIR, String::as_str);
     let config = AppConfig::load_from(Some(Path::new(config_path)), Path::new(secrets))?;
-    let storage = ObjectStorage::new(&config.object_storage)?;
+    let trust = TrustStore::load(&config.tls)?;
+    let storage = ObjectStorage::new(&config.object_storage, &trust)?;
     storage
         .write("roundtrip/hello.txt", Bytes::from_static(b"hello"))
         .await?;

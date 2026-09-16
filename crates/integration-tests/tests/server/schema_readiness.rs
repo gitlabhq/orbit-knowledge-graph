@@ -30,6 +30,7 @@ use orbit_server_config::AppConfig;
 use orbit_utils::yaml;
 use serde_json::{Value, json};
 use testcontainers_modules::nats::Nats;
+use tls_trust::TrustStore;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
@@ -212,7 +213,11 @@ impl Cluster {
         ensure_version_table(&graph.create_client()).await.unwrap();
         let (nats, nats_address) = start_nats().await;
         let config = webserver_config(&graph, &nats_address);
-        let nats_client = Arc::new(NatsClient::connect(&config.nats).await.unwrap());
+        let nats_client = Arc::new(
+            NatsClient::connect(&config.nats, &TrustStore::platform_only())
+                .await
+                .unwrap(),
+        );
         let catalog = OntologyCatalog::open(nats_client.clone()).await.unwrap();
 
         let shutdown = CancellationToken::new();
@@ -228,6 +233,7 @@ impl Cluster {
             Arc::new(JwtValidator::new(SECRET, 0).unwrap()),
             active_schema.clone(),
             &config.graph,
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             WAIT_LIMIT.as_secs(),
             Arc::new(config.analytics.clone()),

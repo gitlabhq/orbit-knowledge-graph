@@ -14,6 +14,7 @@ use testcontainers_modules::nats::Nats;
 use tokio_util::sync::CancellationToken;
 
 use super::super::common::dispatch::start_nats;
+use tls_trust::TrustStore;
 
 const LEGACY_SCHEMA_VERSION: u32 = 93;
 
@@ -292,6 +293,7 @@ impl TestContext {
             schedule: defaults.schedule,
             schema: defaults.schema,
             health_bind_address: "127.0.0.1:0".parse().unwrap(),
+            trust: TrustStore::platform_only(),
         };
         Self { server, config }
     }
@@ -302,7 +304,9 @@ impl TestContext {
 
         let client = tokio::time::timeout(CONNECT_TIMEOUT, async {
             loop {
-                if let Ok(client) = NatsClient::connect(&self.config.nats).await {
+                if let Ok(client) =
+                    NatsClient::connect(&self.config.nats, &TrustStore::platform_only()).await
+                {
                     break Arc::new(client);
                 }
                 tokio::time::sleep(RETRY_INTERVAL).await;

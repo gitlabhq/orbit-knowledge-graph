@@ -94,12 +94,12 @@ pub async fn run(
 
     info!(modules = ?config.engine.modules, "indexer module selection");
 
-    let graph_client = config.graph.build_client();
+    let graph_client = config.graph.build_client_with_trust(&config.trust);
     info!(url = %config.graph.url, "initializing schema version table");
     schema::version::init(&graph_client).await?;
 
     info!(url = %config.nats.url, "connecting to NATS");
-    let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
+    let broker = Arc::new(NatsBroker::connect(&config.nats, &config.trust).await?);
 
     broker
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
@@ -147,6 +147,7 @@ pub async fn run(
     let writer = Arc::new(ClickHouseWriter::new(
         config.graph.clone(),
         metrics.clone(),
+        &config.trust,
     )?);
 
     let registry = Arc::new(HandlerRegistry::default());
@@ -247,12 +248,12 @@ pub async fn run_dispatcher(
     archive: &ontology::archive::OntologyArchive,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
-    let services = orchestrator::scheduled::connect(&config.nats).await?;
+    let services = orchestrator::scheduled::connect(&config.nats, &config.trust).await?;
 
     let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
     let ontology = catalog.publish(archive).await?;
 
-    let graph = config.graph.build_client();
+    let graph = config.graph.build_client_with_trust(&config.trust);
     if let Some(active_version) = orbit_migrations::version::read_active_version(&graph).await?
         && active_version != archive.schema_version()
     {
@@ -268,7 +269,7 @@ pub async fn run_dispatcher(
         warn!(%error, "release GC failed, will retry next startup");
     }
 
-    let datalake = config.datalake.build_client();
+    let datalake = config.datalake.build_client_with_trust(&config.trust);
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
 
@@ -339,8 +340,8 @@ pub async fn run_dispatcher(
         }
     }
 
-    let deletion_graph = Arc::new(config.graph.build_client());
-    let deletion_datalake = Arc::new(config.datalake.build_client());
+    let deletion_graph = Arc::new(config.graph.build_client_with_trust(&config.trust));
+    let deletion_datalake = Arc::new(config.datalake.build_client_with_trust(&config.trust));
     let deletion_store: Arc<dyn NamespaceDeletionStore> =
         Arc::new(ClickHouseNamespaceDeletionStore::new(
             deletion_datalake,
@@ -351,8 +352,8 @@ pub async fn run_dispatcher(
 
     let backfill = Arc::new(CodeBackfill::new(
         services.nats.clone(),
-        config.graph.build_client(),
-        config.datalake.build_client(),
+        config.graph.build_client_with_trust(&config.trust),
+        config.datalake.build_client_with_trust(&config.trust),
         metrics.clone(),
         campaign.clone(),
         config.schedule.tasks.code_backfill.publish_window,
@@ -369,7 +370,7 @@ pub async fn run_dispatcher(
             services.nats.clone(),
             datalake,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                config.graph.build_client(),
+                config.graph.build_client_with_trust(&config.trust),
             ))),
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
@@ -379,7 +380,7 @@ pub async fn run_dispatcher(
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
             CodeStaleSweep::new(
-                config.graph.build_client(),
+                config.graph.build_client_with_trust(&config.trust),
                 &modules::code::config::CodeTableNames::from_ontology(&ontology)
                     .expect("code tables must resolve from the archived ontology"),
                 checkpoint_store.clone(),
@@ -401,17 +402,17 @@ pub async fn run_dispatcher(
             config.schedule.tasks.namespace_deletion.clone(),
         )),
         Box::new(StaleEdgeReconciliation::new(
-            config.graph.build_client(),
+            config.graph.build_client_with_trust(&config.trust),
             &ontology,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                config.graph.build_client(),
+                config.graph.build_client_with_trust(&config.trust),
             ))),
             metrics.clone(),
             config.schedule.tasks.stale_edge_reconciliation.clone(),
         )),
         Box::new(MigrationCompletionChecker::new(
-            config.graph.build_client(),
-            config.datalake.build_client(),
+            config.graph.build_client_with_trust(&config.trust),
+            config.datalake.build_client_with_trust(&config.trust),
             lock_service.clone(),
             Arc::new(ontology),
             config.schema.clone(),
@@ -431,7 +432,7 @@ pub async fn run_dispatcher(
         Arc::new(EnabledNamespacesRoute::new(
             NamespaceIndexingDispatch::new(services.nats.clone()),
             backfill.clone(),
-            config.datalake.build_client(),
+            config.datalake.build_client_with_trust(&config.trust),
         )),
     ];
 

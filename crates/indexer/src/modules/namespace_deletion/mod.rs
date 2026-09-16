@@ -34,8 +34,8 @@ pub fn register_handlers(
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
 ) -> Result<(), HandlerInitError> {
-    let graph_client = Arc::new(config.graph.build_client());
-    let datalake_client = Arc::new(config.datalake.build_client());
+    let graph_client = Arc::new(config.graph.build_client_with_trust(&config.trust));
+    let datalake_client = Arc::new(config.datalake.build_client_with_trust(&config.trust));
 
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
         datalake_client,

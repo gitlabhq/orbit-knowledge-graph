@@ -385,6 +385,10 @@ Every server binary links the AWS-LC FIPS module; there is no separate FIPS buil
 - **Module generation**: the build is declared against AWS-LC-FIPS 4 (`aws-lc-fips-sys` 0.14.x), which has completed lab testing and is in process at CMVP. AWS-LC-FIPS 3.1.0 holds certificates #5298 and #5314 but requires `aws-lc-rs` below 1.18, which `rustls` 0.23.44 and later no longer accept; `rustls` 0.23.45 carries the fix for GHSA-2mjx-qc3c-rqvc, so the validated generation would mean shipping a known TLS 1.3 defect. Patch releases inside a generation are the module's update stream and are taken as they arrive. A unit test pins the linked generation to the declared one so that a dependency bump crossing generations fails CI and forces this section to be revisited.
 - **Out of scope**: the `orbit` CLI targets Windows and macOS, where the static FIPS module does not build; it stays on the non-FIPS `aws-lc-rs` provider. Content fingerprints (ontology and DDL hashes) are checksums, not security functions, and use the `sha2` crate.
 
+### Outbound Trust Roots
+
+Every outbound TLS client (GitLab internal API over `reqwest`, ClickHouse over `hyper-rustls`, NATS over `async-nats`, object storage over `object_store`) verifies servers against the platform trust store. `tls.ca_bundle_path` names one PEM bundle of extra roots that `crates/tls-trust` reads once at startup and appends to that store for all of them, so a deployment behind a private CA (GitLab Dedicated) trusts its ClickHouse, GitLab and NATS endpoints with one setting. The bundle never replaces the platform store. Startup fails when the file is missing, is not PEM, or holds no certificate. `nats.tls_ca_cert_path` and `object_storage.ca_cert_path` remain as per-client additions.
+
 ### Database Access Controls
 
 The Orbit service connects to ClickHouse with restricted privileges:

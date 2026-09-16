@@ -5,6 +5,7 @@ use indexer::nats::versioning::{
 };
 
 use orbit_server_config::AppConfig;
+use tls_trust::TrustStore;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -12,10 +13,11 @@ pub enum Error {
     HealthCheck(#[from] health_check::Error),
 }
 
-pub async fn run(config: &AppConfig) -> Result<(), Error> {
-    let instances = build_clickhouse_instances(config);
+pub async fn run(config: &AppConfig, trust: &TrustStore) -> Result<(), Error> {
+    let instances = build_clickhouse_instances(config, trust);
     let work_queue = WorkQueueConfig {
         nats: config.nats.clone(),
+        trust: trust.clone(),
         stream_name: code_work_stream_name(),
         code_consumer_name: config
             .nats
@@ -35,23 +37,23 @@ pub async fn run(config: &AppConfig) -> Result<(), Error> {
     Ok(())
 }
 
-fn build_clickhouse_instances(config: &AppConfig) -> Vec<ClickHouseInstance> {
+fn build_clickhouse_instances(config: &AppConfig, trust: &TrustStore) -> Vec<ClickHouseInstance> {
     let same_host = config.graph.url == config.datalake.url;
 
     if same_host {
         vec![ClickHouseInstance {
             name: "clickhouse".to_string(),
-            client: config.graph.build_client(),
+            client: config.graph.build_client_with_trust(trust),
         }]
     } else {
         vec![
             ClickHouseInstance {
                 name: "clickhouse-graph".to_string(),
-                client: config.graph.build_client(),
+                client: config.graph.build_client_with_trust(trust),
             },
             ClickHouseInstance {
                 name: "clickhouse-datalake".to_string(),
-                client: config.datalake.build_client(),
+                client: config.datalake.build_client_with_trust(trust),
             },
         ]
     }
@@ -71,7 +73,7 @@ mod tests {
     #[test]
     fn same_url_deduplicates_to_single_instance() {
         let config = config_with_urls("http://ch:8123", "http://ch:8123");
-        let instances = build_clickhouse_instances(&config);
+        let instances = build_clickhouse_instances(&config, &TrustStore::platform_only());
         assert_eq!(instances.len(), 1);
         assert_eq!(instances[0].name, "clickhouse");
     }
@@ -79,7 +81,7 @@ mod tests {
     #[test]
     fn different_urls_produce_two_instances() {
         let config = config_with_urls("http://ch-graph:8123", "http://ch-datalake:8123");
-        let instances = build_clickhouse_instances(&config);
+        let instances = build_clickhouse_instances(&config, &TrustStore::platform_only());
         assert_eq!(instances.len(), 2);
         assert_eq!(instances[0].name, "clickhouse-graph");
         assert_eq!(instances[1].name, "clickhouse-datalake");

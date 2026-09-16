@@ -6,6 +6,7 @@ use object_store::path::Path;
 use object_store::prefix::PrefixStore;
 use object_store::{Certificate, ClientOptions, ObjectStore, ObjectStoreExt, PutPayload};
 use orbit_server_config::{ObjectStorageAuth, ObjectStorageConfig, ObjectStorageProvider};
+use tls_trust::TrustStore;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ObjectStorageError {
@@ -20,10 +21,13 @@ pub struct ObjectStorage {
 }
 
 impl ObjectStorage {
-    pub fn new(config: &ObjectStorageConfig) -> Result<Self, ObjectStorageError> {
+    pub fn new(
+        config: &ObjectStorageConfig,
+        trust: &TrustStore,
+    ) -> Result<Self, ObjectStorageError> {
         let store: Box<dyn ObjectStore> = match config.provider {
-            ObjectStorageProvider::S3 => Box::new(s3(config)?),
-            ObjectStorageProvider::Gcs => Box::new(gcs(config)?),
+            ObjectStorageProvider::S3 => Box::new(s3(config, trust)?),
+            ObjectStorageProvider::Gcs => Box::new(gcs(config, trust)?),
             ObjectStorageProvider::Local => {
                 Box::new(LocalFileSystem::new_with_prefix(&config.bucket)?)
             }
@@ -48,17 +52,23 @@ impl ObjectStorage {
     }
 }
 
-fn client_options(config: &ObjectStorageConfig) -> Result<ClientOptions, ObjectStorageError> {
+fn client_options(
+    config: &ObjectStorageConfig,
+    trust: &TrustStore,
+) -> Result<ClientOptions, ObjectStorageError> {
     let mut options = ClientOptions::new().with_allow_http(config.allow_http);
     if let Some(path) = &config.ca_cert_path {
         for certificate in Certificate::from_pem_bundle(&std::fs::read(path)?)? {
             options = options.with_root_certificate(certificate);
         }
     }
+    for certificate in trust.extra_roots() {
+        options = options.with_root_certificate(Certificate::from_der(certificate)?);
+    }
     Ok(options)
 }
 
-fn s3(config: &ObjectStorageConfig) -> Result<AmazonS3, ObjectStorageError> {
+fn s3(config: &ObjectStorageConfig, trust: &TrustStore) -> Result<AmazonS3, ObjectStorageError> {
     let mut builder = match config.auth {
         ObjectStorageAuth::Identity => AmazonS3Builder::from_env(),
         ObjectStorageAuth::Static => AmazonS3Builder::new()
@@ -67,7 +77,7 @@ fn s3(config: &ObjectStorageConfig) -> Result<AmazonS3, ObjectStorageError> {
     };
     builder = builder
         .with_bucket_name(&config.bucket)
-        .with_client_options(client_options(config)?)
+        .with_client_options(client_options(config, trust)?)
         .with_virtual_hosted_style_request(!config.path_style);
     if let Some(region) = &config.region {
         builder = builder.with_region(region);
@@ -81,7 +91,10 @@ fn s3(config: &ObjectStorageConfig) -> Result<AmazonS3, ObjectStorageError> {
     Ok(builder.build()?)
 }
 
-fn gcs(config: &ObjectStorageConfig) -> Result<GoogleCloudStorage, ObjectStorageError> {
+fn gcs(
+    config: &ObjectStorageConfig,
+    trust: &TrustStore,
+) -> Result<GoogleCloudStorage, ObjectStorageError> {
     let mut builder = match config.auth {
         ObjectStorageAuth::Identity => GoogleCloudStorageBuilder::from_env(),
         ObjectStorageAuth::Static => GoogleCloudStorageBuilder::new()
@@ -89,7 +102,7 @@ fn gcs(config: &ObjectStorageConfig) -> Result<GoogleCloudStorage, ObjectStorage
     };
     builder = builder
         .with_bucket_name(&config.bucket)
-        .with_client_options(client_options(config)?);
+        .with_client_options(client_options(config, trust)?);
     if let Some(endpoint) = &config.endpoint {
         builder = builder.with_base_url(endpoint);
     }
@@ -110,6 +123,6 @@ mod tests {
         config.allow_http = true;
         config.access_key_id = Some("k".into());
         config.secret_access_key = Some("s".into());
-        ObjectStorage::new(&config).unwrap();
+        ObjectStorage::new(&config, &TrustStore::platform_only()).unwrap();
     }
 }

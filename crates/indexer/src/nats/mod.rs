@@ -14,8 +14,9 @@
 //! ```ignore
 //! use etl_engine::nats::{NatsBroker, NatsConfiguration};
 //!
-//! let config = AppConfig::load(None)?.nats;
-//! let broker = NatsBroker::connect(&config).await?;
+//! let config = AppConfig::load(None)?;
+//! let trust = TrustStore::load(&config.tls)?;
+//! let broker = NatsBroker::connect(&config.nats, &trust).await?;
 //! ```
 //!
 //! # Handlers

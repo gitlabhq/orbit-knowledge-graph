@@ -17,6 +17,7 @@ futures = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
+tls-trust = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 

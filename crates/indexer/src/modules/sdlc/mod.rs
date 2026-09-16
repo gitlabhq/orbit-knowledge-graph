@@ -53,8 +53,8 @@ pub async fn register_handlers(
 ) -> Result<(), HandlerInitError> {
     let entity_handler_config = config.engine.handlers.entity_handler.clone();
 
-    let datalake_client = Arc::new(config.datalake.build_client());
-    let graph_client = Arc::new(config.graph.build_client());
+    let datalake_client = Arc::new(config.datalake.build_client_with_trust(&config.trust));
+    let graph_client = Arc::new(config.graph.build_client_with_trust(&config.trust));
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(datalake_client));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =

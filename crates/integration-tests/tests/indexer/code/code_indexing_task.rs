@@ -18,6 +18,7 @@ use orbit_utils::arrow::ArrowUtils;
 
 use super::helpers::*;
 use orbit_utils::traversal_path::TraversalPath;
+use tls_trust::TrustStore;
 
 #[tokio::test]
 async fn indexes_repository() {
@@ -1374,6 +1375,7 @@ fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
                 ..orbit_server_config::AppConfig::embedded_defaults().graph
             },
             Arc::new(indexer::metrics::EngineMetrics::new()),
+            &TrustStore::platform_only(),
         )
         .expect("config is valid"),
     )

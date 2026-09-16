@@ -32,6 +32,7 @@ use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
 use crate::orchestrator::{Trigger, TriggerError};
 use orbit_server_config::NatsConfiguration;
 use orbit_server_config::ScheduleConfiguration;
+use tls_trust::TrustStore;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -67,8 +68,11 @@ pub struct SchedulerServices {
     pub nats_connection: async_nats::Client,
 }
 
-pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerServices, SchedulerError> {
-    let broker = Arc::new(NatsBroker::connect(nats_config).await?);
+pub async fn connect(
+    nats_config: &NatsConfiguration,
+    trust: &TrustStore,
+) -> Result<SchedulerServices, SchedulerError> {
+    let broker = Arc::new(NatsBroker::connect(nats_config, trust).await?);
     broker
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await?;

@@ -16,6 +16,7 @@ use orbit_utils::arrow::ColumnValue;
 use prost::Message;
 use query_engine::compiler::SecurityContext;
 use query_engine::shared::content::{ColumnResolver, ResolverContext};
+use tls_trust::TrustStore;
 use tokio::net::TcpListener;
 
 type PropertyRow = HashMap<String, ColumnValue>;
@@ -98,11 +99,14 @@ async fn mock_gitlab_server(
         axum::serve(listener, app).await.unwrap();
     });
 
-    let client = GitlabClient::new(orbit_server_config::GitlabClientConfiguration {
-        base_url: format!("http://{addr}"),
-        signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
-        resolve_host: None,
-    })
+    let client = GitlabClient::new(
+        orbit_server_config::GitlabClientConfiguration {
+            base_url: format!("http://{addr}"),
+            signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
+            resolve_host: None,
+        },
+        &TrustStore::platform_only(),
+    )
     .unwrap();
 
     MockServer {
@@ -339,11 +343,14 @@ async fn gitlab_error_returns_none_gracefully() {
     });
 
     let client = Arc::new(
-        GitlabClient::new(orbit_server_config::GitlabClientConfiguration {
-            base_url: format!("http://{addr}"),
-            signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
-            resolve_host: None,
-        })
+        GitlabClient::new(
+            orbit_server_config::GitlabClientConfiguration {
+                base_url: format!("http://{addr}"),
+                signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
+                resolve_host: None,
+            },
+            &TrustStore::platform_only(),
+        )
         .unwrap(),
     );
 

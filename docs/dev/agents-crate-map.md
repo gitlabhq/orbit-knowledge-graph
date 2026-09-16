@@ -28,6 +28,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
 | `named-queries` | Named query templates: parses/validates YAML under `config/named_queries/`, embeds it via `rust-embed`, and renders `$binding` placeholders (server-derived `BindingValues`) and `$param` placeholders (client-supplied, JSON-schema-validated per template); used by `orbit-server`'s build script (compile-time validation with declared `example` values) and at runtime for `QUERY_TYPE_NAMED` execution |
 | `nats-client` | Shared NATS client wrapper (`NatsClient`), KV bucket services (`KvServices`), circuit-breaking decorator (`CircuitBreakingNatsClient`), testkit feature |
+| `tls-trust` | Root certificates for every outbound TLS client (`TrustStore`): the platform store plus the PEM bundle named by `tls.ca_bundle_path`, loaded once at startup and handed to the ClickHouse, GitLab, NATS and object storage clients |
 | `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakerRegistry`, `CircuitBreakableError`) with observer hooks and per-service config |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |

@@ -13,6 +13,7 @@ use tracing::debug;
 use crate::error::GitlabClientError;
 use crate::types::{MergeRequestDiffBatch, ProjectInfo};
 use orbit_server_config::GitlabClientConfiguration;
+use tls_trust::TrustStore;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
 
@@ -59,9 +60,12 @@ pub struct GitlabClient {
 }
 
 impl GitlabClient {
-    pub fn new(config: GitlabClientConfiguration) -> Result<Self, GitlabClientError> {
+    pub fn new(
+        config: GitlabClientConfiguration,
+        trust: &TrustStore,
+    ) -> Result<Self, GitlabClientError> {
         let signing_key = BASE64.decode(&config.signing_key)?;
-        let http = Self::build_http_client(&config)?;
+        let http = Self::build_http_client(&config, trust)?;
         Ok(Self {
             http,
             base_url: config.base_url,
@@ -71,6 +75,7 @@ impl GitlabClient {
 
     fn build_http_client(
         config: &GitlabClientConfiguration,
+        trust: &TrustStore,
     ) -> Result<reqwest::Client, GitlabClientError> {
         // reqwest is compiled with `rustls-no-provider`, so a CryptoProvider
         // must be installed before building any client. The `install_default`
@@ -79,6 +84,11 @@ impl GitlabClient {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let mut builder = reqwest::Client::builder();
+
+        // The platform verifier keeps the platform roots and appends these.
+        for cert in trust.extra_roots() {
+            builder = builder.add_root_certificate(reqwest::Certificate::from_der(cert)?);
+        }
 
         if let Some(resolve_host) = &config.resolve_host {
             let parsed = reqwest::Url::parse(&config.base_url)
@@ -425,32 +435,34 @@ mod tests {
     #[test]
     fn build_http_client_without_resolve_host() {
         let config = config_with_resolve("https://gitlab.example.com", None);
-        assert!(GitlabClient::build_http_client(&config).is_ok());
+        assert!(GitlabClient::build_http_client(&config, &TrustStore::platform_only()).is_ok());
     }
 
     #[test]
     fn build_http_client_with_resolve_host_localhost() {
         let config = config_with_resolve("https://gitlab.example.com:11443", Some("localhost"));
-        assert!(GitlabClient::build_http_client(&config).is_ok());
+        assert!(GitlabClient::build_http_client(&config, &TrustStore::platform_only()).is_ok());
     }
 
     #[test]
     fn build_http_client_with_resolve_host_and_path() {
         let config = config_with_resolve("https://gitlab.example.com/backend", Some("localhost"));
-        assert!(GitlabClient::build_http_client(&config).is_ok());
+        assert!(GitlabClient::build_http_client(&config, &TrustStore::platform_only()).is_ok());
     }
 
     #[test]
     fn build_http_client_rejects_invalid_base_url() {
         let config = config_with_resolve("not a url", Some("localhost"));
-        let err = GitlabClient::build_http_client(&config).unwrap_err();
+        let err =
+            GitlabClient::build_http_client(&config, &TrustStore::platform_only()).unwrap_err();
         assert!(err.to_string().contains("invalid base_url"));
     }
 
     #[test]
     fn build_http_client_rejects_unknown_scheme() {
         let config = config_with_resolve("custom://gitlab.example.com", Some("localhost"));
-        let err = GitlabClient::build_http_client(&config).unwrap_err();
+        let err =
+            GitlabClient::build_http_client(&config, &TrustStore::platform_only()).unwrap_err();
         assert!(err.to_string().contains("no known default port"));
     }
 
@@ -460,7 +472,8 @@ mod tests {
             "https://gitlab.example.com",
             Some("this-host-definitely-does-not-exist.invalid"),
         );
-        let err = GitlabClient::build_http_client(&config).unwrap_err();
+        let err =
+            GitlabClient::build_http_client(&config, &TrustStore::platform_only()).unwrap_err();
         assert!(err.to_string().contains("failed to resolve"));
     }
 
@@ -487,8 +500,11 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let client =
-            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+        let client = GitlabClient::new(
+            config_with_resolve(&format!("http://{addr}"), None),
+            &TrustStore::platform_only(),
+        )
+        .unwrap();
         let _stream = client.download_archive(7, "abc123").await.unwrap();
 
         assert_eq!(*seen.lock().unwrap(), "ref=abc123&include_lfs_blobs=false");

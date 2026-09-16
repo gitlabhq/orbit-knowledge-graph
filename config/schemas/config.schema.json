@@ -1510,6 +1510,13 @@
     "TlsConfig": {
       "type": "object",
       "properties": {
+        "ca_bundle_path": {
+          "description": "PEM bundle of extra root certificates trusted by every outbound TLS\nclient (GitLab API, ClickHouse, NATS, object storage), in addition to\nthe platform trust store. Must exist and hold at least one certificate.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "cert_path": {
           "type": [
             "string",

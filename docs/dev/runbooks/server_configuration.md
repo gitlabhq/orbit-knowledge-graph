@@ -73,7 +73,7 @@ All modes share the same configuration structure.
 | `nats.url` | `localhost:4222` | Broker address |
 | `nats.username` | None | Auth username |
 | `nats.password` | None | Auth password |
-| `nats.tls_ca_cert_path` | None | CA cert (PEM) for TLS. Setting any TLS path enables TLS. |
+| `nats.tls_ca_cert_path` | None | CA cert (PEM) for TLS. Setting any TLS path enables TLS. Added to `tls.ca_bundle_path` when both are set. |
 | `nats.tls_cert_path` | None | Client cert (PEM) for mTLS. Must pair with `tls_key_path`. |
 | `nats.tls_key_path` | None | Client key (PEM) for mTLS. Must pair with `tls_cert_path`. |
 | `nats.connection_timeout_secs` | `10` | Connection timeout |
@@ -409,8 +409,19 @@ These settings are used by the Webserver mode.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `tls.cert_path` | None | TLS certificate path (PEM) |
-| `tls.key_path` | None | TLS private key path (PEM) |
+| `tls.cert_path` | None | TLS certificate path (PEM) for the gRPC listener |
+| `tls.key_path` | None | TLS private key path (PEM) for the gRPC listener |
+| `tls.ca_bundle_path` | None | PEM bundle of extra root certificates for every outbound TLS client (GitLab API, ClickHouse, NATS, object storage), in all four modes |
+
+`tls.ca_bundle_path` adds to the platform trust store; it never replaces it. The file must exist and
+hold at least one certificate, otherwise the server refuses to start. The `starting` log carries the
+number of extra roots loaded. Use it when ClickHouse, GitLab or NATS present certificates from a
+private CA, for example on GitLab Dedicated:
+
+```yaml
+tls:
+  ca_bundle_path: /etc/ssl/certs/private-ca.pem
+```
 
 ### gRPC tuning
 
@@ -518,7 +529,7 @@ Names the bucket Orbit will use for cold storage and how to authenticate to it. 
 | `object_storage.endpoint` | unset | S3-compatible store URL, or a GCS emulator or private endpoint |
 | `object_storage.path_style` | `false` | S3 only. With a custom endpoint and `false`, the endpoint host must include the bucket |
 | `object_storage.allow_http` | `false` | Permit `http://` endpoints; local development only |
-| `object_storage.ca_cert_path` | unset | PEM bundle of extra root certificates for stores behind a private CA |
+| `object_storage.ca_cert_path` | unset | PEM bundle of extra root certificates for stores behind a private CA; added to `tls.ca_bundle_path` when both are set |
 | `object_storage.access_key_id` | unset | S3 static credentials; mount at `/etc/secrets/object_storage/access_key_id` |
 | `object_storage.secret_access_key` | unset | S3 static credentials; mount at `/etc/secrets/object_storage/secret_access_key` |
 | `object_storage.session_token` | unset | S3 static credentials, optional |

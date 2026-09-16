@@ -87,6 +87,7 @@ gitlab:
 tls: {}
   # cert_path: "/path/to/cert.pem"
   # key_path: "/path/to/key.pem"
+  # ca_bundle_path: "/etc/ssl/certs/private-ca.pem"   # extra roots for every outbound TLS client
 
 engine:
   # max_concurrent_workers: 16     # unset = derived from container CPU count and memory limit

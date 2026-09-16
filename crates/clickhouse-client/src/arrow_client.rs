@@ -12,9 +12,14 @@ use circuit_breaker::CircuitBreakableError;
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use hyper_rustls::HttpsConnectorBuilder;
+use hyper_util::client::legacy::Client as HyperClient;
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::rt::TokioExecutor;
 use orbit_utils::clickhouse::{ChScalar, ChType};
 use serde::Serialize;
 use serde_json::Value;
+use tls_trust::TrustStore;
 use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
@@ -90,6 +95,8 @@ pub struct ArrowClickHouseClient {
 }
 
 impl ArrowClickHouseClient {
+    /// Platform trust only; production code passes the shared trust store
+    /// through [`Self::new_with_trust`].
     pub fn new(
         url: &str,
         database: &str,
@@ -98,7 +105,27 @@ impl ArrowClickHouseClient {
         session_settings: &std::collections::HashMap<String, String>,
         insert_settings: &std::collections::HashMap<String, String>,
     ) -> Self {
-        let mut client = Client::default()
+        Self::new_with_trust(
+            url,
+            database,
+            username,
+            password,
+            session_settings,
+            insert_settings,
+            &TrustStore::platform_only(),
+        )
+    }
+
+    pub fn new_with_trust(
+        url: &str,
+        database: &str,
+        username: &str,
+        password: Option<&str>,
+        session_settings: &std::collections::HashMap<String, String>,
+        insert_settings: &std::collections::HashMap<String, String>,
+        trust: &TrustStore,
+    ) -> Self {
+        let mut client = base_client(trust)
             .with_url(url)
             .with_database(database)
             .with_user(username)
@@ -619,6 +646,27 @@ impl std::io::Write for DrainableWriter {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+/// `Client::default()` unless extra roots are configured; then a connector
+/// over the shared root store with the crate's own defaults (TCP keepalive
+/// 60s, pool idle timeout 2s, HTTP/1 only) so only trust differs.
+fn base_client(trust: &TrustStore) -> Client {
+    let Some(tls) = trust.client_config() else {
+        return Client::default();
+    };
+    let mut tcp = HttpConnector::new();
+    tcp.set_keepalive(Some(Duration::from_secs(60)));
+    tcp.enforce_http(false);
+    let https = HttpsConnectorBuilder::new()
+        .with_tls_config(tls)
+        .https_or_http()
+        .enable_http1()
+        .wrap_connector(tcp);
+    let http_client = HyperClient::builder(TokioExecutor::new())
+        .pool_idle_timeout(Duration::from_secs(2))
+        .build(https);
+    Client::with_http_client(http_client)
 }
 
 fn has_quorum_insert_setting(

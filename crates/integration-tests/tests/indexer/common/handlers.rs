@@ -14,6 +14,7 @@ use indexer::testkit::{
 use indexer::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use indexer::types::{Envelope, Event, Subscription};
 use integration_testkit::TestContext;
+use tls_trust::TrustStore;
 
 pub fn handler_context() -> HandlerContext {
     let mock_nats = Arc::new(MockNatsServices::new());
@@ -68,8 +69,12 @@ async fn build_fan_out(
 ) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
     let writer = Arc::new(
-        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
-            .expect("writer"),
+        ClickHouseWriter::new(
+            ctx.config.clone(),
+            Arc::new(EngineMetrics::default()),
+            &TrustStore::platform_only(),
+        )
+        .expect("writer"),
     );
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
@@ -112,8 +117,12 @@ pub async fn entity_handler_with_partitions(
 ) -> Arc<dyn Handler> {
     let config: IndexerConfig = create_test_indexer_config(&ctx.config);
     let writer = Arc::new(
-        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
-            .expect("writer"),
+        ClickHouseWriter::new(
+            ctx.config.clone(),
+            Arc::new(EngineMetrics::default()),
+            &TrustStore::platform_only(),
+        )
+        .expect("writer"),
     );
     let ontology = ontology::Ontology::load_embedded()
         .expect("ontology must load")

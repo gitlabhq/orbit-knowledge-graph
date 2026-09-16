@@ -1,18 +1,19 @@
 [package]
-name = "orbit-object-storage"
+name = "tls-trust"
 version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
 [dependencies]
-bytes = { workspace = true }
-object_store = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
+rustls = { workspace = true, features = ["std"] }
+rustls-native-certs = { workspace = true }
 thiserror = { workspace = true }
-tls-trust = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+rcgen = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

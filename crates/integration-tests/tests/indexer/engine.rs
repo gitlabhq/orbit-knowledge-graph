@@ -24,6 +24,7 @@ use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use tls_trust::TrustStore;
 
 const STREAM: &str = "test_stream";
 const SUBJECT: &str = "test.events";
@@ -226,7 +227,7 @@ impl TestContext {
 
     async fn create_broker_with_config(&self, config: NatsConfiguration) -> Arc<NatsBroker> {
         Arc::new(
-            NatsBroker::connect(&config)
+            NatsBroker::connect(&config, &TrustStore::platform_only())
                 .await
                 .expect("failed to connect to NATS"),
         )
@@ -248,6 +249,7 @@ impl TestContext {
                         .profiling,
                 },
                 Arc::new(EngineMetrics::default()),
+                &TrustStore::platform_only(),
             )
             .expect("failed to create writer"),
         )

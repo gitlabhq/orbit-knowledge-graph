@@ -13,6 +13,7 @@ use gitlab_client::GitlabClient;
 use orbit_server::content::gitaly::mr_diff::MergeRequestDiffContentService;
 use orbit_utils::arrow::ColumnValue;
 use query_engine::shared::content::{ColumnResolver, ResolverContext};
+use tls_trust::TrustStore;
 use tokio::net::TcpListener;
 
 type PropertyRow = HashMap<String, ColumnValue>;
@@ -95,11 +96,14 @@ async fn mock_mr_diff_server(
         axum::serve(listener, app).await.unwrap();
     });
 
-    let client = GitlabClient::new(orbit_server_config::GitlabClientConfiguration {
-        base_url: format!("http://{addr}"),
-        signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
-        resolve_host: None,
-    })
+    let client = GitlabClient::new(
+        orbit_server_config::GitlabClientConfiguration {
+            base_url: format!("http://{addr}"),
+            signing_key: BASE64.encode(b"test-secret-that-is-long-enough!"),
+            resolve_host: None,
+        },
+        &TrustStore::platform_only(),
+    )
     .unwrap();
 
     MockServer {

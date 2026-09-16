@@ -49,6 +49,8 @@ regex = { workspace = true }
 tar = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
+tls-trust = { workspace = true }
+tokio-rustls = { workspace = true }
 tokio-stream = { workspace = true, features = ["net"] }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

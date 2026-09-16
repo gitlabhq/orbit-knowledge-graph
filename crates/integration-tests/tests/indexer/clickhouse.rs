@@ -13,6 +13,7 @@ use orbit_utils::arrow::ArrowUtils;
 use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
+use tls_trust::TrustStore;
 
 const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
 const CLICKHOUSE_TAG: &str = "26.2";
@@ -36,8 +37,12 @@ impl TestContext {
         let (container, host, port) = start_clickhouse_container().await;
         setup_database(&host, port).await;
         let config = create_config(&host, port);
-        let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
-            .expect("failed to create writer");
+        let writer = ClickHouseWriter::new(
+            config,
+            Arc::new(EngineMetrics::default()),
+            &TrustStore::platform_only(),
+        )
+        .expect("failed to create writer");
 
         Self {
             _container: container,
@@ -329,8 +334,12 @@ async fn connection_failure_returns_error() {
             .profiling,
     };
 
-    let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
-        .expect("failed to create writer");
+    let writer = ClickHouseWriter::new(
+        config,
+        Arc::new(EngineMetrics::default()),
+        &TrustStore::platform_only(),
+    )
+    .expect("failed to create writer");
 
     let result = writer
         .write(

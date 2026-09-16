@@ -1363,7 +1363,7 @@ dependencies = [
  "bitflags 2.13.0",
  "cexpr",
  "clang-sys",
- "itertools 0.11.0",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -2080,12 +2080,15 @@ dependencies = [
  "circuit-breaker",
  "clickhouse",
  "futures",
+ "hyper-rustls",
+ "hyper-util",
  "orbit-server-config",
  "orbit-utils",
  "rand 0.10.2",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tls-trust",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -5023,6 +5026,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tls-trust",
  "tokio",
  "tracing",
 ]
@@ -5217,6 +5221,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tls-trust",
  "tokio",
  "tracing",
 ]
@@ -5749,6 +5754,7 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror 2.0.18",
+ "tls-trust",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -5922,7 +5928,9 @@ dependencies = [
  "tempfile",
  "testcontainers",
  "testcontainers-modules",
+ "tls-trust",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tokio-util",
  "tonic",
@@ -7520,6 +7528,7 @@ dependencies = [
  "testcontainers",
  "testcontainers-modules",
  "thiserror 2.0.18",
+ "tls-trust",
  "tokio",
  "tracing",
 ]
@@ -8250,6 +8259,7 @@ dependencies = [
  "object_store 0.13.2",
  "orbit-server-config",
  "thiserror 2.0.18",
+ "tls-trust",
  "tokio",
 ]
 
@@ -8327,6 +8337,7 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
+ "tls-trust",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -11462,9 +11473,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "612460d5f7bea540c490b2b6395d8e34a953e52b491accd6c86c8164c5932a63"
+checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
 dependencies = [
  "openssl-probe",
  "rustls-pki-types",
@@ -12969,6 +12980,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
+name = "tls-trust"
+version = "0.1.0"
+dependencies = [
+ "orbit-server-config",
+ "rcgen",
+ "rustls",
+ "rustls-native-certs",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "tokio"
 version = "1.52.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13009,9 +13033,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.26.4"
+version = "0.26.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
+checksum = "b0c85f2c3ef0b1cd58b36682f4b17aaa995f0e5db534d85692b4903abce21f67"
 dependencies = [
  "rustls",
  "tokio",

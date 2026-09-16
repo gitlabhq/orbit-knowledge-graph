@@ -8,6 +8,7 @@ use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
+use tls_trust::TrustStore;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
@@ -78,11 +79,12 @@ impl OrbitServiceImpl {
         validator: Arc<JwtValidator>,
         active_schema: Arc<ActiveSchema>,
         clickhouse_config: &ClickHouseConfiguration,
+        trust: &TrustStore,
         cluster_health: Arc<ClusterHealthChecker>,
         stream_timeout_secs: u64,
         analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
-        let client = Arc::new(clickhouse_config.build_client());
+        let client = Arc::new(clickhouse_config.build_client_with_trust(trust));
         let tool_service = ToolService::default();
         let pipeline = QueryPipelineService::new(Arc::clone(&client), analytics_config);
         let graph_status = GraphStatusService::new(client);
@@ -784,6 +786,7 @@ mod tests {
             Arc::new(mock_validator()),
             ActiveSchema::pinned(test_ontology()),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -823,6 +826,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(test_ontology()),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -856,6 +860,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(test_ontology()),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -895,6 +900,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(test_ontology()),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -922,6 +928,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(test_ontology()),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -943,6 +950,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(test_ontology()),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -975,6 +983,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(test_ontology()),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1002,6 +1011,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(test_ontology()),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1033,6 +1043,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(test_ontology()),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1204,6 +1215,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(Arc::clone(&ontology)),
             &test_config(),
+            &TrustStore::platform_only(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),

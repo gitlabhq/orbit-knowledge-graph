@@ -26,6 +26,7 @@ use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use tls_trust::TrustStore;
 
 /// Dispatchers publish to a fixed versioned stream, so the shared NATS container
 /// can't host concurrent scenarios: `serial` runs them one at a time and each run
@@ -82,9 +83,12 @@ pub async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
 }
 
 async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<DispatchedMessage> {
-    let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
-        .await
-        .unwrap();
+    let services = indexer::orchestrator::scheduled::connect(
+        &nats_config(nats_url),
+        &TrustStore::platform_only(),
+    )
+    .await
+    .unwrap();
     let checkpoint_store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
         ctx.config.build_client(),
     )));
@@ -108,9 +112,12 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
 }
 
 async fn run_global_dispatcher(nats_url: &str) -> Vec<DispatchedMessage> {
-    let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
-        .await
-        .unwrap();
+    let services = indexer::orchestrator::scheduled::connect(
+        &nats_config(nats_url),
+        &TrustStore::platform_only(),
+    )
+    .await
+    .unwrap();
     let dispatcher = GlobalDispatcher::new(
         services.nats,
         ScheduledTaskMetrics::new(),
@@ -131,9 +138,12 @@ async fn dispatch_enabled_namespace_cdc(
     nats_url: &str,
     cdc: &[CdcEvent],
 ) -> Vec<DispatchedMessage> {
-    let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
-        .await
-        .unwrap();
+    let services = indexer::orchestrator::scheduled::connect(
+        &nats_config(nats_url),
+        &TrustStore::platform_only(),
+    )
+    .await
+    .unwrap();
     let backfill = Arc::new(CodeBackfill::new(
         services.nats.clone(),
         ctx.config.build_client(),

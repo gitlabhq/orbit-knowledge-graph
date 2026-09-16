@@ -2,6 +2,7 @@ use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::stream::Stream;
 use nats_client::NatsClient;
 use orbit_server_config::NatsConfiguration;
+use tls_trust::TrustStore;
 use tokio::sync::OnceCell;
 use tracing::warn;
 
@@ -9,6 +10,7 @@ use crate::types::QueueDepth;
 
 pub struct WorkQueueConfig {
     pub nats: NatsConfiguration,
+    pub trust: TrustStore,
     pub stream_name: String,
     pub code_consumer_name: Option<String>,
     pub sdlc_consumer_name: Option<String>,
@@ -16,6 +18,7 @@ pub struct WorkQueueConfig {
 
 pub struct NatsDepthChecker {
     config: NatsConfiguration,
+    trust: TrustStore,
     stream_name: String,
     code_consumer_name: Option<String>,
     sdlc_consumer_name: Option<String>,
@@ -31,6 +34,7 @@ impl NatsDepthChecker {
     pub fn new(work_queue: WorkQueueConfig) -> Self {
         Self {
             config: work_queue.nats,
+            trust: work_queue.trust,
             stream_name: work_queue.stream_name,
             code_consumer_name: work_queue.code_consumer_name,
             sdlc_consumer_name: work_queue.sdlc_consumer_name,
@@ -41,10 +45,12 @@ impl NatsDepthChecker {
     async fn client(&self) -> Result<&NatsClient, String> {
         self.client
             .get_or_try_init(|| async {
-                NatsClient::connect(&self.config).await.map_err(|e| {
-                    warn!(error = %e, "NATS queue-depth check failed to connect");
-                    format!("failed to connect to NATS: {e}")
-                })
+                NatsClient::connect(&self.config, &self.trust)
+                    .await
+                    .map_err(|e| {
+                        warn!(error = %e, "NATS queue-depth check failed to connect");
+                        format!("failed to connect to NATS: {e}")
+                    })
             })
             .await
     }

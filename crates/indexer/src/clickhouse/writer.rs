@@ -7,6 +7,7 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use orbit_server_config::ClickHouseConfiguration;
 use thiserror::Error;
+use tls_trust::TrustStore;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
@@ -56,11 +57,12 @@ impl ClickHouseWriter {
     pub fn new(
         configuration: ClickHouseConfiguration,
         metrics: Arc<EngineMetrics>,
+        trust: &TrustStore,
     ) -> Result<Self, WriteError> {
         configuration
             .validate()
             .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
-        let client = configuration.build_client();
+        let client = configuration.build_client_with_trust(trust);
         Ok(Self {
             client,
             metrics,

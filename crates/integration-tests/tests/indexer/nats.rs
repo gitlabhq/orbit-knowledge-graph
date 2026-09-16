@@ -22,6 +22,7 @@ use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use tls_trust::TrustStore;
 use tokio_util::sync::CancellationToken;
 
 const TEST_STREAM: &str = "test_stream";
@@ -75,7 +76,7 @@ fn default_config(url: &str) -> NatsConfiguration {
 }
 
 async fn connect_broker(config: &NatsConfiguration) -> NatsBroker {
-    NatsBroker::connect(config)
+    NatsBroker::connect(config, &TrustStore::platform_only())
         .await
         .expect("failed to connect broker")
 }
@@ -395,7 +396,7 @@ async fn connect_to_nats() {
     let (_container, url) = start_nats_container().await;
     let config = default_config(&url);
 
-    let result = NatsBroker::connect(&config).await;
+    let result = NatsBroker::connect(&config, &TrustStore::platform_only()).await;
     assert!(result.is_ok(), "should connect to NATS");
 }
 
@@ -646,7 +647,7 @@ async fn in_progress_prevents_redelivery() {
         ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
-    let broker = NatsBroker::connect(&config)
+    let broker = NatsBroker::connect(&config, &TrustStore::platform_only())
         .await
         .expect("failed to connect");
 

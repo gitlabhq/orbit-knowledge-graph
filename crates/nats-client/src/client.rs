@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_nats::jetstream::Context;
@@ -7,6 +7,9 @@ use async_nats::jetstream::kv::{
     CreateErrorKind, Entry, Operation, Store as KvStore, UpdateErrorKind,
 };
 use async_nats::jetstream::stream::Stream;
+use async_nats::rustls::pki_types::pem::PemObject;
+use async_nats::rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use async_nats::rustls::{ClientConfig, RootCertStore};
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use tokio::sync::RwLock;
@@ -15,6 +18,7 @@ use tracing::info;
 use crate::error::{NatsError, map_connect_error};
 use crate::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult, KvWatch};
 use orbit_server_config::NatsConfiguration;
+use tls_trust::TrustStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubjectDedup {
@@ -38,6 +42,36 @@ impl SubjectDedup {
     }
 }
 
+fn tls_client_config(
+    config: &NatsConfiguration,
+    mut roots: RootCertStore,
+) -> Result<ClientConfig, NatsError> {
+    if let Some(ca_path) = &config.tls_ca_cert_path {
+        for cert in read_certs(ca_path)? {
+            roots
+                .add(cert)
+                .map_err(|e| NatsError::Connection(format!("tls_ca_cert_path: {e}")))?;
+        }
+    }
+    let builder = ClientConfig::builder().with_root_certificates(roots);
+
+    let (Some(cert_path), Some(key_path)) = (&config.tls_cert_path, &config.tls_key_path) else {
+        return Ok(builder.with_no_client_auth());
+    };
+    let certs = read_certs(cert_path)?;
+    let key = PrivateKeyDer::from_pem_file(Path::new(key_path))
+        .map_err(|e| NatsError::Connection(format!("tls_key_path: {e}")))?;
+    builder
+        .with_client_auth_cert(certs, key)
+        .map_err(|e| NatsError::Connection(format!("tls_cert_path: {e}")))
+}
+
+fn read_certs(path: &str) -> Result<Vec<CertificateDer<'static>>, NatsError> {
+    CertificateDer::pem_file_iter(Path::new(path))
+        .and_then(Iterator::collect)
+        .map_err(|e| NatsError::Connection(format!("{path}: {e}")))
+}
+
 pub struct NatsClient {
     client: async_nats::Client,
     jetstream: Context,
@@ -48,12 +82,15 @@ pub struct NatsClient {
 }
 
 impl NatsClient {
-    pub async fn connect(config: &NatsConfiguration) -> Result<Self, NatsError> {
+    pub async fn connect(
+        config: &NatsConfiguration,
+        trust: &TrustStore,
+    ) -> Result<Self, NatsError> {
         config
             .validate_tls_config()
             .map_err(NatsError::Connection)?;
 
-        let connect_options = Self::build_connect_options(config);
+        let connect_options = Self::build_connect_options(config, trust)?;
 
         let url = config.connection_url();
         let client = async_nats::connect_with_options(&url, connect_options)
@@ -84,7 +121,10 @@ impl NatsClient {
         &self.config
     }
 
-    fn build_connect_options(config: &NatsConfiguration) -> async_nats::ConnectOptions {
+    fn build_connect_options(
+        config: &NatsConfiguration,
+        trust: &TrustStore,
+    ) -> Result<async_nats::ConnectOptions, NatsError> {
         let mut options = async_nats::ConnectOptions::new()
             .connection_timeout(config.connection_timeout())
             .request_timeout(Some(config.request_timeout()));
@@ -97,6 +137,14 @@ impl NatsClient {
             options = options.require_tls(true);
         }
 
+        // async-nats keeps only the last `add_root_certificates` path and drops
+        // the platform store once one is given, so a shared bundle needs a
+        // whole client config carrying platform roots, bundle and NATS CA.
+        if let Some(roots) = trust.root_cert_store() {
+            let tls = tls_client_config(config, roots)?;
+            return Ok(options.tls_client_config(tls));
+        }
+
         if let Some(ca_path) = &config.tls_ca_cert_path {
             options = options.add_root_certificates(PathBuf::from(ca_path));
         }
@@ -105,7 +153,7 @@ impl NatsClient {
             options = options.add_client_certificate(PathBuf::from(cert), PathBuf::from(key));
         }
 
-        options
+        Ok(options)
     }
 
     pub async fn create_or_update_stream(

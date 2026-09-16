@@ -8,6 +8,7 @@ use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use tls_trust::TrustStore;
 
 const BUCKET: &str = "test_locks";
 const NATS_TAG: &str = "2.11-alpine";
@@ -39,7 +40,9 @@ fn config(url: &str) -> NatsConfiguration {
 async fn kv_put_errors_when_bucket_not_registered() {
     let (_container, url) = start_nats().await;
 
-    let client = NatsClient::connect(&config(&url)).await.expect("connect");
+    let client = NatsClient::connect(&config(&url), &TrustStore::platform_only())
+        .await
+        .expect("connect");
 
     let result = client
         .kv_put(
@@ -61,7 +64,9 @@ async fn kv_put_errors_when_bucket_not_registered() {
 #[tokio::test]
 async fn kv_create_only_returns_already_exists_on_live_key() {
     let (_container, url) = start_nats().await;
-    let client = NatsClient::connect(&config(&url)).await.expect("connect");
+    let client = NatsClient::connect(&config(&url), &TrustStore::platform_only())
+        .await
+        .expect("connect");
     client
         .ensure_kv_bucket_exists(BUCKET, KvBucketConfig::default())
         .await
@@ -92,7 +97,9 @@ async fn kv_create_only_returns_already_exists_on_live_key() {
 #[tokio::test]
 async fn kv_update_revision_cas_succeeds_only_on_matching_revision() {
     let (_container, url) = start_nats().await;
-    let client = NatsClient::connect(&config(&url)).await.expect("connect");
+    let client = NatsClient::connect(&config(&url), &TrustStore::platform_only())
+        .await
+        .expect("connect");
     client
         .ensure_kv_bucket_exists(BUCKET, KvBucketConfig::default())
         .await
@@ -140,7 +147,9 @@ async fn create_or_update_stream_max_age_override_isolates_dlq() {
 
     let mut cfg = config(&url);
     cfg.stream_max_age_secs = Some(60);
-    let client = NatsClient::connect(&cfg).await.expect("connect");
+    let client = NatsClient::connect(&cfg, &TrustStore::platform_only())
+        .await
+        .expect("connect");
 
     client
         .create_or_update_stream(

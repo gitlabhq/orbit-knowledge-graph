@@ -39,6 +39,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::super::common;
 use common::TestContext as ClickHouseContext;
+use tls_trust::TrustStore;
 
 #[derive(Deserialize)]
 struct CodeIndexingRequest {
@@ -64,10 +65,13 @@ impl TestContext {
             ClickHouseContext::new(&[common::SIPHON_SCHEMA_SQL, *common::GRAPH_SCHEMA_SQL]).await;
         let (nats, nats_url) = Self::start_nats().await;
         Self::create_streams(&nats_url).await;
-        let scheduler_services = indexer::orchestrator::scheduled::connect(&NatsConfiguration {
-            url: nats_url.clone(),
-            ..orbit_server_config::AppConfig::embedded_defaults().nats
-        })
+        let scheduler_services = indexer::orchestrator::scheduled::connect(
+            &NatsConfiguration {
+                url: nats_url.clone(),
+                ..orbit_server_config::AppConfig::embedded_defaults().nats
+            },
+            &TrustStore::platform_only(),
+        )
         .await
         .unwrap();
         let catalog = OntologyCatalog::open(scheduler_services.nats_client.clone())
@@ -808,5 +812,6 @@ fn dispatcher_config(context: &TestContext) -> DispatcherConfig {
         schedule: orbit_server_config::AppConfig::embedded_defaults().schedule,
         schema: orbit_server_config::AppConfig::embedded_defaults().schema,
         health_bind_address: "127.0.0.1:0".parse().unwrap(),
+        trust: TrustStore::platform_only(),
     }
 }

@@ -29,6 +29,7 @@ use orbit_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration}
 use parking_lot::Mutex;
 use serde::Deserialize;
 use std::collections::HashMap;
+use tls_trust::TrustStore;
 
 const SIGNING_KEY: &[u8] = b"test-secret-that-is-long-enough!";
 
@@ -88,6 +89,7 @@ impl CodeIndexingDeps {
             indexer::clickhouse::ClickHouseWriter::new(
                 clickhouse.config.clone(),
                 Arc::new(indexer::metrics::EngineMetrics::new()),
+                &TrustStore::platform_only(),
             )
             .expect("writer must build"),
         );
@@ -236,7 +238,8 @@ impl MockGitlabServer {
             signing_key: base64::engine::general_purpose::STANDARD.encode(SIGNING_KEY),
             resolve_host: None,
         };
-        GitlabClient::new(config).expect("failed to create GitlabClient")
+        GitlabClient::new(config, &TrustStore::platform_only())
+            .expect("failed to create GitlabClient")
     }
 
     pub fn add_project(&self, project_id: i64, default_branch: &str, files: &[(&str, &str)]) {

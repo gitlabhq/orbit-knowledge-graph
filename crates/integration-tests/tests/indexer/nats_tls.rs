@@ -17,6 +17,7 @@ use tempfile::TempDir;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{GenericImage, ImageExt};
+use tls_trust::TrustStore;
 
 const TEST_STREAM: &str = "tls_test_stream";
 const TEST_SUBJECT: &str = "tls.test.events";
@@ -191,7 +192,7 @@ async fn mtls_publish_and_subscribe() {
     let temp_dir = TempDir::new().unwrap();
     let config = client_config(&pki, &url, &temp_dir);
 
-    let broker = NatsBroker::connect(&config)
+    let broker = NatsBroker::connect(&config, &TrustStore::platform_only())
         .await
         .expect("mTLS connection should succeed");
 
@@ -246,7 +247,7 @@ async fn mtls_rejects_without_client_cert() {
         ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
-    let result = NatsBroker::connect(&config).await;
+    let result = NatsBroker::connect(&config, &TrustStore::platform_only()).await;
     assert!(
         result.is_err(),
         "connection without client cert should fail"
@@ -266,7 +267,7 @@ async fn mtls_rejects_wrong_ca() {
     let temp_dir = TempDir::new().unwrap();
     let config = client_config(&wrong_pki, &url, &temp_dir);
 
-    let result = NatsBroker::connect(&config).await;
+    let result = NatsBroker::connect(&config, &TrustStore::platform_only()).await;
     assert!(result.is_err(), "connection with wrong CA should fail");
 }
 
@@ -282,7 +283,7 @@ async fn connect_fails_on_cert_without_key() {
         ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
-    let result = NatsBroker::connect(&config).await;
+    let result = NatsBroker::connect(&config, &TrustStore::platform_only()).await;
     let err = result.err().expect("should reject cert without key");
     assert!(
         err.to_string().contains("tls_key_path is missing"),
@@ -298,10 +299,67 @@ async fn connect_fails_on_missing_ca_file() {
         ..orbit_server_config::AppConfig::embedded_defaults().nats
     };
 
-    let result = NatsBroker::connect(&config).await;
+    let result = NatsBroker::connect(&config, &TrustStore::platform_only()).await;
     let err = result.err().expect("should reject missing CA file");
     assert!(
         err.to_string().contains("file not found"),
         "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn ca_bundle_trusts_the_nats_ca_without_nats_ca_path() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let host = resolve_container_host().await;
+    let sans = vec![host, "localhost".into(), "127.0.0.1".into()];
+    let pki = generate_test_pki(&sans);
+    let (_container, url) = start_nats_tls_container(&pki).await;
+    let temp_dir = TempDir::new().unwrap();
+
+    let bundle_path = temp_dir.path().join("bundle.pem");
+    std::fs::write(&bundle_path, &pki.ca_cert_pem).unwrap();
+    let trust = TrustStore::load(&orbit_server_config::TlsConfig {
+        ca_bundle_path: Some(bundle_path.to_str().unwrap().into()),
+        ..orbit_server_config::AppConfig::embedded_defaults().tls
+    })
+    .unwrap();
+
+    let config = NatsConfiguration {
+        tls_ca_cert_path: None,
+        ..client_config(&pki, &url, &temp_dir)
+    };
+
+    NatsBroker::connect(&config, &trust)
+        .await
+        .expect("the shared bundle alone must make the NATS server trusted");
+}
+
+#[tokio::test]
+async fn ca_bundle_from_another_ca_does_not_trust_the_nats_server() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let host = resolve_container_host().await;
+    let sans = vec![host, "localhost".into(), "127.0.0.1".into()];
+    let pki = generate_test_pki(&sans);
+    let (_container, url) = start_nats_tls_container(&pki).await;
+    let temp_dir = TempDir::new().unwrap();
+
+    let other_pki = generate_test_pki(&sans);
+    let bundle_path = temp_dir.path().join("other-bundle.pem");
+    std::fs::write(&bundle_path, &other_pki.ca_cert_pem).unwrap();
+    let trust = TrustStore::load(&orbit_server_config::TlsConfig {
+        ca_bundle_path: Some(bundle_path.to_str().unwrap().into()),
+        ..orbit_server_config::AppConfig::embedded_defaults().tls
+    })
+    .unwrap();
+
+    let config = NatsConfiguration {
+        tls_ca_cert_path: None,
+        ..client_config(&pki, &url, &temp_dir)
+    };
+
+    let result = NatsBroker::connect(&config, &trust).await;
+    assert!(
+        result.is_err(),
+        "a bundle for another CA must not trust this server"
     );
 }

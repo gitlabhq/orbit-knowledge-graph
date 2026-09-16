@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
+use tls_trust::TrustStore;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::ServerTlsConfig;
 use tracing::info;
@@ -31,6 +32,7 @@ impl GrpcServer {
         validator: Arc<JwtValidator>,
         active_schema: Arc<ActiveSchema>,
         clickhouse_config: &ClickHouseConfiguration,
+        trust: &TrustStore,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
         grpc_config: GrpcConfig,
@@ -40,6 +42,7 @@ impl GrpcServer {
             validator,
             active_schema,
             clickhouse_config,
+            trust,
             cluster_health,
             grpc_config.stream_timeout_secs,
             analytics_config,
@@ -147,6 +150,7 @@ mod tests {
             validator,
             ActiveSchema::pinned(ontology),
             &clickhouse_config,
+            &TrustStore::platform_only(),
             cluster_health,
             None,
             orbit_server_config::AppConfig::embedded_defaults().grpc,

@@ -106,6 +106,7 @@ mod tests {
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64;
     use circuit_breaker::{CircuitBreakerRegistry, CircuitConfig, ServiceName};
+    use tls_trust::TrustStore;
     use tokio::net::TcpListener;
 
     use super::*;
@@ -164,7 +165,7 @@ mod tests {
     #[tokio::test]
     async fn repeated_server_errors_trip_the_circuit_and_reject_further_calls() {
         let (url, hits) = stub_project_info_server(AxumStatus::INTERNAL_SERVER_ERROR).await;
-        let client = GitlabClient::new(config_for(url)).unwrap();
+        let client = GitlabClient::new(config_for(url), &TrustStore::platform_only()).unwrap();
         let wrapped = CircuitBreakingGitlabClient::new(client, breaker());
 
         for _ in 0..2 {
@@ -185,7 +186,7 @@ mod tests {
     #[tokio::test]
     async fn not_found_never_trips_the_circuit() {
         let (url, hits) = stub_project_info_server(AxumStatus::NOT_FOUND).await;
-        let client = GitlabClient::new(config_for(url)).unwrap();
+        let client = GitlabClient::new(config_for(url), &TrustStore::platform_only()).unwrap();
         let wrapped = CircuitBreakingGitlabClient::new(client, breaker());
 
         for _ in 0..5 {
@@ -198,7 +199,7 @@ mod tests {
     #[tokio::test]
     async fn unauthorized_never_trips_the_circuit() {
         let (url, hits) = stub_project_info_server(AxumStatus::UNAUTHORIZED).await;
-        let client = GitlabClient::new(config_for(url)).unwrap();
+        let client = GitlabClient::new(config_for(url), &TrustStore::platform_only()).unwrap();
         let wrapped = CircuitBreakingGitlabClient::new(client, breaker());
 
         for _ in 0..5 {
@@ -210,7 +211,11 @@ mod tests {
 
     #[tokio::test]
     async fn connection_failure_is_transient_and_trips_the_circuit() {
-        let client = GitlabClient::new(config_for("http://127.0.0.1:1".into())).unwrap();
+        let client = GitlabClient::new(
+            config_for("http://127.0.0.1:1".into()),
+            &TrustStore::platform_only(),
+        )
+        .unwrap();
         let wrapped = CircuitBreakingGitlabClient::new(client, breaker());
 
         for _ in 0..2 {

@@ -5,6 +5,7 @@ use orbit_server_config::{
     GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
 };
 use thiserror::Error;
+use tls_trust::TrustStore;
 
 use crate::engine::handler::HandlerInitError;
 
@@ -19,6 +20,14 @@ pub struct IndexerConfig {
     pub health_bind_address: SocketAddr,
     pub schema: SchemaConfig,
     pub analytics: AnalyticsConfig,
+    pub trust: TrustStore,
+}
+
+impl IndexerConfig {
+    pub fn with_trust_store(mut self, trust: TrustStore) -> Self {
+        self.trust = trust;
+        self
+    }
 }
 
 impl From<&AppConfig> for IndexerConfig {
@@ -33,6 +42,7 @@ impl From<&AppConfig> for IndexerConfig {
             health_bind_address: config.indexer_health_bind_address,
             schema: config.schema.clone(),
             analytics: config.analytics.clone(),
+            trust: TrustStore::platform_only(),
         }
     }
 }
@@ -78,6 +88,14 @@ pub struct DispatcherConfig {
     pub schedule: ScheduleConfig,
     pub schema: SchemaConfig,
     pub health_bind_address: SocketAddr,
+    pub trust: TrustStore,
+}
+
+impl DispatcherConfig {
+    pub fn with_trust_store(mut self, trust: TrustStore) -> Self {
+        self.trust = trust;
+        self
+    }
 }
 
 impl From<&AppConfig> for DispatcherConfig {
@@ -89,6 +107,7 @@ impl From<&AppConfig> for DispatcherConfig {
             schedule: config.schedule.clone(),
             schema: config.schema.clone(),
             health_bind_address: config.dispatcher_health_bind_address,
+            trust: TrustStore::platform_only(),
         }
     }
 }

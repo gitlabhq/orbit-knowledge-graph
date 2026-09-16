@@ -34,6 +34,7 @@ use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 use super::message::{NatsAcker, NatsMessage, NatsSubscription};
 use nats_client::NatsError;
 use orbit_server_config::NatsConfiguration;
+use tls_trust::TrustStore;
 
 fn map_subscribe_error<E: std::fmt::Display>(error: E) -> NatsError {
     NatsError::Subscribe(error.to_string())
@@ -47,8 +48,11 @@ pub struct NatsBroker {
 }
 
 impl NatsBroker {
-    pub async fn connect(config: &NatsConfiguration) -> Result<Self, NatsError> {
-        let inner = NatsClient::connect(config).await?;
+    pub async fn connect(
+        config: &NatsConfiguration,
+        trust: &TrustStore,
+    ) -> Result<Self, NatsError> {
+        let inner = NatsClient::connect(config, trust).await?;
         Ok(Self {
             config: config.clone(),
             inner: Arc::new(inner),

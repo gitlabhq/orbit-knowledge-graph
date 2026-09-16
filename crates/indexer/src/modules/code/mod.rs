@@ -64,9 +64,10 @@ pub async fn register_handlers(
     let table_names =
         Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
 
-    let gitlab_client =
-        Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
-    let client = Arc::new(config.graph.build_client());
+    let gitlab_client = Arc::new(
+        GitlabClient::new(gitlab_config.clone(), &config.trust).map_err(HandlerInitError::new)?,
+    );
+    let client = Arc::new(config.graph.build_client_with_trust(&config.trust));
 
     let repository_service: Arc<dyn RepositoryService> =
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));

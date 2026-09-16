@@ -22,6 +22,7 @@ use orbit_server::webserver::Server as HttpServer;
 use orbit_server_config::AppConfig;
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
+use tls_trust::TrustStore;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -65,6 +66,8 @@ async fn main() -> anyhow::Result<()> {
     }
     let _guard = builder.init().expect("labkit init");
 
+    let trust = TrustStore::load(&config.tls)?;
+
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     ontology::constants::validate_ontology_constants(&ontology);
 
@@ -81,25 +84,27 @@ async fn main() -> anyhow::Result<()> {
                 include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
             )?;
 
-            let graph = config.graph.build_client();
+            let graph = config.graph.build_client_with_trust(&trust);
             info!("initializing schema version table");
             schema::version::init(&graph).await?;
 
-            let dispatcher_config = DispatcherConfig::from(&config);
+            let dispatcher_config = DispatcherConfig::from(&config).with_trust_store(trust);
             indexer::run_dispatcher(&dispatcher_config, &archive, shutdown)
                 .await
                 .map_err(Into::into)
         }
-        Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
+        Mode::HealthCheck => health_check_mode::run(&config, &trust)
+            .await
+            .map_err(Into::into),
         Mode::Indexer => {
-            let indexer_config = IndexerConfig::from(&config);
+            let indexer_config = IndexerConfig::from(&config).with_trust_store(trust);
             indexer::run(&indexer_config, ontology, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, shutdown.clone()).await
+            run_webserver(&config, &trust, shutdown.clone()).await
         }
     };
 
@@ -108,7 +113,11 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyhow::Result<()> {
+async fn run_webserver(
+    config: &AppConfig,
+    trust: &TrustStore,
+    shutdown: CancellationToken,
+) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
         config.jwt_clock_skew_secs,
@@ -121,13 +130,13 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
         )
     })?;
     let gitlab_client = Arc::new(
-        gitlab_client::GitlabClient::new(gitlab_client_config)
+        gitlab_client::GitlabClient::new(gitlab_client_config, trust)
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
     let cluster_health = ClusterHealthChecker::new(
         config.health_check_url.clone(),
-        Some(config.graph.build_client()),
+        Some(config.graph.build_client_with_trust(trust)),
         Some(gitlab_client.clone()),
     )
     .into_arc();
@@ -141,7 +150,7 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
 
     info!("initializing NATS connection");
     let nats = Arc::new(
-        nats_client::NatsClient::connect(&config.nats)
+        nats_client::NatsClient::connect(&config.nats, trust)
             .await
             .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
     );
@@ -151,7 +160,7 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
     )?;
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
     let active_schema = ActiveSchema::spawn(
-        Arc::new(config.graph.build_client()),
+        Arc::new(config.graph.build_client_with_trust(trust)),
         archive,
         catalog,
         config,
@@ -168,6 +177,7 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
         validator,
         active_schema,
         &config.graph,
+        trust,
         cluster_health,
         tls_config,
         config.grpc.clone(),

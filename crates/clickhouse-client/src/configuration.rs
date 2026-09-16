@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use orbit_server_config::ClickHouseConfiguration;
+use tls_trust::TrustStore;
 
 use crate::arrow_client::ArrowClickHouseClient;
 
@@ -13,18 +14,26 @@ const QUORUM_SESSION_SETTINGS: [(&str, &str); 4] = [
 ];
 
 pub trait ClickHouseConfigurationExt {
+    /// Platform trust only; production code passes the shared trust store
+    /// through [`Self::build_client_with_trust`].
     fn build_client(&self) -> ArrowClickHouseClient;
+    fn build_client_with_trust(&self, trust: &TrustStore) -> ArrowClickHouseClient;
 }
 
 impl ClickHouseConfigurationExt for ClickHouseConfiguration {
     fn build_client(&self) -> ArrowClickHouseClient {
-        ArrowClickHouseClient::new(
+        self.build_client_with_trust(&TrustStore::platform_only())
+    }
+
+    fn build_client_with_trust(&self, trust: &TrustStore) -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new_with_trust(
             &self.url,
             &self.database,
             &self.username,
             self.password.as_deref(),
             &build_session_settings_with_quorum_defaults(self),
             &self.insert_settings,
+            trust,
         )
         .with_replicated(self.replicated)
     }
