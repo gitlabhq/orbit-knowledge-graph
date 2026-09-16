@@ -248,36 +248,17 @@ fn visit_tf_expr(c: &mut Ctx<'_>, node: PNode<'_>) -> Tf {
                 .into_children()
                 .map(|q| quoted_inner(&q))
                 .collect();
-            match func {
-                "replace" => {
-                    assert_eq!(args.len(), 2, "replace needs 2 args");
-                    Tf::Replace(args[0].into(), args[1].into())
-                }
-                "strip_prefix" => Tf::Strip(args[0].into()),
-                "strip_suffix" => Tf::StripSuffix(args[0].into()),
-                "prepend" => Tf::Prepend(args[0].into()),
-                "to_rel" => Tf::ToRel(args[0].chars().next().expect("to_rel arg")),
-                "split_last" => Tf::SplitLast(args[0].into()),
-                "split_first" => Tf::SplitFirst(args[0].into()),
-                _ => panic!("unknown transform: {func}"),
-            }
+            Tf::from_func(func, &args, None)
         }
         Rule::TfLegacy => {
             let mut ch = inner.into_children();
             let name = ch.next().unwrap().as_str();
             let val = ch.next().unwrap().as_str();
-            match name {
-                "strip" => Tf::Strip(val.into()),
-                "field" => Tf::Field(c.intern_field(val)),
-                _ => panic!("unknown legacy transform: {name}"),
-            }
+            Tf::from_func(name, &[val], Some(c))
         }
         Rule::TfBare => {
             let name = inner.into_children().next().unwrap().as_str();
-            match name {
-                "lowercase" => Tf::Lowercase,
-                _ => panic!("unknown bare transform: {name}"),
-            }
+            Tf::from_func(name, &[], None)
         }
         r => panic!("unexpected tf rule: {r:?}"),
     }

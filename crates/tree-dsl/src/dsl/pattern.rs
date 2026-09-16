@@ -27,6 +27,24 @@ pub enum Tf {
 }
 
 impl Tf {
+    pub(crate) fn from_func(name: &str, args: &[&str], ctx: Option<&mut Ctx>) -> Tf {
+        match name {
+            "replace" => {
+                assert_eq!(args.len(), 2, "replace needs 2 args");
+                Tf::Replace(args[0].into(), args[1].into())
+            }
+            "strip_prefix" | "strip" => Tf::Strip(args[0].into()),
+            "strip_suffix" => Tf::StripSuffix(args[0].into()),
+            "prepend" => Tf::Prepend(args[0].into()),
+            "to_rel" => Tf::ToRel(args[0].chars().next().expect("to_rel arg")),
+            "split_last" => Tf::SplitLast(args[0].into()),
+            "split_first" => Tf::SplitFirst(args[0].into()),
+            "lowercase" => Tf::Lowercase,
+            "field" => Tf::Field(ctx.expect("field needs context").intern_field(args[0])),
+            _ => panic!("unknown transform: {name}"),
+        }
+    }
+
     pub(crate) fn apply_to_str(&self, s: &str) -> String {
         match self {
             Tf::Id => s.to_string(),
