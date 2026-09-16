@@ -1219,7 +1219,7 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn context_relationship_order_is_stable_across_overloads() {
+async fn context_mixed_routing_preserves_relationship_order() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
     let repo = workspace.path().join("repo");

@@ -250,7 +250,7 @@ fn sql_long_about() -> String {
 #[command(about = descriptions::short("context"), long_about = descriptions::long("context"))]
 struct ContextArgs {
     #[arg(value_name = "TARGET", help = context_target_help(), required = true)]
-    target: Vec<String>,
+    target: Vec<commands::context::ContextTarget>,
 
     #[arg(
         long,
@@ -457,8 +457,8 @@ enum Commands {
 }
 
 impl Commands {
-    fn targets_remote(&self, context: Option<&commands::context::Targets>) -> bool {
-        context.is_some_and(|targets| !targets.remote_refs.is_empty())
+    fn targets_remote(&self, context: Option<&commands::context::ResolverPlan>) -> bool {
+        context.is_some_and(|plan| !plan.remote_refs.is_empty())
             || matches!(
                 self,
                 Commands::Query { .. }
@@ -501,7 +501,11 @@ async fn main() -> Result<()> {
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
 
     let context = match &cli.command {
-        Commands::Context(args) => Some(commands::context::classify(args)?),
+        Commands::Context(args) => {
+            let request = commands::context::ContextRequest::normalize_cli(args.target.clone())?;
+            request.validate_options(args)?;
+            Some(request.build_resolver_plan())
+        }
         _ => None,
     };
 
@@ -549,7 +553,10 @@ async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTrac
     }
 }
 
-async fn dispatch(command: Commands, context: Option<commands::context::Targets>) -> Result<()> {
+async fn dispatch(
+    command: Commands,
+    context: Option<commands::context::ResolverPlan>,
+) -> Result<()> {
     match command {
         Commands::Version => {
             println!("{}", env!("ORBIT_VERSION"));
@@ -601,7 +608,7 @@ async fn dispatch(command: Commands, context: Option<commands::context::Targets>
         Commands::Context(args) => {
             commands::context::run(
                 args,
-                context.expect("context was classified before telemetry"),
+                context.expect("context plan was prepared before telemetry"),
             )
             .await
         }
@@ -1265,11 +1272,11 @@ mod tests {
     #[test]
     fn context_accepts_definition_references_or_a_file_target() {
         let Commands::Context(args) =
-            Cli::parse_from(["orbit", "context", "Definition:7", "Definition:9"]).command
+            Cli::parse_from(["orbit", "context", "Definition:7", "Definition[9]"]).command
         else {
             panic!("expected context");
         };
-        assert_eq!(args.target, vec!["Definition:7", "Definition:9"]);
+        assert_eq!(args.target.len(), 2);
         let Commands::Context(with_tests) =
             Cli::parse_from(["orbit", "context", "Definition:7", "--tests"]).command
         else {
@@ -1282,6 +1289,8 @@ mod tests {
         ));
         assert!(Cli::try_parse_from(["orbit", "context"]).is_err());
         assert!(Cli::try_parse_from(["orbit", "context", "--file", "src/lib.rs"]).is_err());
+        assert!(Cli::try_parse_from(["orbit", "local", "context", "Definition:7"]).is_err());
+        assert!(Cli::try_parse_from(["orbit", "remote", "context", "Definition:7"]).is_err());
         for removed in ["--outline", "--related"] {
             assert!(
                 Cli::try_parse_from(["orbit", "context", "Definition:7", removed]).is_err(),

@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use duckdb_client::search::{NodeHydrator, NodeValue};
+use schemars::JsonSchema;
 
 use crate::commands::{definition, relations, setup::spec};
 use crate::workspace;
@@ -42,15 +44,15 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
     })
 }
 
-pub(crate) async fn run(target: crate::ContextArgs, targets: Targets) -> Result<()> {
-    if let Some(local) = targets.local {
+pub(crate) async fn run(target: crate::ContextArgs, plan: ResolverPlan) -> Result<()> {
+    if let Some(local) = plan.local {
         run_local(&target, local)?;
-        if !targets.remote_refs.is_empty() {
+        if !plan.remote_refs.is_empty() {
             println!("\n--- Remote context ---");
         }
     }
-    if !targets.remote_refs.is_empty() {
-        crate::remote::context::run(targets.remote_refs, target.response_format).await?;
+    if !plan.remote_refs.is_empty() {
+        crate::remote::context::run(plan.remote_refs, target.response_format).await?;
     }
     Ok(())
 }
@@ -157,24 +159,23 @@ pub(crate) fn render_bodies(
     Ok(out)
 }
 
-#[derive(Debug, PartialEq)]
-pub(crate) struct Targets {
-    local: Option<LocalTargets>,
-    pub(crate) remote_refs: Vec<String>,
+#[derive(Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[schemars(untagged, deny_unknown_fields)]
+pub(crate) enum ContextTarget {
+    Node {
+        node: String,
+        #[schemars(range(min = 0, max = i64::MAX))]
+        id: i64,
+    },
+    File {
+        file: String,
+    },
 }
 
-#[derive(Debug, PartialEq)]
-enum LocalTargets {
-    Definitions(Vec<i64>),
-    File(String),
-}
+impl FromStr for ContextTarget {
+    type Err = String;
 
-pub(crate) fn classify(args: &crate::ContextArgs) -> Result<Targets> {
-    let ontology = ontology::Ontology::load_embedded()?;
-    let mut ids = Vec::new();
-    let mut refs = Vec::new();
-    let mut files = Vec::new();
-    for target in &args.target {
+    fn from_str(target: &str) -> Result<Self, Self::Err> {
         let delimiter = target.find([':', '[', ']']);
         let path_prefix = target
             .find(['/', '\\'])
@@ -185,56 +186,109 @@ pub(crate) fn classify(args: &crate::ContextArgs) -> Result<Targets> {
             .is_some_and(u8::is_ascii_alphabetic)
             && target.as_bytes().get(1) == Some(&b':')
             && matches!(target.as_bytes().get(2), Some(b'/' | b'\\'));
-        if path_prefix || windows_absolute {
-            files.push(target.clone());
-            continue;
+        if path_prefix || windows_absolute || delimiter.is_none() {
+            return Ok(Self::File {
+                file: target.to_string(),
+            });
         }
-        let Some(delimiter) = delimiter else {
-            files.push(target.clone());
-            continue;
-        };
-        let (kind, suffix) = target.split_at(delimiter);
-        let canonical = if kind == "Issue" { "WorkItem" } else { kind };
-        ontology.get_node(canonical).with_context(|| {
-            format!("unsupported context type {kind:?}; expected an ontology node name or Issue")
-        })?;
+        let delimiter = delimiter.expect("delimiter was checked");
+        let (node, suffix) = target.split_at(delimiter);
         let id = suffix
             .strip_prefix(':')
-            .or_else(|| suffix.strip_prefix('[').and_then(|id| id.strip_suffix(']')));
-        let id = id
+            .or_else(|| suffix.strip_prefix('[').and_then(|id| id.strip_suffix(']')))
             .filter(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
             .and_then(|id| id.parse::<i64>().ok())
-            .with_context(|| format!("invalid context reference {target:?}; expected {kind}:<id> or {kind}[<id>] with a non-negative 64-bit database ID"))?;
-        if canonical == "Definition" {
-            ids.push(id);
-        } else {
-            refs.push(format!("{canonical}[{id}]"));
-        }
+            .ok_or_else(|| format!("invalid context reference {target:?}; expected {node}:<id> or {node}[<id>] with a non-negative 64-bit database ID"))?;
+        Ok(Self::Node {
+            node: node.to_string(),
+            id,
+        })
     }
-    anyhow::ensure!(
-        files.is_empty() || (files.len() == 1 && ids.is_empty()),
-        "a file path is accepted only as the sole local target"
-    );
-    let local = if let Some(file) = files.pop() {
-        anyhow::ensure!(!args.tests, "--tests requires Definition:<id> targets");
-        Some(LocalTargets::File(file))
-    } else if !ids.is_empty() {
-        Some(LocalTargets::Definitions(ids))
-    } else {
+}
+
+#[derive(JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub(crate) struct ContextRequest {
+    #[schemars(length(min = 1))]
+    targets: Vec<ContextTarget>,
+}
+
+impl ContextRequest {
+    pub(crate) fn normalize_cli(mut targets: Vec<ContextTarget>) -> Result<Self> {
+        let ontology = ontology::Ontology::load_embedded()?;
+        for target in &mut targets {
+            if let ContextTarget::Node { node, .. } = target {
+                let requested = std::mem::take(node);
+                let normalized = match requested.as_str() {
+                    "Issue" => "WorkItem",
+                    name => name,
+                };
+                ontology.get_node(normalized).with_context(|| {
+                    format!("unsupported context type {requested:?}; expected an ontology node name or Issue")
+                })?;
+                node.push_str(normalized);
+            }
+        }
+        Ok(Self { targets })
+    }
+
+    pub(crate) fn validate_options(&self, args: &crate::ContextArgs) -> Result<()> {
+        let files = self
+            .targets
+            .iter()
+            .filter(|target| matches!(target, ContextTarget::File { .. }))
+            .count();
+        let definitions = self.targets.iter().any(
+            |target| matches!(target, ContextTarget::Node { node, .. } if node == "Definition"),
+        );
         anyhow::ensure!(
-            !args.tests && args.repo.is_none() && args.db.is_none(),
+            files == 0 || (files == 1 && !definitions),
+            "a file path is accepted only as the sole local target"
+        );
+        anyhow::ensure!(
+            files == 0 || !args.tests,
+            "--tests requires Definition:<id> targets"
+        );
+        anyhow::ensure!(
+            files != 0 || definitions || (!args.tests && args.repo.is_none() && args.db.is_none()),
             "--tests, --repo, and --db are local-only options; remove them for remote-only entity context (use an explicit path for a local file)"
         );
-        None
-    };
-    anyhow::ensure!(
-        !refs.is_empty() || args.response_format.is_none(),
-        "--response-format is only supported for remote entity context"
-    );
-    Ok(Targets {
-        local,
-        remote_refs: refs,
-    })
+        anyhow::ensure!(
+            self.targets.iter().any(
+                |target| matches!(target, ContextTarget::Node { node, .. } if node != "Definition")
+            ) || args.response_format.is_none(),
+            "--response-format is only supported for remote entity context"
+        );
+        Ok(())
+    }
+
+    pub(crate) fn build_resolver_plan(self) -> ResolverPlan {
+        let mut definitions = Vec::new();
+        let mut file = None;
+        let mut remote_refs = Vec::new();
+        for target in self.targets {
+            match target {
+                ContextTarget::Node { node, id } if node == "Definition" => definitions.push(id),
+                ContextTarget::Node { node, id } => remote_refs.push(format!("{node}[{id}]")),
+                ContextTarget::File { file: path } => file = Some(path),
+            }
+        }
+        let local = file.map(LocalTargets::File).or_else(|| {
+            (!definitions.is_empty()).then_some(LocalTargets::Definitions(definitions))
+        });
+        ResolverPlan { local, remote_refs }
+    }
+}
+
+pub(crate) struct ResolverPlan {
+    local: Option<LocalTargets>,
+    pub(crate) remote_refs: Vec<String>,
+}
+
+#[derive(Debug, PartialEq)]
+enum LocalTargets {
+    Definitions(Vec<i64>),
+    File(String),
 }
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
@@ -424,27 +478,36 @@ mod tests {
     }
 
     #[test]
-    fn targets_classify_definition_references_or_one_file() {
-        let classify_targets = |targets: &[&str]| {
-            classify(&crate::ContextArgs {
-                target: targets.iter().map(|target| (*target).into()).collect(),
-                response_format: None,
-                tests: false,
-                repo: None,
-                db: None,
+    fn targets_parse_normalize_and_plan() {
+        assert_eq!(
+            "C:\\src\\lib.rs".parse(),
+            Ok(ContextTarget::File {
+                file: "C:\\src\\lib.rs".into()
             })
-        };
-        assert_eq!(
-            classify_targets(&["src/lib.rs"]).unwrap().local,
-            Some(LocalTargets::File("src/lib.rs".into()))
         );
-        let definitions = classify_targets(&["Definition:7", "Definition[9]"]).unwrap();
+        assert!("Definition[scope:7]".parse::<ContextTarget>().is_err());
+        assert!("X:9223372036854775808".parse::<ContextTarget>().is_err());
+        let targets = ["Definition:7", "Definition[9]", "Issue:4"]
+            .map(|target| target.parse().unwrap())
+            .into();
+        let plan = ContextRequest::normalize_cli(targets)
+            .unwrap()
+            .build_resolver_plan();
+        assert_eq!(plan.local, Some(LocalTargets::Definitions(vec![7, 9])));
+        assert_eq!(plan.remote_refs, ["WorkItem[4]"]);
+    }
+
+    #[test]
+    fn context_request_schema_is_current() {
+        let schema = schemars::schema_for!(ContextRequest);
+        let generated = format!("{}\n", serde_json::to_string_pretty(&schema).unwrap());
         assert_eq!(
-            definitions.local,
-            Some(LocalTargets::Definitions(vec![7, 9]))
+            generated,
+            include_str!(concat!(
+                env!("CONFIG_DIR"),
+                "/schemas/context_request.schema.json"
+            ))
         );
-        assert!(definitions.remote_refs.is_empty());
-        assert!(classify_targets(&["Type::method"]).is_err());
     }
 
     #[test]
