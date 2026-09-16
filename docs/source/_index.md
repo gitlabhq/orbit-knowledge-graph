@@ -129,7 +129,7 @@ its own ClickHouse database. GitLab Orbit Local writes only to a DuckDB file on 
 ### What do I need to host or build?
 
 GitLab.com and GitLab Orbit Local require you to host or build nothing; for Local, install the prebuilt
-`orbit` binary. On GitLab Self-Managed, you host Kubernetes, ClickHouse, and NATS and deploy the Siphon
+`orbit-cli` binary. On GitLab Self-Managed, you host Kubernetes, ClickHouse, and NATS and deploy the Siphon
 and GitLab Orbit Helm charts, but never build GitLab Orbit from source; review the
 [prerequisites and sizing guidance](self-managed/getting-started.md) before planning a deployment.
 
@@ -140,7 +140,7 @@ and GitLab Orbit Helm charts, but never build GitLab Orbit from source; review t
 | Data | Code in one local working tree | Code and SDLC data, including merge requests, pipelines, work items, and vulnerabilities |
 | Where it runs | On your computer | On GitLab-managed infrastructure |
 | GitLab tier | Free, Premium, or Ultimate | Premium or Ultimate for the top-level group you query |
-| Setup | Install the prebuilt `orbit` binary | Enable the `knowledge_graph` feature flag and GitLab Orbit for a top-level group |
+| Setup | Install the prebuilt `orbit-cli` binary | Enable the `knowledge_graph` feature flag and GitLab Orbit for a top-level group |
 | Access | Access to the local repository | Owner role to enable; Reporter role or higher for each user who queries |
 
 For security data in GitLab Orbit Remote, users need the Security Manager role. For more information,
