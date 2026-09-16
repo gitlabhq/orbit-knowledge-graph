@@ -11,6 +11,7 @@ test-runner = ["dep:tree-dsl-tests", "dep:tokio"]
 tree-dsl = { path = "../tree-dsl" }
 tree-dsl-tests = { path = "../tree-dsl-tests", optional = true }
 clap = { workspace = true }
+rustc-hash = "2"
 dirs = { workspace = true }
 serde_yaml = { workspace = true }
 anyhow = { workspace = true }

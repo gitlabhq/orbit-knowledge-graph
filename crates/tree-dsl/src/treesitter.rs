@@ -172,6 +172,7 @@ fn from_tree_sitter(
     lang: &Lang,
     kind_map: &[u16],
     field_map: &[u16],
+    skip: &[bool],
     label: &str,
 ) -> Tree {
     let ts_root = ts_tree.root_node();
@@ -212,6 +213,7 @@ fn from_tree_sitter(
 
     let root_nid = tree.root;
     let mut parent_stack: Vec<indextree::NodeId> = vec![root_nid];
+    let mut pushed: Vec<bool> = Vec::new();
 
     if !cursor.goto_first_child() {
         return tree;
@@ -219,7 +221,33 @@ fn from_tree_sitter(
 
     loop {
         let ts = cursor.node();
-        let kind = kind_map.get(ts.kind_id() as usize).copied().unwrap_or(0);
+        let ts_kind_id = ts.kind_id() as usize;
+        let has_field = cursor.field_id().is_some();
+        let skippable = !has_field && skip.get(ts_kind_id).copied().unwrap_or(false);
+
+        if skippable {
+            if cursor.goto_first_child() {
+                pushed.push(false);
+                continue;
+            }
+            if cursor.goto_next_sibling() {
+                continue;
+            }
+            loop {
+                if !cursor.goto_parent() {
+                    return tree;
+                }
+                if pushed.pop().unwrap_or(true) {
+                    parent_stack.pop();
+                }
+                if cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        let kind = kind_map.get(ts_kind_id).copied().unwrap_or(0);
         let field = cursor
             .field_id()
             .map_or(0, |f| field_map.get(f.get() as usize).copied().unwrap_or(0));
@@ -256,6 +284,7 @@ fn from_tree_sitter(
         );
 
         if cursor.goto_first_child() {
+            pushed.push(true);
             parent_stack.push(nid);
             continue;
         }
@@ -268,7 +297,9 @@ fn from_tree_sitter(
             if !cursor.goto_parent() {
                 return tree;
             }
-            parent_stack.pop();
+            if pushed.pop().unwrap_or(true) {
+                parent_stack.pop();
+            }
             if cursor.goto_next_sibling() {
                 break;
             }
@@ -280,11 +311,17 @@ struct TsCache {
     lang: Option<SupportLang>,
     kinds: Vec<u16>,
     fields: Vec<u16>,
+    skip: Vec<bool>,
     parser: tree_sitter::Parser,
 }
 
 impl TsCache {
-    fn ensure(&mut self, support_lang: SupportLang, lang: &Lang) {
+    fn ensure(
+        &mut self,
+        support_lang: SupportLang,
+        lang: &Lang,
+        referenced: &rustc_hash::FxHashSet<u16>,
+    ) {
         if self.lang == Some(support_lang) {
             return;
         }
@@ -298,6 +335,15 @@ impl TsCache {
                     .map(|id| ts.field_name_for_id(id).map_or(0, |s| lang.intern_field(s))),
             )
             .collect();
+        self.skip = self
+            .kinds
+            .iter()
+            .map(|&our_kind| {
+                our_kind != 0
+                    && !crate::canonical::is_canonical(our_kind)
+                    && !referenced.contains(&our_kind)
+            })
+            .collect();
         self.parser.set_language(&ts).unwrap();
         self.lang = Some(support_lang);
     }
@@ -305,16 +351,22 @@ impl TsCache {
 
 thread_local! {
     static CACHE: std::cell::RefCell<TsCache> = std::cell::RefCell::new(TsCache {
-        lang: None, kinds: Vec::new(), fields: Vec::new(),
+        lang: None, kinds: Vec::new(), fields: Vec::new(), skip: Vec::new(),
         parser: tree_sitter::Parser::new(),
     });
 }
 
-pub fn parse(source: &str, support_lang: SupportLang, lang: &Lang, label: &str) -> Tree {
+pub fn parse(
+    source: &str,
+    support_lang: SupportLang,
+    lang: &Lang,
+    label: &str,
+    referenced: &rustc_hash::FxHashSet<u16>,
+) -> Tree {
     CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
-        c.ensure(support_lang, lang);
+        c.ensure(support_lang, lang, referenced);
         let ts_tree = c.parser.parse(source.as_bytes(), None).unwrap();
-        from_tree_sitter(source, &ts_tree, lang, &c.kinds, &c.fields, label)
+        from_tree_sitter(source, &ts_tree, lang, &c.kinds, &c.fields, &c.skip, label)
     })
 }

@@ -13780,6 +13780,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs",
+ "rustc-hash 2.1.3",
  "serde_json",
  "serde_yaml",
  "tokio",

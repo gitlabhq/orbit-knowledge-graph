@@ -32,6 +32,7 @@ pub struct Pipeline {
     pub lang_id: SupportLang,
     pub rewrite_stages: Vec<Vec<Rewrite>>,
     pub resolve: ResolveConfig,
+    pub referenced_kinds: rustc_hash::FxHashSet<u16>,
 }
 
 impl Pipeline {
@@ -41,11 +42,13 @@ impl Pipeline {
             Some(yaml) => rules::load_lang(yaml, &lang),
             None => (vec![], ResolveConfig::default()),
         };
+        let referenced_kinds = pattern::referenced_kinds(&rewrite_stages);
         (
             Pipeline {
                 lang_id,
                 rewrite_stages,
                 resolve,
+                referenced_kinds,
             },
             lang,
         )
@@ -53,7 +56,13 @@ impl Pipeline {
 }
 
 pub fn process_file(path: &str, source: &str, lang: &Lang, pipeline: &Pipeline) -> Tree {
-    let mut tree = treesitter::parse(source, pipeline.lang_id, lang, path);
+    let mut tree = treesitter::parse(
+        source,
+        pipeline.lang_id,
+        lang,
+        path,
+        &pipeline.referenced_kinds,
+    );
     for stage in &pipeline.rewrite_stages {
         pattern::apply_rewrites(&mut tree, lang, stage);
     }
@@ -70,7 +79,13 @@ pub fn process_file_timed(
     pipeline: &Pipeline,
 ) -> (Tree, [std::time::Duration; 4]) {
     let t0 = Instant::now();
-    let mut tree = treesitter::parse(source, pipeline.lang_id, lang, path);
+    let mut tree = treesitter::parse(
+        source,
+        pipeline.lang_id,
+        lang,
+        path,
+        &pipeline.referenced_kinds,
+    );
     let t1 = Instant::now();
     for stage in &pipeline.rewrite_stages {
         pattern::apply_rewrites(&mut tree, lang, stage);
