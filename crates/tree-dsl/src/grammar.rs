@@ -212,8 +212,13 @@ fn from_tree_sitter(source: &str, ts_tree: &tree_sitter::Tree, lang: &Lang, labe
         let kind = lang.intern_kind(ts.kind());
         let field = cursor.field_name().map_or(0, |f| lang.intern_field(f));
         let sym = if ts.is_named() {
-            let text = &source[ts.start_byte()..ts.end_byte()];
-            lang.syms.intern(text)
+            let len = ts.end_byte() - ts.start_byte();
+            if len <= 1024 {
+                let text = &source[ts.start_byte()..ts.end_byte()];
+                lang.syms.intern(text)
+            } else {
+                0
+            }
         } else {
             0
         };
@@ -259,9 +264,15 @@ fn from_tree_sitter(source: &str, ts_tree: &tree_sitter::Tree, lang: &Lang, labe
     }
 }
 
+thread_local! {
+    static PARSER: std::cell::RefCell<tree_sitter::Parser> = std::cell::RefCell::new(tree_sitter::Parser::new());
+}
+
 pub fn parse(source: &str, support_lang: SupportLang, lang: &Lang, label: &str) -> Tree {
-    let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&support_lang.ts_language()).unwrap();
-    let ts_tree = parser.parse(source.as_bytes(), None).unwrap();
-    from_tree_sitter(source, &ts_tree, lang, label)
+    PARSER.with(|parser| {
+        let mut parser = parser.borrow_mut();
+        parser.set_language(&support_lang.ts_language()).unwrap();
+        let ts_tree = parser.parse(source.as_bytes(), None).unwrap();
+        from_tree_sitter(source, &ts_tree, lang, label)
+    })
 }
