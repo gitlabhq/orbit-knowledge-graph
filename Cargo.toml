@@ -117,10 +117,9 @@ tracing = "0.1.44"
 # Build-time fetch over plain HTTP; integrity comes from pinned checksums.
 ureq = { version = "3", default-features = false }
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
-# The `ring` and `websockets` defaults are dropped so no non-FIPS TLS provider
-# reaches the server binary. `aws-lc-rs` here stays non-FIPS on purpose: the server
-# unifies it onto the FIPS module through its own rustls features, while build
-# scripts that transitively pull async-nats keep a static, host-loadable aws-lc.
+# Drop transitive crypto providers; hint aws-lc usage so orbit-server's `fips` feature
+# resolves it implicitly. Do not add `fips` here: it would leak into build scripts,
+# which cannot load the FIPS shared library on macOS.
 async-nats = { version = "0.49.0", default-features = false, features = [
   "server_2_10",
   "server_2_11",
