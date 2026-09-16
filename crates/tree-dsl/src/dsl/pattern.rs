@@ -554,6 +554,14 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
     let mut caps: Vec<Cap> = (0..max_slots).map(|_| Cap::Empty).collect();
 
+    let root_kinds: Vec<u16> = rules
+        .iter()
+        .map(|r| match &r.pat {
+            Pat::Node { kind, .. } => *kind,
+            _ => 0,
+        })
+        .collect();
+
     let candidates = t.postorder();
 
     for target in candidates {
@@ -561,7 +569,11 @@ pub fn apply_rewrites(t: &mut Tree, lang: &mut Lang, rules: &[Rewrite]) {
             continue;
         }
 
-        for r in rules {
+        let target_kind = t.node(target).kind;
+        for (ri, r) in rules.iter().enumerate() {
+            if root_kinds[ri] != 0 && root_kinds[ri] != target_kind {
+                continue;
+            }
             for c in &mut caps[..r.nslots] {
                 *c = Cap::Empty;
             }
