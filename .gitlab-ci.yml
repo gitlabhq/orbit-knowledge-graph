@@ -769,7 +769,9 @@ code-indexing-benchmark-build:
   tags:
     - ${RUNNER_LARGE}
   script:
-    - cargo build --bin orbit --release --features duckdb-client/bundled
+    - cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled
+    # The CLI ships without the FIPS module; a workspace-level build would pull it in.
+    - '! nm --defined-only target/release/orbit | grep -q " _\?aws_lc_fips_"'
   artifacts:
     paths:
       - target/release/orbit
