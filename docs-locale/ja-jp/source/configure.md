@@ -5,6 +5,8 @@ remove_date: '2026-08-07'
 
 <!-- markdownlint-disable -->
 
+Test by Jack
+
 このドキュメントは[別の場所](remote/getting-started.md)に移動しました。
 
 <!-- This redirect file can be deleted after <2026-08-07>. -->

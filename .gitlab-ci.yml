@@ -1166,7 +1166,8 @@ release-manifest:
     GIT_STRATEGY: none
     DOCS_GITLAB_REPO_SUFFIX: orbit
     # By default, deploy the Review App using the `main` branch of the `gitlab-org/gitlab-docs` project
-    DOCS_BRANCH: main
+#    DOCS_BRANCH: main
+    DOCS_BRANCH: jcole-ext/set-review-languages
   when: manual
 
 # Trigger a docs build in docs-gitlab-com project
