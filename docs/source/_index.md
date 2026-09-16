@@ -144,7 +144,7 @@ writes only to a DuckDB file on your machine.
 |---|---|---|
 | Data | Code in one local working tree | Code and SDLC data, including merge requests, pipelines, work items, and vulnerabilities |
 | Where it runs | On your computer | On GitLab-managed infrastructure |
-| GitLab tier | Free, Premium, or Ultimate | Ultimate for the namespace you query |
+| GitLab tier | Free, Premium, or Ultimate | Premium or Ultimate for the top-level group you query |
 | Setup | Install the prebuilt `orbit` binary | Enable the `knowledge_graph` feature flag and GitLab Orbit for a top-level group |
 | Access | Access to the local repository | Owner role to enable; Reporter role or higher for each user who queries |
 
