@@ -165,62 +165,6 @@ pub struct Rewrite {
     pub slots: HashMap<Box<str>, u16>,
 }
 
-pub fn referenced_kinds(stages: &[Vec<Rewrite>]) -> rustc_hash::FxHashSet<u16> {
-    let mut kinds = rustc_hash::FxHashSet::default();
-    for stage in stages {
-        for r in stage {
-            collect_pat_kinds(&r.pat, &mut kinds);
-            let Out::Replace(ref tpl) = r.out;
-            collect_pat_kinds(tpl, &mut kinds);
-            for filter in &r.filters {
-                kinds.extend(filter);
-            }
-        }
-    }
-    kinds
-}
-
-fn collect_pat_kinds(pat: &Pat, kinds: &mut rustc_hash::FxHashSet<u16>) {
-    match pat {
-        Pat::Node { kind, kids, .. } => {
-            kinds.insert(*kind);
-            for kid in kids {
-                collect_pat_kinds(kid, kinds);
-            }
-        }
-        Pat::Cap {
-            kind,
-            rekind,
-            guard,
-            ..
-        } => {
-            if let Some(k) = kind {
-                kinds.insert(*k);
-            }
-            if let Some(k) = rekind {
-                kinds.insert(*k);
-            }
-            if let Some(g) = guard {
-                collect_pat_kinds(g, kinds);
-            }
-        }
-        Pat::Var { rekind, guard, .. } => {
-            if let Some(k) = rekind {
-                kinds.insert(*k);
-            }
-            if let Some(g) = guard {
-                collect_pat_kinds(g, kinds);
-            }
-        }
-        Pat::Not(inner) | Pat::Desc(inner) => collect_pat_kinds(inner, kinds),
-        Pat::Spread { inject, .. } => {
-            for kid in inject {
-                collect_pat_kinds(kid, kinds);
-            }
-        }
-    }
-}
-
 pub struct Ctx<'l> {
     pub lang: &'l Lang,
     pub(crate) slots: HashMap<Box<str>, u16>,

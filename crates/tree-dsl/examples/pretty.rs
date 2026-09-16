@@ -38,19 +38,12 @@ fn main() {
     match stage.as_str() {
         "cst" => {
             let mut lang = Lang::new();
-            let tree = grammar::parse(
-                &source,
-                lang_id,
-                &lang,
-                "test",
-                &rustc_hash::FxHashSet::default(),
-            );
+            let tree = grammar::parse(&source, lang_id, &lang, "test");
             println!("{}", pretty_print(&tree, &lang, color));
         }
         "rewrite" => {
             let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
-            let mut tree =
-                grammar::parse(&source, lang_id, &lang, "test", &pipeline.referenced_kinds);
+            let mut tree = grammar::parse(&source, lang_id, &lang, "test");
             for rules in &pipeline.rewrite_stages {
                 tree_dsl::pattern::apply_rewrites(&mut tree, &lang, rules);
             }
