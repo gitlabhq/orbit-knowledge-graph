@@ -444,7 +444,7 @@ async fn corpus_smoke() {
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
 
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     // Admin claims -> Owner over org root, so access-gated entities are visible
     // and the real SQL runs (not `WHERE false`).
     let claims = Claims::dummy();
