@@ -62,9 +62,6 @@ impl PipelineStage for AuthorizationStage {
 
         obs.authorized(t.elapsed());
 
-        Ok(AuthorizationOutput {
-            query_result: input.query_result.clone(),
-            authorizations,
-        })
+        Ok(AuthorizationOutput { authorizations })
     }
 }

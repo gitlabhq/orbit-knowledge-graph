@@ -96,10 +96,7 @@ impl PipelineStage for AuthorizeAllStage {
                     .collect::<HashMap<i64, bool>>(),
             })
             .collect();
-        Ok(AuthorizationOutput {
-            query_result: input.query_result.clone(),
-            authorizations,
-        })
+        Ok(AuthorizationOutput { authorizations })
     }
 }
 

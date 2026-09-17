@@ -168,10 +168,7 @@ impl PipelineStage for MockAuthorizationStage {
             })
             .collect();
 
-        Ok(AuthorizationOutput {
-            query_result: input.query_result.clone(),
-            authorizations,
-        })
+        Ok(AuthorizationOutput { authorizations })
     }
 }
 

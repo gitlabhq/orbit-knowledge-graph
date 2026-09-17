@@ -2,7 +2,7 @@ use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
 
-use query_engine::shared::{AuthorizationOutput, RedactionOutput};
+use query_engine::shared::{AuthorizationOutput, ExtractionOutput, RedactionOutput};
 
 #[derive(Clone)]
 pub struct RedactionStage;
@@ -16,16 +16,23 @@ impl PipelineStage for RedactionStage {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx
+        let authorization = ctx
             .phases
-            .get::<AuthorizationOutput>()
+            .remove::<AuthorizationOutput>()
             .ok_or_else(|| {
                 PipelineError::Authorization("AuthorizationOutput not found in phases".into())
             })
             .inspect_err(|e| obs.record_error(e))?;
+        let extraction = ctx
+            .phases
+            .remove::<ExtractionOutput>()
+            .ok_or_else(|| {
+                PipelineError::Authorization("ExtractionOutput not found in phases".into())
+            })
+            .inspect_err(|e| obs.record_error(e))?;
 
-        let mut query_result = input.query_result.clone();
-        let redacted_count = query_result.apply_authorizations(&input.authorizations);
+        let mut query_result = extraction.query_result;
+        let redacted_count = query_result.apply_authorizations(&authorization.authorizations);
 
         Ok(RedactionOutput {
             query_result,
@@ -81,10 +88,10 @@ mod tests {
             server_extensions: Default::default(),
             phases: Default::default(),
         };
-        ctx.phases.insert(AuthorizationOutput {
+        ctx.phases.insert(ExtractionOutput {
             query_result: QueryResult::from_batches(&[batch], &result_ctx),
-            authorizations,
         });
+        ctx.phases.insert(AuthorizationOutput { authorizations });
         ctx
     }
 

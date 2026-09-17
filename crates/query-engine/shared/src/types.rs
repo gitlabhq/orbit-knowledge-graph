@@ -15,7 +15,6 @@ pub struct ExtractionOutput {
 }
 
 pub struct AuthorizationOutput {
-    pub query_result: QueryResult,
     pub authorizations: Vec<ResourceAuthorization>,
 }
 
