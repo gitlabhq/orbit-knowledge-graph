@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
+use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use compiler::{Frontend, SecurityContext, compile_local};
 use duckdb_client::DuckDbClient;
 use ontology::Ontology;
+use orbit_utils::arrow::ArrowUtils;
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{
@@ -161,19 +162,7 @@ fn print_result(label: &str, query: &str, batch: &RecordBatch) {
 }
 
 fn format_cell(array: &dyn Array, row: usize) -> String {
-    if array.is_null(row) {
-        return "NULL".into();
-    }
-    if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
-        return arr.value(row).to_string();
-    }
-    if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
-        return arr.value(row).to_string();
-    }
-    if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
-        return arr.value(row).to_string();
-    }
-    "<?>".into()
+    ArrowUtils::array_value_to_string(array, row).unwrap_or_else(|| "NULL".into())
 }
 
 fn expected_value_matches(array: &dyn Array, row: usize, expected: &serde_json::Value) -> bool {
