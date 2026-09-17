@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.27.1
+version: 0.28.0
 license: MIT
 metadata:
   audience: developers
@@ -89,6 +89,8 @@ Orbit answers come from graph queries, not an authoritative source. Show the que
 ## Repository map helpers
 
 For code-structure orientation before you plan a change, use `glab orbit repo-map` on a local checkout. For a project already indexed in Orbit Remote, use the bundled remote helper script. The script path is relative to this skill root, not the user's repository. See the repository-map rows in [References](#references).
+
+<!-- orbit:include local:quick-start -->
 
 ## Managed CLI
 

@@ -43,6 +43,7 @@ uuid = { workspace = true }
 
 [build-dependencies]
 orbit-prompts = { path = "../orbit-prompts" }
+orbit-skill = { path = "../orbit-skill" }
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }

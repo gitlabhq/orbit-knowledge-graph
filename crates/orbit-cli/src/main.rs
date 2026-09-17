@@ -1091,6 +1091,28 @@ mod tests {
         Cli::command().debug_assert();
     }
 
+    #[test]
+    fn remote_skill_commands_exist_in_the_clap_inventory() {
+        let extracted: std::collections::BTreeSet<_> = env!("ORBIT_SKILL_REMOTE_COMMANDS")
+            .split(',')
+            .map(str::to_string)
+            .collect();
+        let mut clap_commands: std::collections::BTreeSet<_> = Cli::command()
+            .get_subcommands()
+            .map(|command| command.get_name().to_string())
+            .collect();
+        let generated_help_is_materialized = clap_commands.remove("help");
+        assert!(
+            !generated_help_is_materialized,
+            "get_subcommands excludes clap's generated help command"
+        );
+        let unknown: Vec<_> = extracted
+            .iter()
+            .filter(|command| command.as_str() != "help" && !clap_commands.contains(*command))
+            .collect();
+        assert!(unknown.is_empty(), "unknown skill commands: {unknown:?}");
+    }
+
     fn action_for(argv: &[&str]) -> String {
         let matches = Cli::command()
             .try_get_matches_from(argv)

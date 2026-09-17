@@ -8193,6 +8193,7 @@ dependencies = [
  "orbit-analytics",
  "orbit-prompts",
  "orbit-search",
+ "orbit-skill",
  "orbit-utils",
  "regex",
  "reqwest 0.13.4",
@@ -8315,6 +8316,7 @@ dependencies = [
  "orbit-observability",
  "orbit-prompts",
  "orbit-server-config",
+ "orbit-skill",
  "orbit-utils",
  "orbit-versions",
  "prost 0.14.4",
@@ -8355,6 +8357,15 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "orbit-skill"
+version = "0.1.0"
+dependencies = [
+ "comrak",
+ "syn 2.0.118",
+ "tempfile",
 ]
 
 [[package]]

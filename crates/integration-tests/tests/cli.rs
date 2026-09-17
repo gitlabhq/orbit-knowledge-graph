@@ -729,14 +729,14 @@ fn skill_serves_bundled_content() {
     assert!(manifest.status.success());
     let manifest = String::from_utf8(manifest.stdout).unwrap();
     assert!(manifest.contains("name: orbit-cli"));
-    assert!(manifest.contains("references/sql.md"));
+    assert!(manifest.contains("references/local/sql.md"));
     assert!(
-        manifest.contains("`orbit skill references/sql.md`"),
+        manifest.contains("`orbit skill references/local/sql.md`"),
         "served manifest must tell binary users the version-matched access path"
     );
 
     let sql_ref = orbit_cmd()
-        .args(["skill", "references/sql.md"])
+        .args(["skill", "references/local/sql.md"])
         .output()
         .unwrap()
         .stdout;
@@ -747,7 +747,11 @@ fn skill_serves_bundled_content() {
         "the discovery hint must be manifest-only, not appended to subfiles"
     );
 
-    for path in ["SKILL.md", "references/sql.md", "references/repo_map.md"] {
+    for path in [
+        "SKILL.md",
+        "references/local/sql.md",
+        "references/local/repo_map.md",
+    ] {
         let out = orbit_cmd().args(["skill", path]).output().unwrap();
         assert!(out.status.success(), "`orbit skill {path}` failed");
         assert!(
@@ -765,7 +769,7 @@ fn skill_serves_bundled_content() {
     assert_eq!(no_arg, explicit, "no-arg must equal `skill SKILL.md`");
 
     let repo_map_ref = orbit_cmd()
-        .args(["skill", "references/repo_map.md"])
+        .args(["skill", "references/local/repo_map.md"])
         .output()
         .unwrap()
         .stdout;
@@ -782,7 +786,7 @@ fn skill_rejects_unknown_and_escaping_paths() {
         "references/does-not-exist.md",
         "../Cargo.toml",
         "/etc/passwd",
-        "references/../../secret",
+        "references/local/../../../secret",
     ] {
         let out = orbit_cmd().args(["skill", path]).output().unwrap();
         assert!(

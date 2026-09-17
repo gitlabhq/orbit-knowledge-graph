@@ -36,6 +36,12 @@ The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`,
 
 Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version is the `query_dsl` pin in `config/versions.yaml`. It is tied to the `graph_query` schema `$id` major version. The query response format version is the `raw_output_format` pin in the same file.
 
+### Agent Skill Source Trees
+
+Orbit maintains two independently usable agent skill trees. `skills/orbit/` documents Orbit Remote, while `skills/orbit-cli/` documents the local capabilities embedded in the `orbit` binary. Local reference files use the `references/local/` namespace so the two trees can form a collision-free path union without changing today's embedded-only `orbit skill [path]` behavior.
+
+The remote manifest declares local splice slots and the local manifest declares exported sections through paired line-oriented HTML markers. Both consumer build scripts call the shared `orbit-skill` validator, which requires a marker-ID bijection and disjoint paths, resolves relative Markdown links against the composed union, and checks documented remote command literals against the clap command inventory. General Markdown checks remain responsible for prose, external URLs, and fragments.
+
 ### Named Queries
 
 Named queries are server-defined query templates for preset consumers (the Orbit dashboard). Clients invoke a stable name instead of authoring a Query DSL string. That string can drift from the server's grammar and ontology. Templates live as YAML under `config/named_queries/`. They are validated against `config/schemas/named_query.schema.json` and compiled against the ontology by `orbit-server`'s build script. A template that no longer matches the DSL or ontology fails the build.

@@ -14,13 +14,13 @@ struct SkillAssets;
 const MANIFEST: &str = "SKILL.md";
 
 /// Appended (never prepended, so the YAML frontmatter stays first) to the
-/// served manifest. The on-disk SKILL.md links to `references/*.md` with
-/// working-tree-relative paths that do not resolve when the only artifact is
+/// served manifest. The on-disk SKILL.md links to `references/local/*.md`
+/// with working-tree-relative paths that do not resolve when the only artifact is
 /// the binary; this tells the reader the version-matched access path instead.
 fn manifest_binary_hint() -> String {
     let launcher = crate::commands::setup::spec::launcher();
     format!(
-        "\n\n---\n\nYou are viewing this via the `orbit` binary; the links above are relative to the on-disk skill tree. Fetch referenced files with `{launcher} skill <path>` (e.g. `{launcher} skill references/sql.md`).\n"
+        "\n\n---\n\nYou are viewing this via the `orbit` binary; the links above are relative to the on-disk skill tree. Fetch referenced files with `{launcher} skill <path>` (e.g. `{launcher} skill references/local/sql.md`).\n"
     )
 }
 
@@ -70,8 +70,8 @@ mod tests {
 
     #[test]
     fn reference_files_are_embedded() {
-        assert!(lookup("references/sql.md").is_some());
-        assert!(lookup("references/repo_map.md").is_some());
+        assert!(lookup("references/local/sql.md").is_some());
+        assert!(lookup("references/local/repo_map.md").is_some());
     }
 
     #[test]
@@ -85,7 +85,7 @@ mod tests {
             "../Cargo.toml",
             "../../etc/passwd",
             "/etc/passwd",
-            "references/../../secret",
+            "references/local/../../../secret",
             "./SKILL.md",
             "",
         ] {
@@ -105,15 +105,15 @@ mod tests {
     fn served_manifest_carries_binary_hint_but_subfiles_do_not() {
         let manifest = render(MANIFEST).unwrap();
         assert!(manifest.starts_with("---"), "frontmatter must stay first");
-        assert!(manifest.contains("`orbit skill references/sql.md`"));
+        assert!(manifest.contains("`orbit skill references/local/sql.md`"));
 
         assert!(
-            !render("references/sql.md")
+            !render("references/local/sql.md")
                 .unwrap()
                 .contains("skill <path>")
         );
         assert!(
-            !render("references/repo_map.md")
+            !render("references/local/repo_map.md")
                 .unwrap()
                 .contains("skill <path>")
         );
