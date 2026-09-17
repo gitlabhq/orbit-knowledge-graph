@@ -25,7 +25,7 @@ A secure query layer on top of the graph lets developers and AI agents query tha
 - [NATS](https://docs.nats.io/), the durable message broker for CDC and event-driven work such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing (see [ADR 005](decisions/005_code_indexing_task_table.md)).
 - [ClickHouse](https://clickhouse.com/), the remote datalake and property-graph store. Orbit does not connect directly to the GitLab OLTP database.
 - **Orbit Remote's service binary**, with four runtime modes:
-  - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, REST, and MCP traffic; validates Query DSL requests against the JSON schema and ontology; compiles them to ClickHouse SQL; and applies authorization and formatting before returning results.
+  - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, REST, and MCP traffic. It validates Query DSL requests against the JSON schema and ontology. It compiles them to ClickHouse SQL. It applies authorization and formatting before returning results.
   - **`Indexer`** (`gkg-server --mode Indexer`): Runs the shared indexing engine, consumes SDLC and code indexing requests from NATS JetStream, and writes graph data into ClickHouse.
   - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. It also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle, including ontology archive publication.
   - **`HealthCheck`** (`gkg-server --mode HealthCheck`): Aggregates cluster health by probing Kubernetes deployments and ClickHouse instances, and exposes the result on a single `/health` endpoint.
@@ -68,7 +68,7 @@ graph TD
 
 ### Design Documents
 
-Please see the following design documents for more details on the Orbit architecture:
+See the following design documents for more details on the Orbit architecture:
 
 - [Orbit Indexing Service](indexing/)
 - [Orbit Querying Service](querying/)
@@ -77,7 +77,7 @@ Please see the following design documents for more details on the Orbit architec
 - [Orbit Security](security.md)
 - [Orbit Observability](observability.md)
 - [Duo / Orbit Prompt Routing Architecture](duo_orbit_prompt_routing.md)
-- [Architecture Decision Records](decisions/) — numbered ADRs covering storage choice, communication protocols, API design, indexing triggers, and more
+- [Architecture Decision Records](decisions/): numbered ADRs covering storage choice, communication protocols, API design, indexing triggers, and more
 
 ## Runtime Breakdown
 
@@ -169,7 +169,7 @@ View the [Graph Query Engine](querying/graph_engine.md) design document for more
 
 ### Problem Statement
 
-Modern software development operates across a complex web of repositories, issues, merge requests, CI/CD pipelines, deployment environments, infrastructure, and assets. Both code data and SDLC platform metadata are inherently interconnected network graphs. While GitLab is a single vehicle to deliver these collective features, our ability to consume and analyze this data is fragmented, forcing developers and AI agents to piece together context through dozens of API, GraphQL, and Agent-tool calls.
+Modern software development operates across a complex web of repositories, issues, merge requests, CI/CD pipelines, deployment environments, infrastructure, and assets. Both code data and SDLC platform metadata are inherently interconnected network graphs. GitLab is a single vehicle to deliver these collective features. But our ability to consume and analyze this data is fragmented. It forces developers and AI agents to piece together context through dozens of API, GraphQL, and Agent-tool calls.
 
 GitLab has hundreds of REST APIs and GraphQL Schema Elements. AI agents and data products need to be able to reason about GitLab data in a way that is impractical with traditional data-fetching techniques.
 
@@ -283,7 +283,7 @@ By contrast, GraphQL and REST require schema introspection and nested field expa
 
 #### 2. We Need Arbitrary Neighbor Exploration and Path Finding (N-Hop Queries)
 
-Many Orbit workloads involve **exploring neighbors** and **path finding** up to N levels deep—for example, finding “all pipelines triggered by MRs that close issues linked to epics under a group.”
+Many Orbit workloads involve **exploring neighbors** and **path finding** up to N levels deep. For example, finding “all pipelines triggered by MRs that close issues linked to epics under a group”.
 Neither REST nor GraphQL provides a clean or efficient way to express variable-length traversal:
 
 - REST would require chained requests or recursive pagination.
@@ -293,7 +293,7 @@ The Query DSL makes these traversals first-class through typed relationships and
 
 #### 3. Aggregations and Analytics Are Essential
 
-Orbit is not just a document API—it is an analytical OLAP system.
+Orbit is not just a document API. It is an analytical OLAP system.
 For example, this query counts work items by project within a group. Replace
 `your-group/` with your group's full path before running it.
 
@@ -327,7 +327,7 @@ Implementing equivalent groupings via GraphQL or REST would either require bespo
 
 #### 4. Schema Flexibility and Evolution are Essential
 
-Customers will eventually need to be able to add their own data to the graph. Additionally, Orbit’s schema must evolve rapidly as new GitLab SDLC entities (e.g., vulnerabilities, packages, runners) appear.
+Customers will eventually need to be able to add their own data to the graph. Also, Orbit’s schema must evolve rapidly as new GitLab SDLC entities (e.g., vulnerabilities, packages, runners) appear.
 
 Orbit declares node types, relationships, properties, and pipelines in one ontology. The same declarations drive indexing, query validation, authorization metadata, and storage code generation, so existing Query DSL requests remain stable as the graph grows. User-defined data types remain a possible future extension.
 
@@ -341,7 +341,7 @@ See the [querying design documents](./querying/) for the current query architect
 
 ### Orbit is OLAP, not OLTP
 
-Orbit is an **OLAP application** over an OLTP one. Orbit Remote is a **read-only** analytical data store and retrieval API for code and SDLC metadata; it provides point-in-time indexed results rather than transaction guarantees or real-time data. Orbit Local is also read-only at query time, while explicit indexing commands update its DuckDB graph.
+Orbit is an **OLAP application** over an OLTP one. Orbit Remote is a **read-only** analytical data store and retrieval API for code and SDLC metadata. It provides point-in-time indexed results rather than transaction guarantees or real-time data. Orbit Local is also read-only at query time, while explicit indexing commands update its DuckDB graph.
 
 ## Architecture Goals
 
@@ -354,7 +354,7 @@ The architecture is guided by the following goals. The linked design documents d
 - Implement a **thorough review process** and **security tests** for SDLC metadata indexing algorithms to ensure customer data is not indexed incorrectly.
 - **Sanitization, redaction, and validation** of all input queries to prevent injection and DDoS attacks.
 
-Please see the [Security Design Document](security.md) for more details.
+See the [Security Design Document](security.md) for more details.
 
 ### Operational Observability
 
@@ -362,14 +362,14 @@ Please see the [Security Design Document](security.md) for more details.
 - Add **logging** and **tracing** best practices (LabKit integration) to the service.
 - Provide observability to both **self-managed** and **.com** customers.
 
-Please see the [Observability Design Document](observability.md) for more details.
+See the [Observability Design Document](observability.md) for more details.
 
 ### Distributed Scalability & Reliability
 
 - Build a **multi worker deployment architecture** to provide high availability and redundancy for the web service and indexing services.
-- Leverage the same architecture and codebase for both Code Indexing and SDLC Metadata Indexing.
+- Reuse the same architecture and codebase for both Code Indexing and SDLC Metadata Indexing.
 
-For how we will achieve this, please see the following design documents:
+For how we will achieve this, see the following design documents:
 
 - See the [Indexing Service Design Document](indexing/) for how the indexing service will index SDLC metadata and code.
 - See the [Web Service Design Document](querying/) for how the web service will serve queries.
@@ -383,7 +383,7 @@ For how we will achieve this, please see the following design documents:
   - Handling Rails database migrations and schema changes.
   - Adding new data source entities to the graph.
 
-Please see the [Orbit Data Model](data_model.md) design document for more details on the data model.
+See the [Orbit Data Model](data_model.md) design document for more details on the data model.
 
 Follow up MR: New section/page on deployment resource requirements, and plan for operations past day 30.
 
@@ -403,30 +403,30 @@ Here are the differences and similarities between the two:
 ### Differences
 
 - **Where the data starts**:
-  - *Code indexing* reads repositories directly—no database required. Everything is inferred from the files themselves.
+  - *Code indexing* reads repositories directly, with no database required. Everything is inferred from the files themselves.
   - *Namespace indexing* listens to GitLab PostgreSQL through Siphon, stages CDC events and queries them in ClickHouse
 - **What transformation looks like**:
   - *Code indexing* is parser-driven and produces a call graph plus file system hierarchy.
   - *Namespace indexing* is SQL-on-lake-driven, calculating nodes for namespaces, projects, issues, merge requests, pipelines, runners, and vulnerabilities, along with their relationships.
 - **How the load phase runs**:
   - *Code indexing* writes ephemeral Parquet files, then creates or updates the indices in ClickHouse. Incremental updates are calculated by determining the ref's changed files and index deltas.
-  - *Namespace indexing* will calculate the nodes and edges from GitLab data either through direct SQL ETL statements in ClickHouse, or perform ETL via ClickHouse queries and streaming, and insert the data back into ClickHouse.
+  - *Namespace indexing* will calculate the nodes and edges from GitLab data. It uses either direct SQL ETL statements in ClickHouse, or ETL via ClickHouse queries and streaming. It then inserts the data back into ClickHouse.
 
 ### Similarities
 
 - **What they share**:
-  - Both indexing pipelines and query services can reuse the **same** architecture and codebase, as they can share the same graph technology, indexing patterns, and architectural components. Because we are leveraging the Data Insights Platform, we will be able to share the same ingesters, NATS JetStream, and database (ClickHouse). This allows us to have an event-driven platform for both Code Indexing and SDLC Metadata Indexing.
+  - Both indexing pipelines and query services can reuse the **same** architecture and codebase. They can share the same graph technology, indexing patterns, and architectural components. Because we use the Data Insights Platform, we will be able to share the same ingesters, NATS JetStream, and database (ClickHouse). This allows us to have an event-driven platform for both Code Indexing and SDLC Metadata Indexing.
   - They will share the same codebase, [observability patterns](observability.md), and [security patterns](security.md).
 
 ## Iteration Plan
 
-While the topics of Code Indexing and SDLC Indexing differ in how they index, the architecture above provides a platform for both Code Indexing and SDLC data.
+Code Indexing and SDLC Indexing differ in how they index. But the architecture above provides a platform for both Code Indexing and SDLC data.
 
-Please see the [Code Indexing](./indexing/code_indexing.md) and [SDLC Metadata Indexing](./indexing/sdlc_indexing.md) design documents for more details.
+See the [Code Indexing](./indexing/code_indexing.md) and [SDLC Metadata Indexing](./indexing/sdlc_indexing.md) design documents for more details.
 
 ### Phase 1 - SDLC Metadata Indexing and Project Level Code Graph Indexing
 
-This is still the current implementation shape in the repository. SDLC and code data share the same codebase, ontology-driven graph model, and API layer, but they remain operationally distinct in how they are indexed and stored:
+This is still the current implementation shape in the repository. SDLC and code data share the same codebase, ontology-driven graph model, and API layer. But they remain operationally distinct in how they are indexed and stored:
 
 - SDLC data is loaded into typed `gl_*` node tables plus ontology-configured edge tables (defaulting to `gl_edge`) using namespaced ETL driven by the ontology.
 - Code data is loaded into `gl_branch`, `gl_directory`, `gl_file`, `gl_definition`, `gl_imported_symbol`, and the ontology-configured edge table(s), keyed by `traversal_path`, `project_id`, and `branch`.
@@ -440,7 +440,7 @@ The first release of Orbit will be delivered through three parallel workstreams.
 
 - **NATS Unit-Level Production Deployment**: Deploy NATS at the cell level for localized event distribution. NATS is already underway for global usage billing event tracking but further progress is blocked on engineering resources.
 
-- **ClickHouse Work (Consumers + Data Modeling)**: This involves deploying consumers to ingest data from NATS, operationalizing ClickHouse as the data lake and extending the schema to cover SDLC and CI/CD data. This work is blocked by the NATS unit-level deployment.
+- **ClickHouse Work (Consumers + Data Modeling)**: This involves deploying consumers to ingest data from NATS. It makes ClickHouse the data lake. It extends the schema to cover SDLC and CI/CD data. This work is blocked by the NATS unit-level deployment.
 
 #### Dedicated & Self-Managed
 
@@ -448,9 +448,9 @@ Work for Dedicated and Self-Managed customers is blocked until the GitLab.com de
 
 ### Phase 2 - Multi-Project Code Graphs
 
-In the second phase, we will allow users to query across multiple projects simultaneously. This is a challenging engineering problem, as we will need to handle the scale of the graph and the performance of queries based on the number of nodes and relationships.
+In the second phase, we will allow users to query across multiple projects simultaneously. This is a challenging engineering problem. We will need to handle the scale of the graph. We will also need query performance that depends on the number of nodes and relationships.
 
-We need to assess the benefits of cross-graph analysis before determining where MCP tools can handle most cases, or whether there are ways to create unified graphs in a federated manner.
+We need to assess the benefits of cross-graph analysis. Then we can determine where MCP tools can handle most cases. We can also determine whether there are ways to create unified graphs in a federated manner.
 
 ### Phase 3 - Unified Code and SDLC Metadata Graphs
 

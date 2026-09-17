@@ -5,7 +5,7 @@
 The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agents can run graph queries without having to write Cypher or SQL directly. This server adds three major capabilities:
 
 - A **dedicated web server** (`gkg-webserver`) that serves queries by connecting to ClickHouse and NATS to build the graph queries and serve the results.
-- A **graph query engine** that compiles high‑level graph operations into ClickHouse SQL and executes them directly on adjacency‑ordered edge tables and typed node tables.
+- A **graph query engine** that compiles high‑level graph operations into ClickHouse SQL. It executes them directly on adjacency‑ordered edge tables and typed node tables.
 - An **intermediate query language** expressed as JSON schemas that LLMs or UI clients can fill in deterministically. These schemas translate into parameterized ClickHouse SQL executed by the graph query engine.
 
 ### Graph Query Engine
@@ -24,7 +24,7 @@ The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for 
 
 All four query types (traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value, `group_columns` describing grouping keys, and tabular `rows` carrying group values plus metric values. Every response includes a `pagination` object with `has_more`, `truncated`, and (for cursor queries with more pages) `next_cursor`.
 
-- **ADR**: [ADR 004 — Unified Response Schema](../decisions/004_unified_response_schema.md)
+- **ADR**: [ADR 004: Unified Response Schema](../decisions/004_unified_response_schema.md)
 
 A `GraphFormatter` in the Rust query pipeline handles the transformation from raw `QueryResult` rows into the unified payload. A JSON Schema defines the response contract shared between server and frontend.
 
@@ -34,21 +34,21 @@ Orbit agents discover graph capabilities through a command catalog instead of re
 
 The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
 
-Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version is the `query_dsl` pin in `config/versions.yaml` and is tied to the `graph_query` schema `$id` major version; the query response format version is the `raw_output_format` pin in the same file.
+Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version is the `query_dsl` pin in `config/versions.yaml`. It is tied to the `graph_query` schema `$id` major version. The query response format version is the `raw_output_format` pin in the same file.
 
 ### Named Queries
 
-Named queries are server-defined query templates for preset consumers (the Orbit dashboard) so clients invoke a stable name instead of authoring a Query DSL string that can drift from the server's grammar and ontology. Templates live as YAML under `config/named_queries/`, validated against `config/schemas/named_query.schema.json` and compiled against the ontology by `orbit-server`'s build script, so a template that no longer matches the DSL or ontology fails the build.
+Named queries are server-defined query templates for preset consumers (the Orbit dashboard). Clients invoke a stable name instead of authoring a Query DSL string. That string can drift from the server's grammar and ontology. Templates live as YAML under `config/named_queries/`. They are validated against `config/schemas/named_query.schema.json` and compiled against the ontology by `orbit-server`'s build script. A template that no longer matches the DSL or ontology fails the build.
 
-At runtime the same files are embedded into the binary (via the `named-queries` crate). A client executes one by sending `ExecuteQuery` with `query_type = QUERY_TYPE_NAMED` and, in the `query` field, a JSON envelope `{"name": ..., "parameters": {...}}` (`parameters` may be omitted for templates that declare none). The server renders two placeholder kinds and runs the result through the standard pipeline, so quota, security context, redaction, and response formatting behave exactly as for client-authored queries:
+At runtime the same files are embedded into the binary (via the `named-queries` crate). A client executes one by sending `ExecuteQuery` with `query_type = QUERY_TYPE_NAMED`. In the `query` field, it passes a JSON envelope `{"name": ..., "parameters": {...}}` (`parameters` may be omitted for templates that declare none). The server renders two placeholder kinds and runs the result through the standard pipeline. Quota, security context, redaction, and response formatting behave exactly as for client-authored queries:
 
-- `{ "$binding": ... }` — identity values resolved from trusted request context (currently only `current_user_id`, taken from the caller's JWT claims). Never client-supplied.
-- `{ "$param": ... }` — selection values supplied by the client (e.g. the entity and ids of a node clicked in the graph explorer), validated against a JSON Schema each template declares per parameter. Authorization never depends on these: the compiler security pass and redaction filter results regardless of which ids the client asks for. Each parameter also declares an `example` value used to compile the template at build time.
+- `{ "$binding": ... }`: identity values resolved from trusted request context (currently only `current_user_id`, taken from the caller's JWT claims). Never client-supplied.
+- `{ "$param": ... }`: selection values supplied by the client (e.g. the entity and ids of a node clicked in the graph explorer). They are validated against a JSON Schema each template declares per parameter. Authorization never depends on these: the compiler security pass and redaction filter results regardless of which ids the client asks for. Each parameter also declares an `example` value used to compile the template at build time.
 
-Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. Clients discover the catalog through the `ListNamedQueries` RPC (surfaced as `GET /api/v4/orbit/templates`), which returns each parameterless query's name, description, and DSL rendered for the caller with bindings resolved from the JWT claims, so the returned DSL is executable as-is and can populate a query editor.
-Queries that declare parameters are executed by name only and do not appear in the catalog. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side — parameters carry only values (a string parameter may also fill an object key, written `"$param:<name>": ...`, so a template can take the property name to filter on), so the drift-by-construction guarantee is preserved.
+Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. Clients discover the catalog through the `ListNamedQueries` RPC (surfaced as `GET /api/v4/orbit/templates`). It returns each parameterless query's name, description, and DSL rendered for the caller with bindings resolved from the JWT claims. So the returned DSL is executable as-is and can populate a query editor.
+Queries that declare parameters are executed by name only and do not appear in the catalog. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side. Parameters carry only values. A string parameter may also fill an object key, written `"$param:<name>": ...`, so a template can take the property name to filter on. This preserves the drift-by-construction guarantee.
 
-Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
+Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails. Three factors decide it: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 
 ## Web Server Architecture
 
@@ -61,8 +61,8 @@ The web server will expose endpoints for GitLab Rails to consume. This will powe
 ### Request Routing and Query Execution
 
 - **REST endpoints** under `/api/graph/*` and `/api/v1/*` serve code graph workflows (symbols, references, dependencies) and namespace graph analytics. Each handler resolves the target scope (tenant/namespace/project), constructs the appropriate query service, and executes parameterized SQL.
-- **MCP interface** mounts under `/mcp`. The adapter shares the same query services, exposing the intermediate JSON language so agents receive both the generated SQL (for transparency) and the actual query results.
-- **Web server process** (`gkg-webserver`) runs as the query front end in deployed environments. It connects to ClickHouse in read‑only mode, ensuring the query tier cannot mutate graph state while still serving low‑latency requests across multiple replicas.
+- **MCP interface** mounts under `/mcp`. The adapter shares the same query services. It exposes the intermediate JSON language. So agents receive both the generated SQL (for transparency) and the actual query results.
+- **Web server process** (`gkg-webserver`) runs as the query front end in deployed environments. It connects to ClickHouse in read‑only mode. So the query tier cannot mutate graph state while still serving low‑latency requests across multiple replicas.
 
 ```mermaid
 flowchart LR
@@ -89,6 +89,6 @@ flowchart LR
 
 ## Additional Notes
 
-- All query paths reuse the shared ontology and query infrastructure from `config/ontology/`, `config/schemas/graph_query.schema.json`, and the `query-engine/*` crates, so code and namespace graphs adhere to the same entity and relationship definitions.
-- SQL generation is guard-railed: traversal shape limits, a maximum of three hops per relationship selector, a path-finding depth cap of three, explicit relationship lists, and schema-driven validation prevent runaway queries.
+- All query paths reuse the shared ontology and query infrastructure. That includes `config/ontology/`, `config/schemas/graph_query.schema.json`, and the `query-engine/*` crates. So code and namespace graphs adhere to the same entity and relationship definitions.
+- SQL generation is guard-railed. Traversal shape limits and a maximum of three hops per relationship selector apply. A path-finding depth cap of three, explicit relationship lists, and schema-driven validation also prevent runaway queries.
 - The response format is defined by [ADR 004](../decisions/004_unified_response_schema.md). Every query returns a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` payload with deduplicated entity objects and instance-level edges. `format_version` is a semver string (the `raw_output_format` pin in `config/versions.yaml`) so consumers can detect breaking changes. Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output. Proto-level metadata (row count, generated SQL, pagination info, format name + version) travels alongside the JSON payload in `QueryMetadata`.
