@@ -52,6 +52,10 @@ pub enum ContentClass {
 pub struct FileLabel {
     pub skip: Option<SkipReason>,
     pub content: ContentClass,
+    /// Fine-grained content type from an external classifier (e.g.
+    /// Magika). The coarse `content` field drives routing decisions;
+    /// `detail` carries specificity for consumers that need it.
+    pub detail: Option<String>,
     pub extension: Option<String>,
 }
 

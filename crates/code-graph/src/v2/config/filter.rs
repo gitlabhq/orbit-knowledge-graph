@@ -80,6 +80,7 @@ impl CodeFilter {
             FileLabel {
                 skip: Some(reason),
                 content,
+                detail: None,
                 extension: Self::extract_extension(&file.path),
             },
         )
@@ -133,6 +134,7 @@ impl FileStreamHooks for CodeFilter {
             } else {
                 ContentClass::Text
             },
+            detail: None,
             extension: ext,
         };
         let decision = if is_code {

@@ -268,6 +268,7 @@ mod tests {
                 label: FileLabel {
                     skip: None,
                     content: ContentClass::Text,
+                    detail: None,
                     extension: Some("rs".into()),
                 },
             },
@@ -278,6 +279,7 @@ mod tests {
                 label: FileLabel {
                     skip: None,
                     content: ContentClass::Text,
+                    detail: None,
                     extension: Some("toml".into()),
                 },
             },
@@ -288,6 +290,7 @@ mod tests {
                 label: FileLabel {
                     skip: Some(SkipReason::ExcludedExtension),
                     content: ContentClass::Unknown,
+                    detail: None,
                     extension: Some("png".into()),
                 },
             },
