@@ -29,9 +29,8 @@ fixtures:
 tests:
   - name: "named and aliased imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.namedAndAliasedImports'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY name, alias
     assert:
@@ -41,9 +40,8 @@ tests:
 
   - name: "wildcard imports target wildcard imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.wildcardImport'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -51,9 +49,8 @@ tests:
 
   - name: "println does not target wildcard imports"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.builtinPrintln'
-        AND e.edge_kind = 'Calls'
       RETURN sym.path AS path
     assert:
       - { empty: true }

@@ -19,7 +19,7 @@ fixtures:
 tests:
   - name: "alias emits one ImportedSymbol with the last segment as the name"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
       WHERE f.path = 'lib/consumer.ex'
         AND s.import_type = 'Alias'
       RETURN s.path AS path, s.name AS name, s.alias AS alias
@@ -32,7 +32,7 @@ tests:
 
   - name: "import, use, and require each emit their own ImportedSymbol"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
       WHERE f.path = 'lib/consumer.ex'
         AND s.import_type IN ['Import', 'Use', 'Require']
       RETURN s.import_type AS import_type, s.path AS path, s.name AS name
@@ -44,7 +44,7 @@ tests:
 
   - name: "Ordinary function definitions do not produce imports"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
       WHERE f.path = 'lib/consumer.ex'
       RETURN count(s) AS n
     assert:

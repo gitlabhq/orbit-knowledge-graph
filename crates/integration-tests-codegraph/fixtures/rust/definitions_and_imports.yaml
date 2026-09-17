@@ -200,7 +200,7 @@ tests:
 
   - name: "local extern functions are captured and callable"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.name = 'call_local_extern' AND callee.name = 'exported_c'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -209,7 +209,7 @@ tests:
 
   - name: "foreign extern declarations do not create bogus local call edges"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.name = 'call_foreign_extern'
       RETURN callee.name AS name
     assert:

@@ -27,8 +27,8 @@ fixtures:
 tests:
   - name: Annotation ref attributed to the annotated method
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'annotatedMethod' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'annotatedMethod'
       RETURN callee.name AS callee
     assert:
       - { row: { callee: "MyAnnotation" } }
@@ -36,8 +36,8 @@ tests:
 
   - name: Each method references its own annotation
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'otherMethod' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.name = 'otherMethod'
       RETURN callee.name AS callee
     assert:
       - { row: { callee: "OtherAnnotation" } }
@@ -45,8 +45,8 @@ tests:
 
   - name: Plain method has no annotation edges
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'plainMethod' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.name = 'plainMethod'
       RETURN callee.name AS callee
     assert:
       - { empty: true }

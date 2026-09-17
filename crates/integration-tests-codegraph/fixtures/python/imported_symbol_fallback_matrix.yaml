@@ -44,9 +44,8 @@ fixtures:
 tests:
   - name: "package, aliased, and dotted package imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.name = 'package_import_call'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path
     assert:
@@ -58,9 +57,8 @@ tests:
 
   - name: "from imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.name = 'from_import_call'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path, name
     assert:
@@ -70,9 +68,8 @@ tests:
 
   - name: "top-level imported calls target imported symbols from the file"
     query: |
-      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'main.py'
-        AND e.edge_kind = 'Calls'
         AND sym.path = 'sdk.helpers'
       RETURN file.path AS file, sym.path AS path, sym.name AS name, sym.alias AS alias
     assert:
@@ -82,26 +79,23 @@ tests:
   - name: "locally resolved imports do not emit imported-symbol fallback"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
           WHERE caller.name = 'local_import_call'
             AND callee.fqn = 'local_models.LocalClient'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
           WHERE caller.name = 'local_import_call'
-            AND e.edge_kind = 'Calls'
           RETURN sym.path AS path
         assert:
           - { empty: true }
 
   - name: "wildcard imports target wildcard imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.name = 'wildcard_import_call'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -109,9 +103,8 @@ tests:
 
   - name: "built-ins do not target wildcard imports"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['builtin_len_call', 'builtin_print_call']
-        AND e.edge_kind = 'Calls'
       RETURN sym.path AS path
     assert:
       - { empty: true }

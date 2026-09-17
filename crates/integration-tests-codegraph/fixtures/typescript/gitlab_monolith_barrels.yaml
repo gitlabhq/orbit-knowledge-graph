@@ -74,7 +74,7 @@ fixtures:
 tests:
   - name: EE barrel named import resolves local EE export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
         AND i.path = 'ee/commit/constants'
         AND i.name = 'verificationStatuses'
@@ -85,7 +85,7 @@ tests:
 
   - name: EE barrel star reexport import resolves to CE export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
         AND i.path = 'ee/commit/constants'
         AND i.name = 'VERIFIED_CONFIG'
@@ -96,9 +96,8 @@ tests:
 
   - name: Namespace import over EE barrel resolves to local EE function
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
         AND callee.file_path = 'ee/app/assets/javascripts/commit/constants.ts'
       RETURN caller.name AS caller, callee.name AS callee
     assert:
@@ -107,9 +106,8 @@ tests:
 
   - name: EE barrel local call resolves through to CE definition
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'ee/app/assets/javascripts/commit/constants.ts'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path = 'ee/app/assets/javascripts/commit/constants.ts'
         AND callee.file_path = 'app/assets/javascripts/commit/constants.ts'
       RETURN caller.name AS caller, callee.name AS callee
     assert:

@@ -15,7 +15,7 @@ fixtures:
 tests:
   - name: decorated() resolves to definition
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE callee.name = 'decorated'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

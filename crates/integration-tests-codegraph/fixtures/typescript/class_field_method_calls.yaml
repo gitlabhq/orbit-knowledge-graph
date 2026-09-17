@@ -55,9 +55,8 @@ fixtures:
 tests:
   - name: "Method call through a cross-file typed field resolves to the callee"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.fqn = 'PtyService::startProcess'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'PtyService::startProcess'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -65,9 +64,8 @@ tests:
 
   - name: "Method call through a same-file typed field resolves to the callee"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND callee.fqn = 'Engine::run'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE callee.fqn = 'Engine::run'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -93,9 +91,8 @@ tests:
 
   - name: "Method call through a constructor parameter property resolves to the callee"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.fqn = 'PersistentTerminalProcess::start'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.fqn = 'PersistentTerminalProcess::start'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

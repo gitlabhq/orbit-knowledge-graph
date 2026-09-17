@@ -265,7 +265,7 @@ tests:
 
   - name: "Explicit canonical constructor in Range is extracted"
     query: |
-      MATCH (r:Definition)-[:DefinitionToDefinition]->(c:Definition)
+      MATCH (r:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
         AND c.definition_type = 'Constructor'
       RETURN c.name AS name
@@ -275,7 +275,7 @@ tests:
 
   - name: "Bounds compact constructor is extracted"
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Bounds' AND m.name = 'Bounds'
         AND m.definition_type = 'Constructor'
       RETURN m.fqn AS fqn
@@ -304,7 +304,7 @@ tests:
 
   - name: "Implicit accessors x() and y() are synthesised for Point components"
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Point'
         AND m.definition_type = 'Method'
       RETURN m.name AS name, m.start_line AS line
@@ -320,20 +320,18 @@ tests:
 
   - name: "Range record defines its canonical constructor"
     query: |
-      MATCH (r:Definition)-[e:DefinitionToDefinition]->(c:Definition)
+      MATCH (r:Definition)-[e:CALLS]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
         AND c.definition_type = 'Constructor'
-        AND e.edge_kind = 'Defines'
       RETURN c.fqn AS fqn
     assert:
       - { row_count: 1 }
 
   - name: "Range record defines its custom method"
     query: |
-      MATCH (r:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      MATCH (r:Definition)-[e:DEFINES]->(m:Definition)
       WHERE r.fqn = 'com.example.records.Range'
         AND m.fqn = 'com.example.records.Range.length'
-        AND e.edge_kind = 'Defines'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -351,10 +349,9 @@ tests:
 
   - name: "Pair record defines nested Swap record"
     query: |
-      MATCH (p:Definition)-[e:DefinitionToDefinition]->(s:Definition)
+      MATCH (p:Definition)-[e:EXTENDS]->(s:Definition)
       WHERE p.fqn = 'com.example.records.Pair'
         AND s.fqn = 'com.example.records.Pair.Swap'
-        AND e.edge_kind = 'Defines'
       RETURN s.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -363,10 +360,9 @@ tests:
 
   - name: "File defines top-level record"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES]->(d:Definition)
       WHERE f.path = 'com/example/records/Point.java'
         AND d.fqn = 'com.example.records.Point'
-        AND e.edge_kind = 'Defines'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -375,10 +371,9 @@ tests:
 
   - name: "PointUser.origin() calls Point constructor"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.PointUser.origin'
         AND callee.fqn = 'com.example.records.Point'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       # Two edges: the Point return-type reference and the new Point(...) call.
@@ -386,18 +381,17 @@ tests:
 
   - name: "RangeUser.span() calls explicit record method Range.length"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.RangeUser.span'
         AND callee.fqn = 'com.example.records.Range.length'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Records Circle and Rectangle extend sealed interface Shape"
     query: |
-      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
-      WHERE parent.fqn = 'com.example.records.Shape' AND e.edge_kind = 'Extends'
+      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(parent:Definition)
+      WHERE parent.fqn = 'com.example.records.Shape'
       RETURN child.fqn AS child
       ORDER BY child
     assert:
@@ -407,9 +401,8 @@ tests:
 
   - name: "ShapeUser.create() calls Circle and Rectangle constructors"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.create'
-        AND e.edge_kind = 'Calls'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
@@ -418,9 +411,8 @@ tests:
 
   - name: "ShapeUser.area() instanceof type patterns emit Circle and Rectangle type references"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.area'
-        AND e.edge_kind = 'Calls'
         AND callee.fqn IN ['com.example.records.Circle', 'com.example.records.Rectangle']
       RETURN callee.fqn AS callee
       ORDER BY callee
@@ -429,10 +421,9 @@ tests:
 
   - name: "Outer.make() calls nested record Inner constructor"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.Outer.make'
         AND callee.fqn = 'com.example.records.Outer.Inner'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       # Two edges: the Inner return-type reference and the new Inner(...) call.
@@ -440,19 +431,17 @@ tests:
 
   - name: "Outer.use() calls nested record method Inner.doubled"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.Outer.use'
         AND callee.fqn = 'com.example.records.Outer.Inner.doubled'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "PointUser.describe() calls implicit accessors Point.x and Point.y"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.PointUser.describe'
-        AND e.edge_kind = 'Calls'
         AND callee.name IN ['x', 'y']
       RETURN callee.fqn AS callee
       ORDER BY callee
@@ -463,9 +452,8 @@ tests:
 
   - name: "ShapeUser.area() implicit accessor calls on instanceof-bound variables"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.area'
-        AND e.edge_kind = 'Calls'
         AND callee.name IN ['radius', 'width', 'height']
       RETURN DISTINCT callee.fqn AS callee
       ORDER BY callee
@@ -479,7 +467,7 @@ tests:
 
   - name: "Explicit accessor override is a single Method definition"
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Wrapped' AND m.name = 'raw'
         AND m.definition_type = 'Method'
       RETURN m.fqn AS fqn
@@ -488,7 +476,7 @@ tests:
 
   - name: "Explicit toString and equals overrides are single Method definitions"
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Wrapped'
         AND m.name IN ['toString', 'equals']
         AND m.definition_type = 'Method'
@@ -501,10 +489,9 @@ tests:
 
   - name: "WrappedUser.read() calls explicitly overridden accessor Wrapped.raw"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.WrappedUser.read'
         AND callee.fqn = 'com.example.records.Wrapped.raw'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 1 }
@@ -514,10 +501,9 @@ tests:
 
   - name: "WrappedUser.print() calls explicitly overridden Wrapped.toString"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.WrappedUser.print'
         AND callee.fqn = 'com.example.records.Wrapped.toString'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 1 }
@@ -527,10 +513,9 @@ tests:
 
   - name: "WrappedUser.same() calls explicitly overridden Wrapped.equals"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.WrappedUser.same'
         AND callee.fqn = 'com.example.records.Wrapped.equals'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 1 }
@@ -541,7 +526,7 @@ tests:
   - name: "GAP: implicit equals/hashCode/toString defined on Point"
     severity: warning
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Point'
         AND m.name IN ['equals', 'hashCode', 'toString']
       RETURN m.name AS name
@@ -554,7 +539,7 @@ tests:
   - name: "GAP: instanceof record pattern emits Point type reference"
     severity: warning
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.PatternMatcher.describe'
         AND callee.fqn = 'com.example.records.Point'
       RETURN callee.fqn AS callee
@@ -564,9 +549,8 @@ tests:
   - name: "GAP: instanceof record pattern destructuring emits Point.x and Point.y accessor calls"
     severity: warning
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'com.example.records.PatternMatcher.describe'
-        AND e.edge_kind = 'Calls' AND callee.name IN ['x', 'y']
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.PatternMatcher.describe' AND callee.name IN ['x', 'y']
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
@@ -576,7 +560,7 @@ tests:
   - name: "GAP: switch record patterns emit Circle and Rectangle type references"
     severity: warning
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.SwitchMatcher.area'
         AND callee.fqn IN ['com.example.records.Circle', 'com.example.records.Rectangle']
       RETURN callee.fqn AS callee
@@ -587,9 +571,8 @@ tests:
   - name: "GAP: switch record pattern destructuring emits accessor calls"
     severity: warning
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'com.example.records.SwitchMatcher.area'
-        AND e.edge_kind = 'Calls' AND callee.name IN ['radius', 'width', 'height']
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.SwitchMatcher.area' AND callee.name IN ['radius', 'width', 'height']
       RETURN callee.name AS callee
       ORDER BY callee
     assert:

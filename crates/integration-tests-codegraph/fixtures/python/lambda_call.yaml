@@ -19,7 +19,7 @@ tests:
 
   - name: square() call resolves to lambda
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE callee.name = 'square'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

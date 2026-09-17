@@ -14,7 +14,7 @@ fixtures:
 tests:
   - name: Has multiple imports
     query: |
-      MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
+      MATCH (f:File)-[:IMPORTS]->(i:ImportedSymbol)
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 10 } }

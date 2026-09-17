@@ -29,7 +29,7 @@ tests:
   - name: "Main.main -> ArrayList (imported symbol)"
     
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND sym.path = 'java.util'
         AND sym.name = 'ArrayList'
@@ -40,7 +40,7 @@ tests:
   - name: "Main.main -> List (imported symbol)"
     
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.main'
         AND sym.path = 'java.util'
         AND sym.name = 'List'
@@ -51,7 +51,7 @@ tests:
   - name: "Traceable -> Retention (annotation import)"
     skip: true
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Traceable'
         AND sym.name = 'Retention'
       RETURN caller.fqn AS caller, sym.name AS symbol
@@ -61,7 +61,7 @@ tests:
   - name: "Traceable -> Target (annotation import)"
     skip: true
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Traceable'
         AND sym.name = 'Target'
       RETURN caller.fqn AS caller, sym.name AS symbol

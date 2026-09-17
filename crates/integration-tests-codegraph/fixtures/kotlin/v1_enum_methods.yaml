@@ -6,7 +6,7 @@ tests:
 
   - name: "main -> Enum.enumMethod (via ENUM_VALUE_1)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.main'
         AND callee.fqn = 'com.example.enums.Enum.enumMethod'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -15,7 +15,7 @@ tests:
 
   - name: "main -> Enum.enumMethod2 (via variable)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.main'
         AND callee.fqn = 'com.example.enums.Enum.enumMethod2'
       RETURN caller.fqn AS caller, callee.fqn AS callee

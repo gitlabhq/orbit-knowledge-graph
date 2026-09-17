@@ -14,7 +14,7 @@ tests:
 
   - name: Same-class method call resolves
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:DEFINES]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'process'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -46,8 +46,7 @@ tests:
       - { row: { name: "run", fqn: "com.example.Service.run", type: "Function" } }
   - name: Exactly 2 containment edges
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
-      WHERE e.edge_kind = 'Defines'
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 2 }

@@ -58,7 +58,7 @@ tests:
   - name: "log is called from run"
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'log'
       RETURN caller.name AS caller, callee.name AS callee
     assert:
@@ -67,7 +67,7 @@ tests:
   - name: "warn is called from run"
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'warn'
       RETURN caller.name AS caller, callee.name AS callee
     assert:

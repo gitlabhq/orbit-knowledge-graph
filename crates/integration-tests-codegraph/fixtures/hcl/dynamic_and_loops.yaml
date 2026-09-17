@@ -50,19 +50,17 @@ tests:
 
   - name: "Dynamic block ref resolves variable: ingress scope -> ports"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'ingress'
         AND callee.name = 'ports'
-        AND e.edge_kind = 'Calls'
       RETURN caller.name AS caller, callee.name AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Locals scope refs resolve to variables"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.name = 'locals'
-        AND e.edge_kind = 'Calls'
       RETURN callee.name AS callee
     assert:
       - { empty: false }

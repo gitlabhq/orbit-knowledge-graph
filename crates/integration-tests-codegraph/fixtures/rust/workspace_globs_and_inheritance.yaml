@@ -61,7 +61,7 @@ fixtures:
 tests:
   - name: "workspace dependency inheritance resolves both local path crates"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.file_path = 'crates/app/src/main.rs'
         AND caller.name = 'call_workspace_deps'
       RETURN callee.file_path AS file, callee.fqn AS fqn

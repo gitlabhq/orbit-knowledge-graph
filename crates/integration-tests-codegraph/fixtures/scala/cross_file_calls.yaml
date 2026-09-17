@@ -139,7 +139,7 @@ tests:
   - name: Companion object apply — User.guest resolves to User
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.models.User.guest'
       AND callee.fqn = 'com.example.models.User'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -149,7 +149,7 @@ tests:
   - name: Trait method — lookup resolves to findById
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.repo.InMemoryRepository.lookup'
       AND callee.fqn = 'com.example.repo.InMemoryRepository.findById'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -159,7 +159,7 @@ tests:
   - name: Wildcard import — format resolves to StringUtils.truncate
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.service.Formatter.format'
       AND callee.fqn = 'com.example.utils.StringUtils.truncate'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -169,7 +169,7 @@ tests:
   - name: Aliased import — makeSound resolves to Animal.speak
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.service.Zoo.makeSound'
       AND callee.fqn = 'com.example.models.Animal.speak'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -179,7 +179,7 @@ tests:
   - name: Grouped import — totalArea resolves to Circle.area
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.service.Canvas.totalArea'
       AND callee.fqn = 'com.example.models.Circle.area'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -189,7 +189,7 @@ tests:
   - name: Grouped import — totalArea resolves to Square.area
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.service.Canvas.totalArea'
       AND callee.fqn = 'com.example.models.Square.area'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -199,7 +199,7 @@ tests:
   - name: Same-package — OrderService.create resolves to Order
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.domain.OrderService.create'
       AND callee.fqn = 'com.example.domain.Order'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -209,7 +209,7 @@ tests:
   - name: Same-file — MathService.sum resolves to Calculator.add
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.samefile.MathService.sum'
       AND callee.fqn = 'com.example.samefile.Calculator.add'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -219,7 +219,7 @@ tests:
   - name: Advanced pipeline — run resolves to User constructor
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.pipeline.Pipeline.run'
       AND callee.fqn = 'com.example.models.User'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -229,7 +229,7 @@ tests:
   - name: Advanced pipeline — run resolves to Logger.log
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.pipeline.Pipeline.run'
       AND callee.fqn = 'com.example.models.Logger.log'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -239,7 +239,7 @@ tests:
   - name: Advanced pipeline — run resolves to StringUtils.truncate via wildcard
     severity: warning
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.pipeline.Pipeline.run'
       AND callee.fqn = 'com.example.utils.StringUtils.truncate'
       RETURN caller.fqn AS caller, callee.fqn AS callee

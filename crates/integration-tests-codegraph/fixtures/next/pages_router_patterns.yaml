@@ -181,7 +181,7 @@ tests:
 
   - name: Next pages router local imports resolve
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
       RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY file_path, path, name
@@ -207,7 +207,7 @@ tests:
 
   - name: Next pages router package type imports have no local targets
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']
         AND i.path IN ['next/app', 'next']
       RETURN i.path AS path, d.fqn AS target
@@ -216,9 +216,8 @@ tests:
 
   - name: Next pages router cross-file calls resolve JSX components and helpers
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY caller, callee_file, callee
     assert:
@@ -230,9 +229,8 @@ tests:
 
   - name: Prop-supplied Next page Component is not fabricated as a code edge
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.fqn = 'App'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.fqn = 'App'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -307,9 +305,8 @@ tests:
 
   - name: Next pages router dynamic and special files resolve local calls
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path IN [
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path IN [
           'pages/_error.tsx',
           'pages/404.tsx',
           'pages/500.tsx',
@@ -347,7 +344,7 @@ tests:
 
   - name: Next pages router document imports have no local targets
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'pages/_document.tsx'
         AND i.path = 'next/document'
       RETURN i.path AS path, d.fqn AS target

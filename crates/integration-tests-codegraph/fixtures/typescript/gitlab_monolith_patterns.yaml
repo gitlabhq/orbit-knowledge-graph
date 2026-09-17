@@ -172,7 +172,7 @@ fixtures:
 tests:
   - name: jh_else_ce default import targets the CE default export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/root_entry.js'
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -181,7 +181,7 @@ tests:
 
   - name: default imported CE entry preserves aliased helper target
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
       RETURN i.path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -190,7 +190,7 @@ tests:
 
   - name: aliased import from star barrel preserves identity
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/feature_flags/store/actions.ts'
       RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -212,9 +212,8 @@ tests:
 
   - name: imported constants from alias barrels do not create false call edges
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.fqn = 'badScopeCall'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'badScopeCall'
         AND callee.file_path = 'app/assets/javascripts/feature_flags/store/modules/feature_flag.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -222,7 +221,7 @@ tests:
 
   - name: CommonJS require through alias targets the primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/legacy_entry.js'
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -241,7 +240,7 @@ tests:
 
   - name: explicit default reexports target the barrel proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.name = 'ProjectsApp'
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
@@ -251,7 +250,7 @@ tests:
 
   - name: project barrel imports preserve explicit, star, and constant targets
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.import_type = 'NamedImport'
       RETURN i.name AS name, d.fqn AS target
@@ -264,7 +263,7 @@ tests:
 
   - name: namespace imports over alias barrels target the synthesized barrel module
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.import_type = 'NamespaceImport'
       RETURN i.path AS path, d.fqn AS target
@@ -274,9 +273,8 @@ tests:
 
   - name: namespace alias barrel calls resolve to concrete component definitions
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.fqn = 'runProjectsNamespace'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.fqn = 'runProjectsNamespace'
       RETURN caller.fqn AS caller, callee.fqn AS callee
       ORDER BY callee
     assert:
@@ -287,9 +285,8 @@ tests:
 
   - name: imported constants from monolith barrels stay inert
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.fqn = 'badProjectsCall'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.fqn = 'badProjectsCall'
         AND callee.file_path = 'app/assets/javascripts/projects/your_work/components/filters.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -297,7 +294,7 @@ tests:
 
   - name: ee alias helper imports target enterprise utility definitions
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/security_inventory/index.ts'
       RETURN i.path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -306,7 +303,7 @@ tests:
 
   - name: direct ee Vue imports target the component definition
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/direct_form_spec.ts'
       RETURN i.path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -326,7 +323,7 @@ tests:
 
   - name: external Vue package imports remain unresolved inside monolith SFCs
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue'
         AND i.path = '@gitlab/ui'
       RETURN d.fqn AS target
@@ -335,7 +332,7 @@ tests:
 
   - name: ee Vue barrels preserve explicit default reexports
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/index_spec.ts'
       RETURN i.name AS name, d.fqn AS target
     assert:

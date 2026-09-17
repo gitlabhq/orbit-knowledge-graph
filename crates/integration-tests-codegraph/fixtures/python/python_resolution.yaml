@@ -19,7 +19,7 @@ tests:
 
   - name: Cross-file call edge exists
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -28,7 +28,7 @@ tests:
 
   - name: helper() resolves to utils.helper
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE callee.name = 'helper'
       RETURN callee.file_path AS file, caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -52,7 +52,7 @@ tests:
 
   - name: unused() has no incoming call edges
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE callee.name = 'unused'
       RETURN caller.fqn AS caller
     assert:

@@ -49,48 +49,43 @@ fixtures:
 tests:
   - name: "Module-qualified call resolves across files: Foo.greet -> Baz.hello"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.greet'
         AND callee.fqn = 'Baz.hello'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Aliased call resolves across files: Foo.shout -> Helpers.Format.upcase"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.shout'
         AND callee.fqn = 'Helpers.Format.upcase'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Bare call through import resolves: Foo.doubled -> Util.dub"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.doubled'
         AND callee.fqn = 'Util.dub'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Local call resolves within the module: Foo.local -> Foo.internal"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.local'
         AND callee.fqn = 'Foo.internal'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Exactly 4 Calls edges total — no spurious edges"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(:Definition)
       RETURN count(caller) AS n
     assert:
       - { count_equals: { field: n, value: 4 } }

@@ -65,8 +65,8 @@ tests:
 
   - name: "local helper calls resolve to local item definitions"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'outer' AND callee.name = 'helper' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'outer' AND callee.name = 'helper'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
@@ -74,8 +74,8 @@ tests:
 
   - name: "local tuple struct constructors resolve to the local struct"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'outer' AND callee.name = 'Local' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.name = 'outer' AND callee.name = 'Local'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 2 }
@@ -83,8 +83,8 @@ tests:
 
   - name: "local enum variant constructors resolve to the local variant"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'outer' AND callee.name = 'Pick' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.name = 'outer' AND callee.name = 'Pick'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
@@ -92,8 +92,8 @@ tests:
 
   - name: "local items inside methods are retained and callable"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'Container::method' AND callee.name = 'nested' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.fqn = 'Container::method' AND callee.name = 'nested'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }

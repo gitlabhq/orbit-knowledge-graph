@@ -28,8 +28,8 @@ tests:
   - name: "caller calls makeProcessor, Process, and apply"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.fqn = 'main.caller' AND e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'main.caller'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:

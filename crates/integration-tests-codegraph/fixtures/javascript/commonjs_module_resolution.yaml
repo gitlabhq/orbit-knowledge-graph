@@ -189,7 +189,7 @@ fixtures:
 tests:
   - name: Destructured require targets named export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'named/main.js'
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -198,9 +198,8 @@ tests:
 
   - name: Destructured require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'named/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'named/main.js'
         AND callee.file_path = 'named/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -209,7 +208,7 @@ tests:
 
   - name: Namespace require targets synthesized module
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'namespace/main.js'
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -218,9 +217,8 @@ tests:
 
   - name: Namespace require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'namespace/main.js'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path = 'namespace/main.js'
         AND callee.file_path = 'namespace/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -229,7 +227,7 @@ tests:
 
   - name: Aliased destructured require preserves source and alias names
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'alias/main.js'
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -238,9 +236,8 @@ tests:
 
   - name: Aliased destructured require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'alias/main.js'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path = 'alias/main.js'
         AND callee.file_path = 'alias/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -249,7 +246,7 @@ tests:
 
   - name: Default module.exports require targets the primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'default/main.js'
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
@@ -258,9 +255,8 @@ tests:
 
   - name: Default module.exports require call resolves to the exported function
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'default/main.js'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path = 'default/main.js'
         AND callee.file_path = 'default/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -269,9 +265,8 @@ tests:
 
   - name: Object literal module.exports member call resolves to the named function
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'object/main.js'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path = 'object/main.js'
         AND callee.file_path = 'object/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -280,9 +275,8 @@ tests:
 
   - name: Bare require alias chains keep callable primary export identity
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'alias_chain/main.js'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path = 'alias_chain/main.js'
         AND callee.file_path = 'alias_chain/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -291,7 +285,7 @@ tests:
 
   - name: Mixed CJS imports preserve distinct symbol identities
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'no_false_call/main.js'
       RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
@@ -301,9 +295,8 @@ tests:
 
   - name: Imported CJS constants do not create false call edges
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'no_false_call/main.js'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path = 'no_false_call/main.js'
         AND callee.file_path = 'no_false_call/util.js'
         AND callee.name = 'HTTP_STATUS_OK'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -312,9 +305,8 @@ tests:
 
   - name: Imported CJS functions still resolve while constants stay inert
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'no_false_call/main.js'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path = 'no_false_call/main.js'
         AND callee.file_path = 'no_false_call/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -323,9 +315,8 @@ tests:
 
   - name: Transpiled CJS default interop resolves namespace default member calls
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.file_path = 'interop/main.js'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.file_path = 'interop/main.js'
         AND callee.file_path = 'interop/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -334,9 +325,8 @@ tests:
 
   - name: External CommonJS calls target imported symbols
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.file_path IN ['external/namespace.js', 'external/destructured.js']
-        AND e.edge_kind = 'Calls'
       RETURN caller.file_path AS file, caller.fqn AS caller, sym.name AS name, sym.alias AS alias
       ORDER BY file, name
     assert:
@@ -346,9 +336,8 @@ tests:
 
   - name: External CommonJS duplicate aliases preserve exact imported symbols
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'external/duplicate_aliases.js'
-        AND e.edge_kind = 'Calls'
       RETURN DISTINCT caller.fqn AS caller, sym.name AS name, sym.alias AS alias
       ORDER BY alias
     assert:
@@ -358,9 +347,8 @@ tests:
 
   - name: Module-level external CommonJS calls target imported symbols from the file
     query: |
-      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'external/module_level.js'
-        AND e.edge_kind = 'Calls'
       RETURN file.path AS file, sym.path AS path, sym.name AS name
     assert:
       - { row_count: 1 }
@@ -368,16 +356,15 @@ tests:
 
   - name: Module-level global CommonJS calls do not target unrelated imports
     query: |
-      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'external/module_level_globals.js'
-        AND e.edge_kind = 'Calls'
       RETURN file.path AS file, sym.path AS path, sym.name AS name
     assert:
       - { empty: true }
 
   - name: Resolved CommonJS calls do not emit imported-symbol fallback
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.file_path IN [
         'named/main.js',
         'namespace/main.js',
@@ -388,21 +375,19 @@ tests:
         'no_false_call/main.js',
         'interop/main.js'
       ]
-        AND e.edge_kind = 'Calls'
       RETURN caller.file_path AS file, caller.fqn AS caller, sym.path AS path, sym.name AS name
     assert:
       - { empty: true }
 
   - name: Side-effect shadowed reference-only and global CommonJS calls avoid imported-symbol fallbacks
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE caller.file_path IN [
         'side_effect/main.js',
         'external/shadowed.js',
         'external/imported_reference_only.js',
         'external/globals.js'
       ]
-        AND e.edge_kind = 'Calls'
       RETURN caller.file_path AS file, caller.fqn AS caller, sym.path AS path, sym.name AS name
     assert:
       - { empty: true }

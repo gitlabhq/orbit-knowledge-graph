@@ -160,90 +160,81 @@ fixtures:
 tests:
   - name: "top-level source-root module import resolves"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'src.pipeline.run_tier_reviews'
         AND callee.fqn = 'src.scoring.score_review'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "whole-module source-root import keeps local binding"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'src.module_import_pipeline.run_module_reviews'
         AND callee.fqn = 'src.scoring.score_review'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Poetry-style package import resolves"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'src.poetry.console.application.build_application'
         AND callee.fqn = 'src.poetry.factory.Factory'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Prefect-style nested package import resolves"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'src.prefect.task_runners.emit_task_event'
         AND callee.fqn = 'src.prefect.events.schemas.events.Event'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Prefect-style aliased nested package import resolves"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'src.prefect.task_engine.build_prefect_event'
         AND callee.fqn = 'src.prefect.events.schemas.events.Event'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "source-root package module import resolves"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'src.package_imports.caller.build_package_import'
         AND callee.fqn = 'src.package_imports.module.build_module'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "nested src source root import resolves"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'apps.orion.src.orion.service.boot_worker'
         AND callee.fqn = 'apps.orion.src.orion.worker.Worker'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "test file outside the source root resolves src-layout import"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'tests.test_scoring.test_score_review'
         AND callee.fqn = 'src.scoring.score_review'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "repo-root file resolves src-layout import"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'conftest.scoring_fixture'
         AND callee.fqn = 'src.scoring.score_review'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -251,16 +242,14 @@ tests:
   - name: "stdlib-shadowing package submodule does not capture external imports"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
           WHERE caller.fqn = 'tests.test_stdlib_shadow.test_dumps'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'tests.test_stdlib_shadow.test_dumps'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
@@ -268,38 +257,34 @@ tests:
   - name: "stdlib import inside a package does not bind a shadowing sibling submodule"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
           WHERE caller.fqn = 'pkg.service.use_dumps'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'pkg.service.use_dumps'
             AND sym.path = 'json'
             AND sym.name = 'dumps'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
 
   - name: "unique cross-root import from a test file binds the vendored definition"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'tests.test_vendor_client.test_client'
         AND callee.fqn = 'vendor.sdk.client.Client'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "unique cross-root import between roots binds the vendored definition"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'src.external_client.build_external_client'
         AND callee.fqn = 'vendor.sdk.client.Client'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -307,18 +292,16 @@ tests:
   - name: "unmarked ancestor candidates do not bind arbitrary definitions"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
           WHERE caller.fqn = 'src.alpha.other.reporting.run_ambiguous'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'src.alpha.other.reporting.run_ambiguous'
             AND sym.path = 'common.scoring'
             AND sym.name = 'score_review'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
         assert:
           - { row_count: 1 }

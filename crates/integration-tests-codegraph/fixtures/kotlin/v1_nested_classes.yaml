@@ -6,7 +6,7 @@ tests:
 
   - name: "Parent.GrandChild.greet -> Parent.Child.GrandChild.greet"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.nestedclasses.Parent.GrandChild.greet'
         AND callee.fqn = 'com.example.nestedclasses.Parent.Child.GrandChild.greet'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -15,7 +15,7 @@ tests:
 
   - name: "main -> Parent.Child.GrandChild.greet (inferred nested type)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.main'
         AND callee.fqn = 'com.example.nestedclasses.Parent.Child.GrandChild.greet'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -24,7 +24,7 @@ tests:
 
   - name: "main -> Parent.GrandChild.greet (typed nested type)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.main'
         AND callee.fqn = 'com.example.nestedclasses.Parent.GrandChild.greet'
       RETURN caller.fqn AS caller, callee.fqn AS callee

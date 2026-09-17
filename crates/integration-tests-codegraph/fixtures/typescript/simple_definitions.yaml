@@ -43,8 +43,8 @@ tests:
 
   - name: speak and sound are nested inside Animal via Defines
     query: |
-      MATCH (cls:Definition)-[e:DefinitionToDefinition]->(m:Definition)
-      WHERE cls.name = 'Animal' AND e.edge_kind = 'Defines'
+      MATCH (cls:Definition)-[e:DEFINES]->(m:Definition)
+      WHERE cls.name = 'Animal'
       RETURN m.name AS method, m.definition_type AS type
       ORDER BY method
     assert:

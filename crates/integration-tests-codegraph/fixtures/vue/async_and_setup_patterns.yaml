@@ -50,9 +50,8 @@ tests:
 
   - name: defineAsyncComponent setup methods resolve imported helper calls
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.fqn = 'AsyncPanel::setup'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'AsyncPanel::setup'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -60,7 +59,7 @@ tests:
 
   - name: script setup imports resolve to concrete helper definitions
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'components/setup_panel.vue'
       RETURN i.name AS name, d.fqn AS target
     assert:
@@ -69,9 +68,8 @@ tests:
 
   - name: script setup function bodies resolve imported helper calls
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND caller.fqn = 'runSetup'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      WHERE caller.fqn = 'runSetup'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
