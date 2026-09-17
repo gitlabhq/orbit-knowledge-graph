@@ -37,29 +37,17 @@ fn flavor_display<'a>(def: Cursor, dtk: C, lang: &'a Lang) -> &'a str {
 pub struct IdMaps {
     pub defs: HashMap<(usize, u32), i64>,
     pub imports: HashMap<(usize, u32), Vec<i64>>,
-    /// Maps (file_index, __name_node) -> single import ID
     pub import_by_name: HashMap<(usize, u32), i64>,
-    pub modules: HashMap<usize, i64>,
 }
 
-fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
+fn assign_ids(trees: &[Tree], _lang: &Lang) -> IdMaps {
     let mut defs = HashMap::new();
     let mut imports = HashMap::new();
     let mut import_by_name = HashMap::new();
-    let mut modules = HashMap::new();
     let mut next_def: i64 = 1000;
     let mut next_imp: i64 = 5000;
-    let mut next_mod: i64 = 900_000;
 
     for (fi, tree) in trees.iter().enumerate() {
-        let path = lang.syms.resolve(tree.root().sym());
-        if matches!(
-            SupportLang::from_path(path),
-            Some(SupportLang::JavaScript | SupportLang::TypeScript | SupportLang::Tsx)
-        ) {
-            next_mod += 1;
-            modules.insert(fi, next_mod);
-        }
         for nr in tree.root().descendants() {
             let i = nr.index();
             if canonical::has_def_type(nr) {
@@ -114,7 +102,6 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
         defs,
         imports,
         import_by_name,
-        modules,
     }
 }
 
@@ -371,22 +358,6 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMaps) -> anyhow::Result<Recor
                     }
                 }
             }
-        }
-    }
-    for (fi, tree) in trees.iter().enumerate() {
-        if let Some(&mid) = ids.modules.get(&fi) {
-            let path = lang.syms.resolve(tree.root().sym()).to_string();
-            id_b.append_value(mid);
-            fp_b.append_value(&path);
-            fqn_b.append_value(&path);
-            name_b.append_value(&path);
-            dt_b.append_value("Module");
-            sl_b.append_value(0);
-            el_b.append_value(0);
-            sb_b.append_value(0);
-            eb_b.append_value(0);
-            sc_b.append_value(0);
-            ec_b.append_value(0);
         }
     }
     make_batch(
@@ -706,15 +677,7 @@ fn build_imp2def(_trees: &[Tree], edges: &[Edge], ids: &IdMaps) -> anyhow::Resul
         if ce.kind != EdgeKind::Imports {
             continue;
         }
-        let target_id = if let Some(&did) = ids.defs.get(&(ce.to_tree as usize, ce.to_node)) {
-            did
-        } else if ce.to_node == 0 {
-            if let Some(&mid) = ids.modules.get(&(ce.to_tree as usize)) {
-                mid
-            } else {
-                continue;
-            }
-        } else {
+        let Some(&target_id) = ids.defs.get(&(ce.to_tree as usize, ce.to_node)) else {
             continue;
         };
         let key = (ce.from_tree as usize, ce.from_node);
