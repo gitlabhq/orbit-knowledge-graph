@@ -275,6 +275,7 @@ mod tests {
             label: Default::default(),
         }
     }
+
     #[test]
     fn step_settles_in_header_without_sniffing() {
         let mut h = TestHooks {

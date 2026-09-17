@@ -109,7 +109,6 @@ impl FileStreamHooks for CodeFilter {
     }
 
     fn on_content(&mut self, file: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
-        let ext = Self::extract_extension(&file.path);
         if is_lfs_pointer(content) {
             return self.record(file, SkipReason::LfsPointer, ContentClass::LfsPointer);
         }
@@ -126,6 +125,7 @@ impl FileStreamHooks for CodeFilter {
         }
         // A parse candidate is parsed; a non-parsable file (resolver input) is
         // loaded for resolvers but not parsed.
+        let ext = Self::extract_extension(&file.path);
         let is_code = (self.detect_language)(&file.path).is_some();
         let label = FileLabel {
             skip: None,
