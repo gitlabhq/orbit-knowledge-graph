@@ -1,7 +1,7 @@
 # Orbit query recipes
 
 Paste-ready request bodies for each `query_type`. All examples omit
-`response_format`; the CLI defaults to `llm` (compact, agent-friendly). Pass
+`response_format`; the CLI defaults to `llm` (standard TOON). Pass
 `--response-format raw` when piping into `jq`.
 
 Every recipe assumes `glab auth login` has succeeded and the

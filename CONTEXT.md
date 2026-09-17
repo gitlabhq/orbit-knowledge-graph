@@ -140,6 +140,6 @@ _Avoid_: materialized table (the ClickHouse materialized views only feed it), pr
 Fetching properties for **Nodes** discovered dynamically during query execution. Required for PathFinding and Neighbors queries where the result set's node types aren't known upfront.
 _Avoid_: enrichment, decoration
 
-**GOON (Graph Object Output Notation)**:
-A line-oriented text format for representing graph query results compactly. Designed for LLM consumption — measured at −11% cost, −15% duration, and +4.8pp correctness vs raw JSON on Haiku 4.5 (ADR 012). Used when queries specify `format=llm`.
-_Avoid_: LLM format, text format
+**TOON (Token-Oriented Object Notation)**:
+A standard text encoding of JSON data. Orbit uses TOON for `format=llm`, encoding the same graph query payload as `raw` JSON. It replaces the retired Orbit-specific GOON encoding; historical GOON measurements do not describe TOON.
+_Avoid_: GOON (retired format), LLM format, text format

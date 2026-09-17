@@ -6,6 +6,7 @@ pub mod fs;
 pub mod fs_stream;
 pub mod observability;
 pub mod strings;
+pub mod toon;
 pub mod traversal_path;
 pub mod version;
 pub mod walk;

@@ -40,7 +40,7 @@ use crate::proto::{
 };
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
-use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{FormatName, GraphFormatter, ResultFormatter, ToonFormatter};
 
 fn resolve_raw_query(
     query_type: i32,
@@ -86,7 +86,7 @@ fn schema_query_result(
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
         FormatName::Raw => ProtoFormatName::Raw,
-        FormatName::Goon => ProtoFormatName::Goon,
+        FormatName::Toon => ProtoFormatName::Toon,
     }
 }
 
@@ -383,18 +383,12 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                         use crate::proto::execute_query_result::Content;
 
                         let (formatted, format_version, format_name) = if use_llm_format {
-                            GoonFormatter.format_stamped(&output)
+                            ToonFormatter.format_stamped(&output)
                         } else {
                             GraphFormatter.format_stamped(&output)
                         };
 
                         let content = if use_llm_format {
-                            // GoonFormatter::format returns Value::String(raw_goon_bytes).
-                            // `to_string()` on a Value JSON-encodes it (adds quotes + \n
-                            // escapes). Workhorse then JSON-encodes again when wrapping
-                            // into the {result, ...} envelope, producing literal `\n` in
-                            // the UI. Extract the inner string so the gRPC field carries
-                            // raw goon text.
                             let text = match formatted {
                                 serde_json::Value::String(s) => s,
                                 other => other.to_string(),
@@ -805,6 +799,40 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn schema_results_do_not_advertise_graph_format_metadata() {
+        use super::*;
+        use crate::proto::execute_query_result::Content;
+        let response = SchemaResponse {
+            domains: vec![],
+            edges: vec!["CONTAINS".into()],
+        };
+        for llm in [false, true] {
+            let result = schema_query_result(&response, llm).unwrap();
+            assert!(result.metadata.is_none());
+            match result.content.unwrap() {
+                Content::ResultJson(text) => {
+                    assert!(!llm);
+                    assert_eq!(
+                        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+                        serde_json::to_value(&response).unwrap()
+                    );
+                }
+                Content::FormattedText(text) => {
+                    assert!(llm);
+                    assert_eq!(text, "domains: []\nedges[1]: CONTAINS");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn toon_renames_proto_number_one_without_a_goon_alias() {
+        assert_eq!(super::proto_format_name(super::FormatName::Toon) as i32, 1);
+        assert!(crate::proto::FormatName::try_from(2).is_err());
+        assert!(crate::proto::FormatName::from_str_name("FORMAT_NAME_GOON").is_none());
+    }
+
     mod commands;
 
     use super::*;

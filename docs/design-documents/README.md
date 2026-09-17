@@ -150,7 +150,7 @@ flowchart TD
 
 ### Database & Database Ops
 
-Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates queries against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Both frontends share the same compiler and authorization pipeline.
+Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates queries against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Both frontends share the same compiler and authorization pipeline. Query results use JSON for `raw` responses and standard TOON for `llm` responses.
 
 The current implementation uses ClickHouse for remote graph storage and query execution. In the current repository state:
 

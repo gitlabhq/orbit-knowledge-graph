@@ -33,46 +33,6 @@ pub fn bytes_are_allowed(bytes: &[u8], allowed: &[bool; 256]) -> bool {
     bytes.iter().all(|byte| allowed[*byte as usize])
 }
 
-/// Wraps a string in quotes using GOON's escapes for backslash, quote, newline, carriage return,
-/// and tab.
-///
-/// All other C0 control bytes and DEL (`0x7f`) are silently dropped. This policy is not
-/// lossless or JSON-compatible and must not be used when control-character fidelity matters.
-pub fn quote_escaped(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() + 2);
-    output.push('"');
-
-    let bytes = value.as_bytes();
-    let mut start = 0;
-    while start < bytes.len() {
-        let special = next_escape_byte(&bytes[start..]).map_or(bytes.len(), |index| start + index);
-        output.push_str(&value[start..special]);
-        if special == bytes.len() {
-            break;
-        }
-        match bytes[special] {
-            b'\\' => output.push_str("\\\\"),
-            b'"' => output.push_str("\\\""),
-            b'\n' => output.push_str("\\n"),
-            b'\r' => output.push_str("\\r"),
-            b'\t' => output.push_str("\\t"),
-            _ => {}
-        }
-        start = special + 1;
-    }
-
-    output.push('"');
-    output
-}
-
-#[inline]
-fn next_escape_byte(bytes: &[u8]) -> Option<usize> {
-    let quoted = memchr::memchr3(b'\\', b'"', 0x7f, bytes);
-    let bound = quoted.unwrap_or(bytes.len());
-    let control = bytes[..bound].iter().position(|byte| *byte < 0x20);
-    control.or(quoted)
-}
-
 /// Returns the character count only when it exceeds `limit`.
 #[inline]
 pub fn char_count_if_exceeds(value: &str, limit: usize) -> Option<usize> {
@@ -268,24 +228,6 @@ mod tests {
 
     const TOKEN_BYTES: [bool; 256] = ascii_alphanumeric_table(b"_-:./@+");
 
-    fn quote_escaped_reference(value: &str) -> String {
-        let mut output = String::with_capacity(value.len() + 2);
-        output.push('"');
-        for character in value.chars() {
-            match character {
-                '\\' => output.push_str("\\\\"),
-                '"' => output.push_str("\\\""),
-                '\n' => output.push_str("\\n"),
-                '\r' => output.push_str("\\r"),
-                '\t' => output.push_str("\\t"),
-                character if (character as u32) < 0x20 || character == '\u{7f}' => {}
-                character => output.push(character),
-            }
-        }
-        output.push('"');
-        output
-    }
-
     fn is_bare_token_reference(value: &str) -> bool {
         value.chars().all(|character| {
             character.is_ascii_alphanumeric()
@@ -344,7 +286,6 @@ mod tests {
         ]);
 
         for value in values {
-            assert_eq!(quote_escaped(&value), quote_escaped_reference(&value));
             assert_eq!(
                 bytes_are_allowed(value.as_bytes(), &TOKEN_BYTES),
                 is_bare_token_reference(&value)

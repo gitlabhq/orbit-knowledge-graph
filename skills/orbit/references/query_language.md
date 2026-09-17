@@ -54,7 +54,7 @@ query object in a top-level `query` field:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `query` | Yes | The query object documented below. |
-| `response_format` | No | `"llm"` (default when omitted; compact [GOON](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/graph_engine.md) text optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
+| `response_format` | No | `"llm"` (standard [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) encoding of the graph query payload) or `"raw"` (structured JSON). Direct REST requests default to `"raw"` when omitted; the GitLab Orbit CLI (`glab orbit query`) supplies `"llm"` when neither the flag nor request body specifies a format. Use `"raw"` when piping output into `jq`. |
 
 The `orbit query` command requires this envelope.
 

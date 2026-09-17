@@ -62,7 +62,6 @@ futures = { workspace = true }
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-toon-format = { workspace = true }
 
 [build-dependencies]
 compiler = { path = "../query-engine/compiler" }

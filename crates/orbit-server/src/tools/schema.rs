@@ -1,8 +1,8 @@
 use std::sync::LazyLock;
 
+use orbit_utils::toon::encode;
 use semver::Version;
 use serde_json::{Map, Value};
-use toon_format::{EncodeOptions, encode};
 
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 const QUERY_RESPONSE_SCHEMA: &str =
@@ -27,8 +27,7 @@ pub fn condensed_query_schema() -> Result<String, String> {
 
     let condensed = condense_schema(schema);
 
-    let options = EncodeOptions::default();
-    encode(&condensed, &options).map_err(|e| e.to_string())
+    encode(&condensed).map_err(|e| e.to_string())
 }
 
 pub fn raw_query_schema() -> &'static str {

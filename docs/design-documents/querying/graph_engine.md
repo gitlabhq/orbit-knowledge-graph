@@ -152,7 +152,13 @@ The prefix is validated within authorized scope before use: the path resolver on
 
 The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`, `next_cursor`). Keyset cursors (`{ page_size, after }`) lower into seek predicates in SQL, so each page is a fresh bounded query; there is no offset slicing and no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
 Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
-A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
+A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend. The `raw` response is JSON; `llm` is standard TOON encoding of the same payload.
+
+#### TOON limitations
+
+The `toon-format` 0.5.0 encoder has an unresolved finite `Float64` bug: values at 2^63 and 2^64 are emitted as `i64::MAX` and `u64::MAX`, respectively. This is a release risk for callers that need exact values; use the `raw` JSON format as the fallback. No output postprocessing is applied.
+
+The Rust decoder also cannot decode some spec-valid keyword property keys. This decoder limitation does not make the encoder output invalid.
 
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
 

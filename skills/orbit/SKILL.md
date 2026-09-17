@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.27.0
+version: 0.28.0
 license: MIT
 metadata:
   audience: developers
@@ -96,7 +96,7 @@ For code-structure orientation before you plan a change, use `glab orbit repo-ma
 
 glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--install` and `--update` are mutually exclusive. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. `glab orbit --help` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
 
-```bash
+```shell
 glab orbit --install --yes   # install without running
 glab orbit --update          # install the latest compatible version
 ```

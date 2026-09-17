@@ -80,7 +80,7 @@ rmcp = { version = "1.7", features = ["server", "macros", "transport-io"] }
 schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
 stop-words = { version = "0.10.0", default-features = false, features = ["nltk"] }
-serde_json = "1.0.149"
+serde_json = { version = "1.0.149", features = ["preserve_order"] }
 serde-saphyr = "1.1.0"
 sha2 = "0.11.0"
 smallvec = "1.15.1"
@@ -110,7 +110,6 @@ siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.g
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
 toml = "1.0.0"
-toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
 # Build-time fetch over plain HTTP; integrity comes from pinned checksums.
@@ -186,10 +185,6 @@ axum = { version = "0.8.8", features = ["macros"] }
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
 semver = { version = "1.0", features = ["serde"] }
-
-# Formatter test dependencies
-insta = { version = "1.40", features = ["yaml"] }
-proptest = "1.5"
 
 # Health check dependencies
 kube = { version = "4.2", features = ["client", "runtime", "ws"] }

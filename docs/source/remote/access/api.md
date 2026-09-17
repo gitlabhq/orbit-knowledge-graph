@@ -63,7 +63,7 @@ The request body contains:
 - `query`: A JSON Query DSL object, or a text string when `language` is `gql`.
 - `language`: Optional `json` (default) or `gql`. Unknown values and query shapes that do not match the language are rejected.
 - `response_format`: Optional response format. Use `raw` for structured JSON, or `llm`
-  for compact text optimized for AI agents. Default: `raw`.
+  for standard TOON encoding of the same query result. Default: `raw`.
 
 The GitLab Orbit CLI explicitly sends `llm` by default.
 
@@ -141,7 +141,7 @@ An example response:
 ```json
 {
   "result": {
-    "format_version": "2.0.0",
+    "format_version": "5.0.1",
     "query_type": "aggregation",
     "nodes": [],
     "edges": [],

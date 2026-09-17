@@ -83,7 +83,7 @@ message QueryMetadata {
   repeated string raw_query_strings = 2; // compiled ClickHouse SQL(s), debug only
   int32 row_count = 3;
   string format_version = 4;             // semver, e.g. "1.0.0"; empty for stubs
-  FormatName format_name = 5;            // RAW | GOON
+  FormatName format_name = 5;            // RAW | TOON
 }
 ```
 
@@ -326,19 +326,19 @@ The user can always switch.
 
 ### Implementation
 
-`GraphFormatter` in Rust replaces `RawRowFormatter` as the default. `GoonFormatter` handles LLM output (GOON/TOON format). `ResultContext` was extended with `EdgeMeta` to carry edge column metadata through the pipeline. A JSON Schema at `config/schemas/query_response.json` is the shared contract between server and frontend. On the frontend side, `graph_transform.js` goes away entirely, replaced by ~30 lines of `buildGraphData()` that passes nodes and edges straight to Three.js.
+`GraphFormatter` in Rust replaces `RawRowFormatter` as the default. `ToonFormatter` handles LLM output using standard TOON. `ResultContext` was extended with `EdgeMeta` to carry edge column metadata through the pipeline. A JSON Schema at `config/schemas/query_response.json` is the shared contract between server and frontend. On the frontend side, `graph_transform.js` goes away entirely, replaced by ~30 lines of `buildGraphData()` that passes nodes and edges straight to Three.js.
 
 ### Format versioning
 
 Every response includes a `format_version` field (semver string, e.g. `"1.0.0"`). Major bumps signal breaking shape changes, minor bumps signal new optional fields, patch bumps signal formatting bug fixes. The version is loaded at compile time from `config/RAW_OUTPUT_FORMAT_VERSION` and appears in:
 
 1. The JSON response body as a top-level `format_version` string (key order is alphabetical by default since `serde_json` uses `BTreeMap`).
-2. The proto `QueryMetadata.format_version` string + `format_name` enum (`FormatName::Raw` or `FormatName::Goon`).
+2. The proto `QueryMetadata.format_version` string + `format_name` enum (`FormatName::Raw` or `FormatName::Toon`).
 3. The JSON Schema `$id` (`schemas/query_response/v1`), whose `vN` suffix tracks the version's major component. CI asserts the two stay in sync.
 
-The `ResultFormatter` trait exposes `format_name() -> FormatName` and `format_version() -> Option<&Version>` so the gRPC service stamps version metadata without hardcoding. A stub formatter (like `GoonFormatter` today, which delegates to `GraphFormatter`) returns `None` from `format_version()` — the proto field then carries an empty string, making "stub" observable in telemetry. CI enforces that changes to formatter code or the response schema require a strictly greater semver bump (`scripts/check-response-schema-version.sh`).
+The `ResultFormatter` trait exposes `format_name() -> FormatName` and `format_version() -> Option<&Version>` so the gRPC service stamps version metadata without hardcoding. CI enforces format pin changes through `scripts/check-pinned-version.sh`.
 
-GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) is added alongside the actual GOON encoding (ADR 012).
+TOON encoding is versioned separately by `toon_output_format` in `config/versions.yaml`. [ADR 012](012_goon_format.md) records the retired GOON format.
 
 ## Consequences
 

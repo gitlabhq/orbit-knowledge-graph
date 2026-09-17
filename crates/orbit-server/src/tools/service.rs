@@ -4,10 +4,10 @@ use std::sync::Arc;
 use jsonschema::Validator;
 use ontology::Ontology;
 use ontology::introspection::{IntrospectionScope, SchemaResponse, build_schema_response};
+use orbit_utils::toon::encode;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
-use toon_format::{EncodeOptions, encode};
 
 use super::registry::ToolDefinition;
 use super::schema::{condensed_query_schema, query_dsl_version, raw_query_schema};
@@ -184,7 +184,7 @@ impl ToolService {
     }
 
     pub fn encode_schema_toon(response: &SchemaResponse) -> Result<String, ExecutorError> {
-        encode(response, &EncodeOptions::default())
+        encode(response)
             .map_err(|e| ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}")))
     }
 
@@ -214,7 +214,7 @@ impl ToolService {
                 .collect(),
         };
 
-        encode(&catalog, &EncodeOptions::default()).map_err(|e| {
+        encode(&catalog).map_err(|e| {
             ExecutorError::InvalidArguments(format!(
                 "Failed to encode command catalog as toon: {e}"
             ))
