@@ -207,6 +207,14 @@ pub struct Query {
     pub union_all: Vec<Query>,
 }
 
+impl Query {
+    pub fn selects_alias(&self, alias: &str) -> bool {
+        self.select
+            .iter()
+            .any(|s| s.alias.as_deref() == Some(alias))
+    }
+}
+
 impl Default for Query {
     fn default() -> Self {
         Self {
