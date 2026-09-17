@@ -5,7 +5,7 @@
 # ///
 import unittest
 
-from prose_lint import check, markdown_units, yaml_units
+from prose_lint import LintError, check, main, markdown_units, yaml_units
 
 PROMPT = """\
 name: grep
@@ -141,7 +141,20 @@ class MarkdownUnits(unittest.TestCase):
         self.assertEqual(rules(check(self.body))[:3], [(22, "tell"), (22, "tell"), (22, "tell")])
 
 
+class Cli(unittest.TestCase):
+    def test_missing_file_is_an_error(self):
+        with self.assertRaises(LintError):
+            main(["does-not-exist.md"])
+
+    def test_out_of_scope_file_is_skipped(self):
+        self.assertEqual(main([__file__]), 0)
+
+
 class SentenceRules(unittest.TestCase):
+    def test_urls_decimals_and_references_do_not_split(self):
+        (unit,) = markdown_units("s.md", "See https://docs.gitlab.com/ee/api.html and v0.113.1 or Definition:a.b today.")
+        self.assertEqual(len(unit.sentences), 1)
+
     def test_unpunctuated_list_items_stay_separate(self):
         (unit,) = markdown_units("s.md", "Intro line\n- item one leverages things\n- item two underscores things")
         self.assertEqual([(s.line, s.text) for s in unit.sentences][1:], [(2, "item one leverages things"), (3, "item two underscores things")])

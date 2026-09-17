@@ -35,7 +35,7 @@ pre-commit:
       run: ./scripts/linting/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
     - name: prose
-      run: mise run lint:prose -- {staged_files} || true
+      run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files} || true
       glob:
         - "AGENTS.md"
         - "CONTEXT.md"
