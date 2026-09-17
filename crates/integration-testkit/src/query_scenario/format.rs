@@ -116,6 +116,9 @@ pub struct QueryExpect {
     pub group_columns: BTreeMap<String, String>,
     #[serde(default)]
     pub sql_contains: Vec<String>,
+    /// Assert the hydration plan kind: `none`, `static`, or `dynamic`.
+    #[serde(default)]
+    pub hydration: Option<String>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
     /// Assert total edge count across all types.

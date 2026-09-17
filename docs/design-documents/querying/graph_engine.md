@@ -70,7 +70,7 @@ Schema calls have no state in the shared compiler contexts. `compiler::compile` 
 | 8 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
 | 9 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
 | 10 | `check` | Verifies every namespaced graph-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
-| 11 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
+| 11 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
 | 12 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
 | 13 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 

@@ -435,7 +435,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
                             QueryError::Lowering(format!("no sort key for node table '{table}'"))
                         })?;
-                        let (new_from, _selects, nw) = emit_node_join_with_narrowing(
+                        let (new_from, ns, nw) = emit_node_join_with_narrowing(
                             from,
                             np,
                             edge_alias,
@@ -445,6 +445,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             node_sort_key,
                         )?;
                         from = new_from;
+                        selects.extend(ns);
                         where_parts.extend(nw);
                     }
                 }
@@ -456,7 +457,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
                             QueryError::Lowering(format!("no sort key for node table '{table}'"))
                         })?;
-                        let (new_from, _selects, nw) = emit_node_join_with_narrowing(
+                        let (new_from, ns, nw) = emit_node_join_with_narrowing(
                             from,
                             np,
                             edge_alias,
@@ -466,6 +467,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             node_sort_key,
                         )?;
                         from = new_from;
+                        selects.extend(ns);
                         where_parts.extend(nw);
                     }
                 }
