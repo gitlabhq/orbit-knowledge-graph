@@ -1,3 +1,3 @@
 pub mod validation;
 
-pub use validation::{SkillValidation, extract_remote_commands, validate_skill_pair};
+pub use validation::{CLAP_HELP_COMMAND, SkillValidation, validate_skill_pair};

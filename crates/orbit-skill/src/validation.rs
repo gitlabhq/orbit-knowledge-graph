@@ -10,6 +10,8 @@ const SLOT_PREFIX: &str = "<!-- orbit:include local:";
 const SECTION_PREFIX: &str = "<!-- orbit:section ";
 const SECTION_END: &str = "<!-- /orbit:section -->";
 
+pub const CLAP_HELP_COMMAND: &str = "help";
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct SkillValidation {
     pub remote_commands: BTreeSet<String>,
@@ -48,10 +50,13 @@ pub fn validate_skill_pair(
     validate_links("local", &local, &union)?;
 
     let remote_commands = extract_remote_commands_from_tree(&remote);
+    if remote_commands.is_empty() {
+        return Err("remote skill does not document any Orbit commands".to_string());
+    }
     let command_inventory = extract_command_inventory(commands_source.as_ref())?;
     let unknown: Vec<_> = remote_commands
         .difference(&command_inventory)
-        .filter(|command| command.as_str() != "help")
+        .filter(|command| command.as_str() != CLAP_HELP_COMMAND)
         .cloned()
         .collect();
     if !unknown.is_empty() {
@@ -61,12 +66,6 @@ pub fn validate_skill_pair(
     }
 
     Ok(SkillValidation { remote_commands })
-}
-
-pub fn extract_remote_commands(remote_root: impl AsRef<Path>) -> Result<BTreeSet<String>, String> {
-    Ok(extract_remote_commands_from_tree(&load_tree(
-        remote_root.as_ref(),
-    )?))
 }
 
 fn load_tree(root: &Path) -> Result<BTreeMap<String, String>, String> {
@@ -621,7 +620,7 @@ mod tests {
         let root = fixture();
         std::fs::write(
             root.path().join("remote/SKILL.md"),
-            "[local](references/local/sql.md)\n<!-- orbit:include local:quick-start -->\n",
+            "[local](references/local/sql.md)\n<!-- orbit:include local:quick-start -->\n`orbit query`\n",
         )
         .unwrap();
         assert!(validate(root.path()).is_ok());
@@ -690,6 +689,21 @@ orbit graph-status --project-id 1
                 "query".to_string(),
                 "repo-map".to_string(),
             ])
+        );
+    }
+
+    #[test]
+    fn validation_rejects_empty_command_extraction() {
+        let root = fixture();
+        std::fs::write(
+            root.path().join("remote/SKILL.md"),
+            "<!-- orbit:include local:quick-start -->\n",
+        )
+        .unwrap();
+        assert!(
+            validate(root.path())
+                .unwrap_err()
+                .contains("does not document any Orbit commands")
         );
     }
 

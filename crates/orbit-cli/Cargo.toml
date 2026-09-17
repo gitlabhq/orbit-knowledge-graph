@@ -47,4 +47,5 @@ orbit-skill = { path = "../orbit-skill" }
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
+orbit-skill = { path = "../orbit-skill" }
 tempfile = { workspace = true }

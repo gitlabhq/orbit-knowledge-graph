@@ -1097,18 +1097,25 @@ mod tests {
             .split(',')
             .map(str::to_string)
             .collect();
+        assert!(
+            !extracted.is_empty(),
+            "remote skill command extraction must not be empty"
+        );
         let mut clap_commands: std::collections::BTreeSet<_> = Cli::command()
             .get_subcommands()
             .map(|command| command.get_name().to_string())
             .collect();
-        let generated_help_is_materialized = clap_commands.remove("help");
+        let generated_help_is_materialized = clap_commands.remove(orbit_skill::CLAP_HELP_COMMAND);
         assert!(
             !generated_help_is_materialized,
             "get_subcommands excludes clap's generated help command"
         );
         let unknown: Vec<_> = extracted
             .iter()
-            .filter(|command| command.as_str() != "help" && !clap_commands.contains(*command))
+            .filter(|command| {
+                command.as_str() != orbit_skill::CLAP_HELP_COMMAND
+                    && !clap_commands.contains(*command)
+            })
             .collect();
         assert!(unknown.is_empty(), "unknown skill commands: {unknown:?}");
     }
