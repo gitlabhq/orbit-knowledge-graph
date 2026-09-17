@@ -55,10 +55,11 @@ docker buildx build \
   $TAGS \
   .
 
-DIGEST=$(sed -n 's/.*"containerimage\.digest": *"\([^"]*\)".*/\1/p' "$METADATA_FILE" | head -n1)
+DIGEST=$(grep -oE '"containerimage\.digest": *"sha256:[0-9a-f]{64}"' "$METADATA_FILE" | head -n1 | grep -oE 'sha256:[0-9a-f]{64}')
 if [ -z "$DIGEST" ]; then
   echo "buildx reported no image digest" >&2
   exit 1
 fi
-echo "IMAGE_DIGEST_${PLATFORM##*/}=${DIGEST}" > build.env
+mkdir -p image-digests
+printf '%s\n' "$DIGEST" > "image-digests/${PLATFORM##*/}"
 echo "Pushed ${DIGEST} as:${TAGS}"

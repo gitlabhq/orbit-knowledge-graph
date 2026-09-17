@@ -9,7 +9,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Architecture and data model | `docs/design-documents/data_model.md` |
 | Security / AuthZ design | `docs/design-documents/security.md` |
 | FIPS posture (module guard, graph and binary gates) | `crates/orbit-server/src/fips.rs`, `scripts/check-fips-graph.sh`, `scripts/check-fips-binary.sh`; design in `docs/design-documents/security.md` |
-| Image signing (keyless cosign, canonical project only) | `scripts/sign-image.sh`; runbook in `docs/dev/runbooks/image_signing.md`; design in `docs/design-documents/security.md` |
+| Image signing (keyless cosign, canonical project only) | `scripts/publish-manifest.sh`, `scripts/sign-image.sh`; runbook in `docs/dev/runbooks/image_signing.md`; design in `docs/design-documents/security.md` |
 | Query DSL spec | `docs/design-documents/querying/` |
 | Orbit query frontend | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/design-documents/querying/orbit_query_frontend.md` |
 | SDLC indexing pipeline | `docs/design-documents/indexing/sdlc_indexing.md` |

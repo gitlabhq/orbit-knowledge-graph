@@ -4,6 +4,9 @@
 # Runs only in the canonical project. Do not sign in forks, including private
 # forks: a keyless signature publishes the signing project's path and ref to
 # the public Rekor log, which would disclose them.
+# The project ID is read from the signed OIDC token and compared with a
+# literal, because CI variables can be overridden from project or pipeline
+# settings.
 
 set -eu
 
@@ -17,22 +20,33 @@ if [ "$#" -lt 1 ]; then
 fi
 
 for ref in "$@"; do
-  case "$ref" in
-    *@sha256:*) ;;
-    *)
-      echo "Refusing to sign ${ref}: pass the digest, a tag can be moved after the build." >&2
-      exit 1
-      ;;
-  esac
+  if ! printf '%s' "$ref" | grep -Eq '@sha256:[0-9a-f]{64}$'; then
+    echo "Refusing to sign ${ref}: pass a full digest, a tag can be moved after the build." >&2
+    exit 1
+  fi
 done
 
-: "${CI_PROJECT_ID:?CI_PROJECT_ID must be set}"
-if [ "$CI_PROJECT_ID" != "$CANONICAL_PROJECT_ID" ]; then
-  echo "Skipping image signing: project ${CI_PROJECT_ID} is not the canonical project."
+: "${SIGSTORE_ID_TOKEN:?SIGSTORE_ID_TOKEN must be set; the job needs an id_tokens entry with aud sigstore}"
+
+token_project_id() {
+  payload=$(printf '%s' "$SIGSTORE_ID_TOKEN" | cut -d. -f2 | tr '_-' '/+')
+  case $(( ${#payload} % 4 )) in
+    2) payload="${payload}==" ;;
+    3) payload="${payload}=" ;;
+  esac
+  printf '%s' "$payload" | base64 -d 2>/dev/null | grep -oE '"project_id": *"[0-9]+"' | grep -oE '[0-9]+' | head -n1
+}
+
+project_id=$(token_project_id)
+if [ -z "$project_id" ]; then
+  echo "SIGSTORE_ID_TOKEN carries no project_id claim." >&2
+  exit 1
+fi
+if [ "$project_id" != "$CANONICAL_PROJECT_ID" ]; then
+  echo "Skipping image signing: project ${project_id} is not the canonical project."
   exit 0
 fi
 
-: "${SIGSTORE_ID_TOKEN:?SIGSTORE_ID_TOKEN must be set; the job needs an id_tokens entry with aud sigstore}"
 export COSIGN_YES=true
 
 arch=$(uname -m)
@@ -41,9 +55,8 @@ if [ "$arch" != "x86_64" ]; then
   exit 1
 fi
 
-command -v curl >/dev/null 2>&1 || apk add --no-cache curl >/dev/null
 COSIGN="$(mktemp -d)/cosign"
-curl -fsSL -o "$COSIGN" \
+wget -qO "$COSIGN" \
   "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
 echo "${COSIGN_SHA256_AMD64}  ${COSIGN}" | sha256sum -c -
 chmod +x "$COSIGN"
@@ -62,7 +75,7 @@ sign_and_verify() {
   named="${ref%@*}"
   image_tag="${named##*:}"
   case "$image_tag" in
-    */*) image_name="$named"; image_tag="" ;;
+    */*|"$named") image_name="$named"; image_tag="" ;;
     *) image_name="${named%:*}" ;;
   esac
   digest_ref="${image_name}@${digest}"
