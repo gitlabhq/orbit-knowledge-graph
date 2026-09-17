@@ -32,10 +32,10 @@ pre-commit:
     # has no per-job allow_failure primitive — this is the standard workaround.)
     # To promote to a blocking gate, remove `|| true`.
     - name: narration
-      run: ./scripts/comment-guard/check-narration.sh {staged_files} || true
+      run: ./scripts/linting/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
     - name: prompts
-      run: ./scripts/comment-guard/check-prompts.sh {staged_files} || true
+      run: ./scripts/linting/check-prompts.sh {staged_files} || true
       glob:
         - "config/prompts/**/*.yml"
         - "config/setup/setup.yaml"

@@ -1,4 +1,4 @@
-# comment-guard
+# linting
 
 Deterministic lint gates that catch mechanical review feedback (LLM narration
 comments, bloated MR-description headlines) before it reaches a human reviewer.
@@ -23,7 +23,7 @@ as a unit (see *Removing the gates* below). Task #2933.
   block — `|| true` in `lefthook.yml`).
 - **lefthook** `pre-commit` job `prompts` (advisory, same `|| true` pattern).
 - **CI** jobs `lint:narration`, `lint:mr-description`, and `lint:prompts`, defined in
-  [`.gitlab/ci/comment-guard.yml`](../../.gitlab/ci/comment-guard.yml). Both use
+  [`.gitlab/ci/linting.yml`](../../.gitlab/ci/linting.yml). Both use
   `allow_failure: true` (yellow/advisory). In merge-request pipelines the
   narration job scopes to lines the MR added (`--diff-base`).
 
@@ -48,7 +48,7 @@ scorer) at materially lower precision (~70%): the extra flags are continuation
 lines of multi-line why-comments that the Python scorer correctly exempts.
 
 ```shell
-mise exec -- ast-grep scan --rule scripts/comment-guard/narration-comments.yml crates/
+mise exec -- ast-grep scan --rule scripts/linting/narration-comments.yml crates/
 ```
 
 ## Promoting a gate to blocking
@@ -56,7 +56,7 @@ mise exec -- ast-grep scan --rule scripts/comment-guard/narration-comments.yml c
 Blocking-ness lives in config, not the scripts (the scripts always exit non-zero
 on findings):
 
-- **CI:** remove `allow_failure: true` from the job in `.gitlab/ci/comment-guard.yml`.
+- **CI:** remove `allow_failure: true` from the job in `.gitlab/ci/linting.yml`.
 - **lefthook:** remove the `|| true` suffix from the `narration` job's `run:` in
   `lefthook.yml`.
 
@@ -66,8 +66,8 @@ The kill-switch is three deletes plus two one-line reference removals (all
 fail-loud, so nothing silently lingers):
 
 ```shell
-rm -rf scripts/comment-guard .gitlab/ci/comment-guard.yml
+rm -rf scripts/linting .gitlab/ci/linting.yml
 # then remove:
-#   - the `- local: .gitlab/ci/comment-guard.yml` line in .gitlab-ci.yml
+#   - the `- local: .gitlab/ci/linting.yml` line in .gitlab-ci.yml
 #   - the `narration` pre-commit job in lefthook.yml
 ```

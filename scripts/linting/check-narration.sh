@@ -14,11 +14,11 @@
 #
 # Modes:
 #   Whole-tree / explicit files (lefthook, main-branch CI):
-#     scripts/comment-guard/check-narration.sh                 # scan crates/
-#     scripts/comment-guard/check-narration.sh a.rs b.rs ...   # scan specific files
+#     scripts/linting/check-narration.sh                 # scan crates/
+#     scripts/linting/check-narration.sh a.rs b.rs ...   # scan specific files
 #
 #   MR-diff-scoped (merge_request CI pipelines):
-#     scripts/comment-guard/check-narration.sh --diff-base <sha>
+#     scripts/linting/check-narration.sh --diff-base <sha>
 #     Scans only .rs files changed since <sha> and reports only flags on
 #     added/modified lines, so pre-existing legacy narration is not noise.
 #     Errors out (exit 2) if the base SHA is unreachable — never silently
