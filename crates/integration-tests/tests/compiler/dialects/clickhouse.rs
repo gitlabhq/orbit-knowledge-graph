@@ -787,6 +787,33 @@ fn scoped_aggregation_injects_tight_prefix() {
 }
 
 #[test]
+fn scoped_count_condition_excludes_the_scope_lookup() {
+    let orbit_query =
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) RETURN g, count(u) AS n LIMIT 5";
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "g", "entity": "Group", "node_ids": [100]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "limit": 5
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    let count_arg = sql
+        .split("countIf(")
+        .nth(1)
+        .unwrap()
+        .split(" AS n")
+        .next()
+        .unwrap();
+    assert!(!count_arg.contains("_scope"), "{sql}");
+    assert!(sql.contains("FROM gl_group AS _scope WHERE"), "{sql}");
+}
+
+#[test]
 fn cross_namespace_related_to_edge_stays_unscoped() {
     let orbit_query = "MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = 1 RETURN p, wi.id, rel.id, rel.title LIMIT 100";
     let json = r#"{
