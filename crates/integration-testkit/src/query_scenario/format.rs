@@ -1,8 +1,27 @@
 use std::collections::BTreeMap;
 
+use query_engine::compiler::HydrationPlan;
 use serde::Deserialize;
 
 use crate::scenario::Seed;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HydrationKind {
+    None,
+    Static,
+    Dynamic,
+}
+
+impl From<&HydrationPlan> for HydrationKind {
+    fn from(plan: &HydrationPlan) -> Self {
+        match plan {
+            HydrationPlan::None => Self::None,
+            HydrationPlan::Static(_) => Self::Static,
+            HydrationPlan::Dynamic(_) => Self::Dynamic,
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -116,9 +135,8 @@ pub struct QueryExpect {
     pub group_columns: BTreeMap<String, String>,
     #[serde(default)]
     pub sql_contains: Vec<String>,
-    /// Assert the hydration plan kind: `none`, `static`, or `dynamic`.
     #[serde(default)]
-    pub hydration: Option<String>,
+    pub hydration: Option<HydrationKind>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
     /// Assert total edge count across all types.

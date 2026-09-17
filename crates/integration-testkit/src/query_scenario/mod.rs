@@ -214,11 +214,11 @@ async fn run_frontend(
         },
     };
 
-    if let Some(expected) = &expect.hydration {
-        let actual: &str = (&compiled.hydration).into();
+    if let Some(expected) = expect.hydration {
         assert_eq!(
-            actual, expected,
-            "{label}: hydration plan is {actual}, expected {expected}\n{:?}",
+            format::HydrationKind::from(&compiled.hydration),
+            expected,
+            "{label}: unexpected hydration plan\n{:?}",
             compiled.hydration
         );
     }
