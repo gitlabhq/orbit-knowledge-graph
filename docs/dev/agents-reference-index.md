@@ -93,7 +93,7 @@ Read this table before you change a listed input. Run the local task when one is
 | MR titles | `mr-title-check`; use the format in `CONTRIBUTING.md` |
 | Rust toolchain files | `rust-toolchain-sync-check`; regenerate with `mise toolchain:generate` |
 | Markdown | `check_docs_markdown` runs markdownlint, Vale, and lychee; run `mise lint:docs` |
-| Query DSL, RAW, and GOON pins | `pinned-version-check` reports every stale pin in `config/versions.yaml` |
+| Query DSL, RAW, and GOON pins | Bump the matching pin in `config/versions.yaml` whenever a covered query DSL, RAW response, or GOON format file changes; `pinned-version-check` reports every stale pin |
 | Skill files | `skill-version-bump-check`; bump the changed skill under `skills/<name>/` |
 | Prompt files | `prompt-version-bump-check`; bump the changed prompt under `config/prompts/` |
 | Metrics catalog | `metrics-catalog-check`; regenerate from `orbit-observability` as directed by the task |
