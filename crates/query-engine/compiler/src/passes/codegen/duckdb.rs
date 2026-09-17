@@ -180,6 +180,9 @@ impl Context {
     }
 
     fn emit_expr(&mut self, e: &Expr) -> String {
+        if is_deleted_predicate(e) {
+            return "true".to_string();
+        }
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
             Expr::Identifier(name) => name.clone(),
@@ -394,6 +397,13 @@ fn duckdb_trunc_unit(suffix: &str) -> Option<&'static str> {
         "Year" => Some("year"),
         _ => None,
     }
+}
+
+fn is_deleted_predicate(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::BinaryOp { op: Op::Eq, left, .. } if is_dedup_column(left)
+    )
 }
 
 /// Strip `_deleted = false` predicates from a WHERE clause.
