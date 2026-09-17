@@ -35,7 +35,7 @@ workdir=$(mktemp -d)
 script_dir=$(dirname "$0")
 
 index_digest_from_metadata() {
-  digest=$(sed -n '/"containerimage\.descriptor"/,/}/p' "$1" | grep -oE '"digest": *"sha256:[0-9a-f]{64}"' | head -n1 | grep -oE 'sha256:[0-9a-f]{64}')
+  digest=$(tr -d ' \n\t' < "$1" | grep -oE '"containerimage\.descriptor":\{[^}]*\}' | grep -oE '"digest":"sha256:[0-9a-f]{64}"' | head -n1 | grep -oE 'sha256:[0-9a-f]{64}')
   if [ -z "$digest" ]; then
     echo "No index digest in ${1}:" >&2
     cat "$1" >&2
