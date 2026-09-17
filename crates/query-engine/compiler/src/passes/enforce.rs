@@ -220,9 +220,7 @@ fn enforce_return_columns(
 
         // Neighbors emit _gkg_* columns directly in the lowerer per UNION arm
         // because the center edge column differs per direction.
-        if input.query_type == QueryType::Neighbors
-            && q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col))
-        {
+        if input.query_type == QueryType::Neighbors && q.selects_alias(&id_col) {
             continue;
         }
 
@@ -309,7 +307,7 @@ fn enforce_return_columns(
                     }
                 }
 
-                let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
+                let has_pk = q.selects_alias(&pk_col);
                 if !has_pk {
                     q.select.push(SelectExpr {
                         expr: edge_id_expr.clone(),
@@ -318,7 +316,7 @@ fn enforce_return_columns(
                 }
                 ensure_in_group_by(q, input.query_type, edge_id_expr.clone());
 
-                let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+                let has_id = q.selects_alias(&id_col);
                 let id_expr = Expr::col(&node.id, &node.redaction_id_column);
                 if !has_id {
                     q.select.push(SelectExpr {
@@ -328,7 +326,7 @@ fn enforce_return_columns(
                 }
                 ensure_in_group_by(q, input.query_type, id_expr);
             } else {
-                let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+                let has_id = q.selects_alias(&id_col);
                 if !has_id {
                     q.select.push(SelectExpr {
                         expr: edge_id_expr.clone(),
@@ -338,7 +336,7 @@ fn enforce_return_columns(
                 ensure_in_group_by(q, input.query_type, edge_id_expr);
             }
 
-            let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
+            let has_type = q.selects_alias(&type_col);
             if !has_type {
                 let insert_pos = q
                     .select
@@ -359,7 +357,7 @@ fn enforce_return_columns(
             // Table-centric: search, aggregation — node tables are in FROM.
             if needs_separate_pk {
                 let pk_expr = Expr::col(&node.id, DEFAULT_PRIMARY_KEY);
-                let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
+                let has_pk = q.selects_alias(&pk_col);
                 if !has_pk {
                     q.select.push(SelectExpr {
                         expr: pk_expr.clone(),
@@ -372,8 +370,8 @@ fn enforce_return_columns(
                 ensure_in_group_by(q, input.query_type, pk_expr);
             }
 
-            let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
-            let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
+            let has_id = q.selects_alias(&id_col);
+            let has_type = q.selects_alias(&type_col);
 
             if !has_id {
                 let id_expr = Expr::col(&node.id, &node.redaction_id_column);
@@ -410,7 +408,7 @@ fn enforce_return_columns(
         // where the node table was absorbed into an edge filter).
         if node.has_traversal_path && input.query_type != QueryType::Aggregation {
             let tp_col = traversal_path_column(&node.id);
-            let has_tp = q.select.iter().any(|s| s.alias.as_ref() == Some(&tp_col));
+            let has_tp = q.selects_alias(&tp_col);
             if !has_tp {
                 let tp_expr = if node_is_edge_centric {
                     if let Some((edge_alias, _)) = node_edge_col.get(&node.id) {
@@ -762,26 +760,10 @@ mod tests {
         };
 
         assert_eq!(q.select.len(), 3);
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_id".to_string()))
-        );
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_u_type".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_id".to_string()))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
-        );
+        assert!(q.selects_alias("_gkg_u_id"));
+        assert!(q.selects_alias("_gkg_u_type"));
+        assert!(!q.selects_alias("_gkg_n_id"));
+        assert!(!q.selects_alias("_gkg_n_type"));
         assert_eq!(q.group_by.len(), 1);
 
         assert_eq!(ctx.len(), 1);
@@ -1193,27 +1175,11 @@ mod tests {
             matches!(&mr_id.expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
         );
 
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_u_pk"))
-        );
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk"))
-        );
+        assert!(!q.selects_alias("_gkg_u_pk"));
+        assert!(!q.selects_alias("_gkg_mr_pk"));
 
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_u_type"))
-        );
-        assert!(
-            q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_mr_type"))
-        );
+        assert!(q.selects_alias("_gkg_u_type"));
+        assert!(q.selects_alias("_gkg_mr_type"));
     }
 
     #[test]
@@ -1280,11 +1246,7 @@ mod tests {
             "non-default redaction_id_column should JOIN the node table"
         );
 
-        assert!(
-            !q.select
-                .iter()
-                .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk"))
-        );
+        assert!(!q.selects_alias("_gkg_mr_pk"));
     }
 
     #[test]

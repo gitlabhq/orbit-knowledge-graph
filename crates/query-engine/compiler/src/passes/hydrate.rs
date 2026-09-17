@@ -111,7 +111,7 @@ fn build_static_templates(
     emitted: &Node,
     ontology: &Ontology,
 ) -> Vec<HydrationTemplate> {
-    let projected = projected_aliases(emitted);
+    let projected = |alias: &str| matches!(emitted, Node::Query(q) if q.selects_alias(alias));
     input
         .nodes
         .iter()
@@ -126,7 +126,7 @@ fn build_static_templates(
             // DB-only columns (virtual already stripped by normalize).
             let mut columns: Vec<String> = requested
                 .iter()
-                .filter(|col| !projected.contains(&format!("{}_{col}", node.id)))
+                .filter(|col| !projected(&format!("{}_{col}", node.id)))
                 .cloned()
                 .collect();
             let virtual_columns = node.virtual_columns.clone();
@@ -151,13 +151,6 @@ fn build_static_templates(
             })
         })
         .collect()
-}
-
-fn projected_aliases(emitted: &Node) -> HashSet<String> {
-    match emitted {
-        Node::Query(q) => q.select.iter().filter_map(|s| s.alias.clone()).collect(),
-        Node::Insert(_) => HashSet::new(),
-    }
 }
 
 /// Pre-resolve column specs for every ontology entity type based on the
