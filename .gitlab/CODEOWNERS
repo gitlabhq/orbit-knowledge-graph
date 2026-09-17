@@ -16,14 +16,6 @@
 [Architecture] @gitlab-org/orbit/team
 /docs/design-documents/decisions/
 
-[CI and release pipeline] @gitlab-org/orbit/team
-/.gitlab-ci.yml
-/.gitlab/ci/
-/Dockerfile
-/scripts/docker-build.sh
-/scripts/publish-manifest.sh
-/scripts/sign-image.sh
-
 ## Localization files that do not need `*` rule approval,
 ## but still require an approval from a Localization team DRI for each file.
 /docs-locale/ @gitlab-com/localization/maintainers/tech-docs
