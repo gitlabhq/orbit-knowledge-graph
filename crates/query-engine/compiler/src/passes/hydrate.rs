@@ -68,9 +68,10 @@ pub struct VirtualColumnRequest {
 
 /// Build the hydration plan for a compiled query.
 ///
-/// - Search/Aggregation/Traversal: static plan from input nodes. Virtual
-///   columns come from `node.virtual_columns` (populated by normalize).
-///   Search/Aggregation only get a plan when VCRs are present.
+/// - Aggregation/Traversal: one static template per input node, minus the
+///   columns `emitted` already projects as `{alias}_{col}`. Nodes the base
+///   query joins inline therefore need no second query; single-node search
+///   keeps only its virtual columns.
 /// - PathFinding/Neighbors: dynamic plan over all ontology entity types.
 ///
 /// The security context is threaded through so dynamic plans can strip
@@ -79,7 +80,7 @@ pub struct VirtualColumnRequest {
 /// `node.columns`.
 pub fn generate_hydration_plan(
     input: &Input,
-    node: &Node,
+    emitted: &Node,
     ontology: &Ontology,
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
@@ -89,7 +90,7 @@ pub fn generate_hydration_plan(
             HydrationPlan::Dynamic(build_dynamic_specs(input, ontology, security_ctx))
         }
         QueryType::Aggregation | QueryType::Traversal => {
-            let mut templates = build_static_templates(input, node, ontology);
+            let mut templates = build_static_templates(input, emitted, ontology);
 
             // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
             if input.query_type == QueryType::Aggregation {
@@ -107,10 +108,10 @@ pub fn generate_hydration_plan(
 
 fn build_static_templates(
     input: &Input,
-    node: &Node,
+    emitted: &Node,
     ontology: &Ontology,
 ) -> Vec<HydrationTemplate> {
-    let projected = projected_aliases(node);
+    let projected = projected_aliases(emitted);
     input
         .nodes
         .iter()
@@ -152,8 +153,8 @@ fn build_static_templates(
         .collect()
 }
 
-fn projected_aliases(node: &Node) -> HashSet<String> {
-    match node {
+fn projected_aliases(emitted: &Node) -> HashSet<String> {
+    match emitted {
         Node::Query(q) => q.select.iter().filter_map(|s| s.alias.clone()).collect(),
         Node::Insert(_) => HashSet::new(),
     }
@@ -593,8 +594,8 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let node = Node::Query(Box::default());
-        let plan = generate_hydration_plan(&input, &node, &ont, &ctx);
+        let emitted = Node::Query(Box::default());
+        let plan = generate_hydration_plan(&input, &emitted, &ont, &ctx);
 
         match plan {
             HydrationPlan::Dynamic(specs) => {

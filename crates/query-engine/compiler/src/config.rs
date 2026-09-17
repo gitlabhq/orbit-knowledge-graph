@@ -242,8 +242,8 @@ fn check(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.input().as_ref(), "input")?;
-    let node = require(ctx.node().as_ref(), "node")?;
-    let plan = hydrate::generate_hydration_plan(input, node, ctx.ontology(), ctx.security_ctx());
+    let emitted = require(ctx.node().as_ref(), "node")?;
+    let plan = hydrate::generate_hydration_plan(input, emitted, ctx.ontology(), ctx.security_ctx());
     ctx.set_hydration_plan(plan);
     Ok(())
 }
