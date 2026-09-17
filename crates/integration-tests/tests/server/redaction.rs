@@ -3992,7 +3992,7 @@ fn with_after(json: &str, after: &str) -> String {
 async fn fetch_page(
     ctx: &TestContext,
     json: &str,
-    ontology: &ontology::Ontology,
+    ontology: &std::sync::Arc<ontology::Ontology>,
     security_ctx: &query_engine::compiler::SecurityContext,
 ) -> (QueryResult, query_engine::shared::PaginationMeta) {
     let query = compile(

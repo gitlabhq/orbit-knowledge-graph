@@ -59,8 +59,10 @@ fn validate_migration_ledger() {
     println!("cargo:rerun-if-changed={}", fingerprint_path.display());
     println!("cargo:rerun-if-changed={}/ontology", config_dir.display());
 
-    let ontology = ontology::Ontology::load_embedded()
-        .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}"));
+    let ontology = std::sync::Arc::new(
+        ontology::Ontology::load_embedded()
+            .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}")),
+    );
 
     let current = ontology::migrations::Fingerprints {
         sources: ontology::migrations::source_fingerprints(),
@@ -89,8 +91,10 @@ fn validate_migration_ledger() {
 }
 
 fn validate_authored_etl_sql() {
-    let ontology = ontology::Ontology::load_embedded()
-        .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}"));
+    let ontology = std::sync::Arc::new(
+        ontology::Ontology::load_embedded()
+            .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}")),
+    );
     ontology::etl_sql::validate_authored_etl_sql(&ontology).unwrap_or_else(|e| panic!("{e}"));
 }
 
@@ -101,8 +105,10 @@ fn validate_named_queries() {
     );
     println!("cargo:rerun-if-changed={}", dir.display());
 
-    let ontology = ontology::Ontology::load_embedded()
-        .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}"));
+    let ontology = std::sync::Arc::new(
+        ontology::Ontology::load_embedded()
+            .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}")),
+    );
 
     let ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
         .expect("static security context must be valid");
