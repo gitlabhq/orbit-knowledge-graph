@@ -9,8 +9,8 @@ use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
-    BatchTx, Decision, FileInventoryEntry, GraphConverter, GraphStatsCounters, OnBatch, Pipeline,
-    PipelineConfig, PipelineContext,
+    BatchTx, Decision, FileInventory, FileInventoryEntry, GraphConverter, GraphStatsCounters,
+    OnBatch, Pipeline, PipelineConfig, PipelineContext,
 };
 
 use super::assertions::{Severity, TestSuite};
@@ -100,6 +100,7 @@ fn copy_dir_recursive(
                 path: rel.to_string_lossy().to_string(),
                 size: entry.metadata().map_or(0, |metadata| metadata.len()),
                 decision: Decision::Parse,
+                label: Default::default(),
             });
         }
     }
@@ -153,6 +154,7 @@ pub async fn run_yaml_suite(yaml: &str) {
             path: fixture.path.clone(),
             size: fixture.content.len() as u64,
             decision: Decision::Parse,
+            label: Default::default(),
         });
     }
 
@@ -179,28 +181,20 @@ pub async fn run_yaml_suite(yaml: &str) {
             let converter = Arc::new(LanceConverter::new());
             let on_batch: Arc<OnBatch> =
                 Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
-            let inventory: Arc<[FileInventoryEntry]> = Arc::from(file_inventory.clone());
+            let inventory: Arc<FileInventory> =
+                Arc::new(FileInventory::new(file_inventory.clone()));
             let result = if let Some(pool) = &pool {
                 let c = converter.clone() as Arc<dyn GraphConverter>;
                 let ob = on_batch.clone();
                 let inventory = inventory.clone();
                 pool.install(move || {
-                    Pipeline::run_with_tracer(
-                        tmp.path(),
-                        inventory,
-                        config,
-                        &Default::default(),
-                        tracer,
-                        c,
-                        ob,
-                    )
+                    Pipeline::run_with_tracer(tmp.path(), inventory, config, tracer, c, ob)
                 })
             } else {
                 Pipeline::run_with_tracer(
                     tmp.path(),
                     inventory,
                     config,
-                    &Default::default(),
                     tracer,
                     converter.clone() as Arc<dyn GraphConverter>,
                     on_batch,
