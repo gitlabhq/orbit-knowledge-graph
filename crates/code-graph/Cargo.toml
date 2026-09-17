@@ -6,6 +6,7 @@ license = "MIT"
 
 [features]
 test-utils = []
+magika = ["dep:magika"]
 
 [dependencies]
 treesitter-visit = { path = "treesitter-visit", features = ["builtin-parser"] }
@@ -23,6 +24,7 @@ crossbeam-channel = "0.5"
 either = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }
+magika = { workspace = true, optional = true }
 indicatif = { workspace = true }
 jsonschema = { workspace = true }
 memchr = { workspace = true }

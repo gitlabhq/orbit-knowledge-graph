@@ -864,10 +864,19 @@ fn index_repo(
         None,
         code_graph::v2::config::detect_language_from_path,
     );
-    let file_inventory = std::sync::Arc::new(
-        orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
-            .context("failed to walk repository files")?,
-    );
+    let file_inventory = orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
+        .context("failed to walk repository files")?;
+
+    let file_inventory = {
+        let mut magika = code_graph::v2::config::MagikaFilter::new()
+            .context("failed to initialize Magika session")?;
+        let root = git.repo_path.clone();
+        file_inventory
+            .refine(&mut magika, |path| std::fs::read(root.join(path)).ok())
+            .context("Magika classification pass failed")?
+    };
+
+    let file_inventory = std::sync::Arc::new(file_inventory);
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
