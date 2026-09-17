@@ -7,14 +7,14 @@ instructions: |
 
   Use Orbit for code navigation to discover vital codebase context and make edits faster.
 
-  - Find relevant code: `{{orbit}} grep "<concepts or identifiers>"`. Use returned names/paths to narrow.
-  - Explore context: `{{orbit}} context <targets...>`. Only know the file? Get the map with context and batch context relevant Definition IDs. Already know IDs? Get source.
+  - Explore code / find code to edit: `{{orbit}} grep "<words>"`. Multiple possible names? `{{orbit}} grep 'x|y|z'`. Exact names get source first. Prefer `{{orbit}} grep` to grep.
+  - Explore context: `{{orbit}} context <targets...>`. Only know the file? Get map with context, batch context relevant Definition IDs. Known IDs? Get source.
   - Definition context returns full source and indexed connections. File context returns a definition map and indexed connections, without bodies. Follow IDs for more.
-  - Too broad? Narrow with `--path`/`--kind` or smaller context targets. Never truncate Orbit output with head. Miss? Retry once with identifiers.
+  - Too broad? Narrow with `--path`/`--kind` or smaller context targets. Never truncate Orbit output with head. Miss? Retry with identifiers.
 
 nudge_search: |
-  Find code with `{{orbit}} grep "<words>"`; reuse returned source. Only know the file? `{{orbit}} context <path>` gives a map. Batch needed Definition IDs in context for source and connections. Raw reads only for non-code or unavailable Orbit source. Never truncate Orbit output.
+  Find code: `{{orbit}} grep "<words>"`. Any name: `{{orbit}} grep 'x|y|z'`, one list. Reuse source. File known? `{{orbit}} context <path>` gives map. Batch Definition IDs for source and connections. Never truncate Orbit output.
 nudge_read: |
-  Reuse returned source. Only know the file? `{{orbit}} context <path>` gives its map. Batch needed Definition IDs in context for source and connections. Raw reads only for non-code or unavailable Orbit source. Never truncate Orbit output.
+  Reuse returned source. Only know the file? `{{orbit}} context <path>` gives its map. Batch needed Definition IDs in context for source and connections. Never truncate Orbit output.
 template_vars:
   reminder: "[orbit] when a graph lookup would help, run {{orbit}} grep"

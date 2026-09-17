@@ -177,19 +177,22 @@ struct IndexArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("grep"), long_about = descriptions::long("grep"))]
 struct GrepArgs {
-    /// Plain-language queries, e.g. "NATS message publish"; several may be
-    /// given and are searched in one call. Omit them with --path to list
-    /// every definition under that path instead.
-    #[arg(value_name = "QUERY", required_unless_present = "path")]
-    query: Vec<String>,
+    #[arg(
+        value_name = "QUERY",
+        required_unless_present = "path",
+        help = "One query. Quote 'a|b|c' for OR alternatives; omit with --path to list definitions."
+    )]
+    query: Option<String>,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
 
-    /// Maximum matched definitions to show, shared across the queries of one
-    /// call (at least three each).
-    #[arg(long, default_value = "10")]
+    #[arg(
+        long,
+        default_value = "10",
+        help = "Maximum matched definitions across all alternatives"
+    )]
     limit: usize,
 
     /// Only search definitions under this repo-relative directory or file

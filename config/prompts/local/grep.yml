@@ -1,12 +1,17 @@
 name: grep
-version: 1.6.0
+version: 1.7.0
 short: Search local definition names, paths, and bodies
 description: >-
   Search local definition names, paths, and bodies.
 
 
-  Returns ranked `Definition:<id>` references and up to 120 source lines across
-  the top three matches, without repeating overlapping lines. Larger bodies
-  appear as outlines with followable IDs. Use `--path` or `--kind` to narrow
-  results, then batch needed references in context for complete source and
-  indexed relationships.
+  One query per call. Quote `a|b|c` for OR alternatives.
+  OR matches keep their best alternative score, without a bonus for matching
+  more alternatives. This is not regex syntax; each alternative needs search terms.
+
+
+  Returns ranked `Definition:<id>` references. Each search previews up to three
+  exact-name hits, or the top three matches if none are exact, within 120 source
+  lines. Repeated previews and overlapping source print once per invocation.
+  Larger bodies appear as outlines. Use `--path` or `--kind` to narrow, then
+  batch needed IDs in context for complete source and indexed relationships.

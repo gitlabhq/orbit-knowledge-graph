@@ -1,5 +1,6 @@
 mod local;
 
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -29,11 +30,10 @@ fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVo
     ))
 }
 
-const MIN_HITS_PER_QUERY: usize = 3;
 const BODY_LIMIT: usize = 3;
 
 pub(crate) fn run(
-    queries: Vec<String>,
+    query: Option<String>,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     limit: usize,
@@ -41,7 +41,9 @@ pub(crate) fn run(
     filter: RecallFilter,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
-    if let Some(query) = queries.iter().find(|q| content_words(q).is_empty()) {
+    if let Some(query) = &query
+        && query.split('|').any(|part| content_words(part).is_empty())
+    {
         anyhow::bail!(
             "no usable search terms in query: {query:?} — to list every definition in a \
              file or directory instead, run `{launcher} grep --path <path>`; to print a whole \
@@ -52,9 +54,9 @@ pub(crate) fn run(
     let backend = LocalBackend::open(repo, db, &paths)?;
 
     let mut out = std::io::stdout().lock();
-    if queries.is_empty() {
+    let Some(query) = query else {
         return report_outline(&mut out, &backend, &paths, &filter, launcher);
-    }
+    };
     if !paths.is_empty() {
         writeln!(out, "path: {}", paths.join(" "))?;
     }
@@ -63,45 +65,50 @@ pub(crate) fn run(
     }
 
     let vocab = build_vocab(backend.search())?;
-    let per_query_limit = (limit / queries.len()).max(MIN_HITS_PER_QUERY.min(limit));
-    for (i, query) in queries.iter().enumerate() {
-        if i > 0 {
-            writeln!(out)?;
-        }
-        writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-        let (outcome, nodes) = backend.grep(query, per_query_limit, &vocab, &filter)?;
-        let typed: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-        if outcome.terms != typed {
-            writeln!(out, "terms: {}", outcome.terms.join(" "))?;
-        }
+    writeln!(out, "grep {:?} @ {}", query, backend.header())?;
+    let (outcome, nodes) = backend.grep(&query, limit, &vocab, &filter)?;
+    let typed: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if outcome.terms != typed {
+        writeln!(out, "terms: {}", outcome.terms.join(" "))?;
+    }
 
-        if nodes.is_empty() {
-            if paths.is_empty() && filter.is_empty() {
-                writeln!(out, "\nNo definitions match those terms.")?;
-            } else {
-                writeln!(
-                    out,
-                    "\nNo definitions match those terms within that scope; drop --path/--kind to widen."
-                )?;
-            }
+    if nodes.is_empty() {
+        if paths.is_empty() && filter.is_empty() {
+            writeln!(out, "\nNo definitions match those terms.")?;
+        } else {
             writeln!(
                 out,
-                "Retry once with a source identifier. If raw search is still needed, \
-                 use it only to locate a file, then run `{launcher} context <path>`; \
-                 never read source with cat, head, or sed."
+                "\nNo definitions match those terms within that scope; drop --path/--kind to widen."
             )?;
-            continue;
         }
-
-        report_results(&mut out, &outcome, &nodes)?;
-        let defs: Vec<NodeValue> = nodes.iter().take(BODY_LIMIT).cloned().collect();
-        writeln!(out)?;
-        write!(
+        writeln!(
             out,
-            "{}",
-            context::render_bodies(backend.search().client(), backend.git(), &defs)?
+            "Retry once with a source identifier. If raw search is still needed, \
+             use it only to locate a file, then run `{launcher} context <path>`; \
+             never read source with cat, head, or sed."
         )?;
+        return Ok(());
     }
+
+    report_results(&mut out, &outcome, &nodes)?;
+    let exact: HashSet<_> = outcome
+        .matches
+        .iter()
+        .filter(|hit| hit.exact_name)
+        .map(|hit| hit.id)
+        .collect();
+    let defs: Vec<_> = nodes
+        .iter()
+        .filter(|node| exact.is_empty() || exact.contains(&node.id))
+        .take(BODY_LIMIT)
+        .cloned()
+        .collect();
+    writeln!(out)?;
+    write!(
+        out,
+        "{}",
+        context::render_bodies(backend.search().client(), backend.git(), &defs)?
+    )?;
     Ok(())
 }
 
@@ -173,13 +180,19 @@ fn report_query_note(
     out: &mut impl Write,
     outcome: &orbit_search::GrepOutcome,
 ) -> std::io::Result<()> {
-    if outcome.terms.len() >= COMPOUND_TERM_HINT {
+    let longest = outcome
+        .terms
+        .split(|term| term == "|")
+        .map(<[_]>::len)
+        .max()
+        .unwrap_or(0);
+    if longest >= COMPOUND_TERM_HINT {
         writeln!(
             out,
             "note: {} search terms — long queries dilute matching. grep matches \
              symbol-name words, so use one to three identifier-like words per \
-             query and batch several queries in one call instead.",
-            outcome.terms.len()
+             alternative; use 'a|b|c' to search alternatives in one call.",
+            longest
         )?;
     }
     Ok(())
@@ -203,6 +216,7 @@ mod tests {
         result.matches.push(orbit_search::GrepMatch {
             id: 481,
             score: 1.0,
+            exact_name: true,
         });
         result.total = 1;
         let node = NodeValue {

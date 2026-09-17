@@ -187,7 +187,8 @@ branch, which the remote graph does not cover. Flows that already give the
 agent a shell get Orbit this way for free; the MCP path exists for the
 surfaces that do not.
 
-Orbit Local `grep` finds definitions and previews source. `context` returns
+Orbit Local `grep` finds definitions; quoted `a|b` alternatives share one result
+list. Previews favor exact names and omit repeated source. `context` returns
 file definition maps or complete definition source, with indexed relationships.
 It accepts mixed file and definition targets and shows test connections by
 default.

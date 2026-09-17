@@ -17,6 +17,38 @@ pub const DEGREE_CAP: u64 = 200;
 pub struct Hit {
     pub index: usize,
     pub score: f64,
+    pub exact_name: bool,
+}
+
+pub fn rank_alternatives_and_trim(
+    corpus: &[SearchCandidate],
+    sims: &[Vec<f64>],
+    idfs: &[f64],
+    alternatives: &[std::ops::Range<usize>],
+    limit: usize,
+) -> Vec<Hit> {
+    if alternatives.len() == 1 {
+        return rank_and_trim(corpus, sims, idfs, limit);
+    }
+    let mut best: HashMap<usize, Hit> = HashMap::new();
+    for range in alternatives {
+        let scores: Vec<_> = sims.iter().map(|row| row[range.clone()].to_vec()).collect();
+        for hit in rank(corpus, &scores, &idfs[range.clone()], corpus.len()) {
+            best.entry(hit.index)
+                .and_modify(|previous| {
+                    previous.score = previous.score.max(hit.score);
+                    previous.exact_name |= hit.exact_name;
+                })
+                .or_insert(hit);
+        }
+    }
+    let mut hits: Vec<_> = best.into_values().collect();
+    hits.sort_by(|a, b| {
+        b.exact_name
+            .cmp(&a.exact_name)
+            .then_with(|| compare_hits(a, b, corpus))
+    });
+    dedupe_by_parent(hits, corpus, limit)
 }
 
 pub fn rank_and_trim(
@@ -26,7 +58,7 @@ pub fn rank_and_trim(
     limit: usize,
 ) -> Vec<Hit> {
     dedupe_by_parent(
-        rank(corpus, sims, idfs, limit * CANDIDATE_FACTOR),
+        rank(corpus, sims, idfs, limit.saturating_mul(CANDIDATE_FACTOR)),
         corpus,
         limit,
     )
@@ -35,8 +67,9 @@ pub fn rank_and_trim(
 fn rank(corpus: &[SearchCandidate], sims: &[Vec<f64>], idfs: &[f64], cap: usize) -> Vec<Hit> {
     let measured: Vec<f64> = corpus
         .iter()
-        .filter(|r| r.document_length > 0)
-        .map(|r| r.document_length as f64)
+        .zip(sims)
+        .filter(|(row, scores)| row.document_length > 0 && scores.iter().any(|&score| score > 0.0))
+        .map(|(row, _)| row.document_length as f64)
         .collect();
     let avgdl = if measured.is_empty() {
         1.0
@@ -71,21 +104,24 @@ fn rank(corpus: &[SearchCandidate], sims: &[Vec<f64>], idfs: &[f64], cap: usize)
         hits.push(Hit {
             index,
             score: total * coverage * coverage * exactness * connectedness / length_norm,
+            exact_name: exact_idf > 0.0,
         });
     }
-    hits.sort_by(|a, b| {
-        let score = b
-            .score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal);
-        let a = &corpus[a.index];
-        let b = &corpus[b.index];
-        score
-            .then_with(|| a.label.len().cmp(&b.label.len()))
-            .then_with(|| a.id.cmp(&b.id))
-    });
+    hits.sort_by(|a, b| compare_hits(a, b, corpus));
     hits.truncate(cap);
     hits
+}
+
+fn compare_hits(a: &Hit, b: &Hit, corpus: &[SearchCandidate]) -> std::cmp::Ordering {
+    b.score
+        .total_cmp(&a.score)
+        .then_with(|| {
+            corpus[a.index]
+                .label
+                .len()
+                .cmp(&corpus[b.index].label.len())
+        })
+        .then_with(|| corpus[a.index].id.cmp(&corpus[b.index].id))
 }
 
 fn dedupe_by_parent(results: Vec<Hit>, corpus: &[SearchCandidate], limit: usize) -> Vec<Hit> {
@@ -95,6 +131,10 @@ fn dedupe_by_parent(results: Vec<Hit>, corpus: &[SearchCandidate], limit: usize)
     for r in results {
         if kept.len() >= limit {
             break;
+        }
+        if r.exact_name {
+            kept.push(r);
+            continue;
         }
         let row = &corpus[r.index];
         let group = &row.diversity_group;
@@ -226,7 +266,13 @@ mod tests {
             row_at(3, "A::x3", "f.rb"),
             row_at(4, "B::y", "f.rb"),
         ];
-        let hits = (0..4).map(|index| Hit { index, score: 1.0 }).collect();
+        let hits = (0..4)
+            .map(|index| Hit {
+                index,
+                score: 1.0,
+                exact_name: false,
+            })
+            .collect();
         let kept = dedupe_by_parent(hits, &corpus, 10);
         let indices: Vec<usize> = kept.iter().map(|h| h.index).collect();
         assert_eq!(indices, vec![0, 1, 3]);

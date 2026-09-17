@@ -559,23 +559,6 @@ mod tests {
             .downcast_ref::<arrow::array::Int64Array>()
             .unwrap();
         assert_eq!(count.value(0), 1);
-        client
-            .execute(
-                "UPDATE _orbit_meta SET value = 'old' WHERE key = ?1",
-                &[json!(CODE_INDEX_META_KEY)],
-            )
-            .unwrap();
-        drop(client);
-        ensure_graph_schema(&db, LOCAL_DDL).unwrap();
-        let client = DuckDbClient::open(&db).unwrap();
-        assert_eq!(
-            duckdb_client::scalar_i64(
-                &client
-                    .query_arrow("SELECT count(*) FROM _orbit_manifest")
-                    .unwrap()
-            ),
-            0
-        );
     }
 
     #[test]

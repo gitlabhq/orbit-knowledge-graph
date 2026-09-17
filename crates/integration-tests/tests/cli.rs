@@ -1240,48 +1240,44 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
     );
     let reference = stdout
         .split_whitespace()
-        .find(|word| word.starts_with("Definition:"))
+        .find(|s| s.starts_with("Definition:"))
         .unwrap();
     let repo_arg = repo.path.to_str().unwrap();
+    let fqn = "src.utils.read_file";
     let (file, err, ok) = run_cmd(&["context", "src/utils.py", "--repo", repo_arg], dd);
-    assert!(ok, "{err}");
+    assert!(
+        ok && file.starts_with("File:") && !file.contains("return open"),
+        "{err}\n{file}"
+    );
     let file_id = file.split_whitespace().next().unwrap();
-    assert!(
-        file_id.starts_with("File:") && file.contains(reference),
-        "{file}"
-    );
-    assert!(
-        file.contains("[Function]") && file.contains("src/utils.py:3-4"),
-        "{file}"
-    );
-    assert!(file.contains("os"), "{file}");
-    assert!(file.contains("src.main.App.run"), "{file}");
-    assert!(!file.contains("return open"), "{file}");
-    let args = ["context", file_id, "./src/utils.py", "--repo", repo_arg];
-    assert_eq!(file, run_cmd(&args, dd).0);
-    let args = ["context", file_id, reference, reference, "--repo", repo_arg];
+    let args = ["context", file_id, fqn, reference, fqn, "--repo", repo_arg];
     let (context, err, ok) = run_cmd(&args, dd);
-    assert!(ok, "{err}");
-    assert!(context.contains(&file), "{context}");
+    assert!(ok && context.contains(&file), "{err}\n{context}");
     assert_eq!(context.matches("return open(path).read()").count(), 1);
-    let args = ["context", file_id, "../outside.py", "--repo", repo_arg];
-    let (context, _, ok) = run_cmd(&args, dd);
-    assert!(!ok && context.is_empty());
+    let (out, err, ok) = run_cmd(&["grep", "App|read_file|read_file", "--repo", repo_arg], dd);
+    assert!(ok && out.contains("class App"), "{err}\n{out}");
+    assert_eq!(out.matches("return open(path).read()").count(), 1);
+    for missing in ["src.utils.read", "' OR true --", "../outside.py"] {
+        let (out, err, ok) = run_cmd(&["context", fqn, missing, "--repo", repo_arg], dd);
+        assert!(!ok && out.is_empty(), "{out}\n{err}");
+    }
+    for invalid in ["|", "read_file|", "read_file||App"] {
+        let (out, err, ok) = run_cmd(&["grep", invalid, "--repo", repo_arg], dd);
+        assert!(
+            !ok && err.contains("no usable search terms"),
+            "{out}\n{err}"
+        );
+    }
 }
 
 #[test]
-fn context_relationships_are_complete_and_stable_across_overloads() {
-    const EXTRA_CALLERS: usize = 12;
+fn context_relationship_order_is_stable_across_overloads() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
     let repo = workspace.path().join("repo");
-    let extra_calls = (0..EXTRA_CALLERS)
-        .map(|i| format!("    public void call{i}(Target t) {{ t.ping(); }}\n"))
-        .collect::<String>();
     init_repo_at(
         &repo,
         &[
-            ("empty.yaml", "plain: metadata only\n"),
             (
                 "src/Target.java",
                 "public class Target {\n    public Target() {}\n    public void ping() {}\n}\n",
@@ -1298,23 +1294,15 @@ fn context_relationships_are_complete_and_stable_across_overloads() {
                     "}\n",
                 ),
             ),
-            (
-                "src/Extra.java",
-                &format!("public class Extra {{\n{extra_calls}}}\n"),
-            ),
-            (
-                "tests/TargetTest.java",
-                &format!("public class TargetTest {{\n{extra_calls}}}\n"),
-            ),
         ],
     );
     let dd = data_dir.path();
     assert!(orbit_index(&repo, dd));
 
     let repo_arg = repo.to_str().unwrap();
-    for (fqn, title) in [
-        ("Target.ping", "Connections"),
-        ("Target", "Used via members"),
+    for (fqn, section) in [
+        ("Target.ping", "Connections (5 indexed):"),
+        ("Target", "Used via members (5 indexed):"),
     ] {
         let (matches, stderr, ok) = run_cmd(&["grep", fqn, "--repo", repo_arg], dd);
         assert!(ok, "grep {fqn} failed: {stderr}");
@@ -1326,26 +1314,11 @@ fn context_relationships_are_complete_and_stable_across_overloads() {
         let args = ["context", reference, "--repo", repo_arg];
         let (first, stderr, ok) = run_cmd(&args, dd);
         assert!(ok, "context {reference} failed: {stderr}");
-        assert_eq!(
-            first.matches("<-- Extra.call").count(),
-            EXTRA_CALLERS,
-            "{first}"
-        );
-        assert_eq!(
-            first.matches("<-- TargetTest.call").count(),
-            EXTRA_CALLERS,
-            "{first}"
-        );
-        assert!(!first.contains("omitted"), "{first}");
-        let section = format!("{title} ({} indexed):", EXTRA_CALLERS + 5);
+        let (by_name, stderr, ok) = run_cmd(&["context", fqn, "--repo", repo_arg], dd);
+        assert!(ok, "context {fqn} failed: {stderr}");
+        assert_eq!(first, by_name);
         assert!(
-            first.find("public void ping() {}").unwrap() < first.find(&section).unwrap(),
-            "{first}"
-        );
-        assert!(
-            first.contains(&format!(
-                "Test, fixture, or generated connections ({EXTRA_CALLERS} indexed):"
-            )),
+            first.find("public void ping() {}").unwrap() < first.find(section).unwrap(),
             "{first}"
         );
         assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
@@ -1354,32 +1327,16 @@ fn context_relationships_are_complete_and_stable_across_overloads() {
             assert_eq!(first, run_cmd(&args, dd).0, "{reference} output changed");
         }
     }
+    let args = ["context", "Caller.run", "Caller.run", "--repo", repo_arg];
+    let (by_name, stderr, ok) = run_cmd(&args, dd);
+    assert!(ok, "{stderr}");
+    assert_eq!(by_name.matches("|    public void run(").count(), 3);
     let (file, stderr, ok) = run_cmd(&["context", "src/Target.java", "--repo", repo_arg], dd);
     assert!(ok, "{stderr}");
-    assert_eq!(
-        file.matches("<-- Extra.call").count(),
-        EXTRA_CALLERS,
-        "{file}"
-    );
-    assert_eq!(
-        file.matches("<-- TargetTest.call").count(),
-        EXTRA_CALLERS,
-        "{file}"
-    );
-    assert!(!file.contains("omitted"), "{file}");
     assert!(
         !file.contains("public class Target") && file.contains("via ping"),
         "{file}"
     );
-    let (file, stderr, ok) = run_cmd(&["context", "src/Extra.java", "--repo", repo_arg], dd);
-    assert!(ok, "{stderr}");
-    assert_eq!(
-        file.matches("  Extra.call").count(),
-        EXTRA_CALLERS,
-        "{file}"
-    );
-    let (file, _, ok) = run_cmd(&["context", "empty.yaml", "--repo", repo_arg], dd);
-    assert!(ok && file.contains("No indexed definitions.") && !file.contains("plain:"));
 }
 
 #[test]

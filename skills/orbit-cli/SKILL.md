@@ -8,7 +8,7 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.10.0
+version: 0.11.0
 license: MIT
 metadata:
   audience: developers
@@ -36,9 +36,16 @@ Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 ```shell
 orbit index .
 orbit grep "rate limit" --path src --kind Method,Function
+orbit grep 'query_arrow|insert_batch|execute' --path crates/duckdb-client
 orbit context Definition:<id> [Definition:<id>...]
 orbit context src/lib.rs File:<id> Definition:<id>
 ```
+
+One query per call. Quote `a|b|c` for OR alternatives with a shared result limit.
+Different questions need separate calls. OR uses each match's best alternative
+score, not a bonus for matching more alternatives. Each search previews up to three exact-name
+hits, or its top three matches if none are exact. Previews share a 120-line budget
+per search; repeated previews and overlapping source print once per invocation.
 
 `grep` returns `Definition:<id>` references. Pass them to `context`, which
 does not resolve names, FQNs, or globs. A path is shorthand for its indexed
