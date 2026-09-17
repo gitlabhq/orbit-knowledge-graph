@@ -216,7 +216,7 @@ async fn run_frontend(
 
     if let Some(expected) = expect.hydration {
         assert_eq!(
-            format::HydrationKind::from(&compiled.hydration),
+            compiled.hydration.kind(),
             expected,
             "{label}: unexpected hydration plan\n{:?}",
             compiled.hydration

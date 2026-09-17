@@ -1,27 +1,9 @@
 use std::collections::BTreeMap;
 
-use query_engine::compiler::HydrationPlan;
+use query_engine::compiler::HydrationKind;
 use serde::Deserialize;
 
 use crate::scenario::Seed;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum HydrationKind {
-    None,
-    Static,
-    Dynamic,
-}
-
-impl From<&HydrationPlan> for HydrationKind {
-    fn from(plan: &HydrationPlan) -> Self {
-        match plan {
-            HydrationPlan::None => Self::None,
-            HydrationPlan::Static(_) => Self::Static,
-            HydrationPlan::Dynamic(_) => Self::Dynamic,
-        }
-    }
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
