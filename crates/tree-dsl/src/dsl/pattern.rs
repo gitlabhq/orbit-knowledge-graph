@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use indextree::NodeId;
 
 use crate::intern::Lang;
-use crate::tree::{Node, Tree};
+use crate::tree::{Edge, EdgeKind, Node, Tree};
 
 use super::parser::parse;
 
@@ -29,6 +29,8 @@ pub enum Tf {
     Concat(Box<str>, Box<Tf>, Box<Tf>),
     Stem,
     CollapseIndex(Vec<Box<str>>),
+    HasIncoming(EdgeKind),
+    HasOutgoing(EdgeKind),
 }
 
 impl Tf {
@@ -62,6 +64,26 @@ impl Tf {
             }
             "stem" => Tf::Stem,
             "collapse_index" => Tf::CollapseIndex(args.iter().map(|a| (*a).into()).collect()),
+            "has_incoming" => {
+                let kind = match args[0] {
+                    "Calls" => EdgeKind::Calls,
+                    "Defines" => EdgeKind::Defines,
+                    "Imports" => EdgeKind::Imports,
+                    "Extends" => EdgeKind::Extends,
+                    k => panic!("unknown edge kind: {k}"),
+                };
+                Tf::HasIncoming(kind)
+            }
+            "has_outgoing" => {
+                let kind = match args[0] {
+                    "Calls" => EdgeKind::Calls,
+                    "Defines" => EdgeKind::Defines,
+                    "Imports" => EdgeKind::Imports,
+                    "Extends" => EdgeKind::Extends,
+                    k => panic!("unknown edge kind: {k}"),
+                };
+                Tf::HasOutgoing(kind)
+            }
             _ => panic!("unknown transform: {name}"),
         }
     }
@@ -118,13 +140,21 @@ impl Tf {
             | Tf::Const(_)
             | Tf::ParentSym(_)
             | Tf::AncestorSym(_)
-            | Tf::Concat(_, _, _) => {
+            | Tf::Concat(_, _, _)
+            | Tf::HasIncoming(_)
+            | Tf::HasOutgoing(_) => {
                 unreachable!("tree-context transform used as string transform")
             }
         }
     }
 
-    pub(crate) fn apply_sym(&self, t: &Tree, lang: &Lang, id: indextree::NodeId) -> u32 {
+    pub(crate) fn apply_sym(
+        &self,
+        t: &Tree,
+        lang: &Lang,
+        id: indextree::NodeId,
+        edge_ctx: Option<&EdgeCtx>,
+    ) -> u32 {
         match self {
             Tf::Id => t.node(id).sym,
             Tf::Field(f) => {
@@ -165,9 +195,31 @@ impl Tf {
                     }
                 }
             }
+            Tf::HasIncoming(kind) => {
+                let raw = Tree::to_raw(id);
+                if let Some(ctx) = edge_ctx {
+                    let found = ctx.edges.iter().any(|e| {
+                        e.kind == *kind && e.to_tree == ctx.tree_index && e.to_node == raw
+                    });
+                    lang.syms.intern(if found { "true" } else { "false" })
+                } else {
+                    lang.syms.intern("false")
+                }
+            }
+            Tf::HasOutgoing(kind) => {
+                let raw = Tree::to_raw(id);
+                if let Some(ctx) = edge_ctx {
+                    let found = ctx.edges.iter().any(|e| {
+                        e.kind == *kind && e.from_tree == ctx.tree_index && e.from_node == raw
+                    });
+                    lang.syms.intern(if found { "true" } else { "false" })
+                } else {
+                    lang.syms.intern("false")
+                }
+            }
             Tf::Concat(sep, a, b) => {
-                let sa = a.apply_sym(t, lang, id);
-                let sb = b.apply_sym(t, lang, id);
+                let sa = a.apply_sym(t, lang, id, edge_ctx);
+                let sb = b.apply_sym(t, lang, id, edge_ctx);
                 if sa == 0 {
                     return sb;
                 }
@@ -186,8 +238,10 @@ impl Tf {
                         | Tf::Field(_)
                         | Tf::ParentSym(_)
                         | Tf::AncestorSym(_)
-                        | Tf::Concat(_, _, _) => {
-                            let sym = step.apply_sym(t, lang, id);
+                        | Tf::Concat(_, _, _)
+                        | Tf::HasIncoming(_)
+                        | Tf::HasOutgoing(_) => {
+                            let sym = step.apply_sym(t, lang, id, edge_ctx);
                             s = lang.syms.resolve(sym).to_string();
                         }
                         _ => {
@@ -217,6 +271,11 @@ impl Tf {
             }
         }
     }
+}
+
+pub struct EdgeCtx<'a> {
+    pub tree_index: u32,
+    pub edges: &'a [Edge],
 }
 
 fn parse_nested_tf(spec: &str, ctx: Option<&mut Ctx>) -> Tf {
@@ -519,6 +578,7 @@ pub(crate) fn materialize(
     parent: NodeId,
     span: (u32, u32),
     out: &mut Tree,
+    edge_ctx: Option<&EdgeCtx>,
 ) {
     match p {
         Pat::Cap {
@@ -625,7 +685,7 @@ pub(crate) fn materialize(
                     let Some(src) = caps[*slot as usize].one() else {
                         return;
                     };
-                    tf.apply_sym(t, lang, src)
+                    tf.apply_sym(t, lang, src, edge_ctx)
                 }
             };
             let pos_src = match text {
@@ -652,7 +712,7 @@ pub(crate) fn materialize(
                 },
             );
             for k in kids {
-                materialize(t, lang, k, caps, filters, at, span, out);
+                materialize(t, lang, k, caps, filters, at, span, out, edge_ctx);
             }
         }
         Pat::Spread { slot, inject } => {
@@ -661,7 +721,7 @@ pub(crate) fn materialize(
             };
             let copy = out.clone_subtree_from(t, src, Some(parent));
             for kid in inject {
-                materialize(t, lang, kid, caps, filters, copy, span, out);
+                materialize(t, lang, kid, caps, filters, copy, span, out, edge_ctx);
             }
         }
         Pat::Not(_) | Pat::Desc(_) => {}
@@ -669,14 +729,30 @@ pub(crate) fn materialize(
 }
 
 pub fn apply_rewrites(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
-    apply_rewrites_inner(t, lang, rules, false);
+    apply_rewrites_inner(t, lang, rules, false, None);
 }
 
 pub fn apply_rewrites_preorder(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
-    apply_rewrites_inner(t, lang, rules, true);
+    apply_rewrites_inner(t, lang, rules, true, None);
 }
 
-fn apply_rewrites_inner(t: &mut Tree, lang: &Lang, rules: &[Rewrite], preorder: bool) {
+pub fn apply_rewrites_with_edges(
+    t: &mut Tree,
+    lang: &Lang,
+    rules: &[Rewrite],
+    preorder: bool,
+    edge_ctx: &EdgeCtx,
+) {
+    apply_rewrites_inner(t, lang, rules, preorder, Some(edge_ctx));
+}
+
+fn apply_rewrites_inner(
+    t: &mut Tree,
+    lang: &Lang,
+    rules: &[Rewrite],
+    preorder: bool,
+    edge_ctx: Option<&EdgeCtx>,
+) {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
     let mut caps: Vec<Cap> = (0..max_slots).map(|_| Cap::Empty).collect();
 
@@ -741,6 +817,7 @@ fn apply_rewrites_inner(t: &mut Tree, lang: &Lang, rules: &[Rewrite], preorder: 
                         staging.root,
                         span,
                         &mut staging,
+                        edge_ctx,
                     );
                     let replacement_roots: Vec<NodeId> =
                         staging.root.children(&staging.arena).collect();
@@ -762,6 +839,7 @@ fn apply_rewrites_inner(t: &mut Tree, lang: &Lang, rules: &[Rewrite], preorder: 
                             staging.root,
                             span,
                             &mut staging,
+                            edge_ctx,
                         );
                         for child in staging.root.children(&staging.arena).collect::<Vec<_>>() {
                             let imported = t.clone_subtree_from(&staging, child, None);

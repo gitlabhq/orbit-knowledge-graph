@@ -220,3 +220,11 @@ display:
         append: ['(_*_display_def_type "Property")']
       - match: '(__def (__type_alias))'
         append: ['(_*_display_def_type "TypeAlias")']
+  - name: imports
+    rules:
+      - match: '(__import)'
+        append:
+          - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
+      - match: '(__name)'
+        append:
+          - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'

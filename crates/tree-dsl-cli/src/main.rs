@@ -151,12 +151,13 @@ fn cmd_parse(
             print_edges(&tree, &edges, &lang);
         }
         Stage::Display => {
-            let (mut tree, edges, lang, _pipeline) = tree_dsl::parse(lang_id, &path, &source);
+            let (tree, edges, lang, _pipeline) = tree_dsl::parse(lang_id, &path, &source);
             let yaml = tree_dsl::treesitter::lang_yaml(lang_id).expect("no lang yaml");
             let config = tree_dsl::rules::load_lang_full(yaml, &lang);
-            tree_dsl::pattern::apply_rewrites_preorder(&mut tree, &lang, &config.display_rules);
-            print_tree(&tree, &lang);
-            print_edges(&tree, &edges, &lang);
+            let mut trees = vec![tree];
+            tree_dsl::display::apply_display(&mut trees, &edges, &lang, &config.display_rules);
+            print_tree(&trees[0], &lang);
+            print_edges(&trees[0], &edges, &lang);
         }
     }
     Ok(())
