@@ -162,6 +162,10 @@ impl Tree {
             .collect()
     }
 
+    pub(crate) fn preorder(&self) -> Vec<NodeId> {
+        self.root.descendants(&self.arena).collect()
+    }
+
     pub fn prune(&mut self) {
         let ids: Vec<NodeId> = self.root.descendants(&self.arena).skip(1).collect();
         for id in ids {

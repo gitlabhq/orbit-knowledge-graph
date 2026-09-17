@@ -24,6 +24,8 @@ pub enum Tf {
     ToRel(char),
     Lowercase,
     Pipeline(Vec<Tf>),
+    ParentSym(u16),
+    AncestorSym(u16),
 }
 
 impl Tf {
@@ -41,6 +43,14 @@ impl Tf {
             "split_first" => Tf::SplitFirst(args[0].into()),
             "lowercase" => Tf::Lowercase,
             "field" => Tf::Field(ctx.expect("field needs context").intern_field(args[0])),
+            "child_sym" => Tf::Child(ctx.expect("child_sym needs context").intern_kind(args[0])),
+            "parent_sym" => {
+                Tf::ParentSym(ctx.expect("parent_sym needs context").intern_kind(args[0]))
+            }
+            "ancestor_sym" => Tf::AncestorSym(
+                ctx.expect("ancestor_sym needs context")
+                    .intern_kind(args[0]),
+            ),
             _ => panic!("unknown transform: {name}"),
         }
     }
@@ -75,7 +85,12 @@ impl Tf {
                 }
                 result
             }
-            Tf::Field(_) | Tf::Child(_) | Tf::FieldChild(_, _) | Tf::Const(_) => {
+            Tf::Field(_)
+            | Tf::Child(_)
+            | Tf::FieldChild(_, _)
+            | Tf::Const(_)
+            | Tf::ParentSym(_)
+            | Tf::AncestorSym(_) => {
                 unreachable!("tree-context transform used as string transform")
             }
         }
@@ -100,6 +115,28 @@ impl Tf {
                 .find(|&c| t.node(c).field == *f)
                 .and_then(|n| n.children(&t.arena).find(|&c| t.node(c).kind == *k))
                 .map_or(0, |c| t.node(c).sym),
+            Tf::ParentSym(k) => id
+                .parent(&t.arena)
+                .into_iter()
+                .flat_map(|p| p.children(&t.arena))
+                .find(|&c| t.node(c).kind == *k)
+                .map_or(0, |c| t.node(c).sym),
+            Tf::AncestorSym(k) => {
+                let mut cur = id;
+                loop {
+                    let found = cur
+                        .children(&t.arena)
+                        .find(|&c| t.node(c).kind == *k)
+                        .map(|c| t.node(c).sym);
+                    if let Some(sym) = found {
+                        break sym;
+                    }
+                    match cur.parent(&t.arena) {
+                        Some(p) => cur = p,
+                        None => break 0,
+                    }
+                }
+            }
             _ => {
                 let sym = t.node(id).sym;
                 if sym == 0 {
@@ -154,6 +191,7 @@ pub enum Pat {
 
 pub enum Out {
     Replace(Pat),
+    Append(Vec<Pat>),
 }
 
 pub struct Rewrite {
@@ -554,6 +592,14 @@ pub(crate) fn materialize(
 }
 
 pub fn apply_rewrites(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
+    apply_rewrites_inner(t, lang, rules, false);
+}
+
+pub fn apply_rewrites_preorder(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
+    apply_rewrites_inner(t, lang, rules, true);
+}
+
+fn apply_rewrites_inner(t: &mut Tree, lang: &Lang, rules: &[Rewrite], preorder: bool) {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
     let mut caps: Vec<Cap> = (0..max_slots).map(|_| Cap::Empty).collect();
 
@@ -565,7 +611,11 @@ pub fn apply_rewrites(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
         })
         .collect();
 
-    let candidates = t.postorder();
+    let candidates = if preorder {
+        t.preorder()
+    } else {
+        t.postorder()
+    };
 
     for target in candidates {
         if target.is_removed(&t.arena) {
@@ -601,28 +651,48 @@ pub fn apply_rewrites(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
 
             let root_node = t.node(target);
             let span = (root_node.start, root_node.end);
-            let Out::Replace(tpl) = &r.out;
 
-            let mut staging = Tree::new(Node::default());
-            materialize(
-                t,
-                lang,
-                tpl,
-                &caps,
-                &r.filters,
-                staging.root,
-                span,
-                &mut staging,
-            );
-
-            let replacement_roots: Vec<NodeId> = staging.root.children(&staging.arena).collect();
-            let mut moved: Vec<NodeId> = Vec::with_capacity(replacement_roots.len());
-            for child in replacement_roots {
-                let imported = t.clone_subtree_from(&staging, child, None);
-                moved.push(imported);
+            match &r.out {
+                Out::Replace(tpl) => {
+                    let mut staging = Tree::new(Node::default());
+                    materialize(
+                        t,
+                        lang,
+                        tpl,
+                        &caps,
+                        &r.filters,
+                        staging.root,
+                        span,
+                        &mut staging,
+                    );
+                    let replacement_roots: Vec<NodeId> =
+                        staging.root.children(&staging.arena).collect();
+                    let mut moved: Vec<NodeId> = Vec::with_capacity(replacement_roots.len());
+                    for child in replacement_roots {
+                        moved.push(t.clone_subtree_from(&staging, child, None));
+                    }
+                    t.replace(target, moved);
+                }
+                Out::Append(pats) => {
+                    for pat in pats {
+                        let mut staging = Tree::new(Node::default());
+                        materialize(
+                            t,
+                            lang,
+                            pat,
+                            &caps,
+                            &r.filters,
+                            staging.root,
+                            span,
+                            &mut staging,
+                        );
+                        for child in staging.root.children(&staging.arena).collect::<Vec<_>>() {
+                            let imported = t.clone_subtree_from(&staging, child, None);
+                            target.append(imported, &mut t.arena);
+                        }
+                    }
+                }
             }
-
-            t.replace(target, moved);
             break;
         }
     }

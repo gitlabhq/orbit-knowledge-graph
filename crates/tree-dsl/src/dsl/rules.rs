@@ -121,6 +121,8 @@ struct Rule {
     pattern: String,
     #[serde(default)]
     replace: Option<String>,
+    #[serde(default)]
+    append: Option<Vec<String>>,
     #[serde(default, rename = "where")]
     where_clause: Option<String>,
 }
@@ -215,6 +217,17 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
     if let Some(ref tpl) = rule.replace {
         let tpl = tpl.clone();
         let mut rw = Rewrite::new(lang, pat, move |c| Out::Replace(c.template(&tpl)));
+        if let Some(ref wc) = rule.where_clause {
+            rw.guards = parse_where_clause(wc, &rw.slots);
+        }
+        return vec![rw];
+    }
+
+    if let Some(ref appends) = rule.append {
+        let appends = appends.clone();
+        let mut rw = Rewrite::new(lang, pat, move |c| {
+            Out::Append(appends.iter().map(|tpl| c.template(tpl)).collect())
+        });
         if let Some(ref wc) = rule.where_clause {
             rw.guards = parse_where_clause(wc, &rw.slots);
         }
