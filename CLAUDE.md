@@ -32,14 +32,15 @@ Read the linked owner before you act in that area.
 | Area | Read first |
 | --- | --- |
 | Architecture and data flow | `docs/design-documents/README.md` |
-| Security and authorization | `docs/design-documents/security.md` |
+| Authorization, security, FIPS | `docs/design-documents/security.md` |
 | Schema changes | `docs/design-documents/schema_management.md` |
 | Query behavior | `docs/design-documents/querying/` |
 | Indexer and ontology work | `crates/indexer/AGENTS.md` |
 | Code Graph work | `crates/code-graph/AGENTS.md` |
 | Server settings | `docs/dev/runbooks/server_configuration.md` |
 | Billing emission | `docs/dev/sox-billing-boundary.md` |
-| Crates | `docs/dev/agents-crate-map.md` |
+| Crate inventory | `docs/dev/agents-crate-map.md` |
 | Files, schemas, tools, and checks | `docs/dev/agents-reference-index.md` |
-| Code, docs, issues, and MRs | `CONTRIBUTING.md` |
+| Code and comment conventions | [`CONTRIBUTING.md`](CONTRIBUTING.md#engineering-conventions) |
+| Docs to update per change, MR titles, issue references, templates | [`CONTRIBUTING.md`](CONTRIBUTING.md#documentation-conventions), [MR conventions](CONTRIBUTING.md#mr-conventions) |
 | Domain terms | `CONTEXT.md` |

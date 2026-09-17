@@ -103,7 +103,7 @@ Examples: `fix(compiler): correct aggregation undercount`, `docs: add CONTRIBUTI
 
 - Non-trivial MRs (features, refactors, architectural changes) must reference an issue:
   `Closes #N` or `Relates to #N`.
-- Trivial MRs (typos, minor formatting) do not need an issue.
+- Trivial MRs (typos, minor dependency bumps, or formatting-only changes) do not need an issue.
 - Keep each MR focused on one concern.
 - Use the MR and issue templates under [`.gitlab/`](.gitlab/).
 - Read each template's `TEMPLATE CONVENTION` block before you write.
