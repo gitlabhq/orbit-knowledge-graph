@@ -16,10 +16,10 @@ Proposed
 ## Context
 
 The query compiler chooses join order using heuristic selectivity labels (`High`/`Low`)
-from the ontology and a fixed strategy per query type: edge-first for flat chains,
-node-first for FK-star. The heuristics are coarse. A `High` selectivity string filter
-on a column with 50K distinct values and a `High` selectivity string filter on a column
-with 3 distinct values receive identical treatment.
+from the ontology. It also uses a fixed strategy per query type: edge-first for flat
+chains, node-first for FK-star. The heuristics are coarse. Consider a `High` selectivity
+string filter on a column with 50K distinct values. Consider the same filter on a column
+with 3 distinct values. Both receive identical treatment.
 
 Profiling showed this matters. Replacing FilterOnly CTEs with JOINs (!1533) cut
 read_rows by 70% on code-graph queries. But the improvement was accidental -- the
@@ -62,9 +62,9 @@ target first to narrow the pipeline early). For neighbors, the choice between ce
 scan vs edge scan depends on whether the center has selective filters beyond the
 pinned IDs.
 
-PathFinding is partially constrained by its recursive CTE structure, but the anchor
-selection (which endpoint to expand from first, forward vs backward depth split)
-is a join ordering decision.
+PathFinding is partially constrained by its recursive CTE structure. But the anchor
+selection is a join ordering decision. It picks which endpoint to expand from first
+and how to split forward vs backward depth.
 
 ### Stat types
 
@@ -207,7 +207,7 @@ It does not yet have compiled SQL. This is the right moment because the compiler
 needs the stats to make join ordering decisions during the plan pass.
 
 The stats fetch is a single `dictGet` call (or a small batch) to the ClickHouse
-dictionary, returning stats for the query's node tables scoped to the user's
+dictionary. It returns stats for the query's node tables scoped to the user's
 traversal paths. Results are cached in-process with a 2-5 minute TTL keyed by
 `(table, column, traversal_path)`. For most requests the stats come from the cache
 with zero ClickHouse round-trips.

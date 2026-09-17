@@ -46,7 +46,7 @@ The GQL frontend uses one anchored `Statement` grammar root for queries and sche
 Fixed child shapes use `match_nodes!`; optional query clauses and relationship fields are consumed by rule without enumerating their combinations.
 The grammar enforces their order and cardinality, and the consumer rejects unexpected rules.
 Lexical checks live here: identifier rules, string escapes, numeric ranges, `date_trunc` units, and duplicate map keys.
-`lower/` then turns the syntax tree into Input and owns every check that needs query-wide context: variable uniqueness, ID promotion, query-type classification, projection rules, and ORDER BY resolution.
+`lower/` then turns the syntax tree into Input. It owns every check that needs query-wide context: variable uniqueness, ID promotion, query-type classification, projection rules, and ORDER BY resolution.
 Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.
 Scalar values use the same value type as the compiler's filters.
 
@@ -87,7 +87,7 @@ CALL db.schema('MergeRequest')
 ```
 
 The `db.` prefix follows openCypher 9 procedure naming. `db.schema` is Orbit-defined, not an exact Neo4j builtin or an ISO catalog operation.
-Only case-sensitive `db.schema` is allowed; `resolve_schema` rejects unknown or scope-hidden nodes and `'*'` against the supplied ontology, and the grammar rejects extra arguments, parameters, YIELD, and query composition.
+Only case-sensitive `db.schema` is allowed. `resolve_schema` rejects unknown or scope-hidden nodes and `'*'` against the supplied ontology. The grammar rejects extra arguments, parameters, YIELD, and query composition.
 `compiler::compile` remains query-only. A future raw-Cypher endpoint can dispatch both statements through `gql::prepare`, but must authenticate before dispatch; no endpoint or transport is wired here.
 
 ## Supported query statement
@@ -126,7 +126,7 @@ LIMIT 10
 
 RETURN controls the existing graph response, not a general-purpose table of arbitrary expressions.
 Traversal properties select node columns. Whole nodes use ontology defaults; `properties(node)` selects all allowed columns.
-`properties(node)` on the far endpoint of a neighbors query or on a path variable sets the compiler's dynamic column mode to all columns, because those results are hydrated from dynamic column specifications instead of per-node selections.
+`properties(node)` on the far endpoint of a neighbors query or on a path variable sets the compiler's dynamic column mode to all columns. Those results are hydrated from dynamic column specifications instead of per-node selections.
 Neighbors queries select center columns with `center.property` items and still reject `properties(center)`.
 The compiler still includes graph identity and relationship metadata.
 
@@ -173,7 +173,7 @@ Custom ID-property spellings remain outside the frontend.
 
 ## Pagination and presentation
 
-`PAGE rows` replaces `LIMIT` and requests keyset pagination: it lowers to the compiler's cursor with that page size, so the response carries `next_cursor` while more rows remain.
+`PAGE rows` replaces `LIMIT` and requests keyset pagination. It lowers to the compiler's cursor with that page size, so the response carries `next_cursor` while more rows remain.
 `PAGE rows AFTER 'token'` continues from the previous page's `next_cursor`. Both clauses reuse the JSON DSL's cursor and the shared validation, decoding, seek, and readback passes.
 
 A cursor token binds to the statement's lexical tokens, excluding the whole `PAGE` clause, whitespace, and comments.
@@ -195,7 +195,7 @@ Handwritten text queries sit beside JSON fixtures in `crates/integration-tests/t
 The `fuzz_gql_grammar` target in `crates/fuzz/` generates query text from `query.pest` through `orbit_fuzz::grammar::Grammar` and `pest_meta`.
 Input bytes choose grammar productions, with repetition bounded to two.
 Each derivation must be consumed by `syntax.rs`: a lowering error is acceptable, a syntax error or pipeline invariant is not.
-The real parser decides whether a derivation is faithful: its pair tree for the generated text must equal the rules the walk produced, which discards derivations that PEG ordered choice or greedy repetition would read differently.
+The real parser decides whether a derivation is faithful. Its pair tree for the generated text must equal the rules the walk produced. This discards derivations that PEG ordered choice or greedy repetition would read differently.
 
 The `fuzz_gql` target sends arbitrary text through the compiler and checks that errors are client-safe.
 Semantic checks remain in the JSON parity tests above, whose paired JSON and text queries must compile to matching SQL.

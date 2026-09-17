@@ -1,5 +1,5 @@
 ---
-title: "GKG ADR 003: Orbit API Design — Unified REST + GraphQL"
+title: "GKG ADR 003: Orbit API Design (Unified REST + GraphQL)"
 creation-date: "2026-02-26"
 authors: [ "@michaelangeloio" ]
 toc_hide: true
@@ -17,9 +17,9 @@ Proposed
 
 The Orbit dashboard needs APIs to serve three consumers:
 
-1. **Dashboard frontend** — Vue app at `/dashboard/orbit` rendering graphs, tables, schema viewers
-2. **MCP agents** — AI tools calling `tools/call("query_graph")` and `tools/call("get_graph_schema")`
-3. **`glab` CLI** — `glab orbit query "..." --format=llm|human`
+1. **Dashboard frontend**: Vue app at `/dashboard/orbit` rendering graphs, tables, schema viewers
+2. **MCP agents**: AI tools calling `tools/call("query_graph")` and `tools/call("get_graph_schema")`
+3. **`glab` CLI**: `glab orbit query "..." --format=llm|human`
 
 The current GKG gRPC service has 5 RPCs:
 
@@ -33,7 +33,7 @@ The current GKG gRPC service has 5 RPCs:
 
 ### Problems with the current design
 
-1. **`ExecuteTool` is unnecessary indirection.** There are only 2 tools. `ExecuteTool("query_graph", args)` is functionally identical to `ExecuteQuery` — same pipeline, different formatter. `ExecuteTool("get_graph_schema")` is functionally identical to `GetOntology` — same data, different serialization (TOON text vs protobuf).
+1. **`ExecuteTool` is unnecessary indirection.** There are only 2 tools. `ExecuteTool("query_graph", args)` is functionally identical to `ExecuteQuery`: same pipeline, different formatter. `ExecuteTool("get_graph_schema")` is functionally identical to `GetOntology`: same data, different serialization (TOON text vs protobuf).
 
 2. **`GetOntology` and `get_graph_schema` are the same data.** Both return the graph schema. `GetOntology` returns structured protobuf (domains, nodes with properties/styles, edges with variants). `get_graph_schema` returns TOON text with optional `expand_nodes` for selective detail. The only difference is format and granularity.
 
@@ -75,8 +75,8 @@ mutation {
 
 Implementation approach:
 
-- Namespace KG enablement — leverages existing `groups` query with new `knowledgeGraphEnabled` field
-- Dedicated `orbitUpdate` mutation (not `groupUpdate`) for Orbit-specific settings — room to add more configurable options later
+- Namespace KG enablement: reuses the existing `groups` query with a new `knowledgeGraphEnabled` field
+- Dedicated `orbitUpdate` mutation (not `groupUpdate`) for Orbit-specific settings: room to add more configurable options later
 - All under `EE` namespace per [EE features guide](https://docs.gitlab.com/development/ee_features/)
 
 **REST** for GKG data operations:
@@ -131,7 +131,7 @@ enum ResponseFormat {
 | `GetClusterHealth` | Structured health (status, version, components) | [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) — compact key-value notation |
 | `ListTools` | Tool definitions (name, description, `parameters_json_schema`) | Same (no LLM variant needed) |
 
-The detailed response format specification — including the unified response envelope (`metadata`, `rows`, `graph`), GOON encoding, and the shared JSON Schema contract between the Rust backend and the Vue frontend — will be covered in a separate follow-up ADR. The design research for this is tracked in [snippet 5965027](https://gitlab.com/gitlab-org/gitlab/-/snippets/5965027) (Michael Usachenko's proposal) and [snippet 5965036](https://gitlab.com/gitlab-org/gitlab/-/snippets/5965036) (Angelo's extension with Kuzu-inspired uniform model).
+A separate follow-up ADR will cover the detailed response format specification. That specification includes the unified response envelope (`metadata`, `rows`, `graph`) and GOON encoding. It also includes the shared JSON Schema contract between the Rust backend and the Vue frontend. The design research for this is tracked in [snippet 5965027](https://gitlab.com/gitlab-org/gitlab/-/snippets/5965027) (Michael Usachenko's proposal) and [snippet 5965036](https://gitlab.com/gitlab-org/gitlab/-/snippets/5965036) (Angelo's extension with Kuzu-inspired uniform model).
 
 ---
 
@@ -178,7 +178,7 @@ Execute an Orbit query.
 }
 ```
 
-**Response (`format=raw`) — pseudo code:**
+**Response (`format=raw`), pseudo code:**
 
 ```json
 {
@@ -191,7 +191,7 @@ Execute an Orbit query.
 }
 ```
 
-**Response (`format=llm`) — pseudo code:** [GOON format](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205) — deduplicated graph with 25-50% token savings
+**Response (`format=llm`), pseudo code:** [GOON format](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205), deduplicated graph with 25-50% token savings
 
 ```json
 {
@@ -228,7 +228,7 @@ GET /api/v4/orbit/schema?format=llm
 GET /api/v4/orbit/schema?expand=User&format=llm
 ```
 
-**Response (`format=raw`, no expand) — pseudo code:**
+**Response (`format=raw`, no expand), pseudo code:**
 
 ```json
 {
@@ -248,7 +248,7 @@ GET /api/v4/orbit/schema?expand=User&format=llm
 }
 ```
 
-**Response (`format=raw`, `expand=User`) — pseudo code:**
+**Response (`format=raw`, `expand=User`), pseudo code:**
 
 ```json
 {
@@ -276,7 +276,7 @@ GET /api/v4/orbit/schema?expand=User&format=llm
 }
 ```
 
-**Response (`format=llm`, `expand=User`) — pseudo code:**
+**Response (`format=llm`, `expand=User`), pseudo code:**
 
 ```plaintext
 domains: [
@@ -291,7 +291,7 @@ edges: [
 ```
 
 **gRPC mapping:** `GetGraphSchema(expand_nodes, format)`
-**Streaming:** No (unary RPC — reads from in-memory ontology, no ClickHouse, no redaction)
+**Streaming:** No (unary RPC: reads from in-memory ontology, no ClickHouse, no redaction)
 
 ---
 
@@ -305,7 +305,7 @@ Cluster health and component status.
 |-----------|------|---------|-------------|
 | `format` | string | `raw` | `raw` or `llm` |
 
-**Response (`format=raw`) — pseudo code:**
+**Response (`format=raw`), pseudo code:**
 
 ```json
 {
@@ -320,7 +320,7 @@ Cluster health and component status.
 }
 ```
 
-**Response (`format=llm`) — pseudo code:** [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) notation
+**Response (`format=llm`), pseudo code:** [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) notation
 
 ```plaintext
 {status: "healthy", version: "0.5.0", ts: "2026-02-26T12:00:00Z", components: [{name: "clickhouse", status: "healthy", replicas: 3, p99_ms: 120}, {name: "indexer", status: "healthy", replicas: 2}, {name: "webserver", status: "healthy", replicas: 2}]}
@@ -333,11 +333,11 @@ Cluster health and component status.
 
 ### `GET /api/v4/orbit/tools`
 
-List available Orbit operations. **Pure passthrough from the Rust service** — Rails does not maintain tool definitions, descriptions, or parameter schemas. The Rust service's `tools/registry.rs` is the single source of truth.
+List available Orbit operations. **Pure passthrough from the Rust service.** Rails does not maintain tool definitions, descriptions, or parameter schemas. The Rust service's `tools/registry.rs` is the single source of truth.
 
-The `query_graph` tool description includes the full TOON-format schema (~15KB) as context for LLMs. The `get_graph_schema` tool description includes the `expand_nodes` parameter schema. All of this comes directly from the gRPC `ListTools` response — Rails adds only the REST endpoint mapping.
+The `query_graph` tool description includes the full TOON-format schema (~15KB) as context for LLMs. The `get_graph_schema` tool description includes the `expand_nodes` parameter schema. All of this comes directly from the gRPC `ListTools` response. Rails adds only the REST endpoint mapping.
 
-**Response — pseudo code:**
+**Response, pseudo code:**
 
 ```json
 {
@@ -360,7 +360,7 @@ The `query_graph` tool description includes the full TOON-format schema (~15KB) 
 
 **gRPC mapping:** `ListTools()`
 **Streaming:** No (unary)
-**Rails maintenance:** None — tool metadata flows directly from Rust service. The only Rails-side addition is the `endpoint` field mapping tool names to REST paths.
+**Rails maintenance:** None. Tool metadata flows directly from Rust service. The only Rails-side addition is the `endpoint` field mapping tool names to REST paths.
 
 ---
 
@@ -405,7 +405,7 @@ CLI format mapping:
 
 ### Tool routing in `CallTool`
 
-The MCP `tools/call` handler routes tool names to dedicated GrpcClient methods. Tool names are hardcoded in Rails — there are only two tools, and each maps to a specific RPC with different parameter shapes.
+The MCP `tools/call` handler routes tool names to dedicated GrpcClient methods. Tool names are hardcoded in Rails. There are only two tools, and each maps to a specific RPC with different parameter shapes.
 
 Pseudo code:
 
@@ -442,7 +442,7 @@ The `else` branch rejects unknown tool names, addressing the [AppSec feedback](h
 
 ### `ListTools` handler
 
-Unchanged — pure passthrough from `grpc_client.list_tools`.
+Unchanged: pure passthrough from `grpc_client.list_tools`.
 
 **Critical principle: the Rust service owns all tool metadata.** Tool names, descriptions (including the full TOON schema context in `query_graph`'s description), and parameter JSON schemas are defined in `tools/registry.rs` in the knowledge-graph repo. Rails never duplicates this. The `ListTools` RPC returns the authoritative tool list, and Rails passes it through verbatim to both the MCP `tools/list` handler and the `GET /api/v4/orbit/tools` REST endpoint. The only Rails-side enrichment is adding the `endpoint` field that maps each tool name to its corresponding REST path.
 
@@ -452,7 +452,7 @@ Unchanged — pure passthrough from `grpc_client.list_tools`.
 
 ### New proto definition
 
-The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code — see the authoritative definition in [`orbit.proto`](../../../crates/orbit-server/proto/orbit.proto).
+The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code: see the authoritative definition in [`orbit.proto`](../../../crates/orbit-server/proto/orbit.proto).
 
 > Historical sketch: the shipped proto carries no PaginationInfo message; pagination metadata lives in the formatted JSON/GOON body.
 
@@ -755,8 +755,8 @@ end
 - [ADR 001: gRPC Communication Protocol](001_grpc_communication.md)
 - [ADR 002: Rust Core Runtime](002_rust_core_runtime.md)
 - [ADR 011: Agent command surface](011_agent_command_surface.md)
-- [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) — the Rails-side routing that decides when MCP agents reach this API
+- [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md): the Rails-side routing that decides when MCP agents reach this API
 - [MR !411: Proto rewrite for REST API alignment](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411)
-- [GOON Format Specification](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205) — Graph Object Output Notation for `format=llm` query results
-- [TOON Specification](https://github.com/toon-format/spec/blob/main/SPEC.md) — Token-Oriented Object Notation for schema `format=llm`
+- [GOON Format Specification](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205): Graph Object Output Notation for `format=llm` query results
+- [TOON Specification](https://github.com/toon-format/spec/blob/main/SPEC.md): Token-Oriented Object Notation for schema `format=llm`
 - [Orbit GA Designs (Figma)](https://www.figma.com/design/GOrqDStp1E1SE0Ms7lVbXF/--588317--Orbit-GA-Designs?node-id=4066-5048)
