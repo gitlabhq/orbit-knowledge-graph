@@ -3,6 +3,7 @@
 
 pub mod clickhouse;
 pub mod ddl;
+pub mod duckdb;
 
 use orbit_server_config::QueryConfig;
 
@@ -19,6 +20,7 @@ pub use clickhouse::codegen;
 pub enum SqlDialect {
     #[default]
     ClickHouse,
+    DuckDb,
 }
 
 #[derive(Debug, Clone)]
