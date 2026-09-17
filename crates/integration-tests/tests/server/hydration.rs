@@ -753,7 +753,8 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]},
+        "options": {"include_debug_sql": true}
     }"#;
 
     let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
