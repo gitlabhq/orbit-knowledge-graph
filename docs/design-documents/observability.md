@@ -311,7 +311,7 @@ Operator responsibilities:
 
 In Kubernetes, most of this is automatic:
 
-- **Metrics**: Prometheus Operator discovers and scrapes `/-/metrics`. Cluster exporters (cAdvisor, kube-state-metrics, node_exporter) handle CPU, memory, and disk.
+- **Metrics**: Prometheus Operator discovers and scrapes `/-/metrics`. Cluster exporters (cAdvisor, kube-state-metrics, node_exporter) handle CPU, memory, and disk. With `tls.metrics.enabled`, the listener serves HTTPS and the PodMonitor needs `scheme: https` plus a `tlsConfig`; Prometheus connects to the pod IP, so verification needs `serverName` or `insecureSkipVerify`.
 - **Logging**: Container logs go to `stdout`/`stderr` and get collected by the cluster's logging agent (Fluentd, Vector).
 - **Health Checks**: Kubernetes uses liveness and readiness probes to restart unhealthy pods and manage traffic during rollouts.
 

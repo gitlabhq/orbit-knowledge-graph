@@ -86,9 +86,19 @@ gitlab:
     # signing_key: ""
     # verifying_key: ""
 
-tls: {}
+tls:
+  # Shared identity. Setting both enables TLS on the gRPC server, and each
+  # listener group below inherits them unless it names its own.
   # cert_path: "/path/to/cert.pem"
   # key_path: "/path/to/key.pem"
+  # Webserver, indexer, dispatcher and health-check HTTP listeners. A group
+  # inherits the identity above when enabled, or names its own cert_path and
+  # key_path as a pair.
+  probes:
+    enabled: false
+  # The labkit listener: /-/metrics plus its own /-/liveness and /-/readiness.
+  metrics:
+    enabled: false
 
 engine:
   # max_concurrent_workers: 16     # unset = derived from container CPU count and memory limit

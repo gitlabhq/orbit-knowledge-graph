@@ -137,5 +137,6 @@ diagnostic is still appended to this stubbed infrastructure data.
 | Config path | Effect |
 |---|---|
 | `health_check_url` | Base URL for the HealthCheck runtime, for example `http://localhost:4201`. When unset, cluster health uses stubbed infrastructure data. |
+| `tls.probes.enabled` | Serves the HealthCheck listener over TLS. The URL above must then be `https://`, and the certificate needs a SAN for the HealthCheck service name because the Webserver verifies it against the OS trust store. |
 
 See [ADR 003](decisions/003_api_design.md) for cluster-health request and response examples.

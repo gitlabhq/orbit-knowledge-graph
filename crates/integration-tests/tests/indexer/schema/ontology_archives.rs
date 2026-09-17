@@ -245,6 +245,7 @@ async fn dispatcher_rejects_conflicting_archives_before_migration() {
         &conflicting,
         serving_flag(),
         CancellationToken::new(),
+        None,
     )
     .await;
 
@@ -271,6 +272,7 @@ async fn dispatcher_rejects_invalid_archives_before_migration() {
         &invalid,
         serving_flag(),
         CancellationToken::new(),
+        None,
     )
     .await;
 

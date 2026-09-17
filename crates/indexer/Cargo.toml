@@ -29,6 +29,7 @@ futures = { workspace = true }
 gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
 indexmap = { workspace = true }
+labkit = { workspace = true, features = ["tls"] }
 labkit-events = { workspace = true }
 moka = { workspace = true }
 nats-client = { workspace = true }

@@ -46,7 +46,7 @@ query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
-labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
+labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus", "tls"] }
 labkit-events = { workspace = true }
 serde = { workspace = true }
 semver = { workspace = true }

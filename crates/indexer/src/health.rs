@@ -1,11 +1,10 @@
-use std::net::SocketAddr;
+use std::net::TcpListener;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
+use labkit::tls::ServerTls;
 use serde::Serialize;
-use tokio::net::TcpListener;
-use tracing::info;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -57,16 +56,11 @@ pub fn create_health_router(serving: Arc<AtomicBool>) -> Router {
 }
 
 pub async fn run_health_server(
-    bind_address: SocketAddr,
+    listener: TcpListener,
     serving: Arc<AtomicBool>,
+    tls: Option<ServerTls>,
 ) -> Result<(), std::io::Error> {
-    let app = create_health_router(serving);
-
-    let listener = TcpListener::bind(bind_address).await?;
-
-    info!(%bind_address, "indexer health server listening");
-
-    axum::serve(listener, app).await
+    labkit::tls::serve(listener, create_health_router(serving), tls).await
 }
 
 #[cfg(test)]
