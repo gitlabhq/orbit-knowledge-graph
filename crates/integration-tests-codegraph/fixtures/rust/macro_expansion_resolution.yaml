@@ -45,7 +45,7 @@ fixtures:
 tests:
   - name: "macro-expanded function call resolves to local function"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_macro_function' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -54,7 +54,7 @@ tests:
 
   - name: "macro-expanded method call resolves to impl method"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_macro_method' AND callee.name = 'run'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:

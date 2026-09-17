@@ -52,7 +52,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'types/consumer.ts'
-      RETURN i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY name
     assert:
       - { row_count: 4 }

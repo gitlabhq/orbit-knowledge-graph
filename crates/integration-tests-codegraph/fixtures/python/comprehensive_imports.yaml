@@ -22,8 +22,8 @@ tests:
   - name: os import exists
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.path = 'os'
-      RETURN i.path AS path
+      WHERE i.import_path = 'os'
+      RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: "os" } }
@@ -31,8 +31,8 @@ tests:
   - name: From import exists (Path)
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.name = 'Path'
-      RETURN i.path AS path
+      WHERE i.identifier_name = 'Path'
+      RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: "pathlib" } }
@@ -40,7 +40,7 @@ tests:
   - name: Aliased import exists (numpy as np)
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.alias = 'np'
-      RETURN i.path AS path
+      WHERE i.identifier_alias = 'np'
+      RETURN i.import_path AS path
     assert:
       - { row_count: 1 }

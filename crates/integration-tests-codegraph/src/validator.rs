@@ -98,7 +98,7 @@ fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {
         ),
         (
             "Imports",
-            "MATCH (i:ImportedSymbol) RETURN i.file_path AS file, i.path AS path, i.name AS name, i.alias AS alias",
+            "MATCH (i:ImportedSymbol) RETURN i.file_path AS file, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias",
         ),
     ];
 

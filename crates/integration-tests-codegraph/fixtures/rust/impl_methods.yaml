@@ -62,7 +62,7 @@ tests:
 
   - name: No spurious call edges from the struct itself
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'Dog'
       RETURN callee.name AS callee
     assert:

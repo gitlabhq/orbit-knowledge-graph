@@ -29,7 +29,7 @@ tests:
 
   - name: Each method references its own annotation
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'otherMethod'
       RETURN callee.name AS callee
     assert:
@@ -38,7 +38,7 @@ tests:
 
   - name: Plain method has no annotation edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'plainMethod'
       RETURN callee.name AS callee
     assert:

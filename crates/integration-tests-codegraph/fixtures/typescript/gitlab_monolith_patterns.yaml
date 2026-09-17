@@ -174,7 +174,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/root_entry.js'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "DefaultImport", path: "jh_else_ce/gitlab_version_check/index.js", name: "default", target: "mountVersionCheck" } }
@@ -183,7 +183,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
-      RETURN i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { path: "~/lib/utils/common_utils", name: "parseBoolean", target: "parseBoolean" } }
@@ -192,7 +192,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/feature_flags/store/actions.ts'
-      RETURN i.name AS name, i.alias AS alias, d.fqn AS target
+      RETURN i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
       - { row: { name: "buildFlagName", alias: "normalizeFlag", target: "buildFlagName" } }
@@ -223,7 +223,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/legacy_entry.js'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "CjsRequire", path: "~/feature_flags/store/legacy_adapter", name: "default", target: "legacyAdapter" } }
@@ -242,8 +242,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
-        AND i.name = 'ProjectsApp'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+        AND i.identifier_name = 'ProjectsApp'
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
@@ -253,7 +253,7 @@ tests:
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.import_type = 'NamedImport'
-      RETURN i.name AS name, d.fqn AS target
+      RETURN i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 4 }
       - { row: { name: "ProjectsApp", target: "app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
@@ -266,14 +266,14 @@ tests:
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.import_type = 'NamespaceImport'
-      RETURN i.path AS path, d.fqn AS target
+      RETURN i.import_path AS path, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { path: "~/projects/your_work/components", target: "app/assets/javascripts/projects/your_work/components/index.ts" } }
 
   - name: namespace alias barrel calls resolve to concrete component definitions
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'runProjectsNamespace'
       RETURN caller.fqn AS caller, callee.fqn AS callee
       ORDER BY callee
@@ -285,7 +285,7 @@ tests:
 
   - name: imported constants from monolith barrels stay inert
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'badProjectsCall'
         AND callee.file_path = 'app/assets/javascripts/projects/your_work/components/filters.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -296,7 +296,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/security_inventory/index.ts'
-      RETURN i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { path: "ee/security_inventory/utils", name: "buildSeverityPath", target: "buildSeverityPath" } }
@@ -305,7 +305,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/direct_form_spec.ts'
-      RETURN i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { path: "ee/oncall_schedules/components/add_edit_schedule_form.vue", name: "default", target: "AddEditScheduleForm" } }
@@ -325,7 +325,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue'
-        AND i.path = '@gitlab/ui'
+        AND i.import_path = '@gitlab/ui'
       RETURN d.fqn AS target
     assert:
       - { empty: true }
@@ -334,7 +334,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/index_spec.ts'
-      RETURN i.name AS name, d.fqn AS target
+      RETURN i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { name: "AddEditScheduleForm", target: "ee/app/assets/javascripts/oncall_schedules/index.ts::AddEditScheduleForm" } }

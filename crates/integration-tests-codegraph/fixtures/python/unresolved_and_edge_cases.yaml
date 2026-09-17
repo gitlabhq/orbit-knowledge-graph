@@ -63,7 +63,7 @@ tests:
   - name: "D13: reassignment resolves to latest (option2)"
     description: "x = option1; x = option2; x() should resolve to option2 not option1"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'reassignment_caller'
       RETURN callee.name AS callee
     assert:
@@ -72,7 +72,7 @@ tests:
 
   - name: "D20: walrus caller calls get_value"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'walrus_caller' AND callee.name = 'get_value'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -81,7 +81,7 @@ tests:
 
   - name: "D20: walrus caller calls process"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'walrus_caller' AND callee.name = 'process'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -90,7 +90,7 @@ tests:
 
   - name: "D40: f-string calls get_name"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'fstring_caller' AND callee.name = 'get_name'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -99,7 +99,7 @@ tests:
 
   - name: "D40: f-string calls get_age"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'fstring_caller' AND callee.name = 'get_age'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

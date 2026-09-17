@@ -145,7 +145,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'ModDeclaration'
-      RETURN i.import_type AS type, i.path AS path
+      RETURN i.import_type AS type, i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { type: 'ModDeclaration', path: 'generated' } }
@@ -154,7 +154,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'AliasedExternCrate'
-      RETURN i.path AS path, i.alias AS alias
+      RETURN i.import_path AS path, i.identifier_alias AS alias
     assert:
       - { row_count: 1 }
       - { row: { path: 'core', alias: 'rust_core' } }
@@ -163,8 +163,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
-        AND (i.alias = 'inner_helper' OR i.alias = 'inner_mod' OR i.name = 'Worker')
-      RETURN i.import_type AS type, i.path AS path, i.name AS name
+        AND (i.identifier_alias = 'inner_helper' OR i.identifier_alias = 'inner_mod' OR i.identifier_name = 'Worker')
+      RETURN i.import_type AS type, i.import_path AS path, i.identifier_name AS name
     assert:
       - { row_count: 3 }
       - { row: { type: 'UseGroup', path: 'crate::inner::helper', name: 'helper' } }
@@ -175,8 +175,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
-        AND (i.alias = 'inner_helper' OR i.alias = 'inner_mod' OR i.alias = 'crate_helper')
-      RETURN i.alias AS alias
+        AND (i.identifier_alias = 'inner_helper' OR i.identifier_alias = 'inner_mod' OR i.identifier_alias = 'crate_helper')
+      RETURN i.identifier_alias AS alias
     assert:
       - { column_values: { field: alias, values: ['crate_helper', 'inner_helper', 'inner_mod'] } }
 
@@ -184,7 +184,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'GlobUse'
-      RETURN i.path AS path
+      RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: 'crate::inner::nested' } }
@@ -192,15 +192,15 @@ tests:
   - name: "restricted visibility uses stay private in import metadata"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'src/lib.rs' AND i.alias = 'crate_helper'
-      RETURN i.import_type AS type, i.path AS path
+      WHERE i.file_path = 'src/lib.rs' AND i.identifier_alias = 'crate_helper'
+      RETURN i.import_type AS type, i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { type: 'AliasedUse', path: 'crate::inner::helper' } }
 
   - name: "local extern functions are captured and callable"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_local_extern' AND callee.name = 'exported_c'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -209,7 +209,7 @@ tests:
 
   - name: "foreign extern declarations do not create bogus local call edges"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_foreign_extern'
       RETURN callee.name AS name
     assert:

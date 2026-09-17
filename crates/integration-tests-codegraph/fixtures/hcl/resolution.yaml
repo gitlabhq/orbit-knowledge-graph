@@ -137,7 +137,7 @@ tests:
 
   - name: "Variable ref resolves: aws_instance type scope -> instance_type"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND callee.name = 'instance_type'
       RETURN caller.fqn AS caller, callee.name AS callee
@@ -146,7 +146,7 @@ tests:
 
   - name: "Data source ref resolves: aws_instance type scope -> aws_ami.ubuntu"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND callee.fqn = 'aws_ami.ubuntu'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -155,7 +155,7 @@ tests:
 
   - name: "Local ref resolves: aws_vpc type scope -> locals.common_tags"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'aws_vpc'
         AND callee.name = 'common_tags'
       RETURN caller.fqn AS caller, callee.name AS callee
@@ -164,7 +164,7 @@ tests:
 
   - name: "Subnet ref resolves: aws_subnet type scope -> aws_vpc.main"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'aws_subnet'
         AND callee.fqn = 'aws_vpc.main'
       RETURN caller.fqn AS caller, callee.fqn AS callee

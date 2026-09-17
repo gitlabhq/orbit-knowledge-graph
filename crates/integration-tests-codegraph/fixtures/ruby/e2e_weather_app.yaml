@@ -158,7 +158,7 @@ tests:
 
   - name: "Class defines instance method"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(child:Definition)
+      MATCH (parent:Definition)-[e]->(child:Definition)
       WHERE parent.fqn = 'WeatherApp::Forecast'
         AND child.fqn = 'WeatherApp::Forecast::temperature_f'
       RETURN parent.fqn AS parent, child.fqn AS child
@@ -167,7 +167,7 @@ tests:
 
   - name: "Class defines methods named run (instance + singleton)"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(child:Definition)
+      MATCH (parent:Definition)-[e]->(child:Definition)
       WHERE parent.fqn = 'WeatherApp::CLI'
         AND child.fqn = 'WeatherApp::CLI::run'
       RETURN parent.fqn AS parent, child.fqn AS child

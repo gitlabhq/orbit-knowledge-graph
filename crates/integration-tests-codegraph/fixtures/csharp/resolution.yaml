@@ -171,7 +171,7 @@ tests:
 
   - name: "Enum defines all members"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(child:Definition)
+      MATCH (parent:Definition)-[e]->(child:Definition)
       WHERE parent.fqn = 'MyApp.Models.Role'
       RETURN child.fqn AS fqn, e.edge_kind AS kind
     assert:
@@ -184,7 +184,7 @@ tests:
   # ── CALLS edges (cross-file resolution) ────────────────────────
   - name: "Controller.GetUser calls UserService.FindById"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.GetUser'
         AND callee.fqn = 'MyApp.Services.UserService.FindById'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -194,7 +194,7 @@ tests:
 
   - name: "Controller.CreateUser calls UserService.Save"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.CreateUser'
         AND callee.fqn = 'MyApp.Services.UserService.Save'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind

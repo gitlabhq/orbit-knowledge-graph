@@ -14,7 +14,7 @@ tests:
 
   - name: Nested class produces containment edge
     query: |
-      MATCH (outer:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(inner:Definition)
+      MATCH (outer:Definition)-[]->(inner:Definition)
       WHERE outer.name = 'Outer' AND inner.name = 'Inner'
       RETURN outer.fqn AS parent, inner.fqn AS child
     assert:
@@ -23,7 +23,7 @@ tests:
 
   - name: Method belongs to its class
     query: |
-      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
+      MATCH (cls:Definition)-[]->(m:Definition)
       WHERE cls.name = 'Outer' AND m.name = 'outer_method'
       RETURN cls.fqn AS parent, m.fqn AS child
     assert:
@@ -59,7 +59,7 @@ tests:
 
   - name: Exactly 3 containment edges, all Defines
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(child:Definition)
+      MATCH (parent:Definition)-[e]->(child:Definition)
       RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
     assert:
       - { row_count: 3 }

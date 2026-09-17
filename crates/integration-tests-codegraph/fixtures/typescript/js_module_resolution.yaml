@@ -361,7 +361,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'named/main.ts'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "NamedImport", path: "./util", name: "helper", target: "helper" } }
@@ -380,14 +380,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'default/main.ts'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "DefaultImport", path: "./util", name: "default", target: "helper" } }
 
   - name: Default import call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'default/main.ts'
         AND callee.file_path = 'default/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -399,14 +399,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'namespace/main.ts'
-      RETURN i.import_type AS import_type, i.path AS path, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "NamespaceImport", path: "./util", target: "namespace/util.ts" } }
 
   - name: Namespace import call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'namespace/main.ts'
         AND callee.file_path = 'namespace/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -418,14 +418,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'explicit/main.ts'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "explicit/index.ts::helper" } }
 
   - name: Explicit reexport call resolves to source definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'explicit/main.ts'
         AND callee.file_path = 'explicit/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -437,14 +437,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'star/main.ts'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "helper" } }
 
   - name: Star reexport call resolves to source definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'star/main.ts'
         AND callee.file_path = 'star/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -456,14 +456,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'alias/main.ts'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "NamedImport", path: "./constants", name: "formatPrecision", alias: "fmt", target: "formatPrecision" } }
 
   - name: Aliased named import call resolves to local definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'alias/main.ts'
         AND callee.file_path = 'alias/constants.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -475,7 +475,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'identity/consumer.ts'
-      RETURN i.name AS name, i.alias AS alias, d.fqn AS target
+      RETURN i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 3 }
       - { row: { name: "dateFormats", alias: null, target: "dateFormats" } }
@@ -484,7 +484,7 @@ tests:
 
   - name: Imported function from mixed import statement still calls concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'identity/consumer.ts'
         AND callee.file_path = 'identity/constants.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -494,7 +494,7 @@ tests:
 
   - name: Imported constants do not create false call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'no_false_call/main.ts'
         AND callee.file_path = 'no_false_call/constants.ts'
         AND callee.name = 'HTTP_STATUS_OK'
@@ -504,7 +504,7 @@ tests:
 
   - name: Imported functions still call through while constants stay inert
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'no_false_call/main.ts'
         AND callee.file_path = 'no_false_call/constants.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -514,7 +514,7 @@ tests:
 
   - name: Constructor, inferred member, and static method calls resolve
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'advanced/consumer.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -527,7 +527,7 @@ tests:
 
   - name: Callback passing does not fabricate direct execution edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'advanced/consumer.ts'
         AND caller.fqn = 'mapItems'
         AND callee.fqn = 'transform'
@@ -537,7 +537,7 @@ tests:
 
   - name: SSA branch merges preserve multiple candidate receiver types
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'ssa/branch.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -549,7 +549,7 @@ tests:
 
   - name: SSA alias propagation preserves receiver type through local rebinding
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'ssa/alias.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -559,7 +559,7 @@ tests:
 
   - name: SSA loop exit preserves initial and loop-carried receiver types
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'ssa/loop.ts'
         AND callee.name = 'parse'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -570,7 +570,7 @@ tests:
 
   - name: Namespace reexport member chains resolve to underlying static method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'namespace_chain/consumer.ts'
         AND callee.file_path = 'namespace_chain/suggestions.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -580,7 +580,7 @@ tests:
 
   - name: Default and namespace barrel exports both resolve through the barrel
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'combo/consumer.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -593,7 +593,7 @@ tests:
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'unresolved/main.ts'
         AND i.has_target = false
-      RETURN i.import_type AS import_type, i.name AS name, i.has_target AS has_target
+      RETURN i.import_type AS import_type, i.identifier_name AS name, i.has_target AS has_target
       ORDER BY import_type, name
     assert:
       - { row_count: 2 }
@@ -666,9 +666,9 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'ambiguous/main.ts'
-        AND i.name = 'shared'
+        AND i.identifier_name = 'shared'
         AND i.has_target = false
-      RETURN i.name AS name, i.has_target AS has_target
+      RETURN i.identifier_name AS name, i.has_target AS has_target
     assert:
       - { row_count: 1 }
       - { row: { name: "shared", has_target: false } }

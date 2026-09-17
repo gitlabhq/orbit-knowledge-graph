@@ -38,7 +38,7 @@ fixtures:
 tests:
   - name: "aliased re-exported function resolves to its original definition"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_reexports' AND callee.name = 'helper'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -47,7 +47,7 @@ tests:
 
   - name: "re-exported type keeps associated function resolution"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_reexports' AND callee.name = 'create'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
@@ -56,7 +56,7 @@ tests:
 
   - name: "Self::new inside impl resolves to the inherent constructor"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'create' AND callee.name = 'new'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
@@ -66,8 +66,8 @@ tests:
   - name: "re-export aliases are preserved in import metadata"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'src/lib.rs' AND (i.alias = 'exported_helper' OR i.alias = 'ExportedService')
-      RETURN i.alias AS alias, i.import_type AS type
+      WHERE i.file_path = 'src/lib.rs' AND (i.identifier_alias = 'exported_helper' OR i.identifier_alias = 'ExportedService')
+      RETURN i.identifier_alias AS alias, i.import_type AS type
     assert:
       - { row_count: 2 }
       - { row: { alias: 'exported_helper', type: 'ReExportAliased' } }

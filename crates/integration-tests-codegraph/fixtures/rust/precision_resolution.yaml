@@ -172,7 +172,7 @@ tests:
 
   - name: "local closure shadowing does not create a bogus local edge"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'local_closure_shadowing'
       RETURN callee.name AS callee
     assert:
@@ -180,7 +180,7 @@ tests:
 
   - name: "external std calls do not create repo-local edges"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'external_only'
       RETURN callee.name AS callee
     assert:
@@ -273,7 +273,7 @@ tests:
 
   - name: "associated functions stored in fn pointers still resolve"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'fn_pointer_from_assoc' AND callee.name = 'new'
       RETURN caller.file_path AS src, callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -282,7 +282,7 @@ tests:
 
   - name: "generic trait-bound method calls resolve to the trait method"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'generic_trait_bound' AND callee.name = 'trait_ping'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -291,7 +291,7 @@ tests:
 
   - name: "generic trait-bound default calls resolve to the trait default method"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'trait_default_dispatch' AND callee.name = 'defaulted'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -300,7 +300,7 @@ tests:
 
   - name: "trait default bodies still resolve their internal calls"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.fqn = 'dep::Pinger::defaulted' AND callee.name = 'helper'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -309,7 +309,7 @@ tests:
 
   - name: "inherent methods still resolve on concrete receivers"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'inherent_call' AND callee.name = 'inherent_ping'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:

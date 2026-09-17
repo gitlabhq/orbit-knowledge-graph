@@ -94,7 +94,7 @@ tests:
 
   - name: "Cross-file DI via aliased import: OrderService.run -> OrderMailer.send"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Mailer\OrderMailer\send'
       RETURN caller.fqn AS caller
@@ -103,7 +103,7 @@ tests:
 
   - name: "Cross-file DI via promoted typed param: OrderService.run -> OrderRepo.persist"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Repo\OrderRepo\persist'
       RETURN caller.fqn AS caller
@@ -112,7 +112,7 @@ tests:
 
   - name: "Cross-file parent:: dispatch: OrderService.run -> Repository.boot"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Base\Repository\boot'
       RETURN caller.fqn AS caller
@@ -121,7 +121,7 @@ tests:
 
   - name: "Cross-file catch type reference: OrderService.run references RepositoryException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Error\RepositoryException'
       RETURN caller.fqn AS caller

@@ -187,7 +187,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
       ORDER BY import_type, name, target
     assert:
       - { row_count: 9 }
@@ -205,8 +205,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/Home.tsx'
-        AND i.path IN ['react', '@external/ui']
-      RETURN i.path AS path, i.name AS name
+        AND i.import_path IN ['react', '@external/ui']
+      RETURN i.import_path AS path, i.identifier_name AS name
       ORDER BY path, name
     assert:
       - { row_count: 2 }
@@ -217,8 +217,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
-        AND i.path IN ['react', '@external/ui']
-      RETURN i.path AS path, d.fqn AS target
+        AND i.import_path IN ['react', '@external/ui']
+      RETURN i.import_path AS path, d.fqn AS target
     assert:
       - { empty: true }
 
@@ -267,7 +267,7 @@ tests:
 
   - name: Cross-file JSX calls resolve from default component internals
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Card'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY callee
@@ -279,7 +279,7 @@ tests:
 
   - name: Local JSX calls inside the same TSX file still resolve
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn IN ['IconButton', 'CardFooter']
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY caller
@@ -290,7 +290,7 @@ tests:
 
   - name: JSX fragments children aliases and default imports resolve
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn IN ['FragmentHost', 'AliasDefaultHost', 'NamespaceDefaultHost']
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY caller, callee_file, callee
@@ -304,7 +304,7 @@ tests:
 
   - name: Plain JSX files resolve imported TSX components
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'src/Plain.jsx'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
     assert:
@@ -315,14 +315,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'src/Plain.jsx'
-      RETURN i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { path: "./components/button", name: "Button", target: "Button" } }
 
   - name: TSX type declarations do not create runtime call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'src/components/button.tsx'
         AND callee.name = 'ButtonProps'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -331,7 +331,7 @@ tests:
 
   - name: Intrinsic JSX tags do not create code call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'NativeOnly'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

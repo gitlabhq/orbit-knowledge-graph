@@ -34,7 +34,7 @@ tests:
 
   - name: Cross-file constructor call resolves
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

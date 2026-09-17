@@ -70,7 +70,7 @@ tests:
 
   - name: Container.show calls print_it
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'show' AND callee.name = 'print_it'
       RETURN caller.fqn AS caller
     assert:

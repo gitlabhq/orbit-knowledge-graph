@@ -25,7 +25,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'main.ts'
-      RETURN i.name AS name, i.path AS path
+      RETURN i.identifier_name AS name, i.import_path AS path
       ORDER BY name
     assert:
       - { row_count: 2 }

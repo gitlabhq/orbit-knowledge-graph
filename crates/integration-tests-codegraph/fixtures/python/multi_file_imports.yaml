@@ -30,7 +30,7 @@ fixtures:
 tests:
   - name: UserService.create_user calls User
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'create_user' AND callee.name = 'User'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -39,7 +39,7 @@ tests:
 
   - name: main calls UserService across files
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'UserService'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:

@@ -132,7 +132,7 @@ tests:
 
   - name: "Outer record defines nested Inner record"
     query: |
-      MATCH (o:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(i:Definition)
+      MATCH (o:Definition)-[e]->(i:Definition)
       WHERE o.fqn = 'Shapes.Outer'
         AND i.fqn = 'Shapes.Outer.Inner'
       RETURN i.fqn AS fqn

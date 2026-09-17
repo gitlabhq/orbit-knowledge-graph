@@ -238,7 +238,7 @@ tests:
 
   - name: "Repo extends Query — Extends edge present"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(parent:Definition)
+      MATCH (child:Definition)-[e]->(parent:Definition)
       WHERE child.fqn = 'App\Repo' AND parent.fqn = 'App\Query'
       RETURN child.fqn AS c
     assert:
@@ -246,7 +246,7 @@ tests:
 
   - name: "Explicit $this->__construct() resolves to Calls edge"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Container\open'
         AND b.fqn = 'App\Container\__construct'
       RETURN a.fqn AS a
@@ -255,7 +255,7 @@ tests:
 
   - name: "Explicit $this->__toString() resolves to Calls edge"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Container\dump'
         AND b.fqn = 'App\Container\__toString'
       RETURN a.fqn AS a
@@ -264,7 +264,7 @@ tests:
 
   - name: "Explicit $this->__invoke() resolves to Calls edge"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Handler\process'
         AND b.fqn = 'App\Handler\__invoke'
       RETURN a.fqn AS a
@@ -273,7 +273,7 @@ tests:
 
   - name: "Typed-property __toString call resolves cross-class"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Service\callToString'
         AND b.fqn = 'App\Container\__toString'
       RETURN a.fqn AS a
@@ -282,7 +282,7 @@ tests:
 
   - name: "Typed-property __invoke explicit method call resolves cross-class"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Service\callInvokeMethod'
         AND b.fqn = 'App\Handler\__invoke'
       RETURN a.fqn AS a
@@ -291,7 +291,7 @@ tests:
 
   - name: "Subclass calling inherited static create() resolves via Extends to Model::create"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\boot'
         AND b.fqn = 'App\Model\create'
       RETURN a.fqn AS a
@@ -300,7 +300,7 @@ tests:
 
   - name: "Subclass calling inherited static find() resolves to Model::find"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\lookup'
         AND b.fqn = 'App\Model\find'
       RETURN a.fqn AS a
@@ -309,7 +309,7 @@ tests:
 
   - name: "Different subclass also resolves inherited create() to Model::create"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\accountOf'
         AND b.fqn = 'App\Model\create'
       RETURN a.fqn AS a
@@ -318,7 +318,7 @@ tests:
 
   - name: "static::from() inside Repo resolves to inherited Query::from"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Repo\fetch'
         AND b.fqn = 'App\Query\from'
       RETURN a.fqn AS a
@@ -327,7 +327,7 @@ tests:
 
   - name: "self::from() inside Repo also resolves to inherited Query::from"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Repo\fetchSelf'
         AND b.fqn = 'App\Query\from'
       RETURN a.fqn AS a
@@ -336,7 +336,7 @@ tests:
 
   - name: "Service::__construct property assignments do not emit spurious method calls"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Service\__construct'
         AND b.definition_type = 'Method'
       RETURN b.fqn AS b

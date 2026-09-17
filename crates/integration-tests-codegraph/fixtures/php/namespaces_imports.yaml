@@ -265,7 +265,7 @@ tests:
 
   - name: "Grouped use: third entry resolves (D)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
         AND callee.fqn = 'Vendor\Sub\D\whisper'
       RETURN caller.fqn AS c
@@ -275,7 +275,7 @@ tests:
   # ── use function / use const ────────────────────────────────────
   - name: "use function: bare call resolves to namespaced function"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
         AND callee.fqn = 'Vendor\Util\format'
       RETURN caller.fqn AS c
@@ -284,7 +284,7 @@ tests:
 
   - name: "use function: aliased call resolves (h -> Vendor\\Util\\helper)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
         AND callee.fqn = 'Vendor\Util\helper'
       RETURN caller.fqn AS c
@@ -294,7 +294,7 @@ tests:
   # ── Multiple use aliases for same-named classes ─────────────────
   - name: "Two aliases for same-named class disambiguate to different FQNs"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\MultiAlias\run'
         AND callee.fqn IN ['Vendor\X\Foo\fromX', 'Vendor\Y\Foo\fromY']
       RETURN callee.fqn AS callee
@@ -305,7 +305,7 @@ tests:
   # ── Leading-backslash fully-qualified references ────────────────
   - name: "Leading-backslash static call resolves: \\Vendor\\Other\\Bare::call()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
         AND callee.fqn = 'Vendor\Other\Bare\call'
       RETURN caller.fqn AS c
@@ -317,7 +317,7 @@ tests:
   # form `\Vendor\Other\Bare::call()` and `use`-imported types DO resolve.
   - name: "Known gap: leading-backslash typed-parameter $bare->run()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
         AND callee.fqn = 'Vendor\Other\Bare\run'
       RETURN caller.fqn AS c
@@ -327,7 +327,7 @@ tests:
   # ── FQN reference without import ────────────────────────────────
   - name: "Static call by fully-qualified name without use: \\Vendor\\Other\\Bare::call()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
         AND callee.fqn = 'Vendor\Other\Bare\call'
       RETURN caller.fqn AS c
@@ -339,7 +339,7 @@ tests:
   # form `\Vendor\Other\Bare::call()` DO resolve.
   - name: "Known gap: new \\Vendor\\Other\\Bare via local then $b->run()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
         AND callee.fqn = 'Vendor\Other\Bare\run'
       RETURN caller.fqn AS c
@@ -349,7 +349,7 @@ tests:
   # ── Cross-file: deep-namespace inheritance + call ───────────────
   - name: "Deep-namespace child extends imported base across files"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(parent:Definition)
+      MATCH (child:Definition)-[e]->(parent:Definition)
       WHERE child.fqn = 'App\Consumer\Sub\Nested\DeepExtends'
         AND parent.fqn = 'Vendor\Base\BaseService'
       RETURN child.fqn AS c
@@ -358,7 +358,7 @@ tests:
 
   - name: "Deep-namespace child resolves inherited \\$this->boot() to parent method"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\Sub\Nested\DeepExtends\start'
         AND callee.fqn = 'Vendor\Base\BaseService\boot'
       RETURN caller.fqn AS c
@@ -368,7 +368,7 @@ tests:
   # ── Cross-file static call across deep namespaces via use ───────
   - name: "Deep-namespace static call via use: DeepCaller::go -> Thing::make"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\DeepCaller\go'
         AND callee.fqn = 'Vendor\Pkg\Deep\Inner\Thing\make'
       RETURN caller.fqn AS c
@@ -377,7 +377,7 @@ tests:
 
   - name: "Deep-namespace instance call via use: DeepCaller::go -> Thing::ping"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\DeepCaller\go'
         AND callee.fqn = 'Vendor\Pkg\Deep\Inner\Thing\ping'
       RETURN caller.fqn AS c

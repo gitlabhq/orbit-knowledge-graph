@@ -53,7 +53,7 @@ tests:
   - name: All imports extracted correctly
     query: |
       MATCH (i:ImportedSymbol)
-      RETURN i.file_path AS file, i.name AS name, i.path AS path
+      RETURN i.file_path AS file, i.identifier_name AS name, i.import_path AS path
       ORDER BY file, name
     assert:
       - { row_count: 3 }
@@ -73,7 +73,7 @@ tests:
 
   - name: No call edges from models.ts (it only defines)
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'models.ts'
       RETURN caller.fqn AS caller
     assert:

@@ -59,7 +59,7 @@ tests:
 
   - name: "Locals scope refs resolve to variables"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'locals'
       RETURN callee.name AS callee
     assert:

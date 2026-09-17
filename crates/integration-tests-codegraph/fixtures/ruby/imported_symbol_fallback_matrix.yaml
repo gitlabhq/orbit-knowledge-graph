@@ -112,7 +112,7 @@ tests:
   - name: "resolved same-class calls do not emit imported-symbol fallback"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[e]->(callee:Definition)
           WHERE caller.fqn = 'LocalRunner::run'
             AND callee.fqn = 'LocalRunner::helper'
           RETURN caller.fqn AS caller, callee.fqn AS callee

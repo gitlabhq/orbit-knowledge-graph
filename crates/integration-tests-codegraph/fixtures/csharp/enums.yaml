@@ -91,7 +91,7 @@ tests:
 
   - name: "Explicitly-valued members of Priority are extracted as EnumMember"
     query: |
-      MATCH (e:Definition)-[edge:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
+      MATCH (e:Definition)-[edge]->(m:Definition)
       WHERE e.fqn = 'Models.Priority'
         AND m.definition_type = 'EnumMember'
       RETURN m.name AS name
@@ -105,7 +105,7 @@ tests:
 
   - name: "Members of [Flags] enum Permissions are extracted as EnumMember"
     query: |
-      MATCH (e:Definition)-[edge:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
+      MATCH (e:Definition)-[edge]->(m:Definition)
       WHERE e.fqn = 'Models.Permissions'
         AND m.definition_type = 'EnumMember'
       RETURN m.name AS name
@@ -120,7 +120,7 @@ tests:
 
   - name: "Enum defines its member via a Defines edge"
     query: |
-      MATCH (e:Definition)-[edge:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
+      MATCH (e:Definition)-[edge]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
         AND m.definition_type = 'EnumMember'
         AND m.name = 'Active'

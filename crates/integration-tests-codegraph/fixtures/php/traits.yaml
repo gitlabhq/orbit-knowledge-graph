@@ -275,7 +275,7 @@ tests:
 
   - name: "Conflict-resolution use still emits Extends for both traits"
     query: |
-      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(p:Definition)
+      MATCH (c:Definition)-[e]->(p:Definition)
       WHERE c.fqn = 'App\Models\Speaker'
         AND p.fqn IN ['App\Speakers\Left', 'App\Speakers\Right']
       RETURN p.fqn AS parent
@@ -286,7 +286,7 @@ tests:
   # ── Calls into trait-provided members ─────────────────────────────
   - name: "Trait method via \\$this: Product.persist -> Loggable.log"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\persist'
         AND callee.fqn = 'App\Concerns\Loggable\log'
       RETURN caller.fqn AS c
@@ -295,7 +295,7 @@ tests:
 
   - name: "Second trait method via \\$this: Product.persist -> Cacheable.cache"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\persist'
         AND callee.fqn = 'App\Concerns\Cacheable\cache'
       RETURN caller.fqn AS c
@@ -304,7 +304,7 @@ tests:
 
   - name: "Abstract-trait greet -> abstract name: Greeter.greet -> Greeter.name"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Concerns\Greeter\greet'
         AND callee.fqn = 'App\Concerns\Greeter\name'
       RETURN caller.fqn AS c
@@ -313,7 +313,7 @@ tests:
 
   - name: "Class invoking inherited trait method: Person.hello -> Greeter.greet"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Person\hello'
         AND callee.fqn = 'App\Concerns\Greeter\greet'
       RETURN caller.fqn AS c
@@ -322,7 +322,7 @@ tests:
 
   - name: "Static trait method via self::: Widget.bump -> Counter.tick"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Widget\bump'
         AND callee.fqn = 'App\Concerns\Counter\tick'
       RETURN caller.fqn AS c
@@ -331,7 +331,7 @@ tests:
 
   - name: "Static trait method via static::: Widget.clear -> Counter.reset"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Widget\clear'
         AND callee.fqn = 'App\Concerns\Counter\reset'
       RETURN caller.fqn AS c
@@ -340,7 +340,7 @@ tests:
 
   - name: "Transitive trait method through composing trait: Host.run -> Composer.compose"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Host\run'
         AND callee.fqn = 'App\Concerns\Composer\compose'
       RETURN caller.fqn AS c
@@ -349,7 +349,7 @@ tests:
 
   - name: "Trait-of-trait \\$this call: Composer.compose -> Base.ping"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Concerns\Composer\compose'
         AND callee.fqn = 'App\Concerns\Base\ping'
       RETURN caller.fqn AS c
@@ -358,7 +358,7 @@ tests:
 
   - name: "Trait-method-on-trait-method via class: App.show -> HasVersion.version"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\App\show'
         AND callee.fqn = 'App\Concerns\HasVersion\version'
       RETURN caller.fqn AS c

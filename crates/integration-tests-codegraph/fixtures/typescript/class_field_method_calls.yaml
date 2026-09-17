@@ -64,7 +64,7 @@ tests:
 
   - name: "Method call through a same-file typed field resolves to the callee"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE callee.fqn = 'Engine::run'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -91,7 +91,7 @@ tests:
 
   - name: "Method call through a constructor parameter property resolves to the callee"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'PersistentTerminalProcess::start'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

@@ -130,7 +130,7 @@ tests:
 
   - name: "Cross-file trait use: UserController uses Timestamped"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(parent:Definition)
+      MATCH (child:Definition)-[e]->(parent:Definition)
       WHERE child.fqn = 'App\Http\UserController'
         AND parent.fqn = 'App\Support\Timestamped'
       RETURN child.fqn AS child
@@ -139,7 +139,7 @@ tests:
 
   - name: "Cross-file DI call via constructor-promoted typed param: UserController.show -> UserRepo.find"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\show'
         AND callee.fqn = 'App\Repo\UserRepo\find'
       RETURN caller.fqn AS caller
@@ -148,7 +148,7 @@ tests:
 
   - name: "Cross-file interface-typed dispatch: UserController.show -> LoggerInterface.log"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\show'
         AND callee.fqn = 'App\Logging\LoggerInterface\log'
       RETURN caller.fqn AS caller
@@ -157,7 +157,7 @@ tests:
 
   - name: "Cross-file trait method via $this: UserController.show -> Timestamped.touch"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\show'
         AND callee.fqn = 'App\Support\Timestamped\touch'
       RETURN caller.fqn AS caller
@@ -166,7 +166,7 @@ tests:
 
   - name: "Cross-file static factory call: UserRepo.find -> NotFoundException.forId"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\find'
         AND callee.fqn = 'App\Domain\NotFoundException\forId'
       RETURN caller.fqn AS caller
@@ -175,7 +175,7 @@ tests:
 
   - name: "new static() resolves to the declaring class: DomainException.generic -> DomainException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\DomainException\generic'
         AND callee.fqn = 'App\Domain\DomainException'
       RETURN caller.fqn AS caller
@@ -184,7 +184,7 @@ tests:
 
   - name: "new static() resolves to the declaring class: NotFoundException.forId -> NotFoundException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\forId'
         AND callee.fqn = 'App\Domain\NotFoundException'
       RETURN caller.fqn AS caller
@@ -193,7 +193,7 @@ tests:
 
   - name: "new self() resolves to the declaring class: NotFoundException.rebuild -> NotFoundException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'
         AND callee.fqn = 'App\Domain\NotFoundException'
       RETURN caller.fqn AS caller
@@ -202,7 +202,7 @@ tests:
 
   - name: "new parent() resolves to the declared super: NotFoundException.rebuild -> DomainException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'
         AND callee.fqn = 'App\Domain\DomainException'
       RETURN caller.fqn AS caller
@@ -211,7 +211,7 @@ tests:
 
   - name: "new parent() typing flows to method dispatch: NotFoundException.rebuild -> DomainException.describe"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'
         AND callee.fqn = 'App\Domain\DomainException\describe'
       RETURN caller.fqn AS caller
@@ -220,7 +220,7 @@ tests:
 
   - name: "instanceof emits a cross-file type reference: UserController.show -> DomainException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\show'
         AND callee.fqn = 'App\Domain\DomainException'
       RETURN caller.fqn AS caller
@@ -229,7 +229,7 @@ tests:
 
   - name: "Foo::class resolves to the class: UserController.exceptionClass -> NotFoundException"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\exceptionClass'
         AND callee.fqn = 'App\Domain\NotFoundException'
       RETURN caller.fqn AS caller
@@ -238,7 +238,7 @@ tests:
 
   - name: "Foo::class does not create a spurious edge to a member literally named 'class'"
     query: |
-      MATCH (s:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(t:Definition)
+      MATCH (s:Definition)-[e]->(t:Definition)
       WHERE t.name = 'class'
       RETURN t.fqn AS fqn
     assert:

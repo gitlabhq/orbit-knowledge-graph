@@ -226,7 +226,7 @@ tests:
   # ── Calls inside enum methods (self::, $this->, match) ────────
   - name: "Enum method self:: static call: Status.label -> Status.format"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Domain\Status\label' AND b.fqn = 'App\Domain\Status\format'
       RETURN a.fqn AS a
     assert:
@@ -234,7 +234,7 @@ tests:
 
   - name: "$this->opposite() inside Direction.rotate resolves to Direction.opposite"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Domain\Direction\rotate' AND b.fqn = 'App\Domain\Direction\opposite'
       RETURN a.fqn AS a
     assert:
@@ -242,7 +242,7 @@ tests:
 
   - name: "Trait method inherited by enum: Tier.announce -> Describable.shortDescribe"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Domain\Tier\announce' AND b.fqn = 'App\Domain\Describable\shortDescribe'
       RETURN a.fqn AS a
     assert:
@@ -251,7 +251,7 @@ tests:
   # ── Cross-file enum usage from typed parameter ────────────────
   - name: "Typed enum parameter dispatch: Controller.showStatus -> Status.label"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Web\Controller\showStatus' AND b.fqn = 'App\Domain\Status\label'
       RETURN a.fqn AS a
     assert:
@@ -259,7 +259,7 @@ tests:
 
   - name: "Cross-file static enum method call: Controller.defaultLabel -> Status.defaultStatus"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Web\Controller\defaultLabel' AND b.fqn = 'App\Domain\Status\defaultStatus'
       RETURN a.fqn AS a
     assert:

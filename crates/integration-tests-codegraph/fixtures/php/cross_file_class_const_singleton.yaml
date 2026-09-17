@@ -79,7 +79,7 @@ tests:
 
   - name: "new static() late static binding resolves to declaring class: ScopedContainer.build -> ScopedContainer"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Di\ScopedContainer\build'
         AND callee.fqn = 'App\Di\ScopedContainer'
       RETURN caller.fqn AS caller
@@ -88,7 +88,7 @@ tests:
 
   - name: "Foo::class resolves cross-file to the class: ServiceProvider.containerClass -> Container"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\containerClass'
         AND callee.fqn = 'App\Di\Container'
       RETURN caller.fqn AS caller
@@ -97,7 +97,7 @@ tests:
 
   - name: "Cross-file static call: ServiceProvider.register -> Container.instance"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\Container\instance'
       RETURN caller.fqn AS caller
@@ -106,7 +106,7 @@ tests:
 
   - name: "Cross-file static factory call: ServiceProvider.register -> ScopedContainer.build"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\ScopedContainer\build'
       RETURN caller.fqn AS caller
@@ -115,7 +115,7 @@ tests:
 
   - name: "Inherited method dispatch via both static-factory chains: register -> Container.get (2 call sites)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\Container\get'
       RETURN caller.fqn AS caller
@@ -124,7 +124,7 @@ tests:
 
   - name: "Foo::class does not create a spurious edge to a member literally named 'class'"
     query: |
-      MATCH (s:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(t:Definition)
+      MATCH (s:Definition)-[e]->(t:Definition)
       WHERE t.name = 'class'
       RETURN t.fqn AS fqn
     assert:

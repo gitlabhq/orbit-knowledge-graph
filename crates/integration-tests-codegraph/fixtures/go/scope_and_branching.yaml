@@ -53,7 +53,7 @@ tests:
   - name: "withSwitch calls Handle and Retry from separate branches"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[e]->(callee:Definition)
           WHERE caller.fqn = 'main.withSwitch'
           RETURN callee.fqn AS callee
           ORDER BY callee
@@ -61,7 +61,7 @@ tests:
           - { row: { callee: "main.Handle" } }
           - { row: { callee: "main.Retry" } }
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[]->(callee:Definition)
           WHERE caller.fqn = 'main.withSwitch' AND callee.name = 'Close'
           RETURN callee.name
         assert:

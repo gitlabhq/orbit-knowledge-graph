@@ -191,7 +191,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'named/main.js'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "CjsRequire", path: "./util", name: "helper", target: "helper" } }
@@ -210,14 +210,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'namespace/main.js'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "namespace/util.js" } }
 
   - name: Namespace require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'namespace/main.js'
         AND callee.file_path = 'namespace/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -229,14 +229,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'alias/main.js'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "CjsRequire", path: "./util", name: "resolve", alias: "presolve", target: "resolve" } }
 
   - name: Aliased destructured require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'alias/main.js'
         AND callee.file_path = 'alias/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -248,14 +248,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'default/main.js'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "main" } }
 
   - name: Default module.exports require call resolves to the exported function
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'default/main.js'
         AND callee.file_path = 'default/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -265,7 +265,7 @@ tests:
 
   - name: Object literal module.exports member call resolves to the named function
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'object/main.js'
         AND callee.file_path = 'object/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -275,7 +275,7 @@ tests:
 
   - name: Bare require alias chains keep callable primary export identity
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'alias_chain/main.js'
         AND callee.file_path = 'alias_chain/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -287,7 +287,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'no_false_call/main.js'
-      RETURN i.name AS name, i.alias AS alias, d.fqn AS target
+      RETURN i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
       - { row: { name: "HTTP_STATUS_OK", alias: null, target: "no_false_call/util.js::HTTP_STATUS_OK" } }
@@ -295,7 +295,7 @@ tests:
 
   - name: Imported CJS constants do not create false call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'no_false_call/main.js'
         AND callee.file_path = 'no_false_call/util.js'
         AND callee.name = 'HTTP_STATUS_OK'
@@ -305,7 +305,7 @@ tests:
 
   - name: Imported CJS functions still resolve while constants stay inert
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'no_false_call/main.js'
         AND callee.file_path = 'no_false_call/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -315,7 +315,7 @@ tests:
 
   - name: Transpiled CJS default interop resolves namespace default member calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'interop/main.js'
         AND callee.file_path = 'interop/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee

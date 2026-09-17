@@ -220,7 +220,7 @@ tests:
 
   - name: "NO edge from app to static internal_flush (file-local)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'reader::internal_flush'
       RETURN caller.fqn AS caller
@@ -229,7 +229,7 @@ tests:
 
   - name: "NO edge from app to unrelated_func (not included)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn IN ['app::copy_file', 'app::main']
         AND callee.fqn = 'unrelated::unrelated_func'
       RETURN caller.fqn AS caller
@@ -238,7 +238,7 @@ tests:
 
   - name: "NO edge from app to static helper (not included + static)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn IN ['app::copy_file', 'app::main']
         AND callee.fqn = 'unrelated::helper'
       RETURN caller.fqn AS caller
@@ -251,7 +251,7 @@ tests:
 
   - name: "copy_file calls reader_open (via io/reader.h → reader.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'reader::reader_open'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -261,7 +261,7 @@ tests:
 
   - name: "copy_file calls writer_write (via io/writer.h → writer.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'writer::writer_write'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -271,7 +271,7 @@ tests:
 
   - name: "main calls copy_file (same file)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -281,7 +281,7 @@ tests:
 
   - name: "Transitive include: main calls panic (app.c → reader.h → error.h → error.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'error::panic'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -295,7 +295,7 @@ tests:
 
   - name: "copy_file CALLS edges have no duplicates"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
       RETURN callee.fqn AS callee
     assert:
@@ -316,7 +316,7 @@ tests:
 
   - name: "Outer defines Inner"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(child:Definition)
+      MATCH (parent:Definition)-[e]->(child:Definition)
       WHERE parent.fqn = 'nested::Outer'
         AND child.fqn = 'nested::Outer::Inner'
       RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
@@ -411,7 +411,7 @@ tests:
 
   - name: "Intra-file: internal_seek calls internal_flush (both in reader.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'reader::internal_seek'
         AND callee.fqn = 'reader::internal_flush'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -421,7 +421,7 @@ tests:
 
   - name: "Intra-file: main calls copy_file (both in app.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -431,7 +431,7 @@ tests:
 
   - name: "Intra-file: unrelated_func calls helper (both in unrelated.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'unrelated::unrelated_func'
         AND callee.fqn = 'unrelated::helper'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -445,7 +445,7 @@ tests:
 
   - name: "Cross-file: copy_file calls all 6 IO functions via include"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
       RETURN callee.fqn AS callee
     assert:
@@ -460,7 +460,7 @@ tests:
 
   - name: "Cross-file: main calls panic via transitive include chain"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'error::panic'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -510,7 +510,7 @@ tests:
 
   - name: "Cross-file: process_users calls list_init (user.c -> list.h -> list.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_init'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -520,7 +520,7 @@ tests:
 
   - name: "Cross-file: process_users calls list_push"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_push'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -530,7 +530,7 @@ tests:
 
   - name: "Cross-file: process_users calls list_count"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_count'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -540,7 +540,7 @@ tests:
 
   - name: "Cross-file: process_users calls list_pop"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_pop'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -550,7 +550,7 @@ tests:
 
   - name: "Cross-file: process_users calls list_empty"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_empty'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -560,7 +560,7 @@ tests:
 
   - name: "Cross-file: process_users calls panic via transitive include"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'error::panic'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -570,7 +570,7 @@ tests:
 
   - name: "process_users total call count"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
       RETURN callee.fqn AS callee
     assert:

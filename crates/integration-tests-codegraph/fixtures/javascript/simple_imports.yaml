@@ -24,7 +24,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'main.js'
-      RETURN i.name AS name, i.path AS path
+      RETURN i.identifier_name AS name, i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { name: "helper", path: "./utils" } }
@@ -50,7 +50,7 @@ tests:
 
   - name: unused has no incoming cross-file calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE callee.name = 'unused'
       RETURN caller.fqn AS caller
     assert:

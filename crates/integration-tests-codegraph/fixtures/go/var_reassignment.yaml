@@ -47,7 +47,7 @@ tests:
         assert:
           - { row: { callee: "main.Meow" } }
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[]->(callee:Definition)
           WHERE caller.fqn = 'main.varDecl' AND callee.name = 'Bark'
           RETURN callee.name
         assert:
@@ -56,7 +56,7 @@ tests:
   - name: "separateVars calls Meow and Bark without cross-contamination"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[e]->(callee:Definition)
           WHERE caller.fqn = 'main.separateVars'
           RETURN callee.fqn AS callee
           ORDER BY callee
@@ -66,7 +66,7 @@ tests:
 
   - name: "reassigned: both Meow and Bark resolve (phi merges both types)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'main.reassigned'
       RETURN callee.fqn AS callee
       ORDER BY callee
@@ -76,7 +76,7 @@ tests:
 
   - name: "groupedParams: both a and b resolve Query"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'main.groupedParams'
         AND callee.name = 'Query'
       RETURN callee.fqn AS callee

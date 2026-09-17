@@ -156,7 +156,7 @@ tests:
 
   - name: "direct module import still binds (no regression)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'api.monitoring.build_registry_direct'
         AND callee.fqn = 'prompts.base.BasePromptRegistry'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -165,7 +165,7 @@ tests:
 
   - name: "renaming named re-export resolves to the underlying definition"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'selection.caller.load_config'
         AND callee.fqn = 'selection.impl.RealConfig'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -174,7 +174,7 @@ tests:
 
   - name: "sibling-module re-export resolves to the defining module"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'processing.caller.make_language_id'
         AND callee.fqn = 'processing.typing.LanguageId'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -183,7 +183,7 @@ tests:
 
   - name: "multi-hop re-export chain resolves to the defining module"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'deep.caller.make_deep'
         AND callee.fqn = 'deep.impl.Deep'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -193,7 +193,7 @@ tests:
   - name: "external import without a local definition stays an ImportedSymbol"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[e]->(callee:Definition)
           WHERE caller.fqn = 'ext.caller.build_widget'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
@@ -210,7 +210,7 @@ tests:
   - name: "name a package does not re-export is not bound to a definition"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[e]->(callee:Definition)
           WHERE caller.fqn = 'empty_pkg.caller.use_absent'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
@@ -226,7 +226,7 @@ tests:
   - name: "ambiguous wildcard re-export does not bind arbitrarily"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[e]->(callee:Definition)
           WHERE caller.fqn = 'amb.caller.make_thing'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:

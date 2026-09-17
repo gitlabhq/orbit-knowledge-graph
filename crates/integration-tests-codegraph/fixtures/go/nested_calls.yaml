@@ -40,7 +40,7 @@ tests:
           - { row: { callee: "main.Info" } }
           - { row: { callee: "main.process" } }
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[]->(callee:Definition)
           WHERE caller.fqn = 'main.Start' AND callee.name = 'Error'
           RETURN callee.name
         assert:
@@ -48,7 +48,7 @@ tests:
 
   - name: "process calls Info and Error"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'main.process'
       RETURN callee.fqn AS callee
       ORDER BY callee
@@ -58,7 +58,7 @@ tests:
 
   - name: "recursive calls itself"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.fqn = 'main.recursive' AND callee.fqn = 'main.recursive'
       RETURN callee.fqn AS callee
     assert:

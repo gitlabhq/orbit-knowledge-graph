@@ -106,7 +106,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/components/parent_panel.vue'
-        AND i.path = './child_badge.vue'
+        AND i.import_path = './child_badge.vue'
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
@@ -126,7 +126,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/components/parent_panel.vue'
-        AND i.path = '../graphql/get_items.query.graphql'
+        AND i.import_path = '../graphql/get_items.query.graphql'
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
@@ -134,7 +134,7 @@ tests:
 
   - name: Vue mounted hook resolves this-method call to local method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND callee.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND caller.name = 'mounted'
@@ -145,7 +145,7 @@ tests:
 
   - name: Vue local this-method chain resolves load to normalize
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND callee.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND caller.name = 'load'
@@ -156,7 +156,7 @@ tests:
 
   - name: Vue this-alias preserves local method resolution
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND caller.name = 'relayNormalize'
         AND callee.file_path = 'app/assets/javascripts/components/parent_panel.vue'
@@ -167,7 +167,7 @@ tests:
 
   - name: Vue imported helper call resolves from method to helper definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND callee.file_path = 'app/assets/javascripts/lib/logger.js'
       RETURN caller.name AS caller, callee.name AS callee
@@ -177,7 +177,7 @@ tests:
 
   - name: Vue namespace import member call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND callee.file_path = 'app/assets/javascripts/tracking/index.js'
       RETURN caller.name AS caller, callee.name AS callee

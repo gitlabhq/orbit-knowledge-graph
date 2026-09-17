@@ -41,7 +41,7 @@ tests:
 
   - name: No resolution to Decoy.create
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'handle_request' AND callee.fqn = 'models.Decoy.create'
       RETURN caller.fqn AS caller
     assert:
@@ -59,7 +59,7 @@ tests:
   - name: Resolved factory chain has no stale imported-symbol fallback
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[e]->(callee:Definition)
           WHERE caller.name = 'handle_request'
             AND callee.fqn = 'models.UserService.create'
           RETURN caller.fqn AS caller, callee.fqn AS callee

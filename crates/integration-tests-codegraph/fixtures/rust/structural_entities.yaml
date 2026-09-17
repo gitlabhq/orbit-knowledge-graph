@@ -141,8 +141,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
-        AND (i.alias = 'PacketKind' OR i.alias = 'RecordPacket')
-      RETURN i.path AS path, i.alias AS alias, i.import_type AS type
+        AND (i.identifier_alias = 'PacketKind' OR i.identifier_alias = 'RecordPacket')
+      RETURN i.import_path AS path, i.identifier_alias AS alias, i.import_type AS type
     assert:
       - { row_count: 2 }
       - { row: { path: 'crate::inventory::Packet', alias: 'PacketKind', type: 'UseGroup' } }
@@ -152,7 +152,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'ReExportGlob'
-      RETURN i.path AS path
+      RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: 'crate::inventory' } }
@@ -161,7 +161,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'AliasedExternCrate'
-      RETURN i.path AS path, i.alias AS alias
+      RETURN i.import_path AS path, i.identifier_alias AS alias
     assert:
       - { row_count: 1 }
       - { row: { path: 'core', alias: 'rust_core' } }

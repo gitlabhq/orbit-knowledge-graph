@@ -26,7 +26,7 @@ fixtures:
 tests:
   - name: "run() calls helper()"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'helper'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -35,7 +35,7 @@ tests:
 
   - name: "caller() calls topLevel()"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'caller' AND callee.name = 'topLevel'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -44,7 +44,7 @@ tests:
 
   - name: "App methods have correct FQN"
     query: |
-      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
+      MATCH (cls:Definition)-[]->(m:Definition)
       WHERE cls.name = 'App' AND cls.definition_type = 'Class'
       RETURN m.fqn AS fqn
     assert:

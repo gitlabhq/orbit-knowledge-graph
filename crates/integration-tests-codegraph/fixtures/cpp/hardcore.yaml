@@ -275,7 +275,7 @@ tests:
 
   - name: "NO edge from app to static internal_flush"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'reader::io::internal_flush'
       RETURN caller.fqn AS caller
@@ -284,7 +284,7 @@ tests:
 
   - name: "NO edge from app to unrelated_func (not included)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn IN ['app::copy_file', 'app::main']
         AND callee.fqn = 'unrelated::unrelated_func'
       RETURN caller.fqn AS caller
@@ -293,7 +293,7 @@ tests:
 
   - name: "NO edge from app to static helper"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn IN ['app::copy_file', 'app::main']
         AND callee.fqn = 'unrelated::helper'
       RETURN caller.fqn AS caller
@@ -306,7 +306,7 @@ tests:
 
   - name: "main calls copy_file (same file)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -320,7 +320,7 @@ tests:
 
   - name: "copy_file CALLS edges have no duplicates"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
       RETURN callee.fqn AS callee
     assert:
@@ -341,7 +341,7 @@ tests:
 
   - name: "Nested namespace defines inner namespace"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(child:Definition)
+      MATCH (parent:Definition)-[e]->(child:Definition)
       WHERE parent.fqn = 'nested::outer'
         AND child.fqn = 'nested::outer::inner'
       RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
@@ -351,7 +351,7 @@ tests:
 
   - name: "Inner namespace defines Widget"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(child:Definition)
+      MATCH (parent:Definition)-[e]->(child:Definition)
       WHERE parent.fqn = 'nested::outer::inner'
         AND child.fqn = 'nested::outer::inner::Widget'
       RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
@@ -483,7 +483,7 @@ tests:
 
   - name: "Template usage calls tmpl::swap via include"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'tmpl_usage::extra::use_templates'
         AND callee.fqn = 'templates::tmpl::swap'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind

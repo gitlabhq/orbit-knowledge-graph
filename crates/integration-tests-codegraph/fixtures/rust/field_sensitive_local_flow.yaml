@@ -49,7 +49,7 @@ fixtures:
 tests:
   - name: "record literal field calls resolve through the stored local target"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_record_field' AND callee.name = 'helper'
       RETURN callee.fqn AS fqn
     assert:
@@ -58,7 +58,7 @@ tests:
 
   - name: "record shorthand fields preserve callable aliases"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_record_shorthand' AND callee.name = 'helper'
       RETURN callee.fqn AS fqn
     assert:
@@ -67,7 +67,7 @@ tests:
 
   - name: "reassigning a record local invalidates stale field targets"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'rebind_record_field'
       RETURN callee.name AS name
     assert:
@@ -76,7 +76,7 @@ tests:
 
   - name: "tuple fields on tuple-struct constructors preserve callable targets"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_tuple_field' AND callee.name = 'helper'
       RETURN callee.fqn AS fqn
     assert:
@@ -85,7 +85,7 @@ tests:
 
   - name: "record destructuring reuses the tracked field target"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'destructure_record_field' AND callee.name = 'helper'
       RETURN callee.fqn AS fqn
     assert:

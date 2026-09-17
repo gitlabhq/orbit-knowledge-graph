@@ -44,7 +44,7 @@ tests:
 
   - name: "Call does NOT resolve to the non-reachable same-named definition (other.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'app::run' AND callee.fqn = 'other::compute'
       RETURN callee.fqn AS callee
     assert:

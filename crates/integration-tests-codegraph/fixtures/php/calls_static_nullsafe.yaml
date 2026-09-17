@@ -180,7 +180,7 @@ tests:
   # ── self::/parent::/static:: ───────────────────────────────────
   - name: "self:: call: Base.describe -> Base.tag"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\Base\describe'
         AND callee.fqn = 'App\Service\Base\tag'
       RETURN caller.fqn AS c
@@ -189,7 +189,7 @@ tests:
 
   - name: "static:: call resolves to the enclosing class: Base.shout -> Base.tag"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\Base\shout'
         AND callee.fqn = 'App\Service\Base\tag'
       RETURN caller.fqn AS c
@@ -198,7 +198,7 @@ tests:
 
   - name: "parent:: call: Child.announce -> Base.tag"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\Child\announce'
         AND callee.fqn = 'App\Service\Base\tag'
       RETURN caller.fqn AS c
@@ -207,7 +207,7 @@ tests:
 
   - name: "Child extends Base"
     query: |
-      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(p:Definition)
+      MATCH (c:Definition)-[e]->(p:Definition)
       WHERE c.fqn = 'App\Service\Child' AND p.fqn = 'App\Service\Base'
       RETURN c.fqn AS c
     assert:
@@ -216,7 +216,7 @@ tests:
   # ── Chained instance calls (no nullsafe) ───────────────────────
   - name: "Chained call head resolves through typed property: UserRepo.find -> Builder.where"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\find'
         AND callee.fqn = 'App\Query\Builder\where'
       RETURN caller.fqn AS c
@@ -225,7 +225,7 @@ tests:
 
   - name: "Chained call middle (fluent self return): UserRepo.find -> Builder.limit"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\find'
         AND callee.fqn = 'App\Query\Builder\limit'
       RETURN caller.fqn AS c
@@ -234,7 +234,7 @@ tests:
 
   - name: "Chained call tail: UserRepo.find -> Builder.first"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\find'
         AND callee.fqn = 'App\Query\Builder\first'
       RETURN caller.fqn AS c
@@ -246,7 +246,7 @@ tests:
   # `$b = new Builder(); $b->where()` for imported names DOES resolve.
   - name: "Known gap: chained call on inline new (new Builder())->where()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\CallSites\chainedOnNew'
         AND callee.fqn = 'App\Query\Builder\where'
       RETURN caller.fqn AS c
@@ -256,7 +256,7 @@ tests:
   # ── Nullsafe (?->) calls (PHP 8.0) ─────────────────────────────
   - name: "Nullsafe call head: UserRepo.findSafe -> Builder.where"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\findSafe'
         AND callee.fqn = 'App\Query\Builder\where'
       RETURN caller.fqn AS c
@@ -265,7 +265,7 @@ tests:
 
   - name: "Nullsafe chained middle: UserRepo.findSafe -> Builder.limit"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\findSafe'
         AND callee.fqn = 'App\Query\Builder\limit'
       RETURN caller.fqn AS c
@@ -274,7 +274,7 @@ tests:
 
   - name: "Nullsafe chained tail: UserRepo.findSafe -> Builder.first"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\findSafe'
         AND callee.fqn = 'App\Query\Builder\first'
       RETURN caller.fqn AS c
@@ -283,7 +283,7 @@ tests:
 
   - name: "Mixed nullsafe + plain chain: UserRepo.announce -> Logger.with"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\announce'
         AND callee.fqn = 'App\Logging\Logger\with'
       RETURN caller.fqn AS c
@@ -292,7 +292,7 @@ tests:
 
   - name: "Mixed nullsafe + plain chain tail: UserRepo.announce -> Logger.write"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\announce'
         AND callee.fqn = 'App\Logging\Logger\write'
       RETURN caller.fqn AS c
@@ -301,7 +301,7 @@ tests:
 
   - name: "Nullsafe on parameter: CallSites.nullsafeOnReturn -> UserRepo.find"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\CallSites\nullsafeOnReturn'
         AND callee.fqn = 'App\Repo\UserRepo\find'
       RETURN caller.fqn AS c
@@ -311,7 +311,7 @@ tests:
   # ── First-class callable syntax (PHP 8.1) ──────────────────────
   - name: "First-class static callable: CallSites.firstClassStatic -> Logger.default"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\CallSites\firstClassStatic'
         AND callee.fqn = 'App\Logging\Logger\default'
       RETURN caller.fqn AS c
@@ -320,7 +320,7 @@ tests:
 
   - name: "First-class instance callable: CallSites.firstClassInstance -> Logger.write"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\CallSites\firstClassInstance'
         AND callee.fqn = 'App\Logging\Logger\write'
       RETURN caller.fqn AS c
@@ -330,7 +330,7 @@ tests:
   # ── ::class constant ───────────────────────────────────────────
   - name: "Foo::class is a constant expression, not a call (no Calls edge from classConstant to Logger.default)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\CallSites\classConstant'
         AND callee.fqn = 'App\Logging\Logger\default'
       RETURN caller.fqn AS c

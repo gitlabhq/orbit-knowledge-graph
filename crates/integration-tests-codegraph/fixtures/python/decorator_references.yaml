@@ -33,7 +33,7 @@ tests:
 
   - name: Each decorated function references its own decorator
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'another_func'
       RETURN callee.name AS callee
     assert:
@@ -42,7 +42,7 @@ tests:
 
   - name: Plain function has no decorator edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'plain_func'
       RETURN callee.name AS callee
     assert:

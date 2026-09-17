@@ -6,7 +6,7 @@ tests:
 
   - name: "Foo.foo -> Bar.bar (super call)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.fqn = 'com.example.foo.Foo.foo'
         AND callee.fqn = 'com.example.foo.Bar.bar'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -17,7 +17,7 @@ tests:
 
   - name: "Foo.foo -> Foo.fooInFooBody (same-class call)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.fqn = 'com.example.foo.Foo.foo'
         AND callee.fqn = 'com.example.foo.Foo.fooInFooBody'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -26,7 +26,7 @@ tests:
 
   - name: "InnerFoo.innerFoo -> Foo.fooInFooBody (inner class accesses enclosing)"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.fqn = 'com.example.foo.Foo.InnerFoo.innerFoo'
         AND callee.fqn = 'com.example.foo.Foo.fooInFooBody'
       RETURN caller.fqn AS caller, callee.fqn AS callee

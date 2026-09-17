@@ -19,7 +19,7 @@ tests:
 
   - name: No self-referencing call edges
     query: |
-      MATCH (d:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(d2:Definition)
+      MATCH (d:Definition)-[]->(d2:Definition)
       WHERE d.id = d2.id
       RETURN d.fqn AS self_caller
     assert:
@@ -102,14 +102,14 @@ tests:
   - name: Import edge
     query: |
       MATCH (i:ImportedSymbol)
-      RETURN i.file_path AS file, i.path AS path, i.name AS name
+      RETURN i.file_path AS file, i.import_path AS path, i.identifier_name AS name
     assert:
       - { row_count: 1 }
       - { row: { file: "main.py", path: "service", name: "UserService" } }
 
   - name: Definition containment and call edges
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(child:Definition)
+      MATCH (parent:Definition)-[e]->(child:Definition)
       RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
     assert:
       - { where: { kind: "Defines" }, row_count: 2 }

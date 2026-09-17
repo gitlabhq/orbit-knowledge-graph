@@ -169,7 +169,7 @@ tests:
 
   - name: "Arrow function body call resolves (arrow_caller -> add)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\arrow_caller'
         AND callee.fqn = 'App\Lib\add'
       RETURN caller.fqn AS caller
@@ -178,7 +178,7 @@ tests:
 
   - name: "Nested closure + arrow body calls attach to the outer function"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\nested_closures'
         AND callee.fqn = 'App\Lib\add'
       RETURN caller.fqn AS caller
@@ -187,7 +187,7 @@ tests:
 
   - name: "Local-variable closure body call resolves to add"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\calls_via_local_closure'
         AND callee.fqn = 'App\Lib\add'
       RETURN caller.fqn AS caller
@@ -196,7 +196,7 @@ tests:
 
   - name: "Imported function via `use function` resolves (loud -> shout)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\loud'
         AND callee.fqn = 'App\Lib\shout'
       RETURN caller.fqn AS caller
@@ -205,7 +205,7 @@ tests:
 
   - name: "First-class callable syntax records a Calls edge to the referenced function"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Fcc\as_callables'
         AND callee.fqn = 'App\Lib\shout'
       RETURN caller.fqn AS caller
@@ -214,7 +214,7 @@ tests:
 
   - name: "First-class callable for static method resolves to the method"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Fcc\as_callables'
         AND callee.fqn = 'App\Fcc\Util\format'
       RETURN caller.fqn AS caller
@@ -223,7 +223,7 @@ tests:
 
   - name: "Named-argument call still resolves to the target function"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Named\uses_named'
         AND callee.fqn = 'App\Named\greet'
       RETURN caller.fqn AS caller
@@ -232,7 +232,7 @@ tests:
 
   - name: "Named-argument cross-namespace call resolves (uses_named_add -> add)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Named\uses_named_add'
         AND callee.fqn = 'App\Lib\add'
       RETURN caller.fqn AS caller
@@ -241,7 +241,7 @@ tests:
 
   - name: "Variadic call resolves to the variadic-parameter function"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Var\calls_variadic'
         AND callee.fqn = 'App\Lib\variadic_sum'
       RETURN caller.fqn AS caller
@@ -250,7 +250,7 @@ tests:
 
   - name: "Spread-argument call (...$xs) still resolves to the variadic function"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Var\spread_variadic'
         AND callee.fqn = 'App\Lib\variadic_sum'
       RETURN caller.fqn AS caller
@@ -259,7 +259,7 @@ tests:
 
   - name: "Function body call resolves through scalar defaults (with_default_call -> shout)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Lib\with_default_call'
         AND callee.fqn = 'App\Lib\shout'
       RETURN caller.fqn AS caller

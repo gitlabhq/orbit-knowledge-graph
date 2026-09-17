@@ -265,7 +265,7 @@ tests:
 
   - name: "Service.run -> Logger.log via promoted typed property"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Service\run'
         AND callee.fqn = 'App\Infra\Logger\log'
       RETURN caller.fqn AS c
@@ -274,7 +274,7 @@ tests:
 
   - name: "Service.run -> Mailer.send via promoted readonly property"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Service\run'
         AND callee.fqn = 'App\Infra\Mailer\send'
       RETURN caller.fqn AS c
@@ -283,7 +283,7 @@ tests:
 
   - name: "Service.escalate -> Logger.warn via promoted property (second method)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Service\escalate'
         AND callee.fqn = 'App\Infra\Logger\warn'
       RETURN caller.fqn AS c
@@ -292,7 +292,7 @@ tests:
 
   - name: "Service.escalate -> Mailer.deliver via static call (unrelated to promotion)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Service\escalate'
         AND callee.fqn = 'App\Infra\Mailer\deliver'
       RETURN caller.fqn AS c
@@ -301,7 +301,7 @@ tests:
 
   - name: "Order.commit -> Logger.log via private promoted Logger"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Order\commit'
         AND callee.fqn = 'App\Infra\Logger\log'
       RETURN caller.fqn AS c
@@ -310,7 +310,7 @@ tests:
 
   - name: "Order.commit -> Money.add via promoted Money property"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Order\commit'
         AND callee.fqn = 'App\Domain\Money\add'
       RETURN caller.fqn AS c
@@ -319,7 +319,7 @@ tests:
 
   - name: "Vector.__construct -> Point.__construct via parent::"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Geometry\Vector\__construct'
         AND callee.fqn = 'App\Geometry\Point\__construct'
       RETURN caller.fqn AS c
@@ -328,7 +328,7 @@ tests:
 
   - name: "Vector.magnitude -> Point.magnitude via parent::"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Geometry\Vector\magnitude'
         AND callee.fqn = 'App\Geometry\Point\magnitude'
       RETURN caller.fqn AS c
@@ -337,7 +337,7 @@ tests:
 
   - name: "Concrete.__construct -> Base.__construct via parent:: in promoted ctor"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Concrete\__construct'
         AND callee.fqn = 'App\Domain\Base\__construct'
       RETURN caller.fqn AS c

@@ -61,14 +61,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'components/setup_panel.vue'
-      RETURN i.name AS name, d.fqn AS target
+      RETURN i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { name: "normalizeValue", target: "normalizeValue" } }
 
   - name: script setup function bodies resolve imported helper calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'runSetup'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

@@ -168,7 +168,7 @@ tests:
   # so the call resolves to the INTERFACE method, not the concrete implementation.
   - name: "Controller.show -> UserRepositoryInterface.find via interface-typed property"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Controllers\UserController\show'
         AND callee.fqn = 'App\Contracts\UserRepositoryInterface\find'
       RETURN caller.fqn AS c
@@ -177,7 +177,7 @@ tests:
 
   - name: "Controller.index -> UserRepositoryInterface.all via interface-typed property"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Controllers\UserController\index'
         AND callee.fqn = 'App\Contracts\UserRepositoryInterface\all'
       RETURN caller.fqn AS c
@@ -187,7 +187,7 @@ tests:
   # Repository's own injected interface property — same pattern at a deeper layer.
   - name: "Repository.find -> LoggerInterface.info via interface-typed property"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Repositories\EloquentUserRepository\find'
         AND callee.fqn = 'App\Contracts\LoggerInterface\info'
       RETURN caller.fqn AS c
@@ -198,7 +198,7 @@ tests:
   # should produce a Calls edge from the enclosing function to the class.
   - name: "bootApp -> FileLogger via new (constructor reference as Calls)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\bootApp'
         AND callee.fqn = 'App\Support\Logger\FileLogger'
       RETURN caller.fqn AS c
@@ -207,7 +207,7 @@ tests:
 
   - name: "bootApp -> EloquentUserRepository via new"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\bootApp'
         AND callee.fqn = 'App\Repositories\EloquentUserRepository'
       RETURN caller.fqn AS c

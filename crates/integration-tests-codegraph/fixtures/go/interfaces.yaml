@@ -65,7 +65,7 @@ tests:
           - { row: { callee: "main.Repository.Save" } }
       # No edges to unrelated methods
       - query: |
-          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[]->(callee:Definition)
           WHERE caller.fqn = 'main.process' AND callee.name = 'Close'
           RETURN callee.name
         assert:

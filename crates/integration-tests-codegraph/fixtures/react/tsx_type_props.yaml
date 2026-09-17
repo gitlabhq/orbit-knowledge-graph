@@ -54,7 +54,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path IN ['src/Button.tsx', 'src/Toolbar.tsx']
-      RETURN i.file_path AS file_path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.file_path AS file_path, i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY file_path, name
     assert:
       - { row_count: 5 }

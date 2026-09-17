@@ -110,7 +110,7 @@ fixtures:
 tests:
   - name: "prefix operator calls resolve to the impl method"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_neg' AND callee.name = 'neg'
       RETURN callee.fqn AS fqn
     assert:
@@ -119,7 +119,7 @@ tests:
 
   - name: "binary operator calls resolve to the impl method"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_add' AND callee.name = 'add'
       RETURN callee.fqn AS fqn
     assert:
@@ -128,7 +128,7 @@ tests:
 
   - name: "index operator calls resolve to the impl method"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_index' AND callee.name = 'index'
       RETURN callee.fqn AS fqn
     assert:
@@ -137,7 +137,7 @@ tests:
 
   - name: "try expressions resolve to the local Try::branch impl"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_try' AND callee.name = 'branch'
       RETURN callee.fqn AS fqn
     assert:
@@ -146,7 +146,7 @@ tests:
 
   - name: "await expressions resolve to the local Future::poll impl"
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'call_await_once' AND callee.name = 'poll'
       RETURN callee.fqn AS fqn
     assert:

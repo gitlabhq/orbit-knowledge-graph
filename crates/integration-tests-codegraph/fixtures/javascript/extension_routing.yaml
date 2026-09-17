@@ -113,7 +113,7 @@ tests:
         'mts/consumer.ts',
         'cts/consumer.ts'
       ]
-      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.import_type AS import_type, d.fqn AS target
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.import_type AS import_type, d.fqn AS target
       ORDER BY file_path
     assert:
       - { row_count: 6 }

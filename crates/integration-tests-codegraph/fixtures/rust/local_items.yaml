@@ -74,7 +74,7 @@ tests:
 
   - name: "local tuple struct constructors resolve to the local struct"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'outer' AND callee.name = 'Local'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -83,7 +83,7 @@ tests:
 
   - name: "local enum variant constructors resolve to the local variant"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'outer' AND callee.name = 'Pick'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -92,7 +92,7 @@ tests:
 
   - name: "local items inside methods are retained and callable"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Container::method' AND callee.name = 'nested'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:

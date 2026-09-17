@@ -18,7 +18,7 @@ fixtures:
 tests:
   - name: class_method calls static_method
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'class_method' AND callee.name = 'static_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -27,7 +27,7 @@ tests:
 
   - name: instance_method calls static_method
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'instance_method' AND callee.name = 'static_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -36,7 +36,7 @@ tests:
 
   - name: instance_method calls class_method
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'instance_method' AND callee.name = 'class_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

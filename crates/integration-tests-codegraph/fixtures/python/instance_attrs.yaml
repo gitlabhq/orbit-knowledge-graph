@@ -34,7 +34,7 @@ tests:
 
   - name: self.db.close() resolves to Database.close
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'cleanup' AND callee.name = 'close'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -43,7 +43,7 @@ tests:
 
   - name: No cross-method leakage
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'query' AND callee.name = 'close'
       RETURN caller.fqn AS caller
     assert:

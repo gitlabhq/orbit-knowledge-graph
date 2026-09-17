@@ -18,7 +18,7 @@ fixtures:
 tests:
   - name: "typed dataclass attribute access resolves to the field definition"
     query: |
-      MATCH (caller:Definition)-[r:CALLS|DEFINES|EXTENDS|CONTAINS]->(field:Definition)
+      MATCH (caller:Definition)-[r]->(field:Definition)
       WHERE caller.fqn = 'main.greet'
         AND field.name = 'email'
         AND r.edge_kind IN ['Calls', 'References']

@@ -20,7 +20,7 @@ tests:
   - name: "UsersController::create -> User::send_welcome_email"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'UsersController::create'
         AND callee.fqn = 'User::send_welcome_email'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -30,7 +30,7 @@ tests:
   - name: "User::send_welcome_email -> EmailService::send_welcome"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'User::send_welcome_email'
         AND callee.fqn = 'EmailService::send_welcome'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -41,7 +41,7 @@ tests:
   - name: "Application::test_user_creation_flow -> User::create_with_profile"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Application::test_user_creation_flow'
         AND callee.fqn = 'User::create_with_profile'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -51,7 +51,7 @@ tests:
   - name: "Application::test_authentication_flow -> AuthService::create_session"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Application::test_authentication_flow'
         AND callee.fqn = 'AuthService::create_session'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -61,7 +61,7 @@ tests:
   - name: "Application::test_authentication_flow -> AuthService::authenticate_token"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Application::test_authentication_flow'
         AND callee.fqn = 'AuthService::authenticate_token'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -71,7 +71,7 @@ tests:
   - name: "Application::test_authentication_flow -> AuthService::refresh_session"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Application::test_authentication_flow'
         AND callee.fqn = 'AuthService::refresh_session'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -82,7 +82,7 @@ tests:
   - name: "UsersController::show -> User::get_profile"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'UsersController::show'
         AND callee.fqn = 'User::get_profile'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -92,7 +92,7 @@ tests:
   - name: "User::get_profile -> Profile::find_by_user_id"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'User::get_profile'
         AND callee.fqn = 'Profile::find_by_user_id'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -102,7 +102,7 @@ tests:
   - name: "User::update_profile -> User::get_profile (self method)"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'User::update_profile'
         AND callee.fqn = 'User::get_profile'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -113,7 +113,7 @@ tests:
   - name: "NotificationService::notify -> NotificationService::build_notification"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify'
         AND callee.fqn = 'NotificationService::build_notification'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -123,7 +123,7 @@ tests:
   - name: "NotificationService::notify -> NotificationService::determine_delivery_method"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify'
         AND callee.fqn = 'NotificationService::determine_delivery_method'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -133,7 +133,7 @@ tests:
   - name: "NotificationService::notify -> NotificationService::log_notification"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify'
         AND callee.fqn = 'NotificationService::log_notification'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -143,7 +143,7 @@ tests:
   - name: "NotificationService::notify -> EmailService::send_notification"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify'
         AND callee.fqn = 'EmailService::send_notification'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -154,7 +154,7 @@ tests:
   - name: "UsersController::show -> User::get_profile (through @user)"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'UsersController::show'
         AND callee.fqn = 'User::get_profile'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -165,7 +165,7 @@ tests:
   - name: "User::send_welcome_email -> EmailService::send_welcome (cross-service)"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'User::send_welcome_email'
         AND callee.fqn = 'EmailService::send_welcome'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -176,7 +176,7 @@ tests:
   - name: "User::send_notification -> NotificationService::notify"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'User::send_notification'
         AND callee.fqn = 'NotificationService::notify'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -187,7 +187,7 @@ tests:
   - name: "UsersController::create -> User::send_welcome_email (through user = User.new)"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'UsersController::create'
         AND callee.fqn = 'User::send_welcome_email'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -198,7 +198,7 @@ tests:
   - name: "NotificationService::send_batch_notifications -> NotificationService::notify (in block)"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::send_batch_notifications'
         AND callee.fqn = 'NotificationService::notify'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -208,7 +208,7 @@ tests:
   - name: "NotificationService::notify_all -> NotificationService::notify (in each block)"
     skip: false
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify_all'
         AND callee.fqn = 'NotificationService::notify'
       RETURN caller.fqn AS caller, callee.fqn AS callee

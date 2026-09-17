@@ -128,7 +128,7 @@ tests:
 
   - name: "Malformed child: no Extends edge exists between Square and Quad"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(parent:Definition)
+      MATCH (child:Definition)-[e]->(parent:Definition)
       WHERE child.fqn = 'com.example.shapes.Square'
         AND parent.fqn = 'com.example.shapes.Quad'
       RETURN child.fqn AS child
@@ -137,7 +137,7 @@ tests:
 
   - name: "Malformed child: the permits-side reference is the only remaining link"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(child:Definition)
+      MATCH (parent:Definition)-[e]->(child:Definition)
       WHERE parent.fqn = 'com.example.shapes.Quad'
         AND child.fqn = 'com.example.shapes.Square'
       RETURN child.fqn AS child

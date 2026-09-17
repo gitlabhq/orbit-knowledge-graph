@@ -90,7 +90,7 @@ tests:
 
   - name: "Nested module is contained by its parent module"
     query: |
-      MATCH (m:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(f:Definition)
+      MATCH (m:Definition)-[e]->(f:Definition)
       WHERE m.fqn = 'Greeter'
         AND f.fqn = 'Greeter.Inner'
       RETURN f.fqn AS fqn
@@ -99,7 +99,7 @@ tests:
 
   - name: "Functions in a nested module are contained by the nested module"
     query: |
-      MATCH (m:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(f:Definition)
+      MATCH (m:Definition)-[e]->(f:Definition)
       WHERE m.fqn = 'Greeter.Inner'
         AND f.fqn = 'Greeter.Inner.run'
       RETURN f.fqn AS fqn

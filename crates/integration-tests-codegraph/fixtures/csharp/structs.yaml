@@ -94,7 +94,7 @@ tests:
 
   - name: "readonly-struct properties Width and Height are extracted as Property definitions"
     query: |
-      MATCH (s:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(p:Definition)
+      MATCH (s:Definition)-[]->(p:Definition)
       WHERE s.fqn = 'Geometry.Size'
         AND p.definition_type = 'Property'
       RETURN p.name AS name
@@ -107,7 +107,7 @@ tests:
 
   - name: "struct defines its method via a Defines edge"
     query: |
-      MATCH (s:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(m:Definition)
+      MATCH (s:Definition)-[e]->(m:Definition)
       WHERE s.fqn = 'Geometry.Point'
         AND m.fqn = 'Geometry.Point.DistanceToOrigin'
       RETURN m.fqn AS fqn

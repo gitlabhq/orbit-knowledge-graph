@@ -45,7 +45,7 @@ tests:
 
   - name: "cbase and unprefixed call sites resolve identically"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE callee.fqn = 'Projects::TransferService::execute'
       RETURN caller.fqn AS caller
     assert:
@@ -54,7 +54,7 @@ tests:
 
   - name: "cbase .new is not misattributed to the enclosing class"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'ProjectsController::enqueue_async_transfer'
         AND callee.fqn = 'ProjectsController::new'
       RETURN callee.fqn AS callee

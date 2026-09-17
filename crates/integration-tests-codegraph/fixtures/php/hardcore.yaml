@@ -173,7 +173,7 @@ tests:
 
   - name: "Product uses Loggable trait (modeled as Extends)"
     query: |
-      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(p:Definition)
+      MATCH (c:Definition)-[e]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Concerns\Loggable'
       RETURN c.fqn AS c
     assert:
@@ -182,7 +182,7 @@ tests:
   # ── Calls ──────────────────────────────────────────────────────
   - name: "Inherited method call: Entity.refresh -> Entity.touch via \\$this"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Entity\refresh'
         AND callee.fqn = 'App\Models\Entity\touch'
       RETURN caller.fqn AS c
@@ -191,7 +191,7 @@ tests:
 
   - name: "Trait method call: Product.rename -> Loggable.log via \\$this"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Concerns\Loggable\log'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -203,7 +203,7 @@ tests:
 
   - name: "Inherited method via subclass: Product.rename -> Entity.touch"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Models\Entity\touch'
       RETURN caller.fqn AS c
@@ -212,7 +212,7 @@ tests:
 
   - name: "Self static call: Product.rename -> Product.describe via self::"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Models\Product\describe'
       RETURN caller.fqn AS c
@@ -221,7 +221,7 @@ tests:
 
   - name: "Cross-file static call via aliased import: boot -> Logger.make (use ... as Log)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\boot'
         AND callee.fqn = 'App\Support\Logger\make'
       RETURN caller.fqn AS c

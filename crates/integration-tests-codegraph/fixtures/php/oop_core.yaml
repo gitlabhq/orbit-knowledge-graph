@@ -201,7 +201,7 @@ tests:
 
   - name: "Parent-level call: Dog.describe -> Canine.pack via inherited \\$this"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Zoo\Dog\describe'
         AND b.fqn = 'App\Zoo\Canine\pack'
       RETURN a.fqn AS caller
@@ -220,7 +220,7 @@ tests:
 
   - name: "Interface-extends-interface chains (multi-iface): ReadWrite extends Readable AND Writable"
     query: |
-      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(p:Definition)
+      MATCH (c:Definition)-[e]->(p:Definition)
       WHERE c.fqn = 'App\Io\ReadWrite'
         AND (p.fqn = 'App\Io\Readable' OR p.fqn = 'App\Io\Writable')
       RETURN p.fqn AS parent
@@ -230,7 +230,7 @@ tests:
 
   - name: "Interface extends two interfaces (one transitive): Stream -> ReadWrite, Stream -> Closable"
     query: |
-      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(p:Definition)
+      MATCH (c:Definition)-[e]->(p:Definition)
       WHERE c.fqn = 'App\Io\Stream'
         AND (p.fqn = 'App\Io\ReadWrite' OR p.fqn = 'App\Io\Closable')
       RETURN p.fqn AS parent
@@ -240,7 +240,7 @@ tests:
 
   - name: "Class implements interface chain root: File -> Stream"
     query: |
-      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(p:Definition)
+      MATCH (c:Definition)-[e]->(p:Definition)
       WHERE c.fqn = 'App\Io\File'
         AND p.fqn = 'App\Io\Stream'
       RETURN p.fqn AS parent
@@ -314,7 +314,7 @@ tests:
 
   - name: "self:: static call resolves: Counter.bump -> Counter.increment"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Util\Counter\bump'
         AND b.fqn = 'App\Util\Counter\increment'
       RETURN a.fqn AS caller
@@ -323,7 +323,7 @@ tests:
 
   - name: "static:: late-static call resolves: Counter.bump -> Counter.reset"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Util\Counter\bump'
         AND b.fqn = 'App\Util\Counter\reset'
       RETURN a.fqn AS caller
@@ -332,7 +332,7 @@ tests:
 
   - name: "Final method on Base is callable through subclass \\$this: Sub.open -> Base.locked"
     query: |
-      MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(b:Definition)
+      MATCH (a:Definition)-[e]->(b:Definition)
       WHERE a.fqn = 'App\Locks\Sub\open'
         AND b.fqn = 'App\Locks\Base\locked'
       RETURN a.fqn AS caller

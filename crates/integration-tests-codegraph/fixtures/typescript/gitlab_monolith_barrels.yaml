@@ -76,8 +76,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
-        AND i.path = 'ee/commit/constants'
-        AND i.name = 'verificationStatuses'
+        AND i.import_path = 'ee/commit/constants'
+        AND i.identifier_name = 'verificationStatuses'
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
@@ -87,8 +87,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
-        AND i.path = 'ee/commit/constants'
-        AND i.name = 'VERIFIED_CONFIG'
+        AND i.import_path = 'ee/commit/constants'
+        AND i.identifier_name = 'VERIFIED_CONFIG'
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
@@ -106,7 +106,7 @@ tests:
 
   - name: EE barrel local call resolves through to CE definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path = 'ee/app/assets/javascripts/commit/constants.ts'
         AND callee.file_path = 'app/assets/javascripts/commit/constants.ts'
       RETURN caller.name AS caller, callee.name AS callee

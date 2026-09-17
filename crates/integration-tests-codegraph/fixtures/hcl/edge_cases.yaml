@@ -101,7 +101,7 @@ tests:
 
   - name: "Chained resource refs: aws_db_subnet_group type scope -> both subnets"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'aws_db_subnet_group'
         AND callee.fqn STARTS WITH 'aws_subnet.'
       RETURN callee.fqn AS callee
@@ -112,7 +112,7 @@ tests:
 
   - name: "Sensitive variable ref resolves: aws_db_instance type scope -> db_password"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'aws_db_instance'
         AND callee.name = 'db_password'
       RETURN caller.fqn AS caller, callee.name AS callee

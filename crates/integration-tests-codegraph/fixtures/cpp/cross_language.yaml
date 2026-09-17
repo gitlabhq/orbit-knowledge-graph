@@ -101,7 +101,7 @@ tests:
 
   - name: "C++ engine.cxx calls C add() via ops.h -> ops.c"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'ops::add'
       RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
@@ -111,7 +111,7 @@ tests:
 
   - name: "C++ engine.cxx calls C multiply() via ops.h -> ops.c"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'ops::multiply'
       RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
@@ -121,7 +121,7 @@ tests:
 
   - name: "C++ engine.cxx calls C log_result() via format.hh -> format.cc"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'format::log_result'
       RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
@@ -134,7 +134,7 @@ tests:
 
   - name: "main.cpp calls record_sum via data.hxx -> data.cpp"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
         AND callee.fqn = 'data::record_sum'
       RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
@@ -144,7 +144,7 @@ tests:
 
   - name: "main.cpp calls add via ops.h -> ops.c"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
         AND callee.fqn = 'ops::add'
       RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind

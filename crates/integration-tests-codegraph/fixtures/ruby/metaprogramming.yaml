@@ -196,7 +196,7 @@ tests:
 
   - name: "Model.update calls save! (inherited from Base via Extends)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Base::save!'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -206,7 +206,7 @@ tests:
 
   - name: "Model.update calls greet (define_method)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Model::greet'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -216,7 +216,7 @@ tests:
 
   - name: "Presenter.display calls delegated methods"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Presenter::display'
         AND callee.fqn IN ['Presenter::name', 'Presenter::email', 'Presenter::greet']
       RETURN callee.fqn AS callee
@@ -275,7 +275,7 @@ tests:
 
   - name: "send(:notify) resolves to Dispatcher::notify"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Dispatcher::dispatch'
         AND callee.fqn = 'Dispatcher::notify'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -285,7 +285,7 @@ tests:
 
   - name: "public_send(:alert) resolves to Dispatcher::alert"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Dispatcher::dispatch'
         AND callee.fqn = 'Dispatcher::alert'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -303,7 +303,7 @@ tests:
 
   - name: "PostsController.index calls Post.published (qualified receiver chain)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'PostsController::index'
         AND callee.fqn = 'Post::published'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -313,7 +313,7 @@ tests:
 
   - name: "UpdateWorker.perform calls Model.update via constructor chain"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'UpdateWorker::perform'
         AND callee.fqn = 'Model::update'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -323,7 +323,7 @@ tests:
 
   - name: "PostsController.index calls Post.recent (qualified receiver chain)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'PostsController::index'
         AND callee.fqn = 'Post::recent'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -337,7 +337,7 @@ tests:
 
   - name: "Post.summarize calls association and scope methods"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Post::summarize'
       RETURN callee.fqn AS callee
     assert:
@@ -370,7 +370,7 @@ tests:
 
   - name: "__send__(:notify) resolves to Dynamic::notify"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Dynamic::dispatch'
         AND callee.fqn = 'Dynamic::notify'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind

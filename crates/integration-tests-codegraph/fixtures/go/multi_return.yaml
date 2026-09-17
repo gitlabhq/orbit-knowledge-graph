@@ -48,7 +48,7 @@ tests:
           - { row: { callee: "main.SetName" } }
       # Exactly 6 call edges, no false positives
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+          MATCH (caller:Definition)-[e]->(callee:Definition)
           WHERE caller.fqn = 'main.useBuilder'
           RETURN callee.fqn AS callee
         assert:

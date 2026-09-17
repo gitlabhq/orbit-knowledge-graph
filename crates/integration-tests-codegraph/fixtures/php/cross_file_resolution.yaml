@@ -162,7 +162,7 @@ tests:
 
   - name: "Cross-file trait use: OrderService uses Loggable"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(parent:Definition)
+      MATCH (child:Definition)-[e]->(parent:Definition)
       WHERE child.fqn = 'App\Service\OrderService'
         AND parent.fqn = 'App\Mixin\Loggable'
       RETURN child.fqn AS child
@@ -171,7 +171,7 @@ tests:
 
   - name: "Cross-file class extension: OrderRepo extends Repository"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(parent:Definition)
+      MATCH (child:Definition)-[e]->(parent:Definition)
       WHERE child.fqn = 'App\Repo\OrderRepo'
         AND parent.fqn = 'App\Base\Repository'
       RETURN child.fqn AS child
@@ -180,7 +180,7 @@ tests:
 
   - name: "Cross-file interface implementation: OrderRepo implements Persistable"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(parent:Definition)
+      MATCH (child:Definition)-[e]->(parent:Definition)
       WHERE child.fqn = 'App\Repo\OrderRepo'
         AND parent.fqn = 'App\Contract\Persistable'
       RETURN child.fqn AS child
@@ -189,7 +189,7 @@ tests:
 
   - name: "Cross-file interface inheritance: Persistable extends Identifiable"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(parent:Definition)
+      MATCH (child:Definition)-[e]->(parent:Definition)
       WHERE child.fqn = 'App\Contract\Persistable'
         AND parent.fqn = 'App\Contract\Identifiable'
       RETURN child.fqn AS child
@@ -198,7 +198,7 @@ tests:
 
   - name: "Cross-file DI call: OrderService.run -> OrderRepo.find via $this->repo"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Repo\OrderRepo\find'
       RETURN caller.fqn AS caller
@@ -207,7 +207,7 @@ tests:
 
   - name: "Cross-file DI call: OrderService.run -> OrderMailer.sendConfirmation via aliased import"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Mailer\OrderMailer\sendConfirmation'
       RETURN caller.fqn AS caller
@@ -216,7 +216,7 @@ tests:
 
   - name: "Cross-file DI call: OrderService.persist -> OrderRepo.persist"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\persist'
         AND callee.fqn = 'App\Repo\OrderRepo\persist'
       RETURN caller.fqn AS caller
@@ -225,7 +225,7 @@ tests:
 
   - name: "Cross-file parent:: call: OrderService.run -> Repository.boot"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Base\Repository\boot'
       RETURN caller.fqn AS caller
@@ -234,7 +234,7 @@ tests:
 
   - name: "Trait-inherited call: OrderService.run -> Loggable.log via $this->log"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Mixin\Loggable\log'
       RETURN caller.fqn AS caller
@@ -243,7 +243,7 @@ tests:
 
   - name: "Trait-internal call: Loggable.log -> Loggable.writeLog"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Mixin\Loggable\log'
         AND callee.fqn = 'App\Mixin\Loggable\writeLog'
       RETURN caller.fqn AS caller
@@ -258,7 +258,7 @@ tests:
 
   - name: "Cross-file new-call from function: bootstrap -> OrderService.run"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\bootstrap'
         AND callee.fqn = 'App\Service\OrderService\run'
       RETURN caller.fqn AS caller

@@ -43,7 +43,7 @@ tests:
 
   - name: factorial calls itself
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.name = 'factorial' AND callee.name = 'factorial'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

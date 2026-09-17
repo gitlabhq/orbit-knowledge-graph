@@ -101,7 +101,7 @@ tests:
 
   - name: "aws_instance (main.tf) resolves all four reference kinds cross-file"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND caller.file_path <> callee.file_path
       RETURN callee.definition_type AS type
@@ -115,7 +115,7 @@ tests:
 
   - name: "var.instance_type resolves from main.tf to variables.tf"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND callee.fqn = 'var.instance_type'
       RETURN caller.file_path AS sf, callee.file_path AS tf
@@ -125,7 +125,7 @@ tests:
 
   - name: "locals reference var.region cross-file at both usages"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'locals'
         AND callee.fqn = 'var.region'
         AND caller.file_path <> callee.file_path
@@ -135,7 +135,7 @@ tests:
 
   - name: "Local, DataSource and Resource references also resolve cross-file"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND caller.file_path <> callee.file_path
         AND callee.fqn IN ['locals.common_tags', 'aws_ami.ubuntu', 'aws_subnet.public']

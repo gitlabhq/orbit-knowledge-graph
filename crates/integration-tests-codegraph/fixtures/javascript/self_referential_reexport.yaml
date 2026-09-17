@@ -23,8 +23,8 @@ tests:
   - name: import of the self-referential wrapper keeps its imported-symbol fact
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.path = 'wrapper'
-      RETURN i.file_path AS file, i.name AS name, i.alias AS alias
+      WHERE i.import_path = 'wrapper'
+      RETURN i.file_path AS file, i.identifier_name AS name, i.identifier_alias AS alias
     assert:
       - { row_count: 1 }
       - { row: { file: "src/app.js", name: "default", alias: "Wrapper" } }

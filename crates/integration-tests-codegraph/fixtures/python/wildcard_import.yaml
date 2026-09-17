@@ -23,7 +23,7 @@ fixtures:
 tests:
   - name: Wildcard import resolves User
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'use_user' AND callee.name = 'User'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -32,7 +32,7 @@ tests:
 
   - name: Wildcard import resolves Project
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'use_project' AND callee.name = 'Project'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -41,7 +41,7 @@ tests:
 
   - name: No false cross-resolution
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[]->(callee:Definition)
       WHERE caller.name = 'use_user' AND callee.name = 'Project'
       RETURN caller.fqn AS caller
     assert:

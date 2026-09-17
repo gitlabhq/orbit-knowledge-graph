@@ -183,7 +183,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
-      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY file_path, path, name
     assert:
       - { row_count: 4 }
@@ -196,8 +196,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']
-        AND i.path IN ['next/app', 'next']
-      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only
+        AND i.import_path IN ['next/app', 'next']
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only
       ORDER BY file_path, path, name
     assert:
       - { row_count: 3 }
@@ -209,8 +209,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']
-        AND i.path IN ['next/app', 'next']
-      RETURN i.path AS path, d.fqn AS target
+        AND i.import_path IN ['next/app', 'next']
+      RETURN i.import_path AS path, d.fqn AS target
     assert:
       - { empty: true }
 
@@ -229,7 +229,7 @@ tests:
 
   - name: Prop-supplied Next page Component is not fabricated as a code edge
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'App'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -305,7 +305,7 @@ tests:
 
   - name: Next pages router dynamic and special files resolve local calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.file_path IN [
           'pages/_error.tsx',
           'pages/404.tsx',
@@ -332,8 +332,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'pages/_document.tsx'
-        AND i.path = 'next/document'
-      RETURN i.path AS path, i.name AS name
+        AND i.import_path = 'next/document'
+      RETURN i.import_path AS path, i.identifier_name AS name
       ORDER BY name
     assert:
       - { row_count: 4 }
@@ -346,7 +346,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
       WHERE i.file_path = 'pages/_document.tsx'
-        AND i.path = 'next/document'
-      RETURN i.path AS path, d.fqn AS target
+        AND i.import_path = 'next/document'
+      RETURN i.import_path AS path, d.fqn AS target
     assert:
       - { empty: true }

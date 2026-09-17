@@ -167,7 +167,7 @@ tests:
   # ── var inference + chained call ──────────────────────────────
   - name: "var p1 = service.Create() → line = new Line(p1, p2) → line.Length()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'
         AND callee.fqn = 'Geo.Models.Line.Length'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -179,7 +179,7 @@ tests:
   - name: "_cached?.Normalize() resolves despite ?."
     skip: true  # ?. is conditional_access_expression, not member_access_expression
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'
         AND callee.fqn = 'Geo.Models.Point.Normalize'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -210,7 +210,7 @@ tests:
 
   - name: "Partial class Clamp calls Point.Normalize"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Geo.Services.PointService.Clamp'
         AND callee.fqn = 'Geo.Models.Point.Normalize'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -220,7 +220,7 @@ tests:
 
   - name: "Runner calls partial class methods from both files"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'
         AND callee.fqn IN ['Geo.Services.PointService.IsValid',
                             'Geo.Services.PointService.Clamp']
@@ -243,7 +243,7 @@ tests:
 
   - name: "Runner.RunAsync calls CreateAsync"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.RunAsync'
         AND callee.fqn = 'Geo.Services.PointService.CreateAsync'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -254,7 +254,7 @@ tests:
   # ── Runner calls PointService.Create via typed field ──────────
   - name: "Runner.Run calls PointService.Create"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS|CONTAINS]->(callee:Definition)
+      MATCH (caller:Definition)-[e]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'
         AND callee.fqn = 'Geo.Services.PointService.Create'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
