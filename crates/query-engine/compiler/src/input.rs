@@ -339,6 +339,8 @@ pub struct InputNode {
     /// during normalization ("id" for most entities, e.g. "project_id" for Definition).
     /// Always set before enforce.rs runs; do not add fallbacks in downstream code.
     #[serde(skip)]
+    pub column_aliases: HashMap<String, String>,
+    #[serde(skip)]
     pub redaction_id_column: String,
     #[serde(skip)]
     pub virtual_columns: Vec<crate::passes::hydrate::VirtualColumnRequest>,
@@ -373,6 +375,7 @@ impl Default for InputNode {
             node_ids: Vec::new(),
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
+            column_aliases: HashMap::new(),
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             virtual_columns: Vec::new(),
             virtual_filters: Vec::new(),

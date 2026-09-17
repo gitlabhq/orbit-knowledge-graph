@@ -150,10 +150,10 @@ impl Lowering {
                                 alias,
                             });
                     } else {
-                        if alias.is_some() || self.input.query_type == QueryType::PathFinding {
+                        if self.input.query_type == QueryType::PathFinding {
                             return Err(invalid(
                                 span,
-                                "property projections require traversal or neighbors and cannot be renamed",
+                                "property projections are not supported in path_finding RETURN",
                             ));
                         }
                         let input_node = self
@@ -169,6 +169,9 @@ impl Lowering {
                             input_node.columns = Some(ColumnSelection::List(Vec::new()));
                         } else if !property_nodes.contains(&node) {
                             return Err(invalid(span, "duplicate or overlapping node projection"));
+                        }
+                        if let Some(alias) = alias {
+                            input_node.column_aliases.insert(property.clone(), alias);
                         }
                         match &mut input_node.columns {
                             Some(ColumnSelection::List(columns))
