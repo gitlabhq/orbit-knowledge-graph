@@ -81,6 +81,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         security {
             reads_env: [security_ctx, ontology]
+            reads_state: [input]
             mutates: [node]
         }
         cursor {
@@ -221,7 +222,13 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     let security_ctx = ctx.security_ctx().clone();
     let ontology = ctx.ontology().clone();
     let mut node = require(ctx.take_node(), "node")?;
-    security::apply_security_context(&mut node, &security_ctx, &ontology)?;
+    let input = require(ctx.input().as_ref(), "input")?;
+    security::apply_security_context(
+        &mut node,
+        &security_ctx,
+        &ontology,
+        &input.compiler.scope_prefixes,
+    )?;
     ctx.set_node(node);
     Ok(())
 }

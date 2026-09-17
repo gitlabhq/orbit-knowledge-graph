@@ -282,6 +282,23 @@ impl Ontology {
     }
 
     #[must_use]
+    pub fn with_traversal_path_lookup(mut self, entity: &str, key_column: &str) -> Self {
+        let source_table = self
+            .nodes
+            .get(entity)
+            .map(|n| n.destination_table.clone())
+            .unwrap_or_else(|| format!("{}{}", self.table_prefix, entity.to_lowercase()));
+        self.traversal_path_lookups.push(TraversalPathLookup {
+            entity: entity.into(),
+            kind: TraversalPathKind::Id,
+            dictionary: None,
+            source_table,
+            key_column: key_column.into(),
+        });
+        self
+    }
+
+    #[must_use]
     pub fn with_edges(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
         for name in names {
             self.edges.insert(name.into(), vec![]);

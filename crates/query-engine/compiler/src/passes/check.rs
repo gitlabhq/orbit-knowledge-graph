@@ -54,7 +54,7 @@ fn check_query(q: &Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<
 
 fn check_subqueries_in_expr(expr: &Expr, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
     match expr {
-        Expr::InSelect { query, .. } => check_query(query, ctx, ontology),
+        Expr::InSelect { query, .. } | Expr::Scalar(query) => check_query(query, ctx, ontology),
         Expr::BinaryOp { left, right, .. } => {
             check_subqueries_in_expr(left, ctx, ontology)?;
             check_subqueries_in_expr(right, ctx, ontology)
@@ -171,6 +171,8 @@ fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> 
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::ast::{SelectExpr, TableRef};
     fn project_query(where_clause: Option<Expr>) -> Node {
@@ -191,7 +193,13 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        crate::passes::security::apply_security_context(
+            &mut node,
+            &ctx,
+            &ontology,
+            &HashMap::new(),
+        )
+        .unwrap();
         assert!(check_ast(&node, &ctx, &ontology).is_ok());
     }
 
@@ -228,7 +236,13 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        crate::passes::security::apply_security_context(
+            &mut node,
+            &ctx,
+            &ontology,
+            &HashMap::new(),
+        )
+        .unwrap();
         assert!(check_ast(&node, &ctx, &ontology).is_ok());
     }
 
@@ -409,6 +423,7 @@ mod tests {
             &mut Node::Query(Box::new(inner.clone())),
             &ctx,
             &ontology::Ontology::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let filter = Expr::func(
@@ -552,7 +567,13 @@ mod tests {
             ..Default::default()
         }));
         let ontology = ontology::Ontology::new();
-        crate::passes::security::apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        crate::passes::security::apply_security_context(
+            &mut node,
+            &ctx,
+            &ontology,
+            &HashMap::new(),
+        )
+        .unwrap();
         assert!(check_ast(&node, &ctx, &ontology).is_ok());
     }
 

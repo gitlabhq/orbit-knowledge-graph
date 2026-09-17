@@ -1,11 +1,103 @@
-//! The querying pipeline's path-resolution stage uses these to read which
-//! Project/Group scope a node pins (by id or full_path), look the tight
-//! traversal_path prefix up in the graph DB, and attach it to the
-//! `SecurityContext` as scope metadata. Pure derivation, no DB calls.
+//! Which Project/Group scope a node pins (by id or full_path), and the
+//! traversal_path lookup the compiler emits for it so the scan seeks the PK
+//! prefix in the same statement. Pure derivation, no DB calls.
 
-use ontology::{ScopeEdge, TraversalPathKind};
+use std::collections::HashMap;
 
-use crate::input::{FilterOp, Input, InputFilter, InputNode};
+use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
+use ontology::{Ontology, ScopeEdge, TraversalPathKind, TraversalPathLookup};
+
+use crate::ast::{ChType, Expr, Query, SelectExpr, TableRef};
+use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
+
+const LOOKUP_ALIAS: &str = "_scope";
+const UNRESOLVED_PATH: &str = "0/";
+
+/// Alternative traversal_path values a scoped alias may live under. Each
+/// resolves to the anchor's path, or to the `0/` sentinel when the anchor row
+/// is missing, which no namespaced row matches.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScopePrefix(Vec<Expr>);
+
+impl ScopePrefix {
+    pub fn literal(path: &str) -> Self {
+        Self(vec![Expr::string(path)])
+    }
+
+    pub fn predicate(&self, alias: &str) -> Expr {
+        Expr::or_all(self.0.iter().map(|path| {
+            Some(Expr::func(
+                "startsWith",
+                vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path.clone()],
+            ))
+        }))
+        .expect("scope prefix has at least one path")
+    }
+}
+
+/// Seed each anchored node with its lookups and flood them across
+/// scope-preserving edges. Only traversal and aggregation scans are scoped.
+pub fn derive_scope_prefixes(input: &Input, ontology: &Ontology) -> HashMap<String, ScopePrefix> {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return HashMap::new();
+    }
+    let anchor_fks = ontology.anchor_fk_mappings();
+    let seed: HashMap<String, ScopePrefix> = input
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let lookups: Vec<Expr> = scope_keys(node, &anchor_fks)
+                .into_iter()
+                .filter_map(|key| {
+                    ontology
+                        .traversal_path_lookup(&key.entity, key.kind)
+                        .map(|spec| lookup_expr(spec, &key.value))
+                })
+                .collect();
+            (!lookups.is_empty()).then(|| (node.id.clone(), ScopePrefix(lookups)))
+        })
+        .collect();
+    ontology.propagate_scope_prefixes(&scope_edges(input), &seed)
+}
+
+fn lookup_expr(spec: &TraversalPathLookup, value: &PathScopeId) -> Expr {
+    let key = match value {
+        PathScopeId::Numeric(id) => Expr::param(ChType::Int64, *id),
+        PathScopeId::Text(text) => Expr::param(ChType::String, text.clone()),
+    };
+    let latest = |column: &str| {
+        Expr::func(
+            "argMaxOrNull",
+            vec![
+                Expr::col(LOOKUP_ALIAS, column),
+                Expr::col(LOOKUP_ALIAS, VERSION_COLUMN),
+            ],
+        )
+    };
+    let path = Expr::func(
+        "coalesce",
+        vec![
+            Expr::func(
+                "if",
+                vec![
+                    latest(DELETED_COLUMN),
+                    Expr::Literal(serde_json::Value::Null),
+                    latest(TRAVERSAL_PATH_COLUMN),
+                ],
+            ),
+            Expr::string(UNRESOLVED_PATH),
+        ],
+    );
+    Expr::Scalar(Box::new(Query {
+        select: vec![SelectExpr::new(path, TRAVERSAL_PATH_COLUMN)],
+        from: TableRef::scan(&spec.source_table, LOOKUP_ALIAS),
+        where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, &spec.key_column), key)),
+        ..Default::default()
+    }))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PathScopeId {
