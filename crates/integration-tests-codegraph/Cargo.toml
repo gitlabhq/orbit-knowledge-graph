@@ -6,12 +6,10 @@ publish = false
 
 [dependencies]
 code-graph = { path = "../code-graph" }
+compiler = { path = "../query-engine/compiler" }
+duckdb-client = { path = "../duckdb-client" }
+ontology = { path = "../ontology" }
 
-# lance-graph uses arrow 56 — we need matching types for its API
-lance-graph = { workspace = true }
-arrow_56 = { workspace = true }
-
-# arrow 58 for IPC bridge (arrow 58 → arrow 56 conversion)
 arrow = { workspace = true }
 
 crossbeam-channel = "0.5"
@@ -25,9 +23,6 @@ tabled = { workspace = true }
 anyhow = { workspace = true }
 tempfile = { workspace = true }
 walkdir = { workspace = true }
-
-[package.metadata.cargo-shear]
-ignored = ["tokio"]
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -1,17 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use arrow_56::array::{
-    Array, BooleanArray, BooleanBuilder, Int64Array, Int64Builder, StringArray, StringBuilder,
-};
-use arrow_56::record_batch::RecordBatch;
-use lance_graph::{CypherQuery, GraphConfig};
+use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
+use arrow::record_batch::RecordBatch;
+use compiler::{Frontend, SecurityContext, compile_local};
+use duckdb_client::DuckDbClient;
+use ontology::Ontology;
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{
     Assert, AssertCheck, FieldValueArgs, QueryBlock, Severity, TestCase, TestSuite,
 };
-use super::datasets::LanceDatasets;
 
 #[derive(Debug)]
 pub(crate) struct Failure {
@@ -20,10 +19,11 @@ pub(crate) struct Failure {
     pub message: String,
 }
 
-pub(crate) async fn run_suite(
+pub(crate) fn run_suite(
     suite: &TestSuite,
-    datasets: &LanceDatasets,
-    config: &GraphConfig,
+    client: &DuckDbClient,
+    ontology: &Arc<Ontology>,
+    ctx: &SecurityContext,
 ) -> Vec<Failure> {
     let mut failures = Vec::new();
     for test in &suite.tests {
@@ -31,14 +31,19 @@ pub(crate) async fn run_suite(
             eprintln!("  [SKIP] \"{}\"", test.name);
             continue;
         }
-        failures.extend(run_test(test, datasets, config).await);
+        failures.extend(run_test(test, client, ontology, ctx));
     }
     failures
 }
 
-async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfig) -> Vec<Failure> {
+fn run_test(
+    test: &TestCase,
+    client: &DuckDbClient,
+    ontology: &Arc<Ontology>,
+    ctx: &SecurityContext,
+) -> Vec<Failure> {
     if test.debug {
-        dump_datasets(datasets, config).await;
+        dump_datasets(client, ontology, ctx);
     }
 
     let blocks = test.all_queries();
@@ -50,18 +55,44 @@ async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfi
         } else {
             format!("{} [query {}]", test.name, i + 1)
         };
-        failures.extend(run_query_block(&label, test.severity, block, datasets, config).await);
+        failures.extend(run_query_block(
+            &label,
+            test.severity,
+            block,
+            client,
+            ontology,
+            ctx,
+        ));
     }
 
-    // Auto-dump on failure so debugging doesn't require re-running with debug: true
     if !failures.is_empty() && !test.debug {
-        dump_datasets(datasets, config).await;
+        dump_datasets(client, ontology, ctx);
     }
 
     failures
 }
 
-async fn dump_datasets(datasets: &LanceDatasets, config: &GraphConfig) {
+fn execute_cypher(
+    cypher: &str,
+    client: &DuckDbClient,
+    ontology: &Arc<Ontology>,
+    ctx: &SecurityContext,
+) -> anyhow::Result<RecordBatch> {
+    let compiled = compile_local(cypher, Frontend::Gql, ontology, ctx)?;
+    let sql = compiled.base.render();
+    let batches = client.query_arrow(&sql)?;
+    if batches.is_empty() {
+        let schema = Arc::new(arrow::datatypes::Schema::empty());
+        Ok(RecordBatch::new_empty(schema))
+    } else if batches.len() == 1 {
+        Ok(batches.into_iter().next().unwrap())
+    } else {
+        arrow::compute::concat_batches(&batches[0].schema(), &batches)
+            .map_err(|e| anyhow::anyhow!("concat batches: {e}"))
+    }
+}
+
+fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>, ctx: &SecurityContext) {
     let debug_queries = [
         (
             "Definitions",
@@ -75,41 +106,27 @@ async fn dump_datasets(datasets: &LanceDatasets, config: &GraphConfig) {
             "Imports",
             "MATCH (i:ImportedSymbol) RETURN i.file_path AS file, i.path AS path, i.name AS name, i.alias AS alias",
         ),
-        (
-            "DefinitionToDefinition",
-            "MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition) RETURN s.fqn AS source, t.fqn AS target, e.edge_kind AS kind",
-        ),
-        (
-            "FileToDefinition",
-            "MATCH (f:File)-[e:FileToDefinition]->(d:Definition) RETURN f.path AS file, d.fqn AS def, e.edge_kind AS kind",
-        ),
     ];
 
     eprintln!("\n  ╔══ DEBUG DUMP ══════════════════════════════════════");
     for (label, cypher) in debug_queries {
-        if let Ok(q) = CypherQuery::new(cypher) {
-            let q = q.with_config(config.clone());
-            if let Ok(batch) = q.execute(datasets.clone(), None).await {
-                print_result(&format!("  {label}"), cypher, &batch);
-            }
+        match execute_cypher(cypher, client, ontology, ctx) {
+            Ok(batch) => print_result(&format!("  {label}"), cypher, &batch),
+            Err(e) => eprintln!("  {label}: query failed: {e}"),
         }
     }
     eprintln!("  ╚══════════════════════════════════════════════════\n");
 }
 
-async fn run_query_block(
+fn run_query_block(
     label: &str,
     severity: Severity,
     block: &QueryBlock,
-    datasets: &LanceDatasets,
-    config: &GraphConfig,
+    client: &DuckDbClient,
+    ontology: &Arc<Ontology>,
+    ctx: &SecurityContext,
 ) -> Vec<Failure> {
-    let query = match CypherQuery::new(&block.query) {
-        Ok(q) => q.with_config(config.clone()),
-        Err(e) => return vec![fail(label, severity, format!("Cypher parse error: {e}"))],
-    };
-
-    let batch = match query.execute(datasets.clone(), None).await {
+    let batch = match execute_cypher(&block.query, client, ontology, ctx) {
         Ok(b) => b,
         Err(e) => return vec![fail(label, severity, format!("Query execution error: {e}"))],
     };
@@ -200,50 +217,14 @@ fn apply_filter(batch: &RecordBatch, where_clause: &HashMap<String, String>) -> 
         })
         .collect();
 
-    let schema = batch.schema();
+    let indices =
+        arrow::array::UInt32Array::from(matching.iter().map(|&i| i as u32).collect::<Vec<_>>());
     let columns: Vec<Arc<dyn Array>> = (0..batch.num_columns())
-        .map(|col_idx| {
-            let col = batch.column(col_idx);
-            if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
-                let mut b = StringBuilder::new();
-                for &row in &matching {
-                    if arr.is_null(row) {
-                        b.append_null();
-                    } else {
-                        b.append_value(arr.value(row));
-                    }
-                }
-                Arc::new(b.finish()) as Arc<dyn Array>
-            } else if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
-                let mut b = Int64Builder::new();
-                for &row in &matching {
-                    if arr.is_null(row) {
-                        b.append_null();
-                    } else {
-                        b.append_value(arr.value(row));
-                    }
-                }
-                Arc::new(b.finish()) as Arc<dyn Array>
-            } else if let Some(arr) = col.as_any().downcast_ref::<BooleanArray>() {
-                let mut b = BooleanBuilder::new();
-                for &row in &matching {
-                    if arr.is_null(row) {
-                        b.append_null();
-                    } else {
-                        b.append_value(arr.value(row));
-                    }
-                }
-                Arc::new(b.finish()) as Arc<dyn Array>
-            } else {
-                panic!(
-                    "where filter: unsupported column type {:?}",
-                    col.data_type()
-                );
-            }
-        })
+        .map(|col_idx| arrow::compute::take(batch.column(col_idx), &indices, None).unwrap())
         .collect();
 
-    RecordBatch::try_new(schema, columns).unwrap_or_else(|e| panic!("where filter failed: {e}"))
+    RecordBatch::try_new(batch.schema(), columns)
+        .unwrap_or_else(|e| panic!("where filter failed: {e}"))
 }
 
 fn check_assertions(

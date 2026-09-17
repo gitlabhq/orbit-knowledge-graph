@@ -1,71 +1,17 @@
-use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::atomic::AtomicUsize;
-
-use arrow_56::compute::concat_batches;
-use std::sync::Arc;
-
-use code_graph::v2::dispatch_by_tag;
-use code_graph::v2::linker::graph::RowContext;
-use code_graph::v2::trace::Tracer;
-use code_graph::v2::{
-    BatchTx, Decision, FileInventory, FileInventoryEntry, GraphConverter, GraphStatsCounters,
-    OnBatch, Pipeline, PipelineConfig, PipelineContext,
-};
+use std::sync::{Arc, Mutex};
 
 use super::assertions::{Severity, TestSuite};
-use super::config::make_graph_config;
-use super::datasets::{LanceDatasets, to_lance_datasets};
+use super::config;
+use super::datasets::{create_test_db, on_batch_for};
 use super::validator::run_suite;
-
-/// Arrow IPC format is stable across versions — serialize with arrow 58,
-/// deserialize with arrow 56. Zero semantic loss.
-fn arrow58_to_arrow56(
-    batch: &arrow::record_batch::RecordBatch,
-) -> arrow_56::record_batch::RecordBatch {
-    use arrow::ipc::writer::StreamWriter;
-    use arrow_56::ipc::reader::StreamReader;
-
-    let mut buf = Vec::new();
-    {
-        let mut writer = StreamWriter::try_new(&mut buf, &batch.schema()).unwrap();
-        writer.write(batch).unwrap();
-        writer.finish().unwrap();
-    }
-    let reader = StreamReader::try_new(std::io::Cursor::new(buf), None).unwrap();
-    reader.into_iter().next().unwrap().unwrap()
-}
-
-/// Stores datasets in a side channel — returns nothing to the sink.
-struct LanceConverter {
-    datasets: std::sync::Mutex<LanceDatasets>,
-}
-
-impl LanceConverter {
-    fn new() -> Self {
-        Self {
-            datasets: std::sync::Mutex::new(HashMap::new()),
-        }
-    }
-
-    fn take(&self) -> LanceDatasets {
-        std::mem::take(&mut *self.datasets.lock().unwrap())
-    }
-}
-
-impl GraphConverter for LanceConverter {
-    fn convert(
-        &self,
-        graph: code_graph::v2::linker::CodeGraph,
-    ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, code_graph::v2::SinkError> {
-        let row_ctx = RowContext::empty();
-        let ds = to_lance_datasets(&graph, &row_ctx)
-            .map_err(|e| code_graph::v2::SinkError(format!("Lance conversion: {e}")))?;
-        let mut datasets = self.datasets.lock().unwrap();
-        extend_datasets(&mut datasets, ds);
-        Ok(Vec::new())
-    }
-}
+use code_graph::v2::dispatch_by_tag;
+use code_graph::v2::trace::Tracer;
+use code_graph::v2::{
+    BatchTx, Decision, FileInventory, FileInventoryEntry, GraphStatsCounters, OnBatch, Pipeline,
+    PipelineConfig, PipelineContext,
+};
 
 fn workspace_root() -> std::path::PathBuf {
     let output = std::process::Command::new("cargo")
@@ -106,19 +52,6 @@ fn copy_dir_recursive(
     }
 }
 
-fn extend_datasets(into: &mut LanceDatasets, incoming: LanceDatasets) {
-    for (table, batch) in incoming {
-        if let Some(existing) = into.get_mut(&table) {
-            let merged = concat_batches(&existing.schema(), &[existing.clone(), batch])
-                .unwrap_or_else(|error| panic!("Failed to merge {table} batches: {error}"));
-            *existing = merged;
-        } else {
-            into.insert(table, batch);
-        }
-    }
-}
-
-/// Panics on any error-severity failure.
 pub async fn run_yaml_suite(yaml: &str) {
     let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
 
@@ -141,7 +74,6 @@ pub async fn run_yaml_suite(yaml: &str) {
         copy_dir_recursive(&src, tmp.path(), &mut file_inventory);
     }
 
-    // Written after the fixture_dir copy so inline fixtures override same-path files.
     for fixture in &suite.fixtures {
         let path = tmp.path().join(&fixture.path);
         if let Some(parent) = path.parent() {
@@ -163,7 +95,6 @@ pub async fn run_yaml_suite(yaml: &str) {
     let trace_any = suite.trace || suite.tests.iter().any(|t| t.debug);
     let tracer = Tracer::new(trace_any);
 
-    // Single-thread rayon when tracing so trace output isn't interleaved
     let pool = if trace_any {
         Some(
             rayon::ThreadPoolBuilder::new()
@@ -175,16 +106,26 @@ pub async fn run_yaml_suite(yaml: &str) {
         None
     };
 
-    let (datasets, pipeline_ctx) = match suite.pipeline.as_deref() {
+    let client = Arc::new(Mutex::new(
+        create_test_db().expect("Failed to create test DuckDB"),
+    ));
+    let ontology = config::test_ontology();
+    let converter: Arc<dyn code_graph::v2::GraphConverter> =
+        Arc::new(duckdb_client::DuckDbConverter {
+            project_id: 1,
+            branch: "main".to_string(),
+            commit_sha: "test".to_string(),
+            ontology: ontology.clone(),
+        });
+
+    let pipeline_ctx = match suite.pipeline.as_deref() {
         None | Some("generic") => {
             let config = PipelineConfig::default();
-            let converter = Arc::new(LanceConverter::new());
-            let on_batch: Arc<OnBatch> =
-                Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
+            let on_batch = on_batch_for(&client);
             let inventory: Arc<FileInventory> =
                 Arc::new(FileInventory::new(file_inventory.clone()));
             let result = if let Some(pool) = &pool {
-                let c = converter.clone() as Arc<dyn GraphConverter>;
+                let c = converter.clone();
                 let ob = on_batch.clone();
                 let inventory = inventory.clone();
                 pool.install(move || {
@@ -196,7 +137,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                     inventory,
                     config,
                     tracer,
-                    converter.clone() as Arc<dyn GraphConverter>,
+                    converter.clone(),
                     on_batch,
                 )
             };
@@ -205,8 +146,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                 "Pipeline errors: {:?}",
                 result.errors
             );
-
-            (converter.take(), result.ctx.clone())
+            result.ctx.clone()
         }
         Some(tag) => {
             let files: Vec<String> = suite
@@ -218,12 +158,11 @@ pub async fn run_yaml_suite(yaml: &str) {
                 config: PipelineConfig::default(),
                 tracer,
                 root_path: root.clone(),
-                skipped: std::sync::Mutex::new(Vec::new()),
-                faults: std::sync::Mutex::new(Vec::new()),
-                file_timings: std::sync::Mutex::new(Vec::new()),
-                language_timings: std::sync::Mutex::new(Vec::new()),
+                skipped: Mutex::new(Vec::new()),
+                faults: Mutex::new(Vec::new()),
+                file_timings: Mutex::new(Vec::new()),
+                language_timings: Mutex::new(Vec::new()),
             });
-            let converter = LanceConverter::new();
             let (tx, rx) = crossbeam_channel::unbounded();
             let on_batch = {
                 let tx = tx.clone();
@@ -238,11 +177,11 @@ pub async fn run_yaml_suite(yaml: &str) {
             let imps = AtomicUsize::new(0);
             let edgs = AtomicUsize::new(0);
             {
-                let errors = std::sync::Mutex::new(Vec::new());
+                let errors = Mutex::new(Vec::new());
                 let on_batch_ref: &OnBatch = &on_batch;
                 let btx = BatchTx::new(
                     on_batch_ref,
-                    &converter,
+                    converter.as_ref(),
                     &errors,
                     GraphStatsCounters::new(&dirs, &files_count, &defs, &imps, &edgs),
                 );
@@ -251,22 +190,25 @@ pub async fn run_yaml_suite(yaml: &str) {
                     .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
             }
             drop(tx);
-            let mut datasets = converter.take();
+            let db = client.lock().unwrap();
             for (table, batch) in rx.try_iter() {
-                extend_datasets(
-                    &mut datasets,
-                    HashMap::from([(table, arrow58_to_arrow56(&batch))]),
-                );
+                if batch.num_rows() > 0 {
+                    db.insert_batch(&table, &batch)
+                        .unwrap_or_else(|e| panic!("insert into {table}: {e}"));
+                }
             }
-            (datasets, ctx)
+            drop(db);
+            ctx
         }
     };
 
     pipeline_ctx.tracer.dump(&suite.name);
 
-    let config = make_graph_config().expect("Failed to build graph config");
+    let security_ctx = config::test_security_ctx();
+    let db = client.lock().unwrap();
+    let failures = run_suite(&suite, &db, &ontology, &security_ctx);
+    drop(db);
 
-    let failures = run_suite(&suite, &datasets, &config).await;
     if failures.is_empty() {
         eprintln!("[PASS] Suite: {} ({} tests)", suite.name, suite.tests.len());
         return;

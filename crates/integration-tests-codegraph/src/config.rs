@@ -1,19 +1,17 @@
-use lance_graph::GraphConfig;
+use std::sync::Arc;
 
-pub(crate) fn make_graph_config() -> anyhow::Result<GraphConfig> {
-    Ok(GraphConfig::builder()
-        .with_node_label("Directory", "id")
-        .with_node_label("File", "id")
-        .with_node_label("Definition", "id")
-        .with_node_label("ImportedSymbol", "id")
-        .with_relationship("DirectoryToDirectory", "source_id", "target_id")
-        .with_relationship("DirectoryToFile", "source_id", "target_id")
-        .with_relationship("FileToDefinition", "source_id", "target_id")
-        .with_relationship("FileToImportedSymbol", "source_id", "target_id")
-        .with_relationship("DefinitionToDefinition", "source_id", "target_id")
-        .with_relationship("DefinitionToImportedSymbol", "source_id", "target_id")
-        .with_relationship("ImportedSymbolToImportedSymbol", "source_id", "target_id")
-        .with_relationship("ImportedSymbolToDefinition", "source_id", "target_id")
-        .with_relationship("ImportedSymbolToFile", "source_id", "target_id")
-        .build()?)
+use ontology::Ontology;
+
+const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+
+pub(crate) fn local_ddl() -> &'static str {
+    LOCAL_DDL
+}
+
+pub(crate) fn test_ontology() -> Arc<Ontology> {
+    Arc::new(Ontology::load_embedded().expect("embedded ontology"))
+}
+
+pub(crate) fn test_security_ctx() -> compiler::SecurityContext {
+    compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap()
 }
