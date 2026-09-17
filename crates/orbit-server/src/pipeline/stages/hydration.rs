@@ -90,9 +90,13 @@ impl HydrationStage {
             })?;
 
         let rendered_sql = compiled.base.render();
-        let debug = DebugQuery {
-            sql: compiled.base.sql.clone(),
-            rendered: rendered_sql.clone(),
+        let debug = if ctx.compiled()?.input.options.include_debug_sql {
+            vec![DebugQuery {
+                sql: compiled.base.sql.clone(),
+                rendered: rendered_sql.clone(),
+            }]
+        } else {
+            Vec::new()
         };
 
         let start = Instant::now();
@@ -135,7 +139,7 @@ impl HydrationStage {
         };
 
         let props = hydration_helpers::parse_hydration_batches(&batches, &ctx.ontology)?;
-        Ok((props, vec![debug], vec![execution]))
+        Ok((props, debug, vec![execution]))
     }
 }
 
