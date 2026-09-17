@@ -1,17 +1,46 @@
 use std::fmt::Write;
+use std::path::Path;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
-use super::assertions::{Severity, TestSuite};
-use super::config;
-use super::datasets::{create_test_db, on_batch_for};
-use super::validator::run_suite;
+use anyhow::Context;
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
     BatchTx, Decision, FileInventory, FileInventoryEntry, GraphStatsCounters, OnBatch, Pipeline,
     PipelineConfig, PipelineContext,
 };
+use duckdb_client::DuckDbClient;
+
+use super::assertions::{Severity, TestSuite};
+use super::validator::run_suite;
+
+const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+
+fn create_test_db() -> anyhow::Result<DuckDbClient> {
+    let client =
+        DuckDbClient::open(Path::new(":memory:")).context("failed to open in-memory DuckDB")?;
+    client
+        .initialize_schema(LOCAL_DDL)
+        .context("failed to initialize local DDL")?;
+    Ok(client)
+}
+
+fn on_batch_for(client: &Arc<Mutex<DuckDbClient>>) -> Arc<OnBatch> {
+    let client = Arc::clone(client);
+    Arc::new(
+        move |table: &str, batch: arrow::record_batch::RecordBatch| {
+            if batch.num_rows() == 0 {
+                return Ok(());
+            }
+            client
+                .lock()
+                .unwrap()
+                .insert_batch(table, &batch)
+                .map_err(|e| code_graph::v2::SinkError(format!("DuckDB write to {table}: {e}")))
+        },
+    )
+}
 
 fn workspace_root() -> std::path::PathBuf {
     let output = std::process::Command::new("cargo")
@@ -109,7 +138,8 @@ pub async fn run_yaml_suite(yaml: &str) {
     let client = Arc::new(Mutex::new(
         create_test_db().expect("Failed to create test DuckDB"),
     ));
-    let ontology = config::test_ontology();
+    let ontology =
+        std::sync::Arc::new(ontology::Ontology::load_embedded().expect("embedded ontology"));
     let converter: Arc<dyn code_graph::v2::GraphConverter> =
         Arc::new(duckdb_client::DuckDbConverter {
             project_id: 1,
@@ -204,7 +234,7 @@ pub async fn run_yaml_suite(yaml: &str) {
 
     pipeline_ctx.tracer.dump(&suite.name);
 
-    let security_ctx = config::test_security_ctx();
+    let security_ctx = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
     let db = client.lock().unwrap();
     let failures = run_suite(&suite, &db, &ontology, &security_ctx);
     drop(db);
