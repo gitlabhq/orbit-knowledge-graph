@@ -28,8 +28,10 @@ flag. Read it before you guess a flag.
 ## Invocation
 
 The binary is `orbit`. This skill writes commands as `orbit <subcommand>`.
-Through glab, prefix with `glab orbit`. Add `--yes` in non-interactive shells
-to skip the download and run prompts:
+Through glab, prefix with `glab orbit`. Run `orbit skills` to list available
+skills, `orbit skills orbit [path]` to name this tree explicitly, or
+`orbit skills references/local/sql.md` to use the default-tree shorthand. Add
+`--yes` in non-interactive shells to skip the download and run prompts:
 
 ```shell
 orbit index .                  # bundled binary

@@ -365,9 +365,18 @@ enum Commands {
     Mcp(McpArgs),
     #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
-    #[command(about = descriptions::short("skill"), long_about = descriptions::long("skill"))]
-    Skill {
-        /// Skill file to print, relative to the skill root (default: SKILL.md).
+    #[command(
+        name = "skills",
+        alias = "skill",
+        about = descriptions::short("skills"),
+        long_about = descriptions::long("skills")
+    )]
+    Skills {
+        /// Skill name or a path in the default orbit skill.
+        #[arg(value_name = "NAME_OR_PATH")]
+        name_or_path: Option<String>,
+
+        /// File to print from the named skill.
         #[arg(value_name = "PATH")]
         path: Option<String>,
     },
@@ -629,7 +638,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
             ConfigCommands::List => commands::config::list(),
         },
-        Commands::Skill { path } => skill::run(path),
+        Commands::Skills { name_or_path, path } => skill::run(name_or_path, path),
         Commands::Setup {
             assistants,
             remove,

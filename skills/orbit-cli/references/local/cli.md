@@ -53,5 +53,6 @@ glab config set orbit_local_binary_path /path/to/custom/orbit
 
 ## Binary help
 
-The skill content is embedded in the binary, so `orbit skill` serves a copy that
-matches the installed version.
+The skill content is embedded in the binary, so `orbit skills` lists available
+skills and `orbit skills orbit [path]` serves content that matches the installed
+version. A path as the first positional defaults to the `orbit` tree.

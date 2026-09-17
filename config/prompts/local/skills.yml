@@ -1,0 +1,10 @@
+name: skills
+version: 1.2.0
+short: List available skills or print bundled skill content
+description: >-
+  List available skills or print bundled skill content.
+
+
+  With no argument, lists each available skill and its description. Pass `orbit` and an
+  optional relative path to print bundled content, or pass a path such as
+  `references/local/sql.md` as shorthand for the orbit skill.

@@ -1,9 +1,0 @@
-name: skill
-version: 1.2.0
-short: Print the bundled orbit-cli skill content (SKILL.md or a file path)
-description: >-
-  Print the bundled orbit-cli skill content (SKILL.md or a file path)
-
-
-  With no argument, prints SKILL.md, the top-level manifest. Pass a relative path such as
-  `references/local/sql.md` or `references/local/repo_map.md` to print that file.

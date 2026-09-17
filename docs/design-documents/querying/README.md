@@ -38,7 +38,7 @@ Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents 
 
 ### Agent Skill Source Trees
 
-Orbit maintains two independently usable agent skill trees. `skills/orbit/` documents Orbit Remote, while `skills/orbit-cli/` documents the local capabilities embedded in the `orbit` binary. Local reference files use the `references/local/` namespace so the two trees can form a collision-free path union without changing today's embedded-only `orbit skill [path]` behavior.
+Orbit maintains two independently usable agent skill trees. `skills/orbit/` documents Orbit Remote, while `skills/orbit-cli/` documents the local capabilities embedded in the `orbit` binary. Local reference files use the `references/local/` namespace so the two trees can form a collision-free path union. The embedded-only `orbit skills [name] [path]` command lists skill names and frontmatter descriptions with no arguments, accepts `orbit` as the explicit name, and treats a first positional containing `/` or `.` as a path in the default `orbit` tree. The singular `skill` spelling is a hidden compatibility alias.
 
 The remote manifest declares local splice slots and the local manifest declares exported sections through paired line-oriented HTML markers. Both consumer build scripts call the shared `orbit-skill` validator, which requires a marker-ID bijection and disjoint paths, resolves relative Markdown links against the composed union, and checks documented remote command literals against the clap command inventory. General Markdown checks remain responsible for prose, external URLs, and fragments.
 
