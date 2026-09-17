@@ -1,3 +1,23 @@
+## [0.125.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.124.0...v0.125.0) (2026-09-17)
+
+### Features
+
+* **server:** link the AWS-LC FIPS module in every server build ([4813644](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/48136445b04587126551abf67d9c9222cfea4597)) by Bohdan Parkhomchuk
+
+### Performance
+
+* **compiler:** skip hydration for columns the base query projects ([ca99728](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ca9972809116fb9d4ceec015aaa070509b09d929)) by Michael Angelo Rivera
+
+### Other
+
+* **deps:** bump labkit-rs to v0.4.0 ([41fe1cc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/41fe1cc3f4253f34aaee2eadc6f5fed4f94239ac)) by michaelangeloio
+* **dx:** bump rust to 1.98.1 ([30b2e81](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/30b2e818d29b2ad97a551479cd6b7c00f5e74307)) by Michael Angelo Rivera
+* **dx:** complete vendored dependency migration with JSON Schema validation ([3960583](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/39605835c2172dbbf3f0321781b85cffcbaedad1)) by Michael Usachenko
+* **skill:** shorten the orbit-cli agent guide and match the current CLI ([5cdad92](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5cdad92e65f473b5c927f83fa24a9b374fb889d7)) by Michael Angelo Rivera
+* split slow integration tests into parallel lane ([37f2e07](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/37f2e07e4b552ca598a7278d22c0aad521171b22)) by Dmitry Gruzd
+* **testkit:** type the scenario hydration expectation as an enum ([54b969c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/54b969c159b70611bf3805b998fa2718062256ce)) by Michael Angelo Rivera
+* **utils:** multi-pass file classification with FileInventory and FileLabel ([d6e007e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d6e007e7c350e0eb78e9b402aed24bdfef5d20f2)) by Michael Usachenko
+
 ## [0.124.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.123.0...v0.124.0) (2026-09-16)
 
 ### Features
