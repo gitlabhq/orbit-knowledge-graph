@@ -49,6 +49,8 @@ orbit grep "delve"
 | tool | robust |
 |---|---|
 
+> Quoted people may delve as they please.
+
 <!--
 Keep this short. It's worth noting that seamless prose is not just nice, but essential.
 -->
@@ -122,10 +124,11 @@ class MarkdownUnits(unittest.TestCase):
         self.assertIn("Cite file and line.", texts)
         self.assertIn("Never truncate Orbit output, even when it is long.", texts)
 
-    def test_skips_fences_tables_and_headings(self):
+    def test_skips_fences_tables_headings_and_blockquotes(self):
         words = {w for s in self.body.sentences for w in s.words}
         self.assertNotIn("delve", words)
         self.assertNotIn("robust", words)
+        self.assertNotIn("delve", words)
         self.assertNotIn("Orbit", {s.text for s in self.body.sentences})
 
     def test_aligned_columns_split_into_short_sentences(self):

@@ -27,8 +27,9 @@ Scope (the `SCOPE` tuple in `prose_lint.py`): `config/prompts/**/*.yml`,
 because CI already enforces that it equals `AGENTS.md`. Public docs under
 `docs/source/` stay with Vale.
 
-Before scoring, fenced code, tables, headings, link targets, template
-placeholders, and column-aligned label lines are dropped. Inline code counts as
+Before scoring, fenced code, tables, headings, blockquotes (quoted people keep
+their own words), link targets, template placeholders, and column-aligned label
+lines are dropped. Inline code counts as
 one word. HTML comment markers are removed but the comment text is scored,
 because template guidance is written for agents. In yaml, every string scalar
 is scored except `name`, `version`, `variables`, `license`, `metadata`,
