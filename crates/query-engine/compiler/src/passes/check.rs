@@ -171,8 +171,6 @@ fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> 
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
     use crate::ast::{SelectExpr, TableRef};
     fn project_query(where_clause: Option<Expr>) -> Node {
@@ -193,13 +191,7 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(
-            &mut node,
-            &ctx,
-            &ontology,
-            &HashMap::new(),
-        )
-        .unwrap();
+        crate::passes::security::apply_security_context(&mut node, &ctx, &ontology).unwrap();
         assert!(check_ast(&node, &ctx, &ontology).is_ok());
     }
 
@@ -236,13 +228,7 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(
-            &mut node,
-            &ctx,
-            &ontology,
-            &HashMap::new(),
-        )
-        .unwrap();
+        crate::passes::security::apply_security_context(&mut node, &ctx, &ontology).unwrap();
         assert!(check_ast(&node, &ctx, &ontology).is_ok());
     }
 
@@ -423,7 +409,6 @@ mod tests {
             &mut Node::Query(Box::new(inner.clone())),
             &ctx,
             &ontology::Ontology::new(),
-            &HashMap::new(),
         )
         .unwrap();
         let filter = Expr::func(
@@ -567,13 +552,7 @@ mod tests {
             ..Default::default()
         }));
         let ontology = ontology::Ontology::new();
-        crate::passes::security::apply_security_context(
-            &mut node,
-            &ctx,
-            &ontology,
-            &HashMap::new(),
-        )
-        .unwrap();
+        crate::passes::security::apply_security_context(&mut node, &ctx, &ontology).unwrap();
         assert!(check_ast(&node, &ctx, &ontology).is_ok());
     }
 
