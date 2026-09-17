@@ -187,7 +187,7 @@ FROM {table} WHERE {project_id} = ?1 AND {commit_sha} = ?2",
         id = node.column("id")?,
         fqn = node.column("fqn")?,
         file_path = node.column("file_path")?,
-        table = &node.table,
+        table = node.table,
         project_id = node.column("project_id")?,
     ))
 }
@@ -434,7 +434,7 @@ impl GrepSource for DuckDbSearch {
                 id = self.node.column("id")?,
                 fqn = self.node.column("fqn")?,
                 file_path = self.node.column("file_path")?,
-                table = &self.node.table,
+                table = self.node.table,
                 project_id = self.node.column("project_id")?,
                 pid = self.pid,
                 commit_sha = self.node.column("commit_sha")?,
@@ -552,7 +552,7 @@ WHERE d.{project_id} = {pid} AND d.{commit_sha} = {sha}
   AND NOT regexp_matches(d.{name}, '^[0-9]+$')
   AND d.{fqn} NOT LIKE '%@%'
 {exclude}{paths}",
-        table = &node.table,
+        table = node.table,
         project_id = node.column("project_id")?,
         commit_sha = node.column("commit_sha")?,
         name = node.column("name")?,
