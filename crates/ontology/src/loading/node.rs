@@ -207,8 +207,6 @@ struct PropertyYaml {
 #[derive(Debug, Deserialize)]
 struct TraversalPathLookupYaml {
     kind: TraversalPathKind,
-    #[serde(default)]
-    dictionary: Option<String>,
     source_table: String,
     key_column: String,
 }
@@ -386,7 +384,6 @@ impl NodeYaml {
                     traversal_path_lookup: prop_def.traversal_path_lookup.map(|l| {
                         TraversalPathLookupSpec {
                             kind: l.kind,
-                            dictionary: l.dictionary,
                             source_table: l.source_table,
                             key_column: l.key_column,
                         }

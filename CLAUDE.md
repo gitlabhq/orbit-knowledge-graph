@@ -47,6 +47,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
 - Named query YAML validated against JSON schema (`named-query-schema-validate`); each query is also compiled against the ontology by `orbit-server`'s build script, so drift fails every build
+- Versions YAML validated against JSON schema (`versions-schema-validate`); enforces key patterns, hex lengths, path restrictions, and vendored dependency structure
 - Assistant setup specs and mode texts in `config/setup/` validated against JSON schema (`setup-schema-validate`)
 - Migration ledger validated and scope-checked (`migration-ledger-schema-validate`, `migration-ledger-check`, plus `orbit-server` build-time drift checks); full ledger rules in `docs/design-documents/schema_management.md`
 - `cargo fmt` (`fmt-check`)
@@ -57,7 +58,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Unit tests via nextest (`unit-test`)
 - Compiler integration tests: query compilation, ontology validation, pipeline infra (`compiler-integration-test`)
 - CLI integration tests: concurrency, worktrees, content resolution (`cli-integration-test`)
-- Integration tests with Docker testcontainers (`integration-test`); data correctness tests are YAML-driven scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` (format reference in `crates/integration-testkit/README.md`)
+- Integration tests with Docker testcontainers (`integration-test`, `integration-test-data-correctness`); data correctness tests are YAML-driven scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` (format reference in `crates/integration-testkit/README.md`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - `rust-toolchain.toml` must match `mise.toml` (`rust-toolchain-sync-check`; regenerate with `mise toolchain:generate`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check_docs_markdown`)
@@ -66,8 +67,8 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Prompt version bumped when files under `config/prompts/` change (`prompt-version-bump-check`)
 - Metrics catalog regenerated in sync with `orbit-observability` source (`metrics-catalog-check`)
 - Query-language text-indexed properties table regenerated in sync with the ontology (`query-language-docs-check`)
-- Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
-- Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`)
+- Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`; pins in `vendored.iglu.pins`, regenerate with `mise vendor -- iglu`)
+- Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`; pin in `vendored.gitlab_system_note_actions.version`)
 - The vendored DuckDB FTS source archive matches its pinned upstream revisions (`duckdb-fts-sources-sync-check`; regenerate with `mise vendor -- duckdb`)
 - Every `[workspace]` member has a row in `docs/dev/agents-crate-map.md`, and no stale rows remain (`crates/xtask/build.rs`, so any workspace build/clippy fails on drift)
 
@@ -91,7 +92,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
   - If a comment would survive deleting it without losing *why* information, delete it. The `/remove-llm-comments` skill drives that final pass; it is a backstop for what slipped through, not a license to narrate first.
 - **Reuse existing infrastructure before writing new code.** Before scaffolding a new handler, pipeline, or module, do an explicit "what does the codebase already give me?" pass (cursor/checkpoint, Arrow helpers, ontology-derived specs, SQL filtering, concurrency). Reinventing infra the codebase already provides is the most common class of preventable review feedback. For the indexer, see the checklist in **`crates/indexer/AGENTS.md`**. For code-graph, prefer reusing existing types and constructors in the language module (e.g. `CanonicalDefinition` in `src/v2/types/`, the DSL engine helpers in `src/v2/dsl/`) rather than duplicating construction logic per language.
 - **No `#[allow(dead_code)]` in shipped code.** Production (non-test) modules must not ship dead-code allows to silence scaffold warnings. If a symbol is test-only, gate it with `#[cfg(test)]`; if it is genuinely unused, delete it. Reserve exceptions for an explicit, justified case: use `#[allow(dead_code, reason = "…")]` (ideally linking an issue) or, preferably, `#[expect(dead_code, reason = "…")]`, which fails once the code is used and self-cleans. The `indexer` and `code-graph` crates enforce this mechanically via `clippy::allow_attributes_without_reason = "deny"`.
-- **Prefer build-time validation over CI-only checks** for correctness that can be checked without network or repo context. A `build.rs` that `panic!`s on drift fails locally and in CI even when CI egress is down, and can't be skipped by editing a script. Prior art: `crates/orbit-analytics/build.rs` validates committed Iglu schemas under `config/schemas/iglu/` at build time (asserts each schema's `self` block matches its path/version and runs codegen). Consider this pattern for any vendored-constant or generated-file drift check (e.g. the DDL-freshness check in `scripts/check-ddl-freshness.sh` is a future candidate). Checks that need Git diff context or live network (`scripts/iglu/check.sh`'s upstream-CDN half) stay in CI.
+- **Prefer build-time validation over CI-only checks** for correctness that can be checked without network or repo context. A `build.rs` that `panic!`s on drift fails locally and in CI even when CI egress is down, and can't be skipped by editing a script. Prior art: `crates/orbit-analytics/build.rs` validates committed Iglu schemas under `config/schemas/iglu/` at build time (reads version pins from `vendored.iglu.pins` in `versions.yaml`, asserts each schema's `self` block matches, and runs codegen). Consider this pattern for any vendored-constant or generated-file drift check (e.g. the DDL-freshness check in `scripts/check-ddl-freshness.sh` is a future candidate). Checks that need Git diff context or live network (`scripts/vendored/iglu/check.sh`'s upstream-CDN half) stay in CI.
 - Prefer `ast-grep` over text-based Grep/Edit for structural code transformations (batch renames, pattern-based rewrites).
 - Fence executable Orbit query JSON in docs and skills as `json orbit-query`; keep shell commands in separate shell fences so docs smoke tests run the query.
 - Check crates.io for latest version before adding dependencies.

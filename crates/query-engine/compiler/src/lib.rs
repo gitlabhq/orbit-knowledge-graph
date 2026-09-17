@@ -71,11 +71,11 @@ pub use passes::codegen::{
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::frontend::{Frontend, gql};
 pub use passes::hydrate::{
-    DynamicEntityColumns, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
+    DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
+pub use scope::ScopePrefix;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
@@ -119,10 +119,6 @@ pub fn compile(
 }
 
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].
-///
-/// Lets the querying pipeline's path-resolution stage read normalized scope
-/// keys before the full pipeline runs, then resolve and attach the tight
-/// traversal_path prefix as [`SecurityContext`] scope metadata.
 pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input> {
     let mut ctx = config::ValidateNormalizeCtx::new(Arc::new(ontology.clone()));
     ctx.set_raw(json_input.to_string());
@@ -619,7 +615,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            !sql.contains("argMax"),
+            !sql.contains("argMax("),
             "single-hop edge scan must not dedup, got:\n{sql}"
         );
     }
@@ -1840,11 +1836,7 @@ mod tests {
         let query = format!(
             r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":["{group}"],"aggregations":[{{"count":"{agg}","as":"c"}}],"limit":20}}"#
         );
-        let ctx = SecurityContext::new(1, vec!["1/".into()])
-            .unwrap()
-            .with_scope_prefixes(
-                [("g".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
-            );
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
             .unwrap()
             .base
@@ -1864,7 +1856,7 @@ mod tests {
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
                 "p",
                 "f",
-                "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group",
+                "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group AS g",
             ),
             (
                 r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
@@ -1892,7 +1884,7 @@ mod tests {
             "nodes": [
                 {"id": "n", "entity": "Note"},
                 {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}}
+                {"id": "g", "entity": "Group", "filters": {"name": "gitlab-org"}}
             ],
             "relationships": [
                 {"type": "IN_PROJECT", "from": "n", "to": "p"},

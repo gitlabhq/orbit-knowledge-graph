@@ -36,8 +36,7 @@ start
 :Assert versions.yaml is still valid YAML;
 
 |cargo build|
-:Embed **versions.yaml** at compile time\n(orbit_versions::VERSIONS);
-:Run **Versions::validate()**\nHex format, path sanity, structural checks;
+:Embed **versions.yaml** at compile time\n(orbit_versions::VERSIONS, deny_unknown_fields);
 :Run **build.rs**;
 
 |build.rs|
@@ -77,15 +76,16 @@ Each entry under `vendored:` follows this contract:
 | `vendor_script` | No | Script that regenerates artifacts. Must comply with the vendor contract. |
 | `check_script` | No | Script that validates artifacts match pins. Must comply with the check contract. |
 | `extensions` | No | Named sub-dependencies with optional `source_revision`, `source_archive_sha256`, and `binaries` (platform to SHA-256 map). |
+| `pins` | No | Flat key-value sub-pins (e.g. Iglu schema name to version). |
 
-Example (current DuckDB entry):
+Examples:
 
 ```yaml
 vendored:
   duckdb:
     version: v1.5.5
     vendor_dir: crates/duckdb-client/third_party
-    vendor_script: scripts/vendored/duckdb/vendor-duckdb-fts-sources.sh
+    vendor_script: scripts/vendored/duckdb/fts-vendor.sh
     check_script: scripts/vendored/duckdb/check-duckdb-fts-sources-sync.sh
     extensions:
       fts:
@@ -93,7 +93,19 @@ vendored:
         source_archive_sha256: 2aad18...
         binaries:
           linux_amd64: 90d6f049...
-          osx_arm64: b6b8d0a1...
+
+  gitlab_system_note_actions:
+    version: ea52f8c3adc...
+    vendor_dir: config/vendored
+    check_script: scripts/vendored/gitlab_system_note_actions/check.sh
+
+  iglu:
+    vendor_dir: config/schemas/iglu
+    vendor_script: scripts/vendored/iglu/bump.sh
+    check_script: scripts/vendored/iglu/check.sh
+    pins:
+      orbit_query: 2-2-0
+      orbit_common: 1-0-3
 ```
 
 ## Script contract
@@ -126,15 +138,18 @@ invokes the script with standardized environment variables.
 
 ## Validation layers
 
-1. **Compile time.** `orbit_versions::Versions` deserializes with
-   `deny_unknown_fields`. `Versions::validate()` checks hex format, path
-   sanity, and structural invariants.
-2. **Build time.** `crates/duckdb-client/build.rs` asserts Cargo.lock matches
+1. **Schema validation.** `config/schemas/versions.schema.json` enforces key
+   patterns, hex lengths, path restrictions, script prefix, and structural
+   constraints. Validated in CI (`versions-schema-validate`) and locally
+   (`mise versions:validate`).
+2. **Compile time.** `orbit_versions::Versions` deserializes with
+   `deny_unknown_fields`, catching structural drift.
+3. **Build time.** `crates/duckdb-client/build.rs` asserts Cargo.lock matches
    the version pin, verifies archive checksums, and checks platform coverage.
-3. **Runner time.** `scripts/vendored/run.sh` validates preconditions (script
+4. **Runner time.** `scripts/vendored/run.sh` validates preconditions (script
    exists, YAML parses) and postconditions (vendor_dir non-empty, YAML still
    valid, check_script did not modify the file).
-4. **CI time.** The `duckdb-fts-sources-sync-check` job re-vendors the archive
+5. **CI time.** The `duckdb-fts-sources-sync-check` job re-vendors the archive
    from upstream and byte-compares it against the committed artifact.
 
 ## Operator workflows
@@ -158,6 +173,15 @@ invokes the script with standardized environment variables.
    extension with a source archive.
 3. For static linking, add a `compile_<name>` function in `build.rs` with the
    extension-specific C++ source list and build flags.
+
+### Bump an Iglu schema version
+
+1. Edit the pin under `vendored.iglu.pins` in `config/versions.yaml`
+   (e.g. change `orbit_query: 2-2-0` to `orbit_query: 2-3-0`).
+2. Run `mise vendor -- iglu`. The script fetches the schema JSON for every
+   pin from the upstream Iglu registry and writes it to `vendor_dir`.
+3. Run `cargo build` to verify (the `orbit-analytics` build script reads
+   the pins at compile time and validates the schema's `self` block).
 
 ### Add a new vendored dependency
 

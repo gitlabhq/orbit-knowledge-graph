@@ -4992,8 +4992,8 @@ dependencies = [
 
 [[package]]
 name = "gitalisk-core"
-version = "0.8.0"
-source = "git+https://gitlab.com/gitlab-org/rust/gitalisk.git?tag=v0.8.0#88dee485e389969716afc8d884218bf8c5b139c9"
+version = "0.8.1"
+source = "git+https://gitlab.com/gitlab-org/rust/gitalisk.git?tag=v0.8.1#9e483ad15ffad8541a325aedc8d8247a2ee9fd85"
 dependencies = [
  "dunce",
  "ignore",
@@ -6461,7 +6461,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=19b6b139a284a28a078267072cc751f6f2536837#19b6b139a284a28a078267072cc751f6f2536837"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?tag=v0.4.0#54940f413244a679f333bbf76fc79234cb0826e5"
 dependencies = [
  "axum",
  "futures-util",
@@ -6492,7 +6492,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=19b6b139a284a28a078267072cc751f6f2536837#19b6b139a284a28a078267072cc751f6f2536837"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?tag=v0.4.0#54940f413244a679f333bbf76fc79234cb0826e5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6510,7 +6510,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=19b6b139a284a28a078267072cc751f6f2536837#19b6b139a284a28a078267072cc751f6f2536837"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?tag=v0.4.0#54940f413244a679f333bbf76fc79234cb0826e5"
 
 [[package]]
 name = "lance"
@@ -8192,6 +8192,7 @@ version = "0.1.0"
 dependencies = [
  "labkit-events",
  "orbit-server-config",
+ "orbit-versions",
  "parking_lot",
  "prettyplease",
  "serde",
@@ -8356,7 +8357,6 @@ dependencies = [
  "labkit-events",
  "mimalloc",
  "minijinja",
- "moka",
  "named-queries",
  "nats-client",
  "ontology",

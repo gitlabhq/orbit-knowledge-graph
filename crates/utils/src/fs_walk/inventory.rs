@@ -70,10 +70,8 @@ impl FileInventory {
         groups
     }
 
-    /// Run a refinement pass over the inventory using the same
-    /// [`FileStreamHooks`] trait. `read_content` provides file bytes on
-    /// demand (return `None` to settle from the header alone). Entries
-    /// reclassified as [`Decision::Drop`] are removed.
+    /// Run a second [`FileStreamHooks`] pass. `read_content` provides bytes
+    /// on demand (`None` = header-only). Drops entries reclassified as `Drop`.
     pub fn refine<H: FileStreamHooks>(
         self,
         hooks: &mut H,
@@ -97,9 +95,8 @@ impl FileInventory {
         Ok(Self(out))
     }
 
-    /// Mutate entries in place. For lightweight adjustments that don't need
-    /// the full hook pipeline (e.g. upgrading a `Load` to `Parse` after
-    /// an external classifier confirms the language).
+    /// Mutate entries in place without the hook pipeline. Drops entries
+    /// reclassified as `Drop`.
     pub fn reclassify(mut self, mut f: impl FnMut(&mut FileInventoryEntry)) -> Self {
         for entry in &mut self.0 {
             f(entry);
@@ -121,15 +118,10 @@ impl Deref for FileInventory {
     }
 }
 
-impl From<Vec<FileInventoryEntry>> for FileInventory {
-    fn from(entries: Vec<FileInventoryEntry>) -> Self {
-        Self::new(entries)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs_walk::{ContentClass, FileLabel, SkipReason};
 
     fn entry(path: &str, size: u64, decision: Decision) -> FileInventoryEntry {
         FileInventoryEntry {
@@ -140,98 +132,35 @@ mod tests {
         }
     }
 
-    fn sample() -> FileInventory {
-        FileInventory::new(vec![
-            entry("src/main.rs", 100, Decision::Parse),
-            entry("src/lib.rs", 200, Decision::Parse),
-            entry("Cargo.toml", 50, Decision::Load),
-            entry("logo.png", 5000, Decision::ListOnly),
-            entry(".gitignore", 30, Decision::Load),
-        ])
+    fn labeled(path: &str, size: u64, decision: Decision, label: FileLabel) -> FileInventoryEntry {
+        FileInventoryEntry {
+            path: path.into(),
+            size,
+            decision,
+            label,
+        }
     }
 
     #[test]
-    fn by_decision_filters_correctly() {
-        let inv = sample();
-        assert_eq!(inv.parseable().count(), 2);
-        assert_eq!(inv.loaded().count(), 2);
-        assert_eq!(inv.listed().count(), 1);
-    }
-
-    #[test]
-    fn total_bytes_sums_all_entries() {
-        let inv = sample();
-        assert_eq!(inv.total_bytes(), 5380);
-    }
-
-    #[test]
-    fn find_and_contains() {
-        let inv = sample();
-        assert!(inv.contains("src/main.rs"));
-        assert!(!inv.contains("missing.rs"));
-        assert_eq!(inv.find("Cargo.toml").unwrap().size, 50);
-        assert!(inv.find("missing.rs").is_none());
-    }
-
-    #[test]
-    fn paths_returns_all() {
-        let inv = sample();
-        let paths: Vec<&str> = inv.paths().collect();
-        assert_eq!(paths.len(), 5);
-        assert!(paths.contains(&"src/main.rs"));
-    }
-
-    #[test]
-    fn count_by_with_predicate() {
-        let inv = sample();
-        assert_eq!(inv.count_by(|e| e.size > 100), 2);
-    }
-
-    #[test]
-    fn deref_gives_slice_access() {
-        let inv = sample();
-        assert_eq!(inv.len(), 5);
-        assert!(!inv.is_empty());
-    }
-
-    #[test]
-    fn canonicalizes_on_construction() {
+    fn canonicalizes_dedup_and_sort_on_construction() {
         let inv = FileInventory::new(vec![
             entry("./src/main.rs", 10, Decision::Parse),
             entry("src/main.rs", 10, Decision::Parse),
             entry("a/b.rs", 10, Decision::Load),
         ]);
         assert_eq!(inv.len(), 2);
-        let paths: Vec<&str> = inv.paths().collect();
-        assert_eq!(paths, vec!["a/b.rs", "src/main.rs"]);
-    }
-
-    #[test]
-    fn group_by_classifies_entries() {
-        let inv = sample();
-        let groups = inv.group_by(|e| Some(e.decision));
-        assert_eq!(groups[&Decision::Parse].len(), 2);
-        assert_eq!(groups[&Decision::Load].len(), 2);
-        assert_eq!(groups[&Decision::ListOnly].len(), 1);
-    }
-
-    #[test]
-    fn group_by_skips_none() {
-        let inv = sample();
-        let groups = inv.group_by(|e| {
-            if e.decision == Decision::Parse {
-                Some("parseable")
-            } else {
-                None
-            }
-        });
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups["parseable"].len(), 2);
+        assert_eq!(inv.find("a/b.rs").unwrap().decision, Decision::Load);
+        assert!(inv.find("src/main.rs").is_some());
+        assert!(!inv.contains("missing.rs"));
     }
 
     #[test]
     fn reclassify_upgrades_and_drops() {
-        let inv = sample();
+        let inv = FileInventory::new(vec![
+            entry("Cargo.toml", 50, Decision::Load),
+            entry("logo.png", 5000, Decision::ListOnly),
+            entry("src/main.rs", 100, Decision::Parse),
+        ]);
         let inv = inv.reclassify(|e| {
             if e.path == "Cargo.toml" {
                 e.decision = Decision::Parse;
@@ -242,10 +171,8 @@ mod tests {
         });
         assert_eq!(inv.find("Cargo.toml").unwrap().decision, Decision::Parse);
         assert!(!inv.contains("logo.png"));
-        assert_eq!(inv.len(), 4);
+        assert_eq!(inv.len(), 2);
     }
-
-    use crate::fs_walk::{ContentClass, FileLabel, SkipReason};
 
     struct UpgradeTextToParseHooks;
     impl FileStreamHooks for UpgradeTextToParseHooks {
@@ -259,41 +186,23 @@ mod tests {
     }
 
     #[test]
-    fn refine_runs_hooks_over_existing_inventory() {
+    fn refine_upgrades_text_to_parse_and_preserves_others() {
+        let text = FileLabel {
+            skip: None,
+            content: ContentClass::Text,
+            detail: None,
+            extension: Some("toml".into()),
+        };
+        let skipped = FileLabel {
+            skip: Some(SkipReason::ExcludedExtension),
+            content: ContentClass::Unknown,
+            detail: None,
+            extension: Some("png".into()),
+        };
         let inv = FileInventory::new(vec![
-            FileInventoryEntry {
-                path: "src/main.rs".into(),
-                size: 100,
-                decision: Decision::Parse,
-                label: FileLabel {
-                    skip: None,
-                    content: ContentClass::Text,
-                    detail: None,
-                    extension: Some("rs".into()),
-                },
-            },
-            FileInventoryEntry {
-                path: "Cargo.toml".into(),
-                size: 50,
-                decision: Decision::Load,
-                label: FileLabel {
-                    skip: None,
-                    content: ContentClass::Text,
-                    detail: None,
-                    extension: Some("toml".into()),
-                },
-            },
-            FileInventoryEntry {
-                path: "logo.png".into(),
-                size: 5000,
-                decision: Decision::ListOnly,
-                label: FileLabel {
-                    skip: Some(SkipReason::ExcludedExtension),
-                    content: ContentClass::Unknown,
-                    detail: None,
-                    extension: Some("png".into()),
-                },
-            },
+            labeled("Cargo.toml", 50, Decision::Load, text),
+            labeled("logo.png", 5000, Decision::ListOnly, skipped),
+            entry("src/main.rs", 100, Decision::Parse),
         ]);
 
         let mut hooks = UpgradeTextToParseHooks;

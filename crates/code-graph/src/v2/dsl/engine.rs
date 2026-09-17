@@ -668,7 +668,7 @@ impl LanguageSpec {
         state.ssa.seal_remaining();
         state.ssa.remove_redundant_phi_sccs();
 
-        let pending_refs: Vec<_> = state.pending_refs.drain(..).collect();
+        let pending_refs = std::mem::take(&mut state.pending_refs);
 
         for pending in &pending_refs {
             if !pending.is_return || pending.chain.is_some() {

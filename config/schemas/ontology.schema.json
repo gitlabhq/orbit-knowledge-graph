@@ -190,7 +190,7 @@
             },
             "traversal_path_lookup": {
               "$ref": "#/definitions/traversalPathLookup",
-              "description": "Marks this column as a scoping key the path resolver maps to a traversal_path leaf."
+              "description": "Marks this column as a scoping key the compiler resolves to a traversal_path prefix inside the query."
             }
           },
           "required": [
@@ -259,7 +259,7 @@
     },
     "traversalPathLookup": {
       "type": "object",
-      "description": "Path-resolution annotation for a scoping column: how to map an id/full_path filter to a traversal_path leaf.",
+      "description": "Scoping annotation for a column: how a compiled query looks up the traversal_path prefix for an id/full_path filter on this node.",
       "properties": {
         "kind": {
           "type": "string",
@@ -269,17 +269,13 @@
           ],
           "description": "Whether this column resolves by entity id or by full_path."
         },
-        "dictionary": {
-          "type": "string",
-          "description": "Auxiliary dictionary to probe (id kind). Absent for argMax-only resolution (full_path)."
-        },
         "source_table": {
           "type": "string",
           "description": "Unprefixed destination_table of the owning node."
         },
         "key_column": {
           "type": "string",
-          "description": "Column the dictionary or scan keys on."
+          "description": "Column the lookup keys on."
         }
       },
       "required": [

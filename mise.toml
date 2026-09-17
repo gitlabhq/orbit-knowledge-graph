@@ -20,7 +20,7 @@ GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=
 DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 
 [tools]
-"rust" = { version = "1.95.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/check-rust-toolchain.sh --write" }
+"rust" = { version = "1.98.1", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/check-rust-toolchain.sh --write" }
 "cargo:cargo-nextest" = "0.9.123"
 "cargo:cargo-edit" = "0.13.8"
 "cargo:cargo-audit" = "0.22.0"
@@ -362,11 +362,11 @@ description = "Start the local GKG health-check process"
 
 
 [tasks."iglu:bump"]
-run = "bash ./scripts/iglu/bump.sh"
-description = "Bump a pinned Iglu schema version (e.g. mise iglu:bump -- orbit_query 2-0-2)"
+run = "bash ./scripts/vendored/run.sh vendor iglu"
+description = "Fetch Iglu schemas for all pins (edit versions.yaml first, then run this)"
 
 [tasks."iglu:check"]
-run = "bash ./scripts/iglu/check.sh"
+run = "bash ./scripts/vendored/run.sh check iglu"
 description = "Verify pinned Iglu schemas exist locally and match live Iglu"
 
 [tasks."vendor"]
@@ -386,6 +386,10 @@ usage = 'arg "<name>"'
 [tasks."check:vendored:all"]
 run = "bash ./scripts/vendored/run.sh check --all"
 description = "Run check_script for every vendored dependency that has one"
+
+[tasks."versions:validate"]
+run = "uvx check-jsonschema --verbose --schemafile config/schemas/versions.schema.json config/versions.yaml"
+description = "Validate config/versions.yaml against JSON schema"
 
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"

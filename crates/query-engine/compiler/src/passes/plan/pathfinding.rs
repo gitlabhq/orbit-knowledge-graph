@@ -39,6 +39,7 @@ pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
     nodes.insert(end_alias.clone(), end_np);
 
     Ok(Plan {
+        scope_guards: Vec::new(),
         nodes,
         hops: vec![],
         strategy: Strategy::SingleNode,

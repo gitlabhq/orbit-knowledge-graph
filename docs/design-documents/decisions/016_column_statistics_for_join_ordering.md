@@ -192,14 +192,14 @@ programming is needed.
 The server query pipeline currently runs these stages in order:
 
 ```
-Security → PathResolution → Compilation → ClickHouse → Extraction →
+Security → Compilation → ClickHouse → Extraction →
 Authorization → Redaction → Hydration → Output
 ```
 
-Stats fetching runs **after PathResolution and before Compilation**. At that point
+Stats fetching runs **after Security and before Compilation**. At that point
 the server has:
 
-- The user's resolved traversal paths (from PathResolution)
+- The user's authorized traversal paths (from Security)
 - The parsed query input with node entities and filters (from Security/validation)
 - The ontology (loaded at startup)
 
