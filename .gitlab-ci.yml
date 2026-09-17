@@ -728,6 +728,7 @@ cli-integration-test:
 integration-test:
   extends: .integration-test-template
   variables:
+    # nextest ignores folded whitespace; dedicated jobs own both exclusions so all three lanes run concurrently.
     NEXTEST_FILTER: >-
       not test(corpus_smoke) & not (
         test(=indexer::sdlc::scenario_indexing) |
