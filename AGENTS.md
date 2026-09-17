@@ -17,6 +17,8 @@ Use mise for all tasks.
 | Validate ontology | `mise ontology:validate` |
 | Start or dispatch the server | `mise server:start`, `mise server:dispatch` |
 
+`docs-locale/` is generated. Never read, edit, or reference it.
+
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
 ```shell
@@ -33,7 +35,7 @@ Read the linked owner before you act in that area.
 | Security and authorization | `docs/design-documents/security.md` |
 | Schema changes | `docs/design-documents/schema_management.md` |
 | Query behavior | `docs/design-documents/querying/` |
-| Indexer and ontology work | `crates/indexer/AGENTS.md`, `docs/dev/adding-data-to-the-knowledge-graph.md` |
+| Indexer and ontology work | `crates/indexer/AGENTS.md` |
 | Code Graph work | `crates/code-graph/AGENTS.md` |
 | Server settings | `docs/dev/runbooks/server_configuration.md` |
 | Billing emission | `docs/dev/sox-billing-boundary.md` |

@@ -143,7 +143,8 @@ preventable feedback (see #2772, !1416). Check each of these first:
   hardcode them; hardcoded specs silently drift from `config/graph.sql`.
 - **Extraction SQL:** declare the source shape in ontology pipelines. Use `query: generated` for
   single-table projections and extracts with point lookups. Generated extracts list only their base
-  table; lookup tables resolve from the referenced node pipelines. Nodes may declare
+  table; standalone edges put their base projection in `extract.fields`. Lookup tables resolve from
+  the referenced node pipelines. Nodes may declare
   `enrichment_props`. A slim lookup with only `node` and `id` expands source columns and stable
   aliases from that contract. An endpoint with `enrich: true` independently expands its property
   bindings from the same contract. Same-node references derive distinct field namespaces from
