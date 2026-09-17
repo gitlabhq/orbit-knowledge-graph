@@ -60,7 +60,7 @@ pub async fn run_health_server(
     serving: Arc<AtomicBool>,
     tls: Option<ServerTls>,
 ) -> Result<(), std::io::Error> {
-    labkit::tls::serve(listener, create_health_router(serving), tls).await
+    labkit::server::serve(listener, create_health_router(serving), tls).await
 }
 
 #[cfg(test)]

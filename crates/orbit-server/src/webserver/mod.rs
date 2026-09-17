@@ -37,6 +37,6 @@ impl Server {
     }
 
     pub async fn run(self) -> std::io::Result<()> {
-        labkit::tls::serve(self.listener, self.router, self.tls).await
+        labkit::server::serve(self.listener, self.router, self.tls).await
     }
 }

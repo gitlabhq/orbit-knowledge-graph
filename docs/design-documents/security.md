@@ -382,12 +382,12 @@ only the Rails-facing gRPC port.
 | Listener | Config group | Served by |
 |---|---|---|
 | gRPC (Rails) | `tls.cert_path` / `tls.key_path` | tonic |
-| Webserver HTTP `/live` `/ready` | `tls.probes` | `labkit::tls::serve` |
-| Indexer health, dispatcher health | `tls.probes` | `labkit::tls::serve` |
-| Health-check `/health` `/queue-depth` | `tls.probes` | `labkit::tls::serve` |
-| Prometheus `/-/metrics`, labkit `/-/liveness` `/-/readiness` | `tls.metrics` | labkit probe server |
+| Webserver HTTP `/live` `/ready` | `tls.http` | `labkit::server::serve` |
+| Indexer health, dispatcher health | `tls.http` | `labkit::server::serve` |
+| Health-check `/health` `/queue-depth` | `tls.http` | `labkit::server::serve` |
+| Prometheus `/-/metrics`, labkit `/-/liveness` `/-/readiness` | `tls.probe_server` | labkit probe server |
 
-`tls.probes` and `tls.metrics` are off by default and inherit the shared identity unless they
+`tls.http` and `tls.probe_server` are off by default and inherit the shared identity unless they
 name their own certificate, so the externally pinned gRPC certificate and an internal one can
 rotate on different cycles. `crates/orbit-server/src/tls.rs` resolves both groups once at
 startup, after the FIPS provider is installed, so every listener negotiates inside the same

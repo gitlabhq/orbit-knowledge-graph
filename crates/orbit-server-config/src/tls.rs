@@ -17,16 +17,16 @@ use serde::{Deserialize, Serialize};
 pub struct TlsConfig {
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
-    /// HTTP listeners that answer probes: the webserver, the indexer and
+    /// The HTTP listeners this binary binds: the webserver, the indexer and
     /// dispatcher health ports, and the health-check service.
     #[serde(default)]
     #[schemars(default)]
-    pub probes: ListenerTlsConfig,
-    /// The listener labkit serves: `/-/metrics`, and its own `/-/liveness` and
+    pub http: ListenerTlsConfig,
+    /// The listener labkit binds: `/-/metrics`, and its own `/-/liveness` and
     /// `/-/readiness` on the same port.
     #[serde(default)]
     #[schemars(default)]
-    pub metrics: ListenerTlsConfig,
+    pub probe_server: ListenerTlsConfig,
 }
 
 /// TLS for one group of listeners.
@@ -57,16 +57,16 @@ pub enum IdentityError {
 }
 
 impl TlsConfig {
-    /// Certificate and key for the probe listeners, or `None` when they stay
+    /// Certificate and key for the HTTP listeners, or `None` when they stay
     /// plaintext.
-    pub fn probe_paths(&self) -> Result<Option<(&str, &str)>, IdentityError> {
-        self.resolve(&self.probes, "probes")
+    pub fn http_paths(&self) -> Result<Option<(&str, &str)>, IdentityError> {
+        self.resolve(&self.http, "http")
     }
 
-    /// Certificate and key for the metrics listener, or `None` when it stays
-    /// plaintext.
-    pub fn metrics_paths(&self) -> Result<Option<(&str, &str)>, IdentityError> {
-        self.resolve(&self.metrics, "metrics")
+    /// Certificate and key for the labkit probe server, or `None` when it
+    /// stays plaintext.
+    pub fn probe_server_paths(&self) -> Result<Option<(&str, &str)>, IdentityError> {
+        self.resolve(&self.probe_server, "probe_server")
     }
 
     fn resolve<'a>(
@@ -125,56 +125,56 @@ mod tests {
     fn listener_tls_is_off_by_default() {
         let tls = AppConfig::embedded_defaults().tls;
 
-        assert!(!tls.probes.enabled);
-        assert!(!tls.metrics.enabled);
-        assert_eq!(tls.probe_paths().unwrap(), None);
-        assert_eq!(tls.metrics_paths().unwrap(), None);
+        assert!(!tls.http.enabled);
+        assert!(!tls.probe_server.enabled);
+        assert_eq!(tls.http_paths().unwrap(), None);
+        assert_eq!(tls.probe_server_paths().unwrap(), None);
     }
 
     #[test]
     fn an_enabled_group_inherits_the_shared_identity() {
         let tls = config_from(
-            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  probes:\n    enabled: true\n",
+            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  http:\n    enabled: true\n",
         )
         .tls;
 
         assert_eq!(
-            tls.probe_paths().unwrap(),
+            tls.http_paths().unwrap(),
             Some(("/etc/tls/tls.crt", "/etc/tls/tls.key"))
         );
-        assert_eq!(tls.metrics_paths().unwrap(), None);
+        assert_eq!(tls.probe_server_paths().unwrap(), None);
     }
 
     #[test]
     fn a_group_can_override_the_shared_identity() {
         let tls = config_from(
-            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  probes:\n    enabled: true\n    cert_path: /etc/tls-internal/tls.crt\n    key_path: /etc/tls-internal/tls.key\n",
+            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  http:\n    enabled: true\n    cert_path: /etc/tls-internal/tls.crt\n    key_path: /etc/tls-internal/tls.key\n",
         )
         .tls;
 
         assert_eq!(
-            tls.probe_paths().unwrap(),
+            tls.http_paths().unwrap(),
             Some(("/etc/tls-internal/tls.crt", "/etc/tls-internal/tls.key"))
         );
     }
 
     #[test]
     fn an_enabled_group_without_an_identity_is_an_error() {
-        let tls = config_from("tls:\n  metrics:\n    enabled: true\n").tls;
+        let tls = config_from("tls:\n  probe_server:\n    enabled: true\n").tls;
 
-        let error = tls.metrics_paths().unwrap_err();
+        let error = tls.probe_server_paths().unwrap_err();
 
-        assert!(error.to_string().contains("tls.metrics.cert_path"));
+        assert!(error.to_string().contains("tls.probe_server.cert_path"));
     }
 
     #[test]
     fn a_group_naming_only_one_half_of_an_identity_is_an_error() {
         let tls = config_from(
-            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  metrics:\n    enabled: true\n    cert_path: /etc/tls-internal/tls.crt\n",
+            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  probe_server:\n    enabled: true\n    cert_path: /etc/tls-internal/tls.crt\n",
         )
         .tls;
 
-        let error = tls.metrics_paths().unwrap_err();
+        let error = tls.probe_server_paths().unwrap_err();
 
         assert!(
             error
@@ -189,8 +189,8 @@ mod tests {
         let tls =
             config_from("tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n").tls;
 
-        assert!(!tls.probes.enabled);
-        assert_eq!(tls.probe_paths().unwrap(), None);
+        assert!(!tls.http.enabled);
+        assert_eq!(tls.http_paths().unwrap(), None);
     }
 
     #[test]
@@ -199,8 +199,8 @@ mod tests {
         // inside it would each leave the listener plaintext while the config
         // looks right.
         for overlay in [
-            "tls:\n  probes:\n    enable: true\n",
-            "tls:\n  probe:\n    enabled: true\n",
+            "tls:\n  http:\n    enable: true\n",
+            "tls:\n  htp:\n    enabled: true\n",
         ] {
             let result: Result<AppConfig, _> = config::Config::builder()
                 .add_source(config::File::from_str(

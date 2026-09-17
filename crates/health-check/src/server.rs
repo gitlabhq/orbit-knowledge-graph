@@ -46,7 +46,7 @@ pub async fn run_server(
 
     info!(%bind_address, tls = tls.is_some(), "Health check server listening");
 
-    labkit::tls::serve(listener, app, tls)
+    labkit::server::serve(listener, app, tls)
         .await
         .map_err(|e| Error::Config(format!("Server error: {}", e)))
 }

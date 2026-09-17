@@ -1535,14 +1535,8 @@
             "null"
           ]
         },
-        "key_path": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "metrics": {
-          "description": "The listener labkit serves: `/-/metrics`, and its own `/-/liveness` and\n`/-/readiness` on the same port.",
+        "http": {
+          "description": "The HTTP listeners this binary binds: the webserver, the indexer and\ndispatcher health ports, and the health-check service.",
           "$ref": "#/$defs/ListenerTlsConfig",
           "default": {
             "cert_path": null,
@@ -1550,8 +1544,14 @@
             "key_path": null
           }
         },
-        "probes": {
-          "description": "HTTP listeners that answer probes: the webserver, the indexer and\ndispatcher health ports, and the health-check service.",
+        "key_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "probe_server": {
+          "description": "The listener labkit binds: `/-/metrics`, and its own `/-/liveness` and\n`/-/readiness` on the same port.",
           "$ref": "#/$defs/ListenerTlsConfig",
           "default": {
             "cert_path": null,

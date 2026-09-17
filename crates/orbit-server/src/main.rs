@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
     }
-    let orbit_server::tls::ListenerTls { probes, metrics } =
+    let orbit_server::tls::ListenerTls { http, probe_server } =
         orbit_server::tls::ListenerTls::load(&config.tls)?;
     let probe_bind_address = config.probe_server_bind_address()?;
     builder = builder.health_bind(probe_bind_address);
@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
     for (name, check) in probes::readiness_checks(args.mode, &active_schema, &serving) {
         builder = builder.add_readiness_check(name, check);
     }
-    builder = builder.probe_tls(metrics);
+    builder = builder.probe_tls(probe_server);
     let _guard = builder.init().expect("labkit init");
 
     if config.metrics.prometheus.port.is_some() {
@@ -102,22 +102,22 @@ async fn main() -> anyhow::Result<()> {
             schema::version::init(&graph).await?;
 
             let dispatcher_config = DispatcherConfig::from(&config);
-            indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown, probes)
+            indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown, http)
                 .await
                 .map_err(Into::into)
         }
-        Mode::HealthCheck => health_check_mode::run(&config, probes)
+        Mode::HealthCheck => health_check_mode::run(&config, http)
             .await
             .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, serving, shutdown, probes)
+            indexer::run(&indexer_config, ontology, serving, shutdown, http)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, active_schema, shutdown.clone(), probes).await
+            run_webserver(&config, active_schema, shutdown.clone(), http).await
         }
     };
 

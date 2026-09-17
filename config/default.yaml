@@ -91,13 +91,14 @@ tls:
   # listener group below inherits them unless it names its own.
   # cert_path: "/path/to/cert.pem"
   # key_path: "/path/to/key.pem"
-  # Webserver, indexer, dispatcher and health-check HTTP listeners. A group
-  # inherits the identity above when enabled, or names its own cert_path and
-  # key_path as a pair.
-  probes:
+  # The HTTP listeners this binary binds: webserver, indexer, dispatcher and
+  # health-check. A group inherits the identity above when enabled, or names its
+  # own cert_path and key_path as a pair.
+  http:
     enabled: false
-  # The labkit listener: /-/metrics plus its own /-/liveness and /-/readiness.
-  metrics:
+  # The listener labkit binds: /-/metrics plus its own /-/liveness and
+  # /-/readiness.
+  probe_server:
     enabled: false
 
 engine:
