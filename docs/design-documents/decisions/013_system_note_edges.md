@@ -119,7 +119,7 @@ crates/indexer/src/modules/sdlc/transform/system_notes/
 
 Under ADR 014's entity-level SDLC dispatch (scaffolded in [!1341][adr014-mr]), each entity-kind dispatched by `EntityDispatcher` flows through a single shared `EntityIndexingHandler`. That handler routes by `entity_kind` to a per-kind pipeline. ADR 014 introduces `SimpleEntityPipeline` as the default plan-driven pipeline and names SystemNotes specifically as the motivating example for the **`EntityPipeline`** custom-pipeline extension point:
 
-> *"All current entities use `SimpleEntityPipeline` … Future entities (e.g., SystemNotes) can implement `EntityPipeline` with custom logic instead of using `SimpleEntityPipeline`."* Source: ADR 014, "Handler and pipeline"
+> *"All current entities use `SimpleEntityPipeline` … Future entities (e.g., SystemNotes) can implement `EntityPipeline` with custom logic instead of using `SimpleEntityPipeline`."* — ADR 014, "Handler and pipeline"
 
 ADR 013's `SystemNotesPipeline` is that custom impl. It receives an `EntityIndexingRequest` (`entity_kind = "SystemNote"`, `scope = IndexingScope::Namespace { namespace_id, traversal_path }`, `partition = None` for v1) on `sdlc.entity.indexing.requested.SystemNote.{dotted_traversal_path}` and applies the two-stage extract → resolve → emit pipeline below. See [Compatibility with entity-level SDLC indexing (ADR 014)](#compatibility-with-entity-level-sdlc-indexing-adr-014) for the full forward-compatibility analysis.
 

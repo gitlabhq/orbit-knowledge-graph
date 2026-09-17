@@ -18,9 +18,8 @@ The Orbit repository owns the service that backs the Orbit MCP tools
 (`query_graph`, `get_graph_schema`, `list_commands`, `invoke_command`). The
 routing decisions documented here, however, live in `gitlab-org/gitlab`. This
 document is therefore a *consumer-side* description. It captures the invariants
-the Orbit team relies on. Those are which prompts can reach
-Orbit, which agents advertise our tools, and which feature flags gate the
-overall surface.
+the Orbit team relies on: which prompts can reach Orbit, which agents
+advertise our tools, and which feature flags gate the overall surface.
 
 **Scope**
 

@@ -269,8 +269,8 @@ What gets harder:
   (`transform_index` → `output_index`).
 - Risk of hand-written-transform proliferation. Mitigation: the default stays
   "express it as an ontology plan + `DataFusionTransform`." A Rust transform is justified
-  only when the projection cannot be SQL. Concretely, it needs multi-hop
-  datalake reads or cross-row work the SQL projection can't do. Document that bar
+  only when the projection cannot be SQL: multi-hop datalake reads, or
+  cross-row work the SQL projection can't do. Document that bar
   in `crates/indexer/AGENTS.md` beside the reuse checklist.
 
 ## Relationship to ADR 014
