@@ -1,0 +1,31 @@
+description: FK traversal returns note and author properties from the base query alone, no hydration plan
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["confidential", "created_at"]},
+            {"id": "u", "entity": "User", "columns": ["username"]}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+        "limit": 20
+    }
+  gql: |
+    MATCH (n:Note {id: 3000})<-[:AUTHORED]-(u:User) RETURN n.confidential, n.created_at, u.username LIMIT 20
+
+expect:
+  hydration: none
+  sql_contains: ["AS n_confidential", "AS n_created_at", "AS u_username"]
+  node_count: 2
+  edge_exists:
+    AUTHORED:
+      - [1, 3000]
+  nodes:
+    Note:
+      ids: [3000]
+      rows:
+        - { id: 3000, confidential: false, created_at: "2024-01-15T10:30:00Z" }
+    User:
+      rows:
+        - { id: 1, username: alice }

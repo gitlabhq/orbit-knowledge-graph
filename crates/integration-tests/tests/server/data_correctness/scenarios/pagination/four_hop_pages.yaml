@@ -26,6 +26,6 @@ expect:
     edge_count: 13
     page_count: 3
   pages:
-    - skip_requirements: ["relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
-    - skip_requirements: ["relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
-    - skip_requirements: ["relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - skip_requirements: [node_count, cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - skip_requirements: [node_count, cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]
+    - skip_requirements: [node_count, cursor, "relationship:AUTHORED", "relationship:IN_GROUP", "relationship:CONTAINS"]

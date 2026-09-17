@@ -55,6 +55,9 @@ pub enum Expr {
         expr: Box<Expr>,
         query: Box<Query>,
     },
+    /// Single-row, single-column subquery used as a value; ClickHouse folds it
+    /// to a constant before index analysis, so it still drives PK pruning.
+    Scalar(Box<Query>),
     Star,
 }
 
@@ -205,6 +208,14 @@ pub struct Query {
     pub limit: Option<u32>,
     /// UNION ALL with this query, used for recursive CTEs.
     pub union_all: Vec<Query>,
+}
+
+impl Query {
+    pub fn selects_alias(&self, alias: &str) -> bool {
+        self.select
+            .iter()
+            .any(|s| s.alias.as_deref() == Some(alias))
+    }
 }
 
 impl Default for Query {

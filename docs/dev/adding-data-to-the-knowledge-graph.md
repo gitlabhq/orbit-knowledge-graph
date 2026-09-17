@@ -315,7 +315,7 @@ cargo +<pinned> test -p ontology                          # ~128 tests: load, co
 cargo +<pinned> test -p integration-tests scenario_indexing   # end-to-end siphon->graph (needs Docker ClickHouse)
 ```
 
-- Find the pinned version in `rust-toolchain.toml` (e.g. `1.95.0`). Running via
+- Find the pinned version in `rust-toolchain.toml` (e.g. `1.98.1`). Running via
   `mise run …` uses the right toolchain automatically.
 - `integration-tests` pulls in heavy code-graph deps that require the **newer**
   rustc — a bare `cargo test` on an older toolchain fails at dependency resolution.
@@ -357,6 +357,7 @@ knowledge-graph:
 - [ ] **Registered in `schema.yaml`** (nodes map + edges map).
 - [ ] `schema` pin in `config/versions.yaml` bumped; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
 - [ ] `fixtures/siphon.sql` updated; SDLC YAML scenario(s) added.
+- [ ] Query-side YAML scenario(s) added under `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/` to verify the new entity is queryable end-to-end.
 - [ ] `data_model.md` updated.
 - [ ] `cargo test -p ontology` + `scenario_indexing` green (correct toolchain).
 

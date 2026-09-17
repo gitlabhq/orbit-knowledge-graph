@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use crate::ast::Expr;
+use crate::scope::ScopePrefix;
 use ontology::constants::*;
-use orbit_utils::traversal_path::TraversalPath;
 
 use crate::input::*;
 
@@ -26,7 +27,7 @@ pub struct Hop {
     pub join_prev: Option<JoinColumns>,
     /// Tight `traversal_path` prefix to confine this hop's edge scan to,
     /// carried over from the originating `InputRelationship`.
-    pub scope_prefix: Option<TraversalPath>,
+    pub scope_prefix: Option<ScopePrefix>,
     /// Whether this hop keeps both endpoints in the same namespace (intrinsic
     /// child). Gates the FK-chain lowering, which is only result-equivalent to
     /// the edge scan for such relationships.
@@ -159,7 +160,7 @@ pub fn plan(input: &mut Input) -> Plan {
     let hops = build_hops(input);
     let mut nodes = build_node_plans(input);
 
-    let (mut hops, elided_fks, input) = elide_hops(hops, &mut nodes, input);
+    let (mut hops, elided_fks, scope_guards, input) = elide_hops(hops, &mut nodes, input);
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
@@ -213,6 +214,7 @@ pub fn plan(input: &mut Input) -> Plan {
         order_by: input.order_by.clone(),
         cursor: input.cursor.clone(),
         node_edge_mappings,
+        scope_guards,
         denorm_columns: input.compiler.denormalized_columns.clone(),
         denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),
         table_columns: input.compiler.table_columns.clone(),
@@ -360,10 +362,16 @@ fn elide_hops<'a>(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
     input: &'a mut Input,
-) -> (Vec<Hop>, Vec<(String, String, String)>, &'a mut Input) {
+) -> (
+    Vec<Hop>,
+    Vec<(String, String, String)>,
+    Vec<Expr>,
+    &'a mut Input,
+) {
     let mut keep_hops = Vec::new();
     let mut keep_rels = Vec::new();
     let mut elided_fks = Vec::new();
+    let mut scope_guards = Vec::new();
 
     let mut hop_count: HashMap<String, usize> = HashMap::new();
     for hop in &hops {
@@ -384,6 +392,7 @@ fn elide_hops<'a>(
                 .find(|a| is_pure_scope_anchor(a, nodes, input, &hop_count))
                 .map(str::to_string)
         {
+            scope_guards.extend(hop.scope_prefix.as_ref().map(ScopePrefix::resolved));
             nodes.remove(&anchor);
             input.nodes.retain(|n| n.id != anchor);
             continue;
@@ -457,7 +466,7 @@ fn elide_hops<'a>(
     }
 
     input.relationships = keep_rels;
-    (keep_hops, elided_fks, input)
+    (keep_hops, elided_fks, scope_guards, input)
 }
 
 /// Star first (covers single-hop FK), then chain. Chain applies to aggregations

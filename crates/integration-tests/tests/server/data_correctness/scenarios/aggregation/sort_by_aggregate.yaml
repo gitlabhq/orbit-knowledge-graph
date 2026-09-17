@@ -19,6 +19,8 @@ query:
       "aggregation_sort": "-member_count",
       "limit": 10
     }
+  gql: |
+    MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS member_count ORDER BY member_count DESC LIMIT 10
 
 expect:
   groups:

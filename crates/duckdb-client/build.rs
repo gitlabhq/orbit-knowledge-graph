@@ -17,27 +17,29 @@ const TARGETS: &[(&str, &str)] = &[
     ("x86_64-pc-windows-msvc",     "windows_amd64"),
 ];
 
-/// Extension, DuckDB platform, SHA-256 of <extension>.duckdb_extension.gz (upstream publishes
-/// none). Re-pin every row when `duckdb` in config/versions.yaml changes.
-#[rustfmt::skip]
-const EXTENSIONS: &[(&str, &str, &str)] = &[
-    ("fts", "linux_amd64",      "90d6f049e59b592566cfcd228de3001eb679c64e9f144c138dc2cd55dab12cd6"),
-    ("fts", "linux_arm64",      "87a8c2dddf41d397c617af41e479d4e365dd66a9f115cec7e78374057e80478f"),
-    ("fts", "linux_amd64_musl", "10b1049bffa9cbd85ae1a9e82e330258666780ca79a462829e0d78318b08433f"),
-    ("fts", "linux_arm64_musl", "21d81026d1fc06613fd6d0dd63d5ab2de8e61540b9f5d1c441d5d7cc80d9e3f0"),
-    ("fts", "osx_amd64",        "c3da1ea86c107650edf06a8296094640b9f4886b8ceab4ad42912b6ff5c880bc"),
-    ("fts", "osx_arm64",        "b6b8d0a13e0457f3ce368e4e7c2ff8de48637eea5ca61e5ff983c05018e7f315"),
-    ("fts", "windows_amd64",    "24a328d189aa87a22cd3c2ac6c3f484a49ba30adfd6ce05572fe5841429f2ab5"),
-];
-
 const DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
-const STATIC_FTS_ARCHIVE: &str = "third_party/duckdb-fts-sources.tar.gz";
-const STATIC_FTS_PIN: &str = "third_party/duckdb-fts-sources.PIN";
 
 fn main() {
     println!("cargo:rerun-if-changed={}", env!("LOCKFILE"));
-    let duckdb_version = orbit_versions::VERSIONS.duckdb.as_str();
+
+    let duckdb = orbit_versions::VERSIONS
+        .vendored
+        .get("duckdb")
+        .expect("vendored.duckdb missing from config/versions.yaml");
+    let duckdb_version = duckdb
+        .version
+        .as_deref()
+        .expect("vendored.duckdb.version missing");
+    assert!(
+        duckdb_version.starts_with('v'),
+        "vendored.duckdb.version must start with 'v': {duckdb_version}"
+    );
     assert_lockfile_matches_pin(duckdb_version);
+
+    let extensions = duckdb
+        .extensions
+        .as_ref()
+        .expect("vendored.duckdb.extensions missing");
 
     let target = env::var("TARGET").unwrap();
     let &(_, platform) = TARGETS
@@ -46,21 +48,40 @@ fn main() {
         .unwrap_or_else(|| panic!("no DuckDB extension platform for target {target}"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
+    let repo_root = Path::new(env!("VERSIONS_FILE"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("cannot derive repo root from VERSIONS_FILE");
+    let vendor_dir = repo_root.join(
+        duckdb
+            .vendor_dir
+            .as_deref()
+            .expect("vendored.duckdb.vendor_dir missing"),
+    );
+
     let mut entries = String::new();
     if env::var_os("CARGO_FEATURE_STATIC_FTS").is_some() {
-        build_static_fts(&out_dir, duckdb_version);
+        let source_root =
+            verify_and_extract_source_archive("fts", extensions, &vendor_dir, &out_dir);
+        compile_fts(&source_root);
     } else {
-        for &(name, _, expected) in EXTENSIONS.iter().filter(|(_, p, _)| *p == platform) {
+        for (name, ext) in extensions {
+            let Some(binaries) = &ext.binaries else {
+                continue;
+            };
+            let Some(expected) = binaries.get(platform) else {
+                continue;
+            };
             let url = format!(
-                "http://extensions.duckdb.org/{duckdb_version}/{platform}/{name}.duckdb_extension.gz"
+                "https://extensions.duckdb.org/{duckdb_version}/{platform}/{name}.duckdb_extension.gz"
             );
             let gz = out_dir.join(format!("{name}.duckdb_extension.gz"));
-            if sha256_of(&gz).as_deref() != Some(expected) {
+            if sha256_of(&gz).as_deref() != Some(expected.as_str()) {
                 fs::write(&gz, fetch(&url)).unwrap();
                 assert_eq!(
                     sha256_of(&gz).unwrap(),
-                    expected,
-                    "checksum mismatch for {url}; if upstream republished the artifact, re-pin it"
+                    *expected,
+                    "checksum mismatch for {url}; if upstream republished the artifact, re-pin it in config/versions.yaml"
                 );
             }
             entries += &format!("({name:?}, include_bytes!({gz:?})),");
@@ -78,31 +99,49 @@ fn main() {
     .unwrap();
 }
 
-fn build_static_fts(out_dir: &Path, duckdb_version: &str) {
-    let archive = Path::new(STATIC_FTS_ARCHIVE);
-    let pin = fs::read_to_string(STATIC_FTS_PIN).unwrap();
-    assert_eq!(pin_value(&pin, "duckdb"), duckdb_version);
+fn verify_and_extract_source_archive(
+    name: &str,
+    extensions: &std::collections::BTreeMap<String, orbit_versions::Extension>,
+    vendor_dir: &Path,
+    out_dir: &Path,
+) -> PathBuf {
+    let ext = extensions
+        .get(name)
+        .unwrap_or_else(|| panic!("vendored.duckdb.extensions.{name} missing"));
+    let expected_sha = ext.source_archive_sha256.as_deref().unwrap_or_else(|| {
+        panic!("vendored.duckdb.extensions.{name}.source_archive_sha256 missing")
+    });
+    ext.source_revision
+        .as_ref()
+        .unwrap_or_else(|| panic!("vendored.duckdb.extensions.{name}.source_revision missing"));
+
+    let archive = vendor_dir.join(format!("duckdb-{name}-sources.tar.gz"));
     assert_eq!(
-        sha256_of(archive).as_deref(),
-        Some(pin_value(&pin, "archive_sha256")),
-        "{STATIC_FTS_ARCHIVE} does not match {STATIC_FTS_PIN}"
+        sha256_of(&archive).as_deref(),
+        Some(expected_sha),
+        "vendored {name} source archive does not match source_archive_sha256 in config/versions.yaml"
     );
 
-    let source_root = out_dir.join("duckdb-fts-sources");
+    let source_root = out_dir.join(format!("duckdb-{name}-sources"));
     if source_root.exists() {
         fs::remove_dir_all(&source_root).unwrap();
     }
     tar::Archive::new(flate2::read::GzDecoder::new(Cursor::new(
-        fs::read(archive).unwrap(),
+        fs::read(&archive).unwrap(),
     )))
     .unpack(out_dir)
     .unwrap();
 
-    let fts = source_root.join("fts");
+    println!("cargo:rerun-if-changed={}", archive.display());
+    source_root
+}
+
+fn compile_fts(source_root: &Path) {
+    let fts_dir = source_root.join("fts");
     let snowball = source_root.join("snowball");
     let mut sources = vec![
-        fts.join("fts_extension.cpp"),
-        fts.join("fts_indexing.cpp"),
+        fts_dir.join("fts_extension.cpp"),
+        fts_dir.join("fts_indexing.cpp"),
         snowball.join("libstemmer/libstemmer.cpp"),
         snowball.join("runtime/utilities.cpp"),
         snowball.join("runtime/api.cpp"),
@@ -117,14 +156,12 @@ fn build_static_fts(out_dir: &Path, duckdb_version: &str) {
     sources.push(PathBuf::from("src/static_fts.cpp"));
 
     println!("cargo:rerun-if-changed=src/static_fts.cpp");
-    println!("cargo:rerun-if-changed={STATIC_FTS_ARCHIVE}");
-    println!("cargo:rerun-if-changed={STATIC_FTS_PIN}");
 
     let mut build = cc::Build::new();
     build
         .cpp(true)
         .include(env::var("DEP_DUCKDB_INCLUDE").expect("bundled DuckDB include path"))
-        .include(fts.join("include"))
+        .include(fts_dir.join("include"))
         .include(&snowball)
         .include(snowball.join("libstemmer"))
         .include(snowball.join("runtime"))
@@ -152,12 +189,6 @@ fn build_static_fts(out_dir: &Path, duckdb_version: &str) {
     build.compile("orbit_duckdb_fts");
 }
 
-fn pin_value<'a>(pin: &'a str, key: &str) -> &'a str {
-    pin.lines()
-        .find_map(|line| line.strip_prefix(&format!("{key}: ")))
-        .unwrap_or_else(|| panic!("missing {key} in {STATIC_FTS_PIN}"))
-}
-
 /// DuckDB 1.5.5 ships as duckdb crate 1.10505.x.
 fn assert_lockfile_matches_pin(duckdb_version: &str) {
     let [major, minor, patch]: [u32; 3] = duckdb_version[1..]
@@ -174,7 +205,7 @@ fn assert_lockfile_matches_pin(duckdb_version: &str) {
         fs::read_to_string(env!("LOCKFILE"))
             .unwrap()
             .contains(&entry),
-        "duckdb crate no longer matches {duckdb_version}; update `duckdb` in config/versions.yaml and re-pin EXTENSIONS in crates/duckdb-client/build.rs"
+        "duckdb crate no longer matches {duckdb_version}; update vendored.duckdb.version in config/versions.yaml"
     );
 }
 

@@ -34,6 +34,8 @@ query:
       "aggregations": [{"count": "mr", "as": "mr_count"}],
       "limit": 10
     }
+  gql: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1002}) WHERE mr.state = 'merged' RETURN p{.id, .name}, count(mr) AS mr_count LIMIT 10
 
 expect:
   skip_requirements: ["filter:state"]

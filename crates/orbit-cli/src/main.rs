@@ -15,21 +15,15 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
-use code_graph::v2::types::EdgeKind;
 use ontology::Ontology;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
-use strum::IntoEnumIterator;
 use tracing::{Level, debug, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
-
-const SKILL_LONG_ABOUT: &str = "Print the bundled, version-matched orbit-cli skill content.\n\n\
-                                With no argument, prints SKILL.md (the manifest). Pass a relative path \
-                                such as `references/sql.md` or `references/repo_map.md` to print that file.";
 
 /// Per-file byte cap for local indexing; files above it are recorded as nodes
 /// but not loaded or parsed.
@@ -181,37 +175,13 @@ struct IndexArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("grep"))]
-#[command(
-    long_about = "Search the local graph for definitions matching plain-language terms.\n\n\
-                  Ranks indexed definitions by how many distinct query terms they \
-                  match, then shows the most relevant connections to the top matches, \
-                  ranked by graph proximity. Matches resolved definitions, not text \
-                  lines; takes plain words, not regexes. Add --related-to, --callers, \
-                  or --callees to a positional FQN for relationship lookups. An \
-                  explicit target after the flag takes precedence over positional \
-                  terms. Targets accept FQNs, unique unqualified tails, or globs; \
-                  --path and --kind filter connected definitions, not the target. \
-                  --kind takes one comma-separated list, e.g. `Class,Method`.\n\n\
-                  When the output notes unmatched terms or weak matches, read the \
-                  top matches first — they are often still right. Retry with a \
-                  synonym or identifier fragment only if they look off, then fall \
-                  back to text grep."
-)]
+#[command(about = descriptions::short("grep"), long_about = descriptions::long("grep"))]
 struct GrepArgs {
     /// Plain-language queries, e.g. "NATS message publish"; several may be
     /// given and are searched in one call. Omit them with --path to list
     /// every definition under that path instead.
-    #[arg(value_name = "QUERY", required_unless_present_any = ["path", "related_to", "callers_of", "callees_of"])]
+    #[arg(value_name = "QUERY", required_unless_present = "path")]
     query: Vec<String>,
-
-    #[command(flatten)]
-    relations: RelationArgs,
-
-    /// Print the source bodies of the top three matches even when the search
-    /// is broad; searches with three or fewer hits include bodies automatically.
-    #[arg(long, requires = "query", conflicts_with = "relation_target")]
-    body: bool,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -219,7 +189,7 @@ struct GrepArgs {
 
     /// Maximum matched definitions to show, shared across the queries of one
     /// call (at least three each).
-    #[arg(long, default_value = "10", conflicts_with_all = ["relation_target", "edge", "incoming", "outgoing", "tests"])]
+    #[arg(long, default_value = "10")]
     limit: usize,
 
     /// Only search definitions under this repo-relative directory or file
@@ -228,16 +198,17 @@ struct GrepArgs {
     #[arg(long, value_name = "PATH")]
     path: Vec<String>,
 
-    /// Only search definitions of these types, as printed in grep's `[Kind]`
-    /// column: one kind or a comma-separated list such as `Class,Method`
-    /// (`"Class|Method"` also works when quoted); case-insensitive.
-    #[arg(long, value_name = "KINDS", value_parser = parse_kinds)]
+    #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
     kind: Option<Kinds>,
 
     /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
+
+const KIND_ARG_HELP: &str = "Only definitions of these types, as printed in grep's `[Kind]` \
+                             column. One kind or a comma-separated list such as `Class,Method` \
+                             (quoted `\"Class|Method\"` also works); case-insensitive.";
 
 #[derive(Debug, Clone, PartialEq)]
 struct Kinds(Vec<String>);
@@ -259,89 +230,31 @@ fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
     kinds.map(|Kinds(names)| names).unwrap_or_default()
 }
 
-fn fqn_arg_help() -> String {
+fn context_target_help() -> String {
     format!(
-        "Fully qualified name as printed by `{} grep`, its unqualified tail such as \
-         `Type::method` when that names one definition, or a glob such as `crate::module::*`.",
+        "Definition:<id> references printed by `{} grep`, or one file path inside the current checkout. Repeat Definition references to read several definitions.",
         commands::setup::spec::launcher()
     )
-}
-
-fn context_fqn_arg_help() -> String {
-    format!(
-        "Fully qualified names as printed by `{} grep`, their unqualified tails such as \
-         `Type::method` when that names one definition, or globs such as \
-         `crate::module::*` to print every definition they match. Several may be given at once.",
-        commands::setup::spec::launcher()
-    )
-}
-
-fn context_long_about() -> String {
-    format!(
-        "Print the full source body of indexed definitions.\n\n\
-         Takes one or more fully qualified names as printed by `{launcher} grep`, or \
-         their unqualified tails such as `Type::method` when that names one definition, \
-         and prints each definition's source lines from the working tree, so following \
-         up on several grep matches takes one command and no file read. A glob fqn such as \
-         `crate::module::*` prints every matching definition in file order, \
-         `--file <path>` alone prints a whole file as its definitions plus the \
-         lines between them, and `<name> --file <path>` prints that definition \
-         from that file by bare name, so whole-module reading needs no file read \
-         either. `--outline` prints each definition's signature and nested members \
-         without bodies, so large types can be mapped before reading one method.",
-        launcher = commands::setup::spec::launcher()
-    )
-}
-
-fn edge_kind_names() -> String {
-    EdgeKind::iter()
-        .map(|kind| kind.as_ref().to_lowercase())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn parse_edge_kind(value: &str) -> Result<EdgeKind, String> {
-    value.to_uppercase().parse().map_err(|_| {
-        format!(
-            "unknown edge kind {value:?}; expected one of {}",
-            edge_kind_names()
-        )
-    })
 }
 
 fn sql_long_about() -> String {
     format!(
         "Run a read-only SQL query against the local DuckDB graph.\n\n\
-         Tables are pre-filtered to the current checkout's indexed commit, so ad-hoc \
-         SQL needs no project_id or commit_sha predicates; --all queries every indexed \
-         commit and --repo <path> scopes to another checkout. `{} schema` lists the tables.",
+         The current checkout's indexed commit scopes the tables, so queries need \
+         no project_id or commit_sha predicates. `{} schema` lists the tables.",
         commands::setup::spec::launcher()
     )
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = "Print the full source bodies of definitions by fqn or unqualified name")]
-#[command(long_about = context_long_about())]
+#[command(about = descriptions::short("context"), long_about = descriptions::long("context"))]
 struct ContextArgs {
-    #[arg(value_name = "FQN", help = context_fqn_arg_help(), required_unless_present = "file")]
-    fqn: Vec<String>,
+    #[arg(value_name = "TARGET", help = context_target_help(), required = true)]
+    target: Vec<String>,
 
-    /// Restrict to this file (repo-relative or absolute). Alone, prints every
-    /// indexed definition in the file in order with the lines between them;
-    /// with FQNs, also accepts bare definition names.
-    #[arg(long, value_name = "PATH", visible_alias = "path")]
-    file: Option<String>,
-
-    /// Only print definitions of these types, as printed in grep's `[Kind]`
-    /// column: one kind or a comma-separated list such as `Class,Method`
-    /// (`"Class|Method"` also works when quoted); case-insensitive.
-    /// Narrows a glob or --file and disambiguates a bare name.
-    #[arg(long, value_name = "KINDS", value_parser = parse_kinds)]
-    kind: Option<Kinds>,
-
-    /// Print signatures and nested members instead of full bodies.
+    /// Show relationships to test, fixture, and generated definitions.
     #[arg(long)]
-    outline: bool,
+    tests: bool,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -350,97 +263,6 @@ struct ContextArgs {
     /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
-}
-
-#[derive(Args, Debug, PartialEq)]
-#[group(skip)]
-struct RelationArgs {
-    #[arg(long, value_name = "FQN", group = "relation_target", conflicts_with = "limit", help = format!("List all connections of a definition. {}", fqn_arg_help()))]
-    related_to: Option<Option<String>>,
-
-    #[arg(
-        long = "callers",
-        value_name = "FQN",
-        group = "relation_target",
-        conflicts_with = "limit",
-        help = "List callers of a definition, including calls to its members."
-    )]
-    callers_of: Option<Option<String>>,
-
-    #[arg(
-        long = "callees",
-        value_name = "FQN",
-        group = "relation_target",
-        conflicts_with = "limit",
-        help = "List definitions and imported symbols called by a definition."
-    )]
-    callees_of: Option<Option<String>>,
-
-    #[arg(long, value_name = "KIND", requires = "related_to", conflicts_with_all = ["callers_of", "callees_of"], help = format!(
-            "Only connections of this edge kind ({}); repeatable, case-insensitive.",
-            edge_kind_names()
-        ), value_parser = parse_edge_kind)]
-    edge: Vec<EdgeKind>,
-
-    #[arg(
-        long = "in",
-        requires = "related_to",
-        conflicts_with_all = ["callers_of", "callees_of"],
-        help = "Only incoming connections, including uses via members."
-    )]
-    incoming: bool,
-
-    #[arg(
-        long = "out",
-        requires = "related_to",
-        conflicts_with_all = ["callers_of", "callees_of"],
-        help = "Only outgoing connections."
-    )]
-    outgoing: bool,
-
-    #[arg(
-        long,
-        requires = "relation_target",
-        help = "List test, fixture, and generated connections instead of collapsing them into a count."
-    )]
-    tests: bool,
-}
-
-impl RelationArgs {
-    fn into_target(
-        self,
-        query: &[String],
-    ) -> Result<Option<(String, commands::grep::relations::Filter)>> {
-        let (fqn, edges, incoming, outgoing) = if let Some(fqn) = self.callers_of {
-            (fqn, vec![EdgeKind::Calls], true, false)
-        } else if let Some(fqn) = self.callees_of {
-            (fqn, vec![EdgeKind::Calls], false, true)
-        } else if let Some(fqn) = self.related_to {
-            (fqn, self.edge, self.incoming, self.outgoing)
-        } else {
-            return Ok(None);
-        };
-        let fqn = match fqn {
-            Some(fqn) => fqn,
-            None => {
-                let [fqn] = query else {
-                    anyhow::bail!(
-                        "pass one definition before the relationship flag, or a target after it"
-                    );
-                };
-                fqn.clone()
-            }
-        };
-        Ok(Some((
-            fqn,
-            commands::grep::relations::Filter {
-                edges,
-                incoming,
-                outgoing,
-                tests: self.tests,
-            },
-        )))
-    }
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -504,23 +326,14 @@ struct ListArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("mcp_serve"))]
-#[command(long_about = "Serve the local graph to MCP-compatible AI agents.\n\n\
-                  Plug into editors that support MCP (Claude Code, Cursor, OpenCode, Codex) \
-                  so the agent can call `run_sql`, `get_graph_schema`, and `index`.")]
+#[command(about = descriptions::short("mcp_serve"), long_about = descriptions::long("mcp_serve"))]
 struct McpArgs {
     #[command(subcommand)]
     command: McpCommands,
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(name = "repo-map", about = descriptions::short("repo_map"))]
-#[command(
-    long_about = "Produce a high-level, LLM-oriented map of a locally indexed repository.\n\n\
-                   Scoped to the current commit; if it is not indexed, prints the index \
-                   command and exits. Running with no subcommand defaults to `overview`. \
-                   Drill down with `tree`, `api`, `class`, `extends`, and `imports`."
-)]
+#[command(name = "repo-map", about = descriptions::short("repo_map"), long_about = descriptions::long("repo_map"))]
 struct RepoMapArgs {
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -552,25 +365,15 @@ enum Commands {
     Mcp(McpArgs),
     #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
-    #[command(about = descriptions::short("skill"), long_about = SKILL_LONG_ABOUT)]
+    #[command(about = descriptions::short("skill"), long_about = descriptions::long("skill"))]
     Skill {
         /// Skill file to print, relative to the skill root (default: SKILL.md).
         #[arg(value_name = "PATH")]
         path: Option<String>,
     },
-    /// Configure AI coding assistants to consult the graph.
-    #[command(
-        long_about = "Configure AI coding assistants to consult the graph.\n\n\
-                      Writes a managed section into each assistant's user-global \
-                      instruction file (default) or the project's with `--project`/`--dir`, \
-                      telling the assistant to prefer graph queries over grepping raw files, \
-                      plus nudge hooks where the platform supports them (Claude Code, \
-                      OpenCode). Pre-existing files get a one-time `.orbit-backup` sibling \
-                      before their first modification. Re-running updates the section in \
-                      place; `--remove` uninstalls."
-    )]
+    #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
     Setup {
-        /// Assistants to configure. Required when installing; `--remove`
+        /// Assistants to configure. Required when installing. `--remove`
         /// without assistants removes the setup for all of them.
         #[arg(value_name = "ASSISTANT", value_parser = commands::setup::assistant_value_parser(), required_unless_present = "remove")]
         assistants: Vec<String>,
@@ -691,6 +494,8 @@ async fn main() -> Result<()> {
 
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
 
+    // labkit-events ships no TLS provider; the tracker below builds an HTTPS client.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let tracker = telemetry::resolve_from_env().build_tracker();
     if let Some(tracker) = &tracker {
         telemetry::emit_command_event(
@@ -767,30 +572,21 @@ async fn dispatch(command: Commands) -> Result<()> {
         }
         Commands::Grep(GrepArgs {
             query,
-            relations,
-            body,
             repo,
             limit,
             path,
             kind,
             db,
-        }) => {
-            let kind = kind_names(kind);
-            match relations.into_target(&query)? {
-                Some((fqn, filter)) => {
-                    commands::grep::relations::run(fqn, repo, db, filter, &path, &kind)
-                }
-                None => commands::grep::run(
-                    query,
-                    repo,
-                    db,
-                    limit,
-                    path,
-                    orbit_search::RecallFilter { kinds: kind },
-                    body,
-                ),
-            }
-        }
+        }) => commands::grep::run(
+            query,
+            repo,
+            db,
+            limit,
+            path,
+            orbit_search::RecallFilter {
+                kinds: kind_names(kind),
+            },
+        ),
         Commands::Context(args) => commands::context::run(args),
         Commands::Sql(SqlArgs {
             query,
@@ -1064,12 +860,12 @@ fn index_repo(
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
     let mut filter = code_graph::v2::config::CodeFilter::new(
-        MAX_INDEXED_FILE_BYTES,
-        0,
+        Some(MAX_INDEXED_FILE_BYTES),
+        None,
         code_graph::v2::config::detect_language_from_path,
     );
-    let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(
-        orbit_utils::walk::walk_dir(&git.repo_path, &mut filter)
+    let file_inventory = std::sync::Arc::new(
+        orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
             .context("failed to walk repository files")?,
     );
 
@@ -1129,7 +925,6 @@ fn index_repo(
         std::path::Path::new(&root_path),
         file_inventory,
         pipeline_config.clone(),
-        filter.file_reasons(),
         tracer,
         converter,
         on_batch,
@@ -1150,13 +945,22 @@ fn index_repo(
         .context("failed to load the DuckDB fts extension")?;
     client
         .execute(
-            &duckdb_client::search::def_doc_sql(&doc_table),
+            &duckdb_client::search::def_doc_sql(&doc_table, ontology)?,
             &[
                 serde_json::json!(git.project_id),
                 serde_json::json!(git.commit_sha),
             ],
         )
         .context("failed to build the search documents")?;
+    duckdb_client::search::populate_def_doc_sources(
+        &client,
+        &doc_table,
+        ontology,
+        &git.repo_path,
+        git.project_id,
+        &git.commit_sha,
+    )
+    .context("failed to add definition sources to the search documents")?;
     client
         .execute(
             &duckdb_client::search::create_fts_index_sql(&doc_table),
@@ -1383,7 +1187,7 @@ mod tests {
             Commands::RepoMap(_)
         ));
         assert!(matches!(
-            Cli::parse_from(["orbit", "context", "a::b"]).command,
+            Cli::parse_from(["orbit", "context", "Definition:7"]).command,
             Commands::Context(_)
         ));
 
@@ -1430,6 +1234,34 @@ mod tests {
             assert!(
                 Cli::try_parse_from(argv).is_err(),
                 "{argv:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn context_accepts_definition_references_or_a_file_target() {
+        let Commands::Context(args) =
+            Cli::parse_from(["orbit", "context", "Definition:7", "Definition:9"]).command
+        else {
+            panic!("expected context");
+        };
+        assert_eq!(args.target, vec!["Definition:7", "Definition:9"]);
+        let Commands::Context(with_tests) =
+            Cli::parse_from(["orbit", "context", "Definition:7", "--tests"]).command
+        else {
+            panic!("expected context");
+        };
+        assert!(with_tests.tests);
+        assert!(matches!(
+            Cli::parse_from(["orbit", "context", "src/lib.rs"]).command,
+            Commands::Context(_)
+        ));
+        assert!(Cli::try_parse_from(["orbit", "context"]).is_err());
+        assert!(Cli::try_parse_from(["orbit", "context", "--file", "src/lib.rs"]).is_err());
+        for removed in ["--outline", "--related"] {
+            assert!(
+                Cli::try_parse_from(["orbit", "context", "Definition:7", removed]).is_err(),
+                "{removed}"
             );
         }
     }

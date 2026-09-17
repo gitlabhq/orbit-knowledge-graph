@@ -18,9 +18,16 @@ impl QueryParser {
         Ok(())
     }
 
-    pub(super) fn Query(input: Node) -> Result<Query> {
+    pub(super) fn Statement(input: Node) -> Result<Statement> {
         Ok(match_nodes!(input.into_children();
-            [Match((pattern, predicates)), Return(projections), clauses.., EOI(_)] => {
+            [Query(query), EOI(_)] => Statement::Query(Box::new(query)),
+            [SchemaCall(call), EOI(_)] => call,
+        ))
+    }
+
+    fn Query(input: Node) -> Result<Query> {
+        Ok(match_nodes!(input.into_children();
+            [Match((pattern, predicates)), Return(projections), clauses..] => {
                 let mut query = Query {
                     pattern, predicates, projections, order: None, limit: None, debug: false,
                 };
@@ -35,6 +42,14 @@ impl QueryParser {
                 query
             },
         ))
+    }
+
+    fn SchemaCall(input: Node) -> Result<Statement> {
+        let node = match_nodes!(input.into_children();
+            [] => None,
+            [literal] => Some(string(&literal)?),
+        );
+        Ok(Statement::SchemaCall { node })
     }
 
     fn Match(input: Node) -> Result<(Pattern, Vec<Comparison>)> {
@@ -53,8 +68,25 @@ impl QueryParser {
 
     fn ShortestPattern(input: Node) -> Result<Pattern> {
         Ok(match_nodes!(input.into_children();
-            [Variable(variable), PatternElement(element)] => Pattern::Shortest { variable, element },
+            [Variable(variable), PathSearch(_), PatternElement(element)] => Pattern::Shortest { variable, element },
+            [Variable(_), LegacyShortestPath(_)] => unreachable!("LegacyShortestPath always errors"),
         ))
+    }
+
+    fn LegacyShortestPath(input: Node) -> Result<()> {
+        Err(input.error("use ANY SHORTEST (a)-[*1..3]->(b) for shortest paths"))
+    }
+
+    fn PathSearch(input: Node) -> Result<()> {
+        let span = input.as_span();
+        match_nodes!(input.into_children();
+            [] => Ok(()),
+            [UnsignedInteger(count)] => if count.as_u64() == Some(1) {
+                Ok(())
+            } else {
+                Err(error_at(span, "only one shortest path is supported; use ANY SHORTEST or SHORTEST 1"))
+            },
+        )
     }
 
     fn PatternElement(input: Node) -> Result<PatternElement> {

@@ -21,6 +21,8 @@ query:
                  "node_ids": [9800, 9801]}],
       "limit": 10
     }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id IN [9800, 9801] RETURN mr.title, mr.state LIMIT 10
 
 expect:
   node_count: 2

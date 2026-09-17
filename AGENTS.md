@@ -32,11 +32,13 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
   Unversioned objects (durable tables and materialized views created once at boot, never version-prefixed or GCed) are emitted through one `generate_unversioned_objects` path in `crates/query-engine/compiler/src/passes/codegen/ddl/`; add a new unversioned kind there rather than introducing a parallel per-kind generator.
   Schema: `config/schemas/ontology.schema.json`.
 - **Schema archives.** Migration and promotion require usable ontology archives. The dispatcher bootstraps missing active archives from the build-validated release bundle; unsupported missing versions fail closed. The Webserver serves the active archive and pins one schema snapshot per request. See `docs/design-documents/schema_management.md` for readiness, supported legacy upgrades, and rollback retention.
-- **Orbit query frontend.** `crates/query-engine/compiler/src/passes/frontend/` holds one module per query language. `json_dsl` and `gql` each lower source text to compiler `Input` as the first phase of their own pipeline preset; every later phase is shared. Remote requests still use JSON. See `docs/design-documents/querying/orbit_query_frontend.md`.
+- **Orbit query frontend.** `crates/query-engine/compiler/src/passes/frontend/` holds one module per query language; both lower graph queries to language-neutral `Input`. `compiler::gql::prepare` parses once and dispatches MATCH to the complete shared graph compilation phases. Standalone `CALL db.schema(...)` resolves typed ontology metadata inside the GQL frontend without SQL or shared schema state. `compiler::compile` remains graph-query-only. Remote requests still use JSON. See `docs/design-documents/querying/orbit_query_frontend.md`.
 - **Agent-facing prompts are YAML.** Tool and command descriptions live as versioned YAML under `config/prompts/` (`remote/` = server, `local/` = CLI), embedded via rust-embed and build-time validated by `orbit-prompts`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
 - **Layered configuration.** `AppConfig` in `crates/orbit-server-config/` loads four sources (lowest to highest priority): the embedded `config/default.yaml` (compiled in via `include_str!`), an on-disk `config/default.yaml` when present (the Helm ConfigMap key), an overlay file (`--config <path>`, else `config/config.yaml` when present), and K8s secret files from `/etc/secrets/`. There is no environment-variable layer; the mise dev tasks generate `.dev/<mode>.yaml` from `config/dev.yaml`, GDK-derived connection details, and the Git-ignored `config/dev.local.yaml`, and pass that one file to `--config`.
   `config/default.yaml` is the single source of truth for defaults: every section and scalar is declared there; the Rust structs have no `Default` impls or `serde(default)` fallbacks (only `Option` fields and empty collections may be omitted). Add a setting by adding the struct field plus its value in `default.yaml`; tests start from `AppConfig::embedded_defaults()`. The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md`.
+- **Vendored dependencies.** Upstream artifacts committed to the repo (DuckDB FTS sources, extension binaries) are pinned in the `vendored:` section of `config/versions.yaml` with sub-pins, artifact directories, and vendor/check scripts. A generic runner (`scripts/vendored/run.sh`) invokes them with standardized `VENDOR_*` env vars. Vendor scripts write computed checksums back via `yq -i`; check scripts are read-only. Run `mise vendor -- <name>` to regenerate, `mise check:vendored -- <name>` to verify. See `docs/dev/runbooks/vendored_dependencies.md`.
+- **FIPS by default.** `gkg-server` links the AWS-LC FIPS module (`rustls` `fips` feature, `jsonwebtoken` `aws_lc_rs` backend, `async-nats` and `kube` without `ring`) and refuses to start outside FIPS mode (`crates/orbit-server/src/fips.rs`). There is no non-FIPS server variant; the `orbit` CLI is exempt. `scripts/check-fips-graph.sh` and `scripts/check-fips-binary.sh` are the gates. See `docs/design-documents/security.md`.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
 ## What CI enforces
@@ -45,15 +47,18 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
 - Named query YAML validated against JSON schema (`named-query-schema-validate`); each query is also compiled against the ontology by `orbit-server`'s build script, so drift fails every build
+- Versions YAML validated against JSON schema (`versions-schema-validate`); enforces key patterns, hex lengths, path restrictions, and vendored dependency structure
 - Assistant setup specs and mode texts in `config/setup/` validated against JSON schema (`setup-schema-validate`)
 - Migration ledger validated and scope-checked (`migration-ledger-schema-validate`, `migration-ledger-check`, plus `orbit-server` build-time drift checks); full ledger rules in `docs/design-documents/schema_management.md`
 - `cargo fmt` (`fmt-check`)
+- Trailing newlines (`newline-check`, run locally with `mise lint:newlines`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
+- Server dependency graph and binary link the AWS-LC FIPS module and no `ring`; the CLI graph stays non-FIPS (`fips-check`)
 - Unit tests via nextest (`unit-test`)
 - Compiler integration tests: query compilation, ontology validation, pipeline infra (`compiler-integration-test`)
 - CLI integration tests: concurrency, worktrees, content resolution (`cli-integration-test`)
-- Integration tests with Docker testcontainers (`integration-test`)
+- Integration tests with Docker testcontainers (`integration-test`, `integration-test-data-correctness`); data correctness tests are YAML-driven scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` (format reference in `crates/integration-testkit/README.md`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - `rust-toolchain.toml` must match `mise.toml` (`rust-toolchain-sync-check`; regenerate with `mise toolchain:generate`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check_docs_markdown`)
@@ -62,9 +67,9 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Prompt version bumped when files under `config/prompts/` change (`prompt-version-bump-check`)
 - Metrics catalog regenerated in sync with `orbit-observability` source (`metrics-catalog-check`)
 - Query-language text-indexed properties table regenerated in sync with the ontology (`query-language-docs-check`)
-- Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
-- Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`)
-- The vendored DuckDB FTS source archive matches its pinned upstream revisions (`duckdb-fts-sources-sync-check`; regenerate with `scripts/duckdb/vendor-duckdb-fts-sources.sh`)
+- Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`; pins in `vendored.iglu.pins`, regenerate with `mise vendor -- iglu`)
+- Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`; pin in `vendored.gitlab_system_note_actions.version`)
+- The vendored DuckDB FTS source archive matches its pinned upstream revisions (`duckdb-fts-sources-sync-check`; regenerate with `mise vendor -- duckdb`)
 - Every `[workspace]` member has a row in `docs/dev/agents-crate-map.md`, and no stale rows remain (`crates/xtask/build.rs`, so any workspace build/clippy fails on drift)
 
 ## Where to find things
@@ -87,7 +92,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
   - If a comment would survive deleting it without losing *why* information, delete it. The `/remove-llm-comments` skill drives that final pass; it is a backstop for what slipped through, not a license to narrate first.
 - **Reuse existing infrastructure before writing new code.** Before scaffolding a new handler, pipeline, or module, do an explicit "what does the codebase already give me?" pass (cursor/checkpoint, Arrow helpers, ontology-derived specs, SQL filtering, concurrency). Reinventing infra the codebase already provides is the most common class of preventable review feedback. For the indexer, see the checklist in **`crates/indexer/AGENTS.md`**. For code-graph, prefer reusing existing types and constructors in the language module (e.g. `CanonicalDefinition` in `src/v2/types/`, the DSL engine helpers in `src/v2/dsl/`) rather than duplicating construction logic per language.
 - **No `#[allow(dead_code)]` in shipped code.** Production (non-test) modules must not ship dead-code allows to silence scaffold warnings. If a symbol is test-only, gate it with `#[cfg(test)]`; if it is genuinely unused, delete it. Reserve exceptions for an explicit, justified case: use `#[allow(dead_code, reason = "…")]` (ideally linking an issue) or, preferably, `#[expect(dead_code, reason = "…")]`, which fails once the code is used and self-cleans. The `indexer` and `code-graph` crates enforce this mechanically via `clippy::allow_attributes_without_reason = "deny"`.
-- **Prefer build-time validation over CI-only checks** for correctness that can be checked without network or repo context. A `build.rs` that `panic!`s on drift fails locally and in CI even when CI egress is down, and can't be skipped by editing a script. Prior art: `crates/orbit-analytics/build.rs` validates committed Iglu schemas under `config/schemas/iglu/` at build time (asserts each schema's `self` block matches its path/version and runs codegen). Consider this pattern for any vendored-constant or generated-file drift check (e.g. the DDL-freshness check in `scripts/check-ddl-freshness.sh` is a future candidate). Checks that need Git diff context or live network (`scripts/iglu/check.sh`'s upstream-CDN half) stay in CI.
+- **Prefer build-time validation over CI-only checks** for correctness that can be checked without network or repo context. A `build.rs` that `panic!`s on drift fails locally and in CI even when CI egress is down, and can't be skipped by editing a script. Prior art: `crates/orbit-analytics/build.rs` validates committed Iglu schemas under `config/schemas/iglu/` at build time (reads version pins from `vendored.iglu.pins` in `versions.yaml`, asserts each schema's `self` block matches, and runs codegen). Consider this pattern for any vendored-constant or generated-file drift check (e.g. the DDL-freshness check in `scripts/check-ddl-freshness.sh` is a future candidate). Checks that need Git diff context or live network (`scripts/vendored/iglu/check.sh`'s upstream-CDN half) stay in CI.
 - Prefer `ast-grep` over text-based Grep/Edit for structural code transformations (batch renames, pattern-based rewrites).
 - Fence executable Orbit query JSON in docs and skills as `json orbit-query`; keep shell commands in separate shell fences so docs smoke tests run the query.
 - Check crates.io for latest version before adding dependencies.
@@ -104,6 +109,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 See [`crates/code-graph/AGENTS.md`](crates/code-graph/AGENTS.md).
 
 ## MR and issue descriptions and comments
+
+Load the `orbit-planning` skill before creating or labeling issues, epics, or MRs so they use the canonical taxonomy and roadmap rules.
 
 Always use the templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/`, and read the TEMPLATE CONVENTION block at the top of each one before writing the description.
 

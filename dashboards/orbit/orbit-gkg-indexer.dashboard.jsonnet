@@ -40,6 +40,14 @@ local sdlcRows = o.metric('gkg_indexer_sdlc_pipeline_rows_processed_total');
 local sdlcErrors = o.metric('gkg_indexer_sdlc_pipeline_errors_total');
 local sdlcPipelineDur = o.metric('gkg_indexer_sdlc_pipeline_duration_seconds');
 
+// The lag gauge holds its last value per replica until that entity runs there again, so a
+// sample is current only if that replica completed a run within one global cycle (5m plus margin).
+local LAG = 'gkg_indexer_sdlc_watermark_lag_seconds{%s}' % [SEL];
+local SDLC_RUNS = 'gkg_indexer_sdlc_pipeline_duration_seconds_count{%s}' % [SEL];
+local FRESH_LAG = '(%s and on (pod, entity) (increase(%s[6m]) > 0))' % [LAG, SDLC_RUNS];
+// Every entity runs at least once per hourly namespace sweep; 65m without a run is a stall.
+local STALLED_ENTITIES = '(count by (entity) (%s) unless count by (entity) (increase(%s[65m]) > 0))' % [LAG, SDLC_RUNS];
+
 // 1. Health ---------------------------------------------------------------
 local health = [
   o.row('Health'),
@@ -57,8 +65,8 @@ local health = [
   ),
   o.gaugeStat(
     'SDLC: max watermark lag',
-    'Highest current watermark-to-now lag across all SDLC entities. Rising means SDLC is falling behind.',
-    'max(gkg_indexer_sdlc_watermark_lag_seconds{%s})' % [SEL],
+    'Highest dispatch-to-completion lag among SDLC entity runs that completed in the last 6 minutes. Samples from older runs are ignored so a quiet entity does not pin the tile. Rising means SDLC is falling behind.',
+    'max(%s)' % [FRESH_LAG],
     DS, 's', 6,
   ),
   o.gaugeStat(
@@ -221,8 +229,8 @@ local freshness = [
   o.row('Freshness and saturation'),
   o.timeseries(
     'SDLC: watermark lag per entity',
-    'Seconds between the per-entity SDLC watermark and now, worst replica per entity. Rising lag means SDLC is falling behind on that entity.',
-    [o.target('max by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{%s})' % [SEL], '{{entity}}', DS)],
+    'Dispatch-to-completion lag per SDLC entity, worst replica among runs that completed in the last 6 minutes. An entity with no recent run drops out instead of holding its last value. Rising lag means SDLC is falling behind on that entity.',
+    [o.target('max by (entity) (%s)' % [FRESH_LAG], '{{entity}}', DS)],
     's', 12, 8,
   ),
   o.timeseries(
@@ -230,6 +238,12 @@ local freshness = [
     'Active worker permits by kind. Watch the global pool flatlining at the configured ceiling, that is the bottleneck signal.',
     [o.target('sum by (permit_kind) (gkg_etl_permits_active{%s})' % [SEL], '{{permit_kind}}', DS)],
     'short', 12, 8,
+  ),
+  o.gaugeStat(
+    'SDLC: stalled entities',
+    'SDLC entities that completed no run on any replica in the last 65 minutes. Every entity runs during the hourly namespace sweep, so anything above 0 means an entity has stalled.',
+    'count(%s)' % [STALLED_ENTITIES],
+    DS, 'short', 6,
   ),
 ];
 

@@ -1,16 +1,66 @@
 //! One filtering and limit surface for every file source. A repository's files
 //! arrive two ways — a Gitaly tar ([`crate::archive`]) and a directory walk
-//! ([`crate::walk`]) — and both run every entry through one [`FileStreamHooks`]
+//! ([`super::walk`]) — and both run every entry through one [`FileStreamHooks`]
 //! policy via [`step`]; the sources carry no filtering of their own.
 
 use std::path::{Component, Path};
 
 use rustc_hash::FxHashMap;
 
+/// Why a file was not loaded. Snake_case for metric labels.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::Display,
+    strum::AsRefStr,
+    strum::IntoStaticStr,
+    strum::EnumIter,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum SkipReason {
+    Oversize,
+    ExcludedExtension,
+    Binary,
+    NotUtf8,
+    Minified,
+    LineTooLong,
+    NonRegularFile,
+    LfsPointer,
+}
+
+/// Broad content class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ContentClass {
+    #[default]
+    Unknown,
+    Text,
+    Code,
+    Binary,
+    MinifiedCode,
+    LfsPointer,
+    NonRegular,
+}
+
+/// Classification metadata carried on the entry.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileLabel {
+    pub skip: Option<SkipReason>,
+    pub content: ContentClass,
+    /// Fine-grained content type from an external classifier (e.g.
+    /// Magika). The coarse `content` field drives routing decisions;
+    /// `detail` carries specificity for consumers that need it.
+    pub detail: Option<String>,
+    pub extension: Option<String>,
+}
+
 /// Per-file outcome of the hook pipeline. The two loaded states split the
 /// materialize axis from the parse axis: both `Parse` and `Load` make the bytes
 /// available (on disk for the tar source); only `Parse` is sent to a parser.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, strum::Display, strum::AsRefStr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, strum::Display, strum::AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum Decision {
     /// Load the bytes and parse them. The only parse candidate downstream.
@@ -32,24 +82,28 @@ pub struct FileInventoryEntry {
     pub path: String,
     pub size: u64,
     pub decision: Decision,
+    pub label: FileLabel,
 }
 
 /// Normalize each path, drop duplicates (first wins), and sort. Sources call
 /// this so every consumer receives one canonical inventory.
 pub fn canonicalize_inventory(entries: Vec<FileInventoryEntry>) -> Vec<FileInventoryEntry> {
-    let mut by_path: FxHashMap<String, (u64, Decision)> = FxHashMap::default();
+    let mut by_path: FxHashMap<String, (u64, Decision, FileLabel)> = FxHashMap::default();
     for entry in entries {
         let Some(path) = normalize_relative_path(&entry.path) else {
             continue;
         };
-        by_path.entry(path).or_insert((entry.size, entry.decision));
+        by_path
+            .entry(path)
+            .or_insert((entry.size, entry.decision, entry.label));
     }
     let mut entries: Vec<_> = by_path
         .into_iter()
-        .map(|(path, (size, decision))| FileInventoryEntry {
+        .map(|(path, (size, decision, label))| FileInventoryEntry {
             path,
             size,
             decision,
+            label,
         })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -92,30 +146,32 @@ pub enum StreamError {
     Empty,
 }
 
-/// The filtering and accounting policy for a file stream. Each method defaults
-/// to a pass-through; a consumer implements only what it needs and holds its
-/// state (e.g. [`Counter`]s) in `self`. Generic, no `dyn`.
+/// Filtering policy for a file stream. Each method defaults to a pass-through.
+/// Returns `(Decision, FileLabel)` so the source stamps both on the entry.
 pub trait FileStreamHooks {
     /// Charge aggregate counters; called for every entry (so excluded blobs
     /// still count toward a total-bytes cap). `Err` aborts the stream.
     fn admit(&mut self, _file: &FileInventoryEntry) -> Result<(), CapExceeded> {
         Ok(())
     }
-    /// Settle from path + size alone, before any bytes are read. `Some` is final
-    /// (and must not be `Parse` — that needs content); `None` reads the content.
-    fn on_header(&mut self, _file: &FileInventoryEntry) -> Option<Decision> {
+    /// Settle from path + size alone, before any bytes are read. `Some` is
+    /// final; `None` reads the content. On a first pass over raw files,
+    /// `Parse` should only come from `on_content` (it needs bytes). On a
+    /// refinement pass (`FileInventory::refine`) the entry already carries a
+    /// prior label, so returning `Parse` from `on_header` is valid.
+    fn on_header(&mut self, _file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
         None
     }
     /// Decide with the file's full (size-capped) content; only reached when
     /// `on_header` returned `None`.
-    fn on_content(&mut self, _file: &FileInventoryEntry, _content: &[u8]) -> Decision {
-        Decision::Parse
+    fn on_content(&mut self, _file: &FileInventoryEntry, _content: &[u8]) -> (Decision, FileLabel) {
+        (Decision::Parse, FileLabel::default())
     }
     /// Settle a non-regular entry (symlink, etc.) — no content to sniff, never a
     /// parse candidate. Routed here (instead of decided in the source) so the
     /// filter stays the single decision point. Defaults to a bare node.
-    fn on_non_regular(&mut self, _file: &FileInventoryEntry) -> Decision {
-        Decision::ListOnly
+    fn on_non_regular(&mut self, _file: &FileInventoryEntry) -> (Decision, FileLabel) {
+        (Decision::ListOnly, FileLabel::default())
     }
 }
 
@@ -125,7 +181,7 @@ pub fn step<H: FileStreamHooks>(
     file: &FileInventoryEntry,
     content: &mut Vec<u8>,
     sniff: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>,
-) -> Result<Decision, StreamError> {
+) -> Result<(Decision, FileLabel), StreamError> {
     hooks.admit(file)?;
     content.clear();
     if let Some(settled) = hooks.on_header(file) {
@@ -135,16 +191,16 @@ pub fn step<H: FileStreamHooks>(
     Ok(hooks.on_content(file, content))
 }
 
-/// A capped running total (`cap == 0` = unlimited); the first `add` to overflow
-/// short-circuits the stream.
+/// A capped running total; the first `add` to overflow short-circuits the
+/// stream. `None` = unlimited.
 pub struct Counter {
     metric: &'static str,
-    cap: u64,
+    cap: Option<u64>,
     count: u64,
 }
 
 impl Counter {
-    pub fn new(metric: &'static str, cap: u64) -> Self {
+    pub fn new(metric: &'static str, cap: Option<u64>) -> Self {
         Self {
             metric,
             cap,
@@ -154,11 +210,11 @@ impl Counter {
 
     pub fn add(&mut self, n: u64) -> Result<(), CapExceeded> {
         self.count = self.count.saturating_add(n);
-        if self.cap != 0 && self.count > self.cap {
+        if let Some(cap) = self.cap.filter(|&cap| self.count > cap) {
             return Err(CapExceeded {
                 metric: self.metric,
                 count: self.count,
-                cap: self.cap,
+                cap,
             });
         }
         Ok(())
@@ -171,7 +227,7 @@ mod tests {
 
     #[test]
     fn counter_admits_until_cap_then_short_circuits() {
-        let mut bytes = Counter::new("bytes", 100);
+        let mut bytes = Counter::new("bytes", Some(100));
         assert!(bytes.add(60).is_ok());
         assert_eq!(
             bytes.add(60),
@@ -185,7 +241,7 @@ mod tests {
 
     #[test]
     fn zero_cap_is_unlimited() {
-        let mut files = Counter::new("files", 0);
+        let mut files = Counter::new("files", None);
         assert!(files.add(u64::MAX).is_ok());
         assert!(files.add(u64::MAX).is_ok());
     }
@@ -195,8 +251,10 @@ mod tests {
     }
 
     impl FileStreamHooks for TestHooks {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
-            f.path.ends_with(".png").then_some(Decision::Drop)
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
+            f.path
+                .ends_with(".png")
+                .then_some((Decision::Drop, FileLabel::default()))
         }
         fn admit(&mut self, f: &FileInventoryEntry) -> Result<(), CapExceeded> {
             self.bytes.add(f.size)
@@ -208,16 +266,17 @@ mod tests {
             path: path.into(),
             size,
             decision: Decision::Parse,
+            label: Default::default(),
         }
     }
 
     #[test]
     fn step_settles_in_header_without_sniffing() {
         let mut h = TestHooks {
-            bytes: Counter::new("bytes", 0),
+            bytes: Counter::new("bytes", None),
         };
         let mut prefix = Vec::new();
-        let d = step(&mut h, &entry("a.png", 10), &mut prefix, |_| {
+        let (d, _) = step(&mut h, &entry("a.png", 10), &mut prefix, |_| {
             panic!("a header-settled file must never be sniffed")
         })
         .unwrap();
@@ -227,10 +286,10 @@ mod tests {
     #[test]
     fn step_admits_kept_file() {
         let mut h = TestHooks {
-            bytes: Counter::new("bytes", 100),
+            bytes: Counter::new("bytes", Some(100)),
         };
         let mut prefix = Vec::new();
-        let d = step(&mut h, &entry("a.rs", 10), &mut prefix, |buf| {
+        let (d, _) = step(&mut h, &entry("a.rs", 10), &mut prefix, |buf| {
             buf.extend_from_slice(b"fn main");
             Ok(())
         })
@@ -241,7 +300,7 @@ mod tests {
     #[test]
     fn step_charges_cap_before_keep_decision() {
         let mut h = TestHooks {
-            bytes: Counter::new("bytes", 5),
+            bytes: Counter::new("bytes", Some(5)),
         };
         let mut prefix = Vec::new();
         let err = step(&mut h, &entry("a.rs", 10), &mut prefix, |_| Ok(())).unwrap_err();
@@ -251,7 +310,7 @@ mod tests {
     #[test]
     fn step_caps_charge_even_header_dropped_files() {
         let mut h = TestHooks {
-            bytes: Counter::new("bytes", 5),
+            bytes: Counter::new("bytes", Some(5)),
         };
         let mut prefix = Vec::new();
         let err = step(&mut h, &entry("blob.png", 10), &mut prefix, |_| Ok(())).unwrap_err();

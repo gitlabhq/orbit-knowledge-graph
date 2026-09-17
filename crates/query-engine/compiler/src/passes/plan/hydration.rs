@@ -70,6 +70,7 @@ pub fn plan_hydration(input: &Input) -> Result<Plan> {
         .collect::<Result<Vec<_>>>()?;
 
     Ok(Plan {
+        scope_guards: Vec::new(),
         nodes: HashMap::new(),
         hops: vec![],
         strategy: Strategy::SingleNode,

@@ -516,7 +516,6 @@ pub enum TraversalPathKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraversalPathLookupSpec {
     pub kind: TraversalPathKind,
-    pub dictionary: Option<String>,
     pub source_table: String,
     pub key_column: String,
 }
@@ -525,7 +524,6 @@ pub struct TraversalPathLookupSpec {
 pub struct TraversalPathLookup {
     pub entity: String,
     pub kind: TraversalPathKind,
-    pub dictionary: Option<String>,
     pub source_table: String,
     pub key_column: String,
 }

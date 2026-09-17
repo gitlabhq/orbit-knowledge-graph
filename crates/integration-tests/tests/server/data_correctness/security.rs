@@ -128,7 +128,7 @@ pub(super) async fn search_traversal_path_filter_outside_scope_rejects_at_compil
     ctx: &TestContext,
 ) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -180,7 +180,7 @@ pub(super) async fn relationship_traversal_path_filter_outside_scope_rejects_at_
     ctx: &TestContext,
 ) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -317,7 +317,7 @@ fn admin_ctx() -> SecurityContext {
 
 pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -340,7 +340,7 @@ pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestCon
 
 pub(super) async fn admin_only_non_admin_order_by_rejects_at_compile(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -363,7 +363,7 @@ pub(super) async fn admin_only_non_admin_order_by_rejects_at_compile(ctx: &TestC
 
 pub(super) async fn admin_only_non_admin_max_aggregation_rejects_at_compile(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "aggregation",
@@ -396,7 +396,7 @@ pub(super) async fn admin_only_non_admin_count_aggregation_on_auditor_rejects_at
     ctx: &TestContext,
 ) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "aggregation",
@@ -514,7 +514,7 @@ pub(super) async fn admin_only_admin_filter_compiles(ctx: &TestContext) {
 
 pub(super) async fn admin_only_admin_order_by_compiles(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     compile(r#"{
         "query_type": "traversal",
         "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]}],
@@ -526,7 +526,7 @@ pub(super) async fn admin_only_admin_order_by_compiles(ctx: &TestContext) {
 
 pub(super) async fn admin_only_admin_aggregation_compiles(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     compile(r#"{
         "query_type": "aggregation",
         "nodes": [
@@ -832,7 +832,7 @@ pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
 /// rather than relying on CheckPass alone.
 pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
 
     let compiled = compile(r#"{
@@ -873,7 +873,7 @@ pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestCon
 /// paths via LCP + OR.
 pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/102/".into()]).unwrap();
 
     let compiled = compile(r#"{
@@ -1240,7 +1240,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
     ctx: &TestContext,
 ) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap();
 
     let compiled = compile(
@@ -1291,7 +1291,7 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_reporter_rej
     ctx: &TestContext,
 ) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "aggregation",
@@ -1356,7 +1356,7 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_security_man
 /// under Reporter-only access; guards against passes re-introducing the path list.
 pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap();
 
     let compiled = compile(r#"{
@@ -1430,7 +1430,7 @@ pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestCon
 
 pub(super) async fn aggregation_user_only_rejects_at_compile(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "aggregation",
@@ -1453,7 +1453,7 @@ pub(super) async fn aggregation_user_only_rejects_at_compile(ctx: &TestContext) 
 
 pub(super) async fn aggregation_user_only_with_pii_filter_rejects_at_compile(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "aggregation",
@@ -1475,7 +1475,7 @@ pub(super) async fn aggregation_user_only_with_pii_filter_rejects_at_compile(ctx
 
 pub(super) async fn aggregation_user_joined_to_scoped_group_compiles(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     compile(r#"{
         "query_type": "aggregation",
         "nodes": [
@@ -1492,7 +1492,7 @@ pub(super) async fn aggregation_user_joined_to_scoped_group_compiles(ctx: &TestC
 
 pub(super) async fn aggregation_user_only_admin_still_compiles(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     compile(r#"{
         "query_type": "aggregation",
         "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
@@ -1504,7 +1504,7 @@ pub(super) async fn aggregation_user_only_admin_still_compiles(ctx: &TestContext
 
 pub(super) async fn aggregation_user_only_rejection_happens_before_sql_compile(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "aggregation",
@@ -1530,7 +1530,7 @@ pub(super) async fn aggregation_user_only_rejection_happens_before_sql_compile(c
 
 pub(super) async fn aggregation_user_only_neighbors_query_is_not_blocked(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     compile(
         r#"{
         "query_type": "neighbors",
@@ -1549,7 +1549,7 @@ pub(super) async fn aggregation_user_disconnected_scoped_node_rejects_at_compile
     ctx: &TestContext,
 ) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     // User and Group are declared but unconnected: the declaration-based guard
     // accepts this, but the reachability guard must reject because the User scan
     // would be unbounded by any edge join.
@@ -1582,11 +1582,10 @@ pub(super) async fn aggregation_user_disconnected_scoped_node_rejects_at_compile
     );
 }
 
-pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestContext) {
+pub(super) async fn aggregation_over_shortest_path_rejects_at_compile(ctx: &TestContext) {
     let _ = ctx;
-    let ontology = Arc::new(load_ontology());
-    // Reachability is satisfied through the `path` config, not only `relationships`.
-    compile(
+    let ontology = load_ontology();
+    let err = compile(
         r#"{
         "query_type": "aggregation",
         "nodes": [
@@ -1602,7 +1601,12 @@ pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestConte
         &ontology,
         &non_admin_ctx(),
     )
-    .expect("User reachable via path to a scoped Project must compile");
+    .expect_err("aggregation over a shortest path must reject");
+    assert!(
+        err.to_string()
+            .contains("aggregation over shortest paths is not supported"),
+        "{err}"
+    );
 }
 
 pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx: &TestContext) {

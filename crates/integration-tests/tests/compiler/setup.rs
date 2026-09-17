@@ -2,6 +2,7 @@ use compiler::passes::lower::lower;
 use compiler::passes::validate::Validator;
 use compiler::{AccessLevel, AuthorizedPath, Node, SecurityContext, normalize};
 use ontology::{DataType, Ontology};
+use std::sync::Arc;
 
 pub fn test_ctx() -> SecurityContext {
     SecurityContext::new(1, vec!["1/".into()]).unwrap()
@@ -16,50 +17,52 @@ pub fn admin_ctx() -> SecurityContext {
     .with_role(true, Some(AccessLevel::Owner as u32))
 }
 
-pub fn test_ontology() -> Ontology {
-    Ontology::new()
-        .with_nodes(["User", "Project", "Note", "Group"])
-        .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
-        .with_fields(
-            "User",
-            [
-                ("username", DataType::String),
-                ("state", DataType::String),
-                ("created_at", DataType::DateTime),
-            ],
-        )
-        .with_fields(
-            "Note",
-            [
-                ("confidential", DataType::Bool),
-                ("created_at", DataType::DateTime),
-                ("traversal_path", DataType::String),
-            ],
-        )
-        .with_fields(
-            "Project",
-            [
-                ("name", DataType::String),
-                ("traversal_path", DataType::String),
-            ],
-        )
-        .with_fields(
-            "Group",
-            [
-                ("name", DataType::String),
-                ("traversal_path", DataType::String),
-            ],
-        )
+pub fn test_ontology() -> Arc<Ontology> {
+    Arc::new(
+        Ontology::new()
+            .with_nodes(["User", "Project", "Note", "Group"])
+            .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
+            .with_fields(
+                "User",
+                [
+                    ("username", DataType::String),
+                    ("state", DataType::String),
+                    ("created_at", DataType::DateTime),
+                ],
+            )
+            .with_fields(
+                "Note",
+                [
+                    ("confidential", DataType::Bool),
+                    ("created_at", DataType::DateTime),
+                    ("traversal_path", DataType::String),
+                ],
+            )
+            .with_fields(
+                "Project",
+                [
+                    ("name", DataType::String),
+                    ("traversal_path", DataType::String),
+                ],
+            )
+            .with_fields(
+                "Group",
+                [
+                    ("name", DataType::String),
+                    ("traversal_path", DataType::String),
+                ],
+            ),
+    )
 }
 
-pub fn embedded_ontology() -> Ontology {
-    Ontology::load_embedded().expect("Failed to load embedded ontology")
+pub fn embedded_ontology() -> Arc<Ontology> {
+    Arc::new(Ontology::load_embedded().expect("Failed to load embedded ontology"))
 }
 
 pub fn compile_pair(
     json: &str,
     orbit_query: &str,
-    ontology: &Ontology,
+    ontology: &Arc<Ontology>,
     context: &SecurityContext,
 ) -> compiler::Result<compiler::CompiledQueryContext> {
     let json_result = compiler::compile(json, compiler::Frontend::JsonDsl, ontology, context);

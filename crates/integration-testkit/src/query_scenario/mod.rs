@@ -154,15 +154,14 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
             eprintln!("    {name}: skipping unknown query language '{frontend_key}'");
             continue;
         };
-        let label = format!("{name} [{frontend_key}]");
         run_frontend(
             &ctx,
-            frontend,
+            (frontend, frontend_key),
             query_str,
             &security,
             &redaction,
             &scenario.expect,
-            &label,
+            name,
         )
         .await;
     }
@@ -170,21 +169,21 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 
 async fn run_frontend(
     ctx: &TestContext,
-    frontend: Frontend,
+    (frontend, frontend_key): (Frontend, &str),
     query: &str,
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
-    label: &str,
+    name: &str,
 ) {
-    let ontology = Arc::new(load_ontology());
+    let label = &format!("{name} [{frontend_key}]");
+    let ontology = load_ontology();
 
     let compiled = match compile(query, frontend, &ontology, security) {
         Ok(c) => {
-            let expects_error = matches!(
+            let expects_error = !matches!(
                 expect.compile_error,
-                Some(format::CompileErrorExpect::Flag(true))
-                    | Some(format::CompileErrorExpect::Substring(_))
+                None | Some(format::CompileErrorExpect::Flag(false))
             );
             assert!(
                 !expects_error,
@@ -193,9 +192,18 @@ async fn run_frontend(
             Arc::new(c)
         }
         Err(e) => match &expect.compile_error {
-            Some(format::CompileErrorExpect::Flag(true)) => {
+            None | Some(format::CompileErrorExpect::Flag(false)) => {
+                panic!("{label}: unexpected compile error: {e}")
+            }
+            Some(expected) => {
                 let msg = e.to_string();
-                for banned in &expect.compile_error_not_contains {
+                if let Some(sub) = expected.substring_for(frontend_key) {
+                    assert!(
+                        msg.contains(sub),
+                        "{label}: compile error '{msg}' does not contain '{sub}'"
+                    );
+                }
+                for banned in expect.compile_error_not_contains.banned_for(frontend_key) {
                     assert!(
                         !msg.contains(banned.as_str()),
                         "{label}: compile error must not contain '{banned}'\nerror: {msg}"
@@ -203,23 +211,17 @@ async fn run_frontend(
                 }
                 return;
             }
-            Some(format::CompileErrorExpect::Substring(sub)) => {
-                let msg = e.to_string();
-                assert!(
-                    msg.contains(sub.as_str()),
-                    "{label}: compile error '{msg}' does not contain '{sub}'"
-                );
-                for banned in &expect.compile_error_not_contains {
-                    assert!(
-                        !msg.contains(banned.as_str()),
-                        "{label}: compile error must not contain '{banned}'\nerror: {msg}"
-                    );
-                }
-                return;
-            }
-            _ => panic!("{label}: unexpected compile error: {e}"),
         },
     };
+
+    if let Some(expected) = expect.hydration {
+        assert_eq!(
+            compiled.hydration.kind(),
+            expected,
+            "{label}: unexpected hydration plan\n{:?}",
+            compiled.hydration
+        );
+    }
 
     let sql = compiled.base.render();
     for fragment in &expect.sql_contains {
@@ -249,6 +251,25 @@ async fn run_frontend(
     }
 
     let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
+
+    if let Some(n) = expect.repeat_count {
+        assert!(n >= 2, "{label}: repeat_count must be >= 2");
+        let baseline_node_ids = canonical_ids(&resp);
+        let baseline_edges = canonical_edges(&resp);
+        for run in 2..=n {
+            let rerun = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
+            assert_eq!(
+                baseline_node_ids,
+                canonical_ids(&rerun),
+                "{label}: run {run}/{n} returned different node IDs"
+            );
+            assert_eq!(
+                baseline_edges,
+                canonical_edges(&rerun),
+                "{label}: run {run}/{n} returned different edges"
+            );
+        }
+    }
 
     let response: query_engine::formatters::GraphResponse =
         serde_json::from_value(resp).expect("response should deserialize");
@@ -335,9 +356,6 @@ async fn run_pages(
         }
 
         apply_expect(&view, page_expect, &page_label);
-        if page_expect.node_count.is_none() {
-            view.assert_node_count(view.node_count());
-        }
 
         match next_cursor {
             Some(cursor) => query_str = with_after(frontend, base_query.trim_end(), &cursor),
@@ -486,6 +504,11 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 .get("id")
                 .and_then(|v| v.as_i64())
                 .unwrap_or_else(|| panic!("{label}: node {entity} row missing integer 'id'"));
+            let prop_count = row.keys().filter(|k| *k != "id").count();
+            assert!(
+                prop_count > 0,
+                "{label}: node {entity}/{id} row has no property assertions (only 'id')"
+            );
             let found = view
                 .find_node(entity, id)
                 .unwrap_or_else(|| panic!("{label}: node {entity}/{id} not found"));
@@ -632,6 +655,12 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
     if expect.empty_aggregation {
         view.assert_empty_aggregation();
     }
+    for (name, node_dot_prop) in &expect.group_columns {
+        let (node, property) = node_dot_prop.split_once('.').unwrap_or_else(|| {
+            panic!("{label}: group_columns value must be 'node.property', got '{node_dot_prop}'")
+        });
+        view.assert_group_column(name, node, property);
+    }
     if let Some(n) = expect.path_count {
         let pids = view.path_ids();
         assert_eq!(pids.len(), n, "{label}: path count mismatch");
@@ -660,6 +689,14 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         }
     }
     if !expect.path_edges.is_empty() {
+        for (pi, path_exp) in expect.path_edges.iter().enumerate() {
+            for (ei, edge_exp) in path_exp.iter().enumerate() {
+                assert!(
+                    edge_exp.has_assertions(),
+                    "{label}: path_edges[{pi}][{ei}] has no assertions (all fields omitted)"
+                );
+            }
+        }
         let pids = view.path_ids();
         assert_eq!(
             pids.len(),
@@ -668,14 +705,43 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             expect.path_edges.len(),
             pids.len()
         );
-        for (i, (&pid, expected_edges)) in pids.iter().zip(&expect.path_edges).enumerate() {
-            let actual = view.path(pid);
+        // Sort both actual paths and expected paths by destination ID
+        // so the zip is deterministic regardless of path_ids() ordering.
+        let mut actual_paths: Vec<_> = pids
+            .iter()
+            .map(|&pid| {
+                let edges = view.path(pid);
+                let dest_id = edges.last().map_or(0, |e| e.to_id);
+                (dest_id, edges)
+            })
+            .collect();
+        actual_paths.sort_by_key(|(dest, _)| *dest);
+        let mut expected_indexed: Vec<_> = expect
+            .path_edges
+            .iter()
+            .enumerate()
+            .map(|(i, edges)| {
+                let dest_id = edges.last().and_then(|e| e.to_id).unwrap_or_else(|| {
+                    assert!(
+                        expect.path_edges.len() == 1,
+                        "{label}: path_edges[{i}] must set to_id on its last edge \
+                         when more than one path is expected"
+                    );
+                    0
+                });
+                (dest_id, i, edges)
+            })
+            .collect();
+        expected_indexed.sort_by_key(|(dest, _, _)| *dest);
+        for (i, ((_, actual), (_, _, expected_edges))) in
+            actual_paths.iter().zip(&expected_indexed).enumerate()
+        {
             assert_eq!(
                 actual.len(),
                 expected_edges.len(),
                 "{label}: path {i} edge count mismatch"
             );
-            for (j, (edge, exp)) in actual.iter().zip(expected_edges).enumerate() {
+            for (j, (edge, exp)) in actual.iter().zip(*expected_edges).enumerate() {
                 if let Some(ref from) = exp.from {
                     assert_eq!(&edge.from, from, "{label}: path {i} edge {j} from entity");
                 }
@@ -690,6 +756,9 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 }
                 if let Some(to_id) = exp.to_id {
                     assert_eq!(edge.to_id, to_id, "{label}: path {i} edge {j} to_id");
+                }
+                if let Some(step) = exp.step {
+                    assert_eq!(edge.step, Some(step), "{label}: path {i} edge {j} step");
                 }
             }
         }
@@ -735,6 +804,13 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             expected,
             "{label}: has_more mismatch"
         );
+    }
+    let has_edge_assertions = !expect.edges.is_empty()
+        || !expect.edge_exists.is_empty()
+        || !expect.edge_absent.is_empty()
+        || !expect.edge_count.is_empty();
+    if has_edge_assertions && !view.response.edges.is_empty() {
+        view.assert_all_edge_types_covered();
     }
 }
 
@@ -816,6 +892,13 @@ fn eval_filter_predicate(
     }
 }
 
+fn try_expand_repeat(obj: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    let pattern = obj.get("repeat")?.as_str()?;
+    let count = obj.get("count")?.as_u64()? as usize;
+    let suffix = obj.get("suffix").and_then(|v| v.as_str()).unwrap_or("");
+    Some(format!("{}{suffix}", pattern.repeat(count)))
+}
+
 fn assert_property(
     node: &dyn NodeExt,
     prop: &str,
@@ -826,6 +909,12 @@ fn assert_property(
 ) {
     match expected {
         serde_json::Value::String(s) => node.assert_str(prop, s),
+        serde_json::Value::Object(m) if m.contains_key("repeat") => {
+            let expanded = try_expand_repeat(m).unwrap_or_else(|| {
+                panic!("{label}: {entity}/{id}.{prop}: invalid repeat object, expected {{repeat: \"str\", count: N}}")
+            });
+            node.assert_str(prop, &expanded);
+        }
         serde_json::Value::Number(n) if n.is_i64() => {
             node.assert_i64(prop, n.as_i64().unwrap());
         }
@@ -896,17 +985,6 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     if let Some(true) = ov.admin {
         ctx = ctx.with_role(true, Some(AccessLevel::Owner as u32));
     }
-    if !ov.scope_prefixes.is_empty() {
-        let prefixes: std::collections::HashMap<
-            String,
-            orbit_utils::traversal_path::TraversalPath,
-        > = ov
-            .scope_prefixes
-            .iter()
-            .map(|(k, v)| (k.clone(), v.as_str().into()))
-            .collect();
-        ctx = ctx.with_scope_prefixes(prefixes);
-    }
     ctx
 }
 
@@ -945,6 +1023,61 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
         "path_finding" => Some(Requirement::PathFinding),
         _ => None,
     }
+}
+
+fn canonical_ids(resp: &serde_json::Value) -> Vec<(String, i64)> {
+    let mut ids: Vec<(String, i64)> = resp["nodes"]
+        .as_array()
+        .map(|nodes| {
+            nodes
+                .iter()
+                .map(|n| {
+                    let entity = n["entity_type"].as_str().unwrap_or("").to_owned();
+                    let id = n["id"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .or_else(|| n["id"].as_i64())
+                        .unwrap_or_else(|| {
+                            panic!("determinism check: node missing numeric 'id': {n}")
+                        });
+                    (entity, id)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.sort();
+    ids
+}
+
+fn canonical_edges(resp: &serde_json::Value) -> Vec<(String, i64, i64)> {
+    let mut edges: Vec<(String, i64, i64)> = resp["edges"]
+        .as_array()
+        .map(|edges| {
+            edges
+                .iter()
+                .map(|e| {
+                    let kind = e["type"].as_str().unwrap_or("").to_owned();
+                    let from = e["from_id"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .or_else(|| e["from_id"].as_i64())
+                        .unwrap_or_else(|| {
+                            panic!("determinism check: edge missing numeric 'from_id': {e}")
+                        });
+                    let to = e["to_id"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .or_else(|| e["to_id"].as_i64())
+                        .unwrap_or_else(|| {
+                            panic!("determinism check: edge missing numeric 'to_id': {e}")
+                        });
+                    (kind, from, to)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    edges.sort();
+    edges
 }
 
 #[cfg(test)]

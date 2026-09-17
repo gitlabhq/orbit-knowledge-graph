@@ -1,7 +1,12 @@
 use crate::compiler::setup::{compile_pair, compile_to_ast, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
+use compiler::gql::{PreparedStatement, prepare};
 use compiler::input::DynamicColumnMode;
 use compiler::{Frontend, Node, QueryError, compile};
+use ontology::introspection::{
+    IntrospectionScope::{All, Local},
+    build_schema_response,
+};
 
 #[test]
 fn compile_to_ast_works() {
@@ -263,7 +268,7 @@ fn group_by_truncate_custom_alias_preserved() {
 
 #[test]
 fn path_finding_query() {
-    let orbit_query = "MATCH p = shortestPath((start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200})) RETURN p";
+    let orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN p";
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -314,8 +319,8 @@ fn path_finding_depth_control() {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
     }"#;
 
-    let shallow_orbit_query = "MATCH p = shortestPath((start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1]->(`end`:Project {id: 2})) RETURN p";
-    let deep_orbit_query = "MATCH p = shortestPath((start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 2})) RETURN p";
+    let shallow_orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1]->(`end`:Project {id: 2}) RETURN p";
+    let deep_orbit_query = "MATCH p = ANY SHORTEST (start:Project {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 2}) RETURN p";
     let shallow_sql = compile_pair(shallow, shallow_orbit_query, &test_ontology(), &test_ctx())
         .unwrap()
         .base
@@ -522,25 +527,27 @@ fn valid_identifiers_produce_renderable_sql() {
     assert!(rendered.contains("_gkg_node123_id"));
 }
 
-fn multi_table_ontology() -> ontology::Ontology {
+fn multi_table_ontology() -> std::sync::Arc<ontology::Ontology> {
     use ontology::DataType;
-    ontology::Ontology::new()
-        .with_nodes(["User", "Project", "File", "Definition"])
-        .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
-        .with_edge_table("gl_code_edge")
-        .with_edge_for_table("DEFINES", "gl_code_edge")
-        .with_edge_for_table("IMPORTS", "gl_code_edge")
-        .with_fields(
-            "User",
-            [("username", DataType::String), ("state", DataType::String)],
-        )
-        .with_default_columns("User", ["username"])
-        .with_fields("Project", [("name", DataType::String)])
-        .with_default_columns("Project", ["name"])
-        .with_fields("File", [("path", DataType::String)])
-        .with_default_columns("File", ["path"])
-        .with_fields("Definition", [("name", DataType::String)])
-        .with_default_columns("Definition", ["name"])
+    std::sync::Arc::new(
+        ontology::Ontology::new()
+            .with_nodes(["User", "Project", "File", "Definition"])
+            .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
+            .with_edge_table("gl_code_edge")
+            .with_edge_for_table("DEFINES", "gl_code_edge")
+            .with_edge_for_table("IMPORTS", "gl_code_edge")
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("state", DataType::String)],
+            )
+            .with_default_columns("User", ["username"])
+            .with_fields("Project", [("name", DataType::String)])
+            .with_default_columns("Project", ["name"])
+            .with_fields("File", [("path", DataType::String)])
+            .with_default_columns("File", ["path"])
+            .with_fields("Definition", [("name", DataType::String)])
+            .with_default_columns("Definition", ["name"]),
+    )
 }
 
 #[test]
@@ -662,7 +669,7 @@ fn single_table_ontology_no_union() {
 
 #[test]
 fn multi_table_path_finding_scans_all_tables() {
-    let orbit_query = "MATCH path = shortestPath((start:User {id: 1})-[:CONTAINS|DEFINES*1..3]->(`end`:Definition {id: 100})) RETURN path";
+    let orbit_query = "MATCH path = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|DEFINES*1..3]->(`end`:Definition {id: 100}) RETURN path";
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -683,12 +690,14 @@ fn multi_table_path_finding_scans_all_tables() {
 fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
     let orbit_query = "MATCH (f:File)--(n) WHERE f.path CONTAINS 'labkit' RETURN n";
     use ontology::DataType;
-    let ontology = ontology::Ontology::new()
-        .with_nodes(["File"])
-        .with_edges(["DEFINES"])
-        .with_fields("File", [("path", DataType::String)])
-        .with_default_columns("File", ["path"])
-        .with_redaction("File", "project", "project_id");
+    let ontology = std::sync::Arc::new(
+        ontology::Ontology::new()
+            .with_nodes(["File"])
+            .with_edges(["DEFINES"])
+            .with_fields("File", [("path", DataType::String)])
+            .with_default_columns("File", ["path"])
+            .with_redaction("File", "project", "project_id"),
+    );
 
     let json = r#"{
         "query_type": "neighbors",
@@ -731,19 +740,10 @@ fn multi_table_neighbors_scans_all_tables() {
 
 use crate::compiler::setup::{admin_ctx, embedded_ontology};
 
-const SCOPED_PREFIX: &str = "1/24/23/";
-
-fn scoped_ctx() -> compiler::SecurityContext {
-    let mut prefixes = std::collections::HashMap::new();
-    prefixes.insert(
-        "p".to_string(),
-        orbit_utils::traversal_path::TraversalPath::new_unchecked(SCOPED_PREFIX),
-    );
-    admin_ctx().with_scope_prefixes(prefixes)
-}
+const SCOPED_LOOKUP: &str = "FROM gl_project AS _scope WHERE";
 
 fn render_scoped(json: &str, orbit_query: &str) -> String {
-    compile_pair(json, orbit_query, &embedded_ontology(), &scoped_ctx())
+    compile_pair(json, orbit_query, &embedded_ontology(), &admin_ctx())
         .unwrap()
         .base
         .render()
@@ -762,7 +762,11 @@ fn scoped_traversal_injects_tight_prefix() {
         "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
         "limit": 100
     }"#;
-    assert!(render_scoped(json, orbit_query).contains(SCOPED_PREFIX));
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains(SCOPED_LOOKUP) && sql.contains("(_scope.id = 1)"),
+        "{sql}"
+    );
 }
 
 #[test]
@@ -779,7 +783,38 @@ fn scoped_aggregation_injects_tight_prefix() {
         "aggregations": [{"count": "wi", "as": "c"}],
         "limit": 100
     }"#;
-    assert!(render_scoped(json, orbit_query).contains(SCOPED_PREFIX));
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains(SCOPED_LOOKUP) && sql.contains("(_scope.id = 1)"),
+        "{sql}"
+    );
+}
+
+#[test]
+fn scoped_count_condition_excludes_the_scope_lookup() {
+    let orbit_query =
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) RETURN g, count(u) AS n LIMIT 5";
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "g", "entity": "Group", "node_ids": [100]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "limit": 5
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    let count_arg = sql
+        .split("countIf(")
+        .nth(1)
+        .unwrap()
+        .split(" AS n")
+        .next()
+        .unwrap();
+    assert!(!count_arg.contains("_scope"), "{sql}");
+    assert!(sql.contains("FROM gl_group AS _scope WHERE"), "{sql}");
 }
 
 #[test]
@@ -799,22 +834,14 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
         "limit": 100
     }"#;
     let ontology = embedded_ontology();
-    let compiled = compile_pair(json, orbit_query, &ontology, &scoped_ctx()).unwrap();
+    let compiled = compile_pair(json, orbit_query, &ontology, &admin_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    let expected = if ontology.partition().is_some() { 5 } else { 3 };
-    assert_eq!(
-        sql.matches(SCOPED_PREFIX).count(),
-        expected,
-        "startsWith on the anchor + two edge scans, plus a _partition_id per edge scan when partitioned"
-    );
-
-    let scoped_filter = sql.split("WHERE").nth(1).unwrap();
-    let scoped_clause = scoped_filter.split("SELECT").next().unwrap();
-    assert!(scoped_clause.contains(SCOPED_PREFIX));
+    let before_related = sql.split("RELATED_TO").next().unwrap();
+    assert!(before_related.contains(SCOPED_LOOKUP), "{sql}");
 
     let after_related = sql.split("RELATED_TO").nth(1).unwrap();
-    assert!(!after_related.contains(SCOPED_PREFIX));
+    assert!(!after_related.contains(SCOPED_LOOKUP), "{sql}");
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");
@@ -861,6 +888,22 @@ fn orbit_query_bounded_hops_and_relationship_filters() {
 fn orbit_query_id_selectors_preserve_additional_predicates() {
     let cases = [
         (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":{"eq":2}}}]}"#,
+            "MATCH (u:User) WHERE u.id IN [1, 2] AND u.id = 2 RETURN u",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":{"in":[2,3]}}}]}"#,
+            "MATCH (u:User) WHERE u.id IN [1, 2] AND u.id IN [2, 3] RETURN u",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2],"filters":{"id":[{"gte":1},{"lte":3},{"eq":2}]}}]}"#,
+            "MATCH (u:User) WHERE u.id >= 1 AND u.id IN [1, 2] AND u.id <= 3 AND u.id = 2 RETURN u",
+        ),
+        (
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":[{"in":[2,3]},{"gte":1},{"lte":3}]}}]}"#,
+            "MATCH (u:User {id: 1}) WHERE u.id IN [2, 3] AND u.id >= 1 AND u.id <= 3 RETURN u",
+        ),
+        (
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"id":{"in":[2,3]}}}]}"#,
             "MATCH (u:User {id: 1}) WHERE u.id IN [2, 3] RETURN u",
         ),
@@ -883,6 +926,37 @@ fn orbit_query_id_selectors_preserve_additional_predicates() {
     ];
     for (json, orbit_query) in cases {
         compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
+    }
+}
+
+#[test]
+fn orbit_query_id_list_and_range_promote_independently() {
+    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2,3,5],"id_range":{"start":1,"end":3},"filters":{"state":"active"}}]}"#;
+    let ontology = test_ontology();
+    let context = test_ctx();
+    for list in ["u.id IN [1, 2, 3, 5]", "u.id IN ['1', '2', '3', '5']"] {
+        for bounds in [["u.id >= 1", "u.id <= 3"], ["u.id > 0", "u.id < 4"]] {
+            let predicates = [list, bounds[0], bounds[1]];
+            for order in [
+                [0, 1, 2],
+                [0, 2, 1],
+                [1, 0, 2],
+                [1, 2, 0],
+                [2, 0, 1],
+                [2, 1, 0],
+            ] {
+                let conditions = order.map(|i| predicates[i]).join(" AND ");
+                let query =
+                    format!("MATCH (u:User) WHERE {conditions} AND u.state = 'active' RETURN u");
+                let input = compiler::passes::frontend::gql::parse(&query).unwrap();
+                let node = &input.nodes[0];
+                assert_eq!(node.node_ids, [1, 2, 3, 5], "{query}");
+                let range = node.id_range.as_ref().unwrap();
+                assert_eq!((range.start, range.end), (1, 3), "{query}");
+                assert!(!node.filters.contains_key("id"), "{query}");
+                compile_pair(json, &query, &ontology, &context).unwrap();
+            }
+        }
     }
 }
 
@@ -954,6 +1028,44 @@ fn orbit_query_rejects_inline_filters_on_variable_length_relationships() {
 }
 
 #[test]
+fn orbit_query_rejects_aggregation_over_shortest_paths() {
+    let cases = [
+        (
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"p","entity":"Project"}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":10}"#,
+            "MATCH path = ANY SHORTEST (u:User)-[*1..3]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN p, count(u) AS hit LIMIT 10",
+        ),
+        (
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":2,"end":2}},{"id":"p","entity":"Project","node_ids":[2],"columns":["id"]}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":1}"#,
+            "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project {id: 2}) WHERE u.id >= 2 AND u.id <= 2 RETURN p{.id}, count(u) AS hit LIMIT 1",
+        ),
+    ];
+    let ontology = embedded_ontology();
+    let context = test_ctx();
+    for (json, gql) in cases {
+        for (source, frontend) in [(json, Frontend::JsonDsl), (gql, Frontend::Gql)] {
+            let error = compile(source, frontend, &ontology, &context).expect_err(source);
+            assert!(
+                matches!(&error, QueryError::Validation(message)
+                    if message == "aggregation over shortest paths is not supported"),
+                "{source}: {error}"
+            );
+        }
+    }
+    for query in [
+        "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN path, count(u)",
+        "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project) RETURN properties(path), count(u)",
+    ] {
+        let error = compiler::passes::frontend::gql::parse(query).expect_err(query);
+        assert!(
+            error
+                .to_string()
+                .contains("aggregation cannot return the path variable"),
+            "{query}: {error}"
+        );
+    }
+}
+
+#[test]
 fn orbit_query_rejects_neighbors_center_all_properties() {
     for query in [
         "MATCH (center:User {id: 1})--(n) RETURN properties(center), n",
@@ -970,6 +1082,9 @@ fn orbit_query_rejects_neighbors_center_all_properties() {
     }
     let json = r#"{"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}}"#;
     let query = "MATCH (center:User {id: 1})--(n) RETURN center, n";
+    compile_pair(json, query, &embedded_ontology(), &test_ctx()).unwrap();
+    let json = r#"{"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1],"columns":["username","state"]}],"neighbors":{"direction":"both"}}"#;
+    let query = "MATCH (center:User {id: 1})--(n) RETURN center.username, center.state, n";
     compile_pair(json, query, &embedded_ontology(), &test_ctx()).unwrap();
 }
 
@@ -1064,6 +1179,14 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN count(*)",
         "MATCH (u:User) RETURN collect(u.username)",
         "MATCH (u:User) RETURN u SKIP 1",
+        "MATCH (u:User) RETURN u DEBUG DEBUG",
+        "MATCH (u:User) RETURN u DEBUG LIMIT 1",
+        "MATCH (u:User) RETURN u LIMIT 1 ORDER BY u.id",
+        "MATCH (u:User) RETURN u LIMIT 1 PAGE 1",
+        "MATCH (u:User) RETURN u PAGE 1 LIMIT 1",
+        "MATCH (u:User) RETURN u AFTER 'token'",
+        "MATCH (u:User) RETURN u; DEBUG",
+        "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
         "MATCH (u:User) RETURN u.username AS renamed",
         "MATCH (u:User) RETURN u{.username}, count(u)",
@@ -1078,7 +1201,11 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User {id: 1})-->(n) WHERE n.id = 2 RETURN n",
         "MATCH (u:User {id: 1})-->(n) RETURN count(n)",
         "MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(p:Project) WHERE r.target_id = 2 RETURN u",
-        "MATCH p = shortestPath((u:User {id: 1})<-[:MEMBER_OF*1..3]-(p:Project {id: 2})) RETURN p",
+        "MATCH p = ANY SHORTEST (u:User {id: 1})<-[:MEMBER_OF*1..3]-(p:Project {id: 2}) RETURN p",
+        "MATCH p = shortestPath((u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group)) RETURN p",
+        "MATCH p = ALL SHORTEST (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p",
+        "MATCH p = SHORTEST 2 (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p",
+        "MATCH p = (u:User {id: 1})-[:MEMBER_OF*1..3]->(g:Group) RETURN p",
         "MATCH (u:User {id: 1})-->(u) RETURN u",
         "MATCH (u:User {id: 1, id: 2}) RETURN u",
         "MATCH (u:User) WHERE missing.username = 'abc' RETURN u",
@@ -1171,15 +1298,23 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     for query in [nested, oversized] {
         assert!(compiler::passes::frontend::gql::parse(&query).is_err());
     }
-    assert!(
-        compiler::compile(
-            "MATCH (u:User) WHERE u.id IN [] RETURN u",
-            compiler::Frontend::Gql,
-            &test_ontology(),
-            &test_ctx()
-        )
-        .is_err()
-    );
+    for query in [
+        "MATCH (u:User) WHERE u.id IN [] RETURN u",
+        "MATCH (u:User) WHERE u.id IN [] AND u.id >= 1 AND u.id <= 3 RETURN u",
+        "MATCH (u:User) WHERE u.id IN [1, 2] AND u.id IN [] RETURN u",
+        "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u",
+    ] {
+        assert!(
+            compiler::compile(
+                query,
+                compiler::Frontend::Gql,
+                &test_ontology(),
+                &test_ctx()
+            )
+            .is_err(),
+            "{query}"
+        );
+    }
 }
 
 #[test]
@@ -1243,7 +1378,7 @@ fn orbit_query_path_depth_caps_match_json() {
             r#"{{"query_type":"path_finding","nodes":[{{"id":"a","entity":"Project","node_ids":[1]}},{{"id":"b","entity":"Project","node_ids":[2]}}],"path":{{"type":"shortest","from":"a","to":"b","max_depth":{depth},"rel_types":["CONTAINS"]}}}}"#
         );
         let query = format!(
-            "MATCH p = shortestPath((a:Project {{id: 1}})-[:CONTAINS*1..{depth}]->(b:Project {{id: 2}})) RETURN p"
+            "MATCH p = ANY SHORTEST (a:Project {{id: 1}})-[:CONTAINS*1..{depth}]->(b:Project {{id: 2}}) RETURN p"
         );
         let result = compile_pair(&json, &query, &ontology, &ctx);
         if (1..=3).contains(&depth) {
@@ -1515,7 +1650,7 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
     let json = r#"{"query_type":"path_finding","nodes":[{"id":"start","entity":"Project","node_ids":[100]},{"id":"end","entity":"Project","node_ids":[200]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["CONTAINS"]},"options":{"dynamic_columns":"*"}}"#;
     let compiled = compile_pair(
         json,
-        "MATCH p = shortestPath((start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200})) RETURN properties(p)",
+        "MATCH p = ANY SHORTEST (start:Project {id: 100})-[:CONTAINS*1..3]->(`end`:Project {id: 200}) RETURN properties(p)",
         &test_ontology(),
         &test_ctx(),
     )
@@ -1524,6 +1659,58 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
         compiled.input.options.dynamic_columns,
         DynamicColumnMode::All
     );
+}
+
+#[test]
+fn orbit_query_optional_clauses_preserve_options() {
+    for order in ["", " ORDER BY u.id"] {
+        for (limit, rows, page) in [
+            ("", None, None),
+            (" LIMIT 7", Some(7), None),
+            (" PAGE 7", None, Some(7)),
+        ] {
+            for debug in ["", " DEBUG"] {
+                let query = format!("MATCH (u:User {{id: 1}}) RETURN u{order}{limit}{debug}");
+                let compiled =
+                    compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
+                let input = compiled.input;
+                assert_eq!(
+                    input.options.include_debug_sql,
+                    !debug.is_empty(),
+                    "{query}"
+                );
+                assert_eq!(input.order_by.is_some(), !order.is_empty(), "{query}");
+                assert_eq!(input.cursor.as_ref().map(|c| c.page_size), page, "{query}");
+                if let Some(rows) = rows {
+                    assert_eq!(input.limit, rows, "{query}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn orbit_query_debug_in_literals_and_comments_stays_data() {
+    for (literal, value) in [
+        (r#"'DEBUG'"#, "DEBUG"),
+        (r#"'x\' RETURN u DEBUG //'"#, "x' RETURN u DEBUG //"),
+        (r#"'\u0027 RETURN u DEBUG //'"#, "' RETURN u DEBUG //"),
+        (
+            r#""'; DROP TABLE gl_user; --""#,
+            "'; DROP TABLE gl_user; --",
+        ),
+    ] {
+        for comment in ["", " /* DEBUG */", " // DEBUG"] {
+            let query = format!("MATCH (u:User {{username: {literal}}}) RETURN u{comment}");
+            let compiled = compile(&query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
+            assert!(!compiled.input.options.include_debug_sql, "{query}");
+            assert!(
+                has_param_value(&compiled.base.params, &serde_json::json!(value)),
+                "{query}"
+            );
+            assert!(!compiled.base.sql.contains(value), "{query}");
+        }
+    }
 }
 
 #[test]
@@ -1544,4 +1731,59 @@ fn orbit_query_reserved_page_words_need_backticks() {
         &test_ctx(),
     )
     .unwrap();
+}
+
+#[test]
+fn gql_prepares_queries_and_scoped_schema() {
+    let ontology = embedded_ontology();
+    let ctx = test_ctx();
+    assert!(matches!(
+        prepare("MATCH (n:User {id: 1}) RETURN n", &ontology, &ctx, All),
+        Ok(PreparedStatement::Query(_))
+    ));
+    for (scope, call, node) in [
+        (All, "CALL db.schema()", None),
+        (Local, "CALL db.schema()", None),
+        (All, "CALL db.schema('MergeRequest')", Some("MergeRequest")),
+        (Local, "CALL db.schema('File')", Some("File")),
+    ] {
+        let PreparedStatement::Schema(response) = prepare(call, &ontology, &ctx, scope).unwrap()
+        else {
+            panic!("expected schema: {call}");
+        };
+        if let Some(name) = node {
+            assert_eq!(response.domains.len(), 1);
+            assert_eq!(response.domains[0].nodes.len(), 1);
+            let node = serde_json::to_value(&response.domains[0].nodes[0]).unwrap();
+            assert_eq!(node["name"], name);
+            assert!(!node["props"].as_array().unwrap().is_empty());
+            assert!(!response.edges.is_empty());
+            assert!(response.edges.iter().all(|edge| {
+                ontology
+                    .get_edge(edge)
+                    .unwrap()
+                    .iter()
+                    .any(|edge| edge.source_kind == name || edge.target_kind == name)
+            }));
+        } else {
+            assert_eq!(
+                serde_json::to_value(response).unwrap(),
+                serde_json::to_value(build_schema_response(&ontology, scope, &[])).unwrap(),
+            );
+        }
+    }
+    for (scope, call) in [
+        (All, "CALL db.schema('Missing')"),
+        (All, "CALL db.schema('*')"),
+        (All, "CALL db.schema('File', 'User')"),
+        (All, "CALL db.schema() YIELD name"),
+        (Local, "CALL db.schema('MergeRequest')"),
+    ] {
+        assert!(
+            prepare(call, &ontology, &ctx, scope)
+                .unwrap_err()
+                .is_client_safe()
+        );
+    }
+    assert!(compile("CALL db.schema()", Frontend::Gql, &ontology, &ctx).is_err());
 }

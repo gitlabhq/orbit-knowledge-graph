@@ -12,10 +12,12 @@ query:
       "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                "rel_types": ["*"]}
     }
+  gql: |
+    MATCH p = ANY SHORTEST (start:User {id: 1})-[*1..3]->(`end`:Project {id: 1004}) RETURN p
 
 expect:
   referential_integrity: true
   path_count: 1
   path_edges:
-    - - { from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 102 }
-      - { from: Group, from_id: 102, type: CONTAINS, to: Project, to_id: 1004 }
+    - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 102 },
+       { from: Group, from_id: 102, type: CONTAINS, to: Project, to_id: 1004 }]

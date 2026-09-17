@@ -3,13 +3,13 @@
 ## Scope and terms
 
 The Orbit query frontend accepts a read-only graph language based on openCypher 9 syntax.
-It includes Orbit-specific restrictions and extensions and supports only the operations that Orbit's compiler can express.
+It includes Orbit-specific query restrictions, extensions, and schema discovery.
 
-The frontend is a compiler pipeline preset, `clickhouse_gql`. The JSON Query DSL remains the default for remote requests.
-This implementation does not change MCP tools, protocol messages, Rails, or glab.
+Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend. Remote query contracts remain JSON-only.
+This implementation does not change MCP tools, protocol messages, Rails, or CLI contracts.
 
 A **Pest pair** is a matched grammar rule and its source span.
-The frontend's **syntax tree** is the typed Rust form of one statement, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
+A query's **syntax tree** is its typed Rust form, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
 The compiler's **Input** contains node selectors, predicates, and the other logical query fields.
 
 ## Grammar source
@@ -22,24 +22,26 @@ The new Rust implementation remains under the repository's license.
 
 The grammar restricts identifiers and arrows to ASCII. Escaped identifiers must still pass the compiler's identifier rules.
 Keywords are case insensitive; identifiers are case sensitive. Strings support M23 escape forms, and comments count as whitespace.
-`PAGE`, `AFTER`, and `DEBUG` are reserved in addition to the openCypher reserved words, so a variable with one of those names needs backticks.
+`PAGE`, `AFTER`, `DEBUG`, `ANY`, and `SHORTEST` are reserved in addition to the openCypher reserved words, so a variable with one of those names needs backticks.
 
 ## Compiler boundary
 
 ```mermaid
 flowchart LR
-    Gql[Orbit query text] --> GqlParse[gql_parse]
+    Gql[Orbit statement text] --> GqlPrepare[gql::prepare]
+    GqlPrepare -->|MATCH| Input[Compiler Input]
+    GqlPrepare -->|CALL db.schema| Resolve[gql::resolve_schema]
+    Resolve --> Schema[SchemaResponse]
     JSON[JSON Query DSL] --> JsonDslParse[json_dsl_parse]
-    GqlParse --> Input[Compiler Input]
     JsonDslParse --> Input
     Input --> Validate[validate]
     Validate --> Pipeline[Shared compiler phases]
     Pipeline --> SQL[Parameterized ClickHouse SQL]
 ```
 
-Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and one phase in the pipeline declaration in `config.rs`.
-`json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes.
-`gql_parse` runs in two steps and never serializes a JSON query.
+Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and lowers graph queries to the language-neutral Input.
+`json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes; JSON is query-only.
+The GQL frontend uses one anchored `Statement` grammar root for queries and schema calls. Query lowering runs in two steps and never serializes a JSON query.
 `syntax.rs` converts Pest pairs into the typed syntax tree with `pest_consume` methods.
 Fixed child shapes use `match_nodes!`; optional query clauses and relationship fields are consumed by rule without enumerating their combinations.
 The grammar enforces their order and cardinality, and the consumer rejects unexpected rules.
@@ -48,9 +50,12 @@ Lexical checks live here: identifier rules, string escapes, numeric ranges, `dat
 Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.
 Scalar values use the same value type as the compiler's filters.
 
-The `clickhouse_json_dsl` and `clickhouse_gql` presets differ only in that first phase. Both parse phases read the one `raw` state and write `Input`; `validate` and everything after it can reach only `Input`, so no shared phase can depend on the source language.
+The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_parse` and `gql_parse`, then share the complete `validate` through `codegen` phases.
+The `gql_parse` phase parses raw query text when supplied. Preparation supplies parsed Input instead, so the wrapper leaves it unchanged without parsing twice.
+Schema preparation, result types, and resolution belong only to the GQL frontend. Shared compiler contexts have no schema request, response, or introspection scope.
 
-`compiler::compile` takes the raw text and a `Frontend` and runs that frontend's preset.
+`compiler::gql::prepare` parses once and dispatches by statement kind. MATCH runs the complete graph pipeline; CALL resolves ontology metadata directly.
+`compiler::compile` remains query-only for both frontends. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
@@ -64,7 +69,28 @@ The hydration-only `compile_input` entry point is not used for query text.
 Filter maps become ordered predicate lists through one shared helper.
 This makes SQL and parameter ordering stable without changing filter meaning.
 
-## Supported statement
+## Statement preparation API
+
+Here, preparation means compiling a graph query or resolving schema metadata. It does not create a reusable database prepared statement.
+
+`compiler::gql::prepare(raw, &ontology, &security_context, scope)` returns `gql::PreparedStatement::Query(Box<CompiledQueryContext>)` or `gql::PreparedStatement::Schema(SchemaResponse)`.
+MATCH runs the complete graph compilation pipeline. CALL returns ontology metadata with named `domains` and `edges` fields, without SQL or data reads.
+Zero arguments list all node and relationship types within the supplied `IntrospectionScope` (`All` or `Local`).
+One string filters the response to that node: `domains` contains only its domain and expanded node, including properties and incoming/outgoing relationships.
+The `edges` list contains only relationship types with a connection to that node within the selected scope. Other nodes and domains are omitted.
+Scope filters schema metadata, not graph-query authorization. Existing schema tools keep their expansion behavior; this node filter applies only to GQL calls.
+
+```plaintext
+MATCH (n:User {id: 1}) RETURN n
+CALL db.schema()
+CALL db.schema('MergeRequest')
+```
+
+The `db.` prefix follows openCypher 9 procedure naming. `db.schema` is Orbit-defined, not an exact Neo4j builtin or an ISO catalog operation.
+Only case-sensitive `db.schema` is allowed; `resolve_schema` rejects unknown or scope-hidden nodes and `'*'` against the supplied ontology, and the grammar rejects extra arguments, parameters, YIELD, and query composition.
+`compiler::compile` remains query-only. A future raw-Cypher endpoint can dispatch both statements through `gql::prepare`, but must authenticate before dispatch; no endpoint or transport is wired here.
+
+## Supported query statement
 
 ```plaintext
 MATCH pattern [WHERE predicates]
@@ -81,12 +107,13 @@ The frontend infers the query type:
 
 | Pattern or projection | Compiler query type |
 |---|---|
-| Named `shortestPath(...)` pattern | Path finding |
+| Named `ANY SHORTEST ...` pattern | Path finding |
 | One relationship to an unfiltered, unlabeled far endpoint | Neighbors |
 | Aggregate in RETURN | Aggregation |
 | Other supported patterns | Traversal |
 
 Path finding supports outgoing paths from one hop to an explicit maximum.
+Aggregation over shortest paths is unsupported; shared validation rejects it for both JSON and GQL.
 Variable-length traversal accepts exact lengths and bounded ranges. Traversal and path finding share the compiler's three-hop cap.
 Undirected relationships are supported only for neighbors queries. Between labeled nodes, use `->` or `<-`.
 Relationship property filters, including inline maps, require a maximum of one hop.
@@ -99,8 +126,8 @@ LIMIT 10
 
 RETURN controls the existing graph response, not a general-purpose table of arbitrary expressions.
 Traversal properties select node columns. Whole nodes use ontology defaults; `properties(node)` selects all allowed columns.
-`properties(node)` on the far endpoint of a neighbors query or on a `shortestPath` variable sets the compiler's dynamic column mode to all columns, because those results are hydrated from dynamic column specifications instead of per-node selections.
-Neighbors queries still reject `properties(center)`.
+`properties(node)` on the far endpoint of a neighbors query or on a path variable sets the compiler's dynamic column mode to all columns, because those results are hydrated from dynamic column specifications instead of per-node selections.
+Neighbors queries select center columns with `center.property` items and still reject `properties(center)`.
 The compiler still includes graph identity and relationship metadata.
 
 Aggregates support `count`, `sum`, `avg`, `min`, and `max`.
@@ -114,8 +141,11 @@ ORDER BY notes DESC
 LIMIT 10
 ```
 
-The implementation adds node projections, `shortestPath` pattern syntax, `date_trunc`, token predicates, `PAGE ... AFTER`, and `DEBUG` to the selected EBNF productions.
+The implementation adds node projections, `date_trunc`, token predicates, `PAGE ... AFTER`, and `DEBUG` to the selected EBNF productions.
 These are implementation extensions, not changes to the official grammar.
+Shortest paths use the ISO GQL path search prefix, `p = ANY SHORTEST (a)-[*1..3]->(b)` or `p = SHORTEST 1 ...`, because openCypher 9 has no shortest-path syntax.
+The other GQL selectors (`ALL SHORTEST`, `SHORTEST k` for k above one, `SHORTEST k GROUP`) are rejected: the compiler returns one path per endpoint pair.
+`ANY` and `SHORTEST` are reserved.
 
 Predicates support AND, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
 Values are literals; the frontend has no parameter binding, so callers keep untrusted values out of the query text themselves.
@@ -123,10 +153,11 @@ Values are literals; the frontend has no parameter binding, so callers keep untr
 ID forms preserve the compiler's distinct selector and filter representations:
 
 - An inline integer `{id: 1}` becomes `node_ids`.
-- A standalone `node.id IN [...]` becomes `node_ids`.
-- Paired lower and upper ID bounds become an inclusive `id_range`.
+- The first nonempty `node.id IN [...]` becomes `node_ids` unless the node already has an ID selector.
+- When two ID predicates remain and form lower and upper bounds, they become an inclusive `id_range`.
+- An ID list and range can appear together, in any predicate order.
 - `WHERE node.id = 1` remains a property filter.
-- Additional predicates on an already pinned node remain filters; they do not replace its ID selector.
+- Other ID predicates remain filters; they do not replace the ID selector.
 
 ## Rejections and bounds
 
@@ -153,17 +184,21 @@ JSON and text tokens never validate against each other because their hash source
 
 `DEBUG` sets the compiler's `include_debug_sql` presentation option and keeps its existing authorization rules.
 
-## Parity tests
+## Integration tests
 
-Handwritten text queries sit beside JSON fixtures in `crates/integration-tests/tests/compiler/dialects/clickhouse.rs`.
-The shared test helper compares SQL byte for byte, parameter names and typed values, query type, and hydration plans.
-Existing SQL assertions remain in place. Other tests cover syntax rejection, literals, and authorization.
+YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` are the canonical test surface for data correctness. Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations. The runner parses each key into a `Frontend` and passes it to `compiler::compile`. A scenario whose query has no text spelling carries only the `json` key. Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`. See the [integration-testkit README](../../../crates/integration-testkit/README.md) for the full `QueryScenario` format reference.
 
-The YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` run against ClickHouse in CI.
-Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations.
-The runner parses each key into a `Frontend` and passes it to `compiler::compile`.
-A scenario whose query has no text spelling carries only the `json` key.
-Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`.
+Handwritten text queries sit beside JSON fixtures in `crates/integration-tests/tests/compiler/dialects/clickhouse.rs` for compiler-level parity (SQL output, parameters, hydration plans). These are separate from the data correctness scenarios.
+
+### GQL fuzzing
+
+The `fuzz_gql_grammar` target in `crates/fuzz/` generates query text from `query.pest` through `orbit_fuzz::grammar::Grammar` and `pest_meta`.
+Input bytes choose grammar productions, with repetition bounded to two.
+Each derivation must be consumed by `syntax.rs`: a lowering error is acceptable, a syntax error or pipeline invariant is not.
+The real parser decides whether a derivation is faithful: its pair tree for the generated text must equal the rules the walk produced, which discards derivations that PEG ordered choice or greedy repetition would read differently.
+
+The `fuzz_gql` target sends arbitrary text through the compiler and checks that errors are client-safe.
+Semantic checks remain in the JSON parity tests above, whose paired JSON and text queries must compile to matching SQL.
 
 JSON syntax-error tests remain JSON-only.
 The existing `valid_identifiers_produce_renderable_sql` fixture also remains JSON-only:

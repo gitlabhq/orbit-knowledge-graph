@@ -1,0 +1,17 @@
+description: Search with a virtual column keeps a hydration plan for the virtual column while DB columns stay inline
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "f", "entity": "File", "node_ids": [13000], "columns": ["name", "content"]}],
+        "limit": 5
+    }
+  gql: |
+    MATCH (f:File {id: 13000}) RETURN f.name, f.content LIMIT 5
+
+expect:
+  compile_only: true
+  hydration: static
+  sql_contains: ["AS f_name"]
+  sql_not_contains: ["f_content", "f.content"]

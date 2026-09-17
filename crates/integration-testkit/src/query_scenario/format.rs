@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use query_engine::compiler::HydrationKind;
 use serde::Deserialize;
 
 use crate::scenario::Seed;
@@ -50,9 +51,6 @@ pub struct SecurityOverride {
     pub org_id: Option<i64>,
     #[serde(default)]
     pub access_level: Option<u32>,
-    /// Per-alias scope prefixes: `{ g: "1/700/", p: "1/700/" }`
-    #[serde(default)]
-    pub scope_prefixes: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -74,13 +72,16 @@ pub struct RedactionConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
+    /// Run the query N times and assert all responses are identical.
+    #[serde(default)]
+    pub repeat_count: Option<usize>,
     #[serde(default)]
     pub compile_only: bool,
     #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
-    /// Assert error message does NOT contain these substrings.
+    /// Assert error message does NOT contain these substrings, for every frontend or per frontend key.
     #[serde(default)]
-    pub compile_error_not_contains: Vec<String>,
+    pub compile_error_not_contains: NotContainsExpect,
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
@@ -106,8 +107,15 @@ pub struct QueryExpect {
     /// Assert values on rows by index: `[{index: 0, col: val}]`
     #[serde(default)]
     pub row_values: Vec<BTreeMap<String, serde_json::Value>>,
+    /// Assert group column metadata: `{ v_severity: "v.severity" }` verifies
+    /// the response declares a group column named `v_severity` backed by
+    /// node `v`, property `severity`.
+    #[serde(default)]
+    pub group_columns: BTreeMap<String, String>,
     #[serde(default)]
     pub sql_contains: Vec<String>,
+    #[serde(default)]
+    pub hydration: Option<HydrationKind>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
     /// Assert total edge count across all types.
@@ -238,6 +246,8 @@ impl QueryExpect {
             || !self.edge_absent.is_empty()
             || !self.edge_count.is_empty()
             || !self.groups.is_empty()
+            || !self.group_columns.is_empty()
+            || self.repeat_count.is_some()
             || self.empty_aggregation
             || self.row_count.is_some()
             || !self.row_values.is_empty()
@@ -277,6 +287,41 @@ impl QueryExpect {
 pub enum CompileErrorExpect {
     Flag(bool),
     Substring(String),
+    PerFrontend(BTreeMap<String, String>),
+}
+
+impl CompileErrorExpect {
+    pub fn substring_for(&self, frontend_key: &str) -> Option<&str> {
+        match self {
+            Self::Flag(_) => None,
+            Self::Substring(sub) => Some(sub),
+            Self::PerFrontend(by_frontend) => by_frontend.get(frontend_key).map(String::as_str),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum NotContainsExpect {
+    All(Vec<String>),
+    PerFrontend(BTreeMap<String, Vec<String>>),
+}
+
+impl Default for NotContainsExpect {
+    fn default() -> Self {
+        Self::All(Vec::new())
+    }
+}
+
+impl NotContainsExpect {
+    pub fn banned_for(&self, frontend_key: &str) -> &[String] {
+        match self {
+            Self::All(banned) => banned,
+            Self::PerFrontend(by_frontend) => {
+                by_frontend.get(frontend_key).map_or(&[], Vec::as_slice)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -293,4 +338,17 @@ pub struct PathEdgeExpect {
     pub to: Option<String>,
     #[serde(default)]
     pub to_id: Option<i64>,
+    #[serde(default)]
+    pub step: Option<usize>,
+}
+
+impl PathEdgeExpect {
+    pub fn has_assertions(&self) -> bool {
+        self.from.is_some()
+            || self.from_id.is_some()
+            || self.edge_type.is_some()
+            || self.to.is_some()
+            || self.to_id.is_some()
+            || self.step.is_some()
+    }
 }

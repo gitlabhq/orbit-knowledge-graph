@@ -28,8 +28,11 @@ format version (`0.1`).
 ### The `schema` pin in `config/versions.yaml`
 
 `config/versions.yaml` holds every pinned version in the repo (schema, query DSL, output
-formats, DuckDB release, vendored upstream revisions). It is embedded at compile time and
-deserialized into `orbit_versions::Versions`; the indexer exposes the `schema` key as:
+formats, vendored upstream revisions) plus a `vendored:` section for dependencies like DuckDB
+with sub-pins, artifact directories, and vendor/check scripts (see
+[vendored dependencies runbook](../dev/runbooks/vendored_dependencies.md)). It is embedded at
+compile time and deserialized into `orbit_versions::Versions`; the indexer exposes the `schema`
+key as:
 
 ```rust
 pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| orbit_versions::VERSIONS.schema);
@@ -149,11 +152,10 @@ A serving snapshot (`crates/orbit-server/src/active_schema.rs`) is immutable and
 
 - the archive's `migration_version`;
 - the archive's ontology with that version's table prefix applied;
-- the embedded named queries that compile against that ontology (the rest are hidden and rejected);
-- a `PathResolver` for that table-set.
+- the embedded named queries that compile against that ontology (the rest are hidden and rejected).
 
-Every request pins one snapshot for its whole run, from compilation through path resolution and
-redaction, so a promotion cannot switch tables under a running query.
+Every request pins one snapshot for its whole run, from compilation through redaction, so a
+promotion cannot switch tables under a running query.
 
 Loading an archive does not prove the binary can serve it; that depends on the archive loader,
 parser, and compiler. Validate a cross-version rollout before relying on it.

@@ -10,6 +10,8 @@ query:
                  "node_ids": [3002]}],
       "limit": 10
     }
+  gql: |
+    MATCH (n:Note {id: 3002}) WHERE n.id >= 1 AND n.id <= 10000 RETURN n.created_at LIMIT 10
 
 expect:
   node_count: 1

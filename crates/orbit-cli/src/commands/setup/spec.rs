@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn all_specs_parse_and_expected_assistants_exist() {
-        for name in ["claude", "codex", "opencode", "pi"] {
+        for name in ["duo", "claude", "codex", "opencode", "pi"] {
             assert!(get(name).is_some(), "missing spec for {name}");
         }
         assert_eq!(names().len(), all().len());

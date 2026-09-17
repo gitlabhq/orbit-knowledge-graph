@@ -81,6 +81,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         security {
             reads_env: [security_ctx, ontology]
+            reads_state: [input]
             mutates: [node]
         }
         cursor {
@@ -92,7 +93,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         hydrate_plan {
             reads_env: [ontology, security_ctx]
-            reads_state: [input]
+            reads_state: [input, node]
             mutates: [hydration_plan]
         }
         settings {
@@ -136,8 +137,9 @@ fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let raw = require(ctx.take_raw(), "raw")?;
-    ctx.set_input(frontend::gql::parse(&raw)?);
+    if let Some(raw) = ctx.take_raw() {
+        ctx.set_input(frontend::gql::parse(&raw)?);
+    }
     Ok(())
 }
 
@@ -220,6 +222,8 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     let security_ctx = ctx.security_ctx().clone();
     let ontology = ctx.ontology().clone();
     let mut node = require(ctx.take_node(), "node")?;
+    let input = require(ctx.input().as_ref(), "input")?;
+    let security_ctx = security_ctx.with_scope_prefixes(input.compiler.scope_prefixes.clone());
     security::apply_security_context(&mut node, &security_ctx, &ontology)?;
     ctx.set_node(node);
     Ok(())
@@ -240,8 +244,9 @@ fn check(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().clone(), "input")?;
-    let plan = hydrate::generate_hydration_plan(&input, ctx.ontology(), ctx.security_ctx());
+    let input = require(ctx.input().as_ref(), "input")?;
+    let emitted = require(ctx.node().as_ref(), "node")?;
+    let plan = hydrate::generate_hydration_plan(input, emitted, ctx.ontology(), ctx.security_ctx());
     ctx.set_hydration_plan(plan);
     Ok(())
 }

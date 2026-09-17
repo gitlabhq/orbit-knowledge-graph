@@ -383,11 +383,10 @@ impl<'a> SsaEngine<'a> {
     }
 
     fn read_variable_recursive(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
-        let val;
         let sealed = self.blocks[block.0].sealed;
         let num_preds = self.blocks[block.0].predecessors.len();
 
-        if !sealed {
+        let val = if !sealed {
             // Incomplete CFG: defer with operandless phi (Algorithm 4)
             self.stats.unsealed_hits += 1;
             let phi_id = self.new_phi(block, variable);
@@ -395,19 +394,19 @@ impl<'a> SsaEngine<'a> {
                 .entry(block)
                 .or_default()
                 .insert(variable, phi_id);
-            val = SsaValue::Phi(phi_id);
+            SsaValue::Phi(phi_id)
         } else if num_preds == 0 {
             self.stats.dead_end_hits += 1;
-            val = SsaValue::Opaque;
+            SsaValue::Opaque
         } else if num_preds == 1 {
             let pred = self.blocks[block.0].predecessors[0];
-            val = self.read_variable_internal(variable, pred);
+            self.read_variable_internal(variable, pred)
         } else {
             // Marker algorithm (Section 3.3): mark block before recursing.
             // Only place a phi if we detect a cycle (hit the marker) or
             // find different values from predecessors.
-            val = self.read_variable_marker(variable, block);
-        }
+            self.read_variable_marker(variable, block)
+        };
 
         self.write_variable_interned(variable, block, val.clone());
         val

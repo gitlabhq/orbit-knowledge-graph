@@ -1,8 +1,9 @@
 use ontology::Ontology;
 use query_engine::compiler::{Frontend, HydrationPlan, SecurityContext, compile};
+use std::sync::Arc;
 
 fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
-    let ontology = Ontology::load_embedded().unwrap();
+    let ontology = Arc::new(Ontology::load_embedded().unwrap());
     let security_ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
     compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap()
 }

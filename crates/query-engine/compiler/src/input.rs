@@ -122,6 +122,10 @@ pub struct TextIndexMeta {
 /// optimize, enforce, SIP, fold, etc.).
 #[derive(Debug, Clone)]
 pub struct CompilerMetadata {
+    /// Per-alias scope prefixes derived by `restrict` from anchored nodes and
+    /// flooded across scope-preserving edges; the security pass ANDs them onto
+    /// the alias's scan.
+    pub scope_prefixes: HashMap<String, crate::scope::ScopePrefix>,
     /// Maps node alias → (edge_alias, edge_column) for edge-only nodes.
     /// Written by lower, read by enforce to emit `_gkg_*` redaction columns
     /// from edge columns instead of node table columns. Also used by SIP
@@ -179,6 +183,7 @@ pub struct CompilerMetadata {
 impl Default for CompilerMetadata {
     fn default() -> Self {
         Self {
+            scope_prefixes: HashMap::new(),
             node_edge_col: HashMap::new(),
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
@@ -587,7 +592,7 @@ pub struct InputRelationship {
     /// the edge scan inherits the PK prefix instead of the broad org-wide one.
     /// Lossless because an edge row's `traversal_path` is its source entity's.
     #[serde(skip)]
-    pub scope_prefix: Option<TraversalPath>,
+    pub scope_prefix: Option<crate::scope::ScopePrefix>,
     /// Whether every resolved variant of this relationship keeps both endpoints
     /// in the same namespace. Set by `restrict`. Only scope-preserving FK edges
     /// link a node to an intrinsic child whose lifecycle is coupled to the

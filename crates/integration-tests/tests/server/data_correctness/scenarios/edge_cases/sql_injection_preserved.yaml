@@ -8,6 +8,8 @@ query:
         "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]}],
         "limit": 10
     }
+  gql: |
+    MATCH (n:Note {id: 3003}) RETURN n.note LIMIT 10
 
 expect:
   node_count: 1

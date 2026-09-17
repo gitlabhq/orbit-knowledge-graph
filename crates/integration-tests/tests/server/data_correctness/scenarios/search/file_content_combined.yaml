@@ -15,6 +15,8 @@ query:
                }}],
       "limit": 10
     }
+  gql: |
+    MATCH (f:File) WHERE f.id IN [13000, 13001, 13002, 13003, 13004] AND f.project_id = 1000 AND f.path STARTS WITH 'src/' AND f.content CONTAINS 'ClickHouse' RETURN f.path, f.project_id, f.content LIMIT 10
 
 expect:
   node_count: 1

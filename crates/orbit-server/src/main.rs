@@ -27,9 +27,7 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install rustls CryptoProvider");
+    let aws_lc_version = orbit_server::fips::install_crypto_provider()?;
 
     let args = Args::parse();
     let config = AppConfig::load(args.config.as_deref())?;
@@ -70,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     ontology::constants::validate_ontology_constants(&ontology);
 
-    info!(mode = ?args.mode, "starting");
+    info!(mode = ?args.mode, aws_lc_fips = aws_lc_version, "starting");
 
     let shutdown = CancellationToken::new();
     let signal_task = tokio::spawn(shutdown::wait_for_signal(shutdown.clone()));

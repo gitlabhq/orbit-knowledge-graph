@@ -1,0 +1,11 @@
+name: context
+version: 1.3.0
+short: Read local definitions or one source file
+description: >-
+  Read local definitions or one source file.
+
+
+  Pass one or more `Definition:<id>` references from grep, or one existing file
+  path in the current checkout. Definition targets include source and relationships;
+  `--tests` expands hidden test connections. File targets show source and indexed
+  definitions once, without relationships.

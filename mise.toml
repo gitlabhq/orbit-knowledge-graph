@@ -20,7 +20,7 @@ GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=
 DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 
 [tools]
-"rust" = { version = "1.95.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/check-rust-toolchain.sh --write" }
+"rust" = { version = "1.98.1", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/check-rust-toolchain.sh --write" }
 "cargo:cargo-nextest" = "0.9.123"
 "cargo:cargo-edit" = "0.13.8"
 "cargo:cargo-audit" = "0.22.0"
@@ -49,6 +49,9 @@ yq = "4.52.5"
 hyperfine = "1.20.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "github:google/go-jsonnet" = "0.22.0"
+# aws-lc-fips-sys compiles the AWS-LC FIPS module from source and needs cmake and go.
+cmake = "4.4.3"
+go = "1.27.1"
 
 [tasks."hooks:install"]
 run = ["lefthook install --force", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
@@ -61,6 +64,14 @@ description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
 [tasks."fuzz:compile-structured"]
 run = "cargo +nightly bolero test fuzz_compile_structured -p orbit-fuzz"
 description = "Fuzz the query compiler with structured JSON query generation"
+
+[tasks."fuzz:gql"]
+run = "cargo +nightly bolero test fuzz_gql -p orbit-fuzz"
+description = "Fuzz the Orbit query frontend with unstructured text"
+
+[tasks."fuzz:gql-grammar"]
+run = "cargo +nightly bolero test fuzz_gql_grammar -p orbit-fuzz"
+description = "Fuzz the Orbit query frontend with derivations of its own grammar"
 
 [tasks."fuzz:ruby"]
 run = "cargo +nightly bolero test fuzz_ruby -p orbit-fuzz"
@@ -95,11 +106,11 @@ run = "cargo +nightly bolero test fuzz_indexer_messages -p orbit-fuzz"
 description = "Fuzz indexer message deserialization"
 
 [tasks.build]
-run = "cargo build --release"
+run = "cargo build --release --workspace --exclude orbit-cli && cargo build --release -p orbit-cli"
 description = "Build the crates"
 
 [tasks."build:cli"]
-run = "cargo build --bin orbit --release --features duckdb-client/bundled"
+run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled"
 description = "Build the CLI"
 
 [tasks.test]
@@ -190,8 +201,12 @@ run = [
 ]
 description = "Run clippy lint checks and fix applicable issues"
 
+[tasks."lint:newlines"]
+run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --exclude-files docs-locale"
+description = "Check trailing newline formatting in the codebase"
+
 [tasks."fix:newlines"]
-run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --fix"
+run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --exclude-files docs-locale --fix"
 description = "Fix newlines formatting in the codebase"
 
 [tasks."local:index:repo"]
@@ -235,13 +250,13 @@ description = "Download benchmark repositories"
 
 [tasks."bench:run"]
 depends = ["bench:download-repos"]
-run = "cargo build --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
+run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
 description = "Run code indexing benchmark"
 
 [tasks."bench:v2"]
 depends = ["bench:download-repos"]
 run = """
-cargo build --bin orbit --release --features duckdb-client/bundled
+cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled
 for repo in output/repos/*/; do
   name=$(basename "$repo")
   echo "=== Indexing $name with v2 ==="
@@ -347,12 +362,34 @@ description = "Start the local GKG health-check process"
 
 
 [tasks."iglu:bump"]
-run = "bash ./scripts/iglu/bump.sh"
-description = "Bump a pinned Iglu schema version (e.g. mise iglu:bump -- orbit_query 2-0-2)"
+run = "bash ./scripts/vendored/run.sh vendor iglu"
+description = "Fetch Iglu schemas for all pins (edit versions.yaml first, then run this)"
 
 [tasks."iglu:check"]
-run = "bash ./scripts/iglu/check.sh"
+run = "bash ./scripts/vendored/run.sh check iglu"
 description = "Verify pinned Iglu schemas exist locally and match live Iglu"
+
+[tasks."vendor"]
+run = "bash ./scripts/vendored/run.sh vendor ${@}"
+description = "Run a vendored dependency's vendor_script (e.g. mise vendor -- duckdb)"
+usage = 'arg "<name>"'
+
+[tasks."vendor:all"]
+run = "bash ./scripts/vendored/run.sh vendor --all"
+description = "Run vendor_script for every vendored dependency that has one"
+
+[tasks."check:vendored"]
+run = "bash ./scripts/vendored/run.sh check ${@}"
+description = "Run a vendored dependency's check_script (e.g. mise check:vendored -- duckdb)"
+usage = 'arg "<name>"'
+
+[tasks."check:vendored:all"]
+run = "bash ./scripts/vendored/run.sh check --all"
+description = "Run check_script for every vendored dependency that has one"
+
+[tasks."versions:validate"]
+run = "uvx check-jsonschema --verbose --schemafile config/schemas/versions.schema.json config/versions.yaml"
+description = "Validate config/versions.yaml against JSON schema"
 
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"

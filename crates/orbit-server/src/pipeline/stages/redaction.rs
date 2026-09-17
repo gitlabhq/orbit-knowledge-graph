@@ -18,13 +18,13 @@ impl PipelineStage for RedactionStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<AuthorizationOutput>()
+            .remove::<AuthorizationOutput>()
             .ok_or_else(|| {
                 PipelineError::Authorization("AuthorizationOutput not found in phases".into())
             })
             .inspect_err(|e| obs.record_error(e))?;
 
-        let mut query_result = input.query_result.clone();
+        let mut query_result = input.query_result;
         let redacted_count = query_result.apply_authorizations(&input.authorizations);
 
         Ok(RedactionOutput {

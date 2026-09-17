@@ -48,8 +48,20 @@ pub fn build_schema_response(
     expand_nodes: &[String],
 ) -> SchemaResponse {
     SchemaResponse {
-        domains: build_domains(ontology, scope, expand_nodes),
-        edges: build_edge_names(ontology, scope),
+        domains: build_domains(ontology, scope, expand_nodes, None),
+        edges: build_edge_names(ontology, scope, None),
+    }
+}
+
+#[must_use]
+pub fn build_node_schema_response(
+    ontology: &Ontology,
+    scope: IntrospectionScope,
+    node: &str,
+) -> SchemaResponse {
+    SchemaResponse {
+        domains: build_domains(ontology, scope, &[], Some(node)),
+        edges: build_edge_names(ontology, scope, Some(node)),
     }
 }
 
@@ -57,6 +69,7 @@ fn build_domains(
     ontology: &Ontology,
     scope: IntrospectionScope,
     expand_nodes: &[String],
+    only_node: Option<&str>,
 ) -> Vec<SchemaDomain> {
     let mut domain_map: BTreeMap<String, Vec<SchemaNode>> = BTreeMap::new();
 
@@ -66,7 +79,9 @@ fn build_domains(
     };
 
     for node in ontology.nodes() {
-        if scope == IntrospectionScope::Local && !local_names.contains(&node.name.as_str()) {
+        if only_node.is_some_and(|name| name != node.name)
+            || (scope == IntrospectionScope::Local && !local_names.contains(&node.name.as_str()))
+        {
             continue;
         }
 
@@ -76,7 +91,8 @@ fn build_domains(
             node.domain.clone()
         };
 
-        let should_expand = expand_nodes.iter().any(|n| n == "*" || n == &node.name);
+        let should_expand =
+            only_node.is_some() || expand_nodes.iter().any(|n| n == "*" || n == &node.name);
 
         let node_info = if should_expand {
             let fields: Vec<&Field> = match scope {
@@ -109,7 +125,11 @@ fn build_domains(
         .collect()
 }
 
-fn build_edge_names(ontology: &Ontology, scope: IntrospectionScope) -> Vec<String> {
+fn build_edge_names(
+    ontology: &Ontology,
+    scope: IntrospectionScope,
+    only_node: Option<&str>,
+) -> Vec<String> {
     let local_names: Vec<&str> = match scope {
         IntrospectionScope::Local => ontology.local_entity_names(),
         IntrospectionScope::All => Vec::new(),
@@ -119,7 +139,12 @@ fn build_edge_names(ontology: &Ontology, scope: IntrospectionScope) -> Vec<Strin
         .edge_names()
         .filter(|edge_name| {
             let variants = ontology.get_edge(edge_name).unwrap_or(&[]);
-            !filter_variants(variants, scope, &local_names).is_empty()
+            filter_variants(variants, scope, &local_names)
+                .iter()
+                .any(|edge| {
+                    only_node
+                        .is_none_or(|name| edge.source_kind == name || edge.target_kind == name)
+                })
         })
         .map(|name| name.to_string())
         .collect()
