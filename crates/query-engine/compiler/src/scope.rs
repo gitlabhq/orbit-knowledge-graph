@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 use ontology::{Ontology, ScopeEdge, TraversalPathKind, TraversalPathLookup};
 
-use crate::ast::{ChType, Expr, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Expr, Op, Query, SelectExpr, TableRef};
 use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
@@ -18,10 +18,25 @@ impl ScopePrefix {
     }
 
     pub fn predicate(&self, alias: &str) -> Expr {
-        Expr::or_all(self.0.iter().map(|path| {
+        let matches = self.0.iter().map(|path| {
             Some(Expr::func(
                 "startsWith",
                 vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path.clone()],
+            ))
+        });
+        let unresolved = self
+            .0
+            .iter()
+            .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
+        Expr::or_all(matches.chain(unresolved)).expect("scope prefix has at least one path")
+    }
+
+    pub fn resolved(&self) -> Expr {
+        Expr::and_all(self.0.iter().map(|path| {
+            Some(Expr::binary(
+                Op::Ne,
+                path.clone(),
+                Expr::string(UNRESOLVED_PATH),
             ))
         }))
         .expect("scope prefix has at least one path")

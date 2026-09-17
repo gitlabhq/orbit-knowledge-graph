@@ -146,7 +146,8 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 - No pre-query lookup. The compiler emits a scalar subquery in the same statement: `(SELECT coalesce(if(argMaxOrNull(_deleted, _version), NULL, argMaxOrNull(traversal_path, _version)), '0/') FROM <anchor table> AS _scope WHERE _scope.<key> = ?)`.
 - ClickHouse evaluates it once before index analysis, so pruning equals a literal prefix (production `EXPLAIN`: 273 of 39 350 granules for both forms).
 - The lookup is a bloom-filter point read on the anchor table, a few milliseconds.
-- A missing or deleted anchor yields `0/`, which no namespaced row matches. There is no fallback to a broader scan.
+- A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`), so rows whose anchor row is not indexed yet still return, as with the old resolver.
+- When the plan elides a scope anchor (aggregation containers), it adds `<lookup> != '0/'` to the query, so a missing anchor yields no rows instead of counting the whole authorized scope.
 - Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
 - The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
 
