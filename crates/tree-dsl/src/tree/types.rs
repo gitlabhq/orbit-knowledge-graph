@@ -1,5 +1,3 @@
-use std::sync::RwLock;
-
 use indextree::{Arena, NodeEdge, NodeId};
 
 use crate::canonical;
@@ -7,7 +5,18 @@ use crate::canonical;
 pub(crate) const NONE: u32 = u32::MAX;
 
 #[repr(u16)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum::Display,
+    strum::IntoStaticStr,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub enum EdgeKind {
     Calls = 1,
     Defines = 2,
@@ -17,18 +26,7 @@ pub enum EdgeKind {
 
 impl EdgeKind {
     pub fn name(self) -> &'static str {
-        match self {
-            Self::Calls => "Calls",
-            Self::Defines => "Defines",
-            Self::Imports => "Imports",
-            Self::Extends => "Extends",
-        }
-    }
-}
-
-impl std::fmt::Display for EdgeKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name())
+        self.into()
     }
 }
 
@@ -47,72 +45,41 @@ pub struct Node {
     pub(crate) named: bool,
 }
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
-)]
-pub struct NodeRef {
-    pub tree: u32,
-    pub node: u32,
-}
-
-impl NodeRef {
-    pub fn local(node: u32) -> Self {
-        Self { tree: 0, node }
-    }
-    pub fn new(tree: usize, node: u32) -> Self {
-        Self {
-            tree: tree as u32,
-            node,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Edge {
-    pub from: NodeRef,
-    pub to: NodeRef,
+    pub from_tree: u32,
+    pub from_node: u32,
+    pub to_tree: u32,
+    pub to_node: u32,
     pub kind: EdgeKind,
 }
 
 impl Edge {
-    pub fn new(
-        from_tree: usize,
-        from_node: u32,
-        to_tree: usize,
-        to_node: u32,
-        kind: EdgeKind,
-    ) -> Self {
+    pub fn new(from_tree: u32, from_node: u32, to_tree: u32, to_node: u32, kind: EdgeKind) -> Self {
         Self {
-            from: NodeRef::new(from_tree, from_node),
-            to: NodeRef::new(to_tree, to_node),
+            from_tree,
+            from_node,
+            to_tree,
+            to_node,
             kind,
         }
     }
     pub fn local(from: u32, to: u32, kind: EdgeKind) -> Self {
         Self {
-            from: NodeRef::local(from),
-            to: NodeRef::local(to),
+            from_tree: 0,
+            from_node: from,
+            to_tree: 0,
+            to_node: to,
             kind,
         }
     }
 }
 
+#[derive(Clone)]
 pub struct Tree {
     pub(crate) arena: Arena<Node>,
     pub(crate) root: NodeId,
-    pub(crate) edges: RwLock<Vec<Edge>>,
     pub label: String,
-}
-
-impl Clone for Tree {
-    fn clone(&self) -> Self {
-        Self {
-            arena: self.arena.clone(),
-            root: self.root,
-            edges: RwLock::new(self.edges.read().unwrap().clone()),
-            label: self.label.clone(),
-        }
-    }
 }
 
 impl Tree {
@@ -122,7 +89,6 @@ impl Tree {
         Self {
             arena,
             root,
-            edges: RwLock::new(Vec::new()),
             label: String::new(),
         }
     }
@@ -141,21 +107,6 @@ impl Tree {
     #[inline]
     pub(crate) fn to_raw(id: NodeId) -> u32 {
         usize::from(id) as u32 - 1
-    }
-
-    pub fn add_edge(&self, from: u32, to: u32, kind: EdgeKind) {
-        self.edges
-            .write()
-            .unwrap()
-            .push(Edge::local(from, to, kind));
-    }
-
-    pub fn edges(&self) -> std::sync::RwLockReadGuard<'_, Vec<Edge>> {
-        self.edges.read().unwrap()
-    }
-
-    pub fn edges_mut(&mut self) -> &mut Vec<Edge> {
-        self.edges.get_mut().unwrap()
     }
 
     /// Remap all sym IDs using the given table. Used after merging per-thread interners.
@@ -243,25 +194,8 @@ impl Tree {
             };
             id_map.insert(id, new_id);
         }
-        let new_root = id_map[&self.root];
-        let old_arena = std::mem::replace(&mut self.arena, new_arena);
-        self.root = new_root;
-        for edge in self.edges.get_mut().unwrap() {
-            let from_nid = old_arena
-                .get_node_id_at(std::num::NonZeroUsize::new(edge.from.node as usize + 1).unwrap());
-            if let Some(old) = from_nid
-                && let Some(&new) = id_map.get(&old)
-            {
-                edge.from.node = Self::to_raw(new);
-            }
-            let to_nid = old_arena
-                .get_node_id_at(std::num::NonZeroUsize::new(edge.to.node as usize + 1).unwrap());
-            if let Some(old) = to_nid
-                && let Some(&new) = id_map.get(&old)
-            {
-                edge.to.node = Self::to_raw(new);
-            }
-        }
+        self.root = id_map[&self.root];
+        self.arena = new_arena;
     }
 }
 
@@ -285,7 +219,6 @@ pub struct SnapshotNode {
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct TreeSnapshot {
     pub nodes: Vec<SnapshotNode>,
-    pub edges: Vec<Edge>,
     pub label: String,
 }
 
@@ -318,32 +251,8 @@ impl From<&Tree> for TreeSnapshot {
                 parent,
             });
         }
-        let remap_node = |raw: u32| -> u32 {
-            std::num::NonZeroUsize::new(raw as usize + 1)
-                .and_then(|idx| tree.arena.get_node_id_at(idx))
-                .and_then(|nid| id_to_pos.get(&nid).copied())
-                .unwrap_or(raw)
-        };
-        let edges = tree
-            .edges
-            .read()
-            .unwrap()
-            .iter()
-            .map(|e| Edge {
-                from: NodeRef {
-                    tree: e.from.tree,
-                    node: remap_node(e.from.node),
-                },
-                to: NodeRef {
-                    tree: e.to.tree,
-                    node: remap_node(e.to.node),
-                },
-                kind: e.kind,
-            })
-            .collect();
         Self {
             nodes,
-            edges,
             label: tree.label.clone(),
         }
     }
@@ -392,7 +301,6 @@ impl From<TreeSnapshot> for Tree {
             );
             id_map.push(id);
         }
-        tree.edges = RwLock::new(snap.edges);
         tree.label = snap.label;
         tree
     }

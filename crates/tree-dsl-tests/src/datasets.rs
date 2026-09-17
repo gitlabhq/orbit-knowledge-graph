@@ -122,7 +122,7 @@ fn assign_ids(trees: &[Tree], lang: &Lang) -> IdMaps {
 
 pub fn to_datasets(
     trees: &[Tree],
-    cross_edges: &[Edge],
+    edges: &[Edge],
     lang: &Lang,
     support_lang: SupportLang,
     resolve_config: &tree_dsl::rules::ResolveConfig,
@@ -131,10 +131,10 @@ pub fn to_datasets(
     let mut ds = HashMap::new();
     ds.insert("File".into(), build_files(trees, lang)?);
     ds.insert("Definition".into(), build_defs(trees, lang, &ids)?);
-    let resolved_imports: std::collections::HashSet<(usize, u32)> = cross_edges
+    let resolved_imports: std::collections::HashSet<(usize, u32)> = edges
         .iter()
         .filter(|e| e.kind == EdgeKind::Imports)
-        .map(|e| (e.from.tree as usize, e.from.node))
+        .map(|e| (e.from_tree as usize, e.from_node))
         .collect();
     ds.insert(
         "ImportedSymbol".into(),
@@ -147,20 +147,20 @@ pub fn to_datasets(
             &resolved_imports,
         )?,
     );
-    let (f2d, f2i) = build_file_edges(trees, &ids);
+    let (f2d, f2i) = build_file_edges(trees, edges, &ids);
     ds.insert("FileToDefinition".into(), f2d?);
     ds.insert("FileToImportedSymbol".into(), f2i?);
     ds.insert(
         "DefinitionToDefinition".into(),
-        build_def2def(trees, cross_edges, &ids)?,
+        build_def2def(trees, edges, &ids)?,
     );
     ds.insert(
         "DefinitionToImportedSymbol".into(),
-        build_def2imp(trees, cross_edges, &ids)?,
+        build_def2imp(trees, edges, &ids)?,
     );
     ds.insert(
         "ImportedSymbolToDefinition".into(),
-        build_imp2def(trees, cross_edges, &ids)?,
+        build_imp2def(trees, edges, &ids)?,
     );
     Ok(ds)
 }
@@ -584,6 +584,7 @@ fn build_imports(
 
 fn build_file_edges(
     trees: &[Tree],
+    edges: &[Edge],
     ids: &IdMaps,
 ) -> (anyhow::Result<RecordBatch>, anyhow::Result<RecordBatch>) {
     let (mut ds, mut dt, mut dk) = (
@@ -617,10 +618,10 @@ fn build_file_edges(
                 }
             }
         }
-        for edge in tree.edges().iter() {
-            if edge.from.node == 0
+        for edge in edges.iter().filter(|e| e.from_tree == fi as u32) {
+            if edge.from_node == 0
                 && edge.kind == EdgeKind::Calls
-                && let Some(&tid) = ids.defs.get(&(fi, edge.to.node))
+                && let Some(&tid) = ids.defs.get(&(fi, edge.to_node))
             {
                 ds.append_value(fid);
                 dt.append_value(tid);
@@ -631,43 +632,23 @@ fn build_file_edges(
     (edge_batch(ds, dt, dk), edge_batch(is, it, ik))
 }
 
-fn build_def2def(
-    trees: &[Tree],
-    cross_edges: &[Edge],
-    ids: &IdMaps,
-) -> anyhow::Result<RecordBatch> {
+fn build_def2def(_trees: &[Tree], edges: &[Edge], ids: &IdMaps) -> anyhow::Result<RecordBatch> {
     let (mut s, mut t, mut k) = (
         Int64Builder::new(),
         Int64Builder::new(),
         StringBuilder::new(),
     );
-    for (fi, tree) in trees.iter().enumerate() {
-        for edge in tree.edges().iter() {
-            if edge.kind == EdgeKind::Imports {
-                continue;
-            }
-            let label = edge.kind.name();
-            if let (Some(&from), Some(&to)) = (
-                ids.defs.get(&(fi, edge.from.node)),
-                ids.defs.get(&(fi, edge.to.node)),
-            ) {
-                s.append_value(from);
-                t.append_value(to);
-                k.append_value(label);
-            }
-        }
-    }
     let mut cross_seen = std::collections::HashSet::new();
-    for ce in cross_edges {
-        if ce.kind == EdgeKind::Imports {
+    for edge in edges {
+        if edge.kind == EdgeKind::Imports {
             continue;
         }
-        let label = ce.kind.name();
+        let label = edge.kind.name();
         if let (Some(&from), Some(&to)) = (
-            ids.defs.get(&(ce.from.tree as usize, ce.from.node)),
-            ids.defs.get(&(ce.to.tree as usize, ce.to.node)),
+            ids.defs.get(&(edge.from_tree as usize, edge.from_node)),
+            ids.defs.get(&(edge.to_tree as usize, edge.to_node)),
         ) {
-            if !cross_seen.insert((from, to, label)) {
+            if edge.from_tree != edge.to_tree && !cross_seen.insert((from, to, label)) {
                 continue;
             }
             s.append_value(from);
@@ -678,66 +659,57 @@ fn build_def2def(
     edge_batch(s, t, k)
 }
 
-fn build_def2imp(
-    trees: &[Tree],
-    cross_edges: &[Edge],
-    ids: &IdMaps,
-) -> anyhow::Result<RecordBatch> {
+fn build_def2imp(_trees: &[Tree], edges: &[Edge], ids: &IdMaps) -> anyhow::Result<RecordBatch> {
     let (mut s, mut t, mut k) = (
         Int64Builder::new(),
         Int64Builder::new(),
         StringBuilder::new(),
     );
-    let resolved: std::collections::HashSet<(usize, u32)> = cross_edges
+    let resolved: std::collections::HashSet<(usize, u32)> = edges
         .iter()
         .filter(|ce| ce.kind == EdgeKind::Calls)
-        .map(|ce| (ce.from.tree as usize, ce.from.node))
+        .map(|ce| (ce.from_tree as usize, ce.from_node))
         .collect();
-    for (fi, tree) in trees.iter().enumerate() {
-        for edge in tree.edges().iter() {
-            if edge.kind != EdgeKind::Imports {
-                continue;
-            }
-            if resolved.contains(&(fi, edge.from.node)) {
-                continue;
-            }
-            let Some(&caller_id) = ids.defs.get(&(fi, edge.from.node)) else {
-                continue;
-            };
-            if let Some(&iid) = ids.import_by_name.get(&(fi, edge.to.node)) {
+    for edge in edges {
+        if edge.kind != EdgeKind::Imports {
+            continue;
+        }
+        let fi = edge.from_tree as usize;
+        if resolved.contains(&(fi, edge.from_node)) {
+            continue;
+        }
+        let Some(&caller_id) = ids.defs.get(&(fi, edge.from_node)) else {
+            continue;
+        };
+        if let Some(&iid) = ids.import_by_name.get(&(fi, edge.to_node)) {
+            s.append_value(caller_id);
+            t.append_value(iid);
+            k.append_value("Calls");
+        } else if let Some(iids) = ids.imports.get(&(fi, edge.to_node)) {
+            for &iid in iids {
                 s.append_value(caller_id);
                 t.append_value(iid);
                 k.append_value("Calls");
-            } else if let Some(iids) = ids.imports.get(&(fi, edge.to.node)) {
-                for &iid in iids {
-                    s.append_value(caller_id);
-                    t.append_value(iid);
-                    k.append_value("Calls");
-                }
             }
         }
     }
     edge_batch(s, t, k)
 }
 
-fn build_imp2def(
-    _trees: &[Tree],
-    cross_edges: &[Edge],
-    ids: &IdMaps,
-) -> anyhow::Result<RecordBatch> {
+fn build_imp2def(_trees: &[Tree], edges: &[Edge], ids: &IdMaps) -> anyhow::Result<RecordBatch> {
     let (mut s, mut t, mut k) = (
         Int64Builder::new(),
         Int64Builder::new(),
         StringBuilder::new(),
     );
-    for ce in cross_edges {
+    for ce in edges {
         if ce.kind != EdgeKind::Imports {
             continue;
         }
-        let target_id = if let Some(&did) = ids.defs.get(&(ce.to.tree as usize, ce.to.node)) {
+        let target_id = if let Some(&did) = ids.defs.get(&(ce.to_tree as usize, ce.to_node)) {
             did
-        } else if ce.to.node == 0 {
-            if let Some(&mid) = ids.modules.get(&(ce.to.tree as usize)) {
+        } else if ce.to_node == 0 {
+            if let Some(&mid) = ids.modules.get(&(ce.to_tree as usize)) {
                 mid
             } else {
                 continue;
@@ -745,7 +717,7 @@ fn build_imp2def(
         } else {
             continue;
         };
-        let key = (ce.from.tree as usize, ce.from.node);
+        let key = (ce.from_tree as usize, ce.from_node);
         if let Some(&iid) = ids.import_by_name.get(&key) {
             s.append_value(iid);
             t.append_value(target_id);

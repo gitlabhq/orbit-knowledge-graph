@@ -4,7 +4,6 @@
 stages:
   - name: normalize
     rules:
-      # return expr → __return
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
 
@@ -150,6 +149,11 @@ stages:
         replace: '(__def (__defname @$N) (__class) (__callable "__call__") $$$ANN $B)'
       - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:identifier)'
+        replace: '(__ssa_return (__rhs @$V))'
 
 resolve:
   display_source: resolved

@@ -260,11 +260,11 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn follow(self, edge: &Edge) -> Self {
-        self.jump(edge.to.tree, edge.to.node)
+        self.jump(edge.to_tree, edge.to_node)
     }
 
     pub fn edge_to(self, to: Self, kind: EdgeKind) -> Edge {
-        Edge::new(self.fi as usize, self.id, to.fi as usize, to.id, kind)
+        Edge::new(self.fi, self.id, to.fi, to.id, kind)
     }
 
     pub fn descend<R>(self, mut visitor: impl FnMut(Self) -> Step<R>) -> Option<R> {

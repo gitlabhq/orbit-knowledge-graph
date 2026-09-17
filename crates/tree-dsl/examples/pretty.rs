@@ -51,13 +51,13 @@ fn main() {
         }
         "ssa" => {
             let (pipeline, mut lang) = Pipeline::for_lang(lang_id);
-            let tree = tree_dsl::pipeline::process_file("test", &source, &lang, &pipeline);
+            let (tree, edges) = tree_dsl::pipeline::process_file("test", &source, &lang, &pipeline);
             println!("{}", pretty_print(&tree, &lang, color));
-            if !tree.edges().is_empty() {
+            if !edges.is_empty() {
                 println!("edges:");
-                for e in tree.edges().iter() {
-                    let from = lang.syms.resolve(tree.cursor(e.from.node).sym());
-                    let to = lang.syms.resolve(tree.cursor(e.to.node).sym());
+                for e in &edges {
+                    let from = lang.syms.resolve(tree.cursor(e.from_node).sym());
+                    let to = lang.syms.resolve(tree.cursor(e.to_node).sym());
                     println!(
                         "  {} --[{}]--> {}",
                         truncate(from, 40),

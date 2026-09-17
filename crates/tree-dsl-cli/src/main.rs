@@ -144,9 +144,9 @@ fn cmd_parse(
             print_tree(&tree, &lang);
         }
         Stage::Ssa => {
-            let (tree, lang, _) = tree_dsl::parse(lang_id, &path, &source);
+            let (tree, edges, lang, _) = tree_dsl::parse(lang_id, &path, &source);
             print_tree(&tree, &lang);
-            print_edges(&tree, &lang);
+            print_edges(&tree, &edges, &lang);
         }
     }
     Ok(())
@@ -246,14 +246,18 @@ fn print_tree(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::intern::Lang) {
     }
 }
 
-fn print_edges(tree: &tree_dsl::tree::Tree, lang: &tree_dsl::intern::Lang) {
-    if tree.edges().is_empty() {
+fn print_edges(
+    tree: &tree_dsl::tree::Tree,
+    edges: &[tree_dsl::tree::Edge],
+    lang: &tree_dsl::intern::Lang,
+) {
+    if edges.is_empty() {
         return;
     }
     println!("edges:");
-    for e in tree.edges().iter() {
-        let from = node_label(tree, lang, e.from.node);
-        let to = node_label(tree, lang, e.to.node);
+    for e in edges {
+        let from = node_label(tree, lang, e.from_node);
+        let to = node_label(tree, lang, e.to_node);
         println!("  {} --[{}]--> {}", from, edge_name(e.kind), to);
     }
 }
@@ -306,7 +310,6 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
 
     let mut total_defs = 0usize;
     let mut total_imports = 0usize;
-    let mut total_intra_edges = 0usize;
 
     for tree in &result.trees {
         for c in tree.root().descendants() {
@@ -318,7 +321,6 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
                 total_imports += 1;
             }
         }
-        total_intra_edges += tree.edges().len();
     }
 
     eprintln!();
@@ -326,8 +328,7 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
     eprintln!("files:        {}", result.trees.len());
     eprintln!("definitions:  {}", total_defs);
     eprintln!("imports:      {}", total_imports);
-    eprintln!("intra edges:  {}", total_intra_edges);
-    eprintln!("cross edges:  {}", result.cross_edges.len());
+    eprintln!("edges:        {}", result.edges.len());
     eprintln!("parse:        {:.2}s", result.timings.parse_s);
     eprintln!("resolve:      {:.2}s", result.timings.resolve_s);
     eprintln!("total:        {:.2}s", elapsed.as_secs_f64());

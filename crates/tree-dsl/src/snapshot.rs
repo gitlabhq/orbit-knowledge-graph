@@ -10,7 +10,7 @@ use crate::{file_tree, resolver};
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct Snapshot {
     trees: Vec<TreeSnapshot>,
-    cross_edges: Vec<Edge>,
+    edges: Vec<Edge>,
     lang: LangSnapshot,
 }
 
@@ -18,7 +18,7 @@ impl IndexResult {
     pub fn save(&self, path: &Path) -> io::Result<()> {
         let snap = Snapshot {
             trees: self.trees.iter().map(TreeSnapshot::from).collect(),
-            cross_edges: self.cross_edges.clone(),
+            edges: self.edges.clone(),
             lang: LangSnapshot::from(&self.lang),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::BoxedError>(&snap).map_err(io::Error::other)?;
@@ -35,7 +35,7 @@ impl IndexResult {
         let (pipeline, _) = Pipeline::for_lang(lang_id);
         Ok(IndexResult {
             trees: snap.trees.into_iter().map(|t| t.into()).collect(),
-            cross_edges: snap.cross_edges,
+            edges: snap.edges,
             lang: Lang::from(snap.lang),
             pipeline,
             timings: Default::default(),
@@ -55,10 +55,12 @@ impl IndexResult {
             self.trees.retain(|t| t.label != *path);
         }
 
+        let mut intra_edges = Vec::new();
         let new_files: Vec<&(String, String)> = modified.iter().chain(added.iter()).collect();
         for (path, source) in &new_files {
-            let tree = process_file(path, source, &self.lang, &self.pipeline);
+            let (tree, edges) = process_file(path, source, &self.lang, &self.pipeline);
             self.trees.push(tree);
+            intra_edges.extend(edges);
         }
 
         let all_paths: Vec<String> = self.trees.iter().map(|t| t.label.clone()).collect();
@@ -67,13 +69,16 @@ impl IndexResult {
             .map(|p| (p.clone(), String::new()))
             .collect();
         let walk = file_tree::walk(&all_paths, &all_files, &self.lang, &self.pipeline.resolve);
-        self.cross_edges = resolver::resolve(
+        let cross_edges = resolver::resolve(
             &mut self.trees,
+            &self.edges,
             &self.lang,
             self.pipeline.lang_id,
             &walk.lookup_prefixes,
             &self.pipeline.resolve.external,
         )
         .cross_edges;
+        self.edges = intra_edges;
+        self.edges.extend(cross_edges);
     }
 }

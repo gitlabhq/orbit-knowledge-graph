@@ -73,7 +73,7 @@ fn round_trip_save_load() {
 
     let result = tree_dsl::index(SupportLang::Python, &fixtures);
     assert_eq!(result.trees.len(), fixtures.len());
-    assert!(!result.cross_edges.is_empty());
+    assert!(!result.edges.is_empty());
 
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
@@ -84,20 +84,19 @@ fn round_trip_save_load() {
     let loaded = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
 
     assert_eq!(loaded.trees.len(), result.trees.len());
-    assert_eq!(loaded.cross_edges.len(), result.cross_edges.len());
+    assert_eq!(loaded.edges.len(), result.edges.len());
     assert_eq!(count_defs(&loaded), count_defs(&result));
     assert_eq!(file_set(&loaded), file_set(&result));
 
     for (orig, restored) in result.trees.iter().zip(loaded.trees.iter()) {
         assert_eq!(orig.label, restored.label);
         assert_eq!(orig.len(), restored.len());
-        assert_eq!(orig.edges().len(), restored.edges().len());
     }
-    for (orig, restored) in result.cross_edges.iter().zip(loaded.cross_edges.iter()) {
-        assert_eq!(orig.from.tree, restored.from.tree);
-        assert_eq!(orig.from.node, restored.from.node);
-        assert_eq!(orig.to.tree, restored.to.tree);
-        assert_eq!(orig.to.node, restored.to.node);
+    for (orig, restored) in result.edges.iter().zip(loaded.edges.iter()) {
+        assert_eq!(orig.from_tree, restored.from_tree);
+        assert_eq!(orig.from_node, restored.from_node);
+        assert_eq!(orig.to_tree, restored.to_tree);
+        assert_eq!(orig.to_node, restored.to_node);
     }
 }
 
@@ -163,7 +162,7 @@ fn modify_step_preserves_resolution() {
     result.save(&snap).unwrap();
 
     let mut current = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
-    let initial_cross = current.cross_edges.len();
+    let initial_cross = current.edges.len();
     assert!(initial_cross > 0);
 
     let step = &suite.steps[0];
@@ -175,7 +174,7 @@ fn modify_step_preserves_resolution() {
     current.update(&[], &modified, &[]);
 
     assert_eq!(current.trees.len(), 2);
-    assert!(current.cross_edges.len() >= initial_cross);
+    assert!(current.edges.len() >= initial_cross);
 
     let names = def_names(&current);
     assert!(names.contains(&"helper".to_string()));
@@ -185,5 +184,5 @@ fn modify_step_preserves_resolution() {
     current.save(&snap2).unwrap();
     let reloaded = tree_dsl::IndexResult::load(&snap2, SupportLang::Python).unwrap();
     assert_eq!(count_defs(&reloaded), count_defs(&current));
-    assert_eq!(reloaded.cross_edges.len(), current.cross_edges.len());
+    assert_eq!(reloaded.edges.len(), current.edges.len());
 }

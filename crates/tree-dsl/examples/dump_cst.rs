@@ -35,11 +35,11 @@ fn main() {
             eprintln!("--- rewrites: {before} -> {after} nodes ---");
         }
         if stage == "ssa" {
-            let tree = tree_dsl::pipeline::process_file("test", &source, &lang, &pipeline);
+            let (tree, edges) = tree_dsl::pipeline::process_file("test", &source, &lang, &pipeline);
             dump(&tree, &lang);
-            for e in tree.edges().iter() {
-                let from_s = lang.syms.resolve(tree.cursor(e.from.node).sym());
-                let to_s = lang.syms.resolve(tree.cursor(e.to.node).sym());
+            for e in &edges {
+                let from_s = lang.syms.resolve(tree.cursor(e.from_node).sym());
+                let to_s = lang.syms.resolve(tree.cursor(e.to_node).sym());
                 let from = if from_s.len() > 30 {
                     &from_s[..30]
                 } else {

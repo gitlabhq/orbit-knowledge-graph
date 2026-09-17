@@ -26,7 +26,7 @@ async fn build_and_check(
 ) -> Vec<Failure> {
     let datasets = to_datasets(
         &result.trees,
-        &result.cross_edges,
+        &result.edges,
         &mut result.lang,
         lang_id,
         &result.pipeline.resolve,

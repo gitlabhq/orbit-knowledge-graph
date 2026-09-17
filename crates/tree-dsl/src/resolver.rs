@@ -21,6 +21,7 @@ pub struct ResolveResult {
 
 pub fn resolve(
     trees: &mut [Tree],
+    edges: &[Edge],
     lang: &Lang,
     support_lang: SupportLang,
     lookup_prefixes: &[String],
@@ -62,6 +63,7 @@ pub fn resolve(
 
     let ctx = ResolveCtx {
         trees,
+        edges,
         lang,
         visible: &visible,
         ambiguous: &ambiguous,
@@ -98,6 +100,7 @@ pub fn resolve(
 
 struct ResolveCtx<'a> {
     trees: &'a [Tree],
+    edges: &'a [Edge],
     lang: &'a Lang,
     visible: &'a VisibleMap,
     ambiguous: &'a FxHashSet<(usize, u32)>,
@@ -151,9 +154,9 @@ fn name_targets(ctx: &ResolveCtx, corpus: Cursor, tfi: usize, c: Cursor) -> Vec<
 
 fn targets_import(nodes: &Tree, e: &Edge, import_node: u32) -> bool {
     e.kind == EdgeKind::Imports
-        && (e.to.node == import_node
+        && (e.to_node == import_node
             || nodes
-                .cursor(e.to.node)
+                .cursor(e.to_node)
                 .parent()
                 .is_some_and(|p| p.index() == import_node))
 }
@@ -180,18 +183,18 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     let import_node = req.node;
     let nodes = &ctx.trees[fi];
     let target_files: Vec<usize> = std::iter::once(req.target_fi)
-        .chain(import_edges.iter().map(|e| e.to.tree as usize))
+        .chain(import_edges.iter().map(|e| e.to_tree as usize))
         .unique()
         .collect();
 
     let mut edges: Vec<Edge> = import_edges.clone();
 
-    for edge in nodes
-        .edges()
+    for edge in ctx
+        .edges
         .iter()
-        .filter(|e| targets_import(nodes, e, import_node))
+        .filter(|e| e.from_tree == fi as u32 && targets_import(nodes, e, import_node))
     {
-        let caller = corpus.jump(fi as u32, edge.from.node);
+        let caller = corpus.jump(fi as u32, edge.from_node);
         for (_, m) in caller.member_calls() {
             let Some(&(dfi, dn)) = target_files
                 .iter()
@@ -207,24 +210,24 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     }
 
     for ie in &import_edges {
-        let target = corpus.jump(ie.to.tree, ie.to.node);
+        let target = corpus.jump(ie.to_tree, ie.to_node);
         if !is_callable(target) {
             continue;
         }
         let target_name = ctx
             .reverse_visible
-            .get(&(ie.to.tree as usize, ie.to.node))
+            .get(&(ie.to_tree as usize, ie.to_node))
             .copied()
             .unwrap_or(0);
-        let ft = &ctx.trees[ie.from.tree as usize];
-        let is_wild = ft.cursor(ie.from.node).sym() == ctx.wildcard_sym && target_name != 0;
+        let ft = &ctx.trees[ie.from_tree as usize];
+        let is_wild = ft.cursor(ie.from_node).sym() == ctx.wildcard_sym && target_name != 0;
 
-        for intra in ft
-            .edges()
-            .iter()
-            .filter(|i| i.kind == EdgeKind::Imports && is_direct(ft, i.to.node, ie.from.node))
-        {
-            let from = corpus.jump(ie.from.tree, intra.from.node);
+        for intra in ctx.edges.iter().filter(|i| {
+            i.from_tree == ie.from_tree
+                && i.kind == EdgeKind::Imports
+                && is_direct(ft, i.to_node, ie.from_node)
+        }) {
+            let from = corpus.jump(ie.from_tree, intra.from_node);
             let used = !is_wild
                 || from
                     .calls()
@@ -241,13 +244,13 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
 fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, all_cross: &[Edge]) -> Vec<Edge> {
     let corpus = Cursor::new(ctx.trees, 0, 0);
     let target = corpus.follow(ce);
-    let caller = corpus.jump(ce.from.tree, ce.from.node);
+    let caller = corpus.jump(ce.from_tree, ce.from_node);
 
     let Some(ret_sym) = infer_return_type(target) else {
         return vec![];
     };
     let Some((type_fi, type_node)) =
-        resolve_type(ret_sym, ce.to.tree as usize, corpus, ctx.visible, all_cross)
+        resolve_type(ret_sym, ce.to_tree as usize, corpus, ctx.visible, all_cross)
     else {
         return vec![];
     };
@@ -286,7 +289,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     let Some(target_name) = target.child_sym(C::DefName) else {
         return vec![];
     };
-    let ft = &ctx.trees[ce.from.tree as usize];
+    let ft = &ctx.trees[ce.from_tree as usize];
     ft.root().fold_tree(Vec::new(), |edges, n, _w| {
         if !n.is(C::Binding) {
             return;
@@ -311,7 +314,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
             if let Some(m) = find_method_in(target, member.sym()) {
                 edges.push(
                     corpus
-                        .jump(ce.from.tree, caller_def.index())
+                        .jump(ce.from_tree, caller_def.index())
                         .edge_to(m, EdgeKind::Calls),
                 );
             }
@@ -334,11 +337,11 @@ fn resolve_type(
         return Some(loc);
     }
     for ce in cross_edges {
-        if ce.from.tree as usize == target_fi
+        if ce.from_tree as usize == target_fi
             && ce.kind == EdgeKind::Imports
             && corpus.follow(ce).child_sym(C::DefName) == Some(ret_sym)
         {
-            return Some((ce.to.tree as usize, ce.to.node));
+            return Some((ce.to_tree as usize, ce.to_node));
         }
     }
     None
@@ -405,7 +408,13 @@ fn gather_imports(
                         };
                     for (tfi, path, is_sub) in candidates {
                         if is_sub {
-                            edges.push(Edge::new(fi, node_idx, tfi, 0, EdgeKind::Imports));
+                            edges.push(Edge::new(
+                                fi as u32,
+                                node_idx,
+                                tfi as u32,
+                                0,
+                                EdgeKind::Imports,
+                            ));
                         }
                         reqs.push(ImportReq {
                             fi,

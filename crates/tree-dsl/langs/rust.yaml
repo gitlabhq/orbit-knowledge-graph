@@ -133,6 +133,19 @@ stages:
       - match: '(impl_item type: $T body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
 
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:identifier)'
+        replace: '(__ssa_return (__rhs @$V))'
+      - match: '(__ssa_arm $V:identifier)'
+        replace: '(__ssa_arm (__rhs @$V))'
+      - match: '(__ssa_arm (block $V:identifier))'
+        replace: '(__ssa_arm (__rhs @$V))'
+      - match: '(__ssa_arm (else_clause (block $V:identifier)))'
+        replace: '(__ssa_arm (__rhs @$V))'
+      - match: '(__ssa_arm (else_clause $V:block))'
+        replace: '(__ssa_arm $V)'
+
 resolve:
   parse_files:
     - name: "Cargo.toml"

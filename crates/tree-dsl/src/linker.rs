@@ -2,7 +2,9 @@ use crate::canonical::{self as canonical, Canonical as C};
 use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{Cursor, EdgeKind, Step, Tree, find_method_in, infer_return_type, reachable};
+use crate::tree::{
+    Cursor, Edge, EdgeKind, Step, Tree, find_method_in, infer_return_type, reachable,
+};
 
 enum Linked {
     Def(u32),
@@ -54,6 +56,7 @@ struct Fold<'t> {
     import_names: Vec<u32>,
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
+    edges: Vec<Edge>,
 }
 
 impl<'t> Fold<'t> {
@@ -98,8 +101,8 @@ impl<'t> Fold<'t> {
             self.handle_call(c);
             Self::push_children(c, stack);
         } else if k == C::Member {
-            let pk = c.parent().map_or(0, |p| p.kind());
-            if pk != C::Call && pk != C::Callee {
+            let is_callee = c.parent().is_some_and(|p| p.kind() == C::Callee);
+            if !is_callee {
                 self.handle_standalone_member(c);
             }
             Self::push_children(c, stack);
@@ -190,12 +193,14 @@ impl<'t> Fold<'t> {
                 .write_variable(alias.sym(), parent_block, Value::LocalDef(def_idx));
         }
         if let Some(&(Some(parent), _)) = self.def_stack.last() {
-            self.tree.add_edge(parent, idx, EdgeKind::Defines);
+            self.edges.push(Edge::local(parent, idx, EdgeKind::Defines));
         }
-        for st in c.children_of(C::SuperType) {
-            if let Some(dn) = self.defs_named(st.sym()).next() {
-                self.tree.add_edge(idx, dn, EdgeKind::Extends);
-            }
+        let supers: Vec<u32> = c
+            .children_of(C::SuperType)
+            .filter_map(|st| self.defs_named(st.sym()).next())
+            .collect();
+        for dn in supers {
+            self.edges.push(Edge::local(idx, dn, EdgeKind::Extends));
         }
         if canonical::is_scoped_def(c) {
             self.def_stack.push((Some(idx), parent_block));
@@ -240,7 +245,7 @@ impl<'t> Fold<'t> {
                 if let Some(cls) = self.enclosing_class(from)
                     && let Some(m) = self.find_method_in(cls, ivar_sym)
                 {
-                    self.tree.add_edge(from, m, EdgeKind::Calls);
+                    self.edges.push(Edge::local(from, m, EdgeKind::Calls));
                 }
             }
             CalleeShape::Name(sym) => {
@@ -258,7 +263,7 @@ impl<'t> Fold<'t> {
         for r in self.lookup(obj) {
             match r {
                 Linked::Type(ts) if method != 0 => self.resolve_method(ts, method, from),
-                Linked::Import(node) => self.tree.add_edge(from, node, EdgeKind::Imports),
+                Linked::Import(node) => self.edges.push(Edge::local(from, node, EdgeKind::Imports)),
                 _ => {}
             }
         }
@@ -395,14 +400,14 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn emit(&self, r: &Linked, from: u32) {
+    fn emit(&mut self, r: &Linked, from: u32) {
         match r {
             Linked::Def(node) => {
                 if canonical::is_callable_def(self.tree.cursor(*node)) {
-                    self.tree.add_edge(from, *node, EdgeKind::Calls);
+                    self.edges.push(Edge::local(from, *node, EdgeKind::Calls));
                 }
             }
-            Linked::Import(node) => self.tree.add_edge(from, *node, EdgeKind::Imports),
+            Linked::Import(node) => self.edges.push(Edge::local(from, *node, EdgeKind::Imports)),
             Linked::Type(_) => {}
         }
     }
@@ -423,7 +428,7 @@ impl<'t> Fold<'t> {
                 Linked::Type(ts) => self.resolve_method(ts, method, from),
                 Linked::Def(node) => {
                     if let Some(m) = self.find_method_in(node, method) {
-                        self.tree.add_edge(from, m, EdgeKind::Calls);
+                        self.edges.push(Edge::local(from, m, EdgeKind::Calls));
                     } else {
                         self.emit(&Linked::Def(node), from);
                     }
@@ -446,10 +451,10 @@ impl<'t> Fold<'t> {
                             if let Some(callable) = self.tree.cursor(target).child_sym(C::Callable)
                             {
                                 if let Some(m) = self.find_method_in(target, callable) {
-                                    self.tree.add_edge(from, m, EdgeKind::Calls);
+                                    self.edges.push(Edge::local(from, m, EdgeKind::Calls));
                                 }
                             } else {
-                                self.tree.add_edge(from, target, EdgeKind::Calls);
+                                self.edges.push(Edge::local(from, target, EdgeKind::Calls));
                             }
                         }
                     }
@@ -464,7 +469,7 @@ impl<'t> Fold<'t> {
             if let Linked::Def(cls) = r
                 && let Some(m) = self.find_method_in(cls, method)
             {
-                self.tree.add_edge(from, m, EdgeKind::Calls);
+                self.edges.push(Edge::local(from, m, EdgeKind::Calls));
             }
         }
     }
@@ -583,7 +588,7 @@ fn root_object_sym(member: Cursor) -> u32 {
     0
 }
 
-pub fn link(tree: &Tree, lang: &Lang) {
+pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
     ssa.seal_block(entry);
@@ -599,6 +604,7 @@ pub fn link(tree: &Tree, lang: &Lang) {
         import_names: Vec::new(),
         def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern(WILDCARD),
+        edges: Vec::new(),
     };
 
     let root = tree.root();
@@ -609,17 +615,16 @@ pub fn link(tree: &Tree, lang: &Lang) {
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
 
-    let mut meta: Vec<(u32, u32)> = Vec::new();
     for &dn in &f.defs {
         for c in tree.cursor(dn).children_of(C::Decorator) {
             for pv in &f.ssa.read_variable(c.sym(), entry) {
                 if let ParseValue::LocalDef(di) = pv {
-                    meta.push((dn, f.defs[*di as usize]));
+                    f.edges
+                        .push(Edge::local(dn, f.defs[*di as usize], EdgeKind::Calls));
                 }
             }
         }
     }
-    for (from, to) in meta {
-        tree.add_edge(from, to, EdgeKind::Calls);
-    }
+
+    f.edges
 }

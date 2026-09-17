@@ -196,6 +196,11 @@ stages:
       - match: '(export_statement (lexical_declaration $B:__binding))'
         replace: '(export_statement (__def (__defname @$B) (__variable)))'
 
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:identifier)'
+        replace: '(__ssa_return (__rhs @$V))'
+
 resolve:
   parse_files:
     - name: "tsconfig.json"
