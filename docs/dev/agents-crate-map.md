@@ -38,6 +38,6 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), CLI test harness (`cli` module) for CLI integration tests |
 | `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness via YAML scenarios, graph formatting) + cli (concurrency, worktrees); depends on orbit-server, compiler, integration-testkit |
-| `integration-tests-codegraph` | Code-graph-specific integration tests (linker, lance-graph) |
+| `integration-tests-codegraph` | Code-graph-specific integration tests (linker, Orbit DuckDB compiler) |
 | `fuzz` | Fuzz testing harness (bolero) for the query compiler, code parsers, and indexer message handling |
 | `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |
