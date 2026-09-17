@@ -56,7 +56,7 @@ To give agents access to your indexed graph:
 
 1. In the upper-right corner, select your avatar.
 1. Select **Preferences**.
-1. Under **Behavior**, select the **Use Orbit in GitLab Duo** checkbox. Keep the defaults.
+1. Under **Behavior**, select the **Use Orbit in GitLab Duo** checkbox. **Agentic Chat**, **Orbit Agent**, **Other Foundational Agents**, and **Custom Agents** are selected by default.
 1. Select **Save changes**.
 1. Open the GitLab Duo Chat sidebar and confirm GitLab Orbit is turned on.
 
