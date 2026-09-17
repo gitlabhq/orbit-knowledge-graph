@@ -87,7 +87,7 @@ PARAGRAPH = re.compile(r"[^\n]+(?:\n[^\n]+)*")
 INLINE_CODE = re.compile(r"`[^`\n]*`")
 PLACEHOLDER = re.compile(r"\{\{.*?\}\}")
 LINK_TARGET = re.compile(r"\]\([^)]*\)")
-ABBREVIATION = re.compile(r"\b(e\.g|i\.e|vs|etc)\.", re.I)
+ABBREVIATION = re.compile(r"\b([eE]\.g|[iI]\.e)\.|\b(etc|vs)\.(?=\s+[a-z(`\[])")
 LIST_MARKER = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
 SKIPPED_LINE = re.compile(r"^\s*(?:#|\||---|<!--\s*$|-->\s*$)")
 ALIGNED_COLUMNS = re.compile(r"(?<=\S) {3,}(?=\S)")
@@ -150,7 +150,7 @@ def clean(line: str) -> str:
     line = PLACEHOLDER.sub("", line)
     line = LINK_TARGET.sub("]", line)
     line = INLINE_CODE.sub("code", line)
-    return ABBREVIATION.sub(lambda m: m.group(1).replace(".", ""), line)
+    return ABBREVIATION.sub(lambda m: m.group().replace(".", ""), line)
 
 
 def sentences(lines: list[str], first_line: int) -> list[Sentence]:

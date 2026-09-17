@@ -176,6 +176,8 @@ class SentenceRules(unittest.TestCase):
     def test_abbreviations_and_ellipses_hold_while_closing_quotes_split(self):
         (unit,) = markdown_units("s.md", 'See e.g. the docs, i.e. this file... Then ask "why not?" (See below.) Stop.')
         self.assertEqual(len(unit.sentences), 3)
+        (unit,) = markdown_units("s.md", "Columns get renamed, dropped, etc. New rows arrive. Compare a vs. b, etc. and stop.")
+        self.assertEqual(len(unit.sentences), 3)
 
     def test_closing_emphasis_ends_a_sentence(self):
         (unit,) = markdown_units("s.md", "**Do not mirror it.** Then check the ontology. _Really._ Stop. \u201cQuoted.\u201d Done.")
