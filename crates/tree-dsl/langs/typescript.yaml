@@ -220,17 +220,3 @@ resolve:
           replace: '(__dir (__source_root) (__file "index.ts") $$$REST)'
         - match: '(__dir (__file "index.js") $$$REST)'
           replace: '(__dir (__source_root) (__file "index.js") $$$REST)'
-
-display:
-  rules:
-    - match: '(__def)'
-      append:
-        - '(_*_display_fqn @$ROOT|fqn(".", "index", "skip_root"))'
-        - '(_*_display_def_type @$ROOT|def_type)'
-        - '(_*_display_file_path @$ROOT|file_path)'
-    - match: '(__import)'
-      append:
-        - '(_*_display_file_path @$ROOT|file_path)'
-    - match: '(__import_type)'
-      append:
-        - '(_*_display_file_path @$ROOT|file_path)'

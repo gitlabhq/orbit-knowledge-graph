@@ -13733,8 +13733,6 @@ dependencies = [
 name = "tree-dsl"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "arrow 58.3.0",
  "either",
  "indextree",
  "itertools 0.14.0",

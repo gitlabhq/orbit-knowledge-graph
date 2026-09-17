@@ -149,17 +149,3 @@ resolve:
           replace: '(__dir (__source_root) (__file "lib.rs") $$$REST)'
         - match: '(__dir (__file "main.rs") $$$REST)'
           replace: '(__dir (__source_root) (__file "main.rs") $$$REST)'
-
-display:
-  rules:
-    - match: '(__def)'
-      append:
-        - '(_*_display_fqn @$ROOT|fqn("::", "mod", "lib", "main"))'
-        - '(_*_display_def_type @$ROOT|def_type)'
-        - '(_*_display_file_path @$ROOT|file_path)'
-    - match: '(__import)'
-      append:
-        - '(_*_display_file_path @$ROOT|file_path)'
-    - match: '(__import_type)'
-      append:
-        - '(_*_display_file_path @$ROOT|file_path)'
