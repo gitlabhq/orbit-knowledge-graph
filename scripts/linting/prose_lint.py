@@ -169,6 +169,24 @@ def sentences(lines: list[str], first_line: int) -> list[Sentence]:
     return out
 
 
+def prose_lines(lines: list[str]) -> list[str]:
+    cleaned, in_fence = [], False
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            cleaned.append("")
+        elif in_fence or SKIPPED_LINE.match(line):
+            cleaned.append("")
+        else:
+            text = clean(line).strip()
+            if ALIGNED_COLUMNS.search(text):
+                text = "\n" + ALIGNED_COLUMNS.sub(". ", text) + "\n"
+            elif LIST_MARKER.match(line):
+                text = "\n" + LIST_MARKER.sub("", text)
+            cleaned.append(text)
+    return cleaned
+
+
 def markdown_units(path: str, text: str) -> list[Unit]:
     lines = text.splitlines()
     body_start = 0
@@ -176,20 +194,7 @@ def markdown_units(path: str, text: str) -> list[Unit]:
     if len(lines) > 2 and lines[0] == "---" and FRONTMATTER_KEY.match(lines[1]) and "---" in lines[1:]:
         body_start = lines.index("---", 1) + 1
         units += yaml_units(path, "\n".join(lines[1 : body_start - 1]), line_offset=1)
-    cleaned, in_fence = [], False
-    for line in lines[body_start:]:
-        if line.lstrip().startswith("```"):
-            in_fence = not in_fence
-        if in_fence or SKIPPED_LINE.match(line) or line.lstrip().startswith("```"):
-            cleaned.append("")
-            continue
-        text = clean(line).strip()
-        if ALIGNED_COLUMNS.search(text):
-            text = "\n" + ALIGNED_COLUMNS.sub(". ", text) + "\n"
-        elif LIST_MARKER.match(line):
-            text = "\n" + LIST_MARKER.sub("", text)
-        cleaned.append(text)
-    units.append(Unit(path, body_start + 1, sentences(cleaned, body_start + 1)))
+    units.append(Unit(path, body_start + 1, sentences(prose_lines(lines[body_start:]), body_start + 1)))
     return units
 
 
@@ -202,8 +207,8 @@ def yaml_units(path: str, text: str, line_offset: int = 0) -> list[Unit]:
         for line in lines[start:]:
             if line.strip() and len(line) - len(line.lstrip()) <= indent:
                 break
-            raw.append(clean(line.strip()))
-        return raw
+            raw.append(line.strip())
+        return prose_lines(raw)
 
     def scalar_lines(node: yaml.ScalarNode) -> list[str]:
         last = node.end_mark.line if node.end_mark.column else node.end_mark.line - 1
@@ -263,15 +268,9 @@ def check(unit: Unit) -> list[Finding]:
     if len(unit.sentences) >= MIN_SENTENCES_FOR_AVERAGE:
         average = unit.words / len(unit.sentences)
         if average > MAX_AVERAGE_WORDS:
-            add(unit.line, "average", f"{average:.1f} words per sentence (max {MAX_AVERAGE_WORDS:g})")
+            longest = max(unit.sentences, key=lambda s: len(s.words))
+            add(longest.line, "average", f"{average:.1f} words per sentence (max {MAX_AVERAGE_WORDS:g})")
     return found
-
-
-def lint(paths: list[str]) -> list[Finding]:
-    return sorted(
-        (f for path in paths for unit in units_for(path) for f in check(unit)),
-        key=lambda f: (f.path, f.line, f.rule),
-    )
 
 
 def scoped_files() -> list[str]:
@@ -288,8 +287,7 @@ def changed_files(base: str) -> list[str]:
     if subprocess.run(["git", "cat-file", "-e", f"{base}^{{commit}}"], capture_output=True).returncode:
         subprocess.run(["git", "fetch", "origin", base, "--depth=1"], capture_output=True)
     try:
-        git("merge-base", base, head)
-        changed = set(git("diff", "--name-only", "--diff-filter=d", base, head).split())
+        changed = set(git("diff", "--name-only", "--diff-filter=d", f"{base}...{head}").split())
     except subprocess.CalledProcessError as exc:
         raise LintError(f"diff base {base} is unreachable; the lint did not run: {exc.stderr.strip()}") from exc
     return [f for f in scoped_files() if f in changed]
@@ -301,6 +299,9 @@ def main(argv: list[str]) -> int:
     elif argv[:1] == ["--diff-base"] and len(argv) == 2:
         files = changed_files(argv[1])
     elif argv and not argv[0].startswith("--"):
+        missing = [f for f in argv if not Path(f).exists()]
+        if missing:
+            raise LintError(f"no such file: {', '.join(missing)}")
         in_scope = set(scoped_files())
         files = [f for f in argv if f in in_scope]
     else:
@@ -309,9 +310,18 @@ def main(argv: list[str]) -> int:
     if not files:
         print("prose lint: no files in scope.")
         return 0
-    findings = lint(files)
-    for finding in findings:
+    findings, errors = [], []
+    for path in files:
+        try:
+            findings += [f for unit in units_for(path) for f in check(unit)]
+        except (LintError, OSError) as exc:
+            errors.append(str(exc))
+    for finding in sorted(findings, key=lambda f: (f.path, f.line, f.rule)):
         print(finding)
+    for error in errors:
+        print(f"prose lint: error: {error}", file=sys.stderr)
+    if errors:
+        return 2
     if findings:
         print(f"\nprose lint: {len(findings)} finding(s) in {len({f.path for f in findings})} of {len(files)} file(s).")
         print("Rewrite the sentence; do not widen the gate. Rules: scripts/linting/README.md")
@@ -323,6 +333,6 @@ def main(argv: list[str]) -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]))
-    except (LintError, OSError) as exc:
+    except LintError as exc:
         print(f"prose lint: error: {exc}", file=sys.stderr)
         sys.exit(2)

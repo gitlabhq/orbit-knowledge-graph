@@ -21,6 +21,11 @@ nudges:
   read: |
     Reuse the source you already have. Missing code? Run {{orbit}} context.
     Additionally, IMPORTANT: make sure to read everything.
+
+    ```json
+    {"leverage": "synergy"}
+    ```
+    | robust | table |
 """
 
 SKILL = """\
@@ -82,6 +87,10 @@ class YamlUnits(unittest.TestCase):
         (unit,) = yaml_units("q.yml", QUOTED)
         self.assertEqual([(f.line, f.rule) for f in check(unit)], [(3, "tell")])
 
+    def test_block_scalars_skip_fences_and_tables(self):
+        words = {w for s in yaml_units("p.yml", PROMPT)[2].sentences for w in s.words}
+        self.assertFalse(words & {"leverage", "synergy", "robust"})
+
     def test_skips_name_and_version(self):
         texts = [s.text for u in yaml_units("p.yml", PROMPT) for s in u.sentences]
         self.assertNotIn("grep", texts)
@@ -133,6 +142,11 @@ class MarkdownUnits(unittest.TestCase):
 
 
 class SentenceRules(unittest.TestCase):
+    def test_unpunctuated_list_items_stay_separate(self):
+        (unit,) = markdown_units("s.md", "Intro line\n- item one leverages things\n- item two underscores things")
+        self.assertEqual([(s.line, s.text) for s in unit.sentences][1:], [(2, "item one leverages things"), (3, "item two underscores things")])
+        self.assertEqual(rules(check(unit)), [(2, "tell"), (3, "tell")])
+
     def test_inline_code_counts_as_one_word(self):
         long_code = "Run `" + " ".join(["flag"] * 40) + "` now."
         (unit,) = markdown_units("s.md", long_code)
@@ -142,6 +156,9 @@ class SentenceRules(unittest.TestCase):
         long = " ".join(["word"] * 26) + "."
         (unit,) = markdown_units("s.md", "\n\n".join([long] * 3))
         self.assertEqual(rules(check(unit)), [(1, "average"), (1, "sentence"), (3, "sentence"), (5, "sentence")])
+        longer = " ".join(["word"] * 35) + "."
+        (unit,) = markdown_units("s.md", "Short one.\n\n" + longer + "\n\n" + longer)
+        self.assertEqual(rules(check(unit)), [(3, "average"), (3, "sentence"), (5, "sentence")])
 
     def test_abbreviations_and_ellipses_hold_while_closing_quotes_split(self):
         (unit,) = markdown_units("s.md", 'See e.g. the docs, i.e. this file... Then ask "why not?" (See below.) Stop.')
