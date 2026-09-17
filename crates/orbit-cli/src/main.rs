@@ -232,7 +232,7 @@ fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
 
 fn context_target_help() -> String {
     format!(
-        "Definition:<id> references printed by `{} grep` and file paths inside the current checkout. Mix or repeat targets; quote paths with spaces.",
+        "File:<id>, Definition:<id> from `{} grep`, or paths for indexed File views. Mix or repeat targets; quote paths with spaces.",
         commands::setup::spec::launcher()
     )
 }
@@ -251,12 +251,6 @@ fn sql_long_about() -> String {
 struct ContextArgs {
     #[arg(value_name = "TARGET", help = context_target_help(), required = true)]
     target: Vec<String>,
-
-    #[arg(
-        long,
-        help = "Expand the sample of test, fixture, and generated connections"
-    )]
-    tests: bool,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
@@ -1286,19 +1280,13 @@ mod tests {
             panic!("expected context");
         };
         assert_eq!(args.target, vec!["Definition:7", "Definition:9"]);
-        let Commands::Context(with_tests) =
-            Cli::parse_from(["orbit", "context", "Definition:7", "--tests"]).command
-        else {
-            panic!("expected context");
-        };
-        assert!(with_tests.tests);
         assert!(matches!(
             Cli::parse_from(["orbit", "context", "src/lib.rs"]).command,
             Commands::Context(_)
         ));
         assert!(Cli::try_parse_from(["orbit", "context"]).is_err());
         assert!(Cli::try_parse_from(["orbit", "context", "--file", "src/lib.rs"]).is_err());
-        for removed in ["--outline", "--related"] {
+        for removed in ["--outline", "--related", "--tests"] {
             assert!(
                 Cli::try_parse_from(["orbit", "context", "Definition:7", removed]).is_err(),
                 "{removed}"

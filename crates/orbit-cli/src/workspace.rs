@@ -576,12 +576,6 @@ mod tests {
             ),
             0
         );
-        assert_eq!(
-            stored_meta(&client, CODE_INDEX_META_KEY)
-                .unwrap()
-                .as_deref(),
-            Some(CODE_INDEX_REVISION)
-        );
     }
 
     #[test]

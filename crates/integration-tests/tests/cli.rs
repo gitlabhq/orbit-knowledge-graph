@@ -1239,41 +1239,49 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
         "{stdout}"
     );
     let reference = stdout
-        .lines()
-        .find_map(|line| {
-            line.split_whitespace()
-                .find(|word| word.starts_with("Definition:"))
-        })
+        .split_whitespace()
+        .find(|word| word.starts_with("Definition:"))
         .unwrap();
     let repo_arg = repo.path.to_str().unwrap();
-    let args = [
-        "context",
-        reference,
-        "src/main.py",
-        "src/utils.py",
-        "./src/main.py",
-        "--repo",
-        repo_arg,
-    ];
+    let (file, err, ok) = run_cmd(&["context", "src/utils.py", "--repo", repo_arg], dd);
+    assert!(ok, "{err}");
+    let file_id = file.split_whitespace().next().unwrap();
+    assert!(
+        file_id.starts_with("File:") && file.contains(reference),
+        "{file}"
+    );
+    assert!(
+        file.contains("[Function]") && file.contains("src/utils.py:3-4"),
+        "{file}"
+    );
+    assert!(file.contains("os"), "{file}");
+    assert!(file.contains("src.main.App.run"), "{file}");
+    assert!(!file.contains("return open"), "{file}");
+    let args = ["context", file_id, "./src/utils.py", "--repo", repo_arg];
+    assert_eq!(file, run_cmd(&args, dd).0);
+    let args = ["context", file_id, reference, reference, "--repo", repo_arg];
     let (context, err, ok) = run_cmd(&args, dd);
     assert!(ok, "{err}");
-    assert_eq!(context.matches("def hello():").count(), 1, "{context}");
-    assert_eq!(
-        context.matches("return open(path).read()").count(),
-        1,
-        "{context}"
-    );
-    assert!(context.contains(reference) && context.contains("Definition:"));
+    assert!(context.contains(&file), "{context}");
+    assert_eq!(context.matches("return open(path).read()").count(), 1);
+    let args = ["context", file_id, "../outside.py", "--repo", repo_arg];
+    let (context, _, ok) = run_cmd(&args, dd);
+    assert!(!ok && context.is_empty());
 }
 
 #[test]
-fn context_relationship_order_is_stable_across_overloads() {
+fn context_relationships_are_complete_and_stable_across_overloads() {
+    const EXTRA_CALLERS: usize = 12;
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
     let repo = workspace.path().join("repo");
+    let extra_calls = (0..EXTRA_CALLERS)
+        .map(|i| format!("    public void call{i}(Target t) {{ t.ping(); }}\n"))
+        .collect::<String>();
     init_repo_at(
         &repo,
         &[
+            ("empty.yaml", "plain: metadata only\n"),
             (
                 "src/Target.java",
                 "public class Target {\n    public Target() {}\n    public void ping() {}\n}\n",
@@ -1290,15 +1298,23 @@ fn context_relationship_order_is_stable_across_overloads() {
                     "}\n",
                 ),
             ),
+            (
+                "src/Extra.java",
+                &format!("public class Extra {{\n{extra_calls}}}\n"),
+            ),
+            (
+                "tests/TargetTest.java",
+                &format!("public class TargetTest {{\n{extra_calls}}}\n"),
+            ),
         ],
     );
     let dd = data_dir.path();
     assert!(orbit_index(&repo, dd));
 
     let repo_arg = repo.to_str().unwrap();
-    for (fqn, section) in [
-        ("Target.ping", "Connections (showing 5 of 5 indexed):"),
-        ("Target", "Used via members (showing 5 of 5 indexed):"),
+    for (fqn, title) in [
+        ("Target.ping", "Connections"),
+        ("Target", "Used via members"),
     ] {
         let (matches, stderr, ok) = run_cmd(&["grep", fqn, "--repo", repo_arg], dd);
         assert!(ok, "grep {fqn} failed: {stderr}");
@@ -1310,8 +1326,26 @@ fn context_relationship_order_is_stable_across_overloads() {
         let args = ["context", reference, "--repo", repo_arg];
         let (first, stderr, ok) = run_cmd(&args, dd);
         assert!(ok, "context {reference} failed: {stderr}");
+        assert_eq!(
+            first.matches("<-- Extra.call").count(),
+            EXTRA_CALLERS,
+            "{first}"
+        );
+        assert_eq!(
+            first.matches("<-- TargetTest.call").count(),
+            EXTRA_CALLERS,
+            "{first}"
+        );
+        assert!(!first.contains("omitted"), "{first}");
+        let section = format!("{title} ({} indexed):", EXTRA_CALLERS + 5);
         assert!(
-            first.find("public void ping() {}").unwrap() < first.find(section).unwrap(),
+            first.find("public void ping() {}").unwrap() < first.find(&section).unwrap(),
+            "{first}"
+        );
+        assert!(
+            first.contains(&format!(
+                "Test, fixture, or generated connections ({EXTRA_CALLERS} indexed):"
+            )),
             "{first}"
         );
         assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
@@ -1322,10 +1356,30 @@ fn context_relationship_order_is_stable_across_overloads() {
     }
     let (file, stderr, ok) = run_cmd(&["context", "src/Target.java", "--repo", repo_arg], dd);
     assert!(ok, "{stderr}");
-    assert!(
-        file.contains("public class Target") && !file.contains("Connections ("),
+    assert_eq!(
+        file.matches("<-- Extra.call").count(),
+        EXTRA_CALLERS,
         "{file}"
     );
+    assert_eq!(
+        file.matches("<-- TargetTest.call").count(),
+        EXTRA_CALLERS,
+        "{file}"
+    );
+    assert!(!file.contains("omitted"), "{file}");
+    assert!(
+        !file.contains("public class Target") && file.contains("via ping"),
+        "{file}"
+    );
+    let (file, stderr, ok) = run_cmd(&["context", "src/Extra.java", "--repo", repo_arg], dd);
+    assert!(ok, "{stderr}");
+    assert_eq!(
+        file.matches("  Extra.call").count(),
+        EXTRA_CALLERS,
+        "{file}"
+    );
+    let (file, _, ok) = run_cmd(&["context", "empty.yaml", "--repo", repo_arg], dd);
+    assert!(ok && file.contains("No indexed definitions.") && !file.contains("plain:"));
 }
 
 #[test]
