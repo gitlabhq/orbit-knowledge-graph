@@ -20,7 +20,7 @@ Use these discovery paths instead of expanding this file:
 
 ## Non-obvious architecture invariants
 
-- Orbit is read-only toward GitLab. Siphon streams PostgreSQL changes through NATS into the ClickHouse datalake; Orbit writes only its ClickHouse graph tables.
+- Orbit is read-only toward GitLab. Siphon streams PostgreSQL changes through NATS into a ClickHouse datalake of raw rows; the indexer transforms them into indexed tables in a separate ClickHouse graph database, Orbit's only write target.
 - Rails owns authorization. Orbit delegates traversal-path and resource-permission decisions to Rails over gRPC. See `docs/design-documents/security.md`.
 - The ontology under `config/ontology/` is the single source of truth for graph shape, ETL, query validation, redaction, and edge-table routing. New entities and graph-shape facts start there, not in Rust. See `crates/indexer/AGENTS.md` for pipeline authoring.
 - Schema migration, promotion, rollback, and request-time snapshots require usable ontology archives and fail closed when a supported archive is missing. See `docs/design-documents/schema_management.md`.
@@ -32,7 +32,8 @@ Use these discovery paths instead of expanding this file:
 - Keep `AGENTS.md` and `CLAUDE.md` byte-identical.
 - Schema, setup, named-query, ontology, and migration-ledger files have build-time or CI validation; use the corresponding mise validation task before hand-editing these files.
 - Changes covered by pins in `config/versions.yaml` must bump the relevant pin. Changes under `skills/<name>/` or `config/prompts/` must bump that skill or prompt version.
-- Generated artifacts checked in CI include the metrics catalog, query-language property table, vendored Iglu schemas, system-note actions, DuckDB FTS sources, and the crate map. Follow their entries in `docs/dev/agents-reference-index.md` and the failing job's regeneration command.
+- Generated artifacts checked in CI include the metrics catalog, query-language property table, vendored Iglu schemas, system-note actions, and DuckDB FTS sources. Follow their entries in `docs/dev/agents-reference-index.md` and the failing job's regeneration command.
+- Every workspace member needs a row in `docs/dev/agents-crate-map.md`; `crates/xtask/build.rs` enforces this.
 - Markdown must pass markdownlint, Vale, and lychee. Run `mise lint:docs` and `mise lint:newlines`.
 - The server dependency graph must contain AWS-LC FIPS and no `ring`; the CLI graph remains non-FIPS.
 
@@ -53,4 +54,4 @@ Use these discovery paths instead of expanding this file:
 
 Before creating or labeling an issue, epic, or MR, load `/orbit-planning`. Use the repository templates and obey their `TEMPLATE CONVENTION` block. Keep the reviewer summary to 2-3 plain sentences; put implementation details in the Agent context block. Public comments should lead with the verdict and hide lengthy reasoning in a collapsed Agent context block when useful.
 
-Design docs describe the current system. Update the relevant design doc in the same MR whenever behavior or architecture changes; use `docs/dev/agents-reference-index.md` to find the sync point. Check `CONTEXT.md` before documentation and add only genuinely domain-specific terminology.
+Design docs describe the current system. Update the relevant design doc in the same MR whenever behavior or architecture changes; use `docs/dev/agents-reference-index.md` to find the sync point. When adding, removing, or renaming a subsystem, runtime mode, crate, or external dependency, update `AGENTS.md`, `CLAUDE.md`, and `docs/dev/agents-crate-map.md` in the same MR. Check `CONTEXT.md` before documentation and add only genuinely domain-specific terminology.
