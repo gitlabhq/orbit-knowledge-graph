@@ -72,6 +72,7 @@ croner = "3.0.1"
 futures = "0.3.31"
 magika = "1.1.0"
 mimalloc = { version = "0.1.48", default-features = false }
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "download-binaries", "copy-dylibs", "tls-native"] }
 parking_lot = "0.12.5"
 petgraph = "0.8.3"
 globset = "0.4"

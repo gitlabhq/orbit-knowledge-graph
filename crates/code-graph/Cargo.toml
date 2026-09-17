@@ -63,6 +63,7 @@ oxc_linter = { workspace = true }
 oxc_resolver = { workspace = true }
 
 [dev-dependencies]
+ort = { workspace = true }
 tempfile = { workspace = true }
 
 # This crate opts into the workspace lints AND additionally denies bare `#[allow(..)]`
