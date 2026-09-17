@@ -98,7 +98,7 @@ For code-structure orientation before you plan a change, use `glab orbit repo-ma
 
 glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--install` and `--update` are mutually exclusive. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. `glab orbit --help` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
 
-```bash
+```shell
 glab orbit --install --yes   # install without running
 glab orbit --update          # install the latest compatible version
 ```

@@ -22,8 +22,8 @@ _Avoid_: "the server", "production GKG"
 The local backend of the `orbit` binary: indexes a single repository into a DuckDB database for offline analysis. The same flat command tree reaches it with the `index`, `grep`, `context`, `sql`, `schema`, `list`, `repo-map`, and `mcp` verbs. `glab orbit` installs the binary and forwards all verbs to it.
 _Avoid_: "the CLI" (ambiguous: one binary serves both backends)
 
-**Skill Splice Marker**:
-A line-oriented HTML comment that pairs a slot in the standalone Orbit Remote skill with an exported section in the standalone Orbit Local skill. Builds require a one-to-one ID match while both source trees remain independently usable; the current CLI still serves only its embedded local tree.
+**Skill Placeholder**:
+A line-oriented HTML comment that marks where a local section belongs in the standalone Orbit Remote skill. Builds require each placeholder to have one matching local section while both source trees remain independently usable; the current CLI still serves only its embedded local tree.
 _Avoid_: include directive (the source files remain independently usable)
 
 ### Graph model

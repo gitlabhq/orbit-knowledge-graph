@@ -41,7 +41,7 @@ pub fn validate_skill_pair(
         let missing_sections: Vec<_> = slots.difference(&sections).cloned().collect();
         let missing_slots: Vec<_> = sections.difference(&slots).cloned().collect();
         return Err(format!(
-            "skill marker IDs are not a bijection; slots without sections: {missing_sections:?}; sections without slots: {missing_slots:?}"
+            "skill placeholders and local sections do not match; placeholders without sections: {missing_sections:?}; sections without placeholders: {missing_slots:?}"
         ));
     }
 
@@ -603,7 +603,7 @@ mod tests {
         assert!(
             validate(root.path())
                 .unwrap_err()
-                .contains("not a bijection")
+                .contains("placeholders and local sections do not match")
         );
     }
 
