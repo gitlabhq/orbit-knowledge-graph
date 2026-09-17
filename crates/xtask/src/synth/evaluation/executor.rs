@@ -8,6 +8,7 @@ use ontology::Ontology;
 use query_engine::compiler::{Frontend, ParamValue, SecurityContext, compile};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Safe defaults; user-provided settings from the YAML config are merged on
@@ -158,7 +159,7 @@ impl ExecutionResult {
 
 pub struct QueryExecutor {
     client: ArrowClickHouseClient,
-    ontology: Ontology,
+    ontology: Arc<Ontology>,
     sampler: ParameterSampler,
     security_contexts: Vec<(i64, String)>,
     query_settings: String,
@@ -175,7 +176,7 @@ impl QueryExecutor {
         let query_settings = Self::build_settings(user_settings);
         Self {
             client,
-            ontology,
+            ontology: Arc::new(ontology),
             sampler,
             security_contexts: Vec::new(),
             query_settings,

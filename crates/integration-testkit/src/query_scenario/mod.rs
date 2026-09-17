@@ -177,7 +177,7 @@ async fn run_frontend(
     name: &str,
 ) {
     let label = &format!("{name} [{frontend_key}]");
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
 
     let compiled = match compile(query, frontend, &ontology, security) {
         Ok(c) => {

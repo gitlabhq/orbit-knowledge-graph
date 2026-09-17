@@ -243,7 +243,7 @@ fn embedded_schema_version() -> u32 {
 
 fn compile_one(
     query_json: &str,
-    ontology: &Ontology,
+    ontology: &Arc<Ontology>,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
     compiler::compile(
@@ -279,7 +279,7 @@ fn format_hydration(plan: &compiler::HydrationPlan) -> String {
 
 fn run_compile_only(
     query_json: &str,
-    ontology: &Ontology,
+    ontology: &Arc<Ontology>,
     security_ctx: &SecurityContext,
     show: &CompileShow,
     cli: &Cli,

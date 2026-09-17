@@ -215,7 +215,7 @@ impl SnapshotLoader {
     }
 }
 
-fn fits_ontology(query: &NamedQuery, ontology: &Ontology) -> Result<(), String> {
+fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), String> {
     let rendered = query.render_example().map_err(|error| error.to_string())?;
     validate_normalize(&rendered, ontology).map_err(|error| error.to_string())?;
     Ok(())

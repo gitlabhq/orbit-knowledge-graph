@@ -635,7 +635,7 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
     // cannot be satisfied with zero paths.
     let _ = ctx;
     let security_ctx = SecurityContext::new(1, vec![]).unwrap();
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let result = compile(
         r#"{
         "query_type": "aggregation",

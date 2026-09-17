@@ -58,7 +58,7 @@ async fn query_with_security(
     security_ctx: SecurityContext,
 ) -> ResponseView {
     let svc = allow_all();
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let client = Arc::new(ctx.create_client());
     let compiled = Arc::new(compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap());
 

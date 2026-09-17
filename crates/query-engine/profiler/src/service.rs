@@ -156,7 +156,7 @@ impl PipelineStage for MockAuthorizationStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<ExtractionOutput>()
+            .remove::<ExtractionOutput>()
             .ok_or_else(|| PipelineError::Authorization("ExtractionOutput not found".into()))?;
 
         let checks = input.query_result.resource_checks();
@@ -169,7 +169,7 @@ impl PipelineStage for MockAuthorizationStage {
             .collect();
 
         Ok(AuthorizationOutput {
-            query_result: input.query_result.clone(),
+            query_result: input.query_result,
             authorizations,
         })
     }

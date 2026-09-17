@@ -11,6 +11,7 @@ use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
 pub use orbit_utils::clickhouse::ParamValue;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 pub use clickhouse::codegen;
 
@@ -44,17 +45,17 @@ impl ParameterizedQuery {
     /// **Not for execution** — inlines params into SQL; use parameterized
     /// queries to prevent injection.
     pub fn render(&self) -> String {
-        use regex::Regex;
-
-        let re = Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex");
-        re.replace_all(&self.sql, |caps: &regex::Captures| {
-            let name = &caps[1];
-            match self.params.get(name) {
-                Some(param) => param.render_literal(),
-                None => caps[0].to_string(),
-            }
-        })
-        .into_owned()
+        static PARAM_RE: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex"));
+        PARAM_RE
+            .replace_all(&self.sql, |caps: &regex::Captures| {
+                let name = &caps[1];
+                match self.params.get(name) {
+                    Some(param) => param.render_literal(),
+                    None => caps[0].to_string(),
+                }
+            })
+            .into_owned()
     }
 }
 

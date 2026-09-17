@@ -178,7 +178,7 @@ fn make_test_resources(
     Arc<ontology::Ontology>,
     Arc<clickhouse_client::ArrowClickHouseClient>,
 ) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let client = Arc::new(ctx.create_client());
     (ontology, client)
 }
@@ -753,7 +753,8 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]},
+        "options": {"include_debug_sql": true}
     }"#;
 
     let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
@@ -802,7 +803,7 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
 /// `collect_static_ids` reads `_gkg_f_id` (= project_id 1000) and the hydration
 /// query looks up `gl_file WHERE id = 1000`, returning nothing.
 async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
@@ -869,7 +870,7 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
 /// (the actual entity PK), so indirect-auth entities (File, Definition) resolve
 /// without the static-hydration PK fix.
 async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
@@ -919,7 +920,7 @@ async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
 }
 
 async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
@@ -981,7 +982,7 @@ async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext
 }
 
 async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
