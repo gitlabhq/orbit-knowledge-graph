@@ -1,10 +1,6 @@
 # Orbit local SQL reference
 
-The local graph is a DuckDB database (`~/.orbit/graph.duckdb` by default) that
-you query with read-only SQL via `orbit sql` (or `glab orbit --yes sql`).
-Only `index` writes to it.
-Run `orbit schema [TABLE…]` to see live columns. The tables below are the ones
-you query directly (`_orbit_manifest` is bookkeeping).
+`orbit sql "QUERY"` runs SQL against the local DuckDB graph. `orbit schema [TABLE…]` lists live columns.
 
 ## Tables
 
@@ -17,9 +13,7 @@ you query directly (`_orbit_manifest` is bookkeeping).
 | `gl_edge` | a relationship | `source_id`, `source_kind`, `relationship_kind`, `target_id`, `target_kind` |
 | `_orbit_manifest` | an indexed repository | `repo_path`, `project_id`, `branch`, `commit_sha`, `status` |
 
-`relationship_kind` values: `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`,
-`EXTENDS`. Edges hold only identifiers. Join `source_id`/`target_id` back to
-`gl_definition.id` (or `gl_file.id`) to resolve names.
+`relationship_kind`: `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`, `EXTENDS`. Edges hold only IDs. Join `source_id`/`target_id` to `gl_definition.id` or `gl_file.id` to get names.
 
 ## Recipes
 
@@ -29,24 +23,24 @@ Definition-type histogram:
 orbit sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
 ```
 
-Definitions declared in one file:
+Definitions in one file:
 
 ```shell
 orbit sql "SELECT definition_type, name, start_line FROM gl_definition
            WHERE file_path='crates/orbit-cli/src/main.rs' ORDER BY start_line"
 ```
 
-Who calls a function (`CALLS` edge, resolved to caller names):
+Callers of a function (`CALLS`):
 
 ```shell
 orbit sql "SELECT s.name AS caller, s.file_path, s.start_line
            FROM gl_edge e
            JOIN gl_definition s ON e.source_id = s.id
            JOIN gl_definition t ON e.target_id = t.id
-           WHERE e.relationship_kind='CALLS' AND t.name='run_sql'"
+           WHERE e.relationship_kind='CALLS' AND t.name='run_query'"
 ```
 
-What a function calls (flip source/target):
+Callees of a function:
 
 ```shell
 orbit sql "SELECT DISTINCT t.name AS callee
@@ -56,29 +50,28 @@ orbit sql "SELECT DISTINCT t.name AS callee
            WHERE e.relationship_kind='CALLS' AND s.name='main'"
 ```
 
-Subtypes of a base type (`EXTENDS`):
+Subtypes via `EXTENDS`:
 
 ```shell
 orbit sql "SELECT s.name AS subtype, s.file_path
            FROM gl_edge e
            JOIN gl_definition s ON e.source_id = s.id
            JOIN gl_definition t ON e.target_id = t.id
-           WHERE e.relationship_kind='EXTENDS' AND t.name='Visitor'"
+           WHERE e.relationship_kind='EXTENDS' AND t.name='Filter'"
 ```
 
-Who imports a symbol:
+Importers of a symbol:
 
 ```shell
 orbit sql "SELECT DISTINCT file_path FROM gl_imported_symbol
            WHERE identifier_name LIKE '%Workspace%' ORDER BY file_path"
 ```
 
-Where an imported symbol is defined in another indexed repository:
+Cross-repository symbol lookup (`--all`):
 
 ```shell
 orbit sql --all "SELECT im.repo_path AS importing_repo, i.identifier_name AS symbol,
-                 dm.repo_path AS defining_repo, d.file_path AS defining_file,
-                 d.start_line AS defining_line
+                 dm.repo_path AS defining_repo, d.file_path AS defining_file
                  FROM gl_imported_symbol i
                  JOIN _orbit_manifest im ON im.project_id = i.project_id
                  JOIN gl_definition d ON d.name = i.identifier_name
@@ -89,10 +82,5 @@ orbit sql --all "SELECT im.repo_path AS importing_repo, i.identifier_name AS sym
 
 ## Notes
 
-- Only with `--all` or `--repo` do the `commit_sha` columns matter. `gl_edge`
-  has none, so join back to a definition to scope edges by hand.
-- Edges stay within one repository. A question that spans repositories is a
-  join through `_orbit_manifest`, as in the last recipe. That table is never
-  scoped, so the join needs `--all` to match anything. It matches on symbol
-  name. Narrow on `im.repo_path` or `i.import_path` when several indexed
-  repositories, or several worktrees of one, define the same name.
+- `commit_sha` columns matter only with `--all` or `--repo`. `gl_edge` has none, so join to a definition to scope edges.
+- Edges stay inside one repository. Cross-repository questions join through `_orbit_manifest` and need `--all`. The recipe matches on symbol name, so narrow on `im.repo_path` for duplicate names.
