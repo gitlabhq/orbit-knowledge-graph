@@ -206,7 +206,7 @@ run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,
 description = "Check trailing newline formatting in the codebase"
 
 [tasks."lint:integration-test-lanes"]
-run = "./scripts/check-integration-test-lanes.sh"
+run = "cargo xtask integration-lanes --check"
 description = "Check that integration test lanes partition the container tests"
 
 [tasks."fix:newlines"]
