@@ -39,8 +39,9 @@ pub enum ContentClass {
     #[default]
     Unknown,
     Text,
+    Code,
     Binary,
-    Minified,
+    MinifiedCode,
     LfsPointer,
     NonRegular,
 }

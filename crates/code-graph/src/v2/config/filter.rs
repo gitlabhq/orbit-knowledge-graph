@@ -121,16 +121,21 @@ impl FileStreamHooks for CodeFilter {
             return self.record(file, SkipReason::NotUtf8, ContentClass::Binary);
         }
         if let Some(reason) = minified_skip(content) {
-            return self.record(file, reason, ContentClass::Minified);
+            return self.record(file, reason, ContentClass::MinifiedCode);
         }
         // A parse candidate is parsed; a non-parsable file (resolver input) is
         // loaded for resolvers but not parsed.
+        let is_code = (self.detect_language)(&file.path).is_some();
         let label = FileLabel {
             skip: None,
-            content: ContentClass::Text,
+            content: if is_code {
+                ContentClass::Code
+            } else {
+                ContentClass::Text
+            },
             extension: ext,
         };
-        let decision = if (self.detect_language)(&file.path).is_some() {
+        let decision = if is_code {
             Decision::Parse
         } else {
             Decision::Load
@@ -290,7 +295,7 @@ mod tests {
 
         let (_, label) = f.on_content(&entry("main.rs", 10), b"fn main() {}\n");
         assert_eq!(label.skip, None);
-        assert_eq!(label.content, ContentClass::Text);
+        assert_eq!(label.content, ContentClass::Code);
 
         let (_, label) = f.on_non_regular(&entry("link.rs", 5));
         assert_eq!(label.skip, Some(SkipReason::NonRegularFile));
