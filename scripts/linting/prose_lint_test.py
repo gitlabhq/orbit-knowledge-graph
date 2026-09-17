@@ -134,14 +134,14 @@ class MarkdownUnits(unittest.TestCase):
     def test_aligned_columns_split_into_short_sentences(self):
         texts = [s.text for s in self.body.sentences]
         self.assertIn("Query engine, DSL, compiler, pagination, ergonomics", texts)
-        self.assertEqual([f.line for f in check(self.body) if "seamless" in f.message], [22, 26])
+        self.assertEqual([f.line for f in check(self.body) if "seamless" in f.message], [24, 28])
 
     def test_leading_rule_is_not_frontmatter(self):
         (unit,) = markdown_units("s.md", RULE_FIRST)
         self.assertEqual(rules(check(unit)), [(3, "tell")])
 
     def test_comment_prose_is_scored(self):
-        self.assertEqual(rules(check(self.body))[:3], [(22, "tell"), (22, "tell"), (22, "tell")])
+        self.assertEqual(rules(check(self.body))[:3], [(24, "tell"), (24, "tell"), (24, "tell")])
 
 
 class Cli(unittest.TestCase):
