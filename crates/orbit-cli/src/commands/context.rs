@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 
 use anyhow::{Context, Result};
 use duckdb_client::search::{NodeHydrator, NodeValue};
+use duckdb_client::{i64_column, sql_lit, string_column};
 
 use crate::commands::{definition, relations, setup::spec};
 use crate::workspace;
@@ -44,26 +45,11 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
 
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
-    let (files, ids) = resolve_targets(&git.repo_path, &target.target)?;
-    anyhow::ensure!(
-        !target.tests || !ids.is_empty(),
-        "--tests requires Definition:<id> targets"
-    );
+    let (paths, file_ids, ids) = resolve_targets(&git.repo_path, &target.target)?;
+    let files = resolve_files(&client, &git, &paths, &file_ids)?;
     let hydrator = NodeHydrator::embedded("Definition")?;
-    let nodes = if ids.is_empty() {
-        Vec::new()
-    } else {
-        definition::resolve_ids(&client, &git, &hydrator, &ids)?
-    };
+    let mut nodes = definition::resolve_ids(&client, &git, &hydrator, &ids)?;
     let mut defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
-    for path in &files {
-        defs.extend(
-            definitions_in_file(&client, &git, &hydrator, path)?
-                .iter()
-                .map(source_range)
-                .collect::<Result<Vec<_>>>()?,
-        );
-    }
     defs.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
@@ -71,14 +57,16 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
             .then(b.end.cmp(&a.end))
             .then(a.fqn.cmp(&b.fqn))
     });
-    defs.dedup();
-
-    let mut grouped = outline(&defs);
-    for file in &files {
-        grouped.entry(file.clone()).or_default();
-    }
+    let paths = files
+        .iter()
+        .map(|file| repo_relative(&git.repo_path, file.properties["path"].as_str().unwrap()))
+        .collect::<Result<Vec<_>>>()?;
+    let members = definitions_in_files(&client, &git, &hydrator, &paths)?
+        .iter()
+        .map(source_range)
+        .collect::<Result<Vec<_>>>()?;
     let mut out = String::new();
-    for (file, file_defs) in grouped {
+    for (file, file_defs) in outline(&defs) {
         let path = repo_relative(&git.repo_path, &file)?;
         let content = std::fs::read_to_string(git.repo_path.join(path))
             .with_context(|| format!("failed to read {file}"))?;
@@ -86,28 +74,15 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         if !out.is_empty() {
             out.push('\n');
         }
-        if files.contains(&file) {
-            writeln!(
-                out,
-                "{file}  ({} definitions, {} lines)",
-                file_defs.len(),
-                lines.len()
-            )?;
-            render(&mut out, &file_defs, &lines, true)?;
-        } else {
-            render(&mut out, &file_defs, &lines, false)?;
-        }
+        render(&mut out, &file_defs, &lines, false)?;
     }
-    if !nodes.is_empty() {
+    nodes.splice(0..0, files);
+    if !out.is_empty() {
         out.push('\n');
-        out.push_str(&relations::render(
-            &client,
-            &git,
-            &hydrator,
-            &nodes,
-            target.tests,
-        )?);
     }
+    out.push_str(&relations::render(
+        &client, &git, &hydrator, &nodes, &members,
+    )?);
     print!("{out}");
     Ok(())
 }
@@ -158,7 +133,8 @@ pub(crate) fn render_bodies(
                 shown.insert((def.file.clone(), line));
             }
         } else {
-            let members = definitions_in_file(client, git, &hydrator, &def.file)?;
+            let members =
+                definitions_in_files(client, git, &hydrator, std::slice::from_ref(&def.file))?;
             let members = members
                 .iter()
                 .map(source_range)
@@ -178,16 +154,24 @@ pub(crate) fn render_bodies(
 fn resolve_targets(
     repo_path: &std::path::Path,
     targets: &[String],
-) -> Result<(Vec<String>, Vec<i64>)> {
+) -> Result<(Vec<String>, Vec<i64>, Vec<i64>)> {
     let mut files = Vec::new();
+    let mut file_ids = Vec::new();
     let mut ids = Vec::new();
     for target in targets {
-        if let Some(id) = target.strip_prefix("Definition:") {
+        if let Some((kind, id)) = target.split_once(':')
+            && matches!(kind, "Definition" | "File")
+        {
             let id = id
                 .parse::<i64>()
                 .ok()
                 .filter(|id| *id > 0)
-                .with_context(|| format!("{target:?} is not a valid Definition:<id>"))?;
+                .with_context(|| format!("{target:?} is not a valid {kind}:<id>"))?;
+            let ids = if kind == "File" {
+                &mut file_ids
+            } else {
+                &mut ids
+            };
             if !ids.contains(&id) {
                 ids.push(id);
             }
@@ -198,7 +182,7 @@ fn resolve_targets(
             }
         }
     }
-    Ok((files, ids))
+    Ok((files, file_ids, ids))
 }
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
@@ -214,25 +198,103 @@ fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
     Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
-fn definitions_in_file(
+fn resolve_files(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
-    hydrator: &NodeHydrator,
-    path: &str,
+    paths: &[String],
+    ids: &[i64],
 ) -> Result<Vec<NodeValue>> {
+    if paths.is_empty() && ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let hydrator = NodeHydrator::embedded("File")?;
+    let selected = client.query_arrow_json(
+        &format!(
+            "SELECT {id} AS id, {reason} AS reason FROM {table}
+             WHERE {project} = ?1 AND {commit} = ?2
+               AND ({id} IN (SELECT unnest(?3::BIGINT[])) OR {path} IN (SELECT unnest(?4::VARCHAR[])))",
+            id = hydrator.column("id")?,
+            reason = hydrator.column("reason")?,
+            table = hydrator.table(),
+            project = hydrator.column("project_id")?,
+            commit = hydrator.column("commit_sha")?,
+            path = hydrator.column("path")?,
+        ),
+        &[git.project_id.into(), git.commit_sha.clone().into(), ids.into(), paths.into()],
+    )?;
+    let selected_ids = i64_column(&selected, "id");
+    let reasons: BTreeMap<_, _> = selected_ids
+        .iter()
+        .copied()
+        .zip(string_column(&selected, "reason"))
+        .collect();
     let mut nodes = hydrator.query(
         client,
         &[
             ("project_id", git.project_id.into()),
             ("commit_sha", git.commit_sha.clone().into()),
-            ("file_path", path.into()),
         ],
-        None,
+        Some(&selected_ids),
     )?;
-    nodes.retain(|node| {
-        node.properties["fqn"]
+    for id in ids {
+        anyhow::ensure!(
+            selected_ids.contains(id),
+            "no indexed File:{id} for commit {}",
+            git.commit_sha
+        );
+    }
+    for path in paths {
+        anyhow::ensure!(
+            nodes.iter().any(|node| node.properties["path"] == *path),
+            "no indexed File for {path:?} for commit {}",
+            git.commit_sha
+        );
+    }
+    for node in &mut nodes {
+        node.properties
+            .insert("reason".into(), reasons[&node.id].clone().into());
+    }
+    nodes.sort_by(|a, b| {
+        a.properties["path"]
             .as_str()
-            .is_some_and(|fqn| !fqn.contains('@'))
+            .cmp(&b.properties["path"].as_str())
+    });
+    Ok(nodes)
+}
+
+fn definitions_in_files(
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    hydrator: &NodeHydrator,
+    paths: &[String],
+) -> Result<Vec<NodeValue>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let selected = client.query_arrow_json(
+        &format!(
+            "SELECT {id} AS id FROM {table} WHERE {project} = ?1 AND {commit} = ?2
+         AND {path} IN ({paths}) ORDER BY {path}, {start}, {id}",
+            id = hydrator.column("id")?,
+            table = hydrator.table(),
+            project = hydrator.column("project_id")?,
+            commit = hydrator.column("commit_sha")?,
+            path = hydrator.column("file_path")?,
+            start = hydrator.column("start_line")?,
+            paths = paths
+                .iter()
+                .map(|path| sql_lit(path))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        &[git.project_id.into(), git.commit_sha.clone().into()],
+    )?;
+    let mut nodes = definition::resolve_ids(client, git, hydrator, &i64_column(&selected, "id"))?;
+    nodes.retain(|node| {
+        node.properties["definition_type"] != "Variable"
+            || !node.properties["fqn"]
+                .as_str()
+                .is_some_and(|fqn| fqn.contains('@'))
     });
     Ok(nodes)
 }
@@ -243,7 +305,7 @@ pub(crate) fn render_outline(
     members: &[SourceRange],
 ) -> std::fmt::Result {
     for (i, def) in defs.iter().enumerate() {
-        if i > 0 {
+        if i > 0 && !members.is_empty() {
             out.push('\n');
         }
         writeln!(
@@ -383,11 +445,11 @@ mod tests {
         let repo = dunce::canonicalize(root.path()).unwrap();
         assert_eq!(
             resolve_targets(&repo, &["src/lib.rs".into()]).unwrap(),
-            (vec!["src/lib.rs".into()], Vec::new())
+            (vec!["src/lib.rs".into()], Vec::new(), Vec::new())
         );
         assert_eq!(
             resolve_targets(&repo, &["Definition:7".into(), "Definition:9".into()]).unwrap(),
-            (Vec::new(), vec![7, 9])
+            (Vec::new(), Vec::new(), vec![7, 9])
         );
         assert!(resolve_targets(&repo, &["Type::method".into()]).is_err());
     }

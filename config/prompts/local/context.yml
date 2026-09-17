@@ -1,14 +1,11 @@
 name: context
-version: 1.4.0
-short: Read complete local source for files or definitions
+version: 1.7.0
+short: Expand local code context
 description: >-
-  Read complete local source for files or definitions.
+  Expand local code context.
 
 
-  Pass one or more `Definition:<id>` references or existing file paths inside
-  the current checkout. Mix targets and quote paths with spaces. Source prints
-  once where targets overlap, without a line limit. Definition targets also
-  show bounded indexed relationships with followable IDs, including a small
-  test sample; `--tests` expands that sample. File targets return full source
-  with definition IDs, without relationships. Missing graph links do not prove
-  there are no callers or tests.
+  Batch file paths, `File:<id>`, or `Definition:<id>`. Files return definition
+  maps; Definitions return complete source. Both include every indexed
+  connection, with tests in their own section. Reuse source; never truncate
+  output. Raw reads are only for non-code or source Orbit cannot provide.

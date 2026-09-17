@@ -223,15 +223,9 @@ For each file, the parser extracts three categories of information:
 For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path, plus export-member definitions. These let several constructs reuse the same nested and member resolution machinery as other v2 definitions. The constructs are namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation. They do this without exposing a magic synthetic prefix as the user-facing identity.
 A second OXC-driven pass records invocation sites, including React and Next.js JSX/TSX component usages. It feeds local bindings through the shared SSA engine. It resolves intrafile targets through the generic v2 `FileResolver`. It leaves JS-specific cross-file import and module resolution in the custom JS resolver layer. An imported call sometimes cannot resolve to a repository-local definition. Then the graph preserves the call as a `Definition` to `ImportedSymbol` `CALLS` edge, instead of dropping the call site.
 
-Orbit Local stores `code_index_revision` alongside `local_ddl` in `_orbit_meta`.
-A missing or changed revision uses the existing DDL rebuild path to replace
-the shared derived DuckDB graph. This invalidates every repo in that database
-once, even when their commits have not changed. `context` and `grep` index the
-requested checkout before serving source; other repos need re-indexing when used.
-The rebuild closes its DuckDB connection before file replacement. This path
-does not hold a global lock across replacement and recreation.
-The code-index revision is local-only and does not change Orbit Remote schema
-versions.
+Orbit Local rebuilds its shared DuckDB graph when the code-index revision changes,
+even if repository commits have not changed. Repositories are re-indexed as used;
+Orbit Remote schema versions are unaffected.
 
 ##### Inventory-driven indexing pipeline
 

@@ -187,17 +187,10 @@ branch, which the remote graph does not cover. Flows that already give the
 agent a shell get Orbit this way for free; the MCP path exists for the
 surfaces that do not.
 
-Orbit Local `grep` discovers Definition nodes and prints up to 120 source
-lines across its top three matches, without repeating overlapping lines.
-Larger bodies appear as outlines with followable Definition IDs.
-`context` accepts any mix of file paths and `Definition:<id>` references.
-It returns complete requested source from the checkout, without a line limit,
-and prints overlapping source once. File targets include indexed definition
-IDs without relationships. Definition targets also return indexed relationships
-with direction, edge kind, and followable IDs. Each section shows up to ten links.
-A separate test, fixture, or generated section shows three links by default;
-`--tests` expands it to ten. Missing links do not prove that callers or tests
-are absent.
+Orbit Local `grep` finds definitions and previews source. `context` returns
+file definition maps or complete definition source, with indexed relationships.
+It accepts mixed file and definition targets and shows test connections by
+default.
 
 ### Caller identification
 

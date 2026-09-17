@@ -8,17 +8,16 @@ mcp_server:
 instructions: |
   ## Orbit
 
-  Use Orbit for code.
+  Use Orbit for code navigation to discover vital codebase context and make edits faster.
 
-  - Find relevant code for discovery and edits: `{{orbit}} grep "<concepts or identifiers>"`. Use returned names/paths to narrow.
-  - Read or explore known files and Definition IDs: `{{orbit}} context <targets...>`. Batch only needed targets.
-  - Enough source? Edit. Reuse returned source; don't reread it.
-  - Definition context includes indexed caller/callee links + test samples. Follow IDs for more; `--tests` expands samples.
-  - Too broad? Narrow with `--path`/`--kind` or smaller context targets. Never truncate. Miss? Retry once with identifiers.
+  - Find relevant code: `{{orbit}} grep "<concepts or identifiers>"`. Use returned names/paths to narrow.
+  - Explore context: `{{orbit}} context <targets...>`. Only know the file? Get the map with context and batch context relevant Definition IDs. Already know IDs? Get source.
+  - Definition context returns full source and indexed connections. File context returns a definition map and indexed connections, without bodies. Follow IDs for more.
+  - Too broad? Narrow with `--path`/`--kind` or smaller context targets. Never truncate Orbit output with head. Miss? Retry once with identifiers.
 
 nudge_search: |
-  Known targets? Batch paths and Definition IDs in `{{orbit}} context <TARGET...>` for complete source. Otherwise `{{orbit}} grep "<words>"` searches definition names/paths/bodies. Reuse returned source; edit when enough.
+  Find code with `{{orbit}} grep "<words>"`; reuse returned source. Only know the file? `{{orbit}} context <path>` gives a map. Batch needed Definition IDs in context for source and connections. Raw reads only for non-code or unavailable Orbit source. Never truncate Orbit output.
 nudge_read: |
-  Reuse source already returned. Missing code? Batch paths and Definition IDs in `{{orbit}} context <TARGET...>` for complete source. Raw Read/shell reads only for non-code or unavailable Orbit source.
+  Reuse returned source. Only know the file? `{{orbit}} context <path>` gives its map. Batch needed Definition IDs in context for source and connections. Raw reads only for non-code or unavailable Orbit source. Never truncate Orbit output.
 template_vars:
   reminder: "[orbit] when a graph lookup would help, run {{orbit}} grep"

@@ -36,14 +36,17 @@ Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 ```shell
 orbit index .
 orbit grep "rate limit" --path src --kind Method,Function
-orbit context Definition:<id>          # or one file path
+orbit context Definition:<id> [Definition:<id>...]
+orbit context src/lib.rs File:<id> Definition:<id>
 ```
 
-`grep` returns `Definition:<id>` references. Pass them to `context`.
-Definition targets list connections by edge kind: `<--` is a caller, `-->`
-is a callee. Connections from test, fixture, and generated files are hidden
-but counted, and `--tests` shows them. Reuse the returned source. Never
-truncate Orbit output.
+`grep` returns `Definition:<id>` references. Pass them to `context`, which
+does not resolve names, FQNs, or globs. A path is shorthand for its indexed
+`File:<id>`. File targets return a definition map with kinds, line ranges,
+and followable IDs; Definition targets return complete source. Both list
+connections with edge kind: `<--` is a caller, `-->` is a callee.
+Connections from test, fixture, and generated files appear in their own
+section. Reuse the returned source. Never truncate Orbit output.
 
 <!-- orbit:section quick-start -->
 ## Query and map
