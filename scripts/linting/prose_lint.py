@@ -32,14 +32,15 @@ SCOPE = (
     "AGENTS.md",
     "CONTEXT.md",
     "crates/*/AGENTS.md",
-    "docs/dev/agents-*.md",
+    "docs/dev/**/*.md",
+    "docs/design-documents/**/*.md",
     ".gitlab/merge_request_templates/*.md",
     ".gitlab/issue_templates/*.md",
     "skills/**/*.md",
     "config/prompts/**/*.yml",
     "config/setup/setup.yaml",
 )
-GENERATED = {"skills/orbit/references/query_language.md"}
+EXCLUDED = ("skills/orbit/references/query_language.md", "docs/design-documents/previous_design/**/*.md")
 
 MAX_SENTENCE_WORDS = 25
 MAX_AVERAGE_WORDS = 20.0
@@ -49,10 +50,10 @@ SKIP_KEYS = {"name", "version", "variables", "license", "metadata", "allowed-too
 
 TELL_WORDS = re.compile(
     r"\b(?:"
-    r"delv\w*|underscor\w*|showcas\w*|tapestr\w*|testament|pivotal|crucial\w*|meticulous\w*"
-    r"|intrica\w*|realm\w*|multifaceted|myriad|plethora|elucidat\w*|embark\w*|garner\w*"
+    r"delv\w*|underscor(?:es|ed|ing)|showcas\w*|tapestr\w*|testament|pivotal|crucial\w*|meticulous\w*"
+    r"|intrica\w*|multifaceted|myriad|plethora|elucidat\w*|embark\w*|garner\w*"
     r"|bolster\w*|synerg\w*|holistic|leverag\w*|seamless\w*|robust\w*|comprehensive\w*"
-    r"|foster\w*|elevat\w*|utiliz\w*|facilitat\w*|streamlin\w*|landscape|vibrant|ecosystem"
+    r"|foster\w*|elevat(?:e|es|ing)|utili[sz](?:e|es|ed|ing)|facilitat\w*|streamlin\w*|landscape|vibrant|ecosystem"
     r"|empower\w*|unleash\w*|cutting-edge|game-chang\w*|groundbreaking|transformative"
     r"|paradigm|ever-evolving|nuanced|commendable|noteworthy|invaluable|versatile"
     r"|unparalleled|unprecedented|revolutioni\w*|innovative|actionable|supercharg\w*"
@@ -274,8 +275,10 @@ def check(unit: Unit) -> list[Finding]:
 
 
 def scoped_files() -> list[str]:
-    files = {str(p) for pattern in SCOPE for p in Path().glob(pattern) if p.is_file()}
-    return sorted(files - GENERATED)
+    def matching(patterns: tuple[str, ...]) -> set[str]:
+        return {str(p) for pattern in patterns for p in Path().glob(pattern) if p.is_file()}
+
+    return sorted(matching(SCOPE) - matching(EXCLUDED))
 
 
 def git(*args: str) -> str:

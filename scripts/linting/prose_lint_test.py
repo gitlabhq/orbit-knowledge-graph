@@ -185,6 +185,10 @@ class SentenceRules(unittest.TestCase):
         (unit,) = markdown_units("s.md", "Use a colon in summary lines. In summary, stop.")
         self.assertEqual([f.message.split("'")[1] for f in check(unit)], ["In summary"])
 
+    def test_technical_homographs_are_not_tells(self):
+        (unit,) = markdown_units("s.md", "CPU utilization rose with elevated privileges; IDs allow an underscore in the realm of names.")
+        self.assertEqual([f.rule for f in check(unit)], [])
+
     def test_negative_parallelism_and_ing_tail(self):
         (unit,) = markdown_units("s.md", "This is not just a cache, but a graph, ensuring speed.")
         self.assertEqual([f.rule for f in check(unit)], ["tell", "tell"])

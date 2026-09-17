@@ -52,7 +52,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Migration ledger validated and scope-checked (`migration-ledger-schema-validate`, `migration-ledger-check`, plus `orbit-server` build-time drift checks); full ledger rules in `docs/design-documents/schema_management.md`
 - `cargo fmt` (`fmt-check`)
 - Trailing newlines (`newline-check`, run locally with `mise lint:newlines`)
-- Prose that LLMs read passes the prose lint: prompts, the setup block, skills, agent guides, the glossary, and templates (`lint:prose`, advisory; run locally with `mise run lint:prose -- --all`)
+- Prose that LLMs read passes the prose lint: prompts, the setup block, skills, agent guides, the glossary, design docs, runbooks, and templates (`lint:prose`, advisory; run locally with `mise run lint:prose -- --all`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
 - Server dependency graph and binary link the AWS-LC FIPS module and no `ring`; the CLI graph stays non-FIPS (`fips-check`)
