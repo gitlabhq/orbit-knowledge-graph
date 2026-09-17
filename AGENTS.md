@@ -30,7 +30,7 @@ Use these discovery paths instead of expanding this file:
 ## CI rules that are easy to miss
 
 - Keep `AGENTS.md` and `CLAUDE.md` byte-identical.
-- Schema, setup, named-query, ontology, and migration-ledger files have build-time or CI validation; use the corresponding mise validation task before hand-editing generated output.
+- Schema, setup, named-query, ontology, and migration-ledger files have build-time or CI validation; use the corresponding mise validation task before hand-editing these files.
 - Changes covered by pins in `config/versions.yaml` must bump the relevant pin. Changes under `skills/<name>/` or `config/prompts/` must bump that skill or prompt version.
 - Generated artifacts checked in CI include the metrics catalog, query-language property table, vendored Iglu schemas, system-note actions, DuckDB FTS sources, and the crate map. Follow their entries in `docs/dev/agents-reference-index.md` and the failing job's regeneration command.
 - Markdown must pass markdownlint, Vale, and lychee. Run `mise lint:docs` and `mise lint:newlines`.
@@ -47,7 +47,7 @@ Use these discovery paths instead of expanding this file:
 - Keep introspected ontology descriptions to one sentence and at most 200 characters below the top-level schema.
 - Before changing billing emission or anything that populates `BillingInputs`, read `docs/dev/sox-billing-boundary.md`; stop rather than bypassing those rules.
 - Fence executable Orbit query JSON as `json orbit-query`, with shell commands in separate fences.
-- Keep each MR focused. Non-trivial changes must reference an issue; trivial typo, formatting, and minor dependency-only MRs need not.
+- Keep each MR focused. Non-trivial changes must reference an issue; trivial typo, formatting, and minor dependency-only MRs need not. Follow the MR-title format in `CONTRIBUTING.md`.
 
 ## GitLab and documentation
 

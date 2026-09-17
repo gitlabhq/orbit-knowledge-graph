@@ -19,6 +19,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Duo / Orbit prompt routing (Rails-side) | `docs/design-documents/duo_orbit_prompt_routing.md` |
 | Ontology node definitions | `config/ontology/nodes/` |
 | Ontology edge definitions | `config/ontology/edges/` |
+| Edge-table routing | Edge YAML `table:` selects a table declared by `settings.edge_tables` in `config/ontology/schema.yaml`; the default is `gl_edge` |
 | Ontology derived entity definitions | `config/ontology/derived/` |
 | Ontology extraction SQL | Generated from the pipeline (`query: generated`) for nodes and edges; a `.sql.j2` MiniJinja template next to the YAML only for complex nodes (`config/ontology/nodes/`) and derived entities (`config/ontology/derived/`) |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
