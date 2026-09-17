@@ -3992,7 +3992,6 @@ dependencies = [
  "serde_json",
  "tabled",
  "tempfile",
- "tokio",
  "walkdir",
 ]
 

@@ -81,7 +81,7 @@ fn copy_dir_recursive(
     }
 }
 
-pub async fn run_yaml_suite(yaml: &str) {
+pub fn run_yaml_suite(yaml: &str) {
     let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
 
     if suite.tests.iter().all(|t| t.skip) {

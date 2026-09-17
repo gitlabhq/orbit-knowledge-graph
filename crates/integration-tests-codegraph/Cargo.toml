@@ -22,6 +22,3 @@ tabled = { workspace = true }
 anyhow = { workspace = true }
 tempfile = { workspace = true }
 walkdir = { workspace = true }
-
-[dev-dependencies]
-tokio = { workspace = true }
