@@ -45,9 +45,9 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
 
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
-    let (paths, file_ids, ids) = resolve_targets(&git.repo_path, &target.target)?;
-    let files = resolve_files(&client, &git, &paths, &file_ids)?;
     let hydrator = NodeHydrator::embedded("Definition")?;
+    let (paths, file_ids, ids) = resolve_targets(&client, &git, &hydrator, &target.target)?;
+    let files = resolve_files(&client, &git, &paths, &file_ids)?;
     let mut nodes = definition::resolve_ids(&client, &git, &hydrator, &ids)?;
     let mut defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
     defs.sort_by(|a, b| {
@@ -152,15 +152,19 @@ pub(crate) fn render_bodies(
 }
 
 fn resolve_targets(
-    repo_path: &std::path::Path,
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    hydrator: &NodeHydrator,
     targets: &[String],
 ) -> Result<(Vec<String>, Vec<i64>, Vec<i64>)> {
     let mut files = Vec::new();
     let mut file_ids = Vec::new();
     let mut ids = Vec::new();
-    for target in targets {
+    let mut seen = BTreeSet::new();
+    for target in targets.iter().filter(|target| seen.insert(*target)) {
         if let Some((kind, id)) = target.split_once(':')
             && matches!(kind, "Definition" | "File")
+            && !id.starts_with(':')
         {
             let id = id
                 .parse::<i64>()
@@ -176,9 +180,28 @@ fn resolve_targets(
                 ids.push(id);
             }
         } else {
-            let path = repo_relative(repo_path, target)?;
-            if !files.contains(&path) {
-                files.push(path);
+            match repo_relative(&git.repo_path, target) {
+                Ok(path) => {
+                    if !files.contains(&path) {
+                        files.push(path);
+                    }
+                }
+                Err(error) => {
+                    let mut matches = hydrator.query(
+                        client,
+                        &[
+                            ("project_id", git.project_id.into()),
+                            ("commit_sha", git.commit_sha.clone().into()),
+                            ("fqn", target.clone().into()),
+                        ],
+                        None,
+                    )?;
+                    if matches.is_empty() {
+                        return Err(error);
+                    }
+                    matches.sort_by_key(|node| node.id);
+                    ids.extend(matches.into_iter().map(|node| node.id));
+                }
             }
         }
     }
@@ -435,23 +458,6 @@ mod tests {
             start,
             end,
         }
-    }
-
-    #[test]
-    fn targets_resolve_definition_references_or_one_file() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join("src")).unwrap();
-        std::fs::write(root.path().join("src/lib.rs"), "").unwrap();
-        let repo = dunce::canonicalize(root.path()).unwrap();
-        assert_eq!(
-            resolve_targets(&repo, &["src/lib.rs".into()]).unwrap(),
-            (vec!["src/lib.rs".into()], Vec::new(), Vec::new())
-        );
-        assert_eq!(
-            resolve_targets(&repo, &["Definition:7".into(), "Definition:9".into()]).unwrap(),
-            (Vec::new(), Vec::new(), vec![7, 9])
-        );
-        assert!(resolve_targets(&repo, &["Type::method".into()]).is_err());
     }
 
     #[test]

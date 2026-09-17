@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::rank::rank_and_trim;
+use crate::rank::rank_alternatives_and_trim;
 use crate::text::{camel_words, content_words};
 use crate::types::SearchCandidate;
 use crate::vocab::SearchVocab;
@@ -15,6 +15,7 @@ pub struct GrepOutcome {
 pub struct GrepMatch {
     pub id: i64,
     pub score: f64,
+    pub exact_name: bool,
 }
 
 pub struct TermRecall {
@@ -75,13 +76,14 @@ impl<E> From<E> for GrepError<E> {
     }
 }
 
-pub fn grep<S: GrepSource>(
+type QueryRecall = (Vec<String>, Vec<TermRecall>);
+
+fn recall_query<S: GrepSource>(
     source: &S,
     query: &str,
-    limit: usize,
     vocab: &SearchVocab,
     filter: &RecallFilter,
-) -> Result<GrepOutcome, GrepError<S::Error>> {
+) -> Result<QueryRecall, GrepError<S::Error>> {
     let terms = content_words(query);
     if terms.is_empty() {
         return Err(GrepError::NoUsableTerms(query.to_string()));
@@ -120,6 +122,32 @@ pub fn grep<S: GrepSource>(
             recalls[*i] = recall;
         }
     }
+    Ok((terms, recalls))
+}
+
+pub fn grep<S: GrepSource>(
+    source: &S,
+    query: &str,
+    limit: usize,
+    vocab: &SearchVocab,
+    filter: &RecallFilter,
+) -> Result<GrepOutcome, GrepError<S::Error>> {
+    let mut alternatives = Vec::new();
+    let mut terms = Vec::new();
+    let mut recalls = Vec::new();
+    let mut queries = HashSet::new();
+    for alternative in query.split('|').map(str::trim) {
+        if !queries.insert(alternative) {
+            continue;
+        }
+        let (words, recalled) = recall_query(source, alternative, vocab, filter)?;
+        if !terms.is_empty() {
+            terms.push("|".to_string());
+        }
+        terms.extend(words);
+        alternatives.push(recalls.len()..recalls.len() + recalled.len());
+        recalls.extend(recalled);
+    }
     let mut ids: Vec<i64> = Vec::new();
     let mut seen: HashSet<i64> = HashSet::new();
     for &(id, _) in recalls.iter().flat_map(|r| r.hits.iter()) {
@@ -133,7 +161,7 @@ pub fn grep<S: GrepSource>(
         .enumerate()
         .map(|(i, row)| (row.id, i))
         .collect();
-    let mut sims = vec![vec![0.0; search_terms.len()]; corpus.len()];
+    let mut sims = vec![vec![0.0; recalls.len()]; corpus.len()];
     for (t, recall) in recalls.iter().enumerate() {
         for &(id, sim) in &recall.hits {
             if let Some(&i) = index.get(&id) {
@@ -146,12 +174,13 @@ pub fn grep<S: GrepSource>(
         .map(|r| if r.hits.is_empty() { 0.0 } else { r.idf() })
         .collect();
 
-    let hits = rank_and_trim(&corpus, &sims, &idfs, limit);
+    let hits = rank_alternatives_and_trim(&corpus, &sims, &idfs, &alternatives, limit);
     let matches: Vec<GrepMatch> = hits
         .into_iter()
         .map(|h| GrepMatch {
             id: corpus[h.index].id,
             score: h.score,
+            exact_name: h.exact_name,
         })
         .collect();
     Ok(GrepOutcome {
