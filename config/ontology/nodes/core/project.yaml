@@ -29,7 +29,6 @@ properties:
     description: "Unique ID."
     traversal_path_lookup:
       kind: id
-      dictionary: gl_project_traversal_paths_dict
       source_table: gl_project
       key_column: id
 

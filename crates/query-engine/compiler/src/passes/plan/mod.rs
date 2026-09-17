@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::{DataType, FieldSource, Ontology};
 
+use crate::ast::Expr;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
@@ -43,6 +44,9 @@ pub struct Plan {
     pub table_columns: HashMap<String, HashSet<String>>,
     /// ORDER BY columns per table. Used by the lowerer for LIMIT BY dedup.
     pub table_sort_keys: HashMap<String, Vec<String>>,
+    /// `anchor exists` predicates for scope anchors the plan elided; a
+    /// missing anchor must yield no rows instead of the broad fallback.
+    pub scope_guards: Vec<Expr>,
     pub body: PlanBody,
 }
 

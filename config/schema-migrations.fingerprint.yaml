@@ -80,10 +80,10 @@ sources:
   nodes/code_review/merge_request_diff_file.yaml: 5fa6d7cc5a9688905beea55dd3d4904dc4e1b03de969f13c898a99d05f733bee
   nodes/container_registry/container_repository.yaml: 1741a773d71166579a51f3ea0431ef44d93e77bd55493d94d1012f349d7b10a0
   nodes/core/group.sql.j2: 608ffa4313cca9a42afb186c22bad7a41449a32af25bf017ea10e0d9d6e5412f
-  nodes/core/group.yaml: 6b4f41412873d15aa546201fead092e727d2500b963a1881fb30f4c5d48964b8
+  nodes/core/group.yaml: 82a68aa16b7c5fc64fe222d236dcd1ef38721a0a3366b0a2940f3e63ad4663e4
   nodes/core/note.yaml: 44a92bc24760eb61cf9bf2e180fefd94267023e6bf4881a4a4cca839880ee773
   nodes/core/project.sql.j2: 1cdbd21aa2ae071d16918148ecf0aa6e67596257d21826c9899c21b1ea223228
-  nodes/core/project.yaml: 03146158335aea00945e01aec509b55fc91f9c58fffed7a56910ab959ab06155
+  nodes/core/project.yaml: 7d947da536f71c6ce9cab86197f60fa37a22475fc314172374f57228d7b815b2
   nodes/core/user.yaml: abe50689ae0ceacb4a88c1eba5af00e4276cc9f7bb81ed21367c845747fce333
   nodes/packages/dependency.yaml: ee4ad80a2acaf1dbc347f591aaee13f451c3a67d7da25cf3d2a4d21f87c33eec
   nodes/packages/package.yaml: 7c66e1d2876675a05b12a31698ee859d9dff37cf6c05c6d61250a79a7bacbdc8
