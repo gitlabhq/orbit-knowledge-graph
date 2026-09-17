@@ -3,7 +3,9 @@ use std::ops::Deref;
 
 use rustc_hash::FxHashMap;
 
-use super::stream::{Decision, FileInventoryEntry, canonicalize_inventory};
+use super::stream::{
+    Decision, FileInventoryEntry, FileStreamHooks, StreamError, canonicalize_inventory, step,
+};
 
 #[derive(Debug, Clone)]
 pub struct FileInventory(Vec<FileInventoryEntry>);
@@ -66,6 +68,48 @@ impl FileInventory {
             }
         }
         groups
+    }
+
+    /// Run a refinement pass over the inventory using the same
+    /// [`FileStreamHooks`] trait. `read_content` provides file bytes on
+    /// demand (return `None` to settle from the header alone). Entries
+    /// reclassified as [`Decision::Drop`] are removed.
+    pub fn refine<H: FileStreamHooks>(
+        self,
+        hooks: &mut H,
+        read_content: impl Fn(&str) -> Option<Vec<u8>>,
+    ) -> Result<Self, StreamError> {
+        let mut out = Vec::with_capacity(self.0.len());
+        let mut buf = Vec::new();
+        for mut entry in self.0 {
+            let (decision, label) = step(hooks, &entry, &mut buf, |buf| {
+                if let Some(bytes) = read_content(&entry.path) {
+                    buf.extend_from_slice(&bytes);
+                }
+                Ok(())
+            })?;
+            entry.decision = decision;
+            entry.label = label;
+            if entry.decision != Decision::Drop {
+                out.push(entry);
+            }
+        }
+        Ok(Self(out))
+    }
+
+    /// Mutate entries in place. For lightweight adjustments that don't need
+    /// the full hook pipeline (e.g. upgrading a `Load` to `Parse` after
+    /// an external classifier confirms the language).
+    pub fn reclassify(mut self, mut f: impl FnMut(&mut FileInventoryEntry)) -> Self {
+        for entry in &mut self.0 {
+            f(entry);
+        }
+        self.0.retain(|e| e.decision != Decision::Drop);
+        Self(self.0)
+    }
+
+    pub fn into_inner(self) -> Vec<FileInventoryEntry> {
+        self.0
     }
 }
 
@@ -183,5 +227,77 @@ mod tests {
         });
         assert_eq!(groups.len(), 1);
         assert_eq!(groups["parseable"].len(), 2);
+    }
+
+    #[test]
+    fn reclassify_upgrades_and_drops() {
+        let inv = sample();
+        let inv = inv.reclassify(|e| {
+            if e.path == "Cargo.toml" {
+                e.decision = Decision::Parse;
+            }
+            if e.path == "logo.png" {
+                e.decision = Decision::Drop;
+            }
+        });
+        assert_eq!(inv.find("Cargo.toml").unwrap().decision, Decision::Parse);
+        assert!(!inv.contains("logo.png"));
+        assert_eq!(inv.len(), 4);
+    }
+
+    use crate::fs_walk::{ContentClass, FileLabel, SkipReason};
+
+    struct UpgradeTextToParseHooks;
+    impl FileStreamHooks for UpgradeTextToParseHooks {
+        fn on_header(&mut self, file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
+            if file.label.content == ContentClass::Text && file.decision == Decision::Load {
+                Some((Decision::Parse, file.label.clone()))
+            } else {
+                Some((file.decision, file.label.clone()))
+            }
+        }
+    }
+
+    #[test]
+    fn refine_runs_hooks_over_existing_inventory() {
+        let inv = FileInventory::new(vec![
+            FileInventoryEntry {
+                path: "src/main.rs".into(),
+                size: 100,
+                decision: Decision::Parse,
+                label: FileLabel {
+                    skip: None,
+                    content: ContentClass::Text,
+                    extension: Some("rs".into()),
+                },
+            },
+            FileInventoryEntry {
+                path: "Cargo.toml".into(),
+                size: 50,
+                decision: Decision::Load,
+                label: FileLabel {
+                    skip: None,
+                    content: ContentClass::Text,
+                    extension: Some("toml".into()),
+                },
+            },
+            FileInventoryEntry {
+                path: "logo.png".into(),
+                size: 5000,
+                decision: Decision::ListOnly,
+                label: FileLabel {
+                    skip: Some(SkipReason::ExcludedExtension),
+                    content: ContentClass::Unknown,
+                    extension: Some("png".into()),
+                },
+            },
+        ]);
+
+        let mut hooks = UpgradeTextToParseHooks;
+        let inv = inv.refine(&mut hooks, |_| None).unwrap();
+
+        assert_eq!(inv.find("Cargo.toml").unwrap().decision, Decision::Parse);
+        assert_eq!(inv.find("src/main.rs").unwrap().decision, Decision::Parse);
+        assert_eq!(inv.find("logo.png").unwrap().decision, Decision::ListOnly);
     }
 }
