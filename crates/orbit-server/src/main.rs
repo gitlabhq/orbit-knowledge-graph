@@ -74,9 +74,7 @@ async fn main() -> anyhow::Result<()> {
     for (name, check) in probes::readiness_checks(args.mode, &active_schema, &serving) {
         builder = builder.add_readiness_check(name, check);
     }
-    if let Some(tls) = metrics {
-        builder = builder.probe_tls(tls);
-    }
+    builder = builder.probe_tls(metrics);
     let _guard = builder.init().expect("labkit init");
 
     if config.metrics.prometheus.port.is_some() {

@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct TlsConfig {
     pub cert_path: Option<String>,
@@ -193,23 +194,28 @@ mod tests {
     }
 
     #[test]
-    fn a_misspelled_listener_key_is_rejected_rather_than_ignored() {
-        let result: Result<AppConfig, _> = config::Config::builder()
-            .add_source(config::File::from_str(
-                crate::EMBEDDED_DEFAULTS,
-                config::FileFormat::Yaml,
-            ))
-            .add_source(config::File::from_str(
-                "tls:\n  probes:\n    enable: true\n",
-                config::FileFormat::Yaml,
-            ))
-            .build()
-            .unwrap()
-            .try_deserialize();
+    fn a_misspelled_key_is_rejected_rather_than_ignored() {
+        // Both halves matter: a typo in the group name and a typo in a key
+        // inside it would each leave the listener plaintext while the config
+        // looks right.
+        for overlay in [
+            "tls:\n  probes:\n    enable: true\n",
+            "tls:\n  probe:\n    enabled: true\n",
+        ] {
+            let result: Result<AppConfig, _> = config::Config::builder()
+                .add_source(config::File::from_str(
+                    crate::EMBEDDED_DEFAULTS,
+                    config::FileFormat::Yaml,
+                ))
+                .add_source(config::File::from_str(overlay, config::FileFormat::Yaml))
+                .build()
+                .unwrap()
+                .try_deserialize();
 
-        assert!(
-            result.is_err(),
-            "a typo must not leave the listener silently plaintext"
-        );
+            assert!(
+                result.is_err(),
+                "a typo must not leave the listener silently plaintext: {overlay}"
+            );
+        }
     }
 }
