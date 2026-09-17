@@ -64,7 +64,7 @@ TELL_PHRASES = re.compile(
     r"\b(?:"
     r"it(?:'| i)s (?:worth noting|important to note)|plays? an? (?:vital|crucial|pivotal|key|critical) role"
     r"|(?:stands|serves) as an?|in today'?s|let'?s (?:dive|unpack|explore|break (?:this|it) down)"
-    r"|in (?:conclusion|summary)|not (?:just|only|merely)\b[^.?!\n]{1,80}\bbut(?: also)?"
+    r"|in (?:conclusion|summary)(?=[,.:!]|$)|not (?:just|only|merely)\b[^.?!\n]{1,80}\bbut(?: also)?"
     r"|i hope this helps|you'?re absolutely right|great question|certainly!|of course!|i'?d be happy to"
     r"|as of my (?:last|latest) (?:knowledge|training)|at its core|here'?s the (?:thing|kicker)"
     r"|when it comes to|at the end of the day|low-hanging fruit|move the needle|load-bearing"
