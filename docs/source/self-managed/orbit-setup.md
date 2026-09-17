@@ -85,7 +85,7 @@ To create the database and the identities:
 
 On a ClickHouse instance you run yourself, every user can read the `system` database, so these grants change
 nothing. A managed ClickHouse usually restricts the `system` database. Without the grants, schema migrations
-stop when a new version is promoted, and query path resolution fails. Add the grants in both cases. The
+stop when a new version is promoted. Add the grants in both cases. The
 configuration then works unchanged if you move to a managed service.
 
 GitLab Orbit reaches ClickHouse over the HTTP interface on port 8123, or port 8443 with TLS. Siphon uses the

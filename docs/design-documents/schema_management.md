@@ -152,11 +152,10 @@ A serving snapshot (`crates/orbit-server/src/active_schema.rs`) is immutable and
 
 - the archive's `migration_version`;
 - the archive's ontology with that version's table prefix applied;
-- the embedded named queries that compile against that ontology (the rest are hidden and rejected);
-- a `PathResolver` for that table-set.
+- the embedded named queries that compile against that ontology (the rest are hidden and rejected).
 
-Every request pins one snapshot for its whole run, from compilation through path resolution and
-redaction, so a promotion cannot switch tables under a running query.
+Every request pins one snapshot for its whole run, from compilation through redaction, so a
+promotion cannot switch tables under a running query.
 
 Loading an archive does not prove the binary can serve it; that depends on the archive loader,
 parser, and compiler. Validate a cross-version rollout before relying on it.
