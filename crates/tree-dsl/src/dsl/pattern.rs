@@ -770,7 +770,10 @@ fn apply_rewrites_inner(t: &mut Tree, lang: &Lang, rules: &[Rewrite], preorder: 
                     }
                 }
             }
-            break;
+            match &r.out {
+                Out::Replace(_) => break,
+                Out::Append(_) => continue,
+            }
         }
     }
 }

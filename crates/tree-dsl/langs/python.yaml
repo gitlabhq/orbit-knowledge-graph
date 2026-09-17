@@ -187,3 +187,36 @@ display:
       - match: '(__def)'
         append:
           - '(_*_display_fqn @$ROOT|concat(".", "ancestor_sym:_*_display_fqn", "child_sym:__defname"))'
+          - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        append: ['(_*_display_def_type "Function")']
+      - match: '(__def (__method))'
+        append: ['(_*_display_def_type "Method")']
+      - match: '(__def (__class))'
+        append: ['(_*_display_def_type "Class")']
+      - match: '(__def (__struct))'
+        append: ['(_*_display_def_type "Struct")']
+      - match: '(__def (__interface))'
+        append: ['(_*_display_def_type "Interface")']
+      - match: '(__def (__enum))'
+        append: ['(_*_display_def_type "Enum")']
+      - match: '(__def (__enum_variant))'
+        append: ['(_*_display_def_type "EnumVariant")']
+      - match: '(__def (__trait))'
+        append: ['(_*_display_def_type "Trait")']
+      - match: '(__def (__impl))'
+        append: ['(_*_display_def_type "Impl")']
+      - match: '(__def (__variable))'
+        append: ['(_*_display_def_type "Variable")']
+      - match: '(__def (__constant))'
+        append: ['(_*_display_def_type "Constant")']
+      - match: '(__def (__lambda))'
+        append: ['(_*_display_def_type "Lambda")']
+      - match: '(__def (__field_def))'
+        append: ['(_*_display_def_type "Field")']
+      - match: '(__def (__property))'
+        append: ['(_*_display_def_type "Property")']
+      - match: '(__def (__type_alias))'
+        append: ['(_*_display_def_type "TypeAlias")']
