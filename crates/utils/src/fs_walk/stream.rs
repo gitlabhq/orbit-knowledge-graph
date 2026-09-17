@@ -7,8 +7,7 @@ use std::path::{Component, Path};
 
 use rustc_hash::FxHashMap;
 
-/// Why the filter declined to load a file. Low-cardinality, snake_case for
-/// metric labels.
+/// Why a file was not loaded. Snake_case for metric labels.
 #[derive(
     Debug,
     Clone,
@@ -33,7 +32,7 @@ pub enum SkipReason {
     LfsPointer,
 }
 
-/// Broad content class, known after header or content sniffing.
+/// Broad content class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ContentClass {
     #[default]
@@ -46,8 +45,7 @@ pub enum ContentClass {
     NonRegular,
 }
 
-/// Metadata the filter phase already computed, carried on the entry so
-/// downstream code never re-derives it from the path.
+/// Classification metadata carried on the entry.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileLabel {
     pub skip: Option<SkipReason>,
@@ -148,12 +146,8 @@ pub enum StreamError {
     Empty,
 }
 
-/// The filtering and accounting policy for a file stream. Each method defaults
-/// to a pass-through; a consumer implements only what it needs and holds its
-/// state (e.g. [`Counter`]s) in `self`. Generic, no `dyn`.
-///
-/// Hooks return `(Decision, FileLabel)` so the source can stamp both fields
-/// on the entry. The hooks never mutate the entry directly.
+/// Filtering policy for a file stream. Each method defaults to a pass-through.
+/// Returns `(Decision, FileLabel)` so the source stamps both on the entry.
 pub trait FileStreamHooks {
     /// Charge aggregate counters; called for every entry (so excluded blobs
     /// still count toward a total-bytes cap). `Err` aborts the stream.

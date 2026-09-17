@@ -70,10 +70,8 @@ impl FileInventory {
         groups
     }
 
-    /// Run a refinement pass over the inventory using the same
-    /// [`FileStreamHooks`] trait. `read_content` provides file bytes on
-    /// demand (return `None` to settle from the header alone). Entries
-    /// reclassified as [`Decision::Drop`] are removed.
+    /// Run a second [`FileStreamHooks`] pass. `read_content` provides bytes
+    /// on demand (`None` = header-only). Drops entries reclassified as `Drop`.
     pub fn refine<H: FileStreamHooks>(
         self,
         hooks: &mut H,
@@ -97,9 +95,8 @@ impl FileInventory {
         Ok(Self(out))
     }
 
-    /// Mutate entries in place. For lightweight adjustments that don't need
-    /// the full hook pipeline (e.g. upgrading a `Load` to `Parse` after
-    /// an external classifier confirms the language).
+    /// Mutate entries in place without the hook pipeline. Drops entries
+    /// reclassified as `Drop`.
     pub fn reclassify(mut self, mut f: impl FnMut(&mut FileInventoryEntry)) -> Self {
         for entry in &mut self.0 {
             f(entry);
@@ -118,12 +115,6 @@ impl Deref for FileInventory {
 
     fn deref(&self) -> &[FileInventoryEntry] {
         &self.0
-    }
-}
-
-impl From<Vec<FileInventoryEntry>> for FileInventory {
-    fn from(entries: Vec<FileInventoryEntry>) -> Self {
-        Self::new(entries)
     }
 }
 
@@ -185,13 +176,6 @@ mod tests {
     fn count_by_with_predicate() {
         let inv = sample();
         assert_eq!(inv.count_by(|e| e.size > 100), 2);
-    }
-
-    #[test]
-    fn deref_gives_slice_access() {
-        let inv = sample();
-        assert_eq!(inv.len(), 5);
-        assert!(!inv.is_empty());
     }
 
     #[test]
