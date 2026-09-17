@@ -487,6 +487,14 @@ description = "Run Vale prose linting on markdown files"
 run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode '**/*.md'"
 description = "Check for broken links in markdown files"
 
+[tasks."lint:prose"]
+run = "uv run --quiet scripts/linting/prose_lint.py"
+description = "Lint the prose LLMs read: prompts, skills, agent guides, templates (pass files, --all, or --diff-base <sha>)"
+
+[tasks."lint:prose:test"]
+run = "uv run --quiet scripts/linting/prose_lint_test.py"
+description = "Run the prose linter's unit tests"
+
 [tasks."lint:docs"]
 depends = ["lint:markdown", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
