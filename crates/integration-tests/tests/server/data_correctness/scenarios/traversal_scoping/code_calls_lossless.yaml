@@ -2,10 +2,6 @@
 description: Code-intel CALLS traversal returns caller-callee pair without loss under scoping
 
 config:
-  security:
-    scope_prefixes:
-      caller: "1/100/1000/"
-      def: "1/100/1000/"
   extra_seed:
     gl_definition:
       - { id: 12000, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc, file_path: "src/a.rs", fqn: "A#callee", name: callee, definition_type: Method, start_line: 10, end_line: 12, start_byte: 0, end_byte: 0, start_char: 0, end_char: 0 }
@@ -28,6 +24,7 @@ query:
     MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12000}) RETURN caller, def LIMIT 50
 
 expect:
+  sql_contains: ["FROM gl_definition AS _scope WHERE"]
   node_count: 2
   nodes:
     Definition:

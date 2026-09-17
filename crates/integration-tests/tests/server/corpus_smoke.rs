@@ -27,9 +27,7 @@ use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
 use ontology::Ontology;
 use orbit_server::auth::Claims;
-use orbit_server::pipeline::{
-    ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage, SecurityStage,
-};
+use orbit_server::pipeline::{ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage};
 use orbit_server::redaction::ResourceAuthorization;
 use query_engine::formatters::GraphResponse;
 use query_engine::pipeline::{
@@ -418,8 +416,6 @@ async fn run_pipeline(
 
     PipelineRunner::start(&mut ctx, &mut obs)
         .then(&SecurityStage)
-        .await?
-        .then(&PathResolutionStage)
         .await?
         .then(&CompilationStage)
         .await?

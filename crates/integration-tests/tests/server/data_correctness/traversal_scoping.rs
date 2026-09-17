@@ -1,24 +1,12 @@
 //! Data-correctness tests for project/group traversal_path scoping (#601941).
-//!
-//! The path-resolution stage does not run in this harness, so the
-//! resolved/flooded prefixes are supplied directly on the `SecurityContext`
-//! (`with_scope_prefixes`) exactly as `PathResolutionStage` would in the server.
-
-use std::collections::HashMap;
+//! The compiler derives the scope prefixes from the anchored nodes itself.
 
 use integration_testkit::t;
-use orbit_utils::traversal_path::TraversalPath;
 
 use super::helpers::*;
 
-fn scoped(authorized: &str, prefixes: &[(&str, &str)]) -> SecurityContext {
-    let map: HashMap<String, TraversalPath> = prefixes
-        .iter()
-        .map(|(alias, prefix)| (alias.to_string(), TraversalPath::new_unchecked(*prefix)))
-        .collect();
-    SecurityContext::new(1, vec![authorized.into()])
-        .unwrap()
-        .with_scope_prefixes(map)
+fn scoped(authorized: &str) -> SecurityContext {
+    SecurityContext::new(1, vec![authorized.into()]).unwrap()
 }
 
 const MR_DIFF_FILE_CHAIN: &str = r#"{
@@ -75,20 +63,8 @@ pub(super) async fn project_scoped_multi_edge_traversal_is_lossless(ctx: &TestCo
     .await;
     assert_diff_file_chain(&broad);
 
-    let scoped_resp = run_query_with_security(
-        ctx,
-        MR_DIFF_FILE_CHAIN,
-        &allow_all(),
-        scoped(
-            "1/",
-            &[
-                ("mr", "1/100/1000/"),
-                ("diff", "1/100/1000/"),
-                ("df", "1/100/1000/"),
-            ],
-        ),
-    )
-    .await;
+    let scoped_resp =
+        run_query_with_security(ctx, MR_DIFF_FILE_CHAIN, &allow_all(), scoped("1/")).await;
     assert_diff_file_chain(&scoped_resp);
 }
 
@@ -114,7 +90,7 @@ pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: 
             "limit": 50
         }"#,
         &allow_all(),
-        scoped("1/", &[("mr", "1/100/1000/")]),
+        scoped("1/"),
     )
     .await;
 
@@ -152,7 +128,7 @@ pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestCo
             "limit": 50
         }"#,
         &allow_all(),
-        scoped("1/", &[("mr", "1/100/1000/"), ("wi", "1/101/")]),
+        scoped("1/"),
     )
     .await;
 
@@ -222,7 +198,7 @@ pub(super) async fn scope_implied_container_elision_star_counts_authored_mrs(ctx
             svc.allow("user", &[7701, 7702]);
             svc
         },
-        scoped("1/", &[("g", "1/700/"), ("p", "1/700/"), ("mr", "1/700/")]),
+        scoped("1/"),
     )
     .await;
 
@@ -295,16 +271,7 @@ pub(super) async fn scope_implied_container_elision_chain_counts_diff_files(ctx:
             svc.allow("project", &[7010]);
             svc
         },
-        scoped(
-            "1/",
-            &[
-                ("g", "1/701/"),
-                ("p", "1/701/"),
-                ("mr", "1/701/"),
-                ("d", "1/701/"),
-                ("f", "1/701/"),
-            ],
-        ),
+        scoped("1/"),
     )
     .await;
 
@@ -324,7 +291,7 @@ pub(super) async fn cross_namespace_has_label_returns_cross_group_label(ctx: &Te
             "limit": 50
         }"#,
         &allow_all(),
-        scoped("1/", &[("wi", "1/100/")]),
+        scoped("1/"),
     )
     .await;
 
@@ -377,12 +344,7 @@ pub(super) async fn code_intel_calls_scoped_traversal_is_lossless(ctx: &TestCont
     .await;
     assert_code_calls_chain(&broad);
 
-    let scoped_resp = run_query_with_security(
-        ctx,
-        CODE_CALLS_CHAIN,
-        &allow_all(),
-        scoped("1/", &[("caller", "1/100/1000/"), ("def", "1/100/1000/")]),
-    )
-    .await;
+    let scoped_resp =
+        run_query_with_security(ctx, CODE_CALLS_CHAIN, &allow_all(), scoped("1/")).await;
     assert_code_calls_chain(&scoped_resp);
 }

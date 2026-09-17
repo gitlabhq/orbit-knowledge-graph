@@ -2,11 +2,6 @@
 description: Project-scoped MR-MRDiff-MRDiffFile chain returns all diff files without loss
 
 config:
-  security:
-    scope_prefixes:
-      mr: "1/100/1000/"
-      diff: "1/100/1000/"
-      df: "1/100/1000/"
   extra_seed:
     gl_merge_request_diff_file:
       - { id: 9300, merge_request_id: 2000, merge_request_diff_id: 5000, project_id: 1000, new_path: "src/a.rs", traversal_path: "1/100/1000/" }
@@ -35,6 +30,7 @@ query:
     MATCH (mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:HAS_FILE]->(df:MergeRequestDiffFile) WHERE mr.project_id = 1000 RETURN mr.project_id, diff, df LIMIT 50
 
 expect:
+  sql_contains: ["FROM gl_project AS _scope WHERE"]
   node_count: 4
   skip_requirements: ["filter:project_id"]
   nodes:

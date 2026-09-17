@@ -43,7 +43,7 @@ pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
 pub use object_storage::{ObjectStorageAuth, ObjectStorageConfig, ObjectStorageProvider};
-pub use query::{CompilerDerivedSettings, PathResolverConfig, QueryConfig, QuerySettings};
+pub use query::{CompilerDerivedSettings, QueryConfig, QuerySettings};
 pub use resources::{ContainerResources, MIN_DATALAKE_BATCH_SIZE, derive_concurrency_groups};
 pub use schema::{SchemaConfig, SchemaConfigError};
 pub use tls::TlsConfig;
