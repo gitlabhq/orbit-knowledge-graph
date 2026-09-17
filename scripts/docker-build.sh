@@ -38,9 +38,12 @@ echo "Building for ${PLATFORM}:$TAGS"
 
 docker buildx create --use 2>/dev/null || true
 
+METADATA_FILE=$(mktemp)
+
 docker buildx build \
   --platform "$PLATFORM" \
   --push \
+  --metadata-file "$METADATA_FILE" \
   --cache-from "type=registry,ref=${CI_REGISTRY_IMAGE}/cache/${IMAGE_NAME}:${PLATFORM##*/}" \
   --cache-to   "type=registry,mode=max,compression=zstd,oci-mediatypes=true,ref=${CI_REGISTRY_IMAGE}/cache/${IMAGE_NAME}:${PLATFORM##*/}" \
   --label "com.gitlab/ci-pipeline-url=${CI_PIPELINE_URL}" \
@@ -51,3 +54,11 @@ docker buildx build \
   $SECRET_ARGS \
   $TAGS \
   .
+
+DIGEST=$(sed -n 's/.*"containerimage\.digest": *"\([^"]*\)".*/\1/p' "$METADATA_FILE" | head -n1)
+if [ -z "$DIGEST" ]; then
+  echo "buildx reported no image digest" >&2
+  exit 1
+fi
+echo "IMAGE_DIGEST_${PLATFORM##*/}=${DIGEST}" > build.env
+echo "Pushed ${DIGEST} as:${TAGS}"
