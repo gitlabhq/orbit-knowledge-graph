@@ -92,7 +92,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         hydrate_plan {
             reads_env: [ontology, security_ctx]
-            reads_state: [input]
+            reads_state: [input, node]
             mutates: [hydration_plan]
         }
         settings {
@@ -241,8 +241,9 @@ fn check(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().clone(), "input")?;
-    let plan = hydrate::generate_hydration_plan(&input, ctx.ontology(), ctx.security_ctx());
+    let input = require(ctx.input().as_ref(), "input")?;
+    let node = require(ctx.node().as_ref(), "node")?;
+    let plan = hydrate::generate_hydration_plan(input, node, ctx.ontology(), ctx.security_ctx());
     ctx.set_hydration_plan(plan);
     Ok(())
 }

@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use ontology::{FieldSource, Ontology, VirtualSource};
 
+use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
 use crate::types::SecurityContext;
 
@@ -78,6 +79,7 @@ pub struct VirtualColumnRequest {
 /// `node.columns`.
 pub fn generate_hydration_plan(
     input: &Input,
+    node: &Node,
     ontology: &Ontology,
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
@@ -87,12 +89,10 @@ pub fn generate_hydration_plan(
             HydrationPlan::Dynamic(build_dynamic_specs(input, ontology, security_ctx))
         }
         QueryType::Aggregation | QueryType::Traversal => {
-            let mut templates = build_static_templates(input, ontology);
+            let mut templates = build_static_templates(input, node, ontology);
 
-            // Search/Aggregation/search-shaped traversal only need templates
-            // with VCRs. Multi-node traversal needs all templates for
-            // DB-column hydration.
-            if input.is_search() || input.query_type == QueryType::Aggregation {
+            // Aggregation builds its own SELECT, so only virtual columns can need hydration.
+            if input.query_type == QueryType::Aggregation {
                 templates.retain(|t| !t.virtual_columns.is_empty());
             }
 
@@ -105,7 +105,12 @@ pub fn generate_hydration_plan(
     }
 }
 
-fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTemplate> {
+fn build_static_templates(
+    input: &Input,
+    node: &Node,
+    ontology: &Ontology,
+) -> Vec<HydrationTemplate> {
+    let projected = projected_aliases(node);
     input
         .nodes
         .iter()
@@ -118,7 +123,11 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
             };
 
             // DB-only columns (virtual already stripped by normalize).
-            let mut columns: Vec<String> = requested.clone();
+            let mut columns: Vec<String> = requested
+                .iter()
+                .filter(|col| !projected.contains(&format!("{}_{col}", node.id)))
+                .cloned()
+                .collect();
             let virtual_columns = node.virtual_columns.clone();
 
             if columns.is_empty() && virtual_columns.is_empty() {
@@ -141,6 +150,13 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
             })
         })
         .collect()
+}
+
+fn projected_aliases(node: &Node) -> HashSet<String> {
+    match node {
+        Node::Query(q) => q.select.iter().filter_map(|s| s.alias.clone()).collect(),
+        Node::Insert(_) => HashSet::new(),
+    }
 }
 
 /// Pre-resolve column specs for every ontology entity type based on the
@@ -577,7 +593,8 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let plan = generate_hydration_plan(&input, &ont, &ctx);
+        let node = Node::Query(Box::default());
+        let plan = generate_hydration_plan(&input, &node, &ont, &ctx);
 
         match plan {
             HydrationPlan::Dynamic(specs) => {
