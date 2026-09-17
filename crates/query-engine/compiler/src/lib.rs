@@ -75,7 +75,7 @@ pub use passes::hydrate::{
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use scope::{PathResolutionKey, PathScopeId, ScopePrefix, scope_edges, scope_keys};
+pub use scope::ScopePrefix;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
@@ -119,10 +119,6 @@ pub fn compile(
 }
 
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].
-///
-/// Lets the querying pipeline's path-resolution stage read normalized scope
-/// keys before the full pipeline runs, then resolve and attach the tight
-/// traversal_path prefix as [`SecurityContext`] scope metadata.
 pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input> {
     let mut ctx = config::ValidateNormalizeCtx::new(Arc::new(ontology.clone()));
     ctx.set_raw(json_input.to_string());

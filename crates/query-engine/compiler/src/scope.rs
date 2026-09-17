@@ -12,6 +12,7 @@ use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
 const UNRESOLVED_PATH: &str = "0/";
+const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 
 /// Alternative traversal_path values a scoped alias may live under. Each
 /// resolves to the anchor's path, or to the `0/` sentinel when the anchor row
@@ -57,7 +58,9 @@ pub fn derive_scope_prefixes(input: &Input, ontology: &Ontology) -> HashMap<Stri
                         .map(|spec| lookup_expr(spec, &key.value))
                 })
                 .collect();
-            (!lookups.is_empty()).then(|| (node.id.clone(), ScopePrefix(lookups)))
+            (1..=MAX_LOOKUPS_PER_ALIAS)
+                .contains(&lookups.len())
+                .then(|| (node.id.clone(), ScopePrefix(lookups)))
         })
         .collect();
     ontology.propagate_scope_prefixes(&scope_edges(input), &seed)

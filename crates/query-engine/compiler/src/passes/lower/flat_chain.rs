@@ -197,9 +197,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &mut narrowed_nodes,
             )?;
 
-            inner_preds.extend(edge_scope_predicate(hop, &alias));
-
             edge_if_predicates = Expr::conjoin(inner_preds.clone());
+            inner_preds.extend(edge_scope_predicate(hop, &alias));
 
             from = Some(limit_by_scan(
                 &hop.edge_table,

@@ -2,7 +2,7 @@
 //!
 //! Runs every query in `fixtures/queries/corpus/` through the **same pipeline
 //! stages the webserver runs** (`QueryPipelineService::run_query`): Security ->
-//! PathResolution -> Compilation -> ClickHouseExecutor -> Extraction ->
+//! Compilation -> ClickHouseExecutor -> Extraction ->
 //! Authorization -> Redaction -> Hydration -> Output, against a real ClickHouse
 //! seeded with the data-correctness fixture.
 //!
