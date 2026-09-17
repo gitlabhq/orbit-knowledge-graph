@@ -38,9 +38,7 @@ Follow the tutorial below to get started.
 
 ## Prerequisites
 
-- A top-level group with GitLab Orbit Remote indexing turned on. To check, go to the
-  [GitLab Orbit dashboard](https://gitlab.com/dashboard/orbit/explore), or ask
-  your group Owner.
+- GitLab Orbit Remote indexing is turned on for your group. To check if indexing is active, view the [GitLab Orbit Dashboard](https://gitlab.com/dashboard/orbit/explore). If you can't view the dashboard, ask your group Owner to turn on Orbit Remote indexing for the top-level group.
 - Install the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/), version 1.115.0 or later.
 
 ## Step 1: Set up your AI assistant
@@ -52,18 +50,16 @@ Connect GitLab Orbit to:
 
 For the most coverage, use both.
 
-### Use GitLab Duo Agent Platform
+### Turn on GitLab Orbit for agents
 
-Turn on the GitLab Duo Agent Platform setting
-for GitLab Orbit to give agents access to
-your graph:
+To give agents access to your indexed graph:
 
-1. In the top bar, select **Search or go to** > **Preferences**.
+1. In the upper-right corner, select your avatar.
+1. Select **Preferences**.
 1. Under **Behavior**, select the **Use Orbit in GitLab Duo** checkbox. Keep the defaults.
 1. Select **Save changes**.
 1. Open the GitLab Duo Chat sidebar and confirm GitLab Orbit is turned on.
 
-Now, foundational agents can access your graph.
 
 If GitLab Orbit doesn't appear, indexing might not be turned on for your group.
 For help, see [troubleshooting](troubleshooting.md#exit-code-2).
