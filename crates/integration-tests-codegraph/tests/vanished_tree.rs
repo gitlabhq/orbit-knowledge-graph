@@ -2,7 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use code_graph::v2::{
-    Decision, FileInventoryEntry, GraphConverter, OnBatch, Pipeline, PipelineConfig, PipelineResult,
+    Decision, FileInventory, FileInventoryEntry, GraphConverter, OnBatch, Pipeline, PipelineConfig,
+    PipelineResult,
 };
 
 struct NoopConverter;
@@ -20,9 +21,8 @@ fn run_pipeline(root: &Path, inventory: Vec<FileInventoryEntry>) -> PipelineResu
     let on_batch: Arc<OnBatch> = Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
     Pipeline::run(
         root,
-        Arc::from(inventory),
+        Arc::new(FileInventory::new(inventory)),
         PipelineConfig::default(),
-        &Default::default(),
         Arc::new(NoopConverter),
         on_batch,
     )
@@ -33,6 +33,7 @@ fn js_entry(path: &str) -> FileInventoryEntry {
         path: path.to_string(),
         size: 20,
         decision: Decision::Parse,
+        label: Default::default(),
     }
 }
 
