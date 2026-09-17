@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
+use code_graph::v2::config::{CodeFilter, SkipReason, detect_language_from_path};
 use futures::StreamExt;
 use orbit_utils::archive::extract_tar_gz;
 use orbit_utils::fs_walk::{FileInventory, StreamError};
@@ -39,7 +39,7 @@ pub struct CachedRepository {
     pub file_inventory: Arc<FileInventory>,
     /// Per-path reason for files the stream settled as bare nodes, carried to the
     /// pipeline so each File node's `gl_file.reason` reflects the stream skip.
-    pub stream_reasons: FxHashMap<String, FilterSkip>,
+    pub stream_reasons: FxHashMap<String, SkipReason>,
 }
 
 impl CachedRepository {
@@ -139,10 +139,15 @@ impl RepositoryCache for LocalRepositoryCache {
                 .record_archive_entry_skipped(reason.into(), tally.count, tally.bytes);
         }
 
+        let stream_reasons: FxHashMap<String, SkipReason> = file_inventory
+            .iter()
+            .filter_map(|e| e.label.skip.map(|r| (e.path.clone(), r)))
+            .collect();
+
         Ok(CachedRepository {
             dir,
             file_inventory: Arc::new(file_inventory),
-            stream_reasons: filter.file_reasons().clone(),
+            stream_reasons,
         })
     }
 }
@@ -496,7 +501,7 @@ mod tests {
         );
         assert_eq!(
             path.stream_reasons.get("data/train.csv"),
-            Some(&FilterSkip::LfsPointer)
+            Some(&SkipReason::LfsPointer)
         );
         assert!(path.path().join("src/main.rs").exists());
         assert!(!path.path().join("data/train.csv").exists());

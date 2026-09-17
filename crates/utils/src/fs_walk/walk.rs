@@ -56,9 +56,9 @@ pub fn walk_dir<H: FileStreamHooks>(
         // A symlink has no content to sniff and is never a parse candidate; the
         // hooks settle it, same as the tar source.
         meta.decision = if is_symlink {
-            hooks.on_non_regular(&meta)
+            hooks.on_non_regular(&mut meta)
         } else {
-            step(hooks, &meta, &mut content, |buf| {
+            step(hooks, &mut meta, &mut content, |buf| {
                 std::fs::File::open(abs_path)?.read_to_end(buf).map(|_| ())
             })?
         };
@@ -76,11 +76,11 @@ mod tests {
 
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+        fn on_header(&mut self, f: &mut FileInventoryEntry) -> Option<Decision> {
             (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
                 .then_some(Decision::ListOnly)
         }
-        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> Decision {
+        fn on_content(&mut self, _f: &mut FileInventoryEntry, content: &[u8]) -> Decision {
             if content.contains(&0) {
                 Decision::ListOnly
             } else {

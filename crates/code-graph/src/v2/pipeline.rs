@@ -1,4 +1,4 @@
-use crate::v2::config::{FilterSkip, Language, LanguageFamily, detect_language_from_path};
+use crate::v2::config::{Language, LanguageFamily, SkipReason, detect_language_from_path};
 use crate::v2::error::FileReason;
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
@@ -724,7 +724,7 @@ impl Pipeline {
         root: &Path,
         file_inventory: Arc<FileInventory>,
         config: PipelineConfig,
-        stream_reasons: &FxHashMap<String, FilterSkip>,
+        stream_reasons: &FxHashMap<String, SkipReason>,
         converter: Arc<dyn GraphConverter>,
         on_batch: Arc<OnBatch>,
     ) -> PipelineResult {
@@ -744,7 +744,7 @@ impl Pipeline {
         root: &Path,
         file_inventory: Arc<FileInventory>,
         mut config: PipelineConfig,
-        stream_reasons: &FxHashMap<String, FilterSkip>,
+        stream_reasons: &FxHashMap<String, SkipReason>,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
         on_batch: Arc<OnBatch>,

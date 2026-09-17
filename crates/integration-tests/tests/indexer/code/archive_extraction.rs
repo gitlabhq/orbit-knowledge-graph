@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
+use code_graph::v2::config::{CodeFilter, SkipReason, detect_language_from_path};
 use code_graph::v2::linker::CodeGraph;
 use code_graph::v2::linker::graph::GraphNode;
 use code_graph::v2::types::EdgeKind;
@@ -59,7 +59,7 @@ impl GraphConverter for CapturingConverter {
 async fn extract_via_archive_endpoint(
     entries: &[Entry<'_>],
     target: &Path,
-) -> (FileInventory, FxHashMap<String, FilterSkip>) {
+) -> (FileInventory, FxHashMap<String, SkipReason>) {
     use axum::Router;
     use axum::body::Body;
     use axum::http::header;
@@ -102,7 +102,11 @@ async fn extract_via_archive_endpoint(
         let mut filter = CodeFilter::new(None, None, detect_language_from_path);
         let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
         let inventory = extract_tar_gz(bridge, &target, &mut filter).unwrap();
-        (inventory, filter.file_reasons().clone())
+        let reasons = inventory
+            .iter()
+            .filter_map(|e| e.label.skip.map(|r| (e.path.clone(), r)))
+            .collect();
+        (inventory, reasons)
     })
     .await
     .unwrap();
@@ -113,7 +117,7 @@ async fn extract_via_archive_endpoint(
 async fn run_pipeline(
     root: &Path,
     file_inventory: FileInventory,
-    stream_reasons: FxHashMap<String, FilterSkip>,
+    stream_reasons: FxHashMap<String, SkipReason>,
 ) -> CapturedPipelineRun {
     let capturer = Arc::new(CapturingConverter {
         graphs: Mutex::new(Vec::new()),

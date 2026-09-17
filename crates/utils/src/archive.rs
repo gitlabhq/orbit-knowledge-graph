@@ -98,7 +98,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 decision: Decision::ListOnly,
                 label: Default::default(),
             };
-            meta.decision = hooks.on_non_regular(&meta);
+            meta.decision = hooks.on_non_regular(&mut meta);
             if meta.decision != Decision::Drop {
                 let link_target = entry
                     .link_name()
@@ -118,7 +118,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 decision: Decision::Parse,
                 label: Default::default(),
             };
-            meta.decision = step(hooks, &meta, &mut content, |buf| {
+            meta.decision = step(hooks, &mut meta, &mut content, |buf| {
                 entry.read_to_end(buf).map(|_| ())
             })?;
             match meta.decision {
@@ -220,11 +220,11 @@ mod tests {
     /// shape of the production `CodeFilter` without depending on code-graph.
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+        fn on_header(&mut self, f: &mut FileInventoryEntry) -> Option<Decision> {
             (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
                 .then_some(Decision::ListOnly)
         }
-        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> Decision {
+        fn on_content(&mut self, _f: &mut FileInventoryEntry, content: &[u8]) -> Decision {
             if content.contains(&0) {
                 Decision::ListOnly
             } else {
@@ -497,7 +497,7 @@ mod tests {
     /// guard was handed.
     struct MaxSize(u64);
     impl FileStreamHooks for MaxSize {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+        fn on_header(&mut self, f: &mut FileInventoryEntry) -> Option<Decision> {
             (f.size > self.0).then_some(Decision::ListOnly)
         }
     }
