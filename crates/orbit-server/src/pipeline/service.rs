@@ -21,8 +21,8 @@ use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, Pipel
 
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage,
-    RoutingOutput, RoutingStage, SecurityStage,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput,
+    RoutingStage, SecurityStage,
 };
 
 pub struct RawQuery {
