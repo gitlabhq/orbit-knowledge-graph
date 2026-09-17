@@ -22,3 +22,5 @@ GRANT SELECT ON system.columns TO gkg_siphon_reader_app;
 GRANT gkg_app TO gkg_writer;
 GRANT gkg_reader_app TO gkg_reader;
 GRANT gkg_siphon_reader_app TO gkg_siphon_reader;
+GRANT SELECT ON system.tables TO gkg_app;
+GRANT SELECT ON system.dictionaries TO gkg_reader_app;
