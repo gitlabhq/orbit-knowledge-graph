@@ -10,7 +10,7 @@ use sqlparser::ast::{
 use sqlparser::dialect::{ClickHouseDialect, DuckDbDialect};
 use sqlparser::parser::Parser;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Collector {
     functions: HashSet<String>,
     columns: HashSet<String>,
@@ -93,6 +93,7 @@ impl Visitor for Collector {
     }
 }
 
+#[derive(Debug)]
 pub struct ParsedSql {
     pub statements: Vec<Statement>,
     pub raw: String,

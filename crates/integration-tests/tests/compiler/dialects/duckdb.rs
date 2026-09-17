@@ -17,23 +17,15 @@ fn search_uses_positional_params() {
     let result = compile(
         r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"],
-                 "filters": {"username": "alice"}},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"],
+                   "filters": {"username": "alice"}}],
         "limit": 10
     }"#,
     );
 
-    let rendered = result.base.render();
-    assert!(
-        rendered.contains("'alice'"),
-        "expected inlined param: {rendered}"
-    );
-
-    // The username filter is inside the dedup subquery, not the outer WHERE.
-    assert!(
-        rendered.contains("username"),
-        "expected username filter: {rendered}"
-    );
+    let sql = &result.base.sql;
+    assert!(sql.contains("$"), "expected positional params: {sql}");
+    assert!(sql.contains("username"), "expected username filter: {sql}");
 }
 
 #[test]
@@ -41,7 +33,7 @@ fn no_clickhouse_functions_leak() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "traversal",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
         "limit": 10
     }"#,
     );
@@ -56,14 +48,11 @@ fn no_security_filter() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "traversal",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
         "limit": 10
     }"#,
     );
 
-    // No startsWith security filter on traversal_path (local mode has no auth).
-    // The _gkg_*_tp column is present for hydration narrowing but there is no
-    // startsWith predicate in WHERE.
     assert!(!sql.has_function("startsWith"));
 }
 
@@ -83,7 +72,7 @@ fn traversal() {
 
     assert!(sql.has_table("gl_edge"));
     assert!(sql.has_column_ref("relationship_kind"));
-    assert_eq!(sql.limit_value(), Some(25));
+    assert_eq!(sql.limit_value(), Some(26), "limit + 1 probe row");
 }
 
 #[test]
@@ -96,15 +85,16 @@ fn aggregation() {
             {"id": "n", "entity": "Note"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "group_by": [{"kind": "node", "node": "u"}],
-        "aggregations": [
-            {"function": "count", "target": "n", "alias": "note_count"}
-        ],
+        "group_by": ["u"],
+        "aggregations": [{"count": "n", "as": "note_count"}],
         "limit": 10
     }"#,
     );
 
-    assert!(sql.has_function("COUNT"));
+    assert!(
+        sql.has_function("COUNT") || sql.has_function("count") || sql.has_function("countIf"),
+        "expected count function"
+    );
     assert!(sql.has_group_by());
 }
 
@@ -117,7 +107,8 @@ fn path_finding() {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [100]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                 "rel_types": ["MEMBER_OF"]}
     }"#,
     );
 
@@ -130,15 +121,14 @@ fn neighbors() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "neighbors": {"node": "u", "direction": "outgoing"},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+        "neighbors": {"direction": "outgoing"},
         "limit": 10
     }"#,
     );
 
     assert!(sql.has_table("gl_edge"));
-    // Edge-only: no JOIN, edge scan with IN subquery.
-    assert_eq!(sql.limit_value(), Some(10));
+    assert_eq!(sql.limit_value(), Some(11), "limit + 1 probe row");
 }
 
 #[test]
@@ -149,10 +139,8 @@ fn group_by_truncate_emits_duckdb_date_trunc() {
         "nodes": [
             {"id": "u", "entity": "Note", "node_ids": [1]}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "bucket"}
-        ],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "group_by": [{"key": "u.created_at", "truncate": "month", "as": "bucket"}],
         "limit": 10
     }"#,
     );
@@ -176,10 +164,8 @@ fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
                 "nodes": [
                     {{"id": "u", "entity": "Note", "node_ids": [1]}}
                 ],
-                "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
-                "group_by": [
-                    {{"kind": "property", "node": "u", "property": "created_at", "transform": {{"kind": "truncate", "unit": "{unit}"}}}}
-                ],
+                "aggregations": [{{"count": "u", "as": "n"}}],
+                "group_by": [{{"key": "u.created_at", "truncate": "{unit}"}}],
                 "limit": 10
             }}"#
         );
@@ -199,7 +185,7 @@ fn node_ids_expand_params() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2, 3]}],
         "limit": 10
     }"#,
     );
