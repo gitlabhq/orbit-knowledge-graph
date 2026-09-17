@@ -26,6 +26,9 @@ pub enum Tf {
     Pipeline(Vec<Tf>),
     ParentSym(u16),
     AncestorSym(u16),
+    Concat(Box<str>, Box<Tf>, Box<Tf>),
+    Stem,
+    CollapseIndex(Vec<Box<str>>),
 }
 
 impl Tf {
@@ -51,6 +54,14 @@ impl Tf {
                 ctx.expect("ancestor_sym needs context")
                     .intern_kind(args[0]),
             ),
+            "concat" => {
+                assert!(args.len() >= 3, "concat needs (sep, tf_a, tf_b)");
+                let a = Tf::from_func(args[1], &[], None);
+                let b = Tf::from_func(args[2], &[], None);
+                Tf::Concat(args[0].into(), Box::new(a), Box::new(b))
+            }
+            "stem" => Tf::Stem,
+            "collapse_index" => Tf::CollapseIndex(args.iter().map(|a| (*a).into()).collect()),
             _ => panic!("unknown transform: {name}"),
         }
     }
@@ -85,12 +96,29 @@ impl Tf {
                 }
                 result
             }
+            Tf::Stem => {
+                let p = std::path::Path::new(s);
+                p.with_extension("").to_string_lossy().to_string()
+            }
+            Tf::CollapseIndex(names) => {
+                for name in names {
+                    let suffix = format!("/{name}");
+                    if s.ends_with(&suffix) {
+                        return s.strip_suffix(&suffix).unwrap_or("").to_string();
+                    }
+                    if s == &**name {
+                        return String::new();
+                    }
+                }
+                s.to_string()
+            }
             Tf::Field(_)
             | Tf::Child(_)
             | Tf::FieldChild(_, _)
             | Tf::Const(_)
             | Tf::ParentSym(_)
-            | Tf::AncestorSym(_) => {
+            | Tf::AncestorSym(_)
+            | Tf::Concat(_, _, _) => {
                 unreachable!("tree-context transform used as string transform")
             }
         }
@@ -136,6 +164,47 @@ impl Tf {
                         None => break 0,
                     }
                 }
+            }
+            Tf::Concat(sep, a, b) => {
+                let sa = a.apply_sym(t, lang, id);
+                let sb = b.apply_sym(t, lang, id);
+                if sa == 0 {
+                    return sb;
+                }
+                if sb == 0 {
+                    return sa;
+                }
+                let result = format!("{}{sep}{}", lang.syms.resolve(sa), lang.syms.resolve(sb));
+                lang.syms.intern(&result)
+            }
+            Tf::Pipeline(steps) => {
+                let mut s = lang.syms.resolve(t.node(id).sym).to_string();
+                for step in steps {
+                    match step {
+                        Tf::Child(_)
+                        | Tf::FieldChild(_, _)
+                        | Tf::Field(_)
+                        | Tf::ParentSym(_)
+                        | Tf::AncestorSym(_)
+                        | Tf::Concat(_, _, _) => {
+                            let sym = step.apply_sym(t, lang, id);
+                            s = lang.syms.resolve(sym).to_string();
+                        }
+                        _ => {
+                            s = step.apply_to_str(&s);
+                        }
+                    }
+                }
+                lang.syms.intern(&s)
+            }
+            Tf::Stem | Tf::CollapseIndex(_) => {
+                let sym = t.node(id).sym;
+                if sym == 0 {
+                    return 0;
+                }
+                let s = lang.syms.resolve(sym).to_string();
+                let result = self.apply_to_str(&s);
+                lang.syms.intern(&result)
             }
             _ => {
                 let sym = t.node(id).sym;

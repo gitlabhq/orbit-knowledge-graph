@@ -213,6 +213,14 @@ pub enum Canonical {
     SsaHint,
     #[strum(serialize = "__self_method", props(flavor = "true"))]
     SelfMethod,
+
+    // ── Display (write-once, post-resolution) ──
+    #[strum(serialize = "_*_display_fqn")]
+    DisplayFqn,
+    #[strum(serialize = "_*_display_def_type")]
+    DisplayDefType,
+    #[strum(serialize = "_*_display_file_path")]
+    DisplayFilePath,
 }
 
 impl From<Canonical> for u16 {
