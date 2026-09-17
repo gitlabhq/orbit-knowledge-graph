@@ -178,8 +178,8 @@ class SentenceRules(unittest.TestCase):
         self.assertEqual(len(unit.sentences), 3)
 
     def test_closing_emphasis_ends_a_sentence(self):
-        (unit,) = markdown_units("s.md", "**Do not mirror it.** Then check the ontology. _Really._ Stop.")
-        self.assertEqual(len(unit.sentences), 4)
+        (unit,) = markdown_units("s.md", "**Do not mirror it.** Then check the ontology. _Really._ Stop. \u201cQuoted.\u201d Done.")
+        self.assertEqual(len(unit.sentences), 6)
 
     def test_summary_phrase_needs_a_sentence_boundary(self):
         (unit,) = markdown_units("s.md", "Use a colon in summary lines. In summary, stop.")
