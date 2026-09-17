@@ -81,7 +81,7 @@ FILLER = re.compile(
 DASHES = re.compile("[—–]")
 
 WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'_-]*")
-SENTENCE = re.compile(r"\S.*?(?:[.!?]+[\"')\]]*(?=\s|$)|$)", re.S)
+SENTENCE = re.compile(r"\S.*?(?:[.!?]+[\"')\]*_]*(?=\s|$)|$)", re.S)
 PARAGRAPH = re.compile(r"[^\n]+(?:\n[^\n]+)*")
 INLINE_CODE = re.compile(r"`[^`\n]*`")
 PLACEHOLDER = re.compile(r"\{\{.*?\}\}")

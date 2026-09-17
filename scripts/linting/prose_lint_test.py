@@ -177,6 +177,10 @@ class SentenceRules(unittest.TestCase):
         (unit,) = markdown_units("s.md", 'See e.g. the docs, i.e. this file... Then ask "why not?" (See below.) Stop.')
         self.assertEqual(len(unit.sentences), 3)
 
+    def test_closing_emphasis_ends_a_sentence(self):
+        (unit,) = markdown_units("s.md", "**Do not mirror it.** Then check the ontology. _Really._ Stop.")
+        self.assertEqual(len(unit.sentences), 4)
+
     def test_summary_phrase_needs_a_sentence_boundary(self):
         (unit,) = markdown_units("s.md", "Use a colon in summary lines. In summary, stop.")
         self.assertEqual([f.message.split("'")[1] for f in check(unit)], ["In summary"])
