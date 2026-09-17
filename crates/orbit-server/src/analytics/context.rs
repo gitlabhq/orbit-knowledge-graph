@@ -191,7 +191,10 @@ fn apply_metrics(
         q.traversal_shape = traversal_shape(input).and_then(|s| s.parse().ok());
     }
 
-    let label: &str = metrics.hydration.as_ref().map_or("none", |h| h.into());
+    let label: &str = metrics
+        .hydration
+        .as_ref()
+        .map_or("none", |h| h.kind().into());
     q.hydration_plan = label.parse().ok();
     q.duration_ms = Some(ExecMetrics::ms(total_elapsed) as i64);
     q.compile_ms = metrics.compile_ms.map(|v| v as i64);

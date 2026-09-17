@@ -9,8 +9,7 @@ use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
 use crate::types::SecurityContext;
 
-#[derive(Debug, Clone, PartialEq, strum::IntoStaticStr)]
-#[strum(serialize_all = "lowercase")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HydrationPlan {
     None,
     /// One template per input node, with IDs to be filled at runtime.
@@ -18,6 +17,25 @@ pub enum HydrationPlan {
     /// Column specs are pre-resolved for every ontology entity type so
     /// the server just looks up the matching spec — no ontology queries.
     Dynamic(Vec<DynamicEntityColumns>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, strum::IntoStaticStr)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum HydrationKind {
+    None,
+    Static,
+    Dynamic,
+}
+
+impl HydrationPlan {
+    pub fn kind(&self) -> HydrationKind {
+        match self {
+            Self::None => HydrationKind::None,
+            Self::Static(_) => HydrationKind::Static,
+            Self::Dynamic(_) => HydrationKind::Dynamic,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

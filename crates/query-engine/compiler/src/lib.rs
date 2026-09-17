@@ -71,7 +71,7 @@ pub use passes::codegen::{
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::frontend::{Frontend, gql};
 pub use passes::hydrate::{
-    DynamicEntityColumns, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
+    DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
