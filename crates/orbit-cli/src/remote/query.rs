@@ -28,13 +28,12 @@ pub(crate) async fn run_query(
         QueryLanguage::Json => {
             build_query_request(&read_query_body(source.as_deref())?, format_override)?
         }
-        QueryLanguage::Gql => {
-            let text = match source.as_deref() {
-                None | Some("-") => read_query_body(None)?,
-                Some(text) => text.as_bytes().to_vec(),
-            };
-            build_gql_request(&text, format_override)?
-        }
+        QueryLanguage::Gql => build_gql_request(
+            source
+                .as_deref()
+                .ok_or_else(|| RemoteError::new(EXIT_GENERIC, "GQL query text is required"))?,
+            format_override,
+        )?,
     };
     let response = client.query_raw(request_body).await?;
     write_stdout_raw(&response)
@@ -57,13 +56,9 @@ fn read_query_body(source: Option<&str>) -> anyhow::Result<Vec<u8>> {
 }
 
 fn build_gql_request(
-    body: &[u8],
+    query: &str,
     format_override: Option<ResponseFormat>,
 ) -> Result<Vec<u8>, RemoteError> {
-    let body = body.strip_prefix(BOM).unwrap_or(body);
-    let query = std::str::from_utf8(body).map_err(|e| {
-        RemoteError::new(EXIT_GENERIC, format!("query body is not valid UTF-8: {e}"))
-    })?;
     if query.is_empty() {
         return Err(RemoteError::new(EXIT_GENERIC, "query body is empty"));
     }
@@ -133,10 +128,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gql_query_rejects_empty_or_invalid_utf8() {
-        for body in [b"".as_slice(), BOM, &[0xff]] {
-            assert!(build_gql_request(body, None).is_err(), "{body:?}");
-        }
+    fn gql_query_rejects_empty_text() {
+        assert!(build_gql_request("", None).is_err());
     }
 
     #[test]

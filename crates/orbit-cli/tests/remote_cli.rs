@@ -231,39 +231,32 @@ fn query_posts_envelope_with_resolved_response_format() {
 }
 
 #[test]
-fn gql_inline_and_stdin_preserve_query_text_and_response_bytes() {
+fn gql_inline_preserves_query_text_and_response_bytes() {
     let text = "  MATCH (u:User {username: 'a\\\\b\\\"λ'})\r\nRETURN u LIMIT 1\n";
-
-    for (format, response, source) in [
-        ("llm", "@query\nλ \\\"quoted\\\"\n", text),
-        ("raw", "{ \"result\": {\"nodes\":[]} }\n", "-"),
-    ] {
-        let (base_url, handle) = serve_once(response, "text/plain");
-        let args = [
+    let response = "@query\nλ \\\"quoted\\\"\n";
+    let (base_url, handle) = serve_once(response, "text/plain");
+    let output = run_orbit(
+        &base_url,
+        &[
             "query",
             "--language",
             "gql",
             "--response-format",
-            format,
-            source,
-        ];
-        let output = if source == "-" {
-            run_orbit_with_stdin(&base_url, &args, text.as_bytes())
-        } else {
-            run_orbit(&base_url, &args)
-        };
-        let request = handle.join().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let sent: serde_json::Value = serde_json::from_str(&request.body).unwrap();
-        assert_eq!(sent["query"], text);
-        assert_eq!(sent["language"], "gql");
-        assert_eq!(sent["response_format"], format);
-        assert_eq!(output.stdout, response.as_bytes());
-    }
+            "llm",
+            text,
+        ],
+    );
+    let request = handle.join().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sent: serde_json::Value = serde_json::from_str(&request.body).unwrap();
+    assert_eq!(sent["query"], text);
+    assert_eq!(sent["language"], "gql");
+    assert_eq!(sent["response_format"], "llm");
+    assert_eq!(output.stdout, response.as_bytes());
 }
 
 #[test]
