@@ -317,7 +317,6 @@ Each YAML file contains one `QueryScenario` document.
 | `authorized_paths` | [{path, access_level}] | — | Per-path access levels |
 | `org_id` | i64 | — | Organization ID |
 | `access_level` | u32 | 20 (Reporter) | Default access level |
-| `scope_prefixes` | {alias: prefix} | — | Per-alias traversal scoping |
 
 #### `config.redaction` — `RedactionConfig`
 

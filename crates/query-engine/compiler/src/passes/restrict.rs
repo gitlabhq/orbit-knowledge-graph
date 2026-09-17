@@ -199,24 +199,14 @@ fn validate_traversal_path_within_scope(
 /// only hold rows under that scope; scoping it is lossless and restores the
 /// edge PK prefix that the broad org-wide authorization filter erases (#601941).
 ///
-/// The endpoint prefixes come from the ontology's scope-annotation taint walk
-/// ([`Ontology::propagate_scope_prefixes`]) seeded with the prefixes the path
-/// resolver already attached to `scope_prefixes`. The node-table scans are
-/// scoped separately via `scope_prefixes` in the security pass; this stamps the
-/// edges the lowerer emits.
-fn stamp_edge_scope_prefixes(
-    input: &mut Input,
-    ontology: &Ontology,
-    security_ctx: &SecurityContext,
-) {
-    if security_ctx.scope_prefixes.is_empty() {
+/// The per-alias prefixes come from [`crate::scope::derive_scope_prefixes`];
+/// they are kept on `input.compiler.scope_prefixes` for the security pass,
+/// which scopes the node-table scans. This stamps the edges the lowerer emits.
+fn stamp_edge_scope_prefixes(input: &mut Input, ontology: &Ontology) {
+    let node_prefix = crate::scope::derive_scope_prefixes(input, ontology);
+    if node_prefix.is_empty() {
         return;
     }
-
-    let node_prefix = {
-        let edges = crate::scope::scope_edges(input);
-        ontology.propagate_scope_prefixes(&edges, &security_ctx.scope_prefixes)
-    };
 
     let entity_of: std::collections::HashMap<&str, &str> = input
         .nodes
@@ -253,6 +243,7 @@ fn stamp_edge_scope_prefixes(
             }
         }
     }
+    input.compiler.scope_prefixes = node_prefix;
 }
 
 /// Mark each relationship whose every resolved variant keeps both endpoints in
@@ -282,7 +273,7 @@ pub fn restrict(
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     enforce_traversal_path_filters(input, ontology, security_ctx)?;
-    stamp_edge_scope_prefixes(input, ontology, security_ctx);
+    stamp_edge_scope_prefixes(input, ontology);
     stamp_scope_preserving(input, ontology);
 
     if security_ctx.admin {
@@ -365,7 +356,6 @@ mod tests {
     };
 
     use ontology::{DataType, RequiredRole};
-    use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
     use std::collections::HashMap;
 
@@ -1173,7 +1163,8 @@ mod tests {
     fn reviewer_prune_to_target_ontology() -> Ontology {
         let base = Ontology::new()
             .with_nodes(["User"])
-            .with_path_scopable_nodes(["MergeRequest"]);
+            .with_path_scopable_nodes(["MergeRequest"])
+            .with_traversal_path_lookup("MergeRequest", "id");
         let edge_table = base.edge_table().to_string();
         base.with_edge_variant(ontology::EdgeEntity {
             relationship_kind: "REVIEWER".into(),
@@ -1204,13 +1195,7 @@ mod tests {
     #[test]
     fn prune_to_target_stamps_when_target_resolves() {
         let ont = reviewer_prune_to_target_ontology();
-        let prefixes = HashMap::from([(
-            "mr".to_string(),
-            TraversalPath::new_unchecked("1/9970/15846663/"),
-        )]);
-        let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
-            .unwrap()
-            .with_scope_prefixes(prefixes);
+        let ctx = SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
         let mut input = Input {
             query_type: QueryType::Traversal,
             nodes: vec![
@@ -1222,6 +1207,7 @@ mod tests {
                 InputNode {
                     id: "mr".into(),
                     entity: Some("MergeRequest".into()),
+                    node_ids: vec![15846663],
                     ..Default::default()
                 },
             ],
@@ -1229,12 +1215,13 @@ mod tests {
             ..Input::default()
         };
         restrict(&mut input, &ont, &ctx).expect("restrict ok");
+        let mr_prefix = input.compiler.scope_prefixes.get("mr").cloned();
+        assert!(
+            mr_prefix.is_some(),
+            "pinned MergeRequest derives a scope prefix"
+        );
         assert_eq!(
-            input.relationships[0]
-                .scope_prefix
-                .as_ref()
-                .map(TraversalPath::as_str),
-            Some("1/9970/15846663/"),
+            input.relationships[0].scope_prefix, mr_prefix,
             "prune_to_target must stamp the edge from the pinned target prefix"
         );
     }
@@ -1242,19 +1229,14 @@ mod tests {
     #[test]
     fn prune_to_target_does_not_propagate_across_hub() {
         let ont = reviewer_prune_to_target_ontology();
-        let prefixes = HashMap::from([(
-            "mr_a".to_string(),
-            TraversalPath::new_unchecked("1/9970/15846663/"),
-        )]);
-        let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
-            .unwrap()
-            .with_scope_prefixes(prefixes);
+        let ctx = SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
         let mut input = Input {
             query_type: QueryType::Traversal,
             nodes: vec![
                 InputNode {
                     id: "mr_a".into(),
                     entity: Some("MergeRequest".into()),
+                    node_ids: vec![15846663],
                     ..Default::default()
                 },
                 InputNode {
@@ -1277,13 +1259,11 @@ mod tests {
         restrict(&mut input, &ont, &ctx).expect("restrict ok");
 
         assert_eq!(
-            input.relationships[0]
-                .scope_prefix
-                .as_ref()
-                .map(TraversalPath::as_str),
-            Some("1/9970/15846663/"),
+            input.relationships[0].scope_prefix,
+            input.compiler.scope_prefixes.get("mr_a").cloned(),
             "edge adjacent to pinned mr_a must be scoped"
         );
+        assert!(input.relationships[0].scope_prefix.is_some());
 
         assert!(
             input.relationships[1].scope_prefix.is_none(),
@@ -1292,8 +1272,8 @@ mod tests {
         );
 
         assert!(
-            !ctx.scope_prefixes.contains_key("mr_b"),
-            "mr_b must remain unpinned in the security context"
+            !input.compiler.scope_prefixes.contains_key("mr_b"),
+            "mr_b must remain unpinned"
         );
     }
 }

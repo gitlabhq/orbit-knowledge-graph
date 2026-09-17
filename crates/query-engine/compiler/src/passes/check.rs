@@ -54,7 +54,7 @@ fn check_query(q: &Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<
 
 fn check_subqueries_in_expr(expr: &Expr, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
     match expr {
-        Expr::InSelect { query, .. } => check_query(query, ctx, ontology),
+        Expr::InSelect { query, .. } | Expr::Scalar(query) => check_query(query, ctx, ontology),
         Expr::BinaryOp { left, right, .. } => {
             check_subqueries_in_expr(left, ctx, ontology)?;
             check_subqueries_in_expr(right, ctx, ontology)

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use crate::scope::ScopePrefix;
 use ontology::constants::*;
-use orbit_utils::traversal_path::TraversalPath;
 
 use crate::ast::*;
 use crate::constants::*;
@@ -639,19 +639,9 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
-    scope_prefix: Option<&TraversalPath>,
+    scope_prefix: Option<&ScopePrefix>,
 ) -> Query {
-    let scope_pred = |alias: &str| -> Option<Expr> {
-        scope_prefix.map(|p| {
-            Expr::func(
-                "startsWith",
-                vec![
-                    Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                    Expr::string(p.as_str()),
-                ],
-            )
-        })
-    };
+    let scope_pred = |alias: &str| -> Option<Expr> { scope_prefix.map(|s| s.predicate(alias)) };
 
     let mut from = TableRef::scan(edge_table, "e1");
     let mut where_parts = Vec::new();

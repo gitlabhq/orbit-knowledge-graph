@@ -12,14 +12,12 @@ use opentelemetry::KeyValue;
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
-use orbit_server_config::{AppConfig, PathResolverConfig};
+use orbit_server_config::AppConfig;
 use query_engine::compiler::validate_normalize;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 use tracing::{info, warn};
-
-use crate::pipeline::PathResolver;
 
 #[derive(Default)]
 pub struct ActiveSchema {
@@ -40,7 +38,6 @@ impl ActiveSchema {
             graph,
             embedded,
             catalog,
-            path_resolver_config: config.path_resolver.clone(),
         };
         let retry_backoff = Duration::from_secs(config.schema.version_poll_interval_secs);
         tokio::spawn(active.clone().follow(loader, retry_backoff, shutdown));
@@ -54,19 +51,8 @@ impl ActiveSchema {
 
     #[cfg(any(test, feature = "testkit"))]
     pub fn pinned(ontology: Arc<Ontology>) -> Arc<Self> {
-        use clickhouse_client::ClickHouseConfigurationExt;
-        let config = AppConfig::embedded_defaults();
-        let path_resolver = PathResolver::without_dictionaries(
-            Arc::new(config.graph.build_client()),
-            &ontology,
-            &config.path_resolver,
-        );
-        let snapshot = SchemaSnapshot::new(
-            *orbit_migrations::version::SCHEMA_VERSION,
-            ontology,
-            Arc::new(path_resolver),
-        )
-        .expect("pinned schema snapshot must load");
+        let snapshot = SchemaSnapshot::new(*orbit_migrations::version::SCHEMA_VERSION, ontology)
+            .expect("pinned schema snapshot must load");
         Arc::new(Self {
             installed: RwLock::new(Some(Arc::new(snapshot))),
         })
@@ -169,15 +155,10 @@ pub struct SchemaSnapshot {
     pub migration_version: u32,
     pub ontology: Arc<Ontology>,
     pub named_queries: Arc<NamedQueries>,
-    pub path_resolver: Arc<PathResolver>,
 }
 
 impl SchemaSnapshot {
-    fn new(
-        migration_version: u32,
-        ontology: Arc<Ontology>,
-        path_resolver: Arc<PathResolver>,
-    ) -> anyhow::Result<Self> {
+    fn new(migration_version: u32, ontology: Arc<Ontology>) -> anyhow::Result<Self> {
         let mut named_queries = NamedQueries::load_embedded()?;
         named_queries.retain(|query| match fits_ontology(query, &ontology) {
             Ok(()) => true,
@@ -195,7 +176,6 @@ impl SchemaSnapshot {
             migration_version,
             ontology,
             named_queries: Arc::new(named_queries),
-            path_resolver,
         })
     }
 }
@@ -204,7 +184,6 @@ struct SnapshotLoader {
     graph: Arc<ArrowClickHouseClient>,
     embedded: OntologyArchive,
     catalog: OntologyCatalog,
-    path_resolver_config: PathResolverConfig,
 }
 
 impl SnapshotLoader {
@@ -232,9 +211,7 @@ impl SnapshotLoader {
         if !version_tables_complete(&self.graph, version, &expected_tables).await? {
             return Err(anyhow!("v{version} tables are incomplete"));
         }
-        let path_resolver =
-            PathResolver::new(self.graph.clone(), &ontology, &self.path_resolver_config).await;
-        SchemaSnapshot::new(version, ontology, Arc::new(path_resolver)).map(Arc::new)
+        SchemaSnapshot::new(version, ontology).map(Arc::new)
     }
 }
 

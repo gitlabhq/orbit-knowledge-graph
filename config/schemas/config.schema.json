@@ -62,9 +62,6 @@
     "object_storage": {
       "$ref": "#/$defs/ObjectStorageConfig"
     },
-    "path_resolver": {
-      "$ref": "#/$defs/PathResolverConfig"
-    },
     "query": {
       "$ref": "#/$defs/QuerySettings"
     },
@@ -95,7 +92,6 @@
     "metrics",
     "tls",
     "query",
-    "path_resolver",
     "grpc",
     "schema",
     "analytics",
@@ -1089,26 +1085,6 @@
       "required": [
         "enabled",
         "endpoint"
-      ]
-    },
-    "PathResolverConfig": {
-      "type": "object",
-      "properties": {
-        "cache_capacity": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
-        "cache_ttl_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "cache_ttl_secs",
-        "cache_capacity"
       ]
     },
     "ProfilingConfig": {

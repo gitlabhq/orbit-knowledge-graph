@@ -13,25 +13,16 @@ use shared::{
 };
 use types::ResourceAuthorization;
 
-use orbit_server::pipeline::{HydrationStage, PathResolutionStage, PathResolver, RedactionStage};
+use orbit_server::pipeline::{HydrationStage, RedactionStage};
 
 pub struct ProfilerPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
-    resolver: Option<Arc<PathResolver>>,
 }
 
 impl ProfilerPipelineService {
-    pub fn new(
-        ontology: Arc<Ontology>,
-        client: Arc<ArrowClickHouseClient>,
-        resolver: Option<Arc<PathResolver>>,
-    ) -> Self {
-        Self {
-            ontology,
-            client,
-            resolver,
-        }
+    pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>) -> Self {
+        Self { ontology, client }
     }
 
     pub async fn run_query(
@@ -43,9 +34,6 @@ impl ProfilerPipelineService {
 
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
-        if let Some(resolver) = &self.resolver {
-            server_extensions.insert(Arc::clone(resolver));
-        }
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
@@ -57,8 +45,6 @@ impl ProfilerPipelineService {
         };
 
         let output = PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&PathResolutionStage)
-            .await?
             .then(&CompilationStage)
             .await?
             .then(&ProfilerExecutor)

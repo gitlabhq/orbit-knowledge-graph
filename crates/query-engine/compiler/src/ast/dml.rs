@@ -55,6 +55,9 @@ pub enum Expr {
         expr: Box<Expr>,
         query: Box<Query>,
     },
+    /// Single-row, single-column subquery used as a value; ClickHouse folds it
+    /// to a constant before index analysis, so it still drives PK pruning.
+    Scalar(Box<Query>),
     Star,
 }
 
