@@ -388,9 +388,9 @@ enum Commands {
     },
     /// POST a query to the remote Orbit API and stream the response.
     Query {
-        /// With `--language json`: a query body file. With `--language gql`:
-        /// the query text. `-` or omitted reads stdin for either.
-        #[arg(value_name = "FILE|QUERY")]
+        /// With `--language json`: a query body file. `-` or omitted reads stdin.
+        /// With `--language gql`: required inline query text.
+        #[arg(value_name = "FILE|QUERY", required_if_eq("language", "gql"))]
         source: Option<String>,
 
         /// `json` (a query object or envelope file) or `gql` (inline
@@ -873,6 +873,7 @@ mod tests {
         assert_eq!(source.as_deref(), Some("-"));
         assert_eq!(response_format, Some(super::remote::ResponseFormat::Raw));
         assert_eq!(language, super::remote::query::QueryLanguage::Json);
+        assert!(Cli::try_parse_from(["orbit", "query", "--language", "gql"]).is_err());
         assert!(matches!(
             Cli::parse_from(["orbit", "status"]).command,
             Commands::Status
