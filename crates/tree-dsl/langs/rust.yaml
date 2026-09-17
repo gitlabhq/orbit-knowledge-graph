@@ -5,6 +5,8 @@
 stages:
   - name: normalize
     rules:
+      - match: '(source_file $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_expression $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
 

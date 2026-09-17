@@ -79,6 +79,8 @@ enum Stage {
     Ast,
     /// Full pipeline output with edges (default)
     Ssa,
+    /// After display pass (SSA + display decorations)
+    Display,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -145,6 +147,14 @@ fn cmd_parse(
         }
         Stage::Ssa => {
             let (tree, edges, lang, _) = tree_dsl::parse(lang_id, &path, &source);
+            print_tree(&tree, &lang);
+            print_edges(&tree, &edges, &lang);
+        }
+        Stage::Display => {
+            let (mut tree, edges, lang, _pipeline) = tree_dsl::parse(lang_id, &path, &source);
+            let yaml = tree_dsl::treesitter::lang_yaml(lang_id).expect("no lang yaml");
+            let config = tree_dsl::rules::load_lang_full(yaml, &lang);
+            tree_dsl::pattern::apply_rewrites_preorder(&mut tree, &lang, &config.display_rules);
             print_tree(&tree, &lang);
             print_edges(&tree, &edges, &lang);
         }

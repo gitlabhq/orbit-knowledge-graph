@@ -71,6 +71,8 @@ struct RuleFile {
     stages: Vec<Stage>,
     #[serde(default)]
     resolve: Option<ResolveSection>,
+    #[serde(default)]
+    display: Option<Vec<Stage>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -136,6 +138,12 @@ pub fn load_rules(yaml: &str, lang: &Lang) -> Vec<Vec<Rewrite>> {
         .collect()
 }
 
+pub struct LangConfig {
+    pub rewrite_stages: Vec<Vec<Rewrite>>,
+    pub resolve: ResolveConfig,
+    pub display_rules: Vec<Rewrite>,
+}
+
 /// Load both rewrite stages and resolve config from a language YAML file.
 pub fn load_lang(yaml: &str, lang: &Lang) -> (Vec<Vec<Rewrite>>, ResolveConfig) {
     let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
@@ -149,6 +157,30 @@ pub fn load_lang(yaml: &str, lang: &Lang) -> (Vec<Vec<Rewrite>>, ResolveConfig) 
         None => ResolveConfig::default(),
     };
     (rewrites, resolve)
+}
+
+pub fn load_lang_full(yaml: &str, lang: &Lang) -> LangConfig {
+    let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
+    let rewrite_stages = file
+        .stages
+        .iter()
+        .map(|stage| compile_stage(stage, lang))
+        .collect();
+    let resolve = match file.resolve {
+        Some(section) => compile_resolve(&section, lang),
+        None => ResolveConfig::default(),
+    };
+    let display_rules = file
+        .display
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|stage| compile_stage(stage, lang))
+        .collect();
+    LangConfig {
+        rewrite_stages,
+        resolve,
+        display_rules,
+    }
 }
 
 fn compile_resolve(section: &ResolveSection, lang: &Lang) -> ResolveConfig {

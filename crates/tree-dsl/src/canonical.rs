@@ -93,6 +93,8 @@ pub enum Canonical {
 
     #[strum(serialize = "__unknown")]
     Unknown,
+    #[strum(serialize = "__source_file")]
+    SourceFile,
 
     // ── File tree ──
     #[strum(serialize = "__root")]

@@ -5,7 +5,8 @@
 stages:
   - name: normalize
     rules:
-
+      - match: '(program $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
 
       # Constructor parameter property (only when accessibility_modifier present)
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N type: (type_annotation $T:type_identifier))'

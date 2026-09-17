@@ -4,6 +4,8 @@
 stages:
   - name: normalize
     rules:
+      - match: '(module $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
 
@@ -172,5 +174,16 @@ resolve:
         mark: __source_root
     - name: src_dirs
       rules:
-        - match: '(__dir "src" $$$REST)'
-          replace: '(__dir "src" (__source_root) $$$REST)'
+         - match: '(__dir "src" $$$REST)'
+           replace: '(__dir "src" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        append:
+          - '(_*_display_fqn @$M|stem|collapse_index("__init__")|replace("/", "."))'
+          - '(_*_display_file_path @$M)'
+      - match: '(__def)'
+        append:
+          - '(_*_display_fqn @$ROOT|concat(".", "ancestor_sym:_*_display_fqn", "child_sym:__defname"))'

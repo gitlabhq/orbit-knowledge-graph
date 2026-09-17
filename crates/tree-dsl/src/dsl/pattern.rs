@@ -32,7 +32,7 @@ pub enum Tf {
 }
 
 impl Tf {
-    pub(crate) fn from_func(name: &str, args: &[&str], ctx: Option<&mut Ctx>) -> Tf {
+    pub(crate) fn from_func(name: &str, args: &[&str], mut ctx: Option<&mut Ctx>) -> Tf {
         match name {
             "replace" => {
                 assert_eq!(args.len(), 2, "replace needs 2 args");
@@ -56,8 +56,8 @@ impl Tf {
             ),
             "concat" => {
                 assert!(args.len() >= 3, "concat needs (sep, tf_a, tf_b)");
-                let a = Tf::from_func(args[1], &[], None);
-                let b = Tf::from_func(args[2], &[], None);
+                let a = parse_nested_tf(args[1], ctx.as_mut().map(|c| &mut **c));
+                let b = parse_nested_tf(args[2], ctx);
                 Tf::Concat(args[0].into(), Box::new(a), Box::new(b))
             }
             "stem" => Tf::Stem,
@@ -216,6 +216,14 @@ impl Tf {
                 lang.syms.intern(&result)
             }
         }
+    }
+}
+
+fn parse_nested_tf(spec: &str, ctx: Option<&mut Ctx>) -> Tf {
+    if let Some((name, arg)) = spec.split_once(':') {
+        Tf::from_func(name, &[arg], ctx)
+    } else {
+        Tf::from_func(spec, &[], ctx)
     }
 }
 
