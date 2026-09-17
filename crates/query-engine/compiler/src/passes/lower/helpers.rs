@@ -51,11 +51,8 @@ pub(super) fn text_excerpt_projection(
     Expr::func("concat", vec![excerpt, suffix])
 }
 
-/// Row-level predicates for a node: filters, id list, id range, not-deleted.
-///
-/// The latest-row scan applies these after `FINAL`. The candidate-id prefilter
-/// reuses them before `FINAL`, where they may over-select stale rows that the
-/// outer post-`FINAL` scan then re-filters.
+/// The candidate-id prefilter runs these before `FINAL`, so it may over-select
+/// stale rows; the outer latest-row scan re-applies them after `FINAL`.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut predicates = Vec::new();
     for (prop, filter) in &np.filters {
@@ -366,9 +363,6 @@ pub(super) fn dedup_edge_scan(
     )
 }
 
-/// Latest-row dedup for a `ReplacingMergeTree` scan: `ORDER BY <sort_key> ASC,
-/// _version DESC` paired with `LIMIT 1 BY <sort_key>`. Returns the `order_by`
-/// and `limit_by` Query fields; the caller supplies select/from/where.
 fn latest_row_dedup(
     alias: &str,
     sort_key: &[String],
