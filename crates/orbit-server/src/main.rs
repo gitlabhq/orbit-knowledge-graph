@@ -63,10 +63,9 @@ async fn main() -> anyhow::Result<()> {
     let orbit_server::tls::ListenerTls { probes, metrics } =
         orbit_server::tls::ListenerTls::load(&config.tls)?;
     if config.metrics.prometheus.enabled {
-        builder = builder.prometheus_metrics_port(config.metrics.prometheus.port);
-        if let Some(tls) = metrics {
-            builder = builder.probe_tls(tls);
-        }
+        builder = builder
+            .prometheus_metrics_port(config.metrics.prometheus.port)
+            .probe_tls(metrics);
     } else if metrics.is_some() {
         eprintln!(
             "warning: tls.metrics is enabled but metrics.prometheus.enabled is false, so no \
