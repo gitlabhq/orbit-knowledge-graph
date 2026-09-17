@@ -104,6 +104,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [node, input]
             mutates: [result_ctx, query_config, hydration_plan, output]
         }
+        duckdb_codegen {
+            reads_state: [node, input]
+            mutates: [result_ctx, hydration_plan, output]
+        }
     }
 
     pipelines {
@@ -121,6 +125,16 @@ compiler_pipeline_macros::define_compiler_ctx! {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [restrict, plan, lower, enforce, settings, codegen]
+        }
+        duckdb_json_dsl {
+            env: [ontology, security_ctx]
+            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, duckdb_codegen]
+        }
+        duckdb_gql {
+            env: [ontology, security_ctx]
+            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
+            phases: [gql_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, duckdb_codegen]
         }
         validate_normalize {
             env: [ontology]
@@ -303,6 +317,22 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
     let base = codegen::codegen(&node, result_context, query_config)?;
+    let query_type = input.query_type;
+    ctx.set_output(CompiledQueryContext {
+        query_type,
+        base,
+        hydration,
+        input,
+    });
+    Ok(())
+}
+
+fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
+    let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
+    let node = require(ctx.node().clone(), "node")?;
+    let input = require(ctx.input().clone(), "input")?;
+    let base = codegen::duckdb::codegen(&node, result_context)?;
     let query_type = input.query_type;
     ctx.set_output(CompiledQueryContext {
         query_type,

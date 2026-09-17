@@ -7,10 +7,10 @@ use sqlparser::ast::{
     Expr, Function, GroupByExpr, LimitClause, ObjectName, OrderByKind, Query, Select, SelectItem,
     SetExpr, Statement, TableFactor, Visit, Visitor,
 };
-use sqlparser::dialect::ClickHouseDialect;
+use sqlparser::dialect::{ClickHouseDialect, DuckDbDialect};
 use sqlparser::parser::Parser;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Collector {
     functions: HashSet<String>,
     columns: HashSet<String>,
@@ -93,6 +93,7 @@ impl Visitor for Collector {
     }
 }
 
+#[derive(Debug)]
 pub struct ParsedSql {
     pub statements: Vec<Statement>,
     pub raw: String,
@@ -112,6 +113,8 @@ impl ParsedSql {
     pub fn parse_with_dialect(sql: &str, dialect: SqlDialect) -> Self {
         let statements = match dialect {
             SqlDialect::ClickHouse => Parser::parse_sql(&ClickHouseDialect {}, sql)
+                .unwrap_or_else(|e| panic!("failed to parse SQL:\n{sql}\n\nerror: {e}")),
+            SqlDialect::DuckDb => Parser::parse_sql(&DuckDbDialect {}, sql)
                 .unwrap_or_else(|e| panic!("failed to parse SQL:\n{sql}\n\nerror: {e}")),
         };
 
