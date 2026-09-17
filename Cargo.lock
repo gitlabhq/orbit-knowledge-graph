@@ -8306,7 +8306,6 @@ dependencies = [
  "labkit-events",
  "mimalloc",
  "minijinja",
- "moka",
  "named-queries",
  "nats-client",
  "ontology",
