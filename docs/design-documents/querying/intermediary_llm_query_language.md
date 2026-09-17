@@ -18,7 +18,7 @@ flowchart LR
 
 The JSON schema (`config/schemas/graph_query.schema.json`) defines the structure, while the ontology (`config/ontology/`) provides entity types, relationship types, and property definitions that are validated at runtime.
 
-Agents should fetch the current DSL and graph schema before composing a query. The DSL is versioned by the `query_dsl` pin in `config/versions.yaml`, with the major version reflected in the `graph_query` schema `$id`; the graph schema comes from the ontology. Agents should expand every candidate node type needed for the question before using properties, filters, columns, or aggregations.
+Agents should fetch the current DSL and graph schema before composing a query. The DSL is versioned by the `query_dsl` pin in `config/versions.yaml`. The major version is reflected in the `graph_query` schema `$id`. The graph schema comes from the ontology. Agents should expand every candidate node type needed for the question before using properties, filters, columns, or aggregations.
 
 ```mermaid
 sequenceDiagram
@@ -180,7 +180,7 @@ Match nodes and relationships, return matching entities.
 Group and aggregate results.
 
 Each aggregation is an object with a single function key (`count`, `sum`,
-`avg`, `min`, `max`) whose value is a `"node"` or `"node.property"` reference,
+`avg`, `min`, `max`). Its value is a `"node"` or `"node.property"` reference,
 plus an optional `as` output column name. Without `as`, the column name derives
 as `<function>_<node>[_<property>]`.
 
@@ -277,7 +277,7 @@ Find paths between nodes using recursive CTEs.
 
 ### Single-entity Traversal (lookup)
 
-Match a single entity type with optional filters — a `traversal` query with one node and no relationships.
+Match a single entity type with optional filters. This is a `traversal` query with one node and no relationships.
 
 ```json orbit-query
 {
@@ -424,7 +424,7 @@ We never concatenate user/LLM strings into raw SQL:
 1. JSON is deserialized into strongly-typed Rust structs matching the schema
 2. Structs are validated against the ontology (entity types, relationship types, properties)
 3. Validated input is lowered to an internal SQL AST
-4. SQL generator only accepts this AST—it cannot take arbitrary strings
+4. SQL generator only accepts this AST. It cannot take arbitrary strings
 
 This prevents the LLM from "inventing" SQL fragments. The query builder only interpolates placeholders in the SQL and binds the actual values out-of-band via the driver, so there is no injection point.
 

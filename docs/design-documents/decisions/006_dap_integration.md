@@ -50,7 +50,7 @@ DWS authenticates to Rails with an OAuth token carrying the `ai_workflows`
 scope, created by Rails when the workflow starts. All GitLab API traffic from
 DWS is proxied through Workhorse by the executor HTTP client; DWS makes no
 direct HTTP calls to Rails. The Orbit REST API accepts the `ai_workflows`
-scope through the same shared concern other DWS-called APIs use, so the
+scope through the same shared concern other DWS-called APIs use. So the
 integration needs no new data-plane auth mechanism. The scope is broader than
 Orbit, so every Orbit route also requires the `read_knowledge_graph`
 permission; the scope only admits the token type.
@@ -59,7 +59,7 @@ permission; the scope only admits the token type.
 
 Orbit is a first-class MCP server in the Duo Agent Platform. Rails defines the
 `orbit` server in its MCP configuration service the same way it defines the
-built-in GitLab MCP server, Workhorse hosts the MCP session, and DWS consumes
+built-in GitLab MCP server. Workhorse hosts the MCP session. DWS consumes
 the tools like any other MCP tools. There are no Orbit-specific tool classes
 in DWS.
 
@@ -114,19 +114,19 @@ path does not use them for tool execution.
 
 Workhorse is a deliberate part of this path, not incidental proxying. It
 hosts the MCP client, resolves the internal endpoint path for the built-in
-servers, forwards session identifiers, mints the channel identity header, and
-accelerates query execution by streaming results from GKG directly
+servers, and forwards session identifiers. It mints the channel identity header.
+It accelerates query execution by streaming results from GKG directly
 ([ADR 008](008_workhorse_query_acceleration.md)).
 
 ### First-class MCP server
 
 For the built-in `gitlab` and `orbit` servers, the Rails MCP configuration
-service supplies auth headers (the user's OAuth token), the pre-approved tool
-set, and a trusted flag. It does not supply a URL; Workhorse resolves the
-internal endpoint path from the server name. Workhorse opens the MCP session,
-lists the tools, filters them against the allowlist, prefixes each name with
-the server name (`orbit_query_graph` and so on), and passes the definitions to
-DWS as protobuf messages. When the agent calls a tool, DWS sends a
+service supplies three things. These are auth headers (the user's OAuth token),
+the pre-approved tool set, and a trusted flag. It does not supply a URL; Workhorse
+resolves the internal endpoint path from the server name. Workhorse opens the MCP
+session, lists the tools, and filters them against the allowlist. It prefixes each
+name with the server name (`orbit_query_graph` and so on). It passes the
+definitions to DWS as protobuf messages. When the agent calls a tool, DWS sends a
 `RunMCPTool` action back through Workhorse, which proxies it to the server.
 
 Because Rails marks the Orbit server trusted, and DWS derives tool trust from
@@ -135,7 +135,7 @@ The name prefix is the only transformation.
 
 The trusted tool set is `query_graph`, `get_graph_schema`, `list_commands`,
 and `invoke_command`. A feature flag switches the visible surface between the
-legacy query pair and the named-command pair, so the legacy tools can be
+legacy query pair and the named-command pair. So the legacy tools can be
 retired without changing the transport.
 
 This shape has three properties the design depends on:
@@ -178,10 +178,10 @@ the other settings: it is flat-rate and has not adopted Orbit deliberately.
 Duo Developer takes a different route and does not use the MCP tools at all.
 The flow version resolver swaps in an Orbit variant of the developer flow when
 Orbit is enabled for the user. That variant is a single agent with shell
-access in its execution environment, and its system prompt includes a shared
-Orbit skill that teaches the agent to reach Orbit through the
-pre-authenticated `glab orbit` CLI: discover the schema and query DSL first,
-then run queries against the same REST API the other channels use. The CLI
+access in its execution environment. Its system prompt includes a shared
+Orbit skill. The skill teaches the agent to reach Orbit through the
+pre-authenticated `glab orbit` CLI. The agent discovers the schema and query DSL
+first. It then runs queries against the same REST API the other channels use. The CLI
 also serves a local graph for code-structure questions about the current
 branch, which the remote graph does not cover. Flows that already give the
 agent a shell get Orbit this way for free; the MCP path exists for the
@@ -197,9 +197,9 @@ Definition targets.
 
 Every Orbit request is classified by source: frontend, DWS, MCP, REST, code
 intelligence, or core. Browser requests are detected by a verified session,
-DWS by the `ai_workflows` scope, and the MCP surface by its endpoint; other
+DWS by the `ai_workflows` scope, and the MCP surface by its endpoint. Other
 authenticated callers default to REST. The classification travels to GKG as a
-required source-type claim on the JWT, which matches the telemetry enum, so
+required source-type claim on the JWT, which matches the telemetry enum. So
 per-channel usage, query mix, and latency can be answered from either side of
 the gRPC boundary.
 
@@ -213,7 +213,7 @@ verifies. [ADR 007](007_monetization_engineering.md) covers that mechanism.
 
 GKG needs no new endpoints for this integration.
 [ADR 003](003_api_design.md) established Rails as the REST proxy, and that
-holds: GKG serves gRPC only, and capabilities added for agents (schema and
+holds. GKG serves gRPC only. Capabilities added for agents (schema and
 DSL discovery, named-query execution) are gRPC methods. The JWT claims carry
 the source type described above; traversal IDs and redaction behave the same
 for every channel.
@@ -234,9 +234,9 @@ to ClickHouse to the GKG indexer) introduces a short delay. GKG tracks
 freshness with a watermark lag metric (seconds between the indexing watermark
 and wall clock), and each namespace has a last-indexed timestamp.
 
-Agents should default to Orbit for anything that is not brand new, expect an
-empty result for entities the user just created, and fall back to the generic
-REST tool when that happens. An empty result should never be reported to the
+Agents should default to Orbit for anything that is not brand new. They should
+expect an empty result for entities the user just created. They should fall back
+to the generic REST tool when that happens. An empty result should never be reported to the
 user as "does not exist". Empty-result tool responses are also a good place
 to carry the fallback hint, so the guidance does not rely on the system
 prompt alone. Full file contents, job logs, and diff content are not in the
@@ -257,12 +257,12 @@ Prompt content for Orbit-aware agents should teach:
 - When to use Orbit: questions that span entity types, aggregations,
   relationship traversals, cross-entity search, neighbor discovery, and path
   finding.
-- When to use standard tools instead: just-created entities, full file
-  contents, job logs or diffs, real-time pipeline or deployment state, or a
+- When to use standard tools instead. Use them for just-created entities, full
+  file contents, job logs or diffs, real-time pipeline or deployment state, or a
   resource the user referenced by URL.
-- How to query: discover the schema first and expand only the relevant
-  nodes, respect the server limits (3 hops, 1,000 results, 500 node IDs per
-  selector) and filter early, and read results as GOON, the compact text
+- How to query. Discover the schema first and expand only the relevant
+  nodes. Respect the server limits (3 hops, 1,000 results, 500 node IDs per
+  selector) and filter early. Read results as GOON, the compact text
   format for LLM consumption ([ADR 012](012_goon_format.md)).
 
 Guidance in flow definitions must stay consistent with the server limits and
@@ -305,12 +305,12 @@ What this requires:
 
 ### Native DWS tools
 
-Build Orbit tool classes in DWS that call the Orbit REST API directly,
-registered through a dedicated agent privilege and listed in the Rails
-built-in tool catalog. Rejected: it duplicates tool definitions in three
-places (DWS classes, Rails catalog entries, GKG descriptions), needs explicit
-description-fetch logic that MCP provides for free, and couples Orbit
-iteration to DWS and Rails deploys.
+Build Orbit tool classes in DWS that call the Orbit REST API directly.
+Register them through a dedicated agent privilege and list them in the Rails
+built-in tool catalog. Rejected for three reasons. It duplicates tool
+definitions in three places (DWS classes, Rails catalog entries, GKG
+descriptions). It needs explicit description-fetch logic that MCP provides for
+free. It couples Orbit iteration to DWS and Rails deploys.
 
 ### Direct DWS to GKG connection
 
@@ -322,7 +322,7 @@ self-managed and Dedicated topologies.
 
 Serve agent prompt content from a REST endpoint so the GKG team could iterate
 on prompts without touching flow definitions. Rejected in review: prompts in
-flow definitions are version-pinned, reviewable, and traceable, and a runtime
+flow definitions are version-pinned, reviewable, and traceable. A runtime
 prompt fetch would break pinning while adding a query to every workflow.
 
 ## References

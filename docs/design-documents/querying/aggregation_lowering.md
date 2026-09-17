@@ -7,8 +7,8 @@ measurements rejected them on a healthy (well-merged) cluster.
 ## Current form
 
 Count-by-state aggregations ("merged MRs per author", "failed jobs by name")
-lower to one form in `crates/query-engine/compiler/src/passes/lower/`
-(`single_node.rs` emits `TableRef::scan_final`): scan with `FINAL`, then
+lower to one form in `crates/query-engine/compiler/src/passes/lower/`.
+There `single_node.rs` emits `TableRef::scan_final`: scan with `FINAL`, then
 `GROUP BY` and `COUNT()`.
 
 ```sql
@@ -37,10 +37,11 @@ These diverge for any **reversible** column. Proof on prod (`gl_job`
 `WHERE status='failed'` (no FINAL) counts it; `FINAL ... WHERE status='failed'`
 does not. ClickHouse refuses to auto-push a `WHERE` below `FINAL` for exactly
 this reason. A column is **version-stable** when its value is identical across
-every version-row, so filter-first equals latest-state: sort-key columns
-(`traversal_path`, `id`), immutable attributes (`created_at`, `*_id`), and
-absorbing enum values (verified: `MergeRequest.state=merged`, 0/652127
-un-merges; `Job.status` reverses on retry so is never stable).
+every version-row. For such a column, filter-first equals latest-state.
+Version-stable columns are sort-key columns (`traversal_path`, `id`), immutable
+attributes (`created_at`, `*_id`), and absorbing enum values. Verified:
+`MergeRequest.state=merged` has 0/652127 un-merges; `Job.status` reverses on
+retry so is never stable.
 
 ## The alternatives considered
 
@@ -79,21 +80,21 @@ Authoritative, `log_comment`-tagged, prod v58, scope `1/9970/`, parts merged
 Keep `FINAL` as the single aggregation-lowering form. Do not build the K1/M
 multi-strategy selector.
 
-The earlier benchmark that motivated this work (FINAL at 16.5s, alternatives
-4-16x faster) was measured while the v58 backfill had gl_job fragmented into
-many small parts, read-amplifying the merge. On settled parts FINAL is
+The earlier benchmark that motivated this work measured FINAL at 16.5s and
+alternatives 4-16x faster. That benchmark ran while the v58 backfill had gl_job
+fragmented into many small parts, which read-amplified the merge. On settled parts FINAL is
 Pareto-optimal: fast (51ms-3s), bounded-memory, and exact in every case.
 
-**If FINAL aggregations are slow, treat it as a part-fragmentation signal** and
-fix it at the storage layer (merge/compaction settings, backfill pacing,
-projections), not by swapping query forms. Benchmark aggregation forms only on a
+**If FINAL aggregations are slow, treat it as a part-fragmentation signal.**
+Fix it at the storage layer (merge/compaction settings, backfill pacing,
+projections). Do not swap query forms. Benchmark aggregation forms only on a
 well-merged cluster; FINAL's cost is part-state-dependent.
 
 ## If a guarded variant is ever revisited
 
-K1 would need a reliable compile-time cardinality bound to be safe (it is only a
-win for large, merge-dominated scans with a small, version-stable result set).
+K1 would need a reliable compile-time cardinality bound to be safe. It is only a
+win for large, merge-dominated scans with a small, version-stable result set.
 The `tp_count` aggregate projection (`uniq(id)` per `traversal_path`) is the
-only cardinality estimate available, and it is per-namespace, not per-filter, so
+only cardinality estimate available. It is per-namespace, not per-filter. So
 it cannot bound K1's hash table for a filtered aggregation. Absent such a bound,
 K1 stays out.

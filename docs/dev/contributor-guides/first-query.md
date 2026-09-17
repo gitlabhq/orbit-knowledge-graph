@@ -1,9 +1,9 @@
 # Write your first Orbit query
 
 This tutorial takes you from a clean checkout to your first useful Orbit Local
-queries. Orbit Local runs entirely on your machine, stores its graph in DuckDB,
-and does not need Orbit Remote, Rails, ClickHouse, NATS, Docker, or a GitLab
-account.
+queries. Orbit Local runs entirely on your machine and stores its graph in
+DuckDB. It does not need Orbit Remote, Rails, ClickHouse, NATS, Docker, or a
+GitLab account.
 
 You need:
 

@@ -88,7 +88,7 @@ first invocation pays the compile cost.
 - The query REST API and authorization paths
 
 The full server integration suite (`mise run test:integration`) also runs
-without GDK — it needs Docker (`mise run colima:start` on macOS), not the
+without GDK. It needs Docker (`mise run colima:start` on macOS), not the
 GDK stack.
 
 For the rest, follow [Local development](local-development.md).

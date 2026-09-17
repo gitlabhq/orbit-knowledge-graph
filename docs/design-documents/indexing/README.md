@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Orbit indexing architecture transforms GitLab SDLC metadata and code repositories into a queryable property graph. The indexing service operates as a distributed ETL (Extract, Transform, Load) pipeline that leverages the Data Insights Platform to process both SDLC events and code changes.
+The Orbit indexing architecture transforms GitLab SDLC metadata and code repositories into a queryable property graph. The indexing service runs as a distributed ETL (Extract, Transform, Load) pipeline. It uses the Data Insights Platform to process both SDLC events and code changes.
 
 This document outlines the general architecture, shared patterns, and components across both indexing domains. For detailed implementation specifics, see:
 
@@ -22,7 +22,7 @@ The indexing architecture achieves the following:
 
 ## Shared Architecture Components
 
-Both code and SDLC indexing leverage the same foundational infrastructure from the Data Insights Platform and share patterns for distributed coordination, data storage, and query access.
+Both code and SDLC indexing use the same base infrastructure from the Data Insights Platform. They share patterns for distributed coordination, data storage, and query access.
 
 ```mermaid
 flowchart TD
@@ -128,7 +128,7 @@ DispatchIndexing owns raw CDC consumption and request publication. SDLC workers 
 - **Graph Storage**: Both indexers write to property graph tables (nodes and edges) in ClickHouse
 - **Query Backend**: The web server queries the same ClickHouse tables for both code and SDLC graphs
 
-We will leverage ClickHouse's columnar storage and merge tree engines to provide bulk inserts, background merging, and adjacency list optimizations for graph traversals.
+We will use ClickHouse's columnar storage and merge tree engines to provide bulk inserts, background merging, and adjacency list optimizations for graph traversals.
 
 ### 4. Shared Schema and Data Model
 
@@ -144,4 +144,4 @@ We will use the same repository-defined graph schema for both code and SDLC inde
 - `config/graph.sql` for the implemented ClickHouse tables
 - `config/ontology/` for entity definitions, relationship variants, redaction metadata, and ETL mappings
 
-This shared schema allows linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` node from the Code Graph).
+This shared schema links the two graphs. For example, a `Project` node from the SDLC graph can link to a `Branch`, `File`, or `Definition` node from the Code Graph.
