@@ -86,10 +86,10 @@ fn print_skill_list() -> Result<()> {
     let manifest =
         lookup(MANIFEST).ok_or_else(|| anyhow::anyhow!("embedded {MANIFEST} missing"))?;
     let description = manifest_description(&manifest)?;
-    println!(
-        "{DEFAULT_SKILL} — {}",
-        description.split_whitespace().collect::<Vec<_>>().join(" ")
-    );
+    let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
+    for name in KNOWN_SKILLS {
+        println!("{name} — {description}");
+    }
     Ok(())
 }
 
@@ -188,9 +188,27 @@ mod tests {
                 path: "SKILL.md".to_string(),
             }
         );
+        for path in ["ORBIT", ""] {
+            assert_eq!(
+                resolve(Some(path), None).unwrap(),
+                Request::Print {
+                    name: "orbit".to_string(),
+                    path: path.to_string(),
+                }
+            );
+        }
+
         let error = resolve(Some("unknown-name"), None).unwrap_err().to_string();
         assert!(error.contains("unknown skill name"));
         assert!(error.contains("orbit"));
+
+        let error = resolve(
+            Some("references/local/sql.md"),
+            Some("references/local/repo_map.md"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("path shorthand cannot be followed by another path"));
     }
 
     #[test]
