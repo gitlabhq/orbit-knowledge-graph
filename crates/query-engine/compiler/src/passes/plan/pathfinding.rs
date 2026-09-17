@@ -79,6 +79,7 @@ fn node_plan_from(node: &InputNode) -> NodePlan {
         is_global: node.is_global,
         redaction_id_column: node.redaction_id_column.clone(),
         columns: node.columns.clone(),
+        column_aliases: node.column_aliases.clone(),
         text_excerpt: Default::default(),
         dedup_columns: vec![],
         use_narrowing: false,

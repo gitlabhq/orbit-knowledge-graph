@@ -269,6 +269,7 @@ impl Context {
 
         let duckdb_name = match name {
             "startsWith" => "starts_with",
+            "substringUTF8" => "substring",
             "has" => "list_contains",
             "array" => "list_value",
             "arrayConcat" => "list_concat",
