@@ -59,6 +59,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Compiler integration tests: query compilation, ontology validation, pipeline infra (`compiler-integration-test`)
 - CLI integration tests: concurrency, worktrees, content resolution (`cli-integration-test`)
 - Integration tests with Docker testcontainers (`integration-test`, `integration-test-data-correctness`); data correctness tests are YAML-driven scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` (format reference in `crates/integration-testkit/README.md`)
+- Container integration test lane filters cover every test exactly once (`integration-test-lane-coverage-check`, run locally with `mise lint:integration-test-lanes`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - `rust-toolchain.toml` must match `mise.toml` (`rust-toolchain-sync-check`; regenerate with `mise toolchain:generate`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check_docs_markdown`)
