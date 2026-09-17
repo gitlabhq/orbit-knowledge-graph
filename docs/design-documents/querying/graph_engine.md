@@ -133,15 +133,34 @@ Before declaring a join in `schema.yaml`, trial it as an ontology overlay under 
 
 ### Scope rewrite (traversal_path prefix injection)
 
-Project- and group-scoped queries (`traversal` and `aggregation`) are rewritten to add a tight `startsWith(traversal_path, <prefix>)` predicate, so the leading primary-key segment prunes the scan rather than a structural-column filter alone. A node pins a scope when it carries a single `id`/`full_path`/`node_ids` for an anchor entity, **or** a single equality filter on a `namespace_anchor` FK column (e.g. `project_id`/`group_id`) — the anchor and its FK columns are read from the ontology's per-property `traversal_path_lookup` declarations and edge scope annotations via `Ontology::is_anchor` / `Ontology::anchor_fk_mappings`, not a hardcoded list. Anchors are `Project`, `Group`, `MergeRequest`, and the code entities `Definition`/`File`/`Directory`. The code-entity lookups let code-intelligence "find callers/references/callees" traversals — anchored on a single `Definition` node id rather than a project filter — scope to the symbol's own project.
+Project- and group-scoped `traversal` and `aggregation` queries add a tight `startsWith(traversal_path, <prefix>)` predicate so the primary key prunes the scan.
 
-The prefix is not resolved before the query. The compiler emits it as a scalar subquery inside the same statement (`scope::derive_scope_prefixes`, `ScopePrefix`): `(SELECT coalesce(if(argMaxOrNull(_deleted, _version), NULL, argMaxOrNull(traversal_path, _version)), '0/') FROM <anchor table> AS _scope WHERE _scope.<key> = ?)`. ClickHouse evaluates the subquery once, before index analysis, so the `startsWith` prunes primary-key granules exactly like a literal prefix would (verified with `EXPLAIN indexes = 1` in production: 273 of 39 350 granules for both forms). The lookup itself is a bloom-filter point read on the anchor table (`idx_id`, a few milliseconds). A missing or deleted anchor yields the `0/` sentinel, which no namespaced row matches, so the scan returns no rows for that alias; nothing falls back to a broader scan. A node pinned to several anchors (`node_ids` with more than one id) gets one `startsWith` per anchor, OR-ed; above eight anchors the node keeps only the authorization filter, since one point lookup per anchor would outgrow the pruning it buys.
+**When a node is scoped**
 
-**Propagation to reachable edges and payload nodes.** Edge variants are annotated in the ontology YAML with a `scope` (`namespace_anchor`, `same_namespace`, or omitted = cross-namespace; see the scope-annotation MR). Because an edge row's `traversal_path` is its source entity's, and a scope-preserving edge keeps both endpoints in one namespace subtree, a derived prefix floods across scope-preserving relationships to every reachable node and edge via `Ontology::propagate_scope_prefixes` — a two-pass taint walk that resolves the *exact* variant (`is_scope_preserving_triple`, so mixed-variant edges like `CONTAINS` are handled correctly) and refuses to enter any alias reachable through a cross-namespace edge. The compiler maps each `InputRelationship` into an `ontology::ScopeEdge` (`scope::scope_edges`) for the walk. The `restrict` pass keeps the flooded node prefixes on `Input.compiler.scope_prefixes` for the security pass and stamps each edge whose endpoints share a prefix; the lowerer emits the `startsWith` on the edge scan. Cross-namespace relationships (e.g. `CLOSES` an issue in another project) do not propagate, so multi-edge traversals stay correct — an unannotated relationship confines the prefix conservatively rather than over-pruning. This is what makes a 2+ edge project-scoped traversal seek the project's PK range instead of scanning the org-wide edge table (the cause of the #601941 timeout).
+- It carries a single `id`, `full_path`, or up to eight `node_ids` for an anchor entity, or a single equality filter on a `namespace_anchor` FK column such as `project_id`.
+- Anchors and FK columns come from the ontology's `traversal_path_lookup` declarations and edge scope annotations (`Ontology::is_anchor`, `Ontology::anchor_fk_mappings`).
+- Anchors: `Project`, `Group`, `MergeRequest`, `Definition`, `File`, `Directory`. The code entities let "find callers" traversals scope to the symbol's own project.
 
-The scope prefix never replaces the authorization filter. The `SecurityPass` keeps the caller's per-namespace `startsWith` set on every scan and ANDs the scope predicate beside it, so the `check` pass still sees a literal authorized prefix on every alias and the prefix can only narrow within already-authorized scope. ClickHouse intersects the two ranges during index analysis, so the tight prefix still drives the pruning (273 granules with both predicates versus 1 367 with the broad set alone, on the same production table).
+**How the prefix is produced** (`scope::derive_scope_prefixes`, `ScopePrefix`)
 
-**Namespace moves.** The lookup reads the anchor's current `traversal_path` in the same statement, so a transferred project or group scopes to its new location as soon as its re-stamped rows are indexed. There is no resolver cache to go stale.
+- No pre-query lookup. The compiler emits a scalar subquery in the same statement: `(SELECT coalesce(if(argMaxOrNull(_deleted, _version), NULL, argMaxOrNull(traversal_path, _version)), '0/') FROM <anchor table> AS _scope WHERE _scope.<key> = ?)`.
+- ClickHouse evaluates it once before index analysis, so pruning equals a literal prefix (production `EXPLAIN`: 273 of 39 350 granules for both forms).
+- The lookup is a bloom-filter point read on the anchor table, a few milliseconds.
+- A missing or deleted anchor yields `0/`, which no namespaced row matches. There is no fallback to a broader scan.
+- Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
+- The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
+
+**Where it lands**
+
+- The `restrict` pass derives the per-alias prefixes, stores them on `Input.compiler.scope_prefixes`, and stamps each edge whose endpoints share a prefix (`InputRelationship.scope_prefix`).
+- The security pass keeps the caller's authorization `startsWith` set on every scan and ANDs the scope predicate beside it. The `check` pass is unchanged and the prefix can only narrow. ClickHouse intersects both ranges (273 granules with both, 1 367 with the broad set alone).
+- The lowerer emits the same predicate on stamped edge scans.
+
+**Propagation** (`Ontology::propagate_scope_prefixes`)
+
+- Edge variants declare `scope`: `namespace_anchor`, `same_namespace`, or omitted for cross-namespace.
+- An edge row's `traversal_path` is its source entity's, so a prefix floods across scope-preserving edges to every reachable node and edge. A two-pass taint walk resolves the exact variant (`is_scope_preserving_triple`) and refuses aliases reachable through a cross-namespace edge.
+- Cross-namespace relationships such as `CLOSES` do not propagate, so multi-edge traversals stay correct. This is what lets a 2+ edge project-scoped traversal seek the project's PK range instead of scanning the org-wide edge table (#601941).
 
 ## Request Flow (Deployed)
 

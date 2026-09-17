@@ -1,7 +1,3 @@
-//! Which Project/Group scope a node pins (by id or full_path), and the
-//! traversal_path lookup the compiler emits for it so the scan seeks the PK
-//! prefix in the same statement. Pure derivation, no DB calls.
-
 use std::collections::HashMap;
 
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
@@ -13,10 +9,6 @@ use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
 const LOOKUP_ALIAS: &str = "_scope";
 const UNRESOLVED_PATH: &str = "0/";
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
-
-/// Alternative traversal_path values a scoped alias may live under. Each
-/// resolves to the anchor's path, or to the `0/` sentinel when the anchor row
-/// is missing, which no namespaced row matches.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopePrefix(Vec<Expr>);
 
@@ -35,9 +27,6 @@ impl ScopePrefix {
         .expect("scope prefix has at least one path")
     }
 }
-
-/// Seed each anchored node with its lookups and flood them across
-/// scope-preserving edges. Only traversal and aggregation scans are scoped.
 pub fn derive_scope_prefixes(input: &Input, ontology: &Ontology) -> HashMap<String, ScopePrefix> {
     if !matches!(
         input.query_type,
@@ -149,11 +138,6 @@ pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathReso
     if let Some(value) = single_full_path(node) {
         keys.push(PathResolutionKey::full_path(entity, value));
     }
-    // A node filtered by an anchor FK (e.g. `project_id = N`) lives under that
-    // anchor's traversal_path even though the node itself is not the anchor, so
-    // the resolvable scope is the anchor entity's path. The `(fk, anchor)` pairs
-    // come from the ontology's `namespace_anchor` edge annotations
-    // (`Ontology::anchor_fk_mappings`), not a hardcoded list.
     for (column, anchor) in anchor_fks {
         if let Some(id) = single_eq_id(node, column) {
             keys.push(PathResolutionKey::id(*anchor, id));
@@ -161,10 +145,6 @@ pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathReso
     }
     keys
 }
-
-/// True when `node`'s entire constraint is a single scope anchor that `scope_keys`
-/// resolves, so the resolved traversal_path prefix fully captures it and the node
-/// can be dropped without losing a filter. Reuses the `scope_keys` anchor logic.
 pub fn is_scope_only(node: &InputNode) -> bool {
     if scope_keys(node, &[]).len() != 1 || node.id_range.is_some() || node.node_ids.len() > 1 {
         return false;
@@ -202,12 +182,6 @@ fn entity_of<'a>(input: &'a Input, alias: &str) -> &'a str {
         .and_then(|n| n.entity.as_deref())
         .unwrap_or("")
 }
-
-/// Build the [`ScopeEdge`] view of a query's relationships for
-/// [`ontology::Ontology::propagate_scope_prefixes`]. Each relationship becomes
-/// one edge carrying its endpoint aliases, relationship kinds, and the endpoint
-/// entity kinds the ontology needs to select the exact scope-preserving variant
-/// (so mixed-variant edges like `CONTAINS` resolve correctly).
 pub fn scope_edges(input: &Input) -> Vec<ScopeEdge<'_>> {
     input
         .relationships
@@ -358,9 +332,6 @@ mod tests {
             vec![PathResolutionKey::id("Group", 9970)]
         );
     }
-
-    // The customer-zero query pins MergeRequest by project_id alongside state and
-    // merged_at filters; the extra predicates must not suppress the anchor key.
     #[test]
     fn project_id_anchor_survives_sibling_filters() {
         let mut node = node_with_filter("MergeRequest", "project_id", json!(278964));

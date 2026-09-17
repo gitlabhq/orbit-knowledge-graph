@@ -85,21 +85,17 @@ struct Pass<'a> {
 
 impl Pass<'_> {
     fn apply_to_query(&self, q: &mut Query) -> Result<()> {
-        let Pass {
-            ctx,
-            ontology,
-            scope_prefixes,
-        } = *self;
-        let aliased_tables = collect_aliased_tables(&q.from, ontology);
+        let aliased_tables = collect_aliased_tables(&q.from, self.ontology);
         if !aliased_tables.is_empty() {
             let security_conds = aliased_tables.iter().map(|(alias, table)| {
-                let min_role = ontology
+                let min_role = self
+                    .ontology
                     .min_access_level_for_table(table)
                     .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
-                let eligible = ctx.paths_at_least(min_role);
+                let eligible = self.ctx.paths_at_least(min_role);
                 let broad = build_path_filter(alias, &eligible);
-                match scope_prefixes.get(alias) {
-                    Some(scope) if ontology.is_table_path_scopable(table) => {
+                match self.scope_prefixes.get(alias) {
+                    Some(scope) if self.ontology.is_table_path_scopable(table) => {
                         Expr::and(broad, scope.predicate(alias))
                     }
                     _ => broad,

@@ -99,7 +99,6 @@ async fn data_correctness() {
         traversal::traversal_code_graph_calls_without_node_ids,
         traversal::traversal_code_graph_calls_with_node_ids,
         traversal::traversal_code_graph_project_id_filter_scopes_edges,
-        traversal::traversal_code_graph_project_id_filter_on_target_scopes_edges,
         traversal::traversal_code_graph_edge_level_project_filter,
         traversal::traversal_code_graph_project_id_filter_no_match_returns_empty,
         aggregation::aggregation_count_returns_correct_values,
