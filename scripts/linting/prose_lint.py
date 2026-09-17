@@ -50,7 +50,7 @@ SKIP_KEYS = {"name", "version", "variables", "license", "metadata", "allowed-too
 TELL_WORDS = re.compile(
     r"\b(?:"
     r"delv\w*|underscor\w*|showcas\w*|tapestr\w*|testament|pivotal|crucial\w*|meticulous\w*"
-    r"|intrica\w*|realms?|multifaceted|myriad|plethora|elucidat\w*|embark\w*|garner\w*"
+    r"|intrica\w*|realm\w*|multifaceted|myriad|plethora|elucidat\w*|embark\w*|garner\w*"
     r"|bolster\w*|synerg\w*|holistic|leverag\w*|seamless\w*|robust\w*|comprehensive\w*"
     r"|foster\w*|elevat\w*|utiliz\w*|facilitat\w*|streamlin\w*|landscape|vibrant|ecosystem"
     r"|empower\w*|unleash\w*|cutting-edge|game-chang\w*|groundbreaking|transformative"
@@ -81,14 +81,16 @@ FILLER = re.compile(
 DASHES = re.compile("[—–]")
 
 WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'_-]*")
-SENTENCE = re.compile(r"\S.*?(?:[.!?]+(?=\s|$)|$)", re.S)
+SENTENCE = re.compile(r"\S.*?(?:[.!?]+[\"')\]]*(?=\s|$)|$)", re.S)
 PARAGRAPH = re.compile(r"[^\n]+(?:\n[^\n]+)*")
 INLINE_CODE = re.compile(r"`[^`\n]*`")
 PLACEHOLDER = re.compile(r"\{\{.*?\}\}")
 LINK_TARGET = re.compile(r"\]\([^)]*\)")
 ABBREVIATION = re.compile(r"\b(e\.g|i\.e|vs|etc)\.", re.I)
 LIST_MARKER = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
-SKIPPED_LINE = re.compile(r"^\s*(?:#|\||---|<!--\s*$|-->\s*$)|\S {3,}\S")
+SKIPPED_LINE = re.compile(r"^\s*(?:#|\||---|<!--\s*$|-->\s*$)")
+ALIGNED_COLUMNS = re.compile(r"(?<=\S) {3,}(?=\S)")
+FRONTMATTER_KEY = re.compile(r"^[\w-]+:")
 COMMENT_MARKER = re.compile(r"<!--|-->")
 
 
@@ -97,10 +99,27 @@ class LintError(Exception):
 
 
 @dataclass
+class LineMap:
+    first: int
+    starts: list[int]
+
+    def line_of(self, offset: int) -> int:
+        return self.first + bisect_right(self.starts, offset) - 1
+
+
+@dataclass
 class Sentence:
-    line: int
     text: str
     words: list[str]
+    offset: int
+    lines: LineMap
+
+    @property
+    def line(self) -> int:
+        return self.lines.line_of(self.offset)
+
+    def line_at(self, position: int) -> int:
+        return self.lines.line_of(self.offset + position)
 
 
 @dataclass
@@ -126,7 +145,7 @@ class Finding:
 
 
 def clean(line: str) -> str:
-    line = COMMENT_MARKER.sub("", line)
+    line = COMMENT_MARKER.sub("", line).replace("...", "\u2026")
     line = PLACEHOLDER.sub("", line)
     line = LINK_TARGET.sub("]", line)
     line = INLINE_CODE.sub("code", line)
@@ -138,6 +157,7 @@ def sentences(lines: list[str], first_line: int) -> list[Sentence]:
     for line in lines:
         starts.append(pos)
         pos += len(line) + 1
+    line_map = LineMap(first_line, starts)
     text = "\n".join(lines)
     out = []
     for paragraph in PARAGRAPH.finditer(text):
@@ -145,8 +165,7 @@ def sentences(lines: list[str], first_line: int) -> list[Sentence]:
         for match in SENTENCE.finditer(flat):
             words = WORD.findall(match.group())
             if words:
-                line = first_line + bisect_right(starts, paragraph.start() + match.start()) - 1
-                out.append(Sentence(line, match.group().strip(), words))
+                out.append(Sentence(match.group().strip(), words, paragraph.start() + match.start(), line_map))
     return out
 
 
@@ -154,19 +173,22 @@ def markdown_units(path: str, text: str) -> list[Unit]:
     lines = text.splitlines()
     body_start = 0
     units = []
-    if lines and lines[0] == "---" and "---" in lines[1:]:
+    if len(lines) > 2 and lines[0] == "---" and FRONTMATTER_KEY.match(lines[1]) and "---" in lines[1:]:
         body_start = lines.index("---", 1) + 1
         units += yaml_units(path, "\n".join(lines[1 : body_start - 1]), line_offset=1)
     cleaned, in_fence = [], False
     for line in lines[body_start:]:
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
-            line = ""
-        elif in_fence or SKIPPED_LINE.search(line):
-            line = ""
+        if in_fence or SKIPPED_LINE.match(line) or line.lstrip().startswith("```"):
+            cleaned.append("")
+            continue
+        text = clean(line).strip()
+        if ALIGNED_COLUMNS.search(text):
+            text = "\n" + ALIGNED_COLUMNS.sub(". ", text) + "\n"
         elif LIST_MARKER.match(line):
-            line = "\n" + LIST_MARKER.sub("", line)
-        cleaned.append(clean(line).strip())
+            text = "\n" + LIST_MARKER.sub("", text)
+        cleaned.append(text)
     units.append(Unit(path, body_start + 1, sentences(cleaned, body_start + 1)))
     return units
 
@@ -183,6 +205,12 @@ def yaml_units(path: str, text: str, line_offset: int = 0) -> list[Unit]:
             raw.append(clean(line.strip()))
         return raw
 
+    def scalar_lines(node: yaml.ScalarNode) -> list[str]:
+        last = node.end_mark.line if node.end_mark.column else node.end_mark.line - 1
+        span = lines[node.start_mark.line : last + 1]
+        span[0] = span[0][node.start_mark.column :]
+        return [clean(line.strip().strip("\"'")) for line in span]
+
     def walk(node: yaml.Node, key: str | None, indent: int) -> None:
         if isinstance(node, yaml.MappingNode):
             for key_node, value in node.value:
@@ -196,7 +224,7 @@ def yaml_units(path: str, text: str, line_offset: int = 0) -> list[Unit]:
                 raw = block_lines(first, indent)
                 first += 1
             else:
-                raw = [clean(node.value)]
+                raw = scalar_lines(node)
             units.append(Unit(path, first + line_offset, sentences(raw, first + line_offset)))
 
     try:
@@ -222,16 +250,16 @@ def check(unit: Unit) -> list[Finding]:
     for s in unit.sentences:
         if len(s.words) > MAX_SENTENCE_WORDS:
             add(s.line, "sentence", f"{len(s.words)} words (max {MAX_SENTENCE_WORDS})")
-        if DASHES.search(s.text):
-            add(s.line, "dash", "em or en dash; use a comma, colon, or a new sentence")
+        for m in DASHES.finditer(s.text):
+            add(s.line_at(m.start()), "dash", "em or en dash; use a comma, colon, or a new sentence")
         for m in TELL_WORDS.finditer(s.text):
-            add(s.line, "tell", f"'{m.group()}' marks machine-written prose; use a plain word")
+            add(s.line_at(m.start()), "tell", f"'{m.group()}' marks machine-written prose; use a plain word")
         for m in TELL_PHRASES.finditer(s.text):
-            add(s.line, "tell", f"'{m.group().strip(', ')}' is a machine-writing phrase; cut or restate it")
+            add(s.line_at(m.start()), "tell", f"'{m.group().strip(', ')}' is a machine-writing phrase; cut or restate it")
         for m in SHOUTING.finditer(s.text):
-            add(s.line, "prompt", f"'{m.group()}' shouts; state the rule and its reason in plain case")
+            add(s.line_at(m.start()), "prompt", f"'{m.group()}' shouts; state the rule and its reason in plain case")
         for m in FILLER.finditer(s.text):
-            add(s.line, "prompt", f"'{m.group()}' adds no instruction; cut it")
+            add(s.line_at(m.start()), "prompt", f"'{m.group()}' adds no instruction; cut it")
     if len(unit.sentences) >= MIN_SENTENCES_FOR_AVERAGE:
         average = unit.words / len(unit.sentences)
         if average > MAX_AVERAGE_WORDS:

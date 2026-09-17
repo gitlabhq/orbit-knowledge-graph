@@ -49,6 +49,21 @@ Keep this short. It's worth noting that seamless prose is not just nice, but ess
 -->
 Areas:
   orbit::query      Query engine, DSL, compiler, pagination, ergonomics
+  orbit::dx         CI, tooling, and a seamless contributor flow
+"""
+
+RULE_FIRST = """\
+---
+
+Leverage the graph. Then stop.
+---
+name: not frontmatter
+"""
+
+QUOTED = """\
+name: x
+summary: "A quoted scalar that wraps
+  onto a second line with robust prose."
 """
 
 
@@ -63,6 +78,10 @@ class YamlUnits(unittest.TestCase):
         self.assertEqual(units[1].sentences[1].line, 8)
         self.assertEqual(units[2].sentences[-1].line, 13)
 
+    def test_quoted_scalar_keeps_its_lines(self):
+        (unit,) = yaml_units("q.yml", QUOTED)
+        self.assertEqual([(f.line, f.rule) for f in check(unit)], [(3, "tell")])
+
     def test_skips_name_and_version(self):
         texts = [s.text for u in yaml_units("p.yml", PROMPT) for s in u.sentences]
         self.assertNotIn("grep", texts)
@@ -72,7 +91,7 @@ class YamlUnits(unittest.TestCase):
         findings = [f for u in yaml_units("p.yml", PROMPT) for f in check(u)]
         self.assertEqual(
             rules(findings),
-            [(8, "dash"), (8, "tell"), (8, "tell"), (8, "tell"), (13, "prompt"), (13, "prompt"), (13, "tell")],
+            [(8, "dash"), (8, "dash"), (8, "tell"), (9, "tell"), (9, "tell"), (13, "prompt"), (13, "prompt"), (13, "tell")],
         )
         self.assertEqual(
             sorted(f.message.split("'")[1] for f in findings if f.rule == "tell"),
@@ -94,15 +113,23 @@ class MarkdownUnits(unittest.TestCase):
         self.assertIn("Cite file and line.", texts)
         self.assertIn("Never truncate Orbit output, even when it is long.", texts)
 
-    def test_skips_fences_tables_headings_and_aligned_columns(self):
+    def test_skips_fences_tables_and_headings(self):
         words = {w for s in self.body.sentences for w in s.words}
         self.assertNotIn("delve", words)
         self.assertNotIn("robust", words)
         self.assertNotIn("Orbit", {s.text for s in self.body.sentences})
-        self.assertNotIn("DSL", words)
+
+    def test_aligned_columns_split_into_short_sentences(self):
+        texts = [s.text for s in self.body.sentences]
+        self.assertIn("Query engine, DSL, compiler, pagination, ergonomics", texts)
+        self.assertEqual([f.line for f in check(self.body) if "seamless" in f.message], [22, 26])
+
+    def test_leading_rule_is_not_frontmatter(self):
+        (unit,) = markdown_units("s.md", RULE_FIRST)
+        self.assertEqual(rules(check(unit)), [(3, "tell")])
 
     def test_comment_prose_is_scored(self):
-        self.assertEqual(rules(check(self.body)), [(22, "tell"), (22, "tell"), (22, "tell")])
+        self.assertEqual(rules(check(self.body))[:3], [(22, "tell"), (22, "tell"), (22, "tell")])
 
 
 class SentenceRules(unittest.TestCase):
@@ -116,9 +143,9 @@ class SentenceRules(unittest.TestCase):
         (unit,) = markdown_units("s.md", "\n\n".join([long] * 3))
         self.assertEqual(rules(check(unit)), [(1, "average"), (1, "sentence"), (3, "sentence"), (5, "sentence")])
 
-    def test_abbreviations_do_not_split(self):
-        (unit,) = markdown_units("s.md", "See e.g. the docs, i.e. this file. Then stop.")
-        self.assertEqual(len(unit.sentences), 2)
+    def test_abbreviations_and_ellipses_hold_while_closing_quotes_split(self):
+        (unit,) = markdown_units("s.md", 'See e.g. the docs, i.e. this file... Then ask "why not?" (See below.) Stop.')
+        self.assertEqual(len(unit.sentences), 3)
 
     def test_negative_parallelism_and_ing_tail(self):
         (unit,) = markdown_units("s.md", "This is not just a cache, but a graph, ensuring speed.")
