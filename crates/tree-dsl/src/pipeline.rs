@@ -124,16 +124,19 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
 
     let file_paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
     let walk = file_tree::walk(&file_paths, files, &lang, &pipeline.resolve);
-    let cross_edges = resolver::resolve(
-        &mut trees,
+    let result = resolver::resolve(
+        &trees,
         &edges,
         &lang,
         lang_id,
         &walk.lookup_prefixes,
         &pipeline.resolve.external,
-    )
-    .cross_edges;
-    edges.extend(cross_edges);
+    );
+    for rsp in &result.resolved_source_paths {
+        let nid = trees[rsp.fi].to_id(rsp.node);
+        trees[rsp.fi].node_mut(nid).sym = rsp.sym;
+    }
+    edges.extend(result.cross_edges);
 
     let resolve_s = t1.elapsed().as_secs_f64();
 

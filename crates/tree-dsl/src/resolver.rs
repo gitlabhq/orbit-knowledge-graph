@@ -15,12 +15,19 @@ use crate::paths;
 
 type VisibleMap = Vec<FxHashMap<u32, (usize, u32)>>;
 
+pub struct ResolvedSourcePath {
+    pub fi: usize,
+    pub node: u32,
+    pub sym: u32,
+}
+
 pub struct ResolveResult {
     pub cross_edges: Vec<Edge>,
+    pub resolved_source_paths: Vec<ResolvedSourcePath>,
 }
 
 pub fn resolve(
-    trees: &mut [Tree],
+    trees: &[Tree],
     edges: &[Edge],
     lang: &Lang,
     support_lang: SupportLang,
@@ -44,17 +51,18 @@ pub fn resolve(
         wildcard_sym,
     );
 
-    for req in &reqs {
-        let resolved_sym = lang.syms.intern(&req.target_path);
-        let sp_idx = trees[req.fi]
-            .cursor(req.node)
-            .child(C::SourcePath)
-            .map(|n| n.index());
-        if let Some(sn) = sp_idx {
-            let nid = trees[req.fi].to_id(sn);
-            trees[req.fi].node_mut(nid).sym = resolved_sym;
-        }
-    }
+    let resolved_source_paths: Vec<ResolvedSourcePath> = reqs
+        .iter()
+        .filter_map(|req| {
+            let sym = lang.syms.intern(&req.target_path);
+            let node = trees[req.fi].cursor(req.node).child(C::SourcePath)?.index();
+            Some(ResolvedSourcePath {
+                fi: req.fi,
+                node,
+                sym,
+            })
+        })
+        .collect();
 
     let reverse_visible: FxHashMap<(usize, u32), u32> = visible
         .iter()
@@ -95,7 +103,10 @@ pub fn resolve(
         .collect();
     cross_edges.extend(wave2b);
 
-    ResolveResult { cross_edges }
+    ResolveResult {
+        cross_edges,
+        resolved_source_paths,
+    }
 }
 
 struct ResolveCtx<'a> {
@@ -111,8 +122,6 @@ struct ResolveCtx<'a> {
     index_names: &'a [String],
     wildcard_sym: u32,
 }
-
-unsafe impl<'a> Sync for ResolveCtx<'a> {}
 
 fn name_targets(ctx: &ResolveCtx, corpus: Cursor, tfi: usize, c: Cursor) -> Vec<(usize, u32)> {
     let ns = c.sym();

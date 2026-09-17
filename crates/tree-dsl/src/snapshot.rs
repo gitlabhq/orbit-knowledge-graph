@@ -69,15 +69,19 @@ impl IndexResult {
             .map(|p| (p.clone(), String::new()))
             .collect();
         let walk = file_tree::walk(&all_paths, &all_files, &self.lang, &self.pipeline.resolve);
-        let cross_edges = resolver::resolve(
-            &mut self.trees,
+        let result = resolver::resolve(
+            &self.trees,
             &self.edges,
             &self.lang,
             self.pipeline.lang_id,
             &walk.lookup_prefixes,
             &self.pipeline.resolve.external,
-        )
-        .cross_edges;
+        );
+        for rsp in &result.resolved_source_paths {
+            let nid = self.trees[rsp.fi].to_id(rsp.node);
+            self.trees[rsp.fi].node_mut(nid).sym = rsp.sym;
+        }
+        let cross_edges = result.cross_edges;
         self.edges = intra_edges;
         self.edges.extend(cross_edges);
     }
