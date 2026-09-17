@@ -34,6 +34,7 @@ fn js_entry(path: &str) -> FileInventoryEntry {
         path: path.to_string(),
         size: 20,
         decision: Decision::Parse,
+        label: Default::default(),
     }
 }
 

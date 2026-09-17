@@ -96,6 +96,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 path: relative_path.to_string_lossy().into_owned(),
                 size: entry.size(),
                 decision: Decision::ListOnly,
+                label: Default::default(),
             };
             meta.decision = hooks.on_non_regular(&meta);
             if meta.decision != Decision::Drop {
@@ -115,6 +116,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 path: relative_path.to_string_lossy().into_owned(),
                 size: entry.size(),
                 decision: Decision::Parse,
+                label: Default::default(),
             };
             meta.decision = step(hooks, &meta, &mut content, |buf| {
                 entry.read_to_end(buf).map(|_| ())

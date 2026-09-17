@@ -100,6 +100,7 @@ fn copy_dir_recursive(
                 path: rel.to_string_lossy().to_string(),
                 size: entry.metadata().map_or(0, |metadata| metadata.len()),
                 decision: Decision::Parse,
+                label: Default::default(),
             });
         }
     }
@@ -153,6 +154,7 @@ pub async fn run_yaml_suite(yaml: &str) {
             path: fixture.path.clone(),
             size: fixture.content.len() as u64,
             decision: Decision::Parse,
+            label: Default::default(),
         });
     }
 

@@ -50,6 +50,7 @@ pub fn walk_dir<H: FileStreamHooks>(
             path: rel_path.to_string_lossy().into_owned(),
             size,
             decision: Decision::ListOnly,
+            label: Default::default(),
         };
 
         // A symlink has no content to sniff and is never a parse candidate; the

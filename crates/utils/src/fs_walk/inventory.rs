@@ -92,6 +92,7 @@ mod tests {
             path: path.into(),
             size,
             decision,
+            label: Default::default(),
         }
     }
 

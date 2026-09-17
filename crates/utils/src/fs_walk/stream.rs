@@ -7,6 +7,53 @@ use std::path::{Component, Path};
 
 use rustc_hash::FxHashMap;
 
+/// Why the filter declined to load a file. Low-cardinality, snake_case for
+/// metric labels.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::Display,
+    strum::AsRefStr,
+    strum::IntoStaticStr,
+    strum::EnumIter,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum SkipReason {
+    Oversize,
+    ExcludedExtension,
+    Binary,
+    NotUtf8,
+    Minified,
+    LineTooLong,
+    NonRegularFile,
+    LfsPointer,
+}
+
+/// Broad content class, known after header or content sniffing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ContentClass {
+    #[default]
+    Unknown,
+    Text,
+    Binary,
+    Minified,
+    LfsPointer,
+    NonRegular,
+}
+
+/// Metadata the filter phase already computed, carried on the entry so
+/// downstream code never re-derives it from the path.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileLabel {
+    pub skip: Option<SkipReason>,
+    pub content: ContentClass,
+    pub extension: Option<String>,
+}
+
 /// Per-file outcome of the hook pipeline. The two loaded states split the
 /// materialize axis from the parse axis: both `Parse` and `Load` make the bytes
 /// available (on disk for the tar source); only `Parse` is sent to a parser.
@@ -32,24 +79,28 @@ pub struct FileInventoryEntry {
     pub path: String,
     pub size: u64,
     pub decision: Decision,
+    pub label: FileLabel,
 }
 
 /// Normalize each path, drop duplicates (first wins), and sort. Sources call
 /// this so every consumer receives one canonical inventory.
 pub fn canonicalize_inventory(entries: Vec<FileInventoryEntry>) -> Vec<FileInventoryEntry> {
-    let mut by_path: FxHashMap<String, (u64, Decision)> = FxHashMap::default();
+    let mut by_path: FxHashMap<String, (u64, Decision, FileLabel)> = FxHashMap::default();
     for entry in entries {
         let Some(path) = normalize_relative_path(&entry.path) else {
             continue;
         };
-        by_path.entry(path).or_insert((entry.size, entry.decision));
+        by_path
+            .entry(path)
+            .or_insert((entry.size, entry.decision, entry.label));
     }
     let mut entries: Vec<_> = by_path
         .into_iter()
-        .map(|(path, (size, decision))| FileInventoryEntry {
+        .map(|(path, (size, decision, label))| FileInventoryEntry {
             path,
             size,
             decision,
+            label,
         })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -208,6 +259,7 @@ mod tests {
             path: path.into(),
             size,
             decision: Decision::Parse,
+            label: Default::default(),
         }
     }
 

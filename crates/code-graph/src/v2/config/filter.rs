@@ -272,6 +272,7 @@ mod tests {
             path: path.into(),
             size,
             decision: Decision::Parse,
+            label: Default::default(),
         }
     }
 
