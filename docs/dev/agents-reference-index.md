@@ -5,6 +5,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | What | Where |
 |---|---|
 | **Domain glossary** | **`CONTEXT.md`** |
+| Generated translations | `docs-locale/` is machine output; never read, edit, or reference it |
 | Indexer crate guide (handlers, reuse-infra checklist) | **`crates/indexer/AGENTS.md`** |
 | Architecture and data model | `docs/design-documents/data_model.md` |
 | Security / AuthZ design | `docs/design-documents/security.md` |
@@ -39,7 +40,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Ontology overlays for speculative schema shapes | `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, deep-merged over it; run data correctness against one with `mise test:integration:overlay <name>`) |
 | Graph DDL (ClickHouse, versioned) | `config/graph.sql` |
-| Graph DDL (ClickHouse, persistent) | `config/graph_persistent.sql` (durable unversioned tables + materialized views created once at boot) |
+| Graph DDL (ClickHouse, persistent) | `config/graph_persistent.sql` (durable unversioned tables + materialized views created once at boot); all kinds use `generate_unversioned_objects` in `crates/query-engine/compiler/src/passes/codegen/ddl/` |
 | Denormalized joins (`settings.denormalized_joins` in `schema.yaml`) | `crates/ontology/src/denormalized.rs` (table chain, column contract), `crates/ontology/src/loading/mod.rs` (`resolve_denormalized_join`), `crates/query-engine/compiler/src/passes/codegen/ddl/denormalized.rs` (table and feeding views composed from the source tables' generated DDL); design in `docs/design-documents/querying/graph_engine.md` |
 | Refreshable-view MiniJinja SQL templates | `config/ontology/sql/*.sql.j2` (ClickHouse SELECT templates rendered from the schema version and ontology-derived graph table metadata) |
 | Pinned versions | `config/versions.yaml` (`schema` u32 bumped via `mise schema:bump`; `query_dsl`, `raw_output_format`, `goon_output_format` semvers enforced by `scripts/check-pinned-version.sh`; `gitlab_system_note_actions` upstream SHA; `vendored:` section for DuckDB and other vendored deps with sub-pins, artifact dirs, and scripts; embedded at compile time as `orbit_versions::VERSIONS`) |
@@ -59,7 +60,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Orbit issue, epic, and MR planning taxonomy | `/orbit-planning` skill |
-| Related repos and local paths | `/related-repositories` skill |
+| Related repos and local paths | `/related-repositories` skill; Orbit consumes Siphon and NATS but does not own them |
 | Iglu schemas (committed; codegen'd at build) | `config/schemas/iglu/<name>/<version>.json` (update via `mise vendor -- iglu`) |
 | Iglu version pins | `vendored.iglu.pins` in `config/versions.yaml` (edit pin, then `mise vendor -- iglu` to fetch; check via `mise check:vendored -- iglu`) |
 | Analytics event definition | `config/events/gkg_query_executed.yml` |
@@ -67,3 +68,37 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Billing config + observer | `crates/orbit-billing/`, `crates/orbit-server/src/billing_adapter.rs` |
 | SOX billing authoring rules | `docs/dev/sox-billing-boundary.md` |
 | Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |
+
+## Validation and generated files
+
+Read this table before you change a listed input. Run the local task when one is shown.
+
+| Input or rule | Enforcement or update path |
+| --- | --- |
+| `AGENTS.md` and `CLAUDE.md` | Keep them byte-identical; `agent-file-sync-check` enforces this |
+| Rust formatting and lint | `fmt-check`; `lint-check` runs Clippy with all features and treats warnings as errors |
+| Ontology YAML | `ontology-schema-validate`; run `mise ontology:validate` |
+| Named queries | `named-query-schema-validate`; `crates/orbit-server/build.rs` also compiles each query against the ontology |
+| `config/versions.yaml` | `versions-schema-validate` checks keys, hashes, paths, and vendored dependency data |
+| Assistant setup files | `setup-schema-validate` validates `config/setup/` specs and mode text |
+| Migration ledger | `migration-ledger-schema-validate`, `migration-ledger-check`, and server build checks; rules are in `docs/design-documents/schema_management.md` |
+| Trailing newlines | `newline-check`; run `mise lint:newlines` |
+| Workspace dependencies | `unused-deps-check` runs `cargo shear` |
+| Dependency security | The security stage runs `cargo audit`, `cargo deny`, and `cargo geiger` |
+| FIPS dependency graph and binary | `fips-check` requires AWS-LC FIPS and rejects `ring` in the server; the CLI remains non-FIPS |
+| Unit tests | `unit-test` runs nextest |
+| Compiler integration tests | `compiler-integration-test` covers compilation, ontology validation, and pipeline infrastructure |
+| CLI integration tests | `cli-integration-test` covers concurrency, worktrees, and content resolution |
+| Docker integration tests | `integration-test`; YAML correctness scenarios live under `crates/integration-tests/tests/server/data_correctness/scenarios/` |
+| MR titles | `mr-title-check`; use the format in `CONTRIBUTING.md` |
+| Rust toolchain files | `rust-toolchain-sync-check`; regenerate with `mise toolchain:generate` |
+| Markdown | `check_docs_markdown` runs markdownlint, Vale, and lychee; run `mise lint:docs` |
+| Query DSL, RAW, and GOON pins | `pinned-version-check` reports every stale pin in `config/versions.yaml` |
+| Skill files | `skill-version-bump-check`; bump the changed skill under `skills/<name>/` |
+| Prompt files | `prompt-version-bump-check`; bump the changed prompt under `config/prompts/` |
+| Metrics catalog | `metrics-catalog-check`; regenerate from `orbit-observability` as directed by the task |
+| Query-language property table | `query-language-docs-check`; run `mise docs:query-language` |
+| Iglu schemas | `iglu-schema-check`; update `vendored.iglu.pins`, then run `mise vendor -- iglu` |
+| System-note actions | `system-note-actions-check`; update the pinned Rails `ICON_TYPES` SHA and regenerate |
+| DuckDB FTS sources | `duckdb-fts-sources-sync-check`; run `mise vendor -- duckdb` |
+| Workspace crate map | `crates/xtask/build.rs` requires one current row per workspace member in `docs/dev/agents-crate-map.md` |
