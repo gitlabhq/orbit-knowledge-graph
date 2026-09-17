@@ -18,6 +18,7 @@ expect:
   hydration: static
   sql_contains: ["AS g_name", "AS g_visibility_level"]
   sql_not_contains: ["AS u_username"]
+  node_count: 5
   edge_exists:
     MEMBER_OF:
       - [3, 101]
