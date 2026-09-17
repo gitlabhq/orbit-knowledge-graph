@@ -99,7 +99,7 @@ async fn extract_via_archive_endpoint(
     let target = target.to_path_buf();
     let handle = tokio::runtime::Handle::current();
     let result = tokio::task::spawn_blocking(move || {
-        let mut filter = CodeFilter::new(0, 0, detect_language_from_path);
+        let mut filter = CodeFilter::new(None, None, detect_language_from_path);
         let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
         let inventory = extract_tar_gz(bridge, &target, &mut filter).unwrap();
         (inventory, filter.file_reasons().clone())

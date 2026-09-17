@@ -860,8 +860,8 @@ fn index_repo(
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
     let mut filter = code_graph::v2::config::CodeFilter::new(
-        MAX_INDEXED_FILE_BYTES,
-        0,
+        Some(MAX_INDEXED_FILE_BYTES),
+        None,
         code_graph::v2::config::detect_language_from_path,
     );
     let file_inventory = std::sync::Arc::new(

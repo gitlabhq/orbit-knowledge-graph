@@ -34,11 +34,16 @@ impl FileInventory {
     }
 
     pub fn find(&self, path: &str) -> Option<&FileInventoryEntry> {
-        self.0.iter().find(|e| e.path == path)
+        self.0
+            .binary_search_by(|e| e.path.as_str().cmp(path))
+            .ok()
+            .map(|i| &self.0[i])
     }
 
     pub fn contains(&self, path: &str) -> bool {
-        self.0.iter().any(|e| e.path == path)
+        self.0
+            .binary_search_by(|e| e.path.as_str().cmp(path))
+            .is_ok()
     }
 
     pub fn total_bytes(&self) -> u64 {

@@ -185,8 +185,8 @@ impl ReadOntologyFile for OntologyArchive {
 }
 
 fn read_sources(bytes: &[u8]) -> Result<BTreeMap<String, String>, ArchiveError> {
-    let mut source_bytes = Counter::new("ontology source bytes", MAX_SOURCE_BYTES);
-    let mut file_count = Counter::new("ontology files", MAX_FILES);
+    let mut source_bytes = Counter::new("ontology source bytes", Some(MAX_SOURCE_BYTES));
+    let mut file_count = Counter::new("ontology files", Some(MAX_FILES));
     let mut sources = BTreeMap::new();
 
     let mut archive = tar::Archive::new(GzDecoder::new(bytes));

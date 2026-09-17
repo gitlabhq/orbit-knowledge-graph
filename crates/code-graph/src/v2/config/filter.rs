@@ -62,7 +62,7 @@ pub struct SkipTally {
 /// each file fully (load+parse / load-only / node / drop): the language detector
 /// is injected so the filter never hard-wires the registry.
 pub struct CodeFilter {
-    max_file_size: u64,
+    max_file_size: Option<u64>,
     total_bytes: Counter,
     skips: FxHashMap<FilterSkip, SkipTally>,
     detect_language: fn(&str) -> Option<Language>,
@@ -70,11 +70,11 @@ pub struct CodeFilter {
 }
 
 impl CodeFilter {
-    /// `max_file_size` and `max_total_bytes` are byte caps (`0` = unlimited).
+    /// `max_file_size` and `max_total_bytes` are byte caps (`None` = unlimited).
     /// `detect_language` decides parse candidacy (e.g. `detect_language_from_path`).
     pub fn new(
-        max_file_size: u64,
-        max_total_bytes: u64,
+        max_file_size: Option<u64>,
+        max_total_bytes: Option<u64>,
         detect_language: fn(&str) -> Option<Language>,
     ) -> Self {
         Self {
@@ -112,7 +112,7 @@ impl FileStreamHooks for CodeFilter {
     }
 
     fn on_header(&mut self, file: &FileInventoryEntry) -> Option<Decision> {
-        if self.max_file_size != 0 && file.size > self.max_file_size {
+        if self.max_file_size.is_some_and(|cap| file.size > cap) {
             return Some(self.record(file, FilterSkip::Oversize));
         }
         if is_excluded_from_indexing(Path::new(&file.path)) {
@@ -276,7 +276,7 @@ mod tests {
     }
 
     fn filter() -> CodeFilter {
-        CodeFilter::new(0, 0, detect_language_from_path)
+        CodeFilter::new(None, None, detect_language_from_path)
     }
 
     const POINTER: &[u8] = b"version https://git-lfs.github.com/spec/v1\n\
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn list_only_for_excluded_oversize_binary_minified() {
-        let mut f = CodeFilter::new(50, 0, detect_language_from_path);
+        let mut f = CodeFilter::new(Some(50), None, detect_language_from_path);
         assert_eq!(
             f.on_header(&entry("logo.png", 10)),
             Some(Decision::ListOnly)
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn total_bytes_cap_charges_every_file_then_trips() {
-        let mut f = CodeFilter::new(0, 100, detect_language_from_path);
+        let mut f = CodeFilter::new(None, Some(100), detect_language_from_path);
         assert!(f.admit(&entry("a.png", 60)).is_ok());
         assert!(
             f.admit(&entry("b.png", 60)).is_err(),

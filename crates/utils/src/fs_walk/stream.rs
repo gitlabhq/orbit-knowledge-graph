@@ -135,16 +135,16 @@ pub fn step<H: FileStreamHooks>(
     Ok(hooks.on_content(file, content))
 }
 
-/// A capped running total (`cap == 0` = unlimited); the first `add` to overflow
-/// short-circuits the stream.
+/// A capped running total; the first `add` to overflow short-circuits the
+/// stream. `None` = unlimited.
 pub struct Counter {
     metric: &'static str,
-    cap: u64,
+    cap: Option<u64>,
     count: u64,
 }
 
 impl Counter {
-    pub fn new(metric: &'static str, cap: u64) -> Self {
+    pub fn new(metric: &'static str, cap: Option<u64>) -> Self {
         Self {
             metric,
             cap,
@@ -154,11 +154,11 @@ impl Counter {
 
     pub fn add(&mut self, n: u64) -> Result<(), CapExceeded> {
         self.count = self.count.saturating_add(n);
-        if self.cap != 0 && self.count > self.cap {
+        if let Some(cap) = self.cap.filter(|&cap| self.count > cap) {
             return Err(CapExceeded {
                 metric: self.metric,
                 count: self.count,
-                cap: self.cap,
+                cap,
             });
         }
         Ok(())
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn counter_admits_until_cap_then_short_circuits() {
-        let mut bytes = Counter::new("bytes", 100);
+        let mut bytes = Counter::new("bytes", Some(100));
         assert!(bytes.add(60).is_ok());
         assert_eq!(
             bytes.add(60),
@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn zero_cap_is_unlimited() {
-        let mut files = Counter::new("files", 0);
+        let mut files = Counter::new("files", None);
         assert!(files.add(u64::MAX).is_ok());
         assert!(files.add(u64::MAX).is_ok());
     }
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn step_settles_in_header_without_sniffing() {
         let mut h = TestHooks {
-            bytes: Counter::new("bytes", 0),
+            bytes: Counter::new("bytes", None),
         };
         let mut prefix = Vec::new();
         let d = step(&mut h, &entry("a.png", 10), &mut prefix, |_| {
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn step_admits_kept_file() {
         let mut h = TestHooks {
-            bytes: Counter::new("bytes", 100),
+            bytes: Counter::new("bytes", Some(100)),
         };
         let mut prefix = Vec::new();
         let d = step(&mut h, &entry("a.rs", 10), &mut prefix, |buf| {
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn step_charges_cap_before_keep_decision() {
         let mut h = TestHooks {
-            bytes: Counter::new("bytes", 5),
+            bytes: Counter::new("bytes", Some(5)),
         };
         let mut prefix = Vec::new();
         let err = step(&mut h, &entry("a.rs", 10), &mut prefix, |_| Ok(())).unwrap_err();
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn step_caps_charge_even_header_dropped_files() {
         let mut h = TestHooks {
-            bytes: Counter::new("bytes", 5),
+            bytes: Counter::new("bytes", Some(5)),
         };
         let mut prefix = Vec::new();
         let err = step(&mut h, &entry("blob.png", 10), &mut prefix, |_| Ok(())).unwrap_err();
