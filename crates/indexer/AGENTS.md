@@ -94,10 +94,10 @@ one cheap global sweep, off the insert hot path. See
 
 ### Entry point
 
-The `run()` function in `lib.rs` wires everything together. It waits for the schema version to be
-ready. It connects to NATS and ClickHouse. It registers handlers via `sdlc::register_handlers()`,
-`code::register_handlers()`, and `namespace_deletion::register_handlers()`. It builds the engine
-and runs until shutdown.
+The `run()` function in `lib.rs` wires everything together. It waits for the schema version, then
+connects to NATS and ClickHouse. Handlers come from `sdlc::register_handlers()`,
+`code::register_handlers()`, and `namespace_deletion::register_handlers()`. With those registered,
+it builds the engine and runs until shutdown.
 
 `IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `crates/orbit-server-config/src/engine.rs`. There are no string-keyed lookups.
 

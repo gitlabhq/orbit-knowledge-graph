@@ -99,7 +99,7 @@ A UUID stamped on each indexing request message. It identifies one dispatch unit
 _Avoid_: request ID, trace ID (`dispatch_id` groups many requests, not a single one)
 
 **Campaign**:
-The parent correlation above **Dispatch ID**: one campaign per "re-index everything" decision, `null` in steady state. Today a campaign is a schema migration. It opens (`migration-v<N>`) when the dispatcher marks a version `migrating`. It attaches to every dispatch while the migration runs. It closes when the migration completes (promotion to `active`). Held in process memory (`CampaignState`), not persisted. Lets analysts aggregate the cost of one re-index across pipelines without time-based joins.
+The parent correlation above **Dispatch ID**: one campaign per "re-index everything" decision, `null` in steady state. Today a campaign is a schema migration: opened (`migration-v<N>`) when the dispatcher marks a version `migrating`, and closed when the migration completes (promotion to `active`). Every dispatch during the migration carries it. Held in process memory (`CampaignState`), not persisted. Lets analysts aggregate the cost of one re-index across pipelines without time-based joins.
 _Avoid_: batch, job (a campaign spans many dispatches and both pipelines)
 
 **Migration ledger**:
