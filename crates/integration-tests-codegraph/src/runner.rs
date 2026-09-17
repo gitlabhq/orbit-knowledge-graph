@@ -234,9 +234,8 @@ pub fn run_yaml_suite(yaml: &str) {
 
     pipeline_ctx.tracer.dump(&suite.name);
 
-    let security_ctx = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
     let db = client.lock().unwrap();
-    let failures = run_suite(&suite, &db, &ontology, &security_ctx);
+    let failures = run_suite(&suite, &db, &ontology);
     drop(db);
 
     if failures.is_empty() {

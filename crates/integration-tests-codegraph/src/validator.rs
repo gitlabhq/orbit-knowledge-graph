@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
-use compiler::{Frontend, SecurityContext, compile_local};
+use compiler::{Frontend, compile_local};
 use duckdb_client::DuckDbClient;
 use ontology::Ontology;
 use orbit_utils::arrow::ArrowUtils;
@@ -24,7 +24,6 @@ pub(crate) fn run_suite(
     suite: &TestSuite,
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
-    ctx: &SecurityContext,
 ) -> Vec<Failure> {
     let mut failures = Vec::new();
     for test in &suite.tests {
@@ -32,19 +31,14 @@ pub(crate) fn run_suite(
             eprintln!("  [SKIP] \"{}\"", test.name);
             continue;
         }
-        failures.extend(run_test(test, client, ontology, ctx));
+        failures.extend(run_test(test, client, ontology));
     }
     failures
 }
 
-fn run_test(
-    test: &TestCase,
-    client: &DuckDbClient,
-    ontology: &Arc<Ontology>,
-    ctx: &SecurityContext,
-) -> Vec<Failure> {
+fn run_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) -> Vec<Failure> {
     if test.debug {
-        dump_datasets(client, ontology, ctx);
+        dump_datasets(client, ontology);
     }
 
     let blocks = test.all_queries();
@@ -62,12 +56,11 @@ fn run_test(
             block,
             client,
             ontology,
-            ctx,
         ));
     }
 
     if !failures.is_empty() && !test.debug {
-        dump_datasets(client, ontology, ctx);
+        dump_datasets(client, ontology);
     }
 
     failures
@@ -77,10 +70,10 @@ fn execute_cypher(
     cypher: &str,
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
-    ctx: &SecurityContext,
 ) -> anyhow::Result<RecordBatch> {
-    let compiled = compile_local(cypher, Frontend::Gql, ontology, ctx)?;
+    let compiled = compile_local(cypher, Frontend::Gql, ontology)?;
     let sql = compiled.base.render();
+    eprintln!("  SQL: {sql}");
     let batches = client.query_arrow(&sql)?;
     if batches.is_empty() {
         let schema = Arc::new(arrow::datatypes::Schema::empty());
@@ -93,7 +86,7 @@ fn execute_cypher(
     }
 }
 
-fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>, ctx: &SecurityContext) {
+fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {
     let debug_queries = [
         (
             "Definitions",
@@ -111,7 +104,7 @@ fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>, ctx: &Security
 
     eprintln!("\n  ╔══ DEBUG DUMP ══════════════════════════════════════");
     for (label, cypher) in debug_queries {
-        match execute_cypher(cypher, client, ontology, ctx) {
+        match execute_cypher(cypher, client, ontology) {
             Ok(batch) => print_result(&format!("  {label}"), cypher, &batch),
             Err(e) => eprintln!("  {label}: query failed: {e}"),
         }
@@ -125,9 +118,8 @@ fn run_query_block(
     block: &QueryBlock,
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
-    ctx: &SecurityContext,
 ) -> Vec<Failure> {
-    let batch = match execute_cypher(&block.query, client, ontology, ctx) {
+    let batch = match execute_cypher(&block.query, client, ontology) {
         Ok(b) => b,
         Err(e) => return vec![fail(label, severity, format!("Query execution error: {e}"))],
     };

@@ -1,11 +1,11 @@
 //! DuckDB dialect end-to-end tests.
 
-use crate::compiler::setup::{test_ctx, test_ontology};
+use crate::compiler::setup::test_ontology;
 use crate::compiler::utils::ParsedSql;
 use compiler::{Frontend, compile_local};
 
 fn compile(json: &str) -> compiler::passes::codegen::CompiledQueryContext {
-    compile_local(json, Frontend::JsonDsl, &test_ontology(), &test_ctx()).unwrap()
+    compile_local(json, Frontend::JsonDsl, &test_ontology()).unwrap()
 }
 
 fn parse_duckdb(json: &str) -> ParsedSql {
@@ -169,7 +169,7 @@ fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
                 "limit": 10
             }}"#
         );
-        let result = compile_local(&json, Frontend::JsonDsl, &test_ontology(), &test_ctx())
+        let result = compile_local(&json, Frontend::JsonDsl, &test_ontology())
             .unwrap_or_else(|e| panic!("compile_local failed for unit {unit}: {e:?}"));
         let rendered = result.base.render();
         let expected = format!("date_trunc('{unit}', u.created_at)");
