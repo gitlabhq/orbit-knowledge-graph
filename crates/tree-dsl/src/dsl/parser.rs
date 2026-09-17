@@ -248,7 +248,7 @@ fn visit_tf_expr(c: &mut Ctx<'_>, node: PNode<'_>) -> Tf {
                 .into_children()
                 .map(|q| quoted_inner(&q))
                 .collect();
-            Tf::from_func(func, &args, None)
+            Tf::from_func(func, &args, Some(c))
         }
         Rule::TfLegacy => {
             let mut ch = inner.into_children();
@@ -258,7 +258,7 @@ fn visit_tf_expr(c: &mut Ctx<'_>, node: PNode<'_>) -> Tf {
         }
         Rule::TfBare => {
             let name = inner.into_children().next().unwrap().as_str();
-            Tf::from_func(name, &[], None)
+            Tf::from_func(name, &[], Some(c))
         }
         r => panic!("unexpected tf rule: {r:?}"),
     }

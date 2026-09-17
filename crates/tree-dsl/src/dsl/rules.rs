@@ -71,6 +71,22 @@ struct RuleFile {
     stages: Vec<Stage>,
     #[serde(default)]
     resolve: Option<ResolveSection>,
+    #[serde(default)]
+    display: Option<DisplaySection>,
+}
+
+#[derive(serde::Deserialize)]
+struct DisplaySection {
+    #[serde(default)]
+    transforms: std::collections::HashMap<String, String>,
+    rules: Vec<DisplayRule>,
+}
+
+#[derive(serde::Deserialize)]
+struct DisplayRule {
+    #[serde(rename = "match")]
+    pattern: String,
+    append: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -135,7 +151,7 @@ pub fn load_rules(yaml: &str, lang: &Lang) -> Vec<Vec<Rewrite>> {
 }
 
 /// Load both rewrite stages and resolve config from a language YAML file.
-pub fn load_lang(yaml: &str, lang: &Lang) -> (Vec<Vec<Rewrite>>, ResolveConfig) {
+pub fn load_lang(yaml: &str, lang: &Lang) -> (Vec<Vec<Rewrite>>, ResolveConfig, Vec<Rewrite>) {
     let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
     let rewrites = file
         .stages
@@ -146,7 +162,11 @@ pub fn load_lang(yaml: &str, lang: &Lang) -> (Vec<Vec<Rewrite>>, ResolveConfig) 
         Some(section) => compile_resolve(&section, lang),
         None => ResolveConfig::default(),
     };
-    (rewrites, resolve)
+    let display = match file.display {
+        Some(section) => compile_display(&section, lang),
+        None => vec![],
+    };
+    (rewrites, resolve, display)
 }
 
 fn compile_resolve(section: &ResolveSection, lang: &Lang) -> ResolveConfig {
@@ -222,6 +242,36 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
     }
 
     panic!("rule has no action: {:?}", pat);
+}
+
+fn compile_display(section: &DisplaySection, lang: &Lang) -> Vec<Rewrite> {
+    let transforms = &section.transforms;
+    section
+        .rules
+        .iter()
+        .map(|rule| {
+            let templates: Vec<String> = rule
+                .append
+                .iter()
+                .map(|tpl| expand_named_transforms(tpl, transforms))
+                .collect();
+            Rewrite::new(lang, &rule.pattern, move |c| {
+                Out::Append(templates.iter().map(|tpl| c.template(tpl)).collect())
+            })
+        })
+        .collect()
+}
+
+fn expand_named_transforms(
+    tpl: &str,
+    transforms: &std::collections::HashMap<String, String>,
+) -> String {
+    let mut result = tpl.to_string();
+    for (name, expansion) in transforms {
+        result = result.replace(&format!("|{name})"), &format!("|{expansion})"));
+        result = result.replace(&format!("|{name}\""), &format!("|{expansion}\""));
+    }
+    result
 }
 
 fn parse_where_clause(

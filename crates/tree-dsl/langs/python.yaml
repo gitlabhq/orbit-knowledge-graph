@@ -170,3 +170,17 @@ resolve:
       rules:
         - match: '(__dir "src" $$$REST)'
           replace: '(__dir "src" (__source_root) $$$REST)'
+
+display:
+  rules:
+    - match: '(__def)'
+      append:
+        - '(_*_display_fqn @$ROOT|fqn(".", "__init__"))'
+        - '(_*_display_def_type @$ROOT|def_type)'
+        - '(_*_display_file_path @$ROOT|file_path)'
+    - match: '(__import)'
+      append:
+        - '(_*_display_file_path @$ROOT|file_path)'
+    - match: '(__import_type)'
+      append:
+        - '(_*_display_file_path @$ROOT|file_path)'

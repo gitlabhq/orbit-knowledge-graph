@@ -1,6 +1,8 @@
 pub mod canonical;
 pub mod constants;
+pub mod display;
 pub mod dsl;
+pub mod export;
 pub mod file_tree;
 pub mod intern;
 pub mod linker;

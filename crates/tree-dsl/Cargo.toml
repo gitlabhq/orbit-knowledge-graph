@@ -32,6 +32,8 @@ serde = { workspace = true }
 serde_yaml = "0.9"
 stacker = "0.1"
 rustc-hash = "2"
+arrow = { workspace = true }
+anyhow = { workspace = true }
 itertools = "0.14"
 either = { workspace = true }
 indextree = "4.9"

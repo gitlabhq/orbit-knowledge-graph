@@ -12,7 +12,7 @@ use crate::pattern::Rewrite;
 use crate::rules::ResolveConfig;
 use crate::tree::{Edge, Tree};
 use crate::treesitter::{self as treesitter, SupportLang};
-use crate::{file_tree, linker, pattern, resolver, rules};
+use crate::{display, file_tree, linker, pattern, resolver, rules};
 
 pub struct IndexResult {
     pub trees: Vec<Tree>,
@@ -32,20 +32,22 @@ pub struct Pipeline {
     pub lang_id: SupportLang,
     pub rewrite_stages: Vec<Vec<Rewrite>>,
     pub resolve: ResolveConfig,
+    pub display_rules: Vec<Rewrite>,
 }
 
 impl Pipeline {
     pub fn for_lang(lang_id: SupportLang) -> (Pipeline, Lang) {
         let lang = Lang::new();
-        let (rewrite_stages, resolve) = match treesitter::lang_yaml(lang_id) {
+        let (rewrite_stages, resolve, display_rules) = match treesitter::lang_yaml(lang_id) {
             Some(yaml) => rules::load_lang(yaml, &lang),
-            None => (vec![], ResolveConfig::default()),
+            None => (vec![], ResolveConfig::default(), vec![]),
         };
         (
             Pipeline {
                 lang_id,
                 rewrite_stages,
                 resolve,
+                display_rules,
             },
             lang,
         )
@@ -114,6 +116,13 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
         &pipeline.resolve.external,
     )
     .cross_edges;
+
+    display::pre_display(&mut trees, &cross_edges, &lang);
+    if !pipeline.display_rules.is_empty() {
+        for tree in &mut trees {
+            pattern::apply_rewrites(tree, &lang, &pipeline.display_rules);
+        }
+    }
 
     let resolve_s = t1.elapsed().as_secs_f64();
 
