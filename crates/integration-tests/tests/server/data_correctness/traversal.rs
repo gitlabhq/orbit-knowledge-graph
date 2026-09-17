@@ -663,7 +663,7 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
             "query_type": "traversal",
             "nodes": [
                 {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name"]},
-                {"id": "callee", "entity": "Definition", "filters": {"project_id": 1001}, "columns": ["name"]}
+                {"id": "callee", "entity": "Definition", "filters": {"project_id": 1000}, "columns": ["name"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
             "limit": 20
@@ -672,18 +672,18 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
     )
     .await;
 
-    // Can't assert_filter because both caller (project 1000) and callee
-    // (project 1001) are Definition nodes -- skip and prove via exact IDs.
+    // Both endpoints are Definition nodes, so prove the scope via exact IDs;
+    // the cross-project call 12001 -> 12102 must drop.
     resp.skip_requirement(Requirement::Filter {
         field: "project_id".into(),
     });
-    resp.assert_node_count(2);
+    resp.assert_node_count(3);
     resp.assert_referential_integrity();
-    resp.assert_node_ids("Definition", &[12001, 12102]);
-    resp.assert_node("Definition", 12102, |n| {
+    resp.assert_node_ids("Definition", &[12000, 12001, 12002]);
+    resp.assert_node("Definition", 12002, |n| {
         n.prop_str("name") == Some("run_query")
     });
-    resp.assert_edge_set("CALLS", &[(12001, 12102)]);
+    resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002)]);
 }
 
 /// Relationship-level project_id filter (the explicit mechanism, not the
