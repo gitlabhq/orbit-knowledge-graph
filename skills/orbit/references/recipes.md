@@ -178,8 +178,8 @@ underlying join shape and inflate the count.
 }
 ```
 
-If you only have the MR's `iid` and not its internal `id`, the equivalent
-two-node form via `TRIGGERED` works, still with the `source` filter on the
+If you only have the MR's `iid` and not its internal `id`, use the equivalent
+two-node form via `TRIGGERED`. It still needs the `source` filter on the
 Pipeline node:
 
 ```json orbit-query
