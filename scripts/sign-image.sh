@@ -1,18 +1,16 @@
 #!/bin/sh
 
-# Signs a pushed image digest with keyless cosign and verifies the result.
+# Signs pushed image digests with keyless cosign and verifies each result.
 # Runs only in the canonical project. Do not sign in forks, including private
 # forks: a keyless signature publishes the signing project's path and ref to
 # the public Rekor log, which would disclose them.
 
 set -eu
 
-if [ "$#" -ne 1 ]; then
-  echo "Usage: $0 <image:tag>" >&2
+if [ "$#" -lt 1 ]; then
+  echo "Usage: $0 <image:tag>..." >&2
   exit 1
 fi
-
-IMAGE_REF="$1"
 
 if [ "${CI_PROJECT_ID:-}" != "${CANONICAL_PROJECT_ID:-}" ]; then
   echo "Skipping image signing: project ${CI_PROJECT_ID:-unset} is not the canonical project."
@@ -41,11 +39,6 @@ install_cosign() {
 command -v cosign >/dev/null 2>&1 || install_cosign
 cosign version
 
-IMAGE_NAME="${IMAGE_REF%:*}"
-IMAGE_TAG="${IMAGE_REF##*:}"
-DIGEST=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "${IMAGE_REF}")
-DIGEST_REF="${IMAGE_NAME}@${DIGEST}"
-
 if [ -n "${CI_COMMIT_TAG:-}" ]; then
   REF_PATH="refs/tags/${CI_COMMIT_TAG}"
 else
@@ -53,16 +46,28 @@ else
 fi
 CERTIFICATE_IDENTITY="${CI_SERVER_URL}/${CI_PROJECT_PATH}//${CI_CONFIG_PATH}@${REF_PATH}"
 
-echo "Signing ${DIGEST_REF} (pushed as ${IMAGE_TAG})"
-cosign sign --recursive \
-  --annotations "com.gitlab/ci-pipeline-url=${CI_PIPELINE_URL}" \
-  --annotations "com.gitlab/ci-job-url=${CI_JOB_URL}" \
-  --annotations "com.gitlab/commit-sha=${CI_COMMIT_SHA}" \
-  --annotations "com.gitlab/tag=${IMAGE_TAG}" \
-  "${DIGEST_REF}"
+sign_and_verify() {
+  image_ref="$1"
+  image_name="${image_ref%:*}"
+  image_tag="${image_ref##*:}"
+  digest=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "${image_ref}")
+  digest_ref="${image_name}@${digest}"
 
-echo "Verifying ${DIGEST_REF} against identity ${CERTIFICATE_IDENTITY}"
-cosign verify \
-  --certificate-identity "${CERTIFICATE_IDENTITY}" \
-  --certificate-oidc-issuer "${CI_SERVER_URL}" \
-  "${DIGEST_REF}"
+  echo "Signing ${digest_ref} (pushed as ${image_tag})"
+  cosign sign \
+    --annotations "com.gitlab/ci-pipeline-url=${CI_PIPELINE_URL}" \
+    --annotations "com.gitlab/ci-job-url=${CI_JOB_URL}" \
+    --annotations "com.gitlab/commit-sha=${CI_COMMIT_SHA}" \
+    --annotations "com.gitlab/tag=${image_tag}" \
+    "${digest_ref}"
+
+  echo "Verifying ${digest_ref} against identity ${CERTIFICATE_IDENTITY}"
+  cosign verify \
+    --certificate-identity "${CERTIFICATE_IDENTITY}" \
+    --certificate-oidc-issuer "${CI_SERVER_URL}" \
+    "${digest_ref}"
+}
+
+for ref in "$@"; do
+  sign_and_verify "$ref"
+done

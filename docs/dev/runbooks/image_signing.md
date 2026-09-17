@@ -21,7 +21,7 @@ Each signature carries the pipeline URL, job URL, commit SHA, and the tag the di
 cosign verify ... | jq '.[0].optional'
 ```
 
-The GitLab container registry does not serve the OCI referrers API, so cosign stores each signature under a `sha256-<digest>` tag next to the image. One release run produces five of them: the index, both platform manifests, and the two buildx provenance manifests.
+The GitLab container registry does not serve the OCI referrers API, so cosign stores each signature under a `sha256-<digest>` tag next to the image. One release run produces three: the multi-arch index and the two per-arch indexes.
 
 When mirroring images to another registry, copy them with `cosign copy` so the signature travels with the digest. A plain tag copy drops it.
 

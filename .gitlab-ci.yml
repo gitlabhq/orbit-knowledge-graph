@@ -950,7 +950,10 @@ docker-manifest:
         -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64"
-    - ./scripts/sign-image.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+    - ./scripts/sign-image.sh
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64"
 
 docker-build-mr:
   extends: .sign-image
@@ -1158,7 +1161,10 @@ release-manifest:
         -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
-    - ./scripts/sign-image.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
+    - ./scripts/sign-image.sh
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
 
 # Review stage
 
