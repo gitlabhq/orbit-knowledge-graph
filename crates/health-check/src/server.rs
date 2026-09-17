@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 
 use axum::Json;
@@ -7,7 +7,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
-use tokio::net::TcpListener;
+use labkit::tls::ServerTls;
 use tracing::info;
 
 use crate::checker::HealthChecker;
@@ -29,7 +29,11 @@ async fn queue_depth(State(checker): State<Arc<HealthChecker>>) -> impl IntoResp
     }
 }
 
-pub async fn run_server(bind_address: SocketAddr, checker: HealthChecker) -> Result<(), Error> {
+pub async fn run_server(
+    bind_address: SocketAddr,
+    checker: HealthChecker,
+    tls: Option<ServerTls>,
+) -> Result<(), Error> {
     let checker = Arc::new(checker);
 
     let app = Router::new()
@@ -38,12 +42,11 @@ pub async fn run_server(bind_address: SocketAddr, checker: HealthChecker) -> Res
         .with_state(checker);
 
     let listener = TcpListener::bind(bind_address)
-        .await
         .map_err(|e| Error::Config(format!("Failed to bind to {}: {}", bind_address, e)))?;
 
-    info!(%bind_address, "Health check server listening");
+    info!(%bind_address, tls = tls.is_some(), "Health check server listening");
 
-    axum::serve(listener, app)
+    labkit::tls::serve(listener, app, tls)
         .await
         .map_err(|e| Error::Config(format!("Server error: {}", e)))
 }

@@ -407,10 +407,35 @@ These settings are used by the Webserver mode.
 
 ### TLS
 
+`cert_path` and `key_path` are the shared identity. Setting both enables TLS on the gRPC
+server. Each listener group below is off by default; when enabled it inherits that identity
+unless it names its own, so an externally pinned certificate and an internal one can rotate
+on different cycles.
+
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `tls.cert_path` | None | TLS certificate path (PEM) |
 | `tls.key_path` | None | TLS private key path (PEM) |
+| `tls.probes.enabled` | `false` | TLS on the webserver, indexer, dispatcher and health-check HTTP listeners |
+| `tls.probes.cert_path` | None | Overrides `tls.cert_path` for those listeners |
+| `tls.probes.key_path` | None | Overrides `tls.key_path` for those listeners |
+| `tls.metrics.enabled` | `false` | TLS on the labkit listener: `/-/metrics` plus its own `/-/liveness` and `/-/readiness` |
+| `tls.metrics.cert_path` | None | Overrides `tls.cert_path` for the metrics listener |
+| `tls.metrics.key_path` | None | Overrides `tls.key_path` for the metrics listener |
+
+Certificates are read at startup, so rotation needs a pod restart.
+
+Enabling `tls.probes` changes what clients must send:
+
+- Kubernetes probes need `scheme: HTTPS`. The kubelet does not verify the certificate.
+- `health_check_url` must become `https://`. The webserver verifies that certificate against
+  the OS trust store, so the certificate needs a SAN for the health-check service name and
+  its CA must be present in `/etc/pki/tls/certs`.
+- KEDA scalers that read `/queue-depth` need the same treatment.
+
+Enabling `tls.metrics` requires the PodMonitor to set `scheme: https` and a `tlsConfig` that
+either trusts the issuing CA (with `serverName`, because Prometheus connects to the pod IP)
+or sets `insecureSkipVerify`.
 
 ### gRPC tuning
 

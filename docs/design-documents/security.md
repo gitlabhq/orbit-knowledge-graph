@@ -374,6 +374,29 @@ This dual approach provides zero-trust security:
 - **MTLS** ensures we're talking to the right service at the network level.
 - **JWT** ensures we're processing requests with the right user context and permissions.
 
+### Listener TLS
+
+FedRAMP SC-8 covers pod-to-pod traffic, so every listener the server binds can serve TLS, not
+only the Rails-facing gRPC port.
+
+| Listener | Config group | Served by |
+|---|---|---|
+| gRPC (Rails) | `tls.cert_path` / `tls.key_path` | tonic |
+| Webserver HTTP `/live` `/ready` | `tls.probes` | `labkit::tls::serve` |
+| Indexer health, dispatcher health | `tls.probes` | `labkit::tls::serve` |
+| Health-check `/health` `/queue-depth` | `tls.probes` | `labkit::tls::serve` |
+| Prometheus `/-/metrics`, labkit `/-/liveness` `/-/readiness` | `tls.metrics` | labkit probe server |
+
+`tls.probes` and `tls.metrics` are off by default and inherit the shared identity unless they
+name their own certificate, so the externally pinned gRPC certificate and an internal one can
+rotate on different cycles. `crates/orbit-server/src/tls.rs` resolves both groups once at
+startup, after the FIPS provider is installed, so every listener negotiates inside the same
+validated module. Rotation needs a pod restart.
+
+Kubelet probes over HTTPS do not verify the server certificate, which is a property of the
+Kubernetes probe implementation and is recorded as such in the SSP. The webserver to
+health-check hop does verify, against the OS trust store.
+
 ### Cryptographic Module
 
 Every server binary links the AWS-LC FIPS module; there is no separate FIPS build variant.

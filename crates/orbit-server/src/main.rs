@@ -60,8 +60,18 @@ async fn main() -> anyhow::Result<()> {
     if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
     }
+    let orbit_server::tls::ListenerTls { probes, metrics } =
+        orbit_server::tls::ListenerTls::load(&config.tls)?;
     if config.metrics.prometheus.enabled {
         builder = builder.prometheus_metrics_port(config.metrics.prometheus.port);
+        if let Some(tls) = metrics {
+            builder = builder.probe_tls(tls);
+        }
+    } else if metrics.is_some() {
+        eprintln!(
+            "warning: tls.metrics is enabled but metrics.prometheus.enabled is false, so no \
+             metrics listener is started"
+        );
     }
     let _guard = builder.init().expect("labkit init");
 
@@ -86,20 +96,22 @@ async fn main() -> anyhow::Result<()> {
             schema::version::init(&graph).await?;
 
             let dispatcher_config = DispatcherConfig::from(&config);
-            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown)
+            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown, probes)
                 .await
                 .map_err(Into::into)
         }
-        Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
+        Mode::HealthCheck => health_check_mode::run(&config, probes)
+            .await
+            .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, shutdown)
+            indexer::run(&indexer_config, ontology, shutdown, probes)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, shutdown.clone()).await
+            run_webserver(&config, shutdown.clone(), probes).await
         }
     };
 
@@ -108,7 +120,11 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyhow::Result<()> {
+async fn run_webserver(
+    config: &AppConfig,
+    shutdown: CancellationToken,
+    probe_tls: Option<labkit::tls::ServerTls>,
+) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
         config.jwt_clock_skew_secs,
@@ -158,7 +174,7 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
         shutdown.clone(),
     );
 
-    let http_server = HttpServer::bind(config.bind_address, active_schema.clone()).await?;
+    let http_server = HttpServer::bind(config.bind_address, active_schema.clone(), probe_tls)?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
     let tls_config = orbit_server::tls::load_tls_config(&config.tls).await?;

@@ -240,8 +240,13 @@ async fn dispatcher_rejects_conflicting_archives_before_migration() {
     let conflicting = archive_with_extra_newline(*SCHEMA_VERSION);
     catalog.publish(&archive).await.unwrap();
 
-    let result =
-        indexer::run_dispatcher(&context.config, &conflicting, CancellationToken::new()).await;
+    let result = indexer::run_dispatcher(
+        &context.config,
+        &conflicting,
+        CancellationToken::new(),
+        None,
+    )
+    .await;
 
     assert!(matches!(
         result,
@@ -261,7 +266,8 @@ async fn dispatcher_rejects_invalid_archives_before_migration() {
     let invalid = archive_with_invalid_schema(*SCHEMA_VERSION);
     catalog.publish(&archive).await.unwrap();
 
-    let result = indexer::run_dispatcher(&context.config, &invalid, CancellationToken::new()).await;
+    let result =
+        indexer::run_dispatcher(&context.config, &invalid, CancellationToken::new(), None).await;
 
     assert!(matches!(
         result,
