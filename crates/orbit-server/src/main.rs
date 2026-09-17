@@ -60,16 +60,16 @@ async fn main() -> anyhow::Result<()> {
     if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
     }
-    let orbit_server::tls::ListenerTls { probes, metrics } =
+    let orbit_server::tls::ListenerTls { http, probe_server } =
         orbit_server::tls::ListenerTls::load(&config.tls)?;
     if config.metrics.prometheus.enabled {
         builder = builder
             .prometheus_metrics_port(config.metrics.prometheus.port)
-            .probe_tls(metrics);
-    } else if metrics.is_some() {
+            .probe_tls(probe_server);
+    } else if probe_server.is_some() {
         eprintln!(
-            "warning: tls.metrics is enabled but metrics.prometheus.enabled is false, so no \
-             metrics listener is started"
+            "warning: tls.probe_server is enabled but metrics.prometheus.enabled is false, so no \
+             probe server is started"
         );
     }
     let _guard = builder.init().expect("labkit init");
@@ -95,22 +95,22 @@ async fn main() -> anyhow::Result<()> {
             schema::version::init(&graph).await?;
 
             let dispatcher_config = DispatcherConfig::from(&config);
-            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown, probes)
+            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown, http)
                 .await
                 .map_err(Into::into)
         }
-        Mode::HealthCheck => health_check_mode::run(&config, probes)
+        Mode::HealthCheck => health_check_mode::run(&config, http)
             .await
             .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, shutdown, probes)
+            indexer::run(&indexer_config, ontology, shutdown, http)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, shutdown.clone(), probes).await
+            run_webserver(&config, shutdown.clone(), http).await
         }
     };
 

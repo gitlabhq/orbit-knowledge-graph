@@ -28,9 +28,11 @@ fn test_tls() -> TestTls {
     std::fs::write(&cert_path, &cert_pem).expect("failed to write certificate");
     std::fs::write(&key_path, key_pem).expect("failed to write key");
 
-    // `from_pem_files` reads both files eagerly, so the directory can go now.
+    // Both files are read eagerly, so the directory can go now.
     TestTls {
-        server: ServerTls::from_pem_files(&cert_path, &key_path).expect("failed to load TLS"),
+        server: ServerTls::builder(&cert_path, &key_path)
+            .build()
+            .expect("failed to load TLS"),
         ca_pem: cert_pem,
     }
 }
@@ -170,7 +172,7 @@ async fn the_webserver_verifies_the_health_check_certificate() {
         }),
     );
     let handle = tokio::spawn(async move {
-        let _ = labkit::tls::serve(listener, app, Some(tls.server)).await;
+        let _ = labkit::server::serve(listener, app, Some(tls.server)).await;
     });
 
     // The default client has only the public roots, so it cannot verify a

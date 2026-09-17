@@ -9,23 +9,23 @@ use tonic::transport::server::ServerTlsConfig;
 /// `None` twice and every listener stays plaintext.
 pub struct ListenerTls {
     /// Webserver, indexer health, dispatcher health and health-check.
-    pub probes: Option<ServerTls>,
+    pub http: Option<ServerTls>,
     /// The labkit listener: `/-/metrics` and its own probe endpoints.
-    pub metrics: Option<ServerTls>,
+    pub probe_server: Option<ServerTls>,
 }
 
 impl ListenerTls {
     pub fn load(tls: &TlsConfig) -> anyhow::Result<Self> {
         Ok(Self {
-            probes: load_group(tls.probe_paths()?)?,
-            metrics: load_group(tls.metrics_paths()?)?,
+            http: load_group(tls.http_paths()?)?,
+            probe_server: load_group(tls.probe_server_paths()?)?,
         })
     }
 }
 
 fn load_group(paths: Option<(&str, &str)>) -> anyhow::Result<Option<ServerTls>> {
     paths
-        .map(|(cert, key)| ServerTls::from_pem_files(cert, key))
+        .map(|(cert, key)| ServerTls::builder(cert, key).build())
         .transpose()
         .map_err(Into::into)
 }

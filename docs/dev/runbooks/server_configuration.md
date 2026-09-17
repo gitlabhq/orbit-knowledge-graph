@@ -416,16 +416,16 @@ on different cycles.
 |-------------|---------|-------------|
 | `tls.cert_path` | None | TLS certificate path (PEM) |
 | `tls.key_path` | None | TLS private key path (PEM) |
-| `tls.probes.enabled` | `false` | TLS on the webserver, indexer, dispatcher and health-check HTTP listeners |
-| `tls.probes.cert_path` | None | Overrides `tls.cert_path` for those listeners |
-| `tls.probes.key_path` | None | Overrides `tls.key_path` for those listeners |
-| `tls.metrics.enabled` | `false` | TLS on the labkit listener: `/-/metrics` plus its own `/-/liveness` and `/-/readiness` |
-| `tls.metrics.cert_path` | None | Overrides `tls.cert_path` for the metrics listener |
-| `tls.metrics.key_path` | None | Overrides `tls.key_path` for the metrics listener |
+| `tls.http.enabled` | `false` | TLS on the webserver, indexer, dispatcher and health-check HTTP listeners |
+| `tls.http.cert_path` | None | Overrides `tls.cert_path` for those listeners |
+| `tls.http.key_path` | None | Overrides `tls.key_path` for those listeners |
+| `tls.probe_server.enabled` | `false` | TLS on the labkit listener: `/-/metrics` plus its own `/-/liveness` and `/-/readiness` |
+| `tls.probe_server.cert_path` | None | Overrides `tls.cert_path` for the probe server |
+| `tls.probe_server.key_path` | None | Overrides `tls.key_path` for the probe server |
 
 Certificates are read at startup, so rotation needs a pod restart.
 
-Enabling `tls.probes` changes what clients must send:
+Enabling `tls.http` changes what clients must send:
 
 - Kubernetes probes need `scheme: HTTPS`. The kubelet does not verify the certificate.
 - `health_check_url` must become `https://`. The webserver verifies that certificate against
@@ -433,7 +433,7 @@ Enabling `tls.probes` changes what clients must send:
   its CA must be present in `/etc/pki/tls/certs`.
 - KEDA scalers that read `/queue-depth` need the same treatment.
 
-Enabling `tls.metrics` requires the PodMonitor to set `scheme: https` and a `tlsConfig` that
+Enabling `tls.probe_server` requires the PodMonitor to set `scheme: https` and a `tlsConfig` that
 either trusts the issuing CA (with `serverName`, because Prometheus connects to the pod IP)
 or sets `insecureSkipVerify`.
 
