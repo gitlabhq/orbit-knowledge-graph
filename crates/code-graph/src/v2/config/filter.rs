@@ -10,7 +10,8 @@ use std::sync::LazyLock;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use orbit_utils::fs_walk::{
-    CapExceeded, ContentClass, Counter, Decision, FileInventoryEntry, FileStreamHooks, SkipReason,
+    CapExceeded, ContentClass, Counter, Decision, FileInventoryEntry, FileLabel, FileStreamHooks,
+    SkipReason,
 };
 use rustc_hash::FxHashMap;
 
@@ -67,28 +68,36 @@ impl CodeFilter {
 
     fn record(
         &mut self,
-        file: &mut FileInventoryEntry,
+        file: &FileInventoryEntry,
         reason: SkipReason,
         content: ContentClass,
-    ) -> Decision {
+    ) -> (Decision, FileLabel) {
         let tally = self.skips.entry(reason).or_default();
         tally.count += 1;
         tally.bytes += file.size;
-        file.label.skip = Some(reason);
-        file.label.content = content;
-        Decision::ListOnly
+        (
+            Decision::ListOnly,
+            FileLabel {
+                skip: Some(reason),
+                content,
+                extension: Self::extract_extension(&file.path),
+            },
+        )
+    }
+
+    fn extract_extension(path: &str) -> Option<String> {
+        Path::new(path)
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
     }
 }
 
 impl FileStreamHooks for CodeFilter {
-    fn admit(&mut self, file: &mut FileInventoryEntry) -> Result<(), CapExceeded> {
-        file.label.extension = Path::new(&file.path)
-            .extension()
-            .map(|e| e.to_string_lossy().into_owned());
+    fn admit(&mut self, file: &FileInventoryEntry) -> Result<(), CapExceeded> {
         self.total_bytes.add(file.size)
     }
 
-    fn on_header(&mut self, file: &mut FileInventoryEntry) -> Option<Decision> {
+    fn on_header(&mut self, file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
         if self.max_file_size.is_some_and(|cap| file.size > cap) {
             return Some(self.record(file, SkipReason::Oversize, ContentClass::Unknown));
         }
@@ -98,7 +107,8 @@ impl FileStreamHooks for CodeFilter {
         None
     }
 
-    fn on_content(&mut self, file: &mut FileInventoryEntry, content: &[u8]) -> Decision {
+    fn on_content(&mut self, file: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
+        let ext = Self::extract_extension(&file.path);
         if is_lfs_pointer(content) {
             return self.record(file, SkipReason::LfsPointer, ContentClass::LfsPointer);
         }
@@ -115,15 +125,20 @@ impl FileStreamHooks for CodeFilter {
         }
         // A parse candidate is parsed; a non-parsable file (resolver input) is
         // loaded for resolvers but not parsed.
-        file.label.content = ContentClass::Text;
-        if (self.detect_language)(&file.path).is_some() {
+        let label = FileLabel {
+            skip: None,
+            content: ContentClass::Text,
+            extension: ext,
+        };
+        let decision = if (self.detect_language)(&file.path).is_some() {
             Decision::Parse
         } else {
             Decision::Load
-        }
+        };
+        (decision, label)
     }
 
-    fn on_non_regular(&mut self, file: &mut FileInventoryEntry) -> Decision {
+    fn on_non_regular(&mut self, file: &FileInventoryEntry) -> (Decision, FileLabel) {
         self.record(file, SkipReason::NonRegularFile, ContentClass::NonRegular)
     }
 }
@@ -263,42 +278,47 @@ mod tests {
         size 5242880\n";
 
     #[test]
-    fn stamps_label_on_settled_files() {
+    fn returns_label_on_settled_files() {
         let mut f = filter();
-        let mut png = entry("logo.png", 10);
-        f.on_header(&mut png);
-        assert_eq!(png.label.skip, Some(SkipReason::ExcludedExtension));
 
-        let mut bin = entry("x.bin", 10);
-        f.on_content(&mut bin, b"a\x00b");
-        assert_eq!(bin.label.skip, Some(SkipReason::Binary));
-        assert_eq!(bin.label.content, ContentClass::Binary);
+        let (_, label) = f.on_header(&entry("logo.png", 10)).unwrap();
+        assert_eq!(label.skip, Some(SkipReason::ExcludedExtension));
 
-        let mut rs = entry("main.rs", 10);
-        f.on_content(&mut rs, b"fn main() {}\n");
-        assert_eq!(rs.label.skip, None);
-        assert_eq!(rs.label.content, ContentClass::Text);
+        let (_, label) = f.on_content(&entry("x.bin", 10), b"a\x00b");
+        assert_eq!(label.skip, Some(SkipReason::Binary));
+        assert_eq!(label.content, ContentClass::Binary);
 
-        let mut link = entry("link.rs", 5);
-        f.on_non_regular(&mut link);
-        assert_eq!(link.label.skip, Some(SkipReason::NonRegularFile));
-        assert_eq!(link.label.content, ContentClass::NonRegular);
+        let (_, label) = f.on_content(&entry("main.rs", 10), b"fn main() {}\n");
+        assert_eq!(label.skip, None);
+        assert_eq!(label.content, ContentClass::Text);
+
+        let (_, label) = f.on_non_regular(&entry("link.rs", 5));
+        assert_eq!(label.skip, Some(SkipReason::NonRegularFile));
+        assert_eq!(label.content, ContentClass::NonRegular);
+    }
+
+    fn d(result: (Decision, FileLabel)) -> Decision {
+        result.0
+    }
+
+    fn hd(result: Option<(Decision, FileLabel)>) -> Option<Decision> {
+        result.map(|(d, _)| d)
     }
 
     #[test]
     fn parses_source_and_loads_resolver_inputs() {
         let mut f = filter();
-        assert_eq!(f.on_header(&mut entry("src/main.rs", 100)), None);
+        assert_eq!(hd(f.on_header(&entry("src/main.rs", 100))), None);
         assert_eq!(
-            f.on_content(&mut entry("src/main.rs", 100), b"fn main() {}\n"),
+            d(f.on_content(&entry("src/main.rs", 100), b"fn main() {}\n")),
             Decision::Parse
         );
         assert_eq!(
-            f.on_content(&mut entry("Cargo.toml", 100), b"[package]\n"),
+            d(f.on_content(&entry("Cargo.toml", 100), b"[package]\n")),
             Decision::Load
         );
         assert_eq!(
-            f.on_content(&mut entry(".gitignore", 100), b"target/\n"),
+            d(f.on_content(&entry(".gitignore", 100), b"target/\n")),
             Decision::Load
         );
     }
@@ -307,20 +327,20 @@ mod tests {
     fn list_only_for_excluded_oversize_binary_minified() {
         let mut f = CodeFilter::new(Some(50), None, detect_language_from_path);
         assert_eq!(
-            f.on_header(&mut entry("logo.png", 10)),
+            hd(f.on_header(&entry("logo.png", 10))),
             Some(Decision::ListOnly)
         );
         assert_eq!(
-            f.on_header(&mut entry("big.rs", 999)),
+            hd(f.on_header(&entry("big.rs", 999))),
             Some(Decision::ListOnly)
         );
         assert_eq!(
-            f.on_content(&mut entry("x.bin", 10), b"a\x00b"),
+            d(f.on_content(&entry("x.bin", 10), b"a\x00b")),
             Decision::ListOnly
         );
         let minified = vec![b'a'; MAX_LINE_LENGTH + 1];
         assert_eq!(
-            f.on_content(&mut entry("bundle.js", 10), &minified),
+            d(f.on_content(&entry("bundle.js", 10), &minified)),
             Decision::ListOnly
         );
     }
@@ -329,10 +349,10 @@ mod tests {
     fn lfs_pointers_are_nodes_instead_of_source() {
         let mut f = filter();
         for path in ["data/train.csv", "src/model.py"] {
-            let mut e = entry(path, POINTER.len() as u64);
-            assert_eq!(f.on_content(&mut e, POINTER), Decision::ListOnly, "{path}");
-            assert_eq!(e.label.skip, Some(SkipReason::LfsPointer));
-            assert_eq!(e.label.content, ContentClass::LfsPointer);
+            let (decision, label) = f.on_content(&entry(path, POINTER.len() as u64), POINTER);
+            assert_eq!(decision, Decision::ListOnly, "{path}");
+            assert_eq!(label.skip, Some(SkipReason::LfsPointer));
+            assert_eq!(label.content, ContentClass::LfsPointer);
         }
     }
 
@@ -357,7 +377,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                f.on_content(&mut entry(path, content.len() as u64), &content),
+                d(f.on_content(&entry(path, content.len() as u64), &content)),
                 Decision::Load,
                 "{path}"
             );
@@ -369,14 +389,14 @@ mod tests {
         let mut f = filter();
         for path in ["vendor/jquery.min.js", "a/b.min.mjs", "c.min.cjs"] {
             assert_eq!(
-                f.on_header(&mut entry(path, 200)),
+                hd(f.on_header(&entry(path, 200))),
                 Some(Decision::ListOnly),
                 "{path}"
             );
         }
         // The leading dot must be literal — these are real source, not bundles.
         for path in ["src/admin.js", "src/examine.js"] {
-            assert_eq!(f.on_header(&mut entry(path, 200)), None, "{path}");
+            assert_eq!(hd(f.on_header(&entry(path, 200))), None, "{path}");
         }
     }
 
@@ -386,16 +406,16 @@ mod tests {
         // (different module/FQN), so both parse; content is never deduped.
         let mut f = filter();
         let src = b"export const x = 1;\n";
-        assert_eq!(f.on_content(&mut entry("a/x.js", 19), src), Decision::Parse);
-        assert_eq!(f.on_content(&mut entry("b/x.js", 19), src), Decision::Parse);
+        assert_eq!(d(f.on_content(&entry("a/x.js", 19), src)), Decision::Parse);
+        assert_eq!(d(f.on_content(&entry("b/x.js", 19), src)), Decision::Parse);
     }
 
     #[test]
     fn total_bytes_cap_charges_every_file_then_trips() {
         let mut f = CodeFilter::new(None, Some(100), detect_language_from_path);
-        assert!(f.admit(&mut entry("a.png", 60)).is_ok());
+        assert!(f.admit(&entry("a.png", 60)).is_ok());
         assert!(
-            f.admit(&mut entry("b.png", 60)).is_err(),
+            f.admit(&entry("b.png", 60)).is_err(),
             "excluded files still count toward the total-bytes cap"
         );
     }

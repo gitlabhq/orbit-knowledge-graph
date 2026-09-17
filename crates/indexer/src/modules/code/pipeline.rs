@@ -635,7 +635,6 @@ impl CodeIndexer {
         let code_graph_start = Instant::now();
         let repo_dir = repository.path().to_path_buf();
         let file_inventory = repository.file_inventory.clone();
-        let stream_reasons = repository.stream_reasons.clone();
         let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
             span.in_scope(|| {
@@ -643,7 +642,6 @@ impl CodeIndexer {
                     &repo_dir,
                     file_inventory,
                     config,
-                    &stream_reasons,
                     tracer,
                     converter,
                     on_batch,

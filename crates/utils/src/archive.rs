@@ -98,7 +98,9 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 decision: Decision::ListOnly,
                 label: Default::default(),
             };
-            meta.decision = hooks.on_non_regular(&mut meta);
+            let (decision, label) = hooks.on_non_regular(&meta);
+            meta.decision = decision;
+            meta.label = label;
             if meta.decision != Decision::Drop {
                 let link_target = entry
                     .link_name()
@@ -118,9 +120,11 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 decision: Decision::Parse,
                 label: Default::default(),
             };
-            meta.decision = step(hooks, &mut meta, &mut content, |buf| {
+            let (decision, label) = step(hooks, &meta, &mut content, |buf| {
                 entry.read_to_end(buf).map(|_| ())
             })?;
+            meta.decision = decision;
+            meta.label = label;
             match meta.decision {
                 Decision::Drop => continue,
                 Decision::ListOnly => inventory.push(meta),
@@ -210,6 +214,7 @@ fn strip_archive_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs_walk::FileLabel;
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
@@ -220,15 +225,15 @@ mod tests {
     /// shape of the production `CodeFilter` without depending on code-graph.
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &mut FileInventoryEntry) -> Option<Decision> {
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
             (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
-                .then_some(Decision::ListOnly)
+                .then_some((Decision::ListOnly, FileLabel::default()))
         }
-        fn on_content(&mut self, _f: &mut FileInventoryEntry, content: &[u8]) -> Decision {
+        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
             if content.contains(&0) {
-                Decision::ListOnly
+                (Decision::ListOnly, FileLabel::default())
             } else {
-                Decision::Parse
+                (Decision::Parse, FileLabel::default())
             }
         }
     }
@@ -497,8 +502,8 @@ mod tests {
     /// guard was handed.
     struct MaxSize(u64);
     impl FileStreamHooks for MaxSize {
-        fn on_header(&mut self, f: &mut FileInventoryEntry) -> Option<Decision> {
-            (f.size > self.0).then_some(Decision::ListOnly)
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
+            (f.size > self.0).then_some((Decision::ListOnly, FileLabel::default()))
         }
     }
 

@@ -147,39 +147,39 @@ pub enum StreamError {
 /// to a pass-through; a consumer implements only what it needs and holds its
 /// state (e.g. [`Counter`]s) in `self`. Generic, no `dyn`.
 ///
-/// Hooks receive `&mut FileInventoryEntry` so they can stamp
-/// [`FileLabel`] metadata alongside the decision they return.
+/// Hooks return `(Decision, FileLabel)` so the source can stamp both fields
+/// on the entry. The hooks never mutate the entry directly.
 pub trait FileStreamHooks {
     /// Charge aggregate counters; called for every entry (so excluded blobs
     /// still count toward a total-bytes cap). `Err` aborts the stream.
-    fn admit(&mut self, _file: &mut FileInventoryEntry) -> Result<(), CapExceeded> {
+    fn admit(&mut self, _file: &FileInventoryEntry) -> Result<(), CapExceeded> {
         Ok(())
     }
     /// Settle from path + size alone, before any bytes are read. `Some` is final
     /// (and must not be `Parse` — that needs content); `None` reads the content.
-    fn on_header(&mut self, _file: &mut FileInventoryEntry) -> Option<Decision> {
+    fn on_header(&mut self, _file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
         None
     }
     /// Decide with the file's full (size-capped) content; only reached when
     /// `on_header` returned `None`.
-    fn on_content(&mut self, _file: &mut FileInventoryEntry, _content: &[u8]) -> Decision {
-        Decision::Parse
+    fn on_content(&mut self, _file: &FileInventoryEntry, _content: &[u8]) -> (Decision, FileLabel) {
+        (Decision::Parse, FileLabel::default())
     }
     /// Settle a non-regular entry (symlink, etc.) — no content to sniff, never a
     /// parse candidate. Routed here (instead of decided in the source) so the
     /// filter stays the single decision point. Defaults to a bare node.
-    fn on_non_regular(&mut self, _file: &mut FileInventoryEntry) -> Decision {
-        Decision::ListOnly
+    fn on_non_regular(&mut self, _file: &FileInventoryEntry) -> (Decision, FileLabel) {
+        (Decision::ListOnly, FileLabel::default())
     }
 }
 
 /// `content` is caller-owned to reuse across entries.
 pub fn step<H: FileStreamHooks>(
     hooks: &mut H,
-    file: &mut FileInventoryEntry,
+    file: &FileInventoryEntry,
     content: &mut Vec<u8>,
     sniff: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>,
-) -> Result<Decision, StreamError> {
+) -> Result<(Decision, FileLabel), StreamError> {
     hooks.admit(file)?;
     content.clear();
     if let Some(settled) = hooks.on_header(file) {
@@ -249,10 +249,12 @@ mod tests {
     }
 
     impl FileStreamHooks for TestHooks {
-        fn on_header(&mut self, f: &mut FileInventoryEntry) -> Option<Decision> {
-            f.path.ends_with(".png").then_some(Decision::Drop)
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
+            f.path
+                .ends_with(".png")
+                .then_some((Decision::Drop, FileLabel::default()))
         }
-        fn admit(&mut self, f: &mut FileInventoryEntry) -> Result<(), CapExceeded> {
+        fn admit(&mut self, f: &FileInventoryEntry) -> Result<(), CapExceeded> {
             self.bytes.add(f.size)
         }
     }
@@ -265,14 +267,13 @@ mod tests {
             label: Default::default(),
         }
     }
-
     #[test]
     fn step_settles_in_header_without_sniffing() {
         let mut h = TestHooks {
             bytes: Counter::new("bytes", None),
         };
         let mut prefix = Vec::new();
-        let d = step(&mut h, &mut entry("a.png", 10), &mut prefix, |_| {
+        let (d, _) = step(&mut h, &entry("a.png", 10), &mut prefix, |_| {
             panic!("a header-settled file must never be sniffed")
         })
         .unwrap();
@@ -285,7 +286,7 @@ mod tests {
             bytes: Counter::new("bytes", Some(100)),
         };
         let mut prefix = Vec::new();
-        let d = step(&mut h, &mut entry("a.rs", 10), &mut prefix, |buf| {
+        let (d, _) = step(&mut h, &entry("a.rs", 10), &mut prefix, |buf| {
             buf.extend_from_slice(b"fn main");
             Ok(())
         })
@@ -299,7 +300,7 @@ mod tests {
             bytes: Counter::new("bytes", Some(5)),
         };
         let mut prefix = Vec::new();
-        let err = step(&mut h, &mut entry("a.rs", 10), &mut prefix, |_| Ok(())).unwrap_err();
+        let err = step(&mut h, &entry("a.rs", 10), &mut prefix, |_| Ok(())).unwrap_err();
         assert!(matches!(err, StreamError::Cap(_)));
     }
 
@@ -309,7 +310,7 @@ mod tests {
             bytes: Counter::new("bytes", Some(5)),
         };
         let mut prefix = Vec::new();
-        let err = step(&mut h, &mut entry("blob.png", 10), &mut prefix, |_| Ok(())).unwrap_err();
+        let err = step(&mut h, &entry("blob.png", 10), &mut prefix, |_| Ok(())).unwrap_err();
         assert!(
             matches!(err, StreamError::Cap(_)),
             "a dropped file's bytes must still count toward the cap"

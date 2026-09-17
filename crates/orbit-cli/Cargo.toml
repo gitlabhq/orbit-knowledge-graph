@@ -32,7 +32,6 @@ dirs = { workspace = true }
 dunce = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
-rustc-hash = { workspace = true }
 rmcp = { workspace = true }
 rust-embed = { workspace = true }
 rustls = { workspace = true }

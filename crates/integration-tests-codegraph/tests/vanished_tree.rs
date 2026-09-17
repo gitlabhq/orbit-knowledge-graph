@@ -23,7 +23,6 @@ fn run_pipeline(root: &Path, inventory: Vec<FileInventoryEntry>) -> PipelineResu
         root,
         Arc::new(FileInventory::new(inventory)),
         PipelineConfig::default(),
-        &Default::default(),
         Arc::new(NoopConverter),
         on_batch,
     )

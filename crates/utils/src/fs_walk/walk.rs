@@ -55,13 +55,15 @@ pub fn walk_dir<H: FileStreamHooks>(
 
         // A symlink has no content to sniff and is never a parse candidate; the
         // hooks settle it, same as the tar source.
-        meta.decision = if is_symlink {
-            hooks.on_non_regular(&mut meta)
+        let (decision, label) = if is_symlink {
+            hooks.on_non_regular(&meta)
         } else {
-            step(hooks, &mut meta, &mut content, |buf| {
+            step(hooks, &meta, &mut content, |buf| {
                 std::fs::File::open(abs_path)?.read_to_end(buf).map(|_| ())
             })?
         };
+        meta.decision = decision;
+        meta.label = label;
         if meta.decision != Decision::Drop {
             inventory.push(meta);
         }
@@ -73,18 +75,19 @@ pub fn walk_dir<H: FileStreamHooks>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs_walk::FileLabel;
 
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &mut FileInventoryEntry) -> Option<Decision> {
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
             (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
-                .then_some(Decision::ListOnly)
+                .then_some((Decision::ListOnly, FileLabel::default()))
         }
-        fn on_content(&mut self, _f: &mut FileInventoryEntry, content: &[u8]) -> Decision {
+        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
             if content.contains(&0) {
-                Decision::ListOnly
+                (Decision::ListOnly, FileLabel::default())
             } else {
-                Decision::Parse
+                (Decision::Parse, FileLabel::default())
             }
         }
     }

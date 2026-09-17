@@ -188,22 +188,13 @@ pub async fn run_yaml_suite(yaml: &str) {
                 let ob = on_batch.clone();
                 let inventory = inventory.clone();
                 pool.install(move || {
-                    Pipeline::run_with_tracer(
-                        tmp.path(),
-                        inventory,
-                        config,
-                        &Default::default(),
-                        tracer,
-                        c,
-                        ob,
-                    )
+                    Pipeline::run_with_tracer(tmp.path(), inventory, config, tracer, c, ob)
                 })
             } else {
                 Pipeline::run_with_tracer(
                     tmp.path(),
                     inventory,
                     config,
-                    &Default::default(),
                     tracer,
                     converter.clone() as Arc<dyn GraphConverter>,
                     on_batch,

@@ -921,17 +921,10 @@ fn index_repo(
         },
     );
 
-    let stream_reasons: rustc_hash::FxHashMap<String, orbit_utils::fs_walk::SkipReason> =
-        file_inventory
-            .iter()
-            .filter_map(|e| e.label.skip.map(|r| (e.path.clone(), r)))
-            .collect();
-
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
         std::path::Path::new(&root_path),
         file_inventory,
         pipeline_config.clone(),
-        &stream_reasons,
         tracer,
         converter,
         on_batch,

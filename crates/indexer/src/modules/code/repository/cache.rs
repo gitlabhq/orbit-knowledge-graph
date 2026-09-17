@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use code_graph::v2::config::{CodeFilter, SkipReason, detect_language_from_path};
+use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 use futures::StreamExt;
 use orbit_utils::archive::extract_tar_gz;
 use orbit_utils::fs_walk::{FileInventory, StreamError};
-use rustc_hash::FxHashMap;
+
 use tempfile::TempDir;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
@@ -37,9 +37,6 @@ pub enum RepositoryCacheError {
 pub struct CachedRepository {
     dir: TempDir,
     pub file_inventory: Arc<FileInventory>,
-    /// Per-path reason for files the stream settled as bare nodes, carried to the
-    /// pipeline so each File node's `gl_file.reason` reflects the stream skip.
-    pub stream_reasons: FxHashMap<String, SkipReason>,
 }
 
 impl CachedRepository {
@@ -139,15 +136,9 @@ impl RepositoryCache for LocalRepositoryCache {
                 .record_archive_entry_skipped(reason.into(), tally.count, tally.bytes);
         }
 
-        let stream_reasons: FxHashMap<String, SkipReason> = file_inventory
-            .iter()
-            .filter_map(|e| e.label.skip.map(|r| (e.path.clone(), r)))
-            .collect();
-
         Ok(CachedRepository {
             dir,
             file_inventory: Arc::new(file_inventory),
-            stream_reasons,
         })
     }
 }
@@ -155,6 +146,7 @@ impl RepositoryCache for LocalRepositoryCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use code_graph::v2::config::SkipReason;
     use tempfile::TempDir;
 
     fn create_cache() -> (TempDir, LocalRepositoryCache) {
@@ -500,8 +492,12 @@ mod tests {
             "LFS pointers should still be present in archive inventory"
         );
         assert_eq!(
-            path.stream_reasons.get("data/train.csv"),
-            Some(&SkipReason::LfsPointer)
+            path.file_inventory
+                .find("data/train.csv")
+                .unwrap()
+                .label
+                .skip,
+            Some(SkipReason::LfsPointer)
         );
         assert!(path.path().join("src/main.rs").exists());
         assert!(!path.path().join("data/train.csv").exists());

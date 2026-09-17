@@ -1,4 +1,4 @@
-use crate::v2::config::{Language, LanguageFamily, SkipReason, detect_language_from_path};
+use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};
 use crate::v2::error::FileReason;
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
@@ -724,7 +724,6 @@ impl Pipeline {
         root: &Path,
         file_inventory: Arc<FileInventory>,
         config: PipelineConfig,
-        stream_reasons: &FxHashMap<String, SkipReason>,
         converter: Arc<dyn GraphConverter>,
         on_batch: Arc<OnBatch>,
     ) -> PipelineResult {
@@ -732,7 +731,6 @@ impl Pipeline {
             root,
             file_inventory,
             config,
-            stream_reasons,
             Tracer::new(false),
             converter,
             on_batch,
@@ -744,7 +742,6 @@ impl Pipeline {
         root: &Path,
         file_inventory: Arc<FileInventory>,
         mut config: PipelineConfig,
-        stream_reasons: &FxHashMap<String, SkipReason>,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
         on_batch: Arc<OnBatch>,
@@ -998,8 +995,10 @@ impl Pipeline {
         let t_structural = std::time::Instant::now();
         if !file_inventory.is_empty() {
             let mut reasons: FxHashMap<&str, FileReason> = FxHashMap::default();
-            for (path, skip) in stream_reasons {
-                reasons.insert(path.as_str(), FileReason::Filter(*skip));
+            for entry in file_inventory.iter() {
+                if let Some(skip) = entry.label.skip {
+                    reasons.insert(entry.path.as_str(), FileReason::Filter(skip));
+                }
             }
             for s in &skipped {
                 reasons.insert(s.path.as_str(), FileReason::Skip(s.kind));
@@ -1852,7 +1851,6 @@ mod tests {
                 label: Default::default(),
             }])),
             PipelineConfig::default(),
-            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
@@ -1884,7 +1882,6 @@ mod tests {
                 label: Default::default(),
             }])),
             PipelineConfig::default(),
-            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
@@ -1920,7 +1917,6 @@ mod tests {
                 per_file_ssa_timeout: Some(std::time::Duration::ZERO),
                 ..PipelineConfig::default()
             },
-            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
@@ -1970,7 +1966,6 @@ mod tests {
                 })),
                 ..PipelineConfig::default()
             },
-            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
@@ -1999,7 +1994,6 @@ mod tests {
                 label: Default::default(),
             }])),
             PipelineConfig::default(),
-            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(OffsetOverflowOnParsedGraph),
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
@@ -2037,7 +2031,6 @@ mod tests {
                 label: Default::default(),
             }])),
             PipelineConfig::default(),
-            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TypedOffsetOverflowOnParsedGraph),
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
@@ -2099,7 +2092,6 @@ mod tests {
             root,
             Arc::new(inventory),
             PipelineConfig::default(),
-            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
@@ -2150,7 +2142,6 @@ mod tests {
                 label: Default::default(),
             }])),
             PipelineConfig::default(),
-            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
@@ -2343,7 +2334,6 @@ namespace MyApp {
                 },
             ])),
             PipelineConfig::default(),
-            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
