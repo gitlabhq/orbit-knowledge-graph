@@ -160,8 +160,11 @@ pub trait FileStreamHooks {
     fn admit(&mut self, _file: &FileInventoryEntry) -> Result<(), CapExceeded> {
         Ok(())
     }
-    /// Settle from path + size alone, before any bytes are read. `Some` is final
-    /// (and must not be `Parse` — that needs content); `None` reads the content.
+    /// Settle from path + size alone, before any bytes are read. `Some` is
+    /// final; `None` reads the content. On a first pass over raw files,
+    /// `Parse` should only come from `on_content` (it needs bytes). On a
+    /// refinement pass (`FileInventory::refine`) the entry already carries a
+    /// prior label, so returning `Parse` from `on_header` is valid.
     fn on_header(&mut self, _file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
         None
     }
