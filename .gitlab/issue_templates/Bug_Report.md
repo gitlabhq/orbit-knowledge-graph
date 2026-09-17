@@ -46,9 +46,7 @@ Which Orbit are you using?
 **Orbit Remote**
 
 - GitLab.com group or project path (e.g. `gitlab-org/gitlab`):
-
 - Access method: <!-- glab orbit remote / MCP client / GitLab Duo / REST API -->
-
 - Approximate time of the failure (include timezone, or use UTC):
 
 **Orbit Local**

@@ -54,35 +54,21 @@ without a graph query.
 ### Should fire orbit
 
 1. "Who calls the `process_event` function in gitlab-org/gitlab?"
-
 2. "What is the blast radius of changing the `users` table across all projects?"
-
 3. "List all subclasses of ApplicationRecord in gitlab-org/gitlab"
-
 4. "Which contributors touched the most files in gitlab-org/gitlab last quarter?"
-
 5. "Give me a repo map of gitlab-org/gitlab"
-
 6. "How many MRs were merged per project in the gitlab-org group last month?"
-
 7. "Which projects depend on the gitlab-shell gem?"
-
 8. "Which MRs touched both app/models/user.rb and app/models/project.rb?"
 
 ### Should fire glab (not orbit)
 
 1. "Show me the diff of MR !1216": single-entity lookup (`glab mr diff`)
-
 2. "Create a new merge request for my branch": write operation (`glab mr create`)
-
 3. "What is the current pipeline status for MR !500?": single-entity lookup (`glab ci status`)
-
 4. "Approve MR !789": write operation (`glab mr approve`)
-
 5. "List open MRs in gitlab-org/gitlab": simple list (`glab mr list`)
-
 6. "Who are the reviewers on MR !1216?": single known entity, relationship metadata available via `glab mr view` (tie-break: glab)
-
 7. "What files did MR !1216 change?": single known entity, `glab mr diff` suffices (tie-break: glab)
-
 8. "How many open MRs are in gitlab-org/gitlab?": single-project count, `glab mr list | wc` suffices (tie-break: glab)
