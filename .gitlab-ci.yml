@@ -700,7 +700,7 @@ cli-integration-test:
     - cargo nextest run --profile ci --test cli --no-fail-fast
     - sccache --show-stats || true
 
-integration-test:
+.integration-test-template:
   stage: test
   extends:
     - .test-template
@@ -722,9 +722,26 @@ integration-test:
       docker pull nats:2.11-alpine &
       wait
   script:
-    # corpus-smoke runs as its own parallel job below.
-    - cargo nextest run --profile ci --all-features --test containers -E 'not test(corpus_smoke)'
+    - cargo nextest run --profile ci --all-features --test containers -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
+
+integration-test:
+  extends: .integration-test-template
+  variables:
+    NEXTEST_FILTER: >-
+      not test(corpus_smoke) & not (
+        test(=indexer::sdlc::scenario_indexing) |
+        test(=server::data_correctness::data_correctness_scenarios) |
+        test(=server::data_correctness::data_correctness)
+      )
+
+integration-test-data-correctness:
+  extends: .integration-test-template
+  variables:
+    NEXTEST_FILTER: >-
+      test(=indexer::sdlc::scenario_indexing) |
+      test(=server::data_correctness::data_correctness_scenarios) |
+      test(=server::data_correctness::data_correctness)
 
 corpus-smoke-test:
   stage: test
