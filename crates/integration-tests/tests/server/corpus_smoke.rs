@@ -81,7 +81,7 @@ impl PipelineStage for AuthorizeAllStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<ExtractionOutput>()
+            .remove::<ExtractionOutput>()
             .ok_or_else(|| PipelineError::custom("ExtractionOutput not found in phases"))?;
         let authorizations = input
             .query_result
@@ -96,7 +96,10 @@ impl PipelineStage for AuthorizeAllStage {
                     .collect::<HashMap<i64, bool>>(),
             })
             .collect();
-        Ok(AuthorizationOutput { authorizations })
+        Ok(AuthorizationOutput {
+            query_result: input.query_result,
+            authorizations,
+        })
     }
 }
 

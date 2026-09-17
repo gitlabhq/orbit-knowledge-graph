@@ -26,7 +26,7 @@ impl PipelineStage for AuthorizationStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<ExtractionOutput>()
+            .remove::<ExtractionOutput>()
             .ok_or_else(|| {
                 PipelineError::Authorization("ExtractionOutput not found in phases".into())
             })
@@ -62,6 +62,9 @@ impl PipelineStage for AuthorizationStage {
 
         obs.authorized(t.elapsed());
 
-        Ok(AuthorizationOutput { authorizations })
+        Ok(AuthorizationOutput {
+            query_result: input.query_result,
+            authorizations,
+        })
     }
 }
