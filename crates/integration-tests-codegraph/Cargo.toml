@@ -15,7 +15,6 @@ arrow = { workspace = true }
 crossbeam-channel = "0.5"
 globset = { workspace = true }
 rayon = { workspace = true }
-petgraph = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 orbit-utils = { path = "../utils" }

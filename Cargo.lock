@@ -3987,7 +3987,6 @@ dependencies = [
  "globset",
  "ontology",
  "orbit-utils",
- "petgraph",
  "rayon",
  "serde",
  "serde_json",
