@@ -203,14 +203,8 @@
             {
               "if": {
                 "not": {
-                  "properties": {
-                    "type": {
-                      "const": "enum"
-                    }
-                  },
-                  "required": [
-                    "type"
-                  ]
+                  "properties": { "type": { "const": "enum" } },
+                  "required": ["type"]
                 }
               },
               "then": {
@@ -223,22 +217,12 @@
             {
               "if": {
                 "not": {
-                  "properties": {
-                    "type": {
-                      "const": "string"
-                    }
-                  },
-                  "required": [
-                    "type"
-                  ]
+                  "properties": { "type": { "const": "string" } },
+                  "required": ["type"]
                 }
               },
               "then": {
-                "properties": {
-                  "binary": {
-                    "const": false
-                  }
-                }
+                "properties": { "binary": { "const": false } }
               }
             }
           ]
@@ -497,7 +481,7 @@
         },
         "statistics": {
           "type": "object",
-          "description": "Automated column statistics collection via AggregatingMergeTree MVs. All filterable properties on all entities are auto-tracked. Categorization is derived from property types: boolean/enum/selectivity:low → stats_table (value frequencies), string → token_table (token frequencies), int64/timestamp/date/float → histogram_table (equi-depth buckets), uuid → skipped.",
+          "description": "Automated column statistics collection via AggregatingMergeTree MVs. All filterable properties on all entities are auto-tracked. Categorization is derived from property types: boolean/enum/selectivity:low \u2192 stats_table (value frequencies), string \u2192 token_table (token frequencies), int64/timestamp/date/float \u2192 histogram_table (equi-depth buckets), uuid \u2192 skipped.",
           "properties": {
             "stats_table": {
               "type": "string",
@@ -592,10 +576,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "name",
-              "hops"
-            ],
+            "required": ["name", "hops"],
             "properties": {
               "name": {
                 "type": "string",
@@ -609,27 +590,14 @@
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": [
-                    "relationship",
-                    "from",
-                    "to"
-                  ],
+                  "required": ["relationship", "from", "to"],
                   "properties": {
-                    "relationship": {
-                      "type": "string"
-                    },
-                    "from": {
-                      "type": "string"
-                    },
-                    "to": {
-                      "type": "string"
-                    },
+                    "relationship": { "type": "string" },
+                    "from": { "type": "string" },
+                    "to": { "type": "string" },
                     "via": {
                       "type": "string",
-                      "enum": [
-                        "edge",
-                        "fk"
-                      ],
+                      "enum": ["edge", "fk"],
                       "default": "edge",
                       "description": "edge: include the edge table in the chain. fk: join the two node tables directly on the variant's fk_column."
                     }
@@ -663,10 +631,7 @@
                       "description": "Source column the strategy reads, e.g. traversal_path."
                     }
                   },
-                  "required": [
-                    "buckets",
-                    "column"
-                  ],
+                  "required": ["buckets", "column"],
                   "additionalProperties": false
                 }
               },
@@ -676,24 +641,18 @@
             },
             "include_entities": {
               "type": "array",
-              "items": {
-                "type": "string"
-              },
+              "items": { "type": "string" },
               "uniqueItems": true,
               "description": "Node entity names to partition; other node tables stay unpartitioned."
             },
             "include_edge_tables": {
               "type": "array",
-              "items": {
-                "type": "string"
-              },
+              "items": { "type": "string" },
               "uniqueItems": true,
               "description": "Edge table names to partition; other edge tables stay unpartitioned."
             }
           },
-          "required": [
-            "strategy"
-          ],
+          "required": ["strategy"],
           "additionalProperties": false
         },
         "internal_column_prefix": {
@@ -784,9 +743,7 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": {
-                "type": "string"
-              },
+              "name": { "type": "string" },
               "versioned": {
                 "type": "boolean",
                 "description": "Whether the table receives the active schema-version prefix. Defaults to true."
@@ -822,24 +779,10 @@
                   "additionalProperties": false
                 }
               },
-              "order_by": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "version_only_engine": {
-                "type": "boolean"
-              },
-              "version_type": {
-                "type": "string"
-              },
-              "projections": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/definitions/storageProjection"
-                }
-              },
+              "order_by": { "type": "array", "items": { "type": "string" } },
+              "version_only_engine": { "type": "boolean" },
+              "version_type": { "type": "string" },
+              "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } },
               "include_system_columns": {
                 "type": "boolean",
                 "description": "Whether _version and _deleted columns are generated. Defaults to true."
@@ -963,13 +906,7 @@
                 "description": "MiniJinja SQL SELECT template path relative to the ontology directory. Use the .sql.j2 suffix."
               }
             },
-            "required": [
-              "name",
-              "versioned",
-              "append_to",
-              "refresh",
-              "select_file"
-            ],
+            "required": ["name", "versioned", "append_to", "refresh", "select_file"],
             "additionalProperties": false
           }
         },
@@ -1319,7 +1256,7 @@
         "prune_to_source",
         "prune_to_target"
       ],
-      "description": "How a resolved traversal_path prefix relates to an edge variant's endpoints. 'namespace_anchor': source FK points to a Project/Group anchor; propagates and enables anchor FK resolution. 'same_namespace': both endpoints share a namespace subtree; prefix propagates across the edge. 'prune_to_source'/'prune_to_target': confine the edge's own scan to the named endpoint's namespace WITHOUT propagating, so the other endpoint may be a global hub (User/Runner/Label) — the named endpoint must be path-scopable. Omitted (default): fail-closed, no scoping or propagation."
+      "description": "How a resolved traversal_path prefix relates to an edge variant's endpoints. 'namespace_anchor': source FK points to a Project/Group anchor; propagates and enables anchor FK resolution. 'same_namespace': both endpoints share a namespace subtree; prefix propagates across the edge. 'prune_to_source'/'prune_to_target': confine the edge's own scan to the named endpoint's namespace WITHOUT propagating, so the other endpoint may be a global hub (User/Runner/Label) \u2014 the named endpoint must be path-scopable. Omitted (default): fail-closed, no scoping or propagation."
     },
     "edgeVariant": {
       "type": "object",
