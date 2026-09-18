@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::rank::rank_alternatives_and_trim;
+use crate::rank::{EXACT_NAME_SIM, rank_alternatives_and_trim};
 use crate::text::{camel_words, content_words};
 use crate::types::SearchCandidate;
 use crate::vocab::SearchVocab;
 
 pub struct GrepOutcome {
     pub terms: Vec<String>,
+    pub exact_alternatives: Vec<String>,
     pub matches: Vec<GrepMatch>,
     pub total: usize,
 }
@@ -134,13 +135,21 @@ pub fn grep<S: GrepSource>(
 ) -> Result<GrepOutcome, GrepError<S::Error>> {
     let mut alternatives = Vec::new();
     let mut terms = Vec::new();
+    let mut exact_alternatives = Vec::new();
     let mut recalls = Vec::new();
     let mut queries = HashSet::new();
     for alternative in query.split('|').map(str::trim) {
-        if !queries.insert(alternative) {
+        if !queries.insert(alternative.to_lowercase()) {
             continue;
         }
         let (words, recalled) = recall_query(source, alternative, vocab, filter)?;
+        if !alternative.chars().any(char::is_whitespace)
+            && recalled
+                .iter()
+                .any(|term| term.hits.iter().any(|(_, score)| *score >= EXACT_NAME_SIM))
+        {
+            exact_alternatives.push(alternative.to_string());
+        }
         if !terms.is_empty() {
             terms.push("|".to_string());
         }
@@ -185,6 +194,7 @@ pub fn grep<S: GrepSource>(
         .collect();
     Ok(GrepOutcome {
         terms,
+        exact_alternatives,
         matches,
         total: corpus.len(),
     })
@@ -259,6 +269,59 @@ mod tests {
         assert_eq!(outcome.matches.len(), 2);
         assert_eq!(outcome.total, 2);
         assert_eq!(outcome.matches[0].id, HOOK_ID);
+        assert!(outcome.exact_alternatives.is_empty());
+    }
+
+    #[test]
+    fn exact_alternatives_track_identifier_queries_before_result_limits() {
+        let outcome = grep(
+            &FakeRecallSource,
+            "missing|commit|hook|commit",
+            1,
+            &test_vocab(),
+            &RecallFilter::default(),
+        )
+        .unwrap();
+        assert_eq!(outcome.matches.len(), 1);
+        assert_eq!(outcome.exact_alternatives, ["commit", "hook"]);
+    }
+
+    #[test]
+    fn case_variants_are_recalled_once() {
+        struct CountingSource<'a>(&'a std::cell::Cell<usize>);
+
+        impl GrepSource for CountingSource<'_> {
+            type Error = std::convert::Infallible;
+
+            fn stem(&self, words: &[String]) -> Result<Vec<String>, Self::Error> {
+                FakeRecallSource.stem(words)
+            }
+
+            fn recall(
+                &self,
+                terms: &[String],
+                filter: &RecallFilter,
+            ) -> Result<Vec<TermRecall>, Self::Error> {
+                self.0.set(self.0.get() + 1);
+                FakeRecallSource.recall(terms, filter)
+            }
+
+            fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<SearchCandidate>, Self::Error> {
+                FakeRecallSource.rows_by_ids(ids)
+            }
+        }
+
+        let calls = std::cell::Cell::new(0);
+        let outcome = grep(
+            &CountingSource(&calls),
+            "commit|COMMIT",
+            5,
+            &test_vocab(),
+            &RecallFilter::default(),
+        )
+        .unwrap();
+        assert_eq!(calls.get(), 1);
+        assert_eq!(outcome.exact_alternatives, ["commit"]);
     }
 
     #[test]

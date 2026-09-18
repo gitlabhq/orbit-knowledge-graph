@@ -1,5 +1,5 @@
 name: grep
-version: 1.7.0
+version: 1.8.0
 short: Search local definition names, paths, and bodies
 description: >-
   Search local definition names, paths, and bodies.
@@ -10,8 +10,10 @@ description: >-
   more alternatives. This is not regex syntax; each alternative needs search terms.
 
 
-  Returns ranked `Definition:<id>` references. Each search previews up to three
-  exact-name hits, or the top three matches if none are exact, within 120 source
+  Returns ranked `Definition:<id>` references. Identifier alternatives report
+  exact hits and exact misses separately. Each search previews up to three
+  exact-name hits, or the top related match if none are exact, within 120 source
   lines. Repeated previews and overlapping source print once per invocation.
-  Larger bodies appear as outlines. Use `--path` or `--kind` to narrow, then
-  batch needed IDs in context for complete source and indexed relationships.
+  Output is already bounded; never pipe it through `head` or `tail`. Use the
+  printed `next:` command to batch relevant IDs in context for complete source
+  and indexed relationships.

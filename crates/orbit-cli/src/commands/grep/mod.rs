@@ -30,7 +30,9 @@ fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVo
     ))
 }
 
-const BODY_LIMIT: usize = 3;
+const EXACT_BODY_LIMIT: usize = 3;
+const RELATED_BODY_LIMIT: usize = 1;
+const CONTEXT_HINT_LIMIT: usize = 3;
 
 pub(crate) fn run(
     query: Option<String>,
@@ -71,6 +73,7 @@ pub(crate) fn run(
     if outcome.terms != typed {
         writeln!(out, "terms: {}", outcome.terms.join(" "))?;
     }
+    report_exact_query_note(&mut out, &query, &outcome)?;
 
     if nodes.is_empty() {
         if paths.is_empty() && filter.is_empty() {
@@ -97,12 +100,19 @@ pub(crate) fn run(
         .filter(|hit| hit.exact_name)
         .map(|hit| hit.id)
         .collect();
-    let defs: Vec<_> = nodes
+    let context_nodes: Vec<_> = nodes
         .iter()
         .filter(|node| exact.is_empty() || exact.contains(&node.id))
-        .take(BODY_LIMIT)
+        .take(CONTEXT_HINT_LIMIT)
         .cloned()
         .collect();
+    report_context_hint(&mut out, &context_nodes, launcher)?;
+    let body_limit = if exact.is_empty() {
+        RELATED_BODY_LIMIT
+    } else {
+        EXACT_BODY_LIMIT
+    };
+    let defs: Vec<_> = context_nodes.into_iter().take(body_limit).collect();
     writeln!(out)?;
     write!(
         out,
@@ -163,6 +173,15 @@ fn report_results(
     Ok(())
 }
 
+fn report_context_hint(out: &mut impl Write, nodes: &[NodeValue], launcher: &str) -> Result<()> {
+    write!(out, "\nnext: {launcher} context")?;
+    for node in nodes {
+        write!(out, " {}:{}", node.entity_type, node.id)?;
+    }
+    writeln!(out)?;
+    Ok(())
+}
+
 fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
     let range = context::source_range(node)?;
     writeln!(
@@ -175,6 +194,50 @@ fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
 
 const COMPOUND_TERM_HINT: usize = 5;
 const BROAD_HIDDEN_HITS: usize = 100;
+
+fn report_exact_query_note(
+    out: &mut impl Write,
+    query: &str,
+    outcome: &orbit_search::GrepOutcome,
+) -> std::io::Result<()> {
+    let exact: HashSet<_> = outcome
+        .exact_alternatives
+        .iter()
+        .map(|alternative| alternative.to_lowercase())
+        .collect();
+    let mut seen = HashSet::new();
+    let alternatives: Vec<_> = query
+        .split('|')
+        .map(str::trim)
+        .filter(|alternative| {
+            !alternative.is_empty()
+                && !alternative.chars().any(char::is_whitespace)
+                && !content_words(alternative).is_empty()
+                && seen.insert(alternative.to_lowercase())
+        })
+        .collect();
+    let matched: Vec<_> = alternatives
+        .iter()
+        .copied()
+        .filter(|alternative| exact.contains(&alternative.to_lowercase()))
+        .collect();
+    let missing: Vec<_> = alternatives
+        .iter()
+        .copied()
+        .filter(|alternative| !exact.contains(&alternative.to_lowercase()))
+        .collect();
+    if !matched.is_empty() {
+        writeln!(out, "exact: {}", matched.join(" | "))?;
+    }
+    if !missing.is_empty() {
+        writeln!(
+            out,
+            "exact-miss: {} (showing related matches)",
+            missing.join(" | ")
+        )?;
+    }
+    Ok(())
+}
 
 fn report_query_note(
     out: &mut impl Write,
@@ -205,6 +268,7 @@ mod tests {
     fn outcome() -> orbit_search::GrepOutcome {
         orbit_search::GrepOutcome {
             terms: Vec::new(),
+            exact_alternatives: Vec::new(),
             matches: Vec::new(),
             total: 0,
         }
@@ -252,6 +316,33 @@ mod tests {
         let mut buf = Vec::new();
         report_results(&mut buf, &o, &[]).unwrap();
         assert!(!String::from_utf8(buf).unwrap().contains(" more"));
+    }
+
+    #[test]
+    fn exact_query_note_distinguishes_or_alternatives() {
+        let mut result = outcome();
+        result.exact_alternatives = vec!["present".to_string()];
+        let mut buf = Vec::new();
+        report_exact_query_note(&mut buf, "present|missing|natural language", &result).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "exact: present\nexact-miss: missing (showing related matches)\n"
+        );
+    }
+
+    #[test]
+    fn context_hint_is_copyable_and_batched() {
+        let nodes = [481, 482].map(|id| NodeValue {
+            entity_type: "Definition".to_string(),
+            id,
+            properties: serde_json::Map::new(),
+        });
+        let mut buf = Vec::new();
+        report_context_hint(&mut buf, &nodes, "orbit").unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "\nnext: orbit context Definition:481 Definition:482\n"
+        );
     }
 
     #[test]

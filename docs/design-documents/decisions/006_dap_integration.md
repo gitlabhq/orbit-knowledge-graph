@@ -188,8 +188,10 @@ agent a shell get Orbit this way for free; the MCP path exists for the
 surfaces that do not.
 
 Orbit Local `grep` finds definitions; quoted `a|b` alternatives share one result
-list. Previews favor exact names and omit repeated source. `context` returns
-file definition maps or complete definition source, with indexed relationships.
+list. Identifier alternatives label exact hits and misses. Previews favor exact
+names, show one related body when no exact name matches, omit repeated source,
+and print a copyable batched `context` command. `context` returns file definition
+maps or complete definition source, with indexed relationships.
 It accepts mixed file and definition targets and shows test connections by
 default.
 
