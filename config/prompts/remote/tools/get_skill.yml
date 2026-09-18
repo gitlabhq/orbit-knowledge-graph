@@ -1,0 +1,6 @@
+name: get_skill
+version: 1.0.0
+summary: Return a complete deployed Orbit skill tree or metadata only.
+description: >-
+  Return a complete deployed Orbit skill tree with file hashes, or only its
+  identity and cache metadata.

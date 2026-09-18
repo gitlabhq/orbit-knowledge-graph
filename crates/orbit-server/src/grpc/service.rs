@@ -59,6 +59,7 @@ fn command_error_to_status(error: ExecutorError) -> Status {
         ExecutorError::NotFound(_) => Status::not_found(error.to_string()),
         ExecutorError::InvalidArguments(_) => Status::invalid_argument(error.to_string()),
         ExecutorError::InterceptedCommand(_) => Status::failed_precondition(error.to_string()),
+        ExecutorError::SkillNotFound(_) => Status::not_found(error.to_string()),
     }
 }
 
@@ -257,6 +258,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             }
             AgentCommand::QueryLanguage { format } => ToolService::render_query_language(format),
             AgentCommand::ResponseFormat { format } => ToolService::render_response_format(format),
+            AgentCommand::ListSkills => Ok(ToolService::render_skills()),
+            AgentCommand::GetSkill {
+                name,
+                metadata_only,
+            } => ToolService::render_skill(&name, metadata_only),
         }
         .map_err(command_error_to_status)?;
 

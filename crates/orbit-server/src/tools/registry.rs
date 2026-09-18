@@ -10,7 +10,7 @@ pub struct ToolDefinition {
     pub parameters: serde_json::Value,
 }
 
-pub(super) fn command_summaries() -> [(&'static str, &'static str); 4] {
+pub(super) fn command_summaries() -> [(&'static str, &'static str); 6] {
     [
         ("query_graph", prompt("tools/query_graph").summary()),
         (
@@ -22,6 +22,8 @@ pub(super) fn command_summaries() -> [(&'static str, &'static str); 4] {
             "get_response_format",
             prompt("tools/get_response_format").summary(),
         ),
+        ("list_skills", prompt("tools/list_skills").summary()),
+        ("get_skill", prompt("tools/get_skill").summary()),
     ]
 }
 
@@ -50,6 +52,14 @@ pub(super) mod params {
             "type": "string",
             "enum": ["llm", "raw"],
             "description": "Output format. 'llm' (default) returns compact text optimized for AI. 'raw' returns structured JSON."
+        })
+    }
+
+    pub fn artifact_format() -> Value {
+        json!({
+            "type": "string",
+            "enum": ["llm", "raw"],
+            "description": "Accepted for command-registry compatibility. Both values return the same structured artifact so file content and hashes remain unchanged."
         })
     }
 
@@ -155,6 +165,8 @@ impl CommandRegistry {
             Self::get_graph_schema(),
             Self::get_query_dsl(),
             Self::get_response_format(),
+            Self::list_skills(),
+            Self::get_skill(),
         ]
     }
 
@@ -204,6 +216,43 @@ impl CommandRegistry {
                 "type": "object",
                 "properties": {
                     "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn list_skills() -> ToolDefinition {
+        ToolDefinition {
+            name: "list_skills".into(),
+            description: prompt("tools/list_skills").description().into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "format": params::artifact_format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_skill() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_skill".into(),
+            description: prompt("tools/get_skill").description().into(),
+            parameters: json!({
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Skill name returned by list_skills."
+                    },
+                    "metadata_only": {
+                        "type": "boolean",
+                        "description": "Omit files and return only identity and cache metadata."
+                    },
+                    "format": params::artifact_format()
                 },
                 "additionalProperties": false
             }),
@@ -267,10 +316,40 @@ mod tests {
     #[test]
     fn expected_commands_are_registered() {
         let names: Vec<String> = all_commands().into_iter().map(|t| t.name).collect();
-        assert!(names.contains(&"query_graph".into()));
-        assert!(names.contains(&"get_graph_schema".into()));
-        assert!(names.contains(&"get_query_dsl".into()));
-        assert!(names.contains(&"get_response_format".into()));
+        assert_eq!(
+            names,
+            [
+                "query_graph",
+                "get_graph_schema",
+                "get_query_dsl",
+                "get_response_format",
+                "list_skills",
+                "get_skill",
+            ]
+        );
+    }
+
+    #[test]
+    fn skill_commands_accept_only_raw_or_llm_format() {
+        for name in ["list_skills", "get_skill"] {
+            let command = find_command(name);
+            assert_eq!(
+                command.parameters["properties"]["format"]["enum"],
+                json!(["llm", "raw"])
+            );
+            assert!(
+                command.parameters["required"]
+                    .as_array()
+                    .is_none_or(|required| !required.iter().any(|value| value == "format"))
+            );
+        }
+    }
+
+    #[test]
+    fn get_skill_requires_name_and_accepts_metadata_only() {
+        let command = find_command("get_skill");
+        assert!(command.parameters["properties"]["metadata_only"].is_object());
+        assert_eq!(command.parameters["required"], json!(["name"]));
     }
 
     #[test]

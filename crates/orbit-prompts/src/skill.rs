@@ -602,6 +602,38 @@ mod tests {
     }
 
     #[test]
+    fn normalized_skill_paths_reject_absolute_and_parent_components() {
+        for path in [Path::new("/SKILL.md"), Path::new("references/../SKILL.md")] {
+            assert!(
+                normalized_relative_path(path).is_err(),
+                "{}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn validation_rejects_non_utf8_file_content() {
+        let root = fixture();
+        std::fs::write(root.path().join("remote/references/remote.md"), [0xff]).unwrap();
+        let error = validate(root.path()).unwrap_err();
+        assert!(error.contains("UTF-8 skill file"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normalized_skill_paths_reject_non_utf8_names() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = Path::new(std::ffi::OsStr::from_bytes(b"references/\xff.md"));
+        assert!(
+            normalized_relative_path(path)
+                .unwrap_err()
+                .contains("not UTF-8")
+        );
+    }
+
+    #[test]
     fn links_resolve_across_the_composed_union() {
         let root = fixture();
         std::fs::write(

@@ -521,3 +521,65 @@ async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
     };
     assert!(text.contains("QueryDSL v"));
 }
+
+#[tokio::test]
+async fn list_skills_returns_deployed_skill_metadata() {
+    let result = command_json("list_skills", "{}").await;
+    let skills = result["skills"].as_array().unwrap();
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0]["name"], "orbit");
+    assert_eq!(skills[0]["version"], "0.29.0");
+    assert_eq!(skills[0]["tree_sha256"].as_str().unwrap().len(), 64);
+    assert!(
+        skills[0]["description"]
+            .as_str()
+            .unwrap()
+            .contains("glab orbit")
+    );
+}
+
+#[tokio::test]
+async fn get_skill_returns_same_raw_artifact_for_both_formats() {
+    let raw = command_json("get_skill", r#"{"name":"orbit","format":"raw"}"#).await;
+    let llm = command_json("get_skill", r#"{"name":"orbit","format":"llm"}"#).await;
+    assert_eq!(raw, llm);
+
+    let files = raw["files"].as_array().unwrap();
+    assert_eq!(files.len(), 10);
+    assert_eq!(files[0]["path"], "SKILL.md");
+    assert!(
+        files
+            .windows(2)
+            .all(|pair| { pair[0]["path"].as_str().unwrap() < pair[1]["path"].as_str().unwrap() })
+    );
+}
+
+#[tokio::test]
+async fn get_skill_metadata_only_omits_files() {
+    let result = command_json("get_skill", r#"{"name":"orbit","metadata_only":true}"#).await;
+    assert_eq!(result["name"], "orbit");
+    assert!(result.get("files").is_none());
+}
+
+#[tokio::test]
+async fn skill_commands_reject_unsupported_formats() {
+    for command in ["list_skills", "get_skill"] {
+        let parameters = if command == "get_skill" {
+            r#"{"name":"orbit","format":"toon"}"#
+        } else {
+            r#"{"format":"toon"}"#
+        };
+        let error = command_response(command, parameters).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    }
+}
+
+#[tokio::test]
+async fn get_skill_unknown_name_is_typed_not_found_with_known_names() {
+    let error = command_response("get_skill", r#"{"name":"missing"}"#)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::NotFound);
+    assert!(error.message().contains("missing"));
+    assert!(error.message().contains("orbit"));
+}

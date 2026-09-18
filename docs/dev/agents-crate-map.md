@@ -1,12 +1,15 @@
 # Crate map
 
-Every `[workspace]` member needs a row here, as enforced by `crates/xtask/build.rs`; additions, removals, and renames must also update [the documentation sync points](../../CONTRIBUTING.md#documentation-conventions) in the same MR.
+Every `[workspace]` member needs a row here, as enforced by
+`crates/xtask/build.rs`. Additions, removals, and renames must also update
+[the documentation sync points](../../CONTRIBUTING.md#documentation-conventions)
+in the same MR.
 
 Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, HealthCheck via `--mode`).
 
 | Crate | Role |
 |---|---|
-| `orbit-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading, schema-version readiness gate (`active_schema.rs`), MCP tool registry, and Orbit agent command registry (`CommandRegistry`) |
+| `orbit-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading, schema-version readiness gate (`active_schema.rs`), MCP tool registry, Orbit agent command registry (`CommandRegistry`), and the deployed remote skill whole-tree contract (`list_skills`/`get_skill`) |
 | `orbit-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, `QuerySettings`, etc.) and `OnceLock` global for query settings; avoids circular dep between server and compiler |
 | `orbit-analytics` | Consumer-owned Snowplow context types (`OrbitCommonContext`, `OrbitQueryContext`) and tracker infrastructure (`AnalyticsTracker` trait, `SnowplowAnalyticsTracker`, `InMemoryAnalyticsTracker`). Context wrappers implement `labkit_events::SnowplowContext` over typify-codegen'd data types. `build.rs` runs `typify::TypeSpace` over `config/schemas/iglu/<name>/<version>.json` at build time and emits a module per schema (struct + `SCHEMA_URI` + `SCHEMA_JSON` consts) into `OUT_DIR/iglu_schemas.rs`; runtime never reads schema files. `load_schema_json()` returns the embedded JSON for test-time validator compilation. |
 | `orbit-billing` | Snowplow billing-event emission (`BillingObserver`, `BillingTracker`, `BillingInputs`) and CDot quota enforcement (`QuotaService`). Licensed as `LicenseRef-EE`. The billing adapter in `orbit-server/src/billing_adapter.rs` is the single `Claims → BillingInputs` conversion point (SOX auditable surface). Billing event metrics: `gkg.billing.events.{emitted,dropped,rejected,delivered,delivery_failed}`. |

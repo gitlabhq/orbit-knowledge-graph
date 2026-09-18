@@ -11,7 +11,8 @@ use toon_format::{EncodeOptions, encode};
 
 use super::registry::ToolDefinition;
 use super::schema::{condensed_query_schema, query_dsl_version, raw_query_schema};
-use super::{CommandRegistry, ToolRegistry};
+use super::skills::SkillNotFound;
+use super::{CommandRegistry, ToolRegistry, get_skill, list_skills};
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
@@ -23,6 +24,9 @@ pub enum ExecutorError {
 
     #[error("Command is handled by Rails interceptor: {0}")]
     InterceptedCommand(String),
+
+    #[error(transparent)]
+    SkillNotFound(#[from] SkillNotFound),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -52,6 +56,11 @@ pub(crate) enum AgentCommand {
     },
     ResponseFormat {
         format: OutputFormat,
+    },
+    ListSkills,
+    GetSkill {
+        name: String,
+        metadata_only: bool,
     },
 }
 
@@ -171,6 +180,15 @@ impl ToolService {
             }
             "get_query_dsl" => Ok(AgentCommand::QueryLanguage { format }),
             "get_response_format" => Ok(AgentCommand::ResponseFormat { format }),
+            "list_skills" => Ok(AgentCommand::ListSkills),
+            "get_skill" => {
+                let parameters: GetSkillArgs = serde_json::from_value(arguments)
+                    .map_err(|error| ExecutorError::InvalidArguments(error.to_string()))?;
+                Ok(AgentCommand::GetSkill {
+                    name: parameters.name,
+                    metadata_only: parameters.metadata_only,
+                })
+            }
             _ => Err(ExecutorError::NotFound(command_name.to_string())),
         }
     }
@@ -284,6 +302,17 @@ impl ToolService {
         Ok(result)
     }
 
+    pub(crate) fn render_skills() -> Value {
+        json!({ "skills": list_skills() })
+    }
+
+    pub(crate) fn render_skill(name: &str, metadata_only: bool) -> Result<Value, ExecutorError> {
+        let skill = get_skill(name, metadata_only)?;
+        serde_json::to_value(skill).map_err(|error| {
+            ExecutorError::InvalidArguments(format!("Failed to encode skill tree: {error}"))
+        })
+    }
+
     pub(crate) fn render_response_format(format: OutputFormat) -> Result<Value, ExecutorError> {
         let version = Self::build_response_format_version();
         let schema = Self::build_response_format_schema();
@@ -314,6 +343,13 @@ fn parse_format(arguments: &Value) -> OutputFormat {
         .and_then(|v| v.as_str())
         .map(OutputFormat::from_str_lossy)
         .unwrap_or_default()
+}
+
+#[derive(Debug, Deserialize)]
+struct GetSkillArgs {
+    name: String,
+    #[serde(default)]
+    metadata_only: bool,
 }
 
 #[derive(Debug, Deserialize)]

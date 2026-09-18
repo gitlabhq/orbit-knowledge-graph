@@ -1,0 +1,6 @@
+name: list_skills
+version: 1.0.0
+summary: List deployed Orbit skills with their versions and tree hashes.
+description: >-
+  List deployed Orbit skills with their descriptions, versions, and canonical
+  tree hashes.

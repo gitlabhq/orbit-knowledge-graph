@@ -61,13 +61,40 @@ Initial catalog:
 | `get_graph_schema` | GKG executor (`InvokeAgentCommand`) | Pure ontology lookup, no Rails context required |
 | `get_query_dsl` | GKG executor (`InvokeAgentCommand`) | Returns `config/schemas/graph_query.schema.json` and `config/QUERY_DSL_VERSION` (RAW) or a versioned TOON-condensed grammar (LLM) |
 | `get_response_format` | GKG executor (`InvokeAgentCommand`) | Returns the response JSON Schema and its semver from `RAW_OUTPUT_FORMAT_VERSION` |
+| `list_skills` | GKG executor (`InvokeAgentCommand`) | Lists the standalone Orbit Remote skills embedded in the deployed server |
+| `get_skill` | GKG executor (`InvokeAgentCommand`) | Returns one complete, versioned skill tree or metadata only |
 
-The two new commands (`get_query_dsl`, `get_response_format`) directly answer the discovery problems that motivated this ADR:
+The schema-discovery commands (`get_query_dsl`, `get_response_format`) directly answer the discovery problems that motivated this ADR:
 
 - `get_query_dsl` decouples the DSL grammar from the `query_graph` tool description. Agents that hit truncation can still fetch the full grammar on demand, along with `QUERY_DSL_VERSION`. Direct API consumers can use the `GetQueryDsl` RPC or a REST endpoint such as `GET /api/v4/orbit/dsl`; MCP agents use the command catalog and `InvokeAgentCommand`.
 - `get_response_format` returns the JSON Schema for the formatter output plus the matching `RAW_OUTPUT_FORMAT_VERSION`. Coding agents that build Python iteration on top of `query_graph` get an authoritative shape they can pin against.
 
-Both new commands accept a `format: raw | llm` parameter, mirroring `get_graph_schema`. RAW returns the verbatim JSON Schema; LLM returns a TOON-condensed form to save tokens.
+Both schema-discovery commands accept a `format: raw | llm` parameter, mirroring `get_graph_schema`. RAW returns the verbatim JSON Schema; LLM returns a TOON-condensed form to save tokens.
+
+### Deployed skill contract
+
+The server embeds only the standalone remote tree under `skills/orbit`. The local
+`skills/orbit-cli` tree remains owned by the Orbit Local binary and never crosses
+the GKG gRPC boundary. `list_skills` returns each embedded skill's front matter
+name, version, and description together with its canonical tree hash.
+`get_skill` requires `name`; `metadata_only: true` omits `files` so a proxy can
+revalidate cached metadata without transferring the tree.
+
+Full-tree responses sort files by normalized relative path. Each file includes
+its SHA-256 and UTF-8 content. For each sorted file, the tree hash first consumes
+the path's UTF-8 bytes and one NUL byte. The content byte length follows as an
+unsigned 64-bit big-endian integer, then the file content bytes. Build
+validation rejects non-UTF-8 content and paths that are not normalized and
+relative.
+
+Skill commands accept the registry's optional `format: raw | llm` parameter,
+but both values return the identical structured artifact in `result_json`.
+Transforming Markdown for LLM output would invalidate the advertised hashes.
+An unknown skill produces a typed `NOT_FOUND` command error carrying the sorted
+known skill names.
+
+This artifact envelope is separate from the query formatter response. Adding or
+changing it does not require a `raw_output_format` pin bump.
 
 ### Command flow
 
