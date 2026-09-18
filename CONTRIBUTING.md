@@ -60,27 +60,13 @@ Run `mise lint:docs` before pushing any documentation changes.
 
 ## Documentation conventions
 
-Design documents describe the current system. Update an owning design document when its behavior changes.
-
-Use these synchronization points:
-
-| Change | Update |
-| --- | --- |
-| High-level architecture or current system state | `docs/design-documents/README.md` |
-| Entities or relationships | `docs/design-documents/data_model.md` |
-| Indexing flow or runtime modes | `docs/design-documents/indexing/` |
-| Query surface, DSL, or response shape | `docs/design-documents/querying/` |
-| Crates | `docs/dev/agents-crate-map.md` |
-| Canonical files, schemas, or settings | `docs/dev/agents-reference-index.md` |
-| Owner document added, moved, or removed | Update the map in byte-identical `AGENTS.md` and `CLAUDE.md` files |
-
-Update all affected synchronization points in the same MR. This rule covers subsystem, runtime mode, crate, schema shape, and external dependency changes.
-
-Rewrite or remove stale design text instead of preserving history.
-
-Read `CONTEXT.md` before you write docs or MR text. Add or update a missing term when you introduce a domain concept.
-
-Add only domain terms that can confuse a new contributor.
+- Design documents describe the current system. Update the owning document under
+  `docs/design-documents/` in the same MR as a behavior change.
+- Rewrite or remove stale text instead of preserving history.
+- When you add, move, or remove an owning guide, update its pointers in the
+  byte-identical `AGENTS.md` and `CLAUDE.md` files.
+- Use the canonical terms in `CONTEXT.md`. Add a term only when a new domain
+  concept could confuse a new contributor.
 
 ## MR conventions
 
