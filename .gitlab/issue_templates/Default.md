@@ -1,15 +1,13 @@
 <!--
 TEMPLATE CONVENTION: read before filling this out
 
+A person creates this issue. Agents: show the draft and wait for approval
+before you create it (see CONTRIBUTING.md, Issue conventions). Put generated
+content in the Agent context block at the bottom. The sections above it stay
+in the author's own words and stay short.
+
 Each section below is for the *important* content a triager needs: the
-problem statement and the shape of the solution. Keep it short.
-
-Long-form output goes in the Agent context block at the bottom, not in the
-sections above. This covers exhaustive design exploration, related-code dumps,
-alternatives considered, and agent reasoning.
-
-Agents: if you feel the urge to write a wall of text, write it inside the
-Agent context block. The top sections stay terse.
+problem statement and the shape of the solution.
 -->
 
 ### Problem to Solve
