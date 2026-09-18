@@ -17,7 +17,7 @@ A comment flagged by EITHER detector is counted as narration.
 Doc comments (///, //!) are never flagged. Comments that contain a "why"
 signal (because, so, since, otherwise, must, note, safety, gotcha, http(s)
 URLs, issue refs like #123) are exempt from the block_label detector — those
-are the legitimate shapes the AGENTS.md rule wants to keep.
+are the legitimate shapes the CONTRIBUTING.md rule wants to keep.
 
 Usage:
   narration_score.py FILE.rs          # human report

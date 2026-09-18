@@ -1,5 +1,7 @@
 # Adding data to GitLab Orbit — an agent's playbook
 
+**Warning:** This guide is stale. Read [`crates/indexer/AGENTS.md`](../../crates/indexer/AGENTS.md) before you change ontology pipelines.
+
 > Audience: a coding agent (Claude Code or similar) tasked with adding a new
 > **node** or **edge** to the Orbit graph. This is the end-to-end,
 > cross-repo workflow distilled from shipping the Package Registry + Container
