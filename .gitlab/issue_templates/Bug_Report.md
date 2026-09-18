@@ -1,15 +1,14 @@
 <!--
 TEMPLATE CONVENTION: read before filling this out
 
+A person creates this issue. Agents: show the draft and wait for approval
+before you create it (see CONTRIBUTING.md, Issue conventions). Put generated
+content in the Agent context block at the bottom. The sections above it stay
+in the author's own words and stay short.
+
 Each section below is for the *important* content a triager needs: the
-one-line summary, the precise repro, the exact error. Keep it short.
-
-Long-form output goes in the Logs <details> block or the Agent context
-block at the bottom, not in the sections above. This covers full logs, file
-dumps, exhaustive hypothesis lists, and agent reasoning.
-
-Agents: if you feel the urge to write a wall of text, write it inside the
-Agent context block. The top sections stay terse.
+one-line summary, the precise repro, the exact error. Full logs go in the
+Logs block.
 -->
 
 ### Summary
