@@ -188,6 +188,7 @@ fn validate_local(ctx: &mut impl CompilerCtx) -> Result<()> {
     v.check_shape(&input)?;
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
+    input.compiler.inline_all = true;
     ctx.set_input(input);
     Ok(())
 }

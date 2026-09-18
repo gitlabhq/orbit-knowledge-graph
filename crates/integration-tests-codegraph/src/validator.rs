@@ -72,6 +72,10 @@ fn execute_cypher(
     ontology: &Arc<Ontology>,
 ) -> anyhow::Result<RecordBatch> {
     let (clean_query, aliases) = rewrite_query(cypher);
+    if !aliases.is_empty() {
+        eprintln!("  ALIASES: {aliases:?}");
+        eprintln!("  REWRITTEN: {clean_query}");
+    }
     let compiled = compile_local(&clean_query, Frontend::Gql, ontology)?;
     let sql = compiled.base.render();
     eprintln!("  SQL: {sql}");
