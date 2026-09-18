@@ -352,6 +352,38 @@ struct RepoMapArgs {
     command: Option<commands::repo_map::RepoMapCommand>,
 }
 
+#[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("skills"), long_about = descriptions::long("skills"))]
+struct SkillsArgs {
+    #[command(subcommand)]
+    command: Option<SkillsCommands>,
+
+    /// Skill name or a path in the default orbit skill.
+    #[arg(value_name = "NAME_OR_PATH", hide = true)]
+    name_or_path: Option<String>,
+
+    /// File to print from the named skill.
+    #[arg(value_name = "PATH", hide = true)]
+    path: Option<String>,
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+enum SkillsCommands {
+    #[command(
+        about = "Print a bundled agent skill file.",
+        long_about = "Print a file from an agent skill bundled with this binary without installing it."
+    )]
+    Get {
+        /// Skill name.
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// File relative to the skill root.
+        #[arg(value_name = "PATH", default_value = "SKILL.md")]
+        path: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Print the version string and exit.
@@ -365,21 +397,8 @@ enum Commands {
     Mcp(McpArgs),
     #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
-    #[command(
-        name = "skills",
-        alias = "skill",
-        about = descriptions::short("skills"),
-        long_about = descriptions::long("skills")
-    )]
-    Skills {
-        /// Skill name or a path in the default orbit skill.
-        #[arg(value_name = "NAME_OR_PATH")]
-        name_or_path: Option<String>,
-
-        /// File to print from the named skill.
-        #[arg(value_name = "PATH")]
-        path: Option<String>,
-    },
+    #[command(name = "skills", alias = "skill")]
+    Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
     Setup {
         /// Assistants to configure. Required when installing. `--remove`
@@ -638,7 +657,14 @@ async fn dispatch(command: Commands) -> Result<()> {
             ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
             ConfigCommands::List => commands::config::list(),
         },
-        Commands::Skills { name_or_path, path } => skill::run(name_or_path, path),
+        Commands::Skills(SkillsArgs {
+            command,
+            name_or_path,
+            path,
+        }) => match command {
+            Some(SkillsCommands::Get { name, path }) => skill::run(Some(name), Some(path)),
+            None => skill::run(name_or_path, path),
+        },
         Commands::Setup {
             assistants,
             remove,

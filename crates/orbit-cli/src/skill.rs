@@ -43,7 +43,7 @@ struct Frontmatter {
 fn manifest_binary_hint() -> String {
     let launcher = crate::commands::setup::spec::launcher();
     format!(
-        "\n\n---\n\nThe links above refer to the on-disk skill tree. Read a version-matched bundled file with `{launcher} skills orbit <path>`.\n"
+        "\n\n---\n\nThe links above refer to the on-disk skill tree. Read a version-matched bundled file with `{launcher} skills get orbit <path>`.\n"
     )
 }
 
@@ -63,8 +63,9 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
     if is_skill_name(first) {
         if !KNOWN_SKILLS.iter().any(|skill| skill.name == first) {
             bail!(
-                "unknown skill name {first:?}. Known skills:\n{}",
-                known_skill_list()
+                "unknown skill name {first:?}. Known skills:\n{}\n\nUse `{} skills get <name> [path]`.",
+                known_skill_list(),
+                crate::commands::setup::spec::launcher()
             );
         }
         return Ok(Request::Print {
@@ -138,8 +139,9 @@ fn manifest_description(manifest: &str) -> Result<String> {
 fn print_skill_file(requested: &str) -> Result<()> {
     let Some(rendered) = render(requested) else {
         bail!(
-            "unknown skill file {requested:?}. Available files:\n{}",
-            available_list()
+            "unknown skill file {requested:?}. Available files:\n{}\n\nUse `{} skills get <name> [path]`.",
+            available_list(),
+            crate::commands::setup::spec::launcher()
         );
     };
     print!("{rendered}");
@@ -297,17 +299,17 @@ mod tests {
     fn served_manifest_carries_binary_hint_but_subfiles_do_not() {
         let manifest = render(MANIFEST).unwrap();
         assert!(manifest.starts_with("---"), "frontmatter must stay first");
-        assert!(manifest.contains("`orbit skills orbit <path>`"));
+        assert!(manifest.contains("`orbit skills get orbit <path>`"));
 
         assert!(
             !render("references/local/sql.md")
                 .unwrap()
-                .contains("skills orbit <path>")
+                .contains("skills get orbit <path>")
         );
         assert!(
             !render("references/local/repo_map.md")
                 .unwrap()
-                .contains("skills orbit <path>")
+                .contains("skills get orbit <path>")
         );
     }
 }
