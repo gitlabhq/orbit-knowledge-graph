@@ -29,6 +29,8 @@ glab orbit ontology Project |
   jq '.nodes[] | select(.name == "Project") | .properties'
 ```
 
+The named-query catalog at `GET /api/v4/orbit/templates` is rendered for the caller in the language GitLab has enabled for them: JSON objects by default, GQL text when the `orbit_gql_queries` flag is on. Each entry names its `language`; see [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
+
 Each `glab orbit query` has fixed per-call overhead. Prefer one `aggregation` query over N traversal queries for "how many X grouped by Y", and batch related lookups.
 
 When editing Orbit docs or skills, fence executable query JSON as `json orbit-query` so docs smoke tests run it.

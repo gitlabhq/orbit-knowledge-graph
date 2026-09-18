@@ -393,8 +393,8 @@ enum Commands {
         #[arg(value_name = "FILE|QUERY", required_if_eq("language", "gql"))]
         source: Option<String>,
 
-        /// `json` (a query object or envelope file) or `gql` (inline
-        /// read-only query text).
+        /// Input shape: `json` (a query object or envelope file) or `gql`
+        /// (inline query text). The server decides which language it accepts.
         #[arg(long, value_enum, default_value = "json")]
         language: remote::query::QueryLanguage,
 

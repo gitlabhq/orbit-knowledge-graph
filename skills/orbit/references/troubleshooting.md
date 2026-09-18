@@ -79,6 +79,10 @@ Cause: the `orbit_query` rate limit. Fix: back off. For bulk agent work, lower `
 
 Common causes: a malformed JSON body (validate with `jq . /tmp/q.json`), an unreachable hostname (check `glab auth status`), or a network or TLS failure. Re-run with `--response-format raw` and read stderr.
 
+## Named-query catalog
+
+The catalog lists parameterless named queries rendered for the caller. Entries are JSON query objects by default and GQL text when GitLab has enabled the `orbit_gql_queries` flag for the caller; each entry carries `language`. The catalog binds caller identity, so do not reuse another caller's response. Missing entries can require client parameters or depend on entities unavailable in the active schema.
+
 ## Empty result body
 
 Usually the query matched no rows. Confirm with a known-good probe in `/tmp/q-min.json`:

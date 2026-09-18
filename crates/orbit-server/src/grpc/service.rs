@@ -47,6 +47,7 @@ use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, Result
 fn resolve_raw_query(
     query_type: i32,
     query: String,
+    frontend: Frontend,
     named_queries: &named_queries::NamedQueries,
     values: &named_queries::BindingValues,
 ) -> Result<RawQuery, String> {
@@ -55,13 +56,27 @@ fn resolve_raw_query(
         Ok(QueryType::Gql) => (query, Frontend::Gql),
         Ok(QueryType::Named) => (
             named_queries
-                .render_request(&query, values)
+                .render_request(&query, named_language(frontend), values)
                 .map_err(|e| e.to_string())?,
-            Frontend::JsonDsl,
+            frontend,
         ),
         Err(_) => return Err(format!("Unknown query_type: {query_type}")),
     };
     Ok(RawQuery { text, frontend })
+}
+
+fn named_language(frontend: Frontend) -> named_queries::Language {
+    match frontend {
+        Frontend::JsonDsl => named_queries::Language::Json,
+        Frontend::Gql => named_queries::Language::Gql,
+    }
+}
+
+fn wire_query_type(frontend: Frontend) -> QueryType {
+    match frontend {
+        Frontend::JsonDsl => QueryType::Json,
+        Frontend::Gql => QueryType::Gql,
+    }
 }
 
 fn schema_query_result(
@@ -223,7 +238,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             "Listing agent commands for user"
         );
 
-        let all_commands = CommandRegistry::get_all_commands();
+        let all_commands = CommandRegistry::commands_for(ctx.frontend);
         let commands: Vec<_> = if requested.is_empty() {
             all_commands
         } else {
@@ -301,6 +316,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 let schema = self.active_schema.snapshot()?;
                 ToolService::render_graph_schema(&schema.ontology, &expand_nodes, format)
             }
+            AgentCommand::QueryLanguage { .. } if ctx.frontend == Frontend::Gql => {
+                Err(ExecutorError::NotFound(
+                    "get_query_dsl is unavailable with GQL; run CALL db.schema()".into(),
+                ))
+            }
             AgentCommand::QueryLanguage { format } => ToolService::render_query_language(format),
             AgentCommand::ResponseFormat { format } => ToolService::render_response_format(format),
         }
@@ -355,6 +375,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 let resolved = resolve_raw_query(
                     req.query_type,
                     req.query,
+                    ctx.frontend,
                     &schema.named_queries,
                     &named_queries::BindingValues {
                         current_user_id: ctx.claims.user_id,
@@ -526,6 +547,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
 
+        if ctx.frontend == Frontend::Gql {
+            return Err(Status::not_found(
+                "GQL has no query DSL document; run CALL db.schema() for the graph shape",
+            ));
+        }
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching query DSL grammar for user");
 
@@ -627,7 +653,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             current_user_id: ctx.claims.user_id,
         };
         let schema = self.active_schema.snapshot()?;
-        let queries = named_query_definitions(&schema.named_queries, &values)
+        let queries = named_query_definitions(&schema.named_queries, ctx.frontend, &values)
             .map_err(|e| Status::internal(e.to_string()))?;
 
         info!(count = queries.len(), "Listing named queries");
@@ -826,8 +852,11 @@ impl OrbitServiceImpl {
 
 fn named_query_definitions(
     named_queries: &named_queries::NamedQueries,
+    frontend: Frontend,
     values: &named_queries::BindingValues,
 ) -> Result<Vec<NamedQueryDefinition>, named_queries::NamedQueryError> {
+    let language = named_language(frontend);
+    let query_type = wire_query_type(frontend);
     let mut queries: Vec<_> = named_queries
         .iter()
         .filter(|query| query.example_parameters().is_empty())
@@ -837,11 +866,12 @@ fn named_query_definitions(
     queries
         .into_iter()
         .map(|query| {
-            let raw_query = query.render(values, &query.example_parameters())?;
+            let raw_query = query.render(language, values, &query.example_parameters())?;
             Ok(NamedQueryDefinition {
                 name: query.name.clone(),
                 description: query.description.clone(),
                 raw_query,
+                query_type: query_type.into(),
             })
         })
         .collect()
@@ -904,6 +934,18 @@ mod tests {
 
     fn authed_request<T>(message: T) -> Request<T> {
         authed_request_for_user(message, 1)
+    }
+
+    fn with_language<T>(mut request: Request<T>, query_type: QueryType) -> Request<T> {
+        let value = match query_type {
+            QueryType::Gql => "gql",
+            _ => "json",
+        };
+        request.metadata_mut().insert(
+            super::super::auth::QUERY_LANGUAGE_HEADER,
+            MetadataValue::from_static(value),
+        );
+        request
     }
 
     fn authed_request_for_user<T>(message: T, user_id: u64) -> Request<T> {
@@ -1173,38 +1215,98 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_named_queries_returns_rendered_catalog() {
+    async fn list_named_queries_renders_the_header_language() {
         let service = test_service();
-        let response = service
-            .list_named_queries(authed_request(ListNamedQueriesRequest {}))
+        let ontology = service.active_schema.snapshot().unwrap().ontology.clone();
+        for (query_type, validate) in [
+            (
+                QueryType::Json,
+                query_engine::compiler::validate_normalize as fn(&str, &Arc<Ontology>) -> _,
+            ),
+            (
+                QueryType::Gql,
+                query_engine::compiler::validate_normalize_gql,
+            ),
+        ] {
+            let response = service
+                .list_named_queries(with_language(
+                    authed_request(ListNamedQueriesRequest {}),
+                    query_type,
+                ))
+                .await
+                .unwrap()
+                .into_inner();
+
+            for query in &response.queries {
+                assert!(!query.description.is_empty());
+                assert_eq!(query.query_type(), query_type);
+                validate(&query.raw_query, &ontology)
+                    .unwrap_or_else(|error| panic!("{}: {error}", query.name));
+                assert!(!query.raw_query.contains("{{"));
+                assert!(!query.raw_query.contains("$binding"));
+            }
+
+            let names: Vec<_> = response.queries.iter().map(|q| q.name.as_str()).collect();
+            assert_eq!(
+                names,
+                [
+                    "my_neighbors",
+                    "mrs_fixing_vulnerabilities",
+                    "my_mrs_with_pipelines",
+                    "recent_merges",
+                    "top_mr_authors"
+                ]
+            );
+        }
+        let mut request = authed_request(ListNamedQueriesRequest {});
+        request.metadata_mut().insert(
+            super::super::auth::QUERY_LANGUAGE_HEADER,
+            MetadataValue::from_static("cypher"),
+        );
+        let status = service.list_named_queries(request).await.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn gql_requests_lose_the_query_dsl_and_gain_db_schema_guidance() {
+        let service = test_service();
+        let status = service
+            .get_query_dsl(with_language(
+                authed_request(GetQueryDslRequest::default()),
+                QueryType::Gql,
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+        assert!(status.message().contains("CALL db.schema()"));
+
+        let commands = service
+            .list_agent_commands(with_language(
+                authed_request(ListAgentCommandsRequest {
+                    command_names: vec![],
+                    format: ResponseFormat::Raw as i32,
+                }),
+                QueryType::Gql,
+            ))
             .await
             .unwrap()
             .into_inner();
-
-        assert!(!response.queries.is_empty());
-        for query in &response.queries {
-            assert!(!query.name.is_empty());
-            assert!(!query.description.is_empty());
-            let dsl: serde_json::Value = serde_json::from_str(&query.raw_query)
-                .unwrap_or_else(|e| panic!("`{}` DSL must be valid JSON: {e}", query.name));
-            assert!(dsl.is_object(), "`{}` DSL must be an object", query.name);
-            assert!(
-                !query.raw_query.contains("$binding") && !query.raw_query.contains("$param"),
-                "`{}` DSL must have all placeholders resolved: {}",
-                query.name,
-                query.raw_query
-            );
-        }
-
-        let names: Vec<_> = response.queries.iter().map(|q| q.name.as_str()).collect();
-        assert!(
-            !names.contains(&"expand_neighbors"),
-            "parameter-driven queries must be excluded from the catalog, got {names:?}"
-        );
+        let names: Vec<_> = commands.commands.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(
-            names.first(),
-            Some(&"my_neighbors"),
-            "the default query must lead the catalog, got {names:?}"
+            names,
+            ["query_graph", "get_graph_schema", "get_response_format"]
+        );
+        assert!(
+            commands.commands[0]
+                .description
+                .contains("CALL db.schema()")
+        );
+
+        assert!(
+            service
+                .get_query_dsl(authed_request(GetQueryDslRequest::default()))
+                .await
+                .is_ok()
         );
     }
 
@@ -1213,22 +1315,105 @@ mod tests {
         let user_id = 424_242;
 
         let service = test_service();
-        let response = service
-            .list_named_queries(authed_request_for_user(ListNamedQueriesRequest {}, user_id))
-            .await
-            .unwrap()
-            .into_inner();
+        for query_type in [QueryType::Json, QueryType::Gql] {
+            let response = service
+                .list_named_queries(with_language(
+                    authed_request_for_user(ListNamedQueriesRequest {}, user_id),
+                    query_type,
+                ))
+                .await
+                .unwrap()
+                .into_inner();
 
-        let my_neighbors = response
-            .queries
-            .iter()
-            .find(|q| q.name == "my_neighbors")
-            .expect("my_neighbors is an embedded named query");
+            let my_neighbors = response
+                .queries
+                .iter()
+                .find(|q| q.name == "my_neighbors")
+                .expect("my_neighbors is an embedded named query");
+            assert!(
+                my_neighbors.raw_query.contains("424242"),
+                "my_neighbors should contain the caller's user_id: {}",
+                my_neighbors.raw_query
+            );
+        }
+    }
+
+    #[test]
+    fn named_requests_follow_the_request_language() {
+        let queries = named_queries::NamedQueries::load_embedded().unwrap();
+        let bindings = named_queries::BindingValues {
+            current_user_id: 73,
+        };
+        let resolved = resolve_raw_query(
+            QueryType::Named as i32,
+            r#"{"name":"my_neighbors"}"#.into(),
+            Frontend::JsonDsl,
+            &queries,
+            &bindings,
+        )
+        .unwrap();
+        assert_eq!(resolved.frontend, Frontend::JsonDsl);
+        let input = query_engine::compiler::parse_input(&resolved.text).unwrap();
+        assert_eq!(input.nodes[0].node_ids, vec![73]);
+        let resolved = resolve_raw_query(
+            QueryType::Named as i32,
+            r#"{"name":"my_neighbors"}"#.into(),
+            Frontend::Gql,
+            &queries,
+            &bindings,
+        )
+        .unwrap();
+        assert_eq!(resolved.frontend, Frontend::Gql);
+        let input = query_engine::compiler::gql::parse(&resolved.text).unwrap();
+        assert_eq!(input.nodes[0].node_ids, vec![73]);
+        for (query_type, frontend, text) in [
+            (
+                QueryType::Json,
+                Frontend::JsonDsl,
+                r#"{"query_type":"traversal"}"#,
+            ),
+            (
+                QueryType::Gql,
+                Frontend::Gql,
+                "MATCH (n:User {id: 1}) RETURN n",
+            ),
+        ] {
+            let resolved = resolve_raw_query(
+                query_type as i32,
+                text.into(),
+                Frontend::Gql,
+                &queries,
+                &bindings,
+            )
+            .unwrap();
+            assert_eq!(resolved.frontend, frontend);
+            assert_eq!(resolved.text, text);
+        }
         assert!(
-            my_neighbors.raw_query.contains("424242"),
-            "my_neighbors DSL should contain the caller's user_id: {}",
-            my_neighbors.raw_query
+            resolve_raw_query(99, "unused".into(), Frontend::JsonDsl, &queries, &bindings).is_err()
         );
+        assert!(
+            resolve_raw_query(
+                QueryType::Named as i32,
+                r#"{"name":"my_neighbors","parameters":{"current_user_id":999}}"#.into(),
+                Frontend::JsonDsl,
+                &queries,
+                &bindings
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn named_query_catalog_wire_defaults_are_json() {
+        use prost::Message;
+        assert_eq!(
+            NamedQueryDefinition::decode(&[][..]).unwrap().query_type(),
+            QueryType::Json
+        );
+        assert_eq!(QueryType::Json as i32, 0);
+        assert_eq!(QueryType::Named as i32, 1);
+        assert_eq!(QueryType::Gql as i32, 2);
     }
 
     fn test_claims() -> Claims {

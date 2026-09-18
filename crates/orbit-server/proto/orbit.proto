@@ -68,10 +68,6 @@ service OrbitService {
   // Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
   rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
 
-  // Lists the server-defined named queries with their DSL rendered for the
-  // caller (bindings resolved from JWT claims, parameters filled with their
-  // declared examples). Lets clients discover and display named queries
-  // without owning copies of the query text.
   // Used by GET /api/v4/orbit/templates.
   rpc ListNamedQueries(ListNamedQueriesRequest) returns (ListNamedQueriesResponse);
 
@@ -309,19 +305,19 @@ message ResponseFormatSchema {
 // ListNamedQueries — unary, returns the named-query catalog
 // ---------------------------------------------------------------------------
 
-// Request for the named-query catalog.
+// Request for the named-query catalog. The x-gitlab-orbit-query-language
+// metadata selects the rendered language (json by default).
 message ListNamedQueriesRequest {}
 
-// Response listing every embedded named query.
 message ListNamedQueriesResponse {
   repeated NamedQueryDefinition queries = 1;
 }
 
-// A named query with its DSL rendered for the requesting user.
 message NamedQueryDefinition {
   string name = 1;         // stable identifier, e.g. "recent_merges"
   string description = 2;  // human-readable summary from the template YAML
-  string raw_query = 3;    // rendered query DSL as a JSON string, executable as-is
+  string raw_query = 3;      // rendered in the requested language, executable as-is
+  QueryType query_type = 4;  // language of raw_query
 }
 
 // ---------------------------------------------------------------------------

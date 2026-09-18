@@ -254,7 +254,7 @@ fn gql_inline_preserves_query_text_and_response_bytes() {
     );
     let sent: serde_json::Value = serde_json::from_str(&request.body).unwrap();
     assert_eq!(sent["query"], text);
-    assert_eq!(sent["language"], "gql");
+    assert_eq!(sent.get("language"), None);
     assert_eq!(sent["response_format"], "llm");
     assert_eq!(output.stdout, response.as_bytes());
 }

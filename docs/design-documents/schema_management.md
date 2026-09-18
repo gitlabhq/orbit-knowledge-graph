@@ -152,7 +152,9 @@ A serving snapshot (`crates/orbit-server/src/active_schema.rs`) is immutable and
 
 - the archive's `migration_version`;
 - the archive's ontology with that version's table prefix applied;
-- the embedded named queries that compile against that ontology (the rest are hidden and rejected).
+- the embedded named queries whose rendered JSON and GQL examples both pass native validation and normalization against that ontology (the rest are hidden and rejected).
+
+This catalog check needs no caller security context. Named query execution still uses the full compiler pipeline with the caller's context.
 
 Every request pins one snapshot for its whole run, from compilation through redaction, so a
 promotion cannot switch tables under a running query.

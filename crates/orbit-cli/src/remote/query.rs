@@ -11,8 +11,7 @@ use super::{ResponseFormat, write_stdout_raw};
 const DEFAULT_QUERY_FORMAT: &str = "llm";
 const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, strum::AsRefStr)]
-#[strum(serialize_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum QueryLanguage {
     Json,
     Gql,
@@ -65,7 +64,6 @@ fn build_gql_request(
     let response_format = format_override.map_or(DEFAULT_QUERY_FORMAT, ResponseFormat::as_str);
     serialize_request(&serde_json::json!({
         "query": query,
-        "language": QueryLanguage::Gql.as_ref(),
         "response_format": response_format,
     }))
 }

@@ -1,3 +1,4 @@
+use query_engine::compiler::Frontend;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -45,7 +46,6 @@ pub(super) fn list_commands_description() -> String {
 pub(super) mod params {
     use query_engine::compiler::Frontend;
     use serde_json::{Value, json};
-    use strum::VariantNames;
 
     pub fn format() -> Value {
         json!({
@@ -55,28 +55,15 @@ pub(super) mod params {
         })
     }
 
-    pub fn query_parameters() -> Value {
+    pub fn query_parameters(frontend: Frontend) -> Value {
+        let query = match frontend {
+            Frontend::JsonDsl => json!({"type": "object", "description": "JSON Query DSL object."}),
+            Frontend::Gql => json!({"type": "string", "description": "Read-only GQL query text."}),
+        };
         json!({
             "type": "object",
             "required": ["query"],
-            "properties": {
-                "query": {
-                    "type": ["object", "string"],
-                    "description": "JSON Query DSL object, or raw query text with language=gql."
-                },
-                "language": {
-                    "type": "string",
-                    "enum": Frontend::VARIANTS,
-                    "default": <&str>::from(Frontend::JsonDsl)
-                },
-                "format": format()
-            },
-            "if": {
-                "required": ["language"],
-                "properties": {"language": {"const": <&str>::from(Frontend::Gql)}}
-            },
-            "then": {"properties": {"query": {"type": "string"}}},
-            "else": {"properties": {"query": {"type": "object"}}},
+            "properties": {"query": query, "format": format()},
             "additionalProperties": false
         })
     }
@@ -171,19 +158,27 @@ pub struct CommandRegistry;
 
 impl CommandRegistry {
     pub fn get_all_commands() -> Vec<ToolDefinition> {
-        vec![
-            Self::query_graph(),
-            Self::get_graph_schema(),
-            Self::get_query_dsl(),
-            Self::get_response_format(),
-        ]
+        Self::commands_for(Frontend::JsonDsl)
     }
 
-    fn query_graph() -> ToolDefinition {
+    pub fn commands_for(frontend: Frontend) -> Vec<ToolDefinition> {
+        let mut commands = vec![Self::query_graph(frontend), Self::get_graph_schema()];
+        if frontend == Frontend::JsonDsl {
+            commands.push(Self::get_query_dsl());
+        }
+        commands.push(Self::get_response_format());
+        commands
+    }
+
+    fn query_graph(frontend: Frontend) -> ToolDefinition {
+        let prompt_key = match frontend {
+            Frontend::JsonDsl => "tools/query_graph",
+            Frontend::Gql => "tools/query_graph_gql",
+        };
         ToolDefinition {
             name: "query_graph".into(),
-            description: prompt("tools/query_graph").description().into(),
-            parameters: params::query_parameters(),
+            description: prompt(prompt_key).description().into(),
+            parameters: params::query_parameters(frontend),
         }
     }
 
@@ -393,6 +388,24 @@ mod tests {
         let tool = find_command("query_graph");
         assert!(tool.description.contains("get_query_dsl"));
         assert!(tool.description.contains("get_graph_schema"));
+    }
+
+    #[test]
+    fn gql_commands_drop_the_dsl_and_point_to_db_schema() {
+        let commands = CommandRegistry::commands_for(Frontend::Gql);
+        let names: Vec<_> = commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["query_graph", "get_graph_schema", "get_response_format"]
+        );
+        let query = &commands[0];
+        assert!(query.description.contains("CALL db.schema()"));
+        assert!(!query.description.contains("get_query_dsl"));
+        assert_eq!(query.parameters["properties"]["query"]["type"], "string");
+        assert_eq!(
+            CommandRegistry::get_all_commands()[0].parameters["properties"]["query"]["type"],
+            "object"
+        );
     }
 
     #[test]

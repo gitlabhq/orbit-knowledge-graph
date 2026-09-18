@@ -6,7 +6,7 @@ The Orbit query frontend accepts a read-only graph language based on openCypher 
 It includes Orbit-specific query restrictions, extensions, and schema discovery.
 
 Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend.
-Remote graph queries select GQL with `language: gql` and a text query. The JSON Query DSL remains the default.
+GitLab Rails selects GQL per user or root group with the `orbit_gql_queries` flag and sends text queries. The JSON Query DSL remains the default.
 Unknown selectors and mismatched payload shapes reject rather than selecting a parser from the query's syntax.
 
 A **Pest pair** is a matched grammar rule and its source span.
@@ -94,13 +94,11 @@ Only case-sensitive `db.schema` is allowed. `resolve_schema` rejects unknown or 
 ## Remote transport
 
 The gRPC `QueryType` enum is `JSON=0`, `NAMED=1`, `GQL=2`; unknown values reject.
-REST and MCP `query_graph` accept `language: gql` with query text; omitted `language` keeps the JSON object.
-Rails maps the selector onto the gRPC query type. The CLI sends `--language gql` text unchanged.
-Rails checks the default-off `orbit_gql_queries` flag before it forwards GQL requests to Workhorse.
+Rails sends the selected language on every gRPC call as the `x-gitlab-orbit-query-language` metadata header (`json` or `gql`; absent means `json`). `extract_request_context` parses it once into `RequestContext.frontend`, and every surface reads that: ad hoc `ExecuteQuery` still carries `query_type`, named queries render the matching spelling, `ListNamedQueries` renders `raw_query` in it, and `ListAgentCommands` describes `query_graph` for it. Under GQL, `GetQueryDsl` and the `get_query_dsl` command return `NOT_FOUND` and point to `CALL db.schema()`. See [Named Queries](README.md#named-queries).
+REST and MCP `query_graph` have no language field. Rails maps the default-off `orbit_gql_queries` flag onto the header and the ad hoc query type: off sends JSON objects, on sends GQL text.
 The flag can target a user or a root group.
 The root-group gate requires the Developer role or higher in that group or one of its subgroups.
-Orbit Remote does not check this flag.
-Command discovery advertises GQL even when the flag is off.
+Orbit Remote does not check this flag. The CLI `--language` option only chooses the request body shape.
 The server routing stage parses GQL once and returns its result through `PipelineRunner`.
 For MATCH, it carries the lowered Input into path resolution and compilation; the `gql_parse` wrapper leaves that Input unchanged.
 For CALL, it returns schema metadata before security-context construction, path resolution, ClickHouse, row authorization, redaction, hydration, and graph formatting.
