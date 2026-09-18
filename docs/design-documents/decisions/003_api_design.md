@@ -5,6 +5,8 @@ authors: [ "@michaelangeloio" ]
 toc_hide: true
 ---
 
+> Response-format examples in this proposal are historical. Orbit now uses standard TOON for `format=llm`; GOON claims and measurements below do not describe TOON.
+
 ## Status
 
 Proposed

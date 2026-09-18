@@ -1,6 +1,6 @@
-mod goon;
 mod graph;
 mod raw_row;
+mod toon;
 
 use std::sync::LazyLock;
 
@@ -10,12 +10,12 @@ use serde_json::{Value, json};
 use orbit_utils::arrow::ColumnValue;
 use shared::PipelineOutput;
 
-pub use goon::{GOON_OUTPUT_FORMAT_VERSION, GoonFormatter, encode as goon_encode};
 pub use graph::{
     ColumnDescriptor, GraphEdge, GraphFormatter, GraphNode, GraphResponse, GroupColumnDescriptor,
     PaginationResponse,
 };
 pub use raw_row::row_to_json;
+pub use toon::{TOON_OUTPUT_FORMAT_VERSION, ToonFormatter};
 
 pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
     orbit_versions::VERSIONS
@@ -30,13 +30,11 @@ pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
 #[strum(serialize_all = "lowercase")]
 pub enum FormatName {
     Raw,
-    Goon,
+    Toon,
 }
 
 pub trait ResultFormatter: Send + Sync {
     fn format_name(&self) -> FormatName;
-    /// `None` for stubs that have not yet defined their own version
-    /// (e.g. `GoonFormatter` before ADR 009 ships).
     fn format_version(&self) -> Option<&Version>;
     fn format(&self, output: &PipelineOutput) -> Value;
 
@@ -69,9 +67,7 @@ mod tests {
 
     #[test]
     fn query_response_schema_id_major_matches_raw_output_format_version() {
-        // The `$id` in crates/orbit-server/schemas/query_response.json ends with
-        // `/vN` where N is the major component of RAW_OUTPUT_FORMAT_VERSION.
-        // Guards against the two drifting silently when the semver major bumps.
+        // The schema ID major and raw format major are one compatibility boundary.
         let schema: Value = serde_json::from_str(include_str!(concat!(
             env!("SCHEMA_DIR"),
             "/query_response.json"

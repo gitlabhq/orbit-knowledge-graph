@@ -1,0 +1,14 @@
+Key = _{ SOI ~ (BareKey | Quoted) }
+BareKey = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ".")* ~ EOI }
+String = _{ SOI ~ (BareString | Quoted) }
+BareString = @{ !(" " | "\t" | "-" | "#" | "\u{feff}") ~ !(("true" | "false" | "null" | NumericLike) ~ EOI) ~ StringCharacter+ ~ EOI }
+StringCharacter = _{ '^'..'z' | ';'..'Z' | '-'..'9' | '#'..'+' | '~'..'\u{10ffff}' | "!" | "|" | " " ~ !EOI }
+Quoted = @{ ANY* ~ EOI }
+NumericLike = @{ SOI ~ Sign? ~ ASCII_DIGIT+ ~ ("." ~ Fraction)? ~ (ExponentMarker ~ Exponent)? ~ EOI }
+Sign = _{ "+" | "-" }
+ExponentMarker = _{ "e" | "E" }
+Number = _{ SOI ~ Negative? ~ Integer ~ ("." ~ Fraction)? ~ (ExponentMarker ~ Exponent)? ~ EOI }
+Negative = @{ "-" }
+Integer = @{ "0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
+Fraction = @{ ASCII_DIGIT+ }
+Exponent = @{ Sign? ~ ASCII_DIGIT+ }

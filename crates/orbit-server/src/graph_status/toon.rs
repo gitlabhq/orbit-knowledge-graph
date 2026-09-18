@@ -1,5 +1,5 @@
+use orbit_utils::toon::encode;
 use serde::Serialize;
-use toon_format::{EncodeOptions, encode};
 use tracing::warn;
 
 use crate::proto::{IndexingState, IndexingStatus, StructuredGraphStatus};
@@ -104,7 +104,7 @@ pub fn format_status_as_toon(status: &StructuredGraphStatus) -> String {
         code_indexing: status.code_indexing.as_ref().map(indexing_toon),
     };
 
-    encode(&toon, &EncodeOptions::default()).unwrap_or_else(|e| {
+    encode(&toon).unwrap_or_else(|e| {
         warn!(error = %e, "Failed to encode graph status as TOON, falling back");
         format!(
             "projects:{}/{}",

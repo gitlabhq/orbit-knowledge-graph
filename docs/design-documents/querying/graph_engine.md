@@ -174,7 +174,13 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 
 The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`, `next_cursor`). Keyset cursors (`{ page_size, after }`) lower into seek predicates in SQL, so each page is a fresh bounded query. There is no offset slicing and no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
 Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
-A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
+A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend. The `raw` response is JSON; `llm` is standard TOON encoding of the same payload.
+
+#### TOON encoding
+
+The in-repo encoder uses a private Pest grammar (`crates/utils/src/toon.pest`) to classify bare keys and string values that require quotes. It also decomposes JSON number tokens for decimal expansion. The Rust writer still walks JSON values, escapes quoted text, moves decimal points, and emits objects, lists, and tables. Its fixed profile uses a comma delimiter and two-space indentation. Pest does not serialize the payload or decode TOON documents. Grammar tests cover lexical boundaries; the official encode fixtures and public encoder tests cover output bytes and structure.
+
+The in-repo encoder (`orbit_utils::toon`, tested against the official TOON 4.1 encode fixtures under `crates/utils/tests/fixtures/toon`) follows the specification's numeric rules. Integers keep their exact JSON digits. Finite floats with an absolute value in `[1e-6, 1e21)` are written as canonical decimals with no trailing zeros or `.0`. Values outside that range use exponent notation. Every emitted token parses back to the original JSON number, so `llm` responses carry the same numeric values as `raw`.
 
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
 

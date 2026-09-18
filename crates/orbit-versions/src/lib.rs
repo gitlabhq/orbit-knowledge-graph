@@ -17,7 +17,7 @@ pub struct Versions {
     pub schema: u32,
     pub query_dsl: String,
     pub raw_output_format: String,
-    pub goon_output_format: String,
+    pub toon_output_format: String,
     pub vendored: BTreeMap<String, VendoredDependency>,
 }
 

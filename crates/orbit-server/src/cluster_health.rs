@@ -7,8 +7,8 @@ use clickhouse_client::ArrowClickHouseClient;
 use gitlab_client::{GitlabClient, GitlabClientError};
 use health_check::HealthStatus;
 use orbit_migrations::version::read_migrating_version;
+use orbit_utils::toon::encode;
 use tokio::time::timeout;
-use toon_format::{EncodeOptions, encode};
 use tracing::warn;
 
 use crate::proto::{
@@ -285,8 +285,7 @@ impl ClusterHealthChecker {
                 .collect(),
         };
 
-        let options = EncodeOptions::default();
-        encode(&toon, &options).unwrap_or_else(|e| {
+        encode(&toon).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "Failed to encode health as TOON, falling back");
             format!("status:{}", toon.status)
         })

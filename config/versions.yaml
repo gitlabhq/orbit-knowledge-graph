@@ -13,13 +13,17 @@ query_dsl: 12.1.4
 # Response envelope of the raw (JSON) formatter.
 raw_output_format: 5.0.2
 
-# Response envelope of the GOON formatter.
-goon_output_format: 4.0.2
+# Standard TOON encoding of the raw graph response.
+toon_output_format: 2.0.0
 
 # Vendored dependencies. Each entry declares its pins, artifact location,
 # and vendor/check scripts. Vendor scripts read pins and write computed
 # checksums back into this file via `yq -i`. Run `mise vendor <name>`.
 vendored:
+  toon_spec:
+    version: 62f16b369408180f1faf1cba7da1b46d1f336f12
+    vendor_dir: crates/utils/tests/fixtures/toon
+
   duckdb:
     # DuckDB release linked by the duckdb crate in Cargo.lock; crate
     # 1.10505.x is DuckDB 1.5.5.

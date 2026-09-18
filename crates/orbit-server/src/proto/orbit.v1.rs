@@ -26,7 +26,6 @@ pub struct ExecuteQueryRequest {
     /// JSON DSL query string
     #[prost(string, tag = "1")]
     pub query: ::prost::alloc::string::String,
-    /// RAW: tabular JSON rows; LLM: GOON text
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
     /// defaults to JSON DSL
@@ -562,7 +561,6 @@ pub struct GraphStatusItem {
 }
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
-/// LLM returns compact text (GOON for queries, TOON for schema/health) optimized for token budgets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum ResponseFormat {
@@ -596,7 +594,7 @@ impl ResponseFormat {
 #[repr(i32)]
 pub enum FormatName {
     Raw = 0,
-    Goon = 1,
+    Toon = 1,
 }
 impl FormatName {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -606,14 +604,14 @@ impl FormatName {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Self::Raw => "FORMAT_NAME_RAW",
-            Self::Goon => "FORMAT_NAME_GOON",
+            Self::Toon => "FORMAT_NAME_TOON",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "FORMAT_NAME_RAW" => Some(Self::Raw),
-            "FORMAT_NAME_GOON" => Some(Self::Goon),
+            "FORMAT_NAME_TOON" => Some(Self::Toon),
             _ => None,
         }
     }

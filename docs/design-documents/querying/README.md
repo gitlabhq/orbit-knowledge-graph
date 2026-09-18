@@ -26,7 +26,7 @@ All four query types (traversal, aggregation, path_finding, neighbors) return a 
 
 - **ADR**: [ADR 004: Unified Response Schema](../decisions/004_unified_response_schema.md)
 
-A `GraphFormatter` in the Rust query pipeline handles the transformation from raw `QueryResult` rows into the unified payload. A JSON Schema defines the response contract shared between server and frontend.
+A `GraphFormatter` in the Rust query pipeline handles the transformation from raw `QueryResult` rows into the unified payload. A JSON Schema defines the response contract shared between server and frontend. The `raw` response is JSON; `llm` is standard TOON encoding of the same payload.
 
 ### Agent Command Discovery
 

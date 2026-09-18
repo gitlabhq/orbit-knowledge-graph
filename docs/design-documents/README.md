@@ -150,7 +150,7 @@ flowchart TD
 
 ### Database & Database Ops
 
-Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates the JSON Query DSL against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Cypher was evaluated during the storage and query-engine design, but it is not a current query surface. The JSON Query DSL and the compiler-level Orbit query frontend share the same compiler pipeline.
+Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates the JSON Query DSL against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Cypher was evaluated during the storage and query-engine design, but it is not a current query surface. The JSON Query DSL and the compiler-level Orbit query frontend share the same compiler pipeline. Query results use JSON for `raw` responses and standard TOON for `llm` responses.
 
 The current implementation uses ClickHouse for remote graph storage and query execution. In the current repository state:
 

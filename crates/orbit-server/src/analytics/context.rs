@@ -209,7 +209,6 @@ fn apply_metrics(
 
     q.query_dsl_version = VERSIONS.query_dsl.parse().ok();
     q.raw_output_format_version = VERSIONS.raw_output_format.parse().ok();
-    q.goon_output_format_version = VERSIONS.goon_output_format.parse().ok();
 }
 
 /// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
@@ -369,6 +368,17 @@ mod tests {
             .build()
             .unwrap();
         event.contexts()[0].data.clone()
+    }
+
+    #[test]
+    fn query_versions_omit_retired_goon_version() {
+        let data = query_data(&claims_with_paths(vec!["1/22/"]), "query_graph");
+        assert_eq!(data["query_dsl_version"], VERSIONS.query_dsl);
+        assert_eq!(
+            data["raw_output_format_version"],
+            VERSIONS.raw_output_format
+        );
+        assert!(data.get("goon_output_format_version").is_none());
     }
 
     #[test]

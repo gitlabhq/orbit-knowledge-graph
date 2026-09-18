@@ -4,7 +4,7 @@
   "title": "GitLab Orbit Versions",
   "description": "Schema for config/versions.yaml: pinned versions and vendored dependencies.",
   "type": "object",
-  "required": ["schema", "query_dsl", "raw_output_format", "goon_output_format", "vendored"],
+  "required": ["schema", "query_dsl", "raw_output_format", "toon_output_format", "vendored"],
   "additionalProperties": false,
   "properties": {
     "schema": {
@@ -24,8 +24,8 @@
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
       "maxLength": 20
     },
-    "goon_output_format": {
-      "description": "Response envelope version of the GOON formatter (semver).",
+    "toon_output_format": {
+      "description": "Version of the TOON encoding of the raw graph response (semver).",
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
       "maxLength": 20

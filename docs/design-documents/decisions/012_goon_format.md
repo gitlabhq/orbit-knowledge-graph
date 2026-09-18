@@ -6,9 +6,11 @@ authors: [ "@michaelangeloio", "@jgdoyon1" ]
 toc_hide: true
 ---
 
+> This ADR records the retired GOON format. Orbit now uses standard TOON for `format=llm`; the measurements below are historical and do not describe TOON.
+
 ## Status
 
-Accepted
+Superseded by the [current response format](../querying/graph_engine.md#unified-response-format).
 
 ## Date
 

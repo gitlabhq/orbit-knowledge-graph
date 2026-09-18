@@ -17,7 +17,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
 use executor::enrich_output;
-use formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
+use formatters::{GraphFormatter, ResultFormatter, ToonFormatter};
 use orbit_server_config::ProfilingConfig;
 use output::{ProfilerOutput, build_output};
 use service::ProfilerPipelineService;
@@ -93,8 +93,7 @@ struct Cli {
     #[arg(long, value_enum)]
     compile_only: Option<CompileShow>,
 
-    /// Include the formatted response agents receive (`goon` = llm format,
-    /// `json` = raw graph) as a `response` field in the profiler output.
+    /// Include the formatted response (`toon` for the LLM format or `json` for raw).
     #[arg(long, value_enum)]
     emit_response: Option<ResponseFormat>,
 }
@@ -108,7 +107,7 @@ enum CompileShow {
 
 #[derive(Clone, clap::ValueEnum)]
 enum ResponseFormat {
-    Goon,
+    Toon,
     Json,
 }
 
@@ -145,7 +144,7 @@ async fn run_single(
     enrich_output(ctx.client, &mut output, ctx.profiling_config).await;
 
     let response = ctx.emit_response.as_ref().map(|fmt| match fmt {
-        ResponseFormat::Goon => GoonFormatter.format(&output),
+        ResponseFormat::Toon => ToonFormatter.format(&output),
         ResponseFormat::Json => GraphFormatter.format(&output),
     });
 
@@ -497,4 +496,23 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+    use clap::ValueEnum;
+
+    #[test]
+    fn emit_response_accepts_toon_and_json_but_not_retired_goon() {
+        assert!(matches!(
+            ResponseFormat::from_str("toon", false).unwrap(),
+            ResponseFormat::Toon
+        ));
+        assert!(matches!(
+            ResponseFormat::from_str("json", false).unwrap(),
+            ResponseFormat::Json
+        ));
+        assert!(ResponseFormat::from_str("goon", false).is_err());
+    }
 }

@@ -180,7 +180,7 @@ Orbit Endpoint Smoke
 
 Orbit Query LLM
     [Documentation]    POST /orbit/query with response_format=llm. Returns the raw response so the
-    ...                caller can assert on the GOON text body.
+    ...                caller can assert on the TOON text body.
     [Arguments]    ${query}
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    query=${query}    response_format=llm

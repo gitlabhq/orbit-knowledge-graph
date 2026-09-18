@@ -11,7 +11,6 @@ mod server {
     pub mod corpus_smoke;
     pub mod data_correctness;
     pub mod denormalization;
-    pub mod goon_formatter;
     pub mod graph_formatter;
     pub mod graph_status;
     pub mod grpc_tls;
@@ -19,4 +18,5 @@ mod server {
     pub mod redaction;
     pub mod schema_readiness;
     pub mod telemetry;
+    pub mod toon_formatter;
 }
