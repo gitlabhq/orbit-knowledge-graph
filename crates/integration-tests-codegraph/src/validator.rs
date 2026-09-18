@@ -75,30 +75,49 @@ fn execute_cypher(
     let sql = compiled.base.render();
     eprintln!("  SQL: {sql}");
     let batches = client.query_arrow(&sql)?;
-    if batches.is_empty() {
+    let batch = if batches.is_empty() {
         let schema = Arc::new(arrow::datatypes::Schema::empty());
-        Ok(RecordBatch::new_empty(schema))
+        RecordBatch::new_empty(schema)
     } else if batches.len() == 1 {
-        Ok(batches.into_iter().next().unwrap())
+        batches.into_iter().next().unwrap()
     } else {
         arrow::compute::concat_batches(&batches[0].schema(), &batches)
-            .map_err(|e| anyhow::anyhow!("concat batches: {e}"))
-    }
+            .map_err(|e| anyhow::anyhow!("concat batches: {e}"))?
+    };
+    Ok(strip_node_prefixes(batch, &compiled.input))
+}
+
+fn strip_node_prefixes(batch: RecordBatch, input: &compiler::Input) -> RecordBatch {
+    let prefixes: Vec<String> = input.nodes.iter().map(|n| format!("{}_", n.id)).collect();
+    let schema = batch.schema();
+    let new_fields: Vec<arrow::datatypes::Field> = schema
+        .fields()
+        .iter()
+        .map(|f| {
+            let name = f.name();
+            for prefix in &prefixes {
+                if let Some(stripped) = name.strip_prefix(prefix.as_str()) {
+                    return f.as_ref().clone().with_name(stripped);
+                }
+            }
+            f.as_ref().clone()
+        })
+        .collect();
+    let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
+    RecordBatch::try_new(new_schema, batch.columns().to_vec())
+        .unwrap_or_else(|e| panic!("strip_node_prefixes failed: {e}"))
 }
 
 fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {
     let debug_queries = [
         (
             "Definitions",
-            "MATCH (d:Definition) RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file",
+            "MATCH (d:Definition) RETURN d.name, d.fqn, d.definition_type, d.file_path",
         ),
-        (
-            "Files",
-            "MATCH (f:File) RETURN f.path AS path, f.language AS lang",
-        ),
+        ("Files", "MATCH (f:File) RETURN f.path, f.language"),
         (
             "Imports",
-            "MATCH (i:ImportedSymbol) RETURN i.file_path AS file, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias",
+            "MATCH (i:ImportedSymbol) RETURN i.file_path, i.import_path, i.identifier_name, i.identifier_alias",
         ),
     ];
 
