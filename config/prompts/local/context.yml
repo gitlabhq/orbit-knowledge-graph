@@ -1,11 +1,12 @@
 name: context
-version: 1.7.0
+version: 1.8.0
 short: Expand local code context
 description: >-
   Expand local code context.
 
 
-  Batch file paths, `File:<id>`, or `Definition:<id>`. Files return definition
-  maps; Definitions return complete source. Both include every indexed
-  connection, with tests in their own section. Reuse source; never truncate
-  output. Raw reads are only for non-code or source Orbit cannot provide.
+  Batch file paths, `File:<id>`, or `Definition:<id>`. Files return compact
+  definition maps with every followable ID and up to ten connections per section,
+  with omitted counts. Choose a Definition ID for complete source and its indexed
+  connections. Test connections appear in their own section. Reuse source; never
+  truncate output. Raw reads are only for non-code or source Orbit cannot provide.

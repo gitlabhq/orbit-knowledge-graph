@@ -1286,8 +1286,9 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("Definition:")
-            && stdout.contains("return open")
-            && stdout.contains("next: orbit context Definition:"),
+            && stdout.contains("mention (body-only")
+            && !stdout.contains("return open")
+            && !stdout.contains("next: orbit context"),
         "{stdout}"
     );
     let reference = stdout
@@ -1314,14 +1315,14 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
     assert!(ok, "{err}\n{out}");
     assert!(out.contains("exact: App"), "{out}");
     assert!(
-        out.contains("exact-miss: missing_symbol (showing related matches)"),
+        out.contains("exact-miss: missing_symbol (no exact symbol name within scope)"),
         "{out}"
     );
     for missing in ["src.utils.read", "' OR true --", "../outside.py"] {
         let (out, err, ok) = run_cmd(&["context", fqn, missing, "--repo", repo_arg], dd);
         assert!(!ok && out.is_empty(), "{out}\n{err}");
     }
-    for invalid in ["|", "read_file|", "read_file||App"] {
+    for invalid in ["|", "read_file|", "read_file||App", "!!!"] {
         let (out, err, ok) = run_cmd(&["grep", invalid, "--repo", repo_arg], dd);
         assert!(
             !ok && err.contains("no usable search terms"),
@@ -1399,6 +1400,7 @@ fn context_relationship_order_is_stable_across_overloads() {
         assert!(ok, "grep {fqn} failed: {stderr}");
         let reference = matches
             .lines()
+            .filter(|line| line.trim_start().starts_with("Definition:"))
             .find(|line| line.split_whitespace().nth(1) == Some(fqn))
             .and_then(|line| line.split_whitespace().next())
             .unwrap();
@@ -1450,5 +1452,266 @@ fn repo_map_api_empty_prefix_succeeds() {
     assert!(
         !stderr.contains("No files found"),
         "must not leak DuckDB glob error: {stderr}"
+    );
+}
+
+#[test]
+fn grep_conjunction_mentions_and_explicit_context_preserve_source_comments() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(
+        &repo,
+        &[
+            (
+                "src/compat.py",
+                "def with_metaclass():\n    prepare = None\n    return prepare\n",
+            ),
+            (
+                "src/models.py",
+                "def copy():\n    # clone this object without sharing state\n    return object()\n",
+            ),
+        ],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+    let repo_arg = repo.to_str().unwrap();
+    for query in ["prepare_multipart", "nonexistenttoken", "' OR true --"] {
+        let (out, err, ok) = run_cmd(&["grep", query, "--repo", repo_arg], dd);
+        assert!(
+            ok && out.contains("No definitions match"),
+            "{query}: {err}\n{out}"
+        );
+        assert!(!out.contains("Definition:"), "{out}");
+        assert!(!out.contains("next:"), "{out}");
+    }
+    let (out, err, ok) = run_cmd(&["grep", "clone", "--repo", repo_arg], dd);
+    assert!(ok && out.contains("src.models.copy"), "{err}\n{out}");
+    assert!(out.contains("mention (body-only"), "{out}");
+    assert!(!out.contains("# clone") && !out.contains("next:"), "{out}");
+    let reference = out
+        .split_whitespace()
+        .find(|s| s.starts_with("Definition:"))
+        .unwrap();
+    let (body, err, ok) = run_cmd(&["context", reference, "--repo", repo_arg], dd);
+    assert!(
+        ok && body.contains("# clone this object without sharing state"),
+        "{err}\n{body}"
+    );
+    let (out, err, ok) = run_cmd(&["grep", "models", "--repo", repo_arg], dd);
+    assert!(ok && out.contains("# clone"), "{err}\n{out}");
+    assert!(out.contains("previewed lines will repeat"), "{out}");
+    let (out, err, ok) = run_cmd(&["grep", "copy", "--limit", "0", "--repo", repo_arg], dd);
+    assert!(!ok, "{err}\n{out}");
+}
+
+#[test]
+fn file_context_compacts_definition_locations_and_bounds_each_connection_section() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    let models = (0..67)
+        .map(|i| format!("def entry_{i}():\n    return {i}\n\n"))
+        .collect::<String>();
+    let callers = |prefix: &str| {
+        format!(
+            "from models import entry_0\n\n{}",
+            (0..25)
+                .map(|i| format!("def {prefix}_{i}():\n    return entry_0()\n\n"))
+                .collect::<String>()
+        )
+    };
+    let imports = (0..25)
+        .map(|i| format!("import dependency_{i}\n"))
+        .collect::<String>();
+    init_repo_at(
+        &repo,
+        &[
+            ("src/models.py", &models),
+            ("src/imports.py", &imports),
+            ("tests/imports.py", &imports),
+            ("fixtures/imports.py", &imports),
+            ("src/callers.py", &callers("caller")),
+            ("tests/test_models.py", &callers("test_caller")),
+        ],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+    let repo_arg = repo.to_str().unwrap();
+    let (out, err, ok) = run_cmd(&["context", "src/models.py", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{out}");
+    assert!(out.contains("(67 definitions)"), "{out}");
+    let definitions: Vec<_> = out
+        .lines()
+        .filter(|line| line.starts_with("  Definition:"))
+        .collect();
+    assert_eq!(definitions.len(), 67, "{out}");
+    assert!(
+        definitions
+            .iter()
+            .all(|line| line.contains("  L") && !line.contains("src/models.py:")),
+        "{out}"
+    );
+    assert!(
+        out.contains("Connections via definitions (25 indexed):"),
+        "{out}"
+    );
+    assert!(
+        out.contains("Test, fixture, or generated connections"),
+        "{out}"
+    );
+    assert!(out.matches("connections omitted").count() >= 2, "{out}");
+    assert!(
+        out.lines().count() < 110,
+        "{} lines\n{out}",
+        out.lines().count()
+    );
+    assert!(out.contains("next: orbit context Definition:"), "{out}");
+    let reference = definitions[0].split_whitespace().next().unwrap();
+    let (body, err, ok) = run_cmd(&["context", reference, "--repo", repo_arg], dd);
+    assert!(
+        ok && body.contains("def entry_0():") && body.contains("return 0"),
+        "{err}\n{body}"
+    );
+    assert_eq!(
+        body.matches("<-- src.callers.caller_").count(),
+        25,
+        "{body}"
+    );
+    assert_eq!(
+        body.matches("<-- tests.test_models.test_caller_").count(),
+        25,
+        "{body}"
+    );
+    assert!(!body.contains("connections omitted"), "{body}");
+    for path in ["src/imports.py", "tests/imports.py", "fixtures/imports.py"] {
+        let (imports, err, ok) = run_cmd(&["context", path, "--repo", repo_arg], dd);
+        assert!(
+            ok && imports.contains("connections omitted; list all file edges:"),
+            "{path}: {err}\n{imports}"
+        );
+        assert!(imports.contains("No indexed definitions."), "{imports}");
+        if path != "src/imports.py" {
+            assert!(
+                imports.contains("Test, fixture, or generated connections (25 indexed):"),
+                "{imports}"
+            );
+            assert!(imports.contains("15 connections omitted"), "{imports}");
+        }
+        let sql = imports
+            .lines()
+            .find_map(|line| line.split_once("sql \""))
+            .unwrap()
+            .1
+            .trim_end_matches('"');
+        let (edges, err, ok) = run_cmd(&["sql", sql, "-F", "json", "--repo", repo_arg], dd);
+        assert!(ok, "{err}\n{edges}");
+        let edges: Vec<Value> = serde_json::from_str(&edges).unwrap();
+        assert_eq!(
+            edges
+                .iter()
+                .filter(|edge| edge["relationship_kind"] == "IMPORTS")
+                .count(),
+            25,
+            "{path}: {edges:?}"
+        );
+    }
+    let last_reference = definitions
+        .last()
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap();
+    let (body, err, ok) = run_cmd(&["context", last_reference, "--repo", repo_arg], dd);
+    assert!(ok && body.contains("def entry_66():"), "{err}\n{body}");
+}
+
+#[test]
+fn file_context_via_summary_counts_names_not_overloaded_definitions() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(
+        &repo,
+        &[
+            (
+                "src/Target.java",
+                "public class Target { public void ping() {} }\n",
+            ),
+            (
+                "src/Caller.java",
+                concat!(
+                    "public class Caller {\n",
+                    "    public void a(Target t) { t.ping(); }\n",
+                    "    public void b(Target t) { t.ping(); }\n",
+                    "    public void c(Target t) { t.ping(); }\n",
+                    "    public void d(Target t) { t.ping(); }\n",
+                    "    public void d(Target t, int n) { t.ping(); }\n",
+                    "}\n",
+                    "class Other { public void d(Target t) { t.ping(); } }\n",
+                ),
+            ),
+        ],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+    let repo_arg = repo.to_str().unwrap();
+    let (target, err, ok) = run_cmd(&["context", "Target.ping", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{target}");
+    assert_eq!(target.matches("<-- Caller.d ").count(), 2, "{target}");
+    assert_eq!(target.matches("<-- Other.d ").count(), 1, "{target}");
+    assert!(target.contains("Connections (6 indexed):"), "{target}");
+    let (out, err, ok) = run_cmd(&["context", "src/Caller.java", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{out}");
+    let via = out
+        .lines()
+        .find(|line| line.contains("--> Target.ping "))
+        .unwrap();
+    assert!(via.contains("via a, b, c (+1 names)"), "{out}");
+}
+
+#[test]
+fn file_context_mixed_excluded_connections_keep_both_followups() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    let targets = (0..25)
+        .map(|i| format!("def target_{i}():\n    return {i}\n\n"))
+        .collect::<String>();
+    let callers = (0..25).map(|i| format!(
+        "import dependency_{i}\nfrom targets import target_{i}\ndef caller_{i}():\n    return target_{i}()\n\n"
+    )).collect::<String>();
+    init_repo_at(
+        &repo,
+        &[("tests/targets.py", &targets), ("tests/mixed.py", &callers)],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+    let repo_arg = repo.to_str().unwrap();
+    let (out, err, ok) = run_cmd(&["context", "tests/mixed.py", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{out}");
+    assert!(
+        out.contains("connections omitted; list all file edges:"),
+        "{out}"
+    );
+    assert!(
+        out.contains("For omitted definition connections, use a Definition ID"),
+        "{out}"
+    );
+    let sql = out
+        .lines()
+        .find_map(|line| line.split_once("sql \""))
+        .unwrap()
+        .1
+        .trim_end_matches('"');
+    let (edges, err, ok) = run_cmd(&["sql", sql, "-F", "json", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{edges}");
+    let edges: Vec<Value> = serde_json::from_str(&edges).unwrap();
+    assert_eq!(
+        edges
+            .iter()
+            .filter(|edge| edge["relationship_kind"] == "IMPORTS")
+            .count(),
+        50
     );
 }
