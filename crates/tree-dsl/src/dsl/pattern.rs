@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use indextree::NodeId;
+use smallvec::{SmallVec, smallvec};
 
 use crate::intern::Lang;
 use crate::tree::{Edge, EdgeKind, Node, Tree};
@@ -29,8 +31,13 @@ pub enum Tf {
     Concat(Box<str>, Box<Tf>, Box<Tf>),
     Stem,
     CollapseIndex(Vec<Box<str>>),
-    HasIncoming(EdgeKind),
-    HasOutgoing(EdgeKind),
+    HasEdge(EdgeKind, EdgeDir),
+}
+
+#[derive(Clone, Copy)]
+pub enum EdgeDir {
+    Incoming,
+    Outgoing,
 }
 
 impl Tf {
@@ -65,24 +72,12 @@ impl Tf {
             "stem" => Tf::Stem,
             "collapse_index" => Tf::CollapseIndex(args.iter().map(|a| (*a).into()).collect()),
             "has_incoming" => {
-                let kind = match args[0] {
-                    "Calls" => EdgeKind::Calls,
-                    "Defines" => EdgeKind::Defines,
-                    "Imports" => EdgeKind::Imports,
-                    "Extends" => EdgeKind::Extends,
-                    k => panic!("unknown edge kind: {k}"),
-                };
-                Tf::HasIncoming(kind)
+                let kind = EdgeKind::from_str(args[0]).expect("unknown edge kind");
+                Tf::HasEdge(kind, EdgeDir::Incoming)
             }
             "has_outgoing" => {
-                let kind = match args[0] {
-                    "Calls" => EdgeKind::Calls,
-                    "Defines" => EdgeKind::Defines,
-                    "Imports" => EdgeKind::Imports,
-                    "Extends" => EdgeKind::Extends,
-                    k => panic!("unknown edge kind: {k}"),
-                };
-                Tf::HasOutgoing(kind)
+                let kind = EdgeKind::from_str(args[0]).expect("unknown edge kind");
+                Tf::HasEdge(kind, EdgeDir::Outgoing)
             }
             _ => panic!("unknown transform: {name}"),
         }
@@ -141,8 +136,7 @@ impl Tf {
             | Tf::ParentSym(_)
             | Tf::AncestorSym(_)
             | Tf::Concat(_, _, _)
-            | Tf::HasIncoming(_)
-            | Tf::HasOutgoing(_) => {
+            | Tf::HasEdge(_, _) => {
                 unreachable!("tree-context transform used as string transform")
             }
         }
@@ -195,27 +189,22 @@ impl Tf {
                     }
                 }
             }
-            Tf::HasIncoming(kind) => {
+            Tf::HasEdge(kind, dir) => {
                 let raw = Tree::to_raw(id);
-                if let Some(ctx) = edge_ctx {
-                    let found = ctx.edges.iter().any(|e| {
-                        e.kind == *kind && e.to_tree == ctx.tree_index && e.to_node == raw
-                    });
-                    lang.syms.intern(if found { "true" } else { "false" })
-                } else {
-                    lang.syms.intern("false")
-                }
-            }
-            Tf::HasOutgoing(kind) => {
-                let raw = Tree::to_raw(id);
-                if let Some(ctx) = edge_ctx {
-                    let found = ctx.edges.iter().any(|e| {
-                        e.kind == *kind && e.from_tree == ctx.tree_index && e.from_node == raw
-                    });
-                    lang.syms.intern(if found { "true" } else { "false" })
-                } else {
-                    lang.syms.intern("false")
-                }
+                let found = edge_ctx.is_some_and(|ctx| {
+                    ctx.edges.iter().any(|e| {
+                        e.kind == *kind
+                            && match dir {
+                                EdgeDir::Incoming => {
+                                    e.to_tree == ctx.tree_index && e.to_node == raw
+                                }
+                                EdgeDir::Outgoing => {
+                                    e.from_tree == ctx.tree_index && e.from_node == raw
+                                }
+                            }
+                    })
+                });
+                lang.syms.intern(if found { "true" } else { "false" })
             }
             Tf::Concat(sep, a, b) => {
                 let sa = a.apply_sym(t, lang, id, edge_ctx);
@@ -244,8 +233,7 @@ impl Tf {
                         | Tf::ParentSym(_)
                         | Tf::AncestorSym(_)
                         | Tf::Concat(_, _, _)
-                        | Tf::HasIncoming(_)
-                        | Tf::HasOutgoing(_) => {
+                        | Tf::HasEdge(_, _) => {
                             let sym = step.apply_sym(t, lang, id, edge_ctx);
                             s = lang.syms.resolve(sym).to_string();
                         }
@@ -255,15 +243,6 @@ impl Tf {
                     }
                 }
                 lang.syms.intern(&s)
-            }
-            Tf::Stem | Tf::CollapseIndex(_) => {
-                let sym = t.node(id).sym;
-                if sym == 0 {
-                    return 0;
-                }
-                let s = lang.syms.resolve(sym).to_string();
-                let result = self.apply_to_str(&s);
-                lang.syms.intern(&result)
             }
             _ => {
                 let sym = t.node(id).sym;
@@ -402,32 +381,7 @@ impl<'l> Ctx<'l> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum Cap {
-    Empty,
-    One(indextree::NodeId),
-    Many(Vec<indextree::NodeId>),
-}
-
-impl Cap {
-    pub(crate) fn is_empty(&self) -> bool {
-        matches!(self, Cap::Empty)
-    }
-    pub(crate) fn one(&self) -> Option<indextree::NodeId> {
-        match self {
-            Cap::One(id) => Some(*id),
-            Cap::Many(ids) => ids.first().copied(),
-            Cap::Empty => None,
-        }
-    }
-    pub(crate) fn many(&self) -> &[indextree::NodeId] {
-        match self {
-            Cap::Many(ids) => ids,
-            Cap::One(id) => std::slice::from_ref(id),
-            Cap::Empty => &[],
-        }
-    }
-}
+pub(crate) type Cap = SmallVec<[NodeId; 1]>;
 
 impl Rewrite {
     pub fn new(lang: &Lang, src: &str, out: impl FnOnce(&mut Ctx) -> Out) -> Rewrite {
@@ -477,7 +431,7 @@ pub(crate) fn matches(t: &Tree, id: NodeId, p: &Pat, caps: &mut [Cap]) -> bool {
             {
                 return false;
             }
-            caps[*slot as usize] = Cap::One(id);
+            caps[*slot as usize] = smallvec![id];
             true
         }
         Pat::Node {
@@ -512,12 +466,12 @@ pub(crate) fn matches(t: &Tree, id: NodeId, p: &Pat, caps: &mut [Cap]) -> bool {
                         if let Some(g) = guard {
                             let any_match = range.iter().any(|&e| matches(t, e, g, caps));
                             caps[*slot as usize] = if any_match {
-                                Cap::Many(range)
+                                SmallVec::from_vec(range)
                             } else {
-                                Cap::Empty
+                                SmallVec::new()
                             };
                         } else {
-                            caps[*slot as usize] = Cap::Many(range);
+                            caps[*slot as usize] = SmallVec::from_vec(range);
                         }
                     }
                     Pat::Not(inner) => {
@@ -570,7 +524,7 @@ fn is_optional(p: &Pat) -> bool {
 
 fn mark_empty(p: &Pat, caps: &mut [Cap]) {
     if let Pat::Cap { slot, .. } = p {
-        caps[*slot as usize] = Cap::Empty;
+        caps[*slot as usize] = SmallVec::new();
     }
 }
 
@@ -592,7 +546,7 @@ pub(crate) fn materialize(
             rekind,
             ..
         } => {
-            let Some(src) = caps[*slot as usize].one() else {
+            let Some(src) = caps[*slot as usize].first().copied() else {
                 return;
             };
             let copy = out.clone_subtree_from(t, src, Some(parent));
@@ -615,12 +569,12 @@ pub(crate) fn materialize(
             if caps[*slot as usize].is_empty() {
                 return;
             }
-            let elems = caps[*slot as usize].many();
+            let elems = caps[*slot as usize].as_slice();
             let filter = filters
                 .get(*slot as usize)
                 .map(|f| f.as_slice())
                 .unwrap_or(&[]);
-            let mut scratch: Vec<Cap> = vec![Cap::Empty; caps.len()];
+            let mut scratch: Vec<Cap> = vec![SmallVec::new(); caps.len()];
             for &e in elems {
                 let en = t.node(e);
                 if !filter.is_empty() && !filter.contains(&en.kind) {
@@ -645,13 +599,7 @@ pub(crate) fn materialize(
                             field: 0,
                             named: true,
                             synth: true,
-                            sym: en.sym,
-                            start: en.start,
-                            end: en.end,
-                            start_row: en.start_row,
-                            start_col: en.start_col,
-                            end_row: en.end_row,
-                            end_col: en.end_col,
+                            ..*en
                         },
                     );
                 } else {
@@ -687,7 +635,7 @@ pub(crate) fn materialize(
                 Text::Any => 0,
                 Text::Lit(s) => *s,
                 Text::From(slot, tf) => {
-                    let Some(src) = caps[*slot as usize].one() else {
+                    let Some(src) = caps[*slot as usize].first().copied() else {
                         return;
                     };
                     tf.apply_sym(t, lang, src, edge_ctx)
@@ -695,9 +643,9 @@ pub(crate) fn materialize(
             };
             let pos_src = match text {
                 Text::From(slot, _) if !caps[*slot as usize].is_empty() => {
-                    caps[*slot as usize].one().unwrap()
+                    caps[*slot as usize].first().copied().unwrap()
                 }
-                _ => caps[0].one().unwrap_or(t.root),
+                _ => caps[0].first().copied().unwrap_or(t.root),
             };
             let src = t.node(pos_src);
             let at = out.append(
@@ -721,7 +669,7 @@ pub(crate) fn materialize(
             }
         }
         Pat::Spread { slot, inject } => {
-            let Some(src) = caps[*slot as usize].one() else {
+            let Some(src) = caps[*slot as usize].first().copied() else {
                 return;
             };
             let copy = out.clone_subtree_from(t, src, Some(parent));
@@ -731,6 +679,34 @@ pub(crate) fn materialize(
         }
         Pat::Not(_) | Pat::Desc(_) => {}
     }
+}
+
+fn build_template(
+    t: &mut Tree,
+    lang: &Lang,
+    pat: &Pat,
+    caps: &[Cap],
+    filters: &[Vec<u16>],
+    span: (u32, u32),
+    edge_ctx: Option<&EdgeCtx>,
+) -> Vec<NodeId> {
+    let mut staging = Tree::new(Node::default());
+    materialize(
+        t,
+        lang,
+        pat,
+        caps,
+        filters,
+        staging.root,
+        span,
+        &mut staging,
+        edge_ctx,
+    );
+    staging
+        .root
+        .children(&staging.arena)
+        .map(|c| t.clone_subtree_from(&staging, c, None))
+        .collect()
 }
 
 pub fn apply_rewrites(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
@@ -759,7 +735,7 @@ fn apply_rewrites_inner(
     edge_ctx: Option<&EdgeCtx>,
 ) {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
-    let mut caps: Vec<Cap> = (0..max_slots).map(|_| Cap::Empty).collect();
+    let mut caps: Vec<Cap> = (0..max_slots).map(|_| SmallVec::new()).collect();
 
     let root_kinds: Vec<u16> = rules
         .iter()
@@ -786,76 +762,47 @@ fn apply_rewrites_inner(
                 continue;
             }
             for c in &mut caps[..r.nslots] {
-                *c = Cap::Empty;
+                *c = SmallVec::new();
             }
             if !matches(t, target, &r.pat, &mut caps) {
                 continue;
             }
-            caps[0] = Cap::One(target);
-            if !r.guards.is_empty() {
-                let mut guard_ok = true;
-                for &(a, b, eq) in &r.guards {
-                    let sym_a = caps[a as usize].one().map_or(0, |id| t.node(id).sym);
-                    let sym_b = caps[b as usize].one().map_or(0, |id| t.node(id).sym);
-                    if (sym_a == sym_b) != eq {
-                        guard_ok = false;
-                        break;
-                    }
-                }
-                if !guard_ok {
-                    continue;
-                }
+            caps[0] = smallvec![target];
+            let guards_ok = r.guards.iter().all(|&(a, b, eq)| {
+                let sym_a = caps[a as usize]
+                    .first()
+                    .copied()
+                    .map_or(0, |id| t.node(id).sym);
+                let sym_b = caps[b as usize]
+                    .first()
+                    .copied()
+                    .map_or(0, |id| t.node(id).sym);
+                (sym_a == sym_b) == eq
+            });
+            if !guards_ok {
+                continue;
             }
 
             let root_node = t.node(target);
             let span = (root_node.start, root_node.end);
 
-            match &r.out {
-                Out::Replace(tpl) => {
-                    let mut staging = Tree::new(Node::default());
-                    materialize(
-                        t,
-                        lang,
-                        tpl,
-                        &caps,
-                        &r.filters,
-                        staging.root,
-                        span,
-                        &mut staging,
-                        edge_ctx,
-                    );
-                    let replacement_roots: Vec<NodeId> =
-                        staging.root.children(&staging.arena).collect();
-                    let mut moved: Vec<NodeId> = Vec::with_capacity(replacement_roots.len());
-                    for child in replacement_roots {
-                        moved.push(t.clone_subtree_from(&staging, child, None));
+            let is_append = std::matches!(&r.out, Out::Append(_));
+            let pats: &[Pat] = match &r.out {
+                Out::Replace(p) => std::slice::from_ref(p),
+                Out::Append(ps) => ps,
+            };
+            for pat in pats {
+                let built = build_template(t, lang, pat, &caps, &r.filters, span, edge_ctx);
+                if is_append {
+                    for id in built {
+                        target.append(id, &mut t.arena);
                     }
-                    t.replace(target, moved);
-                }
-                Out::Append(pats) => {
-                    for pat in pats {
-                        let mut staging = Tree::new(Node::default());
-                        materialize(
-                            t,
-                            lang,
-                            pat,
-                            &caps,
-                            &r.filters,
-                            staging.root,
-                            span,
-                            &mut staging,
-                            edge_ctx,
-                        );
-                        for child in staging.root.children(&staging.arena).collect::<Vec<_>>() {
-                            let imported = t.clone_subtree_from(&staging, child, None);
-                            target.append(imported, &mut t.arena);
-                        }
-                    }
+                } else {
+                    t.replace(target, built);
                 }
             }
-            match &r.out {
-                Out::Replace(_) => break,
-                Out::Append(_) => continue,
+            if !is_append {
+                break;
             }
         }
     }

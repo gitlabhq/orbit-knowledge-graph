@@ -12,6 +12,7 @@ pub(crate) const NONE: u32 = u32::MAX;
     PartialEq,
     Eq,
     strum::Display,
+    strum::EnumString,
     strum::IntoStaticStr,
     rkyv::Archive,
     rkyv::Serialize,
