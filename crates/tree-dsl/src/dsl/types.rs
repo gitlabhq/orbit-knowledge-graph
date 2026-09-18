@@ -83,6 +83,56 @@ pub enum Pat {
     },
 }
 
+impl Pat {
+    pub fn cap(slot: u16, field: u16) -> Self {
+        Pat::Cap {
+            slot,
+            field,
+            kind: None,
+            rekind: None,
+            guard: None,
+            optional: false,
+            named_only: false,
+        }
+    }
+
+    pub fn with_kind(mut self, k: u16) -> Self {
+        if let Pat::Cap { kind, .. } = &mut self {
+            *kind = Some(k);
+        }
+        self
+    }
+
+    pub fn with_rekind(mut self, k: u16) -> Self {
+        if let Pat::Cap { rekind, .. } = &mut self {
+            *rekind = Some(k);
+        }
+        self
+    }
+
+    pub fn with_guard(mut self, g: Pat) -> Self {
+        if let Pat::Cap { guard, .. } = &mut self {
+            *guard = Some(Box::new(g));
+        }
+        self
+    }
+
+    pub fn with_optional(mut self) -> Self {
+        match &mut self {
+            Pat::Cap { optional, .. } | Pat::Node { optional, .. } => *optional = true,
+            _ => {}
+        }
+        self
+    }
+
+    pub fn with_named_only(mut self) -> Self {
+        if let Pat::Cap { named_only, .. } = &mut self {
+            *named_only = true;
+        }
+        self
+    }
+}
+
 pub enum Out {
     Replace(Pat),
     Append(Vec<Pat>),
