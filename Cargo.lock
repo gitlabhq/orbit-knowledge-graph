@@ -8267,11 +8267,14 @@ dependencies = [
 name = "orbit-prompts"
 version = "0.1.0"
 dependencies = [
+ "comrak",
  "minijinja",
  "orbit-utils",
  "rust-embed",
  "semver",
  "serde",
+ "syn 2.0.118",
+ "tempfile",
 ]
 
 [[package]]

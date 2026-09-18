@@ -67,7 +67,7 @@ toon-format = { workspace = true }
 [build-dependencies]
 compiler = { path = "../query-engine/compiler" }
 orbit-migrations = { path = "../orbit-migrations" }
-orbit-prompts = { path = "../orbit-prompts" }
+orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
 orbit-versions = { path = "../orbit-versions" }
