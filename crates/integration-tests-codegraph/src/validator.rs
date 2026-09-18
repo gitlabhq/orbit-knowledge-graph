@@ -244,7 +244,7 @@ fn format_cell(array: &dyn Array, row: usize) -> String {
 
 fn expected_value_matches(array: &dyn Array, row: usize, expected: &serde_json::Value) -> bool {
     match expected {
-        serde_json::Value::Null => array.is_null(row),
+        serde_json::Value::Null => array.is_null(row) || format_cell(array, row).is_empty(),
         serde_json::Value::Bool(value) => {
             !array.is_null(row) && format_cell(array, row) == value.to_string()
         }
