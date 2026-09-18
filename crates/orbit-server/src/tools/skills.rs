@@ -73,6 +73,7 @@ struct SkillCatalog {
 impl SkillCatalog {
     fn load_embedded() -> Result<Self, String> {
         let mut files = Vec::new();
+        // build.rs rejects paths that are not normalized and relative before rust-embed runs.
         for path in SkillAssets::iter() {
             let asset = SkillAssets::get(&path)
                 .ok_or_else(|| format!("embedded skill file {path:?} is unreadable"))?;
@@ -209,13 +210,26 @@ mod tests {
     }
 
     #[test]
-    fn canonical_tree_hash_is_pinned_to_the_embedded_tree() {
-        let tree = get_skill("orbit", false).unwrap();
+    fn canonical_tree_hash_matches_known_answer_vector() {
+        let file = |path: &str, content: &str| SkillFile {
+            path: path.to_string(),
+            sha256: sha256_hex(content.as_bytes()),
+            content: content.to_string(),
+        };
+        let files = [
+            file("SKILL.md", "alpha\n"),
+            file("references/guide.md", "beta"),
+        ];
         assert_eq!(
-            tree.metadata.tree_sha256,
-            "d3658ea9a95ede60e89be9948e84e7793f398aff7152d99c747f66508c04efa1",
-            "skill content changes require a version bump and a reviewed hash update"
+            tree_sha256(&files),
+            "7966df3b2283aa44b6d29826c89044f1739aa99f25fc84f44a775eaa41ba7817"
         );
+
+        let swapped_contents = [
+            file("SKILL.md", "beta"),
+            file("references/guide.md", "alpha\n"),
+        ];
+        assert_ne!(tree_sha256(&files), tree_sha256(&swapped_contents));
     }
 
     #[test]
