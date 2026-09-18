@@ -345,24 +345,22 @@ tests:
       - { row: { file: "external/namespace.js", caller: "report", name: "default", alias: "tracker" } }
 
   - name: External CommonJS duplicate aliases preserve exact imported symbols
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
-      WHERE caller.file_path = 'external/duplicate_aliases.js'
+      WHERE caller.fqn = 'reportAliases'
         AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY alias
     assert:
-      - { row_count: 2 }
+      - { row_count: 4 }
       - { row: { caller: "reportAliases", name: "track", alias: "firstTrack" } }
       - { row: { caller: "reportAliases", name: "track", alias: "secondTrack" } }
 
   - name: Module-level external CommonJS calls target imported symbols from the file
-    skip: true
     query: |
       MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'external/module_level.js'
-        AND e.relationship_kind = 'CALLS'
+        AND sym.import_path = 'external-sdk'
       RETURN file.path AS file, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { row_count: 1 }

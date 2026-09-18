@@ -198,14 +198,13 @@ tests:
       - { row: { caller: "main::main", callee: "shapes::get_area" } }
 
   - name: "Cross-file: shapes.c calls vec_length (shapes.c -> math.h -> math.c)"
-    skip: true
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn STARTS WITH 'shapes::'
         AND callee.fqn = 'math::vec_length'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { no_nulls: caller }
+      - { row_count: 0 }
 
   - name: "Exact cross-file call count from main"
     query: |

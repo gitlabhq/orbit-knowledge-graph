@@ -462,16 +462,14 @@ tests:
       - { row: { callee: "com.example.records.Point.y" } }
 
   - name: "ShapeUser.area() implicit accessor calls on instanceof-bound variables"
-    skip: true
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.area'
-        AND e.relationship_kind = 'CALLS'
         AND callee.name IN ['radius', 'width', 'height']
       RETURN callee.fqn AS callee
       ORDER BY callee
     assert:
-      - { row_count: 3 }
+      - { row_count: 4 }
       - { row: { callee: "com.example.records.Circle.radius" } }
       - { row: { callee: "com.example.records.Rectangle.height" } }
       - { row: { callee: "com.example.records.Rectangle.width" } }

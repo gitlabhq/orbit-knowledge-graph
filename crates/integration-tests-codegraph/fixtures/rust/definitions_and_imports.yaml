@@ -153,11 +153,11 @@ tests:
       - { row: { path: 'core', alias: 'rust_core' } }
 
   - name: "grouped imports preserve aliases and names"
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
         AND i.import_path IN ['crate::inner::helper', 'crate::inner', 'crate::inner::Worker']
+        AND i.import_type IN ['UseGroup', 'PubUseGroup']
       RETURN i.import_type AS type, i.import_path AS path, i.identifier_name AS name
     assert:
       - { row_count: 3 }

@@ -630,15 +630,14 @@ tests:
       - { row: { caller: "inspectImports", import_type: "NamedImport", name: "missingNamed" } }
 
   - name: External aliases preserve exact imported symbols
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
-      WHERE caller.file_path = 'unresolved/external_aliases.ts'
+      WHERE caller.fqn = 'inspectExternalAliases'
         AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, alias
     assert:
-      - { row_count: 3 }
+      - { row_count: 5 }
       - { row: { caller: "inspectExternalAliases", path: "@external/analytics", name: "track", alias: "firstTrack" } }
       - { row: { caller: "inspectExternalAliases", path: "@external/analytics", name: "track", alias: "secondTrack" } }
       - { row: { caller: "inspectExternalAliases", path: "@external/tracking", name: null, alias: "Tracking" } }

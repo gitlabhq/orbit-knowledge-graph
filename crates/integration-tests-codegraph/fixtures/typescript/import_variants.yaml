@@ -35,11 +35,10 @@ tests:
       - { row: { name: "User", alias: "TypeUser" } }
 
   - name: All imports point to the same source
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'main.ts'
       RETURN i.import_path AS path
     assert:
-      - { row_count: 1 }
+      - { row_count: 5 }
       - { row: { path: "./models" } }

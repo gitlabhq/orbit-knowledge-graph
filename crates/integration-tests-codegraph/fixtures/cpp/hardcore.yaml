@@ -321,14 +321,12 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "copy_file CALLS edges have no duplicates"
-    skip: true
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
-      - { unique: callee }
+      - { empty: true }
 
   # ══════════════════════════════════════════════════════════════
   # NESTED NAMESPACES

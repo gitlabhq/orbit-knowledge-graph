@@ -69,11 +69,9 @@ tests:
       - { row: { caller: "main.from_import_call", path: "sdk.helpers", name: "run", alias: "helper_run" } }
 
   - name: "top-level imported calls target imported symbols from the file"
-    skip: true
     query: |
       MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'main.py'
-        AND e.relationship_kind = 'CALLS'
         AND sym.import_path = 'sdk.helpers'
       RETURN file.path AS file, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
     assert:
