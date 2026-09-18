@@ -1,4 +1,5 @@
 use orbit_utils::toon::encode;
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 
@@ -10,7 +11,7 @@ struct Fixtures {
 
 #[derive(Deserialize)]
 struct Fixture {
-    input: Value,
+    input: serde_content::Value<'static>,
     expected: String,
     #[serde(default)]
     options: FixtureOptions,
@@ -21,6 +22,10 @@ struct Fixture {
 struct FixtureOptions {
     delimiter: Option<String>,
     indent_size: Option<usize>,
+}
+
+fn ordered_json(input: &str) -> serde_content::Value<'static> {
+    serde_json::from_str(input).unwrap()
 }
 
 #[test]
@@ -56,6 +61,33 @@ fn official_default_profile_encoding_fixtures() {
         }
     }
     assert_eq!((passed, skipped), (156, 23));
+}
+
+#[test]
+fn serde_encounter_order_is_independent_of_json_map_order() {
+    #[derive(Serialize)]
+    struct StructOrder {
+        zebra: u8,
+        alpha: u8,
+        middle: u8,
+    }
+
+    let map = r#"{"zebra":1,"alpha":2,"middle":3}"#;
+    let expected = "zebra: 1\nalpha: 2\nmiddle: 3";
+    assert_eq!(
+        encode(&StructOrder {
+            zebra: 1,
+            alpha: 2,
+            middle: 3,
+        })
+        .unwrap(),
+        expected
+    );
+    assert_eq!(encode(&ordered_json(map)).unwrap(), expected);
+    assert_eq!(
+        encode(&serde_json::from_str::<Value>(map).unwrap()).unwrap(),
+        "alpha: 2\nmiddle: 3\nzebra: 1"
+    );
 }
 
 #[test]
@@ -128,7 +160,7 @@ fn canonical_range_neighbors_preserve_float_value() {
 fn strings_keys_and_controls_are_unambiguous() {
     assert_eq!(
         encode(&json!({"true": true, "false": false, "null": null})).unwrap(),
-        "true: true\nfalse: false\nnull: null"
+        "false: false\nnull: null\ntrue: true"
     );
     for (value, expected) in [
         ("\u{8}\u{c}\0\u{1f}", r#""\u0008\u000c\u0000\u001f""#),
@@ -154,7 +186,7 @@ fn empty_forms_and_nested_arrays_remain_distinct() {
     assert_eq!(encode(&Value::Null).unwrap(), "null");
     assert_eq!(
         encode(&json!({"n": null, "a": [], "o": {}, "s": ""})).unwrap(),
-        "n: null\na: []\no:\ns: \"\""
+        "a: []\nn: null\no:\ns: \"\""
     );
     assert_eq!(
         encode(&json!([[], {}, null, [{"x": 1}], [[true, false], "x"]])).unwrap(),
@@ -164,12 +196,10 @@ fn empty_forms_and_nested_arrays_remain_distinct() {
 
 #[test]
 fn nested_tables_reorder_columns_not_rows() {
-    let value: Value =
-        serde_json::from_str(r#"[{"z":2,"n":{"b":"B","a":1}},{"n":{"a":2,"b":"A"},"z":1}]"#)
-            .unwrap();
+    let value = ordered_json(r#"[{"z":2,"n":{"b":"B","a":1}},{"n":{"a":2,"b":"A"},"z":1}]"#);
     assert_eq!(encode(&value).unwrap(), "[2]{z,n{b,a}}:\n  2,B,1\n  1,A,2");
     assert_eq!(
-        encode(&json!({"b": {"n": {"x": 2}}, "a": {"n": {"x": 1}}})).unwrap(),
+        encode(&ordered_json(r#"{"b":{"n":{"x":2}},"a":{"n":{"x":1}}}"#)).unwrap(),
         "[2:]{n{x}}:\n  b: 2\n  a: 1"
     );
     for cell in [json!({}), json!([]), Value::Null] {
@@ -186,15 +216,18 @@ fn nested_tables_reorder_columns_not_rows() {
 #[test]
 fn list_object_first_field_has_logical_field_depth() {
     assert_eq!(
-        encode(&json!([{"table": [{"x": 1}], "next": []}])).unwrap(),
+        encode(&ordered_json(r#"[{"table":[{"x":1}],"next":[]}]"#)).unwrap(),
         "[1]:\n  - table[1]{x}:\n      1\n    next: []"
     );
     assert_eq!(
-        encode(&json!([{"table": {"b": {"x": 2}, "a": {"x": 1}}, "next": []}])).unwrap(),
+        encode(&ordered_json(
+            r#"[{"table":{"b":{"x":2},"a":{"x":1}},"next":[]}]"#
+        ))
+        .unwrap(),
         "[1]:\n  - table[2:]{x}:\n      b: 2\n      a: 1\n    next: []"
     );
     assert_eq!(
-        encode(&json!([{"a": {"x": 1}, "b": {"x": 2}}, null])).unwrap(),
+        encode(&ordered_json(r#"[{"a":{"x":1},"b":{"x":2}},null]"#)).unwrap(),
         "[2]:\n  - a:\n      x: 1\n    b:\n      x: 2\n  - null"
     );
 }
@@ -233,6 +266,89 @@ fn serde_normalization_and_errors_propagate() {
         "intentional serialization error"
     );
     assert!(encode(&u128::MAX).is_err());
+}
+
+#[test]
+fn serde_data_model_normalizes_to_json_shapes() {
+    #[derive(Serialize)]
+    struct Newtype(u8);
+
+    #[derive(Serialize)]
+    enum External {
+        Unit,
+        Newtype(u8),
+        Tuple(u8, bool),
+        Struct { zebra: u8, alpha: u8 },
+    }
+
+    struct Bytes;
+    impl Serialize for Bytes {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_bytes(&[3, 1, 2])
+        }
+    }
+
+    struct HumanReadable;
+    impl Serialize for HumanReadable {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let human_readable = serializer.is_human_readable();
+            serializer.serialize_bool(human_readable)
+        }
+    }
+
+    assert_eq!(encode(&Newtype(7)).unwrap(), "7");
+    assert_eq!(encode(&External::Unit).unwrap(), "Unit");
+    assert_eq!(encode(&External::Newtype(7)).unwrap(), "Newtype: 7");
+    assert_eq!(
+        encode(&External::Tuple(1, true)).unwrap(),
+        "Tuple[2]: 1,true"
+    );
+    assert_eq!(
+        encode(&External::Struct { zebra: 1, alpha: 2 }).unwrap(),
+        "Struct:\n  zebra: 1\n  alpha: 2"
+    );
+    assert_eq!(encode(&Some(Newtype(9))).unwrap(), "9");
+    assert_eq!(encode(&Option::<u8>::None).unwrap(), "null");
+    assert_eq!(encode(&()).unwrap(), "null");
+    assert_eq!(encode(&Bytes).unwrap(), "[3]: 3,1,2");
+    assert_eq!(encode(&HumanReadable).unwrap(), "true");
+    assert_eq!(encode(&(i64::MIN as i128)).unwrap(), i64::MIN.to_string());
+    assert_eq!(encode(&(u64::MAX as u128)).unwrap(), u64::MAX.to_string());
+    assert!(encode(&(i64::MIN as i128 - 1)).is_err());
+    assert!(encode(&(u64::MAX as u128 + 1)).is_err());
+}
+
+#[test]
+fn map_keys_follow_json_compatibility() {
+    struct Keys;
+    impl Serialize for Keys {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut map = serializer.serialize_map(Some(4))?;
+            map.serialize_entry(&true, &1)?;
+            map.serialize_entry(&-2_i16, &2)?;
+            map.serialize_entry(&'x', &3)?;
+            map.serialize_entry(&NewtypeKey(4), &4)?;
+            map.end()
+        }
+    }
+
+    #[derive(Serialize)]
+    struct NewtypeKey(u8);
+
+    struct InvalidKey;
+    impl Serialize for InvalidKey {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut map = serializer.serialize_map(Some(1))?;
+            map.serialize_entry(&[1_u8, 2], &true)?;
+            map.end()
+        }
+    }
+
+    assert_eq!(encode(&Keys).unwrap(), "true: 1\n\"-2\": 2\nx: 3\n\"4\": 4");
+    assert_eq!(
+        encode(&InvalidKey).unwrap_err().to_string(),
+        "key must be a string"
+    );
 }
 
 #[test]
@@ -278,8 +394,9 @@ fn lexical_boundaries_encode_in_values_headers_and_entry_keys() {
             encode(&json!([{key: true}])).unwrap(),
             format!("[1]{{{expected}}}:\n  true")
         );
+        let keyed_rows = format!(r#"{{{}:{{"v":1}},"other":{{"v":2}}}}"#, json!(key));
         assert_eq!(
-            encode(&json!({key: {"v": 1}, "other": {"v": 2}})).unwrap(),
+            encode(&ordered_json(&keyed_rows)).unwrap(),
             format!("[2:]{{v}}:\n  {expected}: 1\n  other: 2")
         );
     }

@@ -120,7 +120,7 @@ An example response:
 ```json
 {
   "result": {
-    "format_version": "5.0.1",
+    "format_version": "5.0.2",
     "query_type": "aggregation",
     "nodes": [],
     "edges": [],

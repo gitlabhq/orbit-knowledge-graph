@@ -28,8 +28,8 @@ impl ResultFormatter for ToonFormatter {
 
     fn format(&self, output: &PipelineOutput) -> Value {
         Value::String(
-            encode(&GraphFormatter.format(output))
-                .expect("graph response contains only TOON-encodable JSON values"),
+            encode(&GraphFormatter.build_response(output))
+                .expect("graph response contains only TOON-encodable values"),
         )
     }
 }

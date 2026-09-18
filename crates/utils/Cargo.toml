@@ -15,6 +15,7 @@ pest_derive = { workspace = true }
 regex = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
+serde-content = { workspace = true }
 serde-saphyr = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }

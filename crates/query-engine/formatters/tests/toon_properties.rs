@@ -68,29 +68,22 @@ fn graph_payload_keeps_ids_properties_and_float_wire_tokens() {
     assert_eq!(raw["format_version"], raw_version);
     assert_eq!(raw["nodes"][1]["id"], i64::MAX.to_string());
     assert_eq!(raw["nodes"][0]["score"], json!(2_f64.powi(63)));
+    assert_eq!(
+        serde_json::to_string(&raw["nodes"][0]).unwrap(),
+        r#"{"id":"1","name":"世界","score":9.223372036854776e+18,"type":"Project"}"#
+    );
     let (text, version, name) = ToonFormatter.format_stamped(&output);
     assert_eq!(name, FormatName::Toon);
     assert_eq!(version, "2.0.0");
-    let expected = [
-        format!(
-            concat!(
-                "format_version: {}\nquery_type: traversal\nnodes[2]{{type,id,score,name}}:\n",
-                "  Project,\"1\",9223372036854776000,世界\n",
-                "  Project,\"9223372036854775807\",18446744073709552000,\"true\"\nedges: []"
-            ),
-            raw_version
+    let expected = format!(
+        concat!(
+            "format_version: {}\nquery_type: traversal\nnodes[2]{{type,id,name,score}}:\n",
+            "  Project,\"1\",世界,9223372036854776000\n",
+            "  Project,\"9223372036854775807\",\"true\",18446744073709552000\nedges: []"
         ),
-        format!(
-            concat!(
-                "format_version: {}\nquery_type: traversal\nnodes[2]{{type,id,name,score}}:\n",
-                "  Project,\"1\",世界,9223372036854776000\n",
-                "  Project,\"9223372036854775807\",\"true\",18446744073709552000\nedges: []"
-            ),
-            raw_version
-        ),
-    ];
-    let text = text.as_str().unwrap();
-    assert!(expected.iter().any(|expected| expected == text), "{text}");
+        raw_version
+    );
+    assert_eq!(text.as_str().unwrap(), expected);
 }
 
 #[test]
@@ -104,8 +97,8 @@ fn column_value_numeric_and_keyword_properties_encode_without_corruption() {
     assert_eq!(
         encode(&value).unwrap(),
         concat!(
-            "false: false\nnull: null\ntrue: true\nmin: -9223372036854775808\n",
-            "finite: 18446744073709552000\nnonfinite: null"
+            "false: false\nfinite: 18446744073709552000\nmin: -9223372036854775808\n",
+            "nonfinite: null\nnull: null\ntrue: true"
         )
     );
 }

@@ -147,7 +147,7 @@ impl ResultFormatter for GraphFormatter {
 }
 
 impl GraphFormatter {
-    pub fn build_response(&self, output: &PipelineOutput) -> GraphResponse {
+    pub(crate) fn build_response(&self, output: &PipelineOutput) -> GraphResponse {
         let result = &output.query_result;
         let result_context = &output.result_context;
 
