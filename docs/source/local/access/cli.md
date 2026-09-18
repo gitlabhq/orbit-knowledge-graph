@@ -76,7 +76,7 @@ GitLab Orbit Local indexes the current working tree, including uncommitted sourc
 files not excluded by `.gitignore`. It does not enumerate or check out other Git
 branches.
 
-The graph is stored in `~/.orbit/graph.duckdb` by default. Multiple checkout paths
+The graph is stored in `~/.gitlab/orbit/graph.duckdb` by default. Multiple checkout paths
 can share one database, with each canonical checkout path determining its project
 ID. Switching branches alone does not update the stored graph. Reindexing the same
 checkout replaces its previous graph in that database with the current working-tree
@@ -88,7 +88,7 @@ or worktree paths.
 | `--threads` | Worker thread count. `0` (default) auto-detects from CPU cores. |
 | `--stats` | Include detailed statistics in the JSON output. |
 | `--verbose` | Verbose logging to stderr. |
-| `--db` | Override the DuckDB file path (default: `~/.orbit/graph.duckdb`). |
+| `--db` | Override the DuckDB file path (default: `~/.gitlab/orbit/graph.duckdb`). |
 
 ## Inspect the schema
 
@@ -108,7 +108,7 @@ orbit schema gl_definition gl_edge      # scoped to two tables
 | Flag | Purpose |
 |------|---------|
 | `--raw` | Emit JSON instead of the default table view. |
-| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
 
 ## Run SQL against the local graph
 
@@ -123,7 +123,7 @@ orbit sql --file query.sql
 |------|---------|
 | `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
 | `-f`, `--file` | Read the SQL from a file. |
-| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
 
 ## List indexed repositories
 
@@ -153,7 +153,7 @@ here instead of silently disappearing.
 | Flag | Purpose |
 |------|---------|
 | `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
-| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
 
 If nothing has been indexed yet, `orbit list` exits `0`. The table view
 prints nothing; structured formats emit valid empty output (`[]` for `json`,
@@ -169,7 +169,7 @@ orbit mcp serve
 ```
 
 It serves `run_sql`, `get_graph_schema`, and `index` against
-`~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
+`~/.gitlab/orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
 
 ## Set up your AI assistant
 
@@ -233,12 +233,12 @@ same instruction block and hooks by hand.
 
 ## Storage
 
-The graph is stored at `~/.orbit/graph.duckdb`. Multiple repositories share
+The graph is stored at `~/.gitlab/orbit/graph.duckdb`. Multiple repositories share
 the same database. Delete the file to start over.
 
 ## Configure the CLI
 
-`orbit config` reads and writes persisted settings in `~/.orbit/settings.json`.
+`orbit config` reads and writes persisted settings in `~/.gitlab/orbit/settings.json`.
 A saved setting applies to every later run.
 
 ```shell

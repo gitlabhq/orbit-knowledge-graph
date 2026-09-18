@@ -216,7 +216,7 @@ usage = 'arg "<repo_path>"'
 
 [tasks."local:query"]
 run = 'cargo run --release --bin orbit -- sql "${@}"'
-description = "Run a raw SQL query against the local DuckDB graph (~/.orbit/graph.duckdb)"
+description = "Run a raw SQL query against the local DuckDB graph (~/.gitlab/orbit/graph.duckdb)"
 usage = 'arg "<sql>"'
 
 [tasks."diff:branch"]
