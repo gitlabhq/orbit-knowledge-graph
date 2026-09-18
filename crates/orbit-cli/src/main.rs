@@ -365,9 +365,18 @@ enum Commands {
     Mcp(McpArgs),
     #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
-    #[command(about = descriptions::short("skill"), long_about = descriptions::long("skill"))]
-    Skill {
-        /// Skill file to print, relative to the skill root (default: SKILL.md).
+    #[command(
+        name = "skills",
+        alias = "skill",
+        about = descriptions::short("skills"),
+        long_about = descriptions::long("skills")
+    )]
+    Skills {
+        /// Skill name or a path in the default orbit skill.
+        #[arg(value_name = "NAME_OR_PATH")]
+        name_or_path: Option<String>,
+
+        /// File to print from the named skill.
         #[arg(value_name = "PATH")]
         path: Option<String>,
     },
@@ -629,7 +638,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
             ConfigCommands::List => commands::config::list(),
         },
-        Commands::Skill { path } => skill::run(path),
+        Commands::Skills { name_or_path, path } => skill::run(name_or_path, path),
         Commands::Setup {
             assistants,
             remove,
@@ -1089,6 +1098,35 @@ mod tests {
     #[test]
     fn cli_command_tree_verifies() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn remote_skill_commands_exist_in_the_clap_inventory() {
+        let extracted: std::collections::BTreeSet<_> = env!("ORBIT_SKILL_REMOTE_COMMANDS")
+            .split(',')
+            .map(str::to_string)
+            .collect();
+        assert!(
+            !extracted.is_empty(),
+            "remote skill command extraction must not be empty"
+        );
+        let mut clap_commands: std::collections::BTreeSet<_> = Cli::command()
+            .get_subcommands()
+            .map(|command| command.get_name().to_string())
+            .collect();
+        let generated_help_is_materialized = clap_commands.remove(orbit_prompts::CLAP_HELP_COMMAND);
+        assert!(
+            !generated_help_is_materialized,
+            "get_subcommands excludes clap's generated help command"
+        );
+        let unknown: Vec<_> = extracted
+            .iter()
+            .filter(|command| {
+                command.as_str() != orbit_prompts::CLAP_HELP_COMMAND
+                    && !clap_commands.contains(*command)
+            })
+            .collect();
+        assert!(unknown.is_empty(), "unknown skill commands: {unknown:?}");
     }
 
     fn action_for(argv: &[&str]) -> String {

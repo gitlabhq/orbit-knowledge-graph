@@ -1,6 +1,7 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     validate_prompts();
+    validate_skills();
     validate_named_queries();
     validate_migration_ledger();
     validate_ontology_archives();
@@ -47,6 +48,18 @@ fn validate_prompts() {
     let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("remote");
     println!("cargo:rerun-if-changed={}", dir.display());
     orbit_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
+}
+
+fn validate_skills() {
+    let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let remote = repository.join("skills/orbit");
+    let local = repository.join("skills/orbit-cli");
+    let commands = repository.join("crates/orbit-cli/src/main.rs");
+    println!("cargo:rerun-if-changed={}", remote.display());
+    println!("cargo:rerun-if-changed={}", local.display());
+    println!("cargo:rerun-if-changed={}", commands.display());
+    orbit_prompts::validate_skill_pair(remote, local, commands)
+        .unwrap_or_else(|error| panic!("Orbit skill validation failed: {error}"));
 }
 
 /// Fails the build on ontology/DDL drift from the fingerprint snapshot or a
