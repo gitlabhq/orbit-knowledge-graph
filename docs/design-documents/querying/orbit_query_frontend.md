@@ -96,6 +96,11 @@ Only case-sensitive `db.schema` is allowed. `resolve_schema` rejects unknown or 
 The gRPC `QueryType` enum is `JSON=0`, `NAMED=1`, `GQL=2`; unknown values reject.
 REST and MCP `query_graph` accept `language: gql` with query text; omitted `language` keeps the JSON object.
 Rails maps the selector onto the gRPC query type. The CLI sends `--language gql` text unchanged.
+Rails checks the default-off `orbit_gql_queries` flag before it forwards GQL requests to Workhorse.
+The flag can target a user or a root group.
+The root-group gate requires the Developer role or higher in that group or one of its subgroups.
+Orbit Remote does not check this flag.
+Command discovery advertises GQL even when the flag is off.
 The server routing stage parses GQL once and returns its result through `PipelineRunner`.
 For MATCH, it carries the lowered Input into path resolution and compilation; the `gql_parse` wrapper leaves that Input unchanged.
 For CALL, it returns schema metadata before security-context construction, path resolution, ClickHouse, row authorization, redaction, hydration, and graph formatting.

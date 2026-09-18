@@ -84,6 +84,12 @@ curl --request POST \
 
 See the [query language reference](../queries/query-language.md) for the full DSL.
 
+GQL requires the `orbit_gql_queries` feature flag in Rails, which is off by default.
+The flag can target your user or a root group.
+For the group gate, you need at least the Developer role in that group or one of its subgroups.
+Without the flag, Rails rejects GQL requests.
+JSON queries do not require this flag.
+
 To send read-only query text or inspect its ontology:
 
 ```shell
