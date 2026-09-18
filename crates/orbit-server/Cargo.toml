@@ -25,7 +25,7 @@ clickhouse-client = { path = "../clickhouse-client" }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-billing = { path = "../orbit-billing" }
 orbit-observability = { workspace = true }
-orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
+orbit-prompts = { path = "../orbit-prompts" }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }
 orbit-versions = { path = "../orbit-versions" }

@@ -6,10 +6,12 @@ use serde::Deserialize;
 
 #[cfg(feature = "skill-validation")]
 mod skill;
+mod skill_frontmatter;
 
 pub const CLAP_HELP_COMMAND: &str = "help";
 #[cfg(feature = "skill-validation")]
-pub use skill::{SkillFrontmatter, SkillValidation, parse_skill_frontmatter, validate_skill_pair};
+pub use skill::{SkillValidation, validate_skill_pair};
+pub use skill_frontmatter::{SkillFrontmatter, parse_skill_frontmatter};
 
 #[derive(Embed)]
 #[folder = "$PROMPTS_DIR"]
