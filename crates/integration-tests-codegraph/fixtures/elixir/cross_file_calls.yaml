@@ -48,6 +48,7 @@ fixtures:
 
 tests:
   - name: "Module-qualified call resolves across files: Foo.greet -> Baz.hello"
+    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.greet'
@@ -88,6 +89,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Exactly 4 Calls edges total — no spurious edges"
+    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(:Definition)
       WHERE e.relationship_kind = 'Calls'

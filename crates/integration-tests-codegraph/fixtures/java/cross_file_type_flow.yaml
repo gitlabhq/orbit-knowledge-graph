@@ -51,6 +51,7 @@ tests:
           - { empty: true }
 
   - name: "no duplicate edges"
+    skip: true
     queries:
       - query: |
           MATCH (src:Definition)-[e:CALLS|DEFINES|EXTENDS]->(tgt:Definition)

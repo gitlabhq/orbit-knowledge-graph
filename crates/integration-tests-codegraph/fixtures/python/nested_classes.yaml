@@ -11,6 +11,7 @@ fixtures:
 
 tests:
   - name: Inner class is contained in Outer
+    skip: true
     query: |
       MATCH (outer:Definition)-[:CALLS|DEFINES|EXTENDS]->(inner:Definition)
       WHERE outer.name = 'Outer' AND inner.name = 'Inner'

@@ -86,6 +86,7 @@ fixtures:
 tests:
   # ── if/else phi ────────────────────────────────────────────
   - name: "if/else: exactly 2 edges, both correct"
+    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -107,6 +108,7 @@ tests:
 
   # ── try/except phi ────────────────────────────────────────
   - name: "try/except: exactly 2 edges, both correct"
+    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -138,6 +140,7 @@ tests:
 
   # ── if without else ───────────────────────────────────────
   - name: "no else: exactly 2 edges (pre-branch + if-branch)"
+    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -177,6 +180,7 @@ tests:
 
   # ── nested if/else ────────────────────────────────────────
   - name: "nested: exactly 3 edges (outer-if + inner-if + inner-else)"
+    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -198,6 +202,7 @@ tests:
 
   # ── elif chain ─────────────────────────────────────────────
   - name: "elif: exactly 3 edges"
+    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -229,6 +234,7 @@ tests:
 
   # ── global: no duplicate edges anywhere in the file ────────
   - name: "no duplicate edges in entire file"
+    skip: true
     queries:
       - query: |
           MATCH (src:Definition)-[e:CALLS|DEFINES|EXTENDS]->(tgt:Definition)

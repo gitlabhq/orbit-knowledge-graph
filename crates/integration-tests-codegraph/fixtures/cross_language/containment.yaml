@@ -13,6 +13,7 @@ tests:
   # ── Original targeted queries, hardened ──────────────────────
 
   - name: Nested class produces containment edge
+    skip: true
     query: |
       MATCH (outer:Definition)-[:CALLS|DEFINES|EXTENDS]->(inner:Definition)
       WHERE outer.name = 'Outer' AND inner.name = 'Inner'

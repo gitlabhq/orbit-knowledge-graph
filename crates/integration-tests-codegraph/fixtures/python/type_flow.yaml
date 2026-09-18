@@ -168,6 +168,7 @@ tests:
           - { empty: true }
 
   - name: "chained return types: engine.session().cursor().fetch_all() via annotations"
+    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

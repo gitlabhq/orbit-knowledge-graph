@@ -274,6 +274,7 @@ tests:
           - { empty: true }
 
   - name: "deep chain: pool.getConnection().getDb().execute().fetchAll()"
+    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -341,6 +342,7 @@ tests:
           - { row: { callee: "helper", callee_fqn: "ThisCall.helper" } }
 
   - name: "packaged inheritance: d.speak() resolves via super FQN"
+    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

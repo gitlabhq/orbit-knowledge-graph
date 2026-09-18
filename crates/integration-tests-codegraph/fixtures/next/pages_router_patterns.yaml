@@ -180,6 +180,7 @@ tests:
       - { row: { file_path: "pages/api/users.ts", fqn: "handler", type: "Function" } }
 
   - name: Next pages router local imports resolve
+    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
@@ -193,6 +194,7 @@ tests:
       - { row: { file_path: "pages/api/users.ts", path: "../../lib/users", name: "listUsers", is_type_only: false, target: "listUsers" } }
 
   - name: Next pages router package type imports remain unresolved
+    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']

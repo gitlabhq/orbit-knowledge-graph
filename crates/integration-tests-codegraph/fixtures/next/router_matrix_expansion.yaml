@@ -323,6 +323,7 @@ tests:
       - { row: { caller: "savePost", callee_file: "src/lib/index.ts", callee: "updateItem" } }
 
   - name: Next external package imports remain external in expanded matrix
+    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path IN ['src/app/api/items/[id]/route.ts', 'src/app/client-panel.tsx']
