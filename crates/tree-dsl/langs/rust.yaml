@@ -170,7 +170,6 @@ display:
     rules:
       - match: '$M:__source_file'
         append:
-          - '(_*_display_fqn @$M|stem|collapse_index("mod", "lib", "main")|replace("/", "::"))'
           - '(_*_display_file_path @$M)'
       - match: '(__def)'
         append:

@@ -224,15 +224,14 @@ resolve:
       rules:
         - match: '(__dir (__file "index.ts") $$$REST)'
           replace: '(__dir (__source_root) (__file "index.ts") $$$REST)'
-         - match: '(__dir (__file "index.js") $$$REST)'
-           replace: '(__dir (__source_root) (__file "index.js") $$$REST)'
+        - match: '(__dir (__file "index.js") $$$REST)'
+          replace: '(__dir (__source_root) (__file "index.js") $$$REST)'
 
 display:
   - name: fqn
     rules:
       - match: '$M:__source_file'
         append:
-          - '(_*_display_fqn @$M|stem|collapse_index("index")|replace("/", "."))'
           - '(_*_display_file_path @$M)'
       - match: '(__def)'
         append:

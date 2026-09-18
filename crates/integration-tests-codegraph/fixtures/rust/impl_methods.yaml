@@ -39,7 +39,7 @@ tests:
       - { row: { name: "Dog", type: "Struct" } }
       - { row: { name: "greet", type: "Method" } }
       - { row: { name: "main", type: "Function" } }
-      - { row: { name: "new", type: "AssociatedFunction" } }
+      - { row: { name: "new", type: "Function" } }
       - { row: { name: "speak", type: "Method" } }
 
   - name: Methods are nested under impl via Defines

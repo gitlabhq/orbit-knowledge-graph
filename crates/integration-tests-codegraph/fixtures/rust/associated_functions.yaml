@@ -40,8 +40,8 @@ tests:
       - { row: { name: "Point", type: "Struct" } }
       - { row: { name: "distance", type: "Method" } }
       - { row: { name: "main", type: "Function" } }
-      - { row: { name: "new", type: "AssociatedFunction" } }
-      - { row: { name: "origin", type: "AssociatedFunction" } }
+      - { row: { name: "new", type: "Function" } }
+      - { row: { name: "origin", type: "Function" } }
 
   - name: origin calls new (associated function calling associated function)
     query: |
