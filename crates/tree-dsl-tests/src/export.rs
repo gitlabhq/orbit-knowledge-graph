@@ -254,10 +254,14 @@ fn build_imports(trees: &[Tree], lang: &Lang, imp_ids: &IdMap) -> anyhow::Result
 
             let fp_sym = child_display_sym(c, C::DisplayFilePath);
             let fp = lang.syms.resolve(fp_sym);
-            let source_sym = c
-                .child_sym(C::SourcePath)
-                .or(c.child_sym(C::Source))
-                .unwrap_or(0);
+            let display_source = child_display_sym(c, C::DisplaySourcePath);
+            let source_sym = if display_source != 0 {
+                display_source
+            } else {
+                c.child_sym(C::SourcePath)
+                    .or(c.child_sym(C::Source))
+                    .unwrap_or(0)
+            };
             let source = lang.syms.resolve(source_sym);
             let is_type_only = c.is(C::ImportType);
             let resolved_sym = child_display_sym(c, C::DisplayResolved);

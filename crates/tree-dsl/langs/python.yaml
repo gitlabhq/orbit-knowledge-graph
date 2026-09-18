@@ -225,6 +225,7 @@ display:
       - match: '(__import)'
         append:
           - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
+          - '(_*_display_source_path @$ROOT|child_sym("__source_path")|replace("/", "."))'
       - match: '(__name)'
         append:
           - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'

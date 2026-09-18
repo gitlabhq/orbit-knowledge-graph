@@ -225,6 +225,8 @@ pub enum Canonical {
     DisplayFilePath,
     #[strum(serialize = "_*_display_resolved")]
     DisplayResolved,
+    #[strum(serialize = "_*_display_source_path")]
+    DisplaySourcePath,
 }
 
 impl From<Canonical> for u16 {
