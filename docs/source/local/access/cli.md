@@ -282,4 +282,4 @@ GitLab Orbit Local does not consume GitLab Credits. All processing is local.
   the local graph.
 - [Use GitLab Orbit Local with glab](glab.md) - call the CLI through `glab orbit`.
 - [Schema reference](../../remote/schema.md) - available node types and properties.
-- [Cookbook](../../remote/cookbook.md) - copy-paste queries for common use cases.
+- [Query examples](../../remote/examples/_index.md) - prompts for common use cases.

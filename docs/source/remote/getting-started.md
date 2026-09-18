@@ -120,5 +120,5 @@ curl --request POST \
 
 - [What GitLab Orbit indexes](indexing.md) - understand coverage before writing queries
 - [Schema reference](schema.md) - explore the 28 node types and their properties
-- [Cookbook](cookbook.md) - copy-paste queries for common use cases
+- [Query examples](examples/_index.md) - prompts for common use cases, with the queries behind them
 - [Get started with GitLab Orbit Local](../local/getting-started.md) - query a local repository offline

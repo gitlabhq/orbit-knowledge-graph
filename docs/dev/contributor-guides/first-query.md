@@ -219,6 +219,6 @@ between them.
   direct `orbit`, `glab orbit`, and MCP usage.
 - [Orbit query language reference](../../source/remote/queries/query-language.md)
   for the Query DSL used by Orbit Remote and agent-facing graph queries.
-- [Cookbook](../../source/remote/cookbook.md) for copy-paste query ideas.
+- [Query examples](../../source/remote/examples/_index.md) for query ideas.
 - [Add a language to the code indexer](../adding-a-language.md) if you want to
   contribute parser coverage for more source languages.

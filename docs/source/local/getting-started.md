@@ -205,5 +205,5 @@ GitLab Orbit Local does not consume GitLab Credits. All processing is local.
 
 - [What GitLab Orbit Local indexes](indexing.md) - language and coverage scope.
 - [Schema reference](schema.md) - the four node types in the local graph.
-- [Cookbook](../remote/cookbook.md) - copy-paste queries (code-only ones apply to Local).
+- [Query examples](../remote/examples/_index.md) - prompts for common use cases (code-only ones apply to Local).
 - [Get started with GitLab Orbit Remote](../remote/getting-started.md) - query your full GitLab instance.

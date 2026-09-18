@@ -30,7 +30,7 @@ New here? Start with:
 - **[User docs](https://docs.gitlab.com/orbit/)** — understand what Orbit does before changing it
 - **[`orbit::hackathon` issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?label_name%5B%5D=orbit%3A%3Ahackathon)** — curated issues for new contributors
 
-Most contributions don't require Rust experience: ontology YAML, docs, cookbook recipes, and language parser stubs are all approachable without deep Rust knowledge.
+Most contributions don't require Rust experience: ontology YAML, docs, query examples, and language parser stubs are all approachable without deep Rust knowledge.
 
 ## Two ways to run Orbit
 
@@ -123,7 +123,7 @@ Put the request body in `/tmp/orbit-query.json`:
 glab orbit query /tmp/orbit-query.json
 ```
 
-The [cookbook](docs/source/remote/cookbook.md) has blast-radius, dependency, pipeline-health, and vulnerability recipes.
+The [query examples](docs/source/remote/examples/_index.md) cover blast radius, dependencies, pipeline health, and vulnerabilities.
 
 ## Features
 
@@ -146,7 +146,7 @@ Orbit shares a Rust workspace and YAML ontology across two runtimes. Orbit Remot
 |---|---|
 | [Orbit overview](docs/source/_index.md) | [Local development](docs/dev/local-development.md) |
 | [AI coding agents](docs/source/ai_coding_agents.md) | [Domain glossary (CONTEXT.md)](CONTEXT.md) |
-| [Remote: how it works](docs/source/remote/how-it-works.md) · [indexing](docs/source/remote/indexing.md) · [schema](docs/source/remote/schema.md) · [cookbook](docs/source/remote/cookbook.md) · [Query DSL](docs/source/remote/queries/query-language.md) | [Design documents](docs/design-documents/) |
+| [Remote: how it works](docs/source/remote/how-it-works.md) · [indexing](docs/source/remote/indexing.md) · [schema](docs/source/remote/schema.md) · [query examples](docs/source/remote/examples/_index.md) · [Query DSL](docs/source/remote/queries/query-language.md) | [Design documents](docs/design-documents/) |
 | [Local: how it works](docs/source/local/how-it-works.md) · [indexing](docs/source/local/indexing.md) · [schema](docs/source/local/schema.md) · [`orbit` CLI](docs/source/local/access/cli.md) | [Adding a language](docs/dev/adding-a-language.md) |
 | [MCP tool reference](docs/source/queries/mcp_tools.md) | [E2E testing](docs/dev/e2e-testing.md) |
 | [Configuration](docs/source/configure.md) | [Indexer crate guide](crates/indexer/AGENTS.md) |
