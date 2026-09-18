@@ -143,7 +143,7 @@ tests:
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'api.handler.build_registry'
             AND callee.fqn = 'prompts.base.BasePromptRegistry'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
@@ -151,7 +151,7 @@ tests:
           MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'api.handler.build_registry'
             AND sym.identifier_name = 'BasePromptRegistry'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller
         assert:
           - { empty: true }
@@ -161,7 +161,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'api.monitoring.build_registry_direct'
         AND callee.fqn = 'prompts.base.BasePromptRegistry'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -171,7 +171,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'selection.caller.load_config'
         AND callee.fqn = 'selection.impl.RealConfig'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -181,7 +181,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'processing.caller.make_language_id'
         AND callee.fqn = 'processing.typing.LanguageId'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -191,7 +191,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'deep.caller.make_deep'
         AND callee.fqn = 'deep.impl.Deep'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -201,7 +201,7 @@ tests:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'ext.caller.build_widget'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
@@ -210,7 +210,7 @@ tests:
           WHERE caller.fqn = 'ext.caller.build_widget'
             AND sym.import_path = 'thirdparty'
             AND sym.identifier_name = 'Widget'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
@@ -220,7 +220,7 @@ tests:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'empty_pkg.caller.use_absent'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
@@ -228,7 +228,7 @@ tests:
           MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'empty_pkg.caller.use_absent'
             AND sym.identifier_name = 'Absent'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
@@ -238,7 +238,7 @@ tests:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'amb.caller.make_thing'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
@@ -246,7 +246,7 @@ tests:
           MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'amb.caller.make_thing'
             AND sym.identifier_name = 'Thing'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }

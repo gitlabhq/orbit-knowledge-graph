@@ -224,7 +224,7 @@ tests:
     query: |
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\User' AND parent.fqn = 'App\Model'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS c
     assert:
       - { row_count: 1 }
@@ -233,7 +233,7 @@ tests:
     query: |
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Account' AND parent.fqn = 'App\Model'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS c
     assert:
       - { row_count: 1 }
@@ -242,7 +242,7 @@ tests:
     query: |
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Repo' AND parent.fqn = 'App\Query'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS c
     assert:
       - { row_count: 1 }
@@ -252,7 +252,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Container\open'
         AND b.fqn = 'App\Container\__construct'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -262,7 +262,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Container\dump'
         AND b.fqn = 'App\Container\__toString'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -272,7 +272,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Handler\process'
         AND b.fqn = 'App\Handler\__invoke'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -282,7 +282,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Service\callToString'
         AND b.fqn = 'App\Container\__toString'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -292,7 +292,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Service\callInvokeMethod'
         AND b.fqn = 'App\Handler\__invoke'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -302,7 +302,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\boot'
         AND b.fqn = 'App\Model\create'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -312,7 +312,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\lookup'
         AND b.fqn = 'App\Model\find'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -322,7 +322,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\accountOf'
         AND b.fqn = 'App\Model\create'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -332,7 +332,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Repo\fetch'
         AND b.fqn = 'App\Query\from'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -342,7 +342,7 @@ tests:
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Repo\fetchSelf'
         AND b.fqn = 'App\Query\from'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -351,7 +351,7 @@ tests:
     query: |
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Service\__construct'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
         AND b.definition_type = 'Method'
       RETURN b.fqn AS b
     assert:

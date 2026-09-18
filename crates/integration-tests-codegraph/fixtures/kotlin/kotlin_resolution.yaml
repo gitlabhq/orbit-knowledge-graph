@@ -51,7 +51,7 @@ tests:
   - name: Exactly 2 containment edges
     query: |
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
-      WHERE e.relationship_kind = 'Defines'
+      WHERE e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 2 }

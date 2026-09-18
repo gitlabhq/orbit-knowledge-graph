@@ -43,7 +43,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::local_call'
         AND callee.fqn = 'app::local_helper'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

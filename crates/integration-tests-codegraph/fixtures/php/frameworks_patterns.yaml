@@ -151,7 +151,7 @@ tests:
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Support\Logger\FileLogger'
         AND p.fqn = 'App\Contracts\LoggerInterface'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -161,7 +161,7 @@ tests:
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Repositories\EloquentUserRepository'
         AND p.fqn = 'App\Contracts\UserRepositoryInterface'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -173,7 +173,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Controllers\UserController\show'
         AND callee.fqn = 'App\Contracts\UserRepositoryInterface\find'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -183,7 +183,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Controllers\UserController\index'
         AND callee.fqn = 'App\Contracts\UserRepositoryInterface\all'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -194,7 +194,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Repositories\EloquentUserRepository\find'
         AND callee.fqn = 'App\Contracts\LoggerInterface\info'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -206,7 +206,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\bootApp'
         AND callee.fqn = 'App\Support\Logger\FileLogger'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -216,7 +216,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\bootApp'
         AND callee.fqn = 'App\Repositories\EloquentUserRepository'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }

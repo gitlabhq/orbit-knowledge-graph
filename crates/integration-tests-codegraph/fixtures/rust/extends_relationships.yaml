@@ -108,7 +108,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Pet'
           RETURN parent.fqn AS parent
         assert:
@@ -119,7 +119,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Companion'
           RETURN parent.fqn AS parent
           ORDER BY parent
@@ -132,7 +132,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Domesticated'
           RETURN parent.fqn AS parent
         assert:
@@ -140,7 +140,7 @@ tests:
           - { row: { parent: "Carnivore" } }
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Carnivore'
           RETURN parent.fqn AS parent
         assert:
@@ -154,7 +154,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Dog'
           RETURN parent.fqn AS parent
         assert:
@@ -165,7 +165,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Cat'
           RETURN parent.fqn AS parent
           ORDER BY parent
@@ -177,7 +177,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Box1'
           RETURN count(parent) AS n
         assert:
@@ -187,7 +187,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Wrapper'
           RETURN parent.fqn AS parent
         assert:
@@ -198,7 +198,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Mood'
           RETURN parent.fqn AS parent
         assert:
@@ -212,7 +212,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Bark'
           RETURN parent.fqn AS parent
         assert:
@@ -223,7 +223,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'File'
           RETURN parent.fqn AS parent
         assert:
@@ -237,7 +237,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND parent.fqn = 'Markable'
           RETURN child.fqn AS child
         assert:
@@ -247,7 +247,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Probe'
           RETURN count(parent) AS n
         assert:
@@ -260,7 +260,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Polygon'
           RETURN parent.fqn AS parent
           ORDER BY parent
@@ -269,7 +269,7 @@ tests:
           - { row: { parent: "HasPerimeter" } }
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'HasArea'
           RETURN parent.fqn AS parent
         assert:
@@ -277,7 +277,7 @@ tests:
           - { row: { parent: "Shape" } }
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'HasPerimeter'
           RETURN parent.fqn AS parent
         assert:
@@ -291,7 +291,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'Counter'
           RETURN parent.fqn AS parent
         assert:

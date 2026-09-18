@@ -209,7 +209,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'reader::internal_seek'
         AND callee.fqn = 'reader::internal_flush'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -255,7 +255,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'reader::reader_open'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -266,7 +266,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'writer::writer_write'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -277,7 +277,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -288,7 +288,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'error::panic'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -302,7 +302,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { unique: callee }
@@ -325,7 +325,7 @@ tests:
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'nested::Outer'
         AND child.fqn = 'nested::Outer::Inner'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -421,7 +421,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'reader::internal_seek'
         AND callee.fqn = 'reader::internal_flush'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -432,7 +432,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -443,7 +443,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'unrelated::unrelated_func'
         AND callee.fqn = 'unrelated::helper'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -457,7 +457,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 6 }
@@ -474,7 +474,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'error::panic'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -525,7 +525,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_init'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -536,7 +536,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_push'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -547,7 +547,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_count'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -558,7 +558,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_pop'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -569,7 +569,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_empty'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -580,7 +580,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'error::panic'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -590,7 +590,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 6 }

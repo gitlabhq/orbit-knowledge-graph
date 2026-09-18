@@ -211,7 +211,7 @@ tests:
     query: |
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Domain\Status' AND p.fqn = 'App\Domain\HasLabel'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -220,7 +220,7 @@ tests:
     query: |
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Domain\Tier' AND p.fqn = 'App\Domain\Describable'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -230,7 +230,7 @@ tests:
     query: |
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Domain\Status\label' AND b.fqn = 'App\Domain\Status\format'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -239,7 +239,7 @@ tests:
     query: |
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Domain\Direction\rotate' AND b.fqn = 'App\Domain\Direction\opposite'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -248,7 +248,7 @@ tests:
     query: |
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Domain\Tier\announce' AND b.fqn = 'App\Domain\Describable\shortDescribe'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -258,7 +258,7 @@ tests:
     query: |
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Web\Controller\showStatus' AND b.fqn = 'App\Domain\Status\label'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }
@@ -267,7 +267,7 @@ tests:
     query: |
       MATCH (a:Definition)-[e:CALLS|DEFINES|EXTENDS]->(b:Definition)
       WHERE a.fqn = 'App\Web\Controller\defaultLabel' AND b.fqn = 'App\Domain\Status\defaultStatus'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN a.fqn AS a
     assert:
       - { row_count: 1 }

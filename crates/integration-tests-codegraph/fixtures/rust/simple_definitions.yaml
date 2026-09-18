@@ -62,7 +62,7 @@ tests:
   - name: No call edges (no function calls in this fixture)
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
       RETURN count(caller) AS n
     assert:
       - { row_count: 1 }

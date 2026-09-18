@@ -40,7 +40,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.directImports'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
       ORDER BY name
     assert:
@@ -52,7 +52,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.staticImport'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -62,7 +62,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.WildcardMain.wildcardImport'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -72,7 +72,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.WildcardMain.builtinPrintln'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN sym.import_path AS path
     assert:
       - { empty: true }

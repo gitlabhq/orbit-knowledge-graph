@@ -288,7 +288,12 @@ impl Context {
         };
 
         let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
-        format!("{}({})", duckdb_name, args.join(", "))
+        let call = format!("{}({})", duckdb_name, args.join(", "));
+        if name == "countIf" || name == "sumIf" {
+            format!("COALESCE({call}, 0)")
+        } else {
+            call
+        }
     }
 
     fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {

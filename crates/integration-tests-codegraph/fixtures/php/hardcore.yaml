@@ -159,7 +159,7 @@ tests:
     query: |
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Models\Entity'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -168,7 +168,7 @@ tests:
     query: |
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Contracts\Identifiable'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -177,7 +177,7 @@ tests:
     query: |
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Concerns\Loggable'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -188,7 +188,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Entity\refresh'
         AND callee.fqn = 'App\Models\Entity\touch'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -198,7 +198,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Concerns\Loggable\log'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -211,7 +211,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Models\Entity\touch'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -221,7 +221,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Models\Product\describe'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -231,7 +231,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\boot'
         AND callee.fqn = 'App\Support\Logger\make'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }

@@ -82,7 +82,7 @@ tests:
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'app.consumer.build'
             AND callee.fqn = 'app.registry.base.BaseRegistry'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
@@ -90,7 +90,7 @@ tests:
           MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'app.consumer.build'
             AND sym.identifier_name = 'BaseRegistry'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller
         assert:
           - { empty: true }
@@ -100,7 +100,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app.consumer.build'
         AND callee.fqn = 'app.registry.helpers.make_widget'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -110,7 +110,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'proj.sub.caller.make_engine'
         AND callee.fqn = 'proj.core.Engine'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -120,7 +120,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'reg.pkg.mod.use_thing'
         AND callee.fqn = 'reg.pkg.thing.Thing'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -130,7 +130,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ext.caller.build_widget'
         AND sym.identifier_name = 'Widget'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

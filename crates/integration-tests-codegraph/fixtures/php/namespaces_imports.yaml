@@ -250,7 +250,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
         AND callee.fqn = 'Vendor\Sub\A\greet'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -260,7 +260,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
         AND callee.fqn = 'Vendor\Sub\B\shout'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -270,7 +270,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
         AND callee.fqn = 'Vendor\Sub\D\whisper'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -281,7 +281,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
         AND callee.fqn = 'Vendor\Util\format'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -291,7 +291,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
         AND callee.fqn = 'Vendor\Util\helper'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -302,7 +302,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\MultiAlias\run'
         AND callee.fqn IN ['Vendor\X\Foo\fromX', 'Vendor\Y\Foo\fromY']
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }
@@ -314,7 +314,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
         AND callee.fqn = 'Vendor\Other\Bare\call'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -327,7 +327,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
         AND callee.fqn = 'Vendor\Other\Bare\run'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 0 }
@@ -338,7 +338,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
         AND callee.fqn = 'Vendor\Other\Bare\call'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -351,7 +351,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
         AND callee.fqn = 'Vendor\Other\Bare\run'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 0 }
@@ -362,7 +362,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Consumer\Sub\Nested\DeepExtends'
         AND parent.fqn = 'Vendor\Base\BaseService'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS c
     assert:
       - { row_count: 1 }
@@ -372,7 +372,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\Sub\Nested\DeepExtends\start'
         AND callee.fqn = 'Vendor\Base\BaseService\boot'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -383,7 +383,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\DeepCaller\go'
         AND callee.fqn = 'Vendor\Pkg\Deep\Inner\Thing\make'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -393,7 +393,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\DeepCaller\go'
         AND callee.fqn = 'Vendor\Pkg\Deep\Inner\Thing\ping'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }

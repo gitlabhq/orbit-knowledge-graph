@@ -57,7 +57,7 @@ tests:
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.process' AND e.relationship_kind = 'Calls'
+          WHERE caller.fqn = 'main.process' AND e.relationship_kind = 'CALLS'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:

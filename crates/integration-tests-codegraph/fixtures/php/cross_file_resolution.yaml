@@ -147,7 +147,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Service\OrderService'
         AND parent.fqn = 'App\Base\Repository'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -157,7 +157,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Service\OrderService'
         AND parent.fqn = 'App\Contract\Persistable'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -167,7 +167,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Service\OrderService'
         AND parent.fqn = 'App\Mixin\Loggable'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -177,7 +177,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Repo\OrderRepo'
         AND parent.fqn = 'App\Base\Repository'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -187,7 +187,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Repo\OrderRepo'
         AND parent.fqn = 'App\Contract\Persistable'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -197,7 +197,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Contract\Persistable'
         AND parent.fqn = 'App\Contract\Identifiable'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -207,7 +207,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Repo\OrderRepo\find'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -217,7 +217,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Mailer\OrderMailer\sendConfirmation'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -227,7 +227,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\persist'
         AND callee.fqn = 'App\Repo\OrderRepo\persist'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -237,7 +237,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Base\Repository\boot'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -247,7 +247,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\OrderService\run'
         AND callee.fqn = 'App\Mixin\Loggable\log'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -257,7 +257,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Mixin\Loggable\log'
         AND callee.fqn = 'App\Mixin\Loggable\writeLog'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -273,7 +273,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\bootstrap'
         AND callee.fqn = 'App\Service\OrderService\run'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

@@ -36,7 +36,7 @@ tests:
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.useBuilder' AND e.relationship_kind = 'Calls'
+          WHERE caller.fqn = 'main.useBuilder' AND e.relationship_kind = 'CALLS'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -49,7 +49,7 @@ tests:
       # Exactly 6 call edges, no false positives
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.useBuilder' AND e.relationship_kind = 'Calls'
+          WHERE caller.fqn = 'main.useBuilder' AND e.relationship_kind = 'CALLS'
           RETURN callee.fqn AS callee
         assert:
           - { row_count: 6 }

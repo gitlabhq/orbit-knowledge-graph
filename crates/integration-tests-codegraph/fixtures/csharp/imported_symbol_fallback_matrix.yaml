@@ -65,7 +65,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'App.JsonRunner.Serialize'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -75,7 +75,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'App.StaticRunner.Track'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -85,7 +85,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'App.AliasRunner.Serialize'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -95,7 +95,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'App.ConsoleRunner.Log'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN sym.import_path AS path
     assert:
       - { empty: true }

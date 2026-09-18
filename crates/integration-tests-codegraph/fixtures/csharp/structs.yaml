@@ -87,7 +87,7 @@ tests:
       MATCH (s:Definition)-[e:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE s.fqn = 'Geometry.Point'
         AND c.definition_type = 'Constructor'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
@@ -111,7 +111,7 @@ tests:
       MATCH (s:Definition)-[e:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE s.fqn = 'Geometry.Point'
         AND m.fqn = 'Geometry.Point.DistanceToOrigin'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -121,7 +121,7 @@ tests:
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'Geometry/Point.cs'
         AND d.fqn = 'Geometry.Point'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

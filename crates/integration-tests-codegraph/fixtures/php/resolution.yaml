@@ -101,7 +101,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Models\User'
         AND parent.fqn = 'App\Models\Model'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
@@ -111,7 +111,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Model\save'
         AND callee.fqn = 'App\Models\Model\persist'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -124,7 +124,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\User\save'
         AND callee.fqn = 'App\Models\Model\save'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -137,7 +137,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\User\save'
         AND callee.fqn = 'App\Support\Logger\log'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -150,7 +150,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\User\rename'
         AND callee.fqn = 'App\Models\User\save'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

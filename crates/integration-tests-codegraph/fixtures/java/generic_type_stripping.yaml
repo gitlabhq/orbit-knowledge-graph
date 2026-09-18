@@ -51,7 +51,7 @@ tests:
     description: "getUsers() returns List<UserService> — inner() extracts UserService from type_arguments"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'useGenericReturn' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'useGenericReturn' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 4 }
@@ -63,7 +63,7 @@ tests:
   - name: All call edges from useGenericLocal
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'useGenericLocal' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'useGenericLocal' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 4 }

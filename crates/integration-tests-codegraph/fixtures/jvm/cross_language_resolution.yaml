@@ -72,7 +72,7 @@ tests:
       WHERE caller.name = 'createUser'
         AND callee.name = 'create'
         AND callee.file_path = 'com/example/model/User.java'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -87,7 +87,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'createUser'
         AND callee.name = 'capitalize'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -102,7 +102,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.model.User.create'
         AND callee.fqn STARTS WITH 'com.example.model.User'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }

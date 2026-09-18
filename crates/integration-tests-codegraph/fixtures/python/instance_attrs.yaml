@@ -26,7 +26,7 @@ tests:
   - name: self.db.execute() resolves to Database.execute not Decoy.execute
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'query' AND callee.name = 'execute' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'query' AND callee.name = 'execute' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -35,7 +35,7 @@ tests:
   - name: self.db.close() resolves to Database.close
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'cleanup' AND callee.name = 'close' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'cleanup' AND callee.name = 'close' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -44,7 +44,7 @@ tests:
   - name: No cross-method leakage
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'query' AND callee.name = 'close' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'query' AND callee.name = 'close' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { empty: true }

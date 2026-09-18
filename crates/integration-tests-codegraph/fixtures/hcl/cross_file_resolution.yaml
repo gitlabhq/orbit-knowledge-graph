@@ -91,7 +91,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE callee.definition_type = 'Variable'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 4 }
@@ -103,7 +103,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.definition_type AS type
     assert:
       - { row_count: 4 }
@@ -118,7 +118,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND callee.fqn = 'var.instance_type'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS sf, callee.file_path AS tf
     assert:
       - { row_count: 1 }
@@ -129,7 +129,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'locals'
         AND callee.fqn = 'var.region'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }
@@ -138,7 +138,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
         AND callee.fqn IN ['locals.common_tags', 'aws_ami.ubuntu', 'aws_subnet.public']
       RETURN callee.fqn AS callee
     assert:

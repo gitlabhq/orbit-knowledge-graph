@@ -99,7 +99,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'zoo::animals::Bark'
           RETURN parent.fqn AS parent
         assert:
@@ -110,7 +110,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'zoo::animals::Wolf'
           RETURN parent.fqn AS parent
         assert:
@@ -121,7 +121,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'zoo::animals::Bear'
           RETURN parent.fqn AS parent
         assert:
@@ -132,7 +132,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'zoo::traits::Carnivore'
           RETURN parent.fqn AS parent
         assert:
@@ -146,7 +146,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'zoo_impl::CarHorn'
           RETURN parent.fqn AS parent
         assert:
@@ -157,7 +157,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'zoo_impl::Beep'
           RETURN parent.fqn AS parent
         assert:
@@ -168,7 +168,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND child.fqn = 'zoo_impl::Hound'
           RETURN parent.fqn AS parent
         assert:
@@ -179,7 +179,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
             AND parent.fqn = 'zoo::traits::Audible'
           RETURN child.fqn AS child
           ORDER BY child

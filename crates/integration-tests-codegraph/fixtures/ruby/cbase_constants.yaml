@@ -38,7 +38,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'ProjectsController::enqueue_async_transfer'
         AND callee.fqn = 'Projects::TransferService::execute'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -47,7 +47,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE callee.fqn = 'Projects::TransferService::execute'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 2 }

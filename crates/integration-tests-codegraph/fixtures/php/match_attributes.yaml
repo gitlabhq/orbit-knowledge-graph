@@ -204,7 +204,7 @@ tests:
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Domain\Status'
         AND p.fqn = 'App\Contracts\Labeled'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -214,7 +214,7 @@ tests:
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Http\ApiRouter'
         AND p.fqn = 'App\Http\Router'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -225,7 +225,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Router\route'
         AND callee.fqn = 'App\Http\Router\ok'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -235,7 +235,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Router\route'
         AND callee.fqn = 'App\Http\Router\redirect'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -245,7 +245,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Router\route'
         AND callee.fqn = 'App\Http\Router\missing'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -255,7 +255,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Router\route'
         AND callee.fqn = 'App\Http\Router\fallback'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -265,7 +265,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\ApiRouter\dispatch'
         AND callee.fqn = 'App\Http\Router\fallback'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -275,7 +275,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\ApiRouter\dispatch'
         AND callee.fqn = 'App\Http\ApiRouter\client'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -286,7 +286,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Dispatcher\pick'
         AND callee.fqn = 'App\Errors\Errors\code'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -296,7 +296,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Dispatcher\pick'
         AND callee.fqn = 'App\Domain\Dispatcher\handleA'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -317,7 +317,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Status\label'
         AND callee.fqn = 'App\Domain\Status\format'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row: { c: 'App\Domain\Status\label' } }
@@ -336,7 +336,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\list'
         AND callee.fqn = 'App\Support\Logger\level'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -347,7 +347,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\boot'
         AND callee.fqn = 'App\Http\Router'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -357,7 +357,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\boot'
         AND callee.fqn = 'App\Domain\Dispatcher'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }

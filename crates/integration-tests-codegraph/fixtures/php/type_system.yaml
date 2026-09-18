@@ -221,7 +221,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\TypedProps\lookup'
         AND callee.fqn = 'App\Service\Repo\find'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -232,7 +232,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\boot'
         AND callee.fqn = 'App\Service\Repo\find'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -242,7 +242,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\boot'
         AND callee.fqn = 'App\Service\Cache\get'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -253,7 +253,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\NullableTypes\fetch'
         AND callee.fqn = 'App\Service\Repo\save'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -268,7 +268,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\UnionTypes\process'
         AND callee.fqn = 'App\Service\Repo\find'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -290,7 +290,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\IntersectionUser\measure'
         AND callee.fqn = 'App\Iface\Countable\count'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -304,7 +304,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\DnfTypes\inspect'
         AND callee.fqn = 'App\Iface\Countable\count'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -320,7 +320,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\FluentBuilder\go'
         AND callee.fqn = 'App\Service\Builder\finish'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -330,7 +330,7 @@ tests:
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Service\FluentBuilder'
         AND p.fqn = 'App\Service\Builder'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -354,7 +354,7 @@ tests:
     query: |
       MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Iface\Counter'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN p.fqn AS parent
     assert:
       - { row: { parent: 'App\Iface\Countable' } }

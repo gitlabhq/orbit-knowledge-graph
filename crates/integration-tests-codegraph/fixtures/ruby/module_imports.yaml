@@ -84,7 +84,7 @@ tests:
     query: |
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'Report'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN parent.fqn AS parent
     assert:
       - { row_count: 5 }

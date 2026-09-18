@@ -46,7 +46,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'package_import_call'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path
     assert:
@@ -60,7 +60,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'from_import_call'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, name
     assert:
@@ -72,7 +72,7 @@ tests:
     query: |
       MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'main.py'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
         AND sym.import_path = 'sdk.helpers'
       RETURN file.path AS file, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
     assert:
@@ -85,14 +85,14 @@ tests:
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'local_import_call'
             AND callee.fqn = 'local_models.LocalClient'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.name = 'local_import_call'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN sym.import_path AS path
         assert:
           - { empty: true }
@@ -101,7 +101,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'wildcard_import_call'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -111,7 +111,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['builtin_len_call', 'builtin_print_call']
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN sym.import_path AS path
     assert:
       - { empty: true }

@@ -59,7 +59,7 @@ tests:
   - name: use_closure calls apply
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'use_closure' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'use_closure' AND e.relationship_kind = 'CALLS'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
@@ -69,7 +69,7 @@ tests:
   - name: process calls double, area, and Circle
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'process' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'process' AND e.relationship_kind = 'CALLS'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:

@@ -190,7 +190,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'external_imported_calls'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, name, alias
     assert:
@@ -204,7 +204,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'local_callable_shadows_external_import'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN sym.identifier_name AS name
     assert:
       - { empty: true }
@@ -213,7 +213,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['scoped_import_user', 'another_scoped_import_user', 'scoped_import_out_of_scope']
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
       ORDER BY caller
     assert:
@@ -225,7 +225,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['top_level_import_user', 'scoped_import_shadows_top_level']
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
       ORDER BY caller
     assert:
@@ -237,7 +237,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'qualified_external_imported_calls'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, alias
     assert:
@@ -257,7 +257,7 @@ tests:
         'inherent_call',
         'local_method_same_name_as_external_import'
       ]
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
@@ -273,7 +273,7 @@ tests:
         'imported_module_constant_reference',
         'wildcard_external_import_user'
       ]
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }

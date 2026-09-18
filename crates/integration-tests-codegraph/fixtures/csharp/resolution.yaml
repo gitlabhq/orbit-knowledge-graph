@@ -164,7 +164,7 @@ tests:
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'MyApp.Controllers.UserController'
         AND child.fqn = 'MyApp.Controllers.UserController.GetUser'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -174,7 +174,7 @@ tests:
     query: |
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'MyApp.Models.Role'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN child.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -189,7 +189,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.GetUser'
         AND callee.fqn = 'MyApp.Services.UserService.FindById'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -200,7 +200,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.CreateUser'
         AND callee.fqn = 'MyApp.Services.UserService.Save'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

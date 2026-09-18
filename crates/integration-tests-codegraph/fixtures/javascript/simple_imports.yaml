@@ -42,7 +42,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'helper'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -51,7 +51,7 @@ tests:
   - name: unused has no incoming cross-file calls
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE callee.name = 'unused' AND e.relationship_kind = 'Calls'
+      WHERE callee.name = 'unused' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { empty: true }

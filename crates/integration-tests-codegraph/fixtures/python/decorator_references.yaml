@@ -25,7 +25,7 @@ tests:
   - name: Decorator produces reference edge from decorated function
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'decorated_func' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'decorated_func' AND e.relationship_kind = 'CALLS'
       RETURN callee.name AS callee
     assert:
       - { row: { callee: "my_decorator" } }
@@ -34,7 +34,7 @@ tests:
   - name: Each decorated function references its own decorator
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'another_func' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'another_func' AND e.relationship_kind = 'CALLS'
       RETURN callee.name AS callee
     assert:
       - { row: { callee: "other_decorator" } }
@@ -43,7 +43,7 @@ tests:
   - name: Plain function has no decorator edges
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'plain_func' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'plain_func' AND e.relationship_kind = 'CALLS'
       RETURN callee.name AS callee
     assert:
       - { empty: true }

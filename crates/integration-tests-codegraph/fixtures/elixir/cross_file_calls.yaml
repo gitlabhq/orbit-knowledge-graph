@@ -53,7 +53,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.greet'
         AND callee.fqn = 'Baz.hello'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -63,7 +63,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.shout'
         AND callee.fqn = 'Helpers.Format.upcase'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -73,7 +73,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.doubled'
         AND callee.fqn = 'Util.dub'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -83,7 +83,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Foo.local'
         AND callee.fqn = 'Foo.internal'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -92,7 +92,7 @@ tests:
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
       RETURN count(caller) AS n
     assert:
       - { count_equals: { field: n, value: 4 } }

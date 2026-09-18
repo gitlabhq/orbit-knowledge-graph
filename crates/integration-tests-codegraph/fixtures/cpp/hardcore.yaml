@@ -264,7 +264,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'reader::io::internal_seek'
         AND callee.fqn = 'reader::io::internal_flush'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -310,7 +310,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -324,7 +324,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { unique: callee }
@@ -347,7 +347,7 @@ tests:
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'nested::outer'
         AND child.fqn = 'nested::outer::inner'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -358,7 +358,7 @@ tests:
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'nested::outer::inner'
         AND child.fqn = 'nested::outer::inner::Widget'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -491,7 +491,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'tmpl_usage::extra::use_templates'
         AND callee.fqn = 'templates::tmpl::swap'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

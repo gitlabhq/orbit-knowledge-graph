@@ -27,7 +27,7 @@ tests:
   - name: Call through relative import resolves
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'create_user' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'create_user' AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "mypackage.models.User" } }

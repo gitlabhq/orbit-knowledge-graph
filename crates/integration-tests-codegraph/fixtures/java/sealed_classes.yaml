@@ -103,7 +103,7 @@ tests:
           'com.example.shapes.Triangle'
         ]
         AND parent.fqn = 'com.example.shapes.Shape'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 3 }
@@ -115,7 +115,7 @@ tests:
     query: |
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'com.example.shapes.Shape'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
         AND child.fqn IN [
           'com.example.shapes.Circle',
           'com.example.shapes.Rectangle',
@@ -133,7 +133,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'com.example.shapes.Square'
         AND parent.fqn = 'com.example.shapes.Quad'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { empty: true }
@@ -143,7 +143,7 @@ tests:
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'com.example.shapes.Quad'
         AND child.fqn = 'com.example.shapes.Square'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }

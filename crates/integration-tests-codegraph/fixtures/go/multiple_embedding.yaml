@@ -55,7 +55,7 @@ tests:
     queries:
       - query: |
           MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'Extends'
+          WHERE e.relationship_kind = 'EXTENDS'
           RETURN child.name AS child, parent.name AS parent
           ORDER BY child, parent
         assert:
@@ -68,7 +68,7 @@ tests:
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.useRWC' AND e.relationship_kind = 'Calls'
+          WHERE caller.fqn = 'main.useRWC' AND e.relationship_kind = 'CALLS'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -86,7 +86,7 @@ tests:
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.useDiamond' AND e.relationship_kind = 'Calls'
+          WHERE caller.fqn = 'main.useDiamond' AND e.relationship_kind = 'CALLS'
             AND callee.name = 'Dup'
           RETURN callee.fqn AS callee
         assert:

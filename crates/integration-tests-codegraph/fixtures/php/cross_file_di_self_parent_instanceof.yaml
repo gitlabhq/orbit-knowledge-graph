@@ -115,7 +115,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Domain\NotFoundException'
         AND parent.fqn = 'App\Domain\DomainException'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -125,7 +125,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Logging\FileLogger'
         AND parent.fqn = 'App\Logging\LoggerInterface'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -135,7 +135,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Http\UserController'
         AND parent.fqn = 'App\Support\Timestamped'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -145,7 +145,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\show'
         AND callee.fqn = 'App\Repo\UserRepo\find'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -155,7 +155,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\show'
         AND callee.fqn = 'App\Logging\LoggerInterface\log'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -165,7 +165,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\show'
         AND callee.fqn = 'App\Support\Timestamped\touch'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -175,7 +175,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Repo\UserRepo\find'
         AND callee.fqn = 'App\Domain\NotFoundException\forId'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -185,7 +185,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\DomainException\generic'
         AND callee.fqn = 'App\Domain\DomainException'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -195,7 +195,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\forId'
         AND callee.fqn = 'App\Domain\NotFoundException'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -205,7 +205,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'
         AND callee.fqn = 'App\Domain\NotFoundException'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -215,7 +215,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'
         AND callee.fqn = 'App\Domain\DomainException'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -225,7 +225,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'
         AND callee.fqn = 'App\Domain\DomainException\describe'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -235,7 +235,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\show'
         AND callee.fqn = 'App\Domain\DomainException'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -245,7 +245,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\exceptionClass'
         AND callee.fqn = 'App\Domain\NotFoundException'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

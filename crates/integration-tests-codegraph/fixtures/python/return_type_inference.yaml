@@ -40,7 +40,7 @@ tests:
   - name: make_db().query() resolves to Database.query not Decoy.query
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'use_factory' AND callee.name = 'query' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'use_factory' AND callee.name = 'query' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -49,7 +49,7 @@ tests:
   - name: make_logger().log() resolves to Logger.log not Decoy.log
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'use_factory' AND callee.name = 'log' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'use_factory' AND callee.name = 'log' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -58,7 +58,7 @@ tests:
   - name: Indirect return (return x where x = Database()) resolves
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'use_indirect' AND callee.name = 'query' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'use_indirect' AND callee.name = 'query' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

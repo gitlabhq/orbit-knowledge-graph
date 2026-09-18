@@ -92,7 +92,7 @@ tests:
   - name: Escaping alias does not produce call edges into outside files
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.file_path IN [
           'app/assets/javascripts/consumer.js',
           'app/assets/javascripts/env_consumer.js',
@@ -106,7 +106,7 @@ tests:
   - name: process.env does not unlock escaping aliases
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.file_path = 'app/assets/javascripts/env_consumer.js'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
     assert:
@@ -116,7 +116,7 @@ tests:
   - name: fs existsSync does not unlock escaping aliases
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.file_path = 'app/assets/javascripts/fs_consumer.js'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
     assert:

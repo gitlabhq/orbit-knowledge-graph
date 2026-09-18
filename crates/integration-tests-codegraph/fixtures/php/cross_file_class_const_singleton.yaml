@@ -64,7 +64,7 @@ tests:
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Di\ScopedContainer'
         AND parent.fqn = 'App\Di\Container'
-        AND e.relationship_kind = 'Extends'
+        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -74,7 +74,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Di\Container\instance'
         AND callee.fqn = 'App\Di\Container'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -84,7 +84,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Di\ScopedContainer\build'
         AND callee.fqn = 'App\Di\ScopedContainer'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -94,7 +94,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\containerClass'
         AND callee.fqn = 'App\Di\Container'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -104,7 +104,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\Container\instance'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -114,7 +114,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\ScopedContainer\build'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -124,7 +124,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\Container\get'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 2 }

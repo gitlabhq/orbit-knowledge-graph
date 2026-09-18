@@ -219,7 +219,7 @@ tests:
   - name: Next pages router cross-file calls resolve JSX components and helpers
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY caller, callee_file, callee
@@ -233,7 +233,7 @@ tests:
   - name: Prop-supplied Next page Component is not fabricated as a code edge
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.fqn = 'App'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -310,7 +310,7 @@ tests:
   - name: Next pages router dynamic and special files resolve local calls
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.file_path IN [
           'pages/_error.tsx',
           'pages/404.tsx',

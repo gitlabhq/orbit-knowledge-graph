@@ -323,7 +323,7 @@ tests:
       MATCH (r:Definition)-[e:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
         AND c.definition_type = 'Constructor'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN c.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -333,7 +333,7 @@ tests:
       MATCH (r:Definition)-[e:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE r.fqn = 'com.example.records.Range'
         AND m.fqn = 'com.example.records.Range.length'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -354,7 +354,7 @@ tests:
       MATCH (p:Definition)-[e:CALLS|DEFINES|EXTENDS]->(s:Definition)
       WHERE p.fqn = 'com.example.records.Pair'
         AND s.fqn = 'com.example.records.Pair.Swap'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN s.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -366,7 +366,7 @@ tests:
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'com/example/records/Point.java'
         AND d.fqn = 'com.example.records.Point'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -378,7 +378,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.PointUser.origin'
         AND callee.fqn = 'com.example.records.Point'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       # Two edges: the Point return-type reference and the new Point(...) call.
@@ -389,7 +389,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.RangeUser.span'
         AND callee.fqn = 'com.example.records.Range.length'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -397,7 +397,7 @@ tests:
   - name: "Records Circle and Rectangle extend sealed interface Shape"
     query: |
       MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-      WHERE parent.fqn = 'com.example.records.Shape' AND e.relationship_kind = 'Extends'
+      WHERE parent.fqn = 'com.example.records.Shape' AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child
       ORDER BY child
     assert:
@@ -409,7 +409,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.create'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
@@ -420,7 +420,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.area'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
         AND callee.fqn IN ['com.example.records.Circle', 'com.example.records.Rectangle']
       RETURN callee.fqn AS callee
       ORDER BY callee
@@ -432,7 +432,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.Outer.make'
         AND callee.fqn = 'com.example.records.Outer.Inner'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       # Two edges: the Inner return-type reference and the new Inner(...) call.
@@ -443,7 +443,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.Outer.use'
         AND callee.fqn = 'com.example.records.Outer.Inner.doubled'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -452,7 +452,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.PointUser.describe'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
         AND callee.name IN ['x', 'y']
       RETURN callee.fqn AS callee
       ORDER BY callee
@@ -465,7 +465,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.area'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
         AND callee.name IN ['radius', 'width', 'height']
       RETURN callee.fqn AS callee
       ORDER BY callee
@@ -504,7 +504,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.WrappedUser.read'
         AND callee.fqn = 'com.example.records.Wrapped.raw'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 1 }
@@ -517,7 +517,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.WrappedUser.print'
         AND callee.fqn = 'com.example.records.Wrapped.toString'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 1 }
@@ -530,7 +530,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.WrappedUser.same'
         AND callee.fqn = 'com.example.records.Wrapped.equals'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 1 }
@@ -566,7 +566,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.PatternMatcher.describe'
-        AND e.relationship_kind = 'Calls' AND callee.name IN ['x', 'y']
+        AND e.relationship_kind = 'CALLS' AND callee.name IN ['x', 'y']
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
@@ -589,7 +589,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.SwitchMatcher.area'
-        AND e.relationship_kind = 'Calls' AND callee.name IN ['radius', 'width', 'height']
+        AND e.relationship_kind = 'CALLS' AND callee.name IN ['radius', 'width', 'height']
       RETURN callee.name AS callee
       ORDER BY callee
     assert:

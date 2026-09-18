@@ -34,7 +34,7 @@ tests:
   - name: main.ts imports resolve through re-export to original defs
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'run' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'run' AND e.relationship_kind = 'CALLS'
       RETURN callee.name AS callee, callee.file_path AS file
       ORDER BY callee
     assert:

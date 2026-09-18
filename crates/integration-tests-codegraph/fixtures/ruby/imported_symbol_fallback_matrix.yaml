@@ -61,7 +61,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ApiRunner::fetch'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -71,7 +71,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ApiRunner::connect'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -81,7 +81,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ApiRunner::parse'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -91,7 +91,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'RelativeRunner::connect'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
@@ -103,14 +103,14 @@ tests:
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'ShadowRunner::connect'
             AND callee.fqn = 'LocalExternalClient::connect'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'ShadowRunner::connect'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN sym.import_path AS path
         assert:
           - { empty: true }
@@ -121,14 +121,14 @@ tests:
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'LocalRunner::run'
             AND callee.fqn = 'LocalRunner::helper'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'LocalRunner::run'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN sym.import_path AS path
         assert:
           - { empty: true }

@@ -104,7 +104,7 @@ tests:
       MATCH (e:Definition)-[edge:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND m.fqn = 'com.example.enums.Planet.surfaceGravity'
-        AND edge.relationship_kind = 'Defines'
+        AND edge.relationship_kind = 'DEFINES'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -114,7 +114,7 @@ tests:
       MATCH (e:Definition)-[edge:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND c.definition_type = 'EnumConstant'
-        AND edge.relationship_kind = 'Defines'
+        AND edge.relationship_kind = 'DEFINES'
       RETURN c.name AS name
       ORDER BY c.name
     assert:
@@ -128,7 +128,7 @@ tests:
       MATCH (e:Definition)-[r:CALLS|DEFINES|EXTENDS]->(i:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND i.fqn = 'com.example.enums.Describable'
-        AND r.relationship_kind = 'Extends'
+        AND r.relationship_kind = 'EXTENDS'
       RETURN i.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -138,7 +138,7 @@ tests:
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'com/example/enums/Planet.java'
         AND d.fqn = 'com.example.enums.Planet'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

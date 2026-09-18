@@ -53,7 +53,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'ingress'
         AND callee.name = 'ports'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.name AS caller, callee.name AS callee
     assert:
       - { row_count: 1 }
@@ -62,7 +62,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'locals'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN callee.name AS callee
     assert:
       - { empty: false }

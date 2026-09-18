@@ -213,7 +213,7 @@ tests:
   - name: imported constants from alias barrels do not create false call edges
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.fqn = 'badScopeCall'
         AND callee.file_path = 'app/assets/javascripts/feature_flags/store/modules/feature_flag.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -275,7 +275,7 @@ tests:
   - name: namespace alias barrel calls resolve to concrete component definitions
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.fqn = 'runProjectsNamespace'
       RETURN caller.fqn AS caller, callee.fqn AS callee
       ORDER BY callee
@@ -288,7 +288,7 @@ tests:
   - name: imported constants from monolith barrels stay inert
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.fqn = 'badProjectsCall'
         AND callee.file_path = 'app/assets/javascripts/projects/your_work/components/filters.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee

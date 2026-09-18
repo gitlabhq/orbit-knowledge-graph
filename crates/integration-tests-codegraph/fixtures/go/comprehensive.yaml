@@ -120,7 +120,7 @@ tests:
   - name: "Admin extends User via struct embedding"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.fqn = 'main.Admin' AND e.relationship_kind = 'Extends'
+      WHERE caller.fqn = 'main.Admin' AND e.relationship_kind = 'EXTENDS'
       RETURN callee.fqn AS parent
     assert:
       - { row: { parent: "main.User" } }
@@ -131,7 +131,7 @@ tests:
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.main' AND e.relationship_kind = 'Calls'
+          WHERE caller.fqn = 'main.main' AND e.relationship_kind = 'CALLS'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -185,7 +185,7 @@ tests:
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.DeleteUser' AND e.relationship_kind = 'Calls'
+          WHERE caller.fqn = 'main.DeleteUser' AND e.relationship_kind = 'CALLS'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:

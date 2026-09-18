@@ -65,7 +65,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'buildUser'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -74,7 +74,7 @@ tests:
   - name: No call edges from models.ts (it only defines)
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.file_path = 'models.ts' AND e.relationship_kind = 'Calls'
+      WHERE caller.file_path = 'models.ts' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { empty: true }

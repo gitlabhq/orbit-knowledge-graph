@@ -155,7 +155,7 @@ tests:
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'com.example.weather.Main'
         AND child.fqn = 'com.example.weather.Main.run'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -165,7 +165,7 @@ tests:
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'com.example.weather.formatter.Formatter.Format'
         AND child.fqn = 'com.example.weather.formatter.Formatter.Format.JSON'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -175,7 +175,7 @@ tests:
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'src/main/java/com/example/weather/Main.java'
         AND d.fqn = 'com.example.weather.Main'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN f.path AS file, d.fqn AS def
     assert:
       - { row_count: 1 }
@@ -185,7 +185,7 @@ tests:
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'src/main/java/com/example/weather/model/Forecast.java'
         AND d.fqn = 'com.example.weather.model.Forecast'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN f.path AS file, d.fqn AS def
     assert:
       - { row_count: 1 }
@@ -197,7 +197,7 @@ tests:
       WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
         AND i.import_path = 'java.io'
         AND i.identifier_name = 'PrintStream'
-        AND e.relationship_kind = 'Imports'
+        AND e.relationship_kind = 'IMPORTS'
       RETURN f.path AS file, i.identifier_name AS import
     assert:
       - { row_count: 1 }
@@ -208,7 +208,7 @@ tests:
       WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
         AND i.import_path = 'java.util'
         AND i.identifier_name = 'Arrays'
-        AND e.relationship_kind = 'Imports'
+        AND e.relationship_kind = 'IMPORTS'
       RETURN f.path AS file, i.identifier_name AS import
     assert:
       - { row_count: 1 }
@@ -219,7 +219,7 @@ tests:
       WHERE f.path = 'src/main/java/com/example/weather/service/WeatherService.java'
         AND i.import_path = 'java.util.stream'
         AND i.identifier_name = 'Collectors'
-        AND e.relationship_kind = 'Imports'
+        AND e.relationship_kind = 'IMPORTS'
       RETURN f.path AS file, i.identifier_name AS import
     assert:
       - { row_count: 1 }
@@ -230,7 +230,7 @@ tests:
       WHERE f.path = 'src/main/java/com/example/weather/Main.java'
         AND i.import_path = 'com.example.weather.model'
         AND i.identifier_name = 'Forecast'
-        AND e.relationship_kind = 'Imports'
+        AND e.relationship_kind = 'IMPORTS'
       RETURN f.path AS file, i.identifier_name AS import
     assert:
       - { row_count: 1 }

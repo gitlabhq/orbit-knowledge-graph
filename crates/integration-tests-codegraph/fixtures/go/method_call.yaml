@@ -17,7 +17,7 @@ tests:
   - name: svc.Run() resolves to Service's Run method
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'main' AND e.relationship_kind = 'Calls' AND callee.name = 'Run'
+      WHERE caller.name = 'main' AND e.relationship_kind = 'CALLS' AND callee.name = 'Run'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "main.Run" } }

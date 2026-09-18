@@ -33,7 +33,7 @@ tests:
   - name: Cross-file factory return type resolves
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'handle_request' AND callee.name = 'create' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'handle_request' AND callee.name = 'create' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -42,7 +42,7 @@ tests:
   - name: No resolution to Decoy.create
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'handle_request' AND callee.fqn = 'models.Decoy.create' AND e.relationship_kind = 'Calls'
+      WHERE caller.name = 'handle_request' AND callee.fqn = 'models.Decoy.create' AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { empty: true }
@@ -51,7 +51,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'external_call'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path
     assert:
       - { row_count: 1 }
@@ -63,7 +63,7 @@ tests:
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'handle_request'
             AND callee.fqn = 'models.UserService.create'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
@@ -71,7 +71,7 @@ tests:
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.name = 'handle_request'
-            AND e.relationship_kind = 'Calls'
+            AND e.relationship_kind = 'CALLS'
           RETURN sym.import_path AS path
         assert:
           - { empty: true }

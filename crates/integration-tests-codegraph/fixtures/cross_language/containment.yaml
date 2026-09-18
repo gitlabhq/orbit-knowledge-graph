@@ -61,7 +61,7 @@ tests:
   - name: Exactly 3 containment edges, all Defines
     query: |
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
-      WHERE e.relationship_kind = 'Defines'
+      WHERE e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 3 }
@@ -81,7 +81,7 @@ tests:
   - name: File owns all 4 definitions via Defines edges
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
-      WHERE e.relationship_kind = 'Defines'
+      WHERE e.relationship_kind = 'DEFINES'
       RETURN f.path AS file, d.name AS def
     assert:
       - { match: { field: file, pattern: "app.py" } }

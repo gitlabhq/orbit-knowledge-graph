@@ -80,7 +80,7 @@ tests:
       MATCH (e:Definition)-[edge:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
         AND m.definition_type = 'EnumMember'
-        AND edge.relationship_kind = 'Defines'
+        AND edge.relationship_kind = 'DEFINES'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -95,7 +95,7 @@ tests:
       MATCH (e:Definition)-[edge:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE e.fqn = 'Models.Priority'
         AND m.definition_type = 'EnumMember'
-        AND edge.relationship_kind = 'Defines'
+        AND edge.relationship_kind = 'DEFINES'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -110,7 +110,7 @@ tests:
       MATCH (e:Definition)-[edge:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE e.fqn = 'Models.Permissions'
         AND m.definition_type = 'EnumMember'
-        AND edge.relationship_kind = 'Defines'
+        AND edge.relationship_kind = 'DEFINES'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -127,7 +127,7 @@ tests:
       WHERE e.fqn = 'Models.Status'
         AND m.definition_type = 'EnumMember'
         AND m.name = 'Active'
-        AND edge.relationship_kind = 'Defines'
+        AND edge.relationship_kind = 'DEFINES'
       RETURN m.name AS name
     assert:
       - { row_count: 1 }
@@ -137,7 +137,7 @@ tests:
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'Models/Status.cs'
         AND d.fqn = 'Models.Status'
-        AND e.relationship_kind = 'Defines'
+        AND e.relationship_kind = 'DEFINES'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

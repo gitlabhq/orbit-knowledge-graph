@@ -104,7 +104,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'ops::add'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -115,7 +115,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'ops::multiply'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -126,7 +126,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'format::log_result'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row: { src: "engine.cxx", tgt: "util/format.cc" } }
@@ -140,7 +140,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
         AND callee.fqn = 'data::record_sum'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -151,7 +151,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
         AND callee.fqn = 'ops::add'
-        AND e.relationship_kind = 'Calls'
+        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }

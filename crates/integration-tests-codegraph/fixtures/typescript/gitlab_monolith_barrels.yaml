@@ -97,7 +97,7 @@ tests:
   - name: Namespace import over EE barrel resolves to local EE function
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
         AND callee.file_path = 'ee/app/assets/javascripts/commit/constants.ts'
       RETURN caller.name AS caller, callee.name AS callee
@@ -108,7 +108,7 @@ tests:
   - name: EE barrel local call resolves through to CE definition
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.file_path = 'ee/app/assets/javascripts/commit/constants.ts'
         AND callee.file_path = 'app/assets/javascripts/commit/constants.ts'
       RETURN caller.name AS caller, callee.name AS callee

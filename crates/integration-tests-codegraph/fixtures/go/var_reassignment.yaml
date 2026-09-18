@@ -42,7 +42,7 @@ tests:
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.varDecl' AND e.relationship_kind = 'Calls'
+          WHERE caller.fqn = 'main.varDecl' AND e.relationship_kind = 'CALLS'
           RETURN callee.fqn AS callee
         assert:
           - { row: { callee: "main.Meow" } }
@@ -57,7 +57,7 @@ tests:
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.separateVars' AND e.relationship_kind = 'Calls'
+          WHERE caller.fqn = 'main.separateVars' AND e.relationship_kind = 'CALLS'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -67,7 +67,7 @@ tests:
   - name: "reassigned: both Meow and Bark resolve (phi merges both types)"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.fqn = 'main.reassigned' AND e.relationship_kind = 'Calls'
+      WHERE caller.fqn = 'main.reassigned' AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
       ORDER BY callee
     assert:
@@ -77,7 +77,7 @@ tests:
   - name: "groupedParams: both a and b resolve Query"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.fqn = 'main.groupedParams' AND e.relationship_kind = 'Calls'
+      WHERE caller.fqn = 'main.groupedParams' AND e.relationship_kind = 'CALLS'
         AND callee.name = 'Query'
       RETURN callee.fqn AS callee
     assert:

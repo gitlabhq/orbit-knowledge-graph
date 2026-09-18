@@ -67,7 +67,7 @@ tests:
   - name: TSX runtime calls exclude type-only definitions
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'Calls'
+      WHERE e.relationship_kind = 'CALLS'
         AND caller.file_path IN ['src/Button.tsx', 'src/Toolbar.tsx']
       RETURN caller.fqn AS caller, callee.fqn AS callee
       ORDER BY caller, callee
