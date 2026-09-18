@@ -23,7 +23,7 @@ The local backend of the `orbit` binary: indexes a single repository into a Duck
 _Avoid_: "the CLI" (ambiguous: one binary serves both backends)
 
 **Skill Placeholder**:
-A line-oriented HTML comment that marks where a local section belongs in the standalone Orbit Remote skill. Builds require each placeholder to have one matching local section while both source trees remain independently usable; the current CLI still serves only its embedded local tree.
+A line-oriented HTML comment that marks where a local section belongs in the standalone Orbit Remote skill. Builds require each placeholder to have one matching local section. Both source trees remain independently usable, and the current CLI still serves only its embedded local tree.
 _Avoid_: include directive (the source files remain independently usable)
 
 ### Graph model
