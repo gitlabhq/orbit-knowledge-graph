@@ -119,12 +119,19 @@ RUN_ID=bench1 RA_DATALAKE_SNAPSHOT=golden-core-2026-06-25-1115 \
 # 3. Deploy mock git server for code indexing (~2 min)
 RUN_ID=bench1 bash bench/scripts/deploy-mock-git-server.sh
 
-# 4. Wait for indexing, then check SLOs
+# 4. Wait for indexing, drive query load, then check SLOs
+RUN_ID=bench1 bash bench/scripts/query-load.sh
 RUN_ID=bench1 bash bench/scripts/slos.sh
 
 # 5. Tear down when done
 bash bench/scripts/infra.sh destroy
 ```
+
+The `query_p90_ms` SLO only reflects real work if queries actually ran, so
+run `query-load.sh` before `slos.sh`. The load driver reads the tier's
+`gkg.concurrency.max_concurrent_workers`, port-forwards the webserver, and
+fires the SDLC query corpus over TLS. Latency lands in ClickHouse's
+`system.query_log`, which `slos.sh` reads for the p90.
 
 ## First-time setup
 
@@ -207,6 +214,27 @@ RUN_ID=bench1 bash bench/scripts/slos.sh
 
 Produces a table of 4 SLOs (query p90, success rate, watermark lag, OOM
 count) evaluated against the tier's targets from `tiers.yaml`.
+
+## CI: manual RA benchmark
+
+`.gitlab/ci/orbit-ra-bench.yml` adds a manual `orbit-ra-bench` job in the
+`benchmark` stage. It is canonical-only, `when: manual`, and `allow_failure`,
+so it never blocks a pipeline. Trigger it from an MR or `main` and it runs
+`bench/scripts/ci.sh`: provision from the golden snapshot, drive query load,
+score SLOs, and upload `bench/results/` as an artifact.
+
+Pick the tier at trigger time with the `TIER` variable (`small` by default;
+`medium` or `large` also work). Other job variables:
+
+- `RA_DATALAKE_SNAPSHOT` -- golden snapshot to provision from
+- `CLUSTER_NAME`, `BENCH_PROJECT`, `BENCH_ZONE` -- target cluster
+- `CREATE_CLUSTER` / `TEARDOWN` -- full lifecycle (create and destroy the
+  cluster); both default to `false` so the job reuses an existing cluster
+- `INDEX_WAIT_SECS` -- how long to let indexing settle before scoring
+
+The job authenticates to GCP through the shared `.google-oidc:auth` template.
+The service account it assumes must have `container.developer` and datalake
+bucket read access in `BENCH_PROJECT`; grant that before the first run.
 
 ## Cluster lifecycle
 
@@ -314,6 +342,9 @@ init time by `infra.sh`.
 | `infra.sh` | Lifecycle wrapper: init, apply, plan, destroy, reload, deploy, output |
 | `provision.sh` | Deploy CH + e2e stack, import datalake, start indexing |
 | `deploy-mock-git-server.sh` | Build/deploy mock, upgrade GKG for code indexing |
+| `query-load.sh` | Drive gRPC query load at the tier's concurrency (feeds `slos.sh`) |
+| `grpc_load_driver.py` | Concurrent gRPC load driver (TLS-aware, tier-agnostic) |
+| `ci.sh` | Non-interactive end-to-end run: provision, load, score SLOs |
 | `slos.sh` | Evaluate SLOs from Cloud Monitoring + CH query_log + kubectl |
 | `dump-project-list.sh` | Export project IDs from the datalake to GCS |
 | `fetch-code-corpus.sh` | Fetch repo archives from gitlab.com to GCS |

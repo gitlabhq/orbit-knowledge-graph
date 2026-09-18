@@ -1,0 +1,59 @@
+# Manual Reference Architecture performance benchmark.
+#
+# Provisions the bench stack from a golden datalake snapshot on GKE, drives
+# query load against the webserver, and scores the tier's SLOs. Manual only,
+# canonical only, and allowed to fail so it never blocks a pipeline.
+#
+# Prerequisites (infrastructure, one-time):
+#   - The WIF service account (SERVICE_ACCOUNT) must have container.developer
+#     and storage read access in the bench project (BENCH_PROJECT).
+#   - The target cluster (CLUSTER_NAME) and the golden snapshot
+#     (RA_DATALAKE_SNAPSHOT) must already exist. Set CREATE_CLUSTER=true to
+#     provision a fresh cluster instead (needs terraform + state bucket access).
+orbit-ra-bench:
+  extends:
+    - .google-oidc:auth
+  stage: benchmark
+  image: google/cloud-sdk:slim
+  tags:
+    - saas-linux-medium-amd64
+  timeout: 3h
+  interruptible: false
+  variables:
+    TIER: small
+    BENCH_PROJECT: gl-knowledgegraph-prj-f2eec59d
+    BENCH_ZONE: us-central1-a
+    CLUSTER_NAME: ra-bench-smoke
+    RA_DATALAKE_SNAPSHOT: golden-core-2026-06-25-1115
+    CREATE_CLUSTER: "false"
+    DEPLOY_MOCK: "false"
+    TEARDOWN: "false"
+    INDEX_WAIT_SECS: "1800"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true
+  script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends
+        kubectl google-cloud-cli-gke-gcloud-auth-plugin python3-pip curl >/dev/null
+    - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null
+    - curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+    - chmod +x /usr/local/bin/yq
+    - pip3 install --quiet --break-system-packages grpcio grpcio-tools protobuf
+    - export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+    - gcloud container clusters get-credentials "${CLUSTER_NAME}"
+        --zone "${BENCH_ZONE}" --project "${BENCH_PROJECT}"
+    - export KCTX="gke_${BENCH_PROJECT}_${BENCH_ZONE}_${CLUSTER_NAME}"
+    - export RUN_ID="ci-${CI_PIPELINE_ID}"
+    - bash bench/scripts/ci.sh
+  artifacts:
+    when: always
+    paths:
+      - bench/results/
+    expire_in: 30 days
