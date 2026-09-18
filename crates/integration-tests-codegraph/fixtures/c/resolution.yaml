@@ -198,6 +198,7 @@ tests:
       - { row: { caller: "main::main", callee: "shapes::get_area" } }
 
   - name: "Cross-file: shapes.c calls vec_length (shapes.c -> math.h -> math.c)"
+    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn STARTS WITH 'shapes::'

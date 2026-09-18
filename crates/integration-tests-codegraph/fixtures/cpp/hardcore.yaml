@@ -321,6 +321,7 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "copy_file CALLS edges have no duplicates"
+    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'

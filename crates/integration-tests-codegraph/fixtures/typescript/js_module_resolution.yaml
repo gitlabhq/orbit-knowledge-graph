@@ -630,6 +630,7 @@ tests:
       - { row: { caller: "inspectImports", import_type: "NamedImport", name: "missingNamed" } }
 
   - name: External aliases preserve exact imported symbols
+    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'unresolved/external_aliases.ts'

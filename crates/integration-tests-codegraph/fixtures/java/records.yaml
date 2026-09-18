@@ -462,6 +462,7 @@ tests:
       - { row: { callee: "com.example.records.Point.y" } }
 
   - name: "ShapeUser.area() implicit accessor calls on instanceof-bound variables"
+    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.area'

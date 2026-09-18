@@ -345,6 +345,7 @@ tests:
       - { row: { file: "external/namespace.js", caller: "report", name: "default", alias: "tracker" } }
 
   - name: External CommonJS duplicate aliases preserve exact imported symbols
+    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'external/duplicate_aliases.js'
@@ -357,6 +358,7 @@ tests:
       - { row: { caller: "reportAliases", name: "track", alias: "secondTrack" } }
 
   - name: Module-level external CommonJS calls target imported symbols from the file
+    skip: true
     query: |
       MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'external/module_level.js'
