@@ -832,6 +832,17 @@ fn skills_reject_unknown_names_and_paths() {
     assert!(error.contains("unknown skill name") && error.contains("orbit"));
     assert!(error.contains("skills get <name> [path]"));
 
+    let path_as_name = orbit_cmd()
+        .args(["skills", "get", "references/local/sql.md"])
+        .output()
+        .unwrap();
+    assert!(!path_as_name.status.success());
+    assert!(path_as_name.stdout.is_empty());
+    let error = String::from_utf8(path_as_name.stderr).unwrap();
+    assert!(error.contains("unknown skill name \"references/local/sql.md\""));
+    assert!(error.contains("Known skills:") && error.contains("orbit"));
+    assert!(!error.contains("path shorthand"));
+
     for path in [
         "references/does-not-exist.md",
         "../Cargo.toml",

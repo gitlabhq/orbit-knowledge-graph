@@ -662,7 +662,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             name_or_path,
             path,
         }) => match command {
-            Some(SkillsCommands::Get { name, path }) => skill::run(Some(name), Some(path)),
+            Some(SkillsCommands::Get { name, path }) => skill::get(name, path),
             None => skill::run(name_or_path, path),
         },
         Commands::Setup {

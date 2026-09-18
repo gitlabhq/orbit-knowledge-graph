@@ -48,11 +48,27 @@ fn manifest_binary_hint() -> String {
 }
 
 pub(crate) fn run(name_or_path: Option<String>, path: Option<String>) -> Result<()> {
-    match resolve(name_or_path.as_deref(), path.as_deref())? {
+    execute(resolve(name_or_path.as_deref(), path.as_deref())?)
+}
+
+pub(crate) fn get(name: String, path: String) -> Result<()> {
+    execute(resolve_named(&name, &path)?)
+}
+
+fn execute(request: Request) -> Result<()> {
+    match request {
         Request::Default => print_default_skill()?,
         Request::Print { path, .. } => print_skill_file(&path)?,
     }
     Ok(())
+}
+
+fn resolve_named(name: &str, path: &str) -> Result<Request> {
+    ensure_known_skill(name)?;
+    Ok(Request::Print {
+        name: name.to_string(),
+        path: path.to_string(),
+    })
 }
 
 fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
@@ -61,13 +77,7 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
     };
 
     if is_skill_name(first) {
-        if !KNOWN_SKILLS.iter().any(|skill| skill.name == first) {
-            bail!(
-                "unknown skill name {first:?}. Known skills:\n{}\n\nUse `{} skills get <name> [path]`.",
-                known_skill_list(),
-                crate::commands::setup::spec::launcher()
-            );
-        }
+        ensure_known_skill(first)?;
         return Ok(Request::Print {
             name: first.to_string(),
             path: path.unwrap_or(MANIFEST).to_string(),
@@ -81,6 +91,17 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
         name: DEFAULT_SKILL.to_string(),
         path: first.to_string(),
     })
+}
+
+fn ensure_known_skill(name: &str) -> Result<()> {
+    if !KNOWN_SKILLS.iter().any(|skill| skill.name == name) {
+        bail!(
+            "unknown skill name {name:?}. Known skills:\n{}\n\nUse `{} skills get <name> [path]`.",
+            known_skill_list(),
+            crate::commands::setup::spec::launcher()
+        );
+    }
+    Ok(())
 }
 
 fn is_skill_name(value: &str) -> bool {
@@ -252,6 +273,13 @@ mod tests {
         let error = resolve(Some("unknown-name"), None).unwrap_err().to_string();
         assert!(error.contains("unknown skill name"));
         assert!(error.contains("orbit"));
+
+        let error = resolve_named("references/local/sql.md", MANIFEST)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("unknown skill name \"references/local/sql.md\""));
+        assert!(error.contains("Known skills:\n  orbit"));
+        assert!(!error.contains("path shorthand"));
 
         let error = resolve(
             Some("references/local/sql.md"),
