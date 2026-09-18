@@ -5,7 +5,9 @@ use arrow::record_batch::RecordBatch;
 use duckdb_client::search::{NodeHydrator, NodeValue, excluded_path_predicate};
 use duckdb_client::{DuckDbClient, bool_column, i64_column, sql_lit, string_column};
 
-use crate::commands::context;
+use crate::commands::{context, setup::spec};
+
+const FILE_CONNECTION_LIMIT: usize = 10;
 use crate::workspace;
 
 fn labels_cte(definition: &NodeHydrator) -> Result<String> {
@@ -53,9 +55,10 @@ struct Row {
     loc: String,
     via: String,
     hidden: bool,
+    direct: bool,
 }
 
-fn rows_from(batches: &[RecordBatch]) -> Vec<Row> {
+fn rows_from(batches: &[RecordBatch], direct: bool) -> Vec<Row> {
     let target_ids = i64_column(batches, "target_id");
     let kinds = string_column(batches, "kind");
     let dirs = string_column(batches, "dir");
@@ -74,6 +77,7 @@ fn rows_from(batches: &[RecordBatch]) -> Vec<Row> {
             loc: locs[i].clone(),
             via: vias[i].clone(),
             hidden: hidden[i],
+            direct,
         })
         .collect()
 }
@@ -159,8 +163,8 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
         ),
         &params,
     )?;
-    let edges = rows_from(&edges);
-    let via = rows_from(&via);
+    let edges = rows_from(&edges, true);
+    let via = rows_from(&via, false);
     let mut out = String::new();
     for node in nodes {
         if !out.is_empty() {
@@ -191,7 +195,21 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
             if members.is_empty() {
                 writeln!(out, "No indexed definitions.")?;
             }
-            context::render_outline(&mut out, &members, &[])?;
+            for member in &members {
+                writeln!(
+                    out,
+                    "  Definition:{}  {}  [{}]  L{}-{}",
+                    member.id, member.fqn, member.kind, member.start, member.end
+                )?;
+            }
+            if let Some(member) = members.first() {
+                writeln!(
+                    out,
+                    "\nFor complete source and definition-specific connections, choose a Definition ID above.\nnext: {} context Definition:{}",
+                    spec::launcher(),
+                    member.id
+                )?;
+            }
         } else {
             let range = context::source_range(node)?;
             writeln!(
@@ -234,11 +252,25 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
             }
             writeln!(out, "\n{title} ({} indexed):", rows.len())?;
             let mut prev_path = String::new();
-            for row in &rows {
+            let limit = if is_file {
+                FILE_CONNECTION_LIMIT
+            } else {
+                rows.len()
+            };
+            for row in rows.iter().take(limit) {
                 let via = if row.via.is_empty() {
                     String::new()
                 } else {
-                    format!("  via {}", row.via)
+                    let names: Vec<_> = row.via.split(", ").collect();
+                    if is_file && names.len() > 3 {
+                        format!(
+                            "  via {} (+{} names)",
+                            names[..3].join(", "),
+                            names.len() - 3
+                        )
+                    } else {
+                        format!("  via {}", row.via)
+                    }
                 };
                 writeln!(
                     out,
@@ -249,6 +281,30 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
                     row.reference,
                     loc_suffix(&row.loc, &mut prev_path)
                 )?;
+            }
+            let omitted = rows.len().saturating_sub(limit);
+            if omitted > 0 {
+                let omitted_rows = &rows[limit..];
+                if omitted_rows.iter().any(|row| row.direct) {
+                    writeln!(
+                        out,
+                        "  … {omitted} connections omitted; list all file edges: {} sql \"SELECT * FROM gl_edge WHERE source_id = {} OR target_id = {}\"",
+                        spec::launcher(),
+                        node.id,
+                        node.id
+                    )?;
+                    if omitted_rows.iter().any(|row| !row.direct) {
+                        writeln!(
+                            out,
+                            "  For omitted definition connections, use a Definition ID from the map for its complete connections."
+                        )?;
+                    }
+                } else {
+                    writeln!(
+                        out,
+                        "  … {omitted} connections omitted; use a Definition ID from the map for its complete connections."
+                    )?;
+                }
             }
         }
     }

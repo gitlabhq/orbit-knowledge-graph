@@ -6,33 +6,13 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use duckdb_client::search::NodeValue;
-use orbit_search::{RecallFilter, SearchVocab, content_words};
+use orbit_search::{RecallFilter, query_alternatives};
 
 use crate::commands::context;
 use local::LocalBackend;
 
-fn build_vocab<S: orbit_search::grep::GrepSource>(source: &S) -> Result<SearchVocab, S::Error> {
-    use strum::IntoEnumIterator;
-    let parts: Vec<(String, String)> = code_graph::v2::types::EdgeKind::iter()
-        .flat_map(|kind| {
-            let name = kind.as_ref().to_string();
-            SearchVocab::kind_name_parts(kind.as_ref())
-                .map(|part| (part.to_string(), name.clone()))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    let words: Vec<String> = parts.iter().map(|(part, _)| part.clone()).collect();
-    let stems = source.stem(&words)?;
-    Ok(SearchVocab::new(
-        stems
-            .into_iter()
-            .zip(parts.into_iter().map(|(_, kind)| kind)),
-    ))
-}
-
 const EXACT_BODY_LIMIT: usize = 3;
 const RELATED_BODY_LIMIT: usize = 1;
-const CONTEXT_HINT_LIMIT: usize = 3;
 
 pub(crate) fn run(
     query: Option<String>,
@@ -44,12 +24,12 @@ pub(crate) fn run(
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
     if let Some(query) = &query
-        && query.split('|').any(|part| content_words(part).is_empty())
+        && query_alternatives(query).is_err()
     {
         anyhow::bail!(
             "no usable search terms in query: {query:?} — to list every definition in a \
-             file or directory instead, run `{launcher} grep --path <path>`; to print a whole \
-             file, `{launcher} context <path>`"
+             file or directory instead, run `{launcher} grep --path <path>`; for a file's \
+             definition map and connections, `{launcher} context <path>`"
         );
     }
 
@@ -66,14 +46,9 @@ pub(crate) fn run(
         writeln!(out, "kind: {}", filter.kinds.join(" "))?;
     }
 
-    let vocab = build_vocab(backend.search())?;
     writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-    let (outcome, nodes) = backend.grep(&query, limit, &vocab, &filter)?;
-    let typed: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-    if outcome.terms != typed {
-        writeln!(out, "terms: {}", outcome.terms.join(" "))?;
-    }
-    report_exact_query_note(&mut out, &query, &outcome)?;
+    let (outcome, nodes) = backend.grep(&query, limit, &filter)?;
+    report_exact_query_note(&mut out, &outcome)?;
 
     if nodes.is_empty() {
         if paths.is_empty() && filter.is_empty() {
@@ -100,25 +75,38 @@ pub(crate) fn run(
         .filter(|hit| hit.exact_name)
         .map(|hit| hit.id)
         .collect();
-    let context_nodes: Vec<_> = nodes
+    let informative: HashSet<_> = outcome
+        .matches
         .iter()
-        .filter(|node| exact.is_empty() || exact.contains(&node.id))
-        .take(CONTEXT_HINT_LIMIT)
-        .cloned()
+        .filter(|hit| hit.exact_name || hit.name_match)
+        .map(|hit| hit.id)
         .collect();
-    report_context_hint(&mut out, &context_nodes, launcher)?;
     let body_limit = if exact.is_empty() {
         RELATED_BODY_LIMIT
     } else {
         EXACT_BODY_LIMIT
     };
-    let defs: Vec<_> = context_nodes.into_iter().take(body_limit).collect();
-    writeln!(out)?;
-    write!(
-        out,
-        "{}",
-        context::render_bodies(backend.search().client(), backend.git(), &defs)?
-    )?;
+    let defs: Vec<_> = nodes
+        .iter()
+        .filter(|node| {
+            if exact.is_empty() {
+                informative.contains(&node.id)
+            } else {
+                exact.contains(&node.id)
+            }
+        })
+        .take(body_limit)
+        .cloned()
+        .collect();
+    if !defs.is_empty() {
+        writeln!(out)?;
+        write!(
+            out,
+            "{}",
+            context::render_bodies(backend.search().client(), backend.git(), &defs)?
+        )?;
+        report_context_hint(&mut out, &defs, launcher)?;
+    }
     Ok(())
 }
 
@@ -153,10 +141,12 @@ fn report_results(
     outcome: &orbit_search::GrepOutcome,
     nodes: &[NodeValue],
 ) -> Result<()> {
-    report_query_note(out, outcome)?;
     writeln!(out, "\nDefinitions:")?;
-    for node in nodes {
+    for (node, hit) in nodes.iter().zip(&outcome.matches) {
         report_definition(out, node)?;
+        if !hit.exact_name && !hit.name_match {
+            writeln!(out, "    mention (body-only; not a name/path match)")?;
+        }
     }
     let hidden = outcome.total.saturating_sub(outcome.matches.len());
     if hidden >= BROAD_HIDDEN_HITS {
@@ -174,7 +164,14 @@ fn report_results(
 }
 
 fn report_context_hint(out: &mut impl Write, nodes: &[NodeValue], launcher: &str) -> Result<()> {
-    write!(out, "\nnext: {launcher} context")?;
+    if nodes.is_empty() {
+        return Ok(());
+    }
+    writeln!(
+        out,
+        "\nFor indexed relationships and complete source (previewed lines will repeat):"
+    )?;
+    write!(out, "next: {launcher} context")?;
     for node in nodes {
         write!(out, " {}:{}", node.entity_type, node.id)?;
     }
@@ -192,12 +189,10 @@ fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
     Ok(())
 }
 
-const COMPOUND_TERM_HINT: usize = 5;
 const BROAD_HIDDEN_HITS: usize = 100;
 
 fn report_exact_query_note(
     out: &mut impl Write,
-    query: &str,
     outcome: &orbit_search::GrepOutcome,
 ) -> std::io::Result<()> {
     let exact: HashSet<_> = outcome
@@ -205,16 +200,11 @@ fn report_exact_query_note(
         .iter()
         .map(|alternative| alternative.to_lowercase())
         .collect();
-    let mut seen = HashSet::new();
-    let alternatives: Vec<_> = query
-        .split('|')
-        .map(str::trim)
-        .filter(|alternative| {
-            !alternative.is_empty()
-                && !alternative.chars().any(char::is_whitespace)
-                && !content_words(alternative).is_empty()
-                && seen.insert(alternative.to_lowercase())
-        })
+    let alternatives: Vec<_> = outcome
+        .alternatives
+        .iter()
+        .map(String::as_str)
+        .filter(|alternative| !alternative.chars().any(char::is_whitespace))
         .collect();
     let matched: Vec<_> = alternatives
         .iter()
@@ -227,35 +217,17 @@ fn report_exact_query_note(
         .filter(|alternative| !exact.contains(&alternative.to_lowercase()))
         .collect();
     if !matched.is_empty() {
-        writeln!(out, "exact: {}", matched.join(" | "))?;
+        writeln!(
+            out,
+            "exact: {} (symbol name, case-insensitive; within scope, before limit)",
+            matched.join(" | ")
+        )?;
     }
     if !missing.is_empty() {
         writeln!(
             out,
-            "exact-miss: {} (showing related matches)",
+            "exact-miss: {} (no exact symbol name within scope)",
             missing.join(" | ")
-        )?;
-    }
-    Ok(())
-}
-
-fn report_query_note(
-    out: &mut impl Write,
-    outcome: &orbit_search::GrepOutcome,
-) -> std::io::Result<()> {
-    let longest = outcome
-        .terms
-        .split(|term| term == "|")
-        .map(<[_]>::len)
-        .max()
-        .unwrap_or(0);
-    if longest >= COMPOUND_TERM_HINT {
-        writeln!(
-            out,
-            "note: {} search terms — long queries dilute matching. grep matches \
-             symbol-name words, so use one to three identifier-like words per \
-             alternative; use 'a|b|c' to search alternatives in one call.",
-            longest
         )?;
     }
     Ok(())
@@ -267,7 +239,7 @@ mod tests {
 
     fn outcome() -> orbit_search::GrepOutcome {
         orbit_search::GrepOutcome {
-            terms: Vec::new(),
+            alternatives: Vec::new(),
             exact_alternatives: Vec::new(),
             matches: Vec::new(),
             total: 0,
@@ -281,6 +253,7 @@ mod tests {
             id: 481,
             score: 1.0,
             exact_name: true,
+            name_match: true,
         });
         result.total = 1;
         let node = NodeValue {
@@ -321,12 +294,17 @@ mod tests {
     #[test]
     fn exact_query_note_distinguishes_or_alternatives() {
         let mut result = outcome();
+        result.alternatives = vec![
+            "present".into(),
+            "missing".into(),
+            "natural language".into(),
+        ];
         result.exact_alternatives = vec!["present".to_string()];
         let mut buf = Vec::new();
-        report_exact_query_note(&mut buf, "present|missing|natural language", &result).unwrap();
+        report_exact_query_note(&mut buf, &result).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "exact: present\nexact-miss: missing (showing related matches)\n"
+            "exact: present (symbol name, case-insensitive; within scope, before limit)\nexact-miss: missing (no exact symbol name within scope)\n"
         );
     }
 
@@ -341,14 +319,7 @@ mod tests {
         report_context_hint(&mut buf, &nodes, "orbit").unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "\nnext: orbit context Definition:481 Definition:482\n"
+            "\nFor indexed relationships and complete source (previewed lines will repeat):\nnext: orbit context Definition:481 Definition:482\n"
         );
-    }
-
-    #[test]
-    fn short_query_prints_no_notes() {
-        let mut buf = Vec::new();
-        report_query_note(&mut buf, &outcome()).unwrap();
-        assert!(buf.is_empty());
     }
 }
