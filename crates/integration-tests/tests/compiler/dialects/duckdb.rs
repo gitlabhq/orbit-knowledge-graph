@@ -205,14 +205,14 @@ fn gql_untyped_edge_pattern() {
 }
 
 #[test]
-fn gql_open_ended_scan_with_filter() {
-    let r = compile_gql("MATCH (u:User) WHERE u.username = 'alice' RETURN u.username AS name");
+fn gql_open_ended_scan() {
+    let r = compile_gql("MATCH (u:User) RETURN u.username AS name");
     assert!(r.is_ok(), "{}", r.unwrap_err());
 }
 
 #[test]
-fn gql_count_with_filter() {
-    let r = compile_gql("MATCH (u:User) WHERE u.username = 'alice' RETURN count(u) AS n");
+fn gql_count_without_node_ids() {
+    let r = compile_gql("MATCH (u:User) RETURN count(u) AS n");
     assert!(r.is_ok(), "{}", r.unwrap_err());
 }
 

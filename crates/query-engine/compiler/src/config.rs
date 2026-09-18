@@ -60,7 +60,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [ontology]
             mutates: [input]
         }
-
+        validate_local {
+            reads_env: [ontology]
+            mutates: [input]
+        }
         normalize {
             reads_env: [ontology]
             mutates: [input]
@@ -130,12 +133,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
         duckdb_json_dsl {
             env: [ontology]
             state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, plan, lower, enforce, duckdb_codegen]
+            phases: [json_dsl_parse, validate_local, normalize, plan, lower, enforce, duckdb_codegen]
         }
         duckdb_gql {
             env: [ontology]
             state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate, normalize, plan, lower, enforce, duckdb_codegen]
+            phases: [gql_parse, validate_local, normalize, plan, lower, enforce, duckdb_codegen]
         }
         validate_normalize {
             env: [ontology]
@@ -172,6 +175,19 @@ fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
         }
         c.seek = Some(cursor::decode(after, input.compiler.query_hash)?);
     }
+    v.check_references(&input)?;
+    v.annotate_filter_types(&mut input);
+    ctx.set_input(input);
+    Ok(())
+}
+
+fn validate_local(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let mut input = require(ctx.take_input(), "input")?;
+    let v = validate::Validator::new(ctx.ontology()).with_skip(validate::Skip {
+        selectivity: true,
+        ..Default::default()
+    });
+    v.check_shape(&input)?;
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
     ctx.set_input(input);
