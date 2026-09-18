@@ -42,7 +42,7 @@ strum = { workspace = true }
 uuid = { workspace = true }
 
 [build-dependencies]
-orbit-prompts = { path = "../orbit-prompts" }
+orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }

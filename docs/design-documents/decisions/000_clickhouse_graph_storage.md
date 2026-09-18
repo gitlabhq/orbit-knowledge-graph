@@ -22,7 +22,7 @@ file-embedded graph database, as a local-only desktop tool (see
 maintainers, forcing a storage decision for the deployed service.
 
 The team validated database options against both Code Indexing and SDLC
-indexing workloads, using the SDLC
+indexing workloads. The evaluation used the SDLC
 [dataset generator](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/292)
 and pre-existing Code Index parquet files
 ([Database Selection Epic](https://gitlab.com/groups/gitlab-org/rust/-/epics/31)).
@@ -38,42 +38,43 @@ PostgreSQL is the fallback option.
 
 ### Validation
 
-Inspired by [Brahmand](https://www.brahmanddb.com/) and
+The team drew on [Brahmand](https://www.brahmanddb.com/) and
 [SQL 2023's standardization of property graphs](https://www.iso.org/standard/79473.html)
-(ISO/IEC 9075-16:2023), the team created a modified version of the
+(ISO/IEC 9075-16:2023). It created a modified version of the
 [Demo Instance](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263)
 (which originally used Kuzu) and swapped it out with ClickHouse
 ([demo](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/268#note_2873427090),
-[code](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/391)),
-proving a functioning product with a ClickHouse/Postgres-backed property graph
-model. `@andrewn` also created a
+[code](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/391)).
+This proved a functioning product with a ClickHouse/Postgres-backed property
+graph model. `@andrewn` also created a
 [Cypher to Postgres](https://gitlab.com/andrewn/opencypher-to-postgres#project-walkthrough)
 project that
 [passes 70%](https://gitlab.com/gitlab-com/gl-infra/sandbox/opencypher-to-postgres/-/merge_requests/20)
-of OpenCypher's TCK suite, which much of the team can leverage.
+of OpenCypher's TCK suite, which much of the team can reuse.
 
 Kùzu is a columnar system similar to modern read-optimized analytical DBMSs,
 like ClickHouse. The team conducted
 [research and benchmarking](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/267)
-against a ClickHouse and Postgres-backed property graph, which alleviated
-performance concerns: <300ms p95 query speeds for 3-hop traversals on a
-20M+ row, 11GB dataset, leveraging CSR adjacency list index concepts from
+against a ClickHouse and Postgres-backed property graph. This alleviated
+performance concerns. The benchmark showed <300ms p95 query speeds for 3-hop
+traversals on a 20M+ row, 11GB dataset. It used CSR adjacency list index
+concepts from
 [KuzuDB's whitepaper](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf).
 
 ### Why a Graph Query Engine on ClickHouse?
 
 - The **data model** (property graphs with arbitrary nodes and edges) is the
-  most critical aspect of this product and enables the "Knowledge Graph"
-  capabilities, irrespective of the underlying database.
+  most important aspect of this product. It enables the "Knowledge Graph"
+  capabilities, whatever the underlying database.
 - GitLab has significantly **more operational experience** with ClickHouse and
   Postgres than with graph databases (Neo4j, FalkorDB).
-- By leveraging the existing stack, there is **one less database to deploy and
-  maintain**, reducing SRE and DBRE costs.
-- More **engineering investment goes into ClickHouse** over building an ETL
-  pipeline from ClickHouse to a graph database, meaning the GKG team can help
+- By reusing the existing stack, there is **one less database to deploy and
+  maintain**, which reduces SRE and DBRE costs.
+- More **engineering investment goes into ClickHouse** than into building an ETL
+  pipeline from ClickHouse to a graph database. This means the GKG team can help
   with Siphon and NATS.
 - **Faster time to market** with this query layer.
-- **Two-way door**: if the database does not suit our needs, the deployed
+- **Two-way door**: the database may not suit our needs. If so, the deployed
   components (Siphon, NATS, ClickHouse) remain the foundation for a data
   pipeline to a new graph database (Neo4j, FalkorDB, Memgraph).
 - **Legal and procurement barriers**: because of unfriendly licenses, any new
@@ -89,9 +90,9 @@ The team evaluated the following databases:
 - FalkorDB (SSPL and EE license)
 - Memgraph (BSL and EE license)
 
-After meeting with legal and procurement teams, proceeding with any of these
+The team met with legal and procurement teams. Proceeding with any of these
 databases would require purchasing an enterprise edition license from the
-database provider, in addition to the engineering challenges they introduce.
+database provider. That is on top of the engineering challenges they introduce.
 This would mean a minimum 30-day negotiation and procurement cycle.
 
 ### Why not fork Kuzu?
@@ -109,5 +110,5 @@ maintenance perspective to be too high. We keep an eye on
   as-built implementation.
 - The query layer compiles an intermediate JSON query language into
   parameterized ClickHouse SQL instead of executing Cypher natively.
-- PostgreSQL remains the backup option, leveraging the
+- PostgreSQL remains the backup option, reusing the
   opencypher-to-postgres work.

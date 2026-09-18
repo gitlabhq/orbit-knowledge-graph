@@ -15,27 +15,27 @@ Accepted
 
 ## Update: honest indexing state (2026-08-10)
 
-The single `indexing.state` word used to derive purely from run timestamps in NATS KV, so
-a run that completed without writing anything (empty datalake, aborted extract) still
-reported `indexed` — [#1137](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1137)
+The single `indexing.state` word used to derive purely from run timestamps in NATS KV.
+So a run that completed without writing anything (empty datalake, aborted extract) still
+reported `indexed`. See [#1137](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1137)
 problem 1. The response now separates the two indexing surfaces and makes the combined
 field honest:
 
 - `sdlc_indexing`: the existing worst-of aggregation over per-pipeline KV progress. The
   read set covers every Namespaced pipeline descriptor (node, composed edge, and derived
-  names), matching the keys the SDLC indexer writes under `plan.name`, so edge-pipeline
+  names). It matches the keys the SDLC indexer writes under `plan.name`, so edge-pipeline
   failures surface too.
-- `code_indexing`: derived from the existing `projects` coverage ratio — no checkpoint on
+- `code_indexing`: derived from the existing `projects` coverage ratio. No checkpoint on
   any known project → `not_indexed`, partial → `backfilling`, full → `indexed`. Omitted
   when the scope has no known projects (nothing to claim).
-- `indexing` (pre-existing field): now the worst of the two, so a namespace whose code was
+- `indexing` (pre-existing field): now the worst of the two. A namespace whose code was
   never indexed no longer reports plain `indexed`. Wire shape and enum values are
   unchanged; Rails needs no update.
 - Each domain item carries an optional per-entity `state` (its own pipeline's state for
   SDLC entities, the code coverage state for code-graph entities).
 - `IndexingStatus` carries `last_rows_read` / `last_rows_written`, recorded by both
   indexers at run completion. Rows are evidence for operators (a 0-row full pull next to
-  zero counts explains an empty graph); they never drive the state, because idle
+  zero counts explains an empty graph). They never drive the state, because idle
   incremental ticks legitimately read and write nothing.
 
 ## Context
@@ -82,9 +82,9 @@ enum SourceType {
 
 Entity counts are returned for all node types under the traversal path using `startsWith(traversal_path, ...)`. Subgroups roll up: requesting a parent group counts everything under it.
 
-Every type is counted with `uniq(id)`, which routes to the per-table `tp_count` aggregate projection (`SELECT traversal_path, uniq(id) GROUP BY traversal_path`). It reads kilobytes of HyperLogLog state rather than scanning the namespace and deduplicates the un-merged `ReplacingMergeTree` versions that a plain `count()` overcounts (observed up to +300% for frequently updated types). It carries ~1-2% HyperLogLog error, acceptable for a status indicator, and every type except Group measured within ~1% of exact on prod.
+Every type is counted with `uniq(id)`, which routes to the per-table `tp_count` aggregate projection (`SELECT traversal_path, uniq(id) GROUP BY traversal_path`). It reads kilobytes of HyperLogLog state rather than scanning the namespace. It also deduplicates the un-merged `ReplacingMergeTree` versions that a plain `count()` overcounts (observed up to +300% for frequently updated types). It carries ~1-2% HyperLogLog error, acceptable for a status indicator, and every type except Group measured within ~1% of exact on prod.
 
-Group is the one exception, counted with exact `count() FINAL`. Namespace deletion permanently removes groups and leaves tombstoned rows with distinct ids, and the projection has no `_deleted` column to exclude them, so `uniq(id)` overcounts Group ~6x (measured +549% on a large namespace). The group table is tiny, so FINAL is cheap. The check lives in `build_node_query` in `crates/orbit-server/src/graph_status/lower.rs`.
+Group is the one exception, counted with exact `count() FINAL`. Namespace deletion permanently removes groups and leaves tombstoned rows with distinct ids. The projection has no `_deleted` column to exclude them, so `uniq(id)` overcounts Group ~6x (measured +549% on a large namespace). The group table is tiny, so FINAL is cheap. The check lives in `build_node_query` in `crates/orbit-server/src/graph_status/lower.rs`.
 
 #### Per-entity access control
 
@@ -105,7 +105,7 @@ Entities the user cannot access at any path are excluded from the query entirely
 
 #### Project coverage counts
 
-The response includes a `projects` object with `indexed` (how many projects have been code-indexed) and `total_known` (how many projects exist under the traversal path). These counts are pulled forward from Phase 3 into Phase 1 because they only require ClickHouse queries and are useful even without the indexing metadata from NATS KV.
+The response includes a `projects` object with `indexed` (how many projects have been code-indexed) and `total_known` (how many projects exist under the traversal path). These counts are pulled forward from Phase 3 into Phase 1. They only require ClickHouse queries and are useful even without the indexing metadata from NATS KV.
 
 - `total_known`: `uniq(id)` on `gl_project`, filtered by `startsWith(traversal_path, ...)` and `_deleted = 0`.
 - `indexed`: `uniq(project_id)` on `code_indexing_checkpoint`, filtered by `startsWith(traversal_path, ...)` and `_deleted = 0`. Namespace deletion soft-deletes checkpoint rows via `INSERT INTO ... SELECT` with `_deleted = true`.
@@ -121,7 +121,7 @@ The indexer writes indexing metadata to a NATS KV bucket (`indexing_progress`) a
 
 The value is the same shape for both: `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error`. Overwritten on every run, so it always reflects the most recent attempt. A non-empty `last_error` means the last run failed.
 
-Reads are O(1) lookups — no extra ClickHouse queries for indexing metadata. The `projects.indexed` / `projects.total_known` counts still come from ClickHouse since they require aggregation.
+Reads are O(1) lookups, with no extra ClickHouse queries for indexing metadata. The `projects.indexed` / `projects.total_known` counts still come from ClickHouse since they require aggregation.
 
 Schema migrations trigger a full re-index, but the previous progress entry stays valid until the re-index completes. The data is stale but still accurate for the old schema version, so the endpoint keeps serving it rather than showing nothing.
 
@@ -142,7 +142,7 @@ The response is flat: indexing metadata at the top level, a `projects` object (a
 
 Cache the full serialized response in a NATS KV bucket keyed by traversal path with a 60-second TTL. On a hit, return the cached response without touching ClickHouse. On a miss, run the queries, cache, and return.
 
-The indexer invalidates the cached entry for the relevant traversal path after each indexing run, so consumers see fresh data immediately after indexing completes rather than waiting for the TTL to expire. The 60-second TTL is a fallback for bursts between indexing runs.
+The indexer invalidates the cached entry for the relevant traversal path after each indexing run. Consumers then see fresh data immediately after indexing completes rather than waiting for the TTL to expire. The 60-second TTL is a fallback for bursts between indexing runs.
 
 ## Examples
 

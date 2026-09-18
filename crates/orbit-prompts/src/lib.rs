@@ -4,6 +4,13 @@ use std::path::Path;
 use rust_embed::Embed;
 use serde::Deserialize;
 
+#[cfg(feature = "skill-validation")]
+mod skill;
+
+pub const CLAP_HELP_COMMAND: &str = "help";
+#[cfg(feature = "skill-validation")]
+pub use skill::{SkillValidation, validate_skill_pair};
+
 #[derive(Embed)]
 #[folder = "$PROMPTS_DIR"]
 struct PromptFiles;

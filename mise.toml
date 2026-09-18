@@ -205,6 +205,10 @@ description = "Run clippy lint checks and fix applicable issues"
 run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --exclude-files docs-locale"
 description = "Check trailing newline formatting in the codebase"
 
+[tasks."lint:integration-test-lanes"]
+run = "cargo xtask integration-lanes --check"
+description = "Check that integration test lanes partition the container tests"
+
 [tasks."fix:newlines"]
 run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --exclude-files docs-locale --fix"
 description = "Fix newlines formatting in the codebase"
@@ -216,7 +220,7 @@ usage = 'arg "<repo_path>"'
 
 [tasks."local:query"]
 run = 'cargo run --release --bin orbit -- sql "${@}"'
-description = "Run a raw SQL query against the local DuckDB graph (~/.orbit/graph.duckdb)"
+description = "Run a raw SQL query against the local DuckDB graph (~/.gitlab/orbit/graph.duckdb)"
 usage = 'arg "<sql>"'
 
 [tasks."diff:branch"]

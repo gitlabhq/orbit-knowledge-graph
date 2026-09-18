@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use duckdb_client::DuckDbClient;
@@ -17,7 +18,7 @@ pub enum RepoStatus {
     Error,
 }
 
-/// Manages the `~/.orbit/` workspace — graph database, repo discovery,
+/// Manages the `~/.gitlab/orbit/` workspace — graph database, repo discovery,
 /// and manifest.
 pub struct Workspace {
     root: PathBuf,
@@ -29,15 +30,18 @@ impl Workspace {
     }
 
     pub fn default_root() -> Result<PathBuf> {
-        if let Some(dir) = std::env::var("ORBIT_DATA_DIR")
-            .ok()
-            .filter(|s| !s.is_empty())
-        {
-            Ok(PathBuf::from(dir))
-        } else {
-            let home = dirs::home_dir().context("Could not determine home directory")?;
-            Ok(home.join(".orbit"))
-        }
+        // Resolution runs inside the cell so the legacy migration happens at most
+        // once per process, even when MCP tool calls race on the first use.
+        static ROOT: OnceLock<std::result::Result<PathBuf, String>> = OnceLock::new();
+        ROOT.get_or_init(|| {
+            let override_dir = std::env::var("ORBIT_DATA_DIR")
+                .ok()
+                .filter(|s| !s.is_empty());
+            let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+            resolve_root(override_dir, &home).map_err(|e| e.to_string())
+        })
+        .clone()
+        .map_err(anyhow::Error::msg)
     }
 
     pub fn open(root: PathBuf) -> Result<Self> {
@@ -59,6 +63,37 @@ impl Workspace {
             Ok(vec![canonical])
         } else {
             Ok(discovered)
+        }
+    }
+}
+
+fn resolve_root(override_dir: Option<String>, home: &Path) -> Result<PathBuf> {
+    if let Some(dir) = override_dir {
+        return Ok(PathBuf::from(dir));
+    }
+    let root = home.join(".gitlab").join("orbit");
+    let legacy = home.join(".orbit");
+    if !root.exists() && legacy.is_dir() {
+        return Ok(migrate_legacy_root(&legacy, root));
+    }
+    Ok(root)
+}
+
+fn migrate_legacy_root(legacy: &Path, root: PathBuf) -> PathBuf {
+    let moved = std::fs::create_dir_all(root.parent().unwrap_or(&root))
+        .and_then(|()| std::fs::rename(legacy, &root));
+    match moved {
+        Ok(()) => {
+            eprintln!("orbit: moved {} to {}", legacy.display(), root.display());
+            root
+        }
+        Err(e) => {
+            eprintln!(
+                "orbit: kept {} in place; move to {} failed ({e})",
+                legacy.display(),
+                root.display()
+            );
+            legacy.to_path_buf()
         }
     }
 }
@@ -382,6 +417,64 @@ mod tests {
     }
 
     const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+
+    #[test]
+    fn resolve_root_prefers_the_explicit_override() {
+        let home = tempfile::TempDir::new().unwrap();
+        let root = resolve_root(Some("/custom/dir".to_string()), home.path()).unwrap();
+        assert_eq!(root, PathBuf::from("/custom/dir"));
+    }
+
+    #[test]
+    fn resolve_root_uses_the_gitlab_home_on_a_fresh_install() {
+        let home = tempfile::TempDir::new().unwrap();
+        let root = resolve_root(None, home.path()).unwrap();
+        assert_eq!(root, home.path().join(".gitlab").join("orbit"));
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn resolve_root_migrates_a_legacy_directory() {
+        let home = tempfile::TempDir::new().unwrap();
+        let legacy = home.path().join(".orbit");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("graph.duckdb"), b"data").unwrap();
+
+        let root = resolve_root(None, home.path()).unwrap();
+
+        assert_eq!(root, home.path().join(".gitlab").join("orbit"));
+        assert!(root.join("graph.duckdb").exists());
+        assert!(!legacy.exists());
+    }
+
+    #[test]
+    fn resolve_root_keeps_the_new_directory_when_both_exist() {
+        let home = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(home.path().join(".orbit")).unwrap();
+        let expected = home.path().join(".gitlab").join("orbit");
+        std::fs::create_dir_all(&expected).unwrap();
+
+        let root = resolve_root(None, home.path()).unwrap();
+
+        assert_eq!(root, expected);
+        assert!(home.path().join(".orbit").exists());
+    }
+
+    #[test]
+    fn resolve_root_keeps_the_legacy_directory_when_the_move_fails() {
+        let home = tempfile::TempDir::new().unwrap();
+        let legacy = home.path().join(".orbit");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("graph.duckdb"), b"data").unwrap();
+        // A file where the parent directory must go makes create_dir_all fail
+        // without relying on permissions, which root ignores in CI containers.
+        std::fs::write(home.path().join(".gitlab"), b"").unwrap();
+
+        let root = resolve_root(None, home.path()).unwrap();
+
+        assert_eq!(root, legacy);
+        assert!(legacy.join("graph.duckdb").exists());
+    }
 
     #[test]
     fn record_git_info_failure_writes_error_row() {
