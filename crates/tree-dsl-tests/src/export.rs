@@ -8,7 +8,6 @@ use arrow_56::record_batch::RecordBatch;
 use tree_dsl::canonical::{self, Canonical as C};
 use tree_dsl::intern::Lang;
 use tree_dsl::tree::{Cursor, Edge, EdgeKind, Tree};
-use tree_dsl::treesitter::SupportLang;
 
 pub type Datasets = HashMap<String, RecordBatch>;
 

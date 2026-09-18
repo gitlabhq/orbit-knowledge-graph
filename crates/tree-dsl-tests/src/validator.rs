@@ -11,7 +11,7 @@ use tabled::{Table, builder::Builder};
 use super::assertions::{
     Assert, AssertCheck, FieldValueArgs, QueryBlock, Severity, TestCase, TestSuite,
 };
-use super::datasets::LanceDatasets;
+use super::export::Datasets as LanceDatasets;
 
 #[derive(Debug)]
 pub(crate) struct Failure {
