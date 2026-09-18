@@ -81,7 +81,7 @@ See the following design documents for more details on the Orbit architecture:
 
 ## Runtime Breakdown
 
-Orbit Remote deploys the four `gkg-server` modes shown below. Orbit Local runs separately as the `orbit` CLI on a user's machine and stores its graph in `~/.orbit/graph.duckdb`.
+Orbit Remote deploys the four `gkg-server` modes shown below. Orbit Local runs separately as the `orbit` CLI on a user's machine and stores its graph in `~/.gitlab/orbit/graph.duckdb`.
 
 ```mermaid
 flowchart TD

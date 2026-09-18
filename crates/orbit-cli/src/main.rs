@@ -169,7 +169,7 @@ struct IndexArgs {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -201,7 +201,7 @@ struct GrepArgs {
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
     kind: Option<Kinds>,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -260,7 +260,7 @@ struct ContextArgs {
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -290,7 +290,7 @@ struct SqlArgs {
     #[arg(long)]
     all: bool,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -298,7 +298,7 @@ struct SqlArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("get_graph_schema"))]
 struct SchemaArgs {
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -320,7 +320,7 @@ struct ListArgs {
     #[arg(long, short = 'F', default_value = "table")]
     format: sql_format::Format,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -344,7 +344,7 @@ struct RepoMapArgs {
     #[arg(long = "ext", value_name = "EXT")]
     extensions: Vec<String>,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -442,7 +442,7 @@ enum Commands {
         #[arg(long, value_enum)]
         response_format: Option<remote::ResponseFormat>,
     },
-    /// Read and write persisted CLI settings (`~/.orbit/settings.json`).
+    /// Read and write persisted CLI settings (`~/.gitlab/orbit/settings.json`).
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
