@@ -249,7 +249,11 @@ fn expected_value_matches(array: &dyn Array, row: usize, expected: &serde_json::
             !array.is_null(row) && format_cell(array, row) == value.to_string()
         }
         serde_json::Value::Number(value) => {
-            !array.is_null(row) && format_cell(array, row) == value.to_string()
+            if array.is_null(row) {
+                value.as_i64() == Some(0) || value.as_f64() == Some(0.0)
+            } else {
+                format_cell(array, row) == value.to_string()
+            }
         }
         serde_json::Value::String(value) => {
             !array.is_null(row) && format_cell(array, row) == *value

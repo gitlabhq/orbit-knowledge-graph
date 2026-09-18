@@ -275,6 +275,8 @@ impl Context {
             "endsWith" => "ends_with",
             "substringUTF8" => "substring",
             "positionCaseInsensitive" => "contains",
+            "countIf" => "count_if",
+            "sumIf" => "sum_if",
             "has" => "list_contains",
             "hasAny" => "list_has_any",
             "hasAll" => "list_has_all",
@@ -288,12 +290,7 @@ impl Context {
         };
 
         let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
-        let call = format!("{}({})", duckdb_name, args.join(", "));
-        if name == "countIf" || name == "sumIf" {
-            format!("COALESCE({call}, 0)")
-        } else {
-            call
-        }
+        format!("{}({})", duckdb_name, args.join(", "))
     }
 
     fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
