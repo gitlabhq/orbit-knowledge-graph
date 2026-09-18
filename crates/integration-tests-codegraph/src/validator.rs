@@ -147,7 +147,7 @@ fn rewrite_query(cypher: &str) -> (String, Vec<(String, String, String)>) {
 /// when multiple nodes project the same property.
 fn apply_aliases(
     batch: RecordBatch,
-    input: &compiler::Input,
+    _input: &compiler::Input,
     aliases: &[(String, String, String)],
 ) -> RecordBatch {
     let alias_map: HashMap<String, String> = aliases

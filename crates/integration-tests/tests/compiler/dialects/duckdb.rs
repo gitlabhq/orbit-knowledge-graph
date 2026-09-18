@@ -92,7 +92,10 @@ fn aggregation() {
     );
 
     assert!(
-        sql.has_function("COUNT") || sql.has_function("count") || sql.has_function("countIf"),
+        sql.has_function("COUNT")
+            || sql.has_function("count")
+            || sql.has_function("countIf")
+            || sql.has_function("count_if"),
         "expected count function"
     );
     assert!(sql.has_group_by());
