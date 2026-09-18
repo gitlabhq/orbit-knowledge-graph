@@ -16,6 +16,8 @@ query:
     MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, mr.title, mr.state LIMIT 20
 
 expect:
+  hydration: none
+  sql_contains: ["AS u_username", "AS mr_title", "AS mr_state"]
   node_count: 7
   referential_integrity: true
   edge_exists:

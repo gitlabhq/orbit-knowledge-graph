@@ -282,6 +282,22 @@ impl Ontology {
     }
 
     #[must_use]
+    pub fn with_traversal_path_lookup(mut self, entity: &str, key_column: &str) -> Self {
+        let source_table = self
+            .nodes
+            .get(entity)
+            .map(|n| n.destination_table.clone())
+            .unwrap_or_else(|| format!("{}{}", self.table_prefix, entity.to_lowercase()));
+        self.traversal_path_lookups.push(TraversalPathLookup {
+            entity: entity.into(),
+            kind: TraversalPathKind::Id,
+            source_table,
+            key_column: key_column.into(),
+        });
+        self
+    }
+
+    #[must_use]
     pub fn with_edges(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
         for name in names {
             self.edges.insert(name.into(), vec![]);
@@ -653,9 +669,6 @@ impl Ontology {
 
         for lookup in &mut self.traversal_path_lookups {
             lookup.source_table = format!("{prefix}{}", lookup.source_table);
-            if let Some(dict) = lookup.dictionary.as_mut() {
-                *dict = format!("{prefix}{dict}");
-            }
         }
 
         if let Some(ref mut stats) = self.statistics {
@@ -3403,12 +3416,6 @@ properties:
                 "lookup source_table '{}' should be prefixed",
                 lookup.source_table
             );
-            if let Some(dict) = &lookup.dictionary {
-                assert!(
-                    dict.starts_with("v1_"),
-                    "lookup dictionary '{dict}' should be prefixed"
-                );
-            }
         }
     }
 

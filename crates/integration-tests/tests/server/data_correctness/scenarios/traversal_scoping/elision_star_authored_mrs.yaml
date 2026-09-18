@@ -2,11 +2,6 @@
 description: Container-elision star aggregation counts authored MRs per user
 
 config:
-  security:
-    scope_prefixes:
-      g: "1/700/"
-      p: "1/700/"
-      mr: "1/700/"
   extra_seed:
     gl_group:
       - { id: 700, name: g700, full_path: g700, visibility_level: public, traversal_path: "1/700/" }
@@ -53,6 +48,8 @@ query:
     MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) WHERE g.full_path = 'g700' RETURN u{.id, .username}, count(mr) AS c LIMIT 10
 
 expect:
+  sql_contains: ["gl_group AS _scope WHERE"]
+  sql_not_contains: ["gl_group AS g"]
   groups:
     u:
       rows:

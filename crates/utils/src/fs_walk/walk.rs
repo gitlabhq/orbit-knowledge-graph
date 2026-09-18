@@ -6,7 +6,8 @@ use std::path::Path;
 
 use ignore::WalkBuilder;
 
-use crate::fs_stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
+use super::inventory::FileInventory;
+use super::stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
 
 /// Walk `root` (honoring `.gitignore`, including dotfiles so resolver inputs
 /// survive), running every file through `hooks`. Returns the inventory of
@@ -14,7 +15,7 @@ use crate::fs_stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamErro
 pub fn walk_dir<H: FileStreamHooks>(
     root: &Path,
     hooks: &mut H,
-) -> Result<Vec<FileInventoryEntry>, StreamError> {
+) -> Result<FileInventory, StreamError> {
     let mut inventory = Vec::new();
     let mut content = Vec::new();
 
@@ -49,40 +50,44 @@ pub fn walk_dir<H: FileStreamHooks>(
             path: rel_path.to_string_lossy().into_owned(),
             size,
             decision: Decision::ListOnly,
+            label: Default::default(),
         };
 
         // A symlink has no content to sniff and is never a parse candidate; the
         // hooks settle it, same as the tar source.
-        meta.decision = if is_symlink {
+        let (decision, label) = if is_symlink {
             hooks.on_non_regular(&meta)
         } else {
             step(hooks, &meta, &mut content, |buf| {
                 std::fs::File::open(abs_path)?.read_to_end(buf).map(|_| ())
             })?
         };
+        meta.decision = decision;
+        meta.label = label;
         if meta.decision != Decision::Drop {
             inventory.push(meta);
         }
     }
 
-    Ok(crate::fs_stream::canonicalize_inventory(inventory))
+    Ok(FileInventory::new(inventory))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs_walk::FileLabel;
 
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
             (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
-                .then_some(Decision::ListOnly)
+                .then_some((Decision::ListOnly, FileLabel::default()))
         }
-        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> Decision {
+        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
             if content.contains(&0) {
-                Decision::ListOnly
+                (Decision::ListOnly, FileLabel::default())
             } else {
-                Decision::Parse
+                (Decision::Parse, FileLabel::default())
             }
         }
     }

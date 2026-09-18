@@ -1,0 +1,16 @@
+description: A node pinned to more than eight anchors keeps only the authorization filter
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9], "columns": ["name"]}],
+        "limit": 10
+    }
+  gql: |
+    MATCH (p:Project) WHERE p.id IN [1, 2, 3, 4, 5, 6, 7, 8, 9] RETURN p.name LIMIT 10
+
+expect:
+  compile_only: true
+  sql_contains: ["startsWith(p.traversal_path, '1/')"]
+  sql_not_contains: ["AS _scope"]

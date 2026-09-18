@@ -15,9 +15,9 @@ Accepted
 
 ## Context
 
-GKG is a Rust service that queries ClickHouse. Rails owns all authorization decisions via `Ability.allowed?`. Neither can do the other's job, but they need to collaborate mid-request: GKG runs the query, then asks Rails to check permissions on the results before returning them.
+GKG is a Rust service that queries ClickHouse. Rails owns all authorization decisions via `Ability.allowed?`. Neither can do the other's job, but they need to collaborate mid-request. GKG runs the query. Then it asks Rails to check permissions on the results before returning them.
 
-The problem is that GKG needs to call *back* to Rails during query execution. Standard request-response protocols can't express this without a second connection from GKG to Rails, creating a circular dependency.
+The problem is that GKG needs to call *back* to Rails during query execution. Standard request-response protocols can't express this. They would need a second connection from GKG to Rails, creating a circular dependency.
 
 ## Decision
 
@@ -150,15 +150,15 @@ message RedactionExchange {
 
 Three alternatives were considered and rejected for the redaction exchange:
 
-REST callback (GKG calls a Rails HTTP endpoint mid-request): This creates a circular service dependency. Rails calls GKG, GKG calls Rails back over a separate HTTP connection. This doubles the connection surface, complicates load balancer configuration, and means GKG needs its own HTTP client and separate auth credentials for the callback path. The callback can timeout independently of the original request.
+REST callback (GKG calls a Rails HTTP endpoint mid-request): This creates a circular service dependency. Rails calls GKG, GKG calls Rails back over a separate HTTP connection. This doubles the connection surface and complicates load balancer configuration. It also means GKG needs its own HTTP client and separate auth credentials for the callback path. The callback can timeout independently of the original request.
 
-Unary gRPC (separate RPC for each phase): Rails would need to call `StartQuery`, poll for `GetRedactionRequest`, send `SubmitRedactionResponse`, then poll for `GetResult`. This adds latency from polling intervals, requires server-side state management for in-flight queries, and turns a single logical operation into four separate RPCs with their own failure modes.
+Unary gRPC (separate RPC for each phase): Rails would need to call `StartQuery`, poll for `GetRedactionRequest`, send `SubmitRedactionResponse`, then poll for `GetResult`. This adds latency from polling intervals and requires server-side state management for in-flight queries. It also turns a single logical operation into four separate RPCs with their own failure modes.
 
 Server streaming (GKG streams results to Rails): This only solves the server-to-client direction. Rails still cannot send redaction responses back to GKG within the same stream.
 
 Bidirectional streaming lets both sides send messages on the same connection. The exchange happens in a single RPC with a single timeout. No polling or callback infrastructure needed.
 
-Without bidi streaming, a redaction-capable query requires two separate connections -- one from the client through Rails to GKG, and a second from GKG back to Rails for authorization checks. With bidi streaming, the entire exchange runs over a single connection. This halves the connection overhead and eliminates the latency from establishing the callback connection under load.
+Without bidi streaming, a redaction-capable query requires two separate connections. One goes from the client through Rails to GKG. A second goes from GKG back to Rails for authorization checks. With bidi streaming, the entire exchange runs over a single connection. This halves the connection overhead and eliminates the latency from establishing the callback connection under load.
 
 ## Why gRPC over REST
 
@@ -215,11 +215,11 @@ TLS certificates for mTLS are managed through one of:
 
 ## Postgres load risk from Layer 3 checks
 
-Every `Ability.allowed?` call in Rails hits Postgres to evaluate DeclarativePolicy rules. A query returning 1000 rows across 5 resource types could trigger 1000 permission checks, each potentially loading the resource from Postgres and evaluating multiple policy conditions.
+Every `Ability.allowed?` call in Rails hits Postgres to evaluate DeclarativePolicy rules. A query returning 1000 rows across 5 resource types could trigger 1000 permission checks. Each check potentially loads the resource from Postgres and evaluates multiple policy conditions.
 
 ### Mitigations
 
-The `ResourceToAuthorize` message groups IDs by `(resource_type, ability)`, and GKG enforces a maximum of 100 resource IDs per check. For a 1000-row result with mixed types, this means at most 10 batched checks rather than 1000 individual ones.
+The `ResourceToAuthorize` message groups IDs by `(resource_type, ability)`. GKG enforces a maximum of 100 resource IDs per check. For a 1000-row result with mixed types, this means at most 10 batched checks rather than 1000 individual ones.
 
 The GKG query engine already enforces a 1000-row limit per query, which caps the upper bound of permission checks per request.
 
@@ -229,7 +229,7 @@ The Auth Architecture team is building [GLAZ](https://gitlab.com/gitlab-org/arch
 
 ## Puma thread implications
 
-Each KG query blocks a Puma thread for the full duration of the bidi stream -- from the initial request through ClickHouse execution, the redaction exchange (including `Ability.allowed?` DB lookups), and the final result. The Rails gRPC client uses a synchronous `Queue` + `Enumerator` pattern; there is no async or non-blocking handling.
+Each KG query blocks a Puma thread for the full duration of the bidi stream. That covers the initial request, ClickHouse execution, the redaction exchange (including `Ability.allowed?` DB lookups), and the final result. The Rails gRPC client uses a synchronous `Queue` + `Enumerator` pattern; there is no async or non-blocking handling.
 
 This is still better than the REST callback alternative. With a REST callback, the original Puma thread blocks waiting for GKG's response while a *second* Puma thread handles the authorization callback from GKG. That means two threads consumed per query. With bidi streaming, the redaction exchange happens on the same thread that initiated the request -- one thread total.
 
@@ -270,4 +270,4 @@ If Rails is down or slow, GKG cannot complete any query that requires Layer 3 ch
 - [MR !273: gRPC service implementation](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/273)
 - [Gitaly client in Rails](https://gitlab.com/gitlab-org/gitlab/-/tree/master/lib/gitlab/gitaly_client)
 - [Gitaly proto definitions](https://gitlab.com/gitlab-org/gitaly/-/tree/master/proto)
-- [ADR 003: API Design — Unified REST + GraphQL](003_api_design.md)
+- [ADR 003: API Design, Unified REST + GraphQL](003_api_design.md)

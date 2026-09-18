@@ -1,11 +1,110 @@
-//! The querying pipeline's path-resolution stage uses these to read which
-//! Project/Group scope a node pins (by id or full_path), look the tight
-//! traversal_path prefix up in the graph DB, and attach it to the
-//! `SecurityContext` as scope metadata. Pure derivation, no DB calls.
+use std::collections::HashMap;
 
-use ontology::{ScopeEdge, TraversalPathKind};
+use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
+use ontology::{Ontology, ScopeEdge, TraversalPathKind, TraversalPathLookup};
 
-use crate::input::{FilterOp, Input, InputFilter, InputNode};
+use crate::ast::{ChType, Expr, Op, Query, SelectExpr, TableRef};
+use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
+
+const LOOKUP_ALIAS: &str = "_scope";
+const UNRESOLVED_PATH: &str = "0/";
+const MAX_LOOKUPS_PER_ALIAS: usize = 8;
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScopePrefix(Vec<Expr>);
+
+impl ScopePrefix {
+    pub fn literal(path: &str) -> Self {
+        Self(vec![Expr::string(path)])
+    }
+
+    pub fn predicate(&self, alias: &str) -> Expr {
+        let matches = self.0.iter().map(|path| {
+            Some(Expr::func(
+                "startsWith",
+                vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path.clone()],
+            ))
+        });
+        let unresolved = self
+            .0
+            .iter()
+            .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
+        Expr::or_all(matches.chain(unresolved)).expect("scope prefix has at least one path")
+    }
+
+    pub fn resolved(&self) -> Expr {
+        Expr::and_all(self.0.iter().map(|path| {
+            Some(Expr::binary(
+                Op::Ne,
+                path.clone(),
+                Expr::string(UNRESOLVED_PATH),
+            ))
+        }))
+        .expect("scope prefix has at least one path")
+    }
+}
+pub fn derive_scope_prefixes(input: &Input, ontology: &Ontology) -> HashMap<String, ScopePrefix> {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return HashMap::new();
+    }
+    let anchor_fks = ontology.anchor_fk_mappings();
+    let seed: HashMap<String, ScopePrefix> = input
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let lookups: Vec<Expr> = scope_keys(node, &anchor_fks)
+                .into_iter()
+                .filter_map(|key| {
+                    ontology
+                        .traversal_path_lookup(&key.entity, key.kind)
+                        .map(|spec| lookup_expr(spec, &key.value))
+                })
+                .collect();
+            (1..=MAX_LOOKUPS_PER_ALIAS)
+                .contains(&lookups.len())
+                .then(|| (node.id.clone(), ScopePrefix(lookups)))
+        })
+        .collect();
+    ontology.propagate_scope_prefixes(&scope_edges(input), &seed)
+}
+
+fn lookup_expr(spec: &TraversalPathLookup, value: &PathScopeId) -> Expr {
+    let key = match value {
+        PathScopeId::Numeric(id) => Expr::param(ChType::Int64, *id),
+        PathScopeId::Text(text) => Expr::param(ChType::String, text.clone()),
+    };
+    let latest = |column: &str| {
+        Expr::func(
+            "argMaxOrNull",
+            vec![
+                Expr::col(LOOKUP_ALIAS, column),
+                Expr::col(LOOKUP_ALIAS, VERSION_COLUMN),
+            ],
+        )
+    };
+    let path = Expr::func(
+        "coalesce",
+        vec![
+            Expr::func(
+                "if",
+                vec![
+                    latest(DELETED_COLUMN),
+                    Expr::Literal(serde_json::Value::Null),
+                    latest(TRAVERSAL_PATH_COLUMN),
+                ],
+            ),
+            Expr::string(UNRESOLVED_PATH),
+        ],
+    );
+    Expr::Scalar(Box::new(Query {
+        select: vec![SelectExpr::new(path, TRAVERSAL_PATH_COLUMN)],
+        from: TableRef::scan(&spec.source_table, LOOKUP_ALIAS),
+        where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, &spec.key_column), key)),
+        ..Default::default()
+    }))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PathScopeId {
@@ -54,11 +153,6 @@ pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathReso
     if let Some(value) = single_full_path(node) {
         keys.push(PathResolutionKey::full_path(entity, value));
     }
-    // A node filtered by an anchor FK (e.g. `project_id = N`) lives under that
-    // anchor's traversal_path even though the node itself is not the anchor, so
-    // the resolvable scope is the anchor entity's path. The `(fk, anchor)` pairs
-    // come from the ontology's `namespace_anchor` edge annotations
-    // (`Ontology::anchor_fk_mappings`), not a hardcoded list.
     for (column, anchor) in anchor_fks {
         if let Some(id) = single_eq_id(node, column) {
             keys.push(PathResolutionKey::id(*anchor, id));
@@ -66,10 +160,6 @@ pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathReso
     }
     keys
 }
-
-/// True when `node`'s entire constraint is a single scope anchor that `scope_keys`
-/// resolves, so the resolved traversal_path prefix fully captures it and the node
-/// can be dropped without losing a filter. Reuses the `scope_keys` anchor logic.
 pub fn is_scope_only(node: &InputNode) -> bool {
     if scope_keys(node, &[]).len() != 1 || node.id_range.is_some() || node.node_ids.len() > 1 {
         return false;
@@ -107,12 +197,6 @@ fn entity_of<'a>(input: &'a Input, alias: &str) -> &'a str {
         .and_then(|n| n.entity.as_deref())
         .unwrap_or("")
 }
-
-/// Build the [`ScopeEdge`] view of a query's relationships for
-/// [`ontology::Ontology::propagate_scope_prefixes`]. Each relationship becomes
-/// one edge carrying its endpoint aliases, relationship kinds, and the endpoint
-/// entity kinds the ontology needs to select the exact scope-preserving variant
-/// (so mixed-variant edges like `CONTAINS` resolve correctly).
 pub fn scope_edges(input: &Input) -> Vec<ScopeEdge<'_>> {
     input
         .relationships
@@ -263,9 +347,6 @@ mod tests {
             vec![PathResolutionKey::id("Group", 9970)]
         );
     }
-
-    // The customer-zero query pins MergeRequest by project_id alongside state and
-    // merged_at filters; the extra predicates must not suppress the anchor key.
     #[test]
     fn project_id_anchor_survives_sibling_filters() {
         let mut node = node_with_filter("MergeRequest", "project_id", json!(278964));

@@ -1,10 +1,6 @@
 # source: crates/integration-tests/tests/server/data_correctness/traversal_scoping.rs::cross_namespace_has_label_returns_cross_group_label
 description: Cross-namespace HAS_LABEL returns labels from a different group
 
-config:
-  security:
-    scope_prefixes:
-      wi: "1/100/"
 
 query:
   json: |

@@ -81,6 +81,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         security {
             reads_env: [security_ctx, ontology]
+            reads_state: [input]
             mutates: [node]
         }
         cursor {
@@ -92,7 +93,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         hydrate_plan {
             reads_env: [ontology, security_ctx]
-            reads_state: [input]
+            reads_state: [input, node]
             mutates: [hydration_plan]
         }
         settings {
@@ -102,6 +103,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
         codegen {
             reads_state: [node, input]
             mutates: [result_ctx, query_config, hydration_plan, output]
+        }
+        duckdb_codegen {
+            reads_state: [node, input]
+            mutates: [result_ctx, hydration_plan, output]
         }
     }
 
@@ -120,6 +125,16 @@ compiler_pipeline_macros::define_compiler_ctx! {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [restrict, plan, lower, enforce, settings, codegen]
+        }
+        duckdb_json_dsl {
+            env: [ontology, security_ctx]
+            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, duckdb_codegen]
+        }
+        duckdb_gql {
+            env: [ontology, security_ctx]
+            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
+            phases: [gql_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, duckdb_codegen]
         }
         validate_normalize {
             env: [ontology]
@@ -221,6 +236,8 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     let security_ctx = ctx.security_ctx().clone();
     let ontology = ctx.ontology().clone();
     let mut node = require(ctx.take_node(), "node")?;
+    let input = require(ctx.input().as_ref(), "input")?;
+    let security_ctx = security_ctx.with_scope_prefixes(input.compiler.scope_prefixes.clone());
     security::apply_security_context(&mut node, &security_ctx, &ontology)?;
     ctx.set_node(node);
     Ok(())
@@ -241,8 +258,9 @@ fn check(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = require(ctx.input().clone(), "input")?;
-    let plan = hydrate::generate_hydration_plan(&input, ctx.ontology(), ctx.security_ctx());
+    let input = require(ctx.input().as_ref(), "input")?;
+    let emitted = require(ctx.node().as_ref(), "node")?;
+    let plan = hydrate::generate_hydration_plan(input, emitted, ctx.ontology(), ctx.security_ctx());
     ctx.set_hydration_plan(plan);
     Ok(())
 }
@@ -299,6 +317,22 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
     let base = codegen::codegen(&node, result_context, query_config)?;
+    let query_type = input.query_type;
+    ctx.set_output(CompiledQueryContext {
+        query_type,
+        base,
+        hydration,
+        input,
+    });
+    Ok(())
+}
+
+fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
+    let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
+    let node = require(ctx.node().clone(), "node")?;
+    let input = require(ctx.input().clone(), "input")?;
+    let base = codegen::duckdb::codegen(&node, result_context)?;
     let query_type = input.query_type;
     ctx.set_output(CompiledQueryContext {
         query_type,

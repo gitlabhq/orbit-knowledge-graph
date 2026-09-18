@@ -1,9 +1,6 @@
 # Orbit local SQL reference
 
-The local graph is a DuckDB database (`~/.orbit/graph.duckdb` by default) that
-you query with read-only SQL via `orbit sql` (or `glab orbit --yes sql`).
-Run `orbit schema [TABLE…]` to see live columns; the tables below are the ones
-you query directly.
+`orbit sql "QUERY"` runs SQL against the local DuckDB graph. `orbit schema [TABLE…]` lists live columns.
 
 ## Tables
 
@@ -16,45 +13,36 @@ you query directly.
 | `gl_edge` | a relationship | `source_id`, `source_kind`, `relationship_kind`, `target_id`, `target_kind` |
 | `_orbit_manifest` | an indexed repository | `repo_path`, `project_id`, `branch`, `commit_sha`, `status` |
 
-`relationship_kind` values: `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`,
-`EXTENDS`. Edges are id-to-id — join `source_id`/`target_id` back to
-`gl_definition.id` (or `gl_file.id`) to resolve names.
-
-`definition_type` values are **capitalized** (`Function`, `Method`,
-`AssociatedFunction`, `Struct`, `Field`, `Variant`, `Module`, `Constant`, …).
-Lowercase filters return nothing.
+`relationship_kind`: `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`, `EXTENDS`. Edges hold only IDs. Join `source_id`/`target_id` to `gl_definition.id` or `gl_file.id` to get names.
 
 ## Recipes
 
-Pass SQL as an argument, or `-` to read from stdin. `-F json|ndjson|csv`
-switches output away from the default table.
-
 Definition-type histogram:
 
-```bash
+```shell
 orbit sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
 ```
 
-Definitions declared in one file:
+Definitions in one file:
 
-```bash
+```shell
 orbit sql "SELECT definition_type, name, start_line FROM gl_definition
            WHERE file_path='crates/orbit-cli/src/main.rs' ORDER BY start_line"
 ```
 
-Who calls a function (`CALLS` edge, resolved to caller names):
+Callers of a function (`CALLS`):
 
-```bash
+```shell
 orbit sql "SELECT s.name AS caller, s.file_path, s.start_line
            FROM gl_edge e
            JOIN gl_definition s ON e.source_id = s.id
            JOIN gl_definition t ON e.target_id = t.id
-           WHERE e.relationship_kind='CALLS' AND t.name='run_sql'"
+           WHERE e.relationship_kind='CALLS' AND t.name='run_query'"
 ```
 
-What a function calls (flip source/target):
+Callees of a function:
 
-```bash
+```shell
 orbit sql "SELECT DISTINCT t.name AS callee
            FROM gl_edge e
            JOIN gl_definition s ON e.source_id = s.id
@@ -62,29 +50,28 @@ orbit sql "SELECT DISTINCT t.name AS callee
            WHERE e.relationship_kind='CALLS' AND s.name='main'"
 ```
 
-Subtypes of a base type (`EXTENDS`):
+Subtypes via `EXTENDS`:
 
-```bash
+```shell
 orbit sql "SELECT s.name AS subtype, s.file_path
            FROM gl_edge e
            JOIN gl_definition s ON e.source_id = s.id
            JOIN gl_definition t ON e.target_id = t.id
-           WHERE e.relationship_kind='EXTENDS' AND t.name='Visitor'"
+           WHERE e.relationship_kind='EXTENDS' AND t.name='Filter'"
 ```
 
-Who imports a symbol:
+Importers of a symbol:
 
-```bash
+```shell
 orbit sql "SELECT DISTINCT file_path FROM gl_imported_symbol
            WHERE identifier_name LIKE '%Workspace%' ORDER BY file_path"
 ```
 
-Where an imported symbol is defined in another indexed repository:
+Cross-repository symbol lookup (`--all`):
 
-```bash
+```shell
 orbit sql --all "SELECT im.repo_path AS importing_repo, i.identifier_name AS symbol,
-                 dm.repo_path AS defining_repo, d.file_path AS defining_file,
-                 d.start_line AS defining_line
+                 dm.repo_path AS defining_repo, d.file_path AS defining_file
                  FROM gl_imported_symbol i
                  JOIN _orbit_manifest im ON im.project_id = i.project_id
                  JOIN gl_definition d ON d.name = i.identifier_name
@@ -95,17 +82,5 @@ orbit sql --all "SELECT im.repo_path AS importing_repo, i.identifier_name AS sym
 
 ## Notes
 
-- Run from inside an indexed checkout, `orbit sql` scopes every table to that
-  repository's indexed commit (`gl_edge` to that commit's edges), so no
-  `project_id` or `commit_sha` predicate is needed. Pass `--all` to query
-  every indexed commit, or `--repo <path>` to scope to another checkout; only
-  then do the node tables' `commit_sha` columns matter. `gl_edge` has no
-  `commit_sha` - join back to a definition to scope edges by hand.
-- Edges stay within one repository: `gl_edge` links nodes that share a
-  `project_id`. A question that spans repositories is a join through
-  `_orbit_manifest`, as in the last recipe. That table is not scoped to the
-  checkout, so the join needs `--all` to match anything. It matches on symbol
-  name, so narrow on `im.repo_path` or `i.import_path` when several indexed
-  repositories define the same name.
-- `orbit sql` is read-only; there is no write path into the graph other than
-  `index`.
+- `commit_sha` columns matter only with `--all` or `--repo`. `gl_edge` has none, so join to a definition to scope edges.
+- Edges stay inside one repository. Cross-repository questions join through `_orbit_manifest` and need `--all`. The recipe matches on symbol name, so narrow on `im.repo_path` for duplicate names.

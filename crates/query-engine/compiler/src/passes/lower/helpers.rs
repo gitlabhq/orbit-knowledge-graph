@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use crate::scope::ScopePrefix;
 use ontology::constants::*;
-use orbit_utils::traversal_path::TraversalPath;
 
 use crate::ast::*;
 use crate::constants::*;
@@ -51,26 +51,9 @@ pub(super) fn text_excerpt_projection(
     Expr::func("concat", vec![excerpt, suffix])
 }
 
-/// Predicates applied after `FINAL` has resolved each node's latest row.
+/// The candidate-id prefilter runs these before `FINAL`, so it may over-select
+/// stale rows; the outer latest-row scan re-applies them after `FINAL`.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
-    let mut predicates = Vec::new();
-    for (prop, filter) in &np.filters {
-        predicates.push(filter_to_expr(alias, prop, filter));
-    }
-    if !np.node_ids.is_empty() {
-        predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
-    }
-    if let Some(ref range) = np.id_range {
-        predicates.push(id_range_predicate(alias, range));
-    }
-    predicates.push(deleted_false(alias));
-    predicates
-}
-
-/// Predicates for a candidate-id prefilter. These run before `FINAL`, so they
-/// may over-select stale rows, but the outer latest-row scan re-applies the
-/// same predicates after `FINAL`.
-pub(super) fn candidate_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut predicates = Vec::new();
     for (prop, filter) in &np.filters {
         predicates.push(filter_to_expr(alias, prop, filter));
@@ -159,19 +142,14 @@ fn emit_node_join_inner(
     // Broad target: FINAL streams deduped rows in PK order so the top-level LIMIT
     // short-circuits the join. Narrowed target: candidate set is tiny, LIMIT 1 BY is cheaper.
     let node_scan = if narrowed {
-        let mut order_by: Vec<OrderExpr> = sort_key
-            .iter()
-            .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-            .collect();
-        order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-        let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+        let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
         TableRef::subquery(
             Query {
                 select: vec![SelectExpr::star()],
                 from: TableRef::scan(table, alias),
                 where_clause: Expr::conjoin(wheres),
                 order_by,
-                limit_by: Some((1, limit_by_cols)),
+                limit_by,
                 ..Default::default()
             },
             alias,
@@ -263,19 +241,13 @@ fn node_ids_dedup_scan(
             "no sort key for node table '{table}'; cannot emit LIMIT BY dedup"
         )));
     }
-    let mut order_by: Vec<OrderExpr> = sort_key
-        .iter()
-        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-        .collect();
-    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
-
+    let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
     Ok(Query {
         select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
         order_by,
-        limit_by: Some((1, limit_by_cols)),
+        limit_by,
         ..Default::default()
     })
 }
@@ -286,7 +258,7 @@ pub(super) fn node_ids_from_candidate_scan(
     np: &NodePlan,
     extra_predicates: Vec<Expr>,
 ) -> Query {
-    let mut predicates = candidate_node_predicates(alias, np);
+    let mut predicates = latest_node_predicates(alias, np);
     predicates.extend(extra_predicates);
     Query {
         select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
@@ -303,7 +275,7 @@ pub(super) fn fk_values_from_candidate_scan(
     np: &NodePlan,
     extra_predicates: Vec<Expr>,
 ) -> Query {
-    let mut predicates = candidate_node_predicates(alias, np);
+    let mut predicates = latest_node_predicates(alias, np);
     predicates.extend(extra_predicates);
     Query {
         select: vec![SelectExpr::new(
@@ -391,6 +363,19 @@ pub(super) fn dedup_edge_scan(
     )
 }
 
+fn latest_row_dedup(
+    alias: &str,
+    sort_key: &[String],
+) -> (Vec<OrderExpr>, Option<(u32, Vec<Expr>)>) {
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+        .collect();
+    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+    (order_by, Some((1, limit_by_cols)))
+}
+
 /// Build a `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` subquery
 /// over a plain (non-`FINAL`) scan, with WHERE predicates injected for PK
 /// pruning. Reproduces `ReplacingMergeTree` latest-row semantics while keeping
@@ -404,20 +389,13 @@ pub(super) fn limit_by_scan(
     sort_key: &[String],
     where_predicates: Vec<Expr>,
 ) -> TableRef {
-    let mut order_by: Vec<OrderExpr> = sort_key
-        .iter()
-        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-        .collect();
-    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-
-    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
-
+    let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
     let query = Query {
         select,
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(where_predicates),
         order_by,
-        limit_by: Some((1, limit_by_cols)),
+        limit_by,
         ..Default::default()
     };
     TableRef::subquery(query, alias)
@@ -639,19 +617,9 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
-    scope_prefix: Option<&TraversalPath>,
+    scope_prefix: Option<&ScopePrefix>,
 ) -> Query {
-    let scope_pred = |alias: &str| -> Option<Expr> {
-        scope_prefix.map(|p| {
-            Expr::func(
-                "startsWith",
-                vec![
-                    Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                    Expr::string(p.as_str()),
-                ],
-            )
-        })
-    };
+    let scope_pred = |alias: &str| -> Option<Expr> { scope_prefix.map(|s| s.predicate(alias)) };
 
     let mut from = TableRef::scan(edge_table, "e1");
     let mut where_parts = Vec::new();

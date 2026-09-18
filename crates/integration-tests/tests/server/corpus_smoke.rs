@@ -2,7 +2,7 @@
 //!
 //! Runs every query in `fixtures/queries/corpus/` through the **same pipeline
 //! stages the webserver runs** (`QueryPipelineService::run_query`): Security ->
-//! PathResolution -> Compilation -> ClickHouseExecutor -> Extraction ->
+//! Compilation -> ClickHouseExecutor -> Extraction ->
 //! Authorization -> Redaction -> Hydration -> Output, against a real ClickHouse
 //! seeded with the data-correctness fixture.
 //!
@@ -27,9 +27,7 @@ use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
 use ontology::Ontology;
 use orbit_server::auth::Claims;
-use orbit_server::pipeline::{
-    ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage, SecurityStage,
-};
+use orbit_server::pipeline::{ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage};
 use orbit_server::redaction::ResourceAuthorization;
 use query_engine::formatters::GraphResponse;
 use query_engine::pipeline::{
@@ -83,7 +81,7 @@ impl PipelineStage for AuthorizeAllStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<ExtractionOutput>()
+            .remove::<ExtractionOutput>()
             .ok_or_else(|| PipelineError::custom("ExtractionOutput not found in phases"))?;
         let authorizations = input
             .query_result
@@ -99,7 +97,7 @@ impl PipelineStage for AuthorizeAllStage {
             })
             .collect();
         Ok(AuthorizationOutput {
-            query_result: input.query_result.clone(),
+            query_result: input.query_result,
             authorizations,
         })
     }
@@ -419,8 +417,6 @@ async fn run_pipeline(
     PipelineRunner::start(&mut ctx, &mut obs)
         .then(&SecurityStage)
         .await?
-        .then(&PathResolutionStage)
-        .await?
         .then(&CompilationStage)
         .await?
         .then(&ClickHouseExecutor {
@@ -448,7 +444,7 @@ async fn corpus_smoke() {
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
 
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     // Admin claims -> Owner over org root, so access-gated entities are visible
     // and the real SQL runs (not `WHERE false`).
     let claims = Claims::dummy();
