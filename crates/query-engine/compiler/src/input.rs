@@ -472,6 +472,7 @@ pub struct InputFilter {
 #[strum(serialize_all = "snake_case")]
 pub enum FilterOp {
     Eq,
+    Ne,
     Gt,
     Lt,
     Gte,

@@ -19,6 +19,7 @@ pub const MAX_FILTER_STRING_LEN: usize = 1024;
 #[allow(dead_code, reason = "consumed by build.rs via include! and by tests")]
 pub const EXPECTED_FILTER_OPS: &[&str] = &[
     "eq",
+    "ne",
     "gt",
     "lt",
     "gte",
