@@ -207,30 +207,30 @@ tests:
 
   - name: jh_else_ce Vue default import targets the primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
-        AND i.path = 'jh_else_ce/gitlab_version_check/components/gitlab_version_check_badge.vue'
-      RETURN i.import_type AS import_type, i.name AS name, d.fqn AS target
+        AND i.import_path = 'jh_else_ce/gitlab_version_check/components/gitlab_version_check_badge.vue'
+      RETURN i.import_type AS import_type, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "DefaultImport", name: "default", target: "GitlabVersionCheckBadge" } }
 
   - name: Barrel named import for Vue component targets the barrel proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
-        AND i.path = '~/gitlab_version_check/components'
-        AND i.name = 'SecurityPatchUpgradeAlertModal'
-      RETURN i.import_type AS import_type, i.name AS name, d.fqn AS target
+        AND i.import_path = '~/gitlab_version_check/components'
+        AND i.identifier_name = 'SecurityPatchUpgradeAlertModal'
+      RETURN i.import_type AS import_type, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { import_type: "NamedImport", name: "SecurityPatchUpgradeAlertModal", target: "app/assets/javascripts/gitlab_version_check/components/index.js::SecurityPatchUpgradeAlertModal" } }
 
   - name: Vue SFC imports preserve local monolith alias and relative targets
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue'
-      RETURN i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+      RETURN i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 5 }
       - { row: { path: "~/tracking", name: "track", alias: null, target: "track" } }
@@ -259,9 +259,9 @@ tests:
 
   - name: Namespace imports in Vue SFC target synthesized modules
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
       - { row: { import_type: "NamespaceImport", path: "../utils", name: null, alias: "versionUtils", target: "app/assets/javascripts/gitlab_version_check/utils.js" } }
@@ -287,8 +287,8 @@ tests:
 
   - name: Imported constants in Vue components do not fabricate call edges
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE e.relationship_kind = 'Calls'
         AND caller.fqn = 'GitlabVersionCheckBadge::badConstantCall'
         AND callee.file_path = 'app/assets/javascripts/gitlab_version_check/constants.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -297,8 +297,8 @@ tests:
 
   - name: Vue namespace member calls resolve to concrete helper definitions
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE e.relationship_kind = 'Calls'
         AND caller.fqn = 'GitlabVersionCheckBadge::badgeTitle'
         AND callee.file_path = 'app/assets/javascripts/gitlab_version_check/utils.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -308,8 +308,8 @@ tests:
 
   - name: Vue method chains preserve imported helper and local method calls
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE e.relationship_kind = 'Calls'
         AND caller.fqn = 'SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick'
       RETURN caller.fqn AS caller, callee.fqn AS callee
       ORDER BY callee
@@ -320,9 +320,9 @@ tests:
 
   - name: Script lang ts Vue imports preserve namespace and ee alias targets
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue'
-      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
       - { row: { import_type: "NamespaceImport", path: "~/sentry", name: null, alias: "Sentry", target: "app/assets/javascripts/sentry.js" } }
@@ -345,8 +345,8 @@ tests:
   - name: Plain GitLab entrypoints still resolve cross-file calls with monolith aliases
     queries:
       - query: |
-          MATCH (file:File)-[e:FileToDefinition]->(callee:Definition)
-          WHERE e.edge_kind = 'Calls'
+          MATCH (file:File)-[e:DEFINES|CALLS]->(callee:Definition)
+          WHERE e.relationship_kind = 'Calls'
             AND file.path = 'app/assets/javascripts/gitlab_version_check/index.js'
             AND callee.fqn = 'parseBoolean'
           RETURN file.path AS caller, callee.fqn AS callee
@@ -354,8 +354,8 @@ tests:
           - { row_count: 1 }
           - { row: { caller: "app/assets/javascripts/gitlab_version_check/index.js", callee: "parseBoolean" } }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          WHERE e.relationship_kind = 'Calls'
             AND caller.fqn = 'mountVersionCheck'
             AND callee.fqn = 'parseBoolean'
           RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -363,8 +363,8 @@ tests:
           - { row_count: 1 }
           - { row: { caller: "mountVersionCheck", callee: "parseBoolean" } }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          WHERE e.relationship_kind = 'Calls'
             AND caller.fqn = 'dismissAlert'
             AND callee.file_path = 'app/assets/javascripts/gitlab_version_check/utils.js'
           RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -373,8 +373,8 @@ tests:
           - { row: { caller: "dismissAlert", callee: "getHideAlertModalCookie" } }
           - { row: { caller: "dismissAlert", callee: "setHideAlertModalCookie" } }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          WHERE e.relationship_kind = 'Calls'
             AND caller.fqn = 'dismissAlert'
             AND callee.fqn = 'track'
           RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -382,8 +382,8 @@ tests:
           - { row_count: 1 }
           - { row: { caller: "dismissAlert", callee: "track" } }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          WHERE e.relationship_kind = 'Calls'
             AND caller.fqn = 'resolveSchedule'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:

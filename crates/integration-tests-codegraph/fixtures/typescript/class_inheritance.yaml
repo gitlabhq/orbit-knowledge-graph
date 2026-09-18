@@ -9,7 +9,7 @@ fixtures:
 
       class Animal {
           name: string = "";
-          greet(): string { return `I am ${this.name}`; }
+          greet(): string { return `I am ${this.identifier_name}`; }
       }
 
       class Dog extends Animal implements Speakable {
@@ -46,16 +46,16 @@ tests:
 
   - name: Dog.fetch() does not resolve this.greet() cross-class
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'fetch' AND callee.name = 'greet' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE caller.name = 'fetch' AND callee.name = 'greet' AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: true }
 
   - name: Puppy.play() does not resolve inherited this calls
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'play' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE caller.name = 'play' AND e.relationship_kind = 'Calls'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:

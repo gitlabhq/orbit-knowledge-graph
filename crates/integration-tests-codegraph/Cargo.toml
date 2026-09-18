@@ -13,6 +13,7 @@ ontology = { path = "../ontology" }
 arrow = { workspace = true }
 
 crossbeam-channel = "0.5"
+regex = { workspace = true }
 globset = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }

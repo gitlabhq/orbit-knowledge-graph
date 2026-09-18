@@ -157,27 +157,27 @@ tests:
   # ── Inheritance (extends + implements + trait use) ─────────────
   - name: "Product extends Entity"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Models\Entity'
-        AND e.edge_kind = 'Extends'
+        AND e.relationship_kind = 'Extends'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Product implements Identifiable"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Contracts\Identifiable'
-        AND e.edge_kind = 'Extends'
+        AND e.relationship_kind = 'Extends'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Product uses Loggable trait (modeled as Extends)"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Concerns\Loggable'
-        AND e.edge_kind = 'Extends'
+        AND e.relationship_kind = 'Extends'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -185,20 +185,20 @@ tests:
   # ── Calls ──────────────────────────────────────────────────────
   - name: "Inherited method call: Entity.refresh -> Entity.touch via \\$this"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Entity\refresh'
         AND callee.fqn = 'App\Models\Entity\touch'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Trait method call: Product.rename -> Loggable.log via \\$this"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Concerns\Loggable\log'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -208,30 +208,30 @@ tests:
 
   - name: "Inherited method via subclass: Product.rename -> Entity.touch"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Models\Entity\touch'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Self static call: Product.rename -> Product.describe via self::"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Models\Product\describe'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Cross-file static call via aliased import: boot -> Logger.make (use ... as Log)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'App\boot'
         AND callee.fqn = 'App\Support\Logger\make'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }

@@ -88,8 +88,8 @@ tests:
 
   - name: ClassWithMethods has multiple methods
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
-      WHERE cls.name = 'ClassWithMethods'
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
+      WHERE cls.identifier_name = 'ClassWithMethods'
       RETURN count(m) AS n
     assert:
       - { count_gte: { field: n, value: 5 } }

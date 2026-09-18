@@ -52,9 +52,9 @@ tests:
 
   - name: TSX type-only imports are retained separately from runtime imports
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN ['src/Button.tsx', 'src/Toolbar.tsx']
-      RETURN i.file_path AS file_path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.file_path AS file_path, i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY file_path, name
     assert:
       - { row_count: 5 }
@@ -66,8 +66,8 @@ tests:
 
   - name: TSX runtime calls exclude type-only definitions
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE e.relationship_kind = 'Calls'
         AND caller.file_path IN ['src/Button.tsx', 'src/Toolbar.tsx']
       RETURN caller.fqn AS caller, callee.fqn AS callee
       ORDER BY caller, callee

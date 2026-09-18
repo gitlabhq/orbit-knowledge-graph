@@ -12,7 +12,7 @@ fixtures:
 tests:
   - name: Inner class is contained in Outer
     query: |
-      MATCH (outer:Definition)-[:DefinitionToDefinition]->(inner:Definition)
+      MATCH (outer:Definition)-[:CALLS|DEFINES|EXTENDS]->(inner:Definition)
       WHERE outer.name = 'Outer' AND inner.name = 'Inner'
       RETURN outer.fqn AS parent, inner.fqn AS child
     assert:
@@ -21,8 +21,8 @@ tests:
 
   - name: method is contained in Inner
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
-      WHERE cls.name = 'Inner' AND m.name = 'method'
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
+      WHERE cls.identifier_name = 'Inner' AND m.name = 'method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -30,8 +30,8 @@ tests:
 
   - name: outer_method is contained in Outer
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
-      WHERE cls.name = 'Outer' AND m.name = 'outer_method'
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
+      WHERE cls.identifier_name = 'Outer' AND m.name = 'outer_method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }

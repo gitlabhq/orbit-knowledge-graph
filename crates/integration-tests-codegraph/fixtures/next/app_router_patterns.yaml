@@ -148,14 +148,14 @@ tests:
 
   - name: Next app router tsconfig aliases resolve local imports
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN [
         'app/layout.tsx',
         'app/page.tsx',
         'app/blog/[slug]/page.tsx',
         'app/api/health/route.ts'
       ]
-      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY file_path, path, name
     assert:
       - { row_count: 6 }
@@ -170,8 +170,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path IN ['app/layout.tsx', 'app/api/health/route.ts']
-        AND i.path IN ['next', 'next/server']
-      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only
+        AND i.import_path IN ['next', 'next/server']
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only
       ORDER BY file_path, path, name
     assert:
       - { row_count: 2 }
@@ -180,17 +180,17 @@ tests:
 
   - name: Next app router external Next imports have no local targets
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN ['app/layout.tsx', 'app/api/health/route.ts']
-        AND i.path IN ['next', 'next/server']
-      RETURN i.path AS path, d.fqn AS target
+        AND i.import_path IN ['next', 'next/server']
+      RETURN i.import_path AS path, d.fqn AS target
     assert:
       - { empty: true }
 
   - name: Next app router cross-file calls resolve helpers and JSX components
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE e.relationship_kind = 'Calls'
         AND caller.file_path IN [
           'app/layout.tsx',
           'app/page.tsx',
@@ -212,8 +212,8 @@ tests:
 
   - name: Next route handler methods share one helper edge per method
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE e.relationship_kind = 'Calls'
         AND caller.file_path = 'app/api/health/route.ts'
         AND callee.file_path = 'src/lib/health.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee

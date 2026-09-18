@@ -120,10 +120,10 @@ fixtures:
 tests:
   - name: ee_else_ce alias named import targets EE export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
-        AND i.path = 'ee_else_ce/sidebar/constants'
-        AND i.name = 'dropdowni18nText'
+        AND i.import_path = 'ee_else_ce/sidebar/constants'
+        AND i.identifier_name = 'dropdowni18nText'
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
@@ -131,8 +131,8 @@ tests:
 
   - name: Vue computed property resolves ee_else_ce helper call
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE e.relationship_kind = 'Calls'
         AND caller.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
         AND callee.file_path = 'ee/app/assets/javascripts/sidebar/constants.js'
       RETURN caller.name AS caller, callee.name AS callee
@@ -142,9 +142,9 @@ tests:
 
   - name: Vue default import of CE component targets primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
-        AND i.path = '~/repository/components/header_area/blob_overflow_menu.vue'
+        AND i.import_path = '~/repository/components/header_area/blob_overflow_menu.vue'
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
@@ -152,9 +152,9 @@ tests:
 
   - name: GraphQL import through ee_else_ce targets primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
-        AND i.path = 'ee_else_ce/repository/queries/project_info.query.graphql'
+        AND i.import_path = 'ee_else_ce/repository/queries/project_info.query.graphql'
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
@@ -162,9 +162,9 @@ tests:
 
   - name: Asset alias import targets JS helper module
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
-        AND i.path = '@gitlab/svgs/dist/icons.svg'
+        AND i.import_path = '@gitlab/svgs/dist/icons.svg'
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
@@ -172,8 +172,8 @@ tests:
 
   - name: Vue monolith helper import from tilde alias resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE e.relationship_kind = 'Calls'
         AND caller.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
         AND callee.file_path = 'app/assets/javascripts/alert.js'
       RETURN caller.name AS caller, callee.name AS callee

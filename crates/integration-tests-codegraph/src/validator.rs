@@ -71,7 +71,8 @@ fn execute_cypher(
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
 ) -> anyhow::Result<RecordBatch> {
-    let compiled = compile_local(cypher, Frontend::Gql, ontology)?;
+    let (clean_query, aliases) = rewrite_query(cypher);
+    let compiled = compile_local(&clean_query, Frontend::Gql, ontology)?;
     let sql = compiled.base.render();
     eprintln!("  SQL: {sql}");
     let batches = client.query_arrow(&sql)?;
@@ -84,10 +85,58 @@ fn execute_cypher(
         arrow::compute::concat_batches(&batches[0].schema(), &batches)
             .map_err(|e| anyhow::anyhow!("concat batches: {e}"))?
     };
-    Ok(strip_node_prefixes(batch, &compiled.input))
+    Ok(apply_aliases(batch, &compiled.input, &aliases))
 }
 
-fn strip_node_prefixes(batch: RecordBatch, input: &compiler::Input) -> RecordBatch {
+/// Rewrite a fixture Cypher query for the Orbit GQL compiler:
+/// - Strip `AS alias` from RETURN property items and collect the mapping
+/// - Rewrite `ORDER BY alias` to `ORDER BY node.prop`
+/// - Escape backslashes inside single-quoted string literals
+fn rewrite_query(cypher: &str) -> (String, Vec<(String, String, String)>) {
+    let alias_re = regex::Regex::new(r"(?i)\b(\w+)\.(\w+)\s+AS\s+(\w+)").unwrap();
+    let mut aliases = Vec::new();
+    let rewritten = alias_re.replace_all(cypher, |caps: &regex::Captures| {
+        let node = caps[1].to_string();
+        let prop = caps[2].to_string();
+        let alias = caps[3].to_string();
+        aliases.push((node.clone(), prop.clone(), alias));
+        format!("{node}.{prop}")
+    });
+    let mut result = rewritten.into_owned();
+
+    let order_re = regex::Regex::new(r"(?i)\bORDER\s+BY\s+(\w+)").unwrap();
+    if let Some(caps) = order_re.captures(&result) {
+        let sort_key = &caps[1];
+        if let Some((node, prop, _)) = aliases.iter().find(|(_, _, a)| a == sort_key) {
+            let replacement = format!("ORDER BY {node}.{prop}");
+            result = order_re.replace(&result, replacement.as_str()).into_owned();
+        }
+    }
+
+    let backslash_re = regex::Regex::new(r"'([^']*\\'[^']*)'|'([^']*\\[^']*)'").unwrap();
+    if result.contains('\\') {
+        let lit_re = regex::Regex::new(r"'([^']*)'").unwrap();
+        result = lit_re
+            .replace_all(&result, |caps: &regex::Captures| {
+                let inner = &caps[1];
+                if inner.contains('\\') {
+                    format!("'{}'", inner.replace('\\', "\\\\"))
+                } else {
+                    caps[0].to_string()
+                }
+            })
+            .into_owned();
+    }
+
+    (result, aliases)
+}
+
+/// Rename result columns: strip `{node_id}_` prefix, then apply user aliases.
+fn apply_aliases(
+    batch: RecordBatch,
+    input: &compiler::Input,
+    aliases: &[(String, String, String)],
+) -> RecordBatch {
     let prefixes: Vec<String> = input.nodes.iter().map(|n| format!("{}_", n.id)).collect();
     let schema = batch.schema();
     let new_fields: Vec<arrow::datatypes::Field> = schema
@@ -95,17 +144,25 @@ fn strip_node_prefixes(batch: RecordBatch, input: &compiler::Input) -> RecordBat
         .iter()
         .map(|f| {
             let name = f.name();
+            let mut stripped = name.clone();
             for prefix in &prefixes {
-                if let Some(stripped) = name.strip_prefix(prefix.as_str()) {
-                    return f.as_ref().clone().with_name(stripped);
+                if let Some(s) = name.strip_prefix(prefix.as_str()) {
+                    stripped = s.to_string();
+                    break;
                 }
             }
-            f.as_ref().clone()
+            for (node, prop, alias) in aliases {
+                let prefixed = format!("{node}_{prop}");
+                if name == &prefixed {
+                    return f.as_ref().clone().with_name(alias);
+                }
+            }
+            f.as_ref().clone().with_name(stripped)
         })
         .collect();
     let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
     RecordBatch::try_new(new_schema, batch.columns().to_vec())
-        .unwrap_or_else(|e| panic!("strip_node_prefixes failed: {e}"))
+        .unwrap_or_else(|e| panic!("apply_aliases failed: {e}"))
 }
 
 fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {

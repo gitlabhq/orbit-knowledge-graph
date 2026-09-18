@@ -63,39 +63,39 @@ fixtures:
 tests:
   - name: "namespace using directives target wildcard imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'App.JsonRunner.Serialize'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
       - { row: { caller: "App.JsonRunner.Serialize", path: "Newtonsoft.Json", name: null, import_type: "WildcardImport" } }
 
   - name: "static using directives target wildcard imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'App.StaticRunner.Track'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
       - { row: { caller: "App.StaticRunner.Track", path: "External.Tools.Helpers", name: null, import_type: "StaticImport" } }
 
   - name: "alias using directives target aliased imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'App.AliasRunner.Serialize'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias, sym.import_type AS import_type
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
       - { row: { caller: "App.AliasRunner.Serialize", path: "Newtonsoft.Json.JsonConvert", name: "JsonConvert", alias: "Json", import_type: "AliasedImport" } }
 
   - name: "console logging calls do not target ambient namespace imports"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'App.ConsoleRunner.Log'
-        AND e.edge_kind = 'Calls'
-      RETURN sym.path AS path
+        AND e.relationship_kind = 'Calls'
+      RETURN sym.import_path AS path
     assert:
       - { empty: true }

@@ -50,9 +50,9 @@ tests:
 
   - name: Type-only imports are preserved distinctly from runtime imports
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'types/consumer.ts'
-      RETURN i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY name
     assert:
       - { row_count: 4 }
@@ -63,8 +63,8 @@ tests:
 
   - name: Type-only imports do not fabricate runtime call edges
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE e.relationship_kind = 'Calls'
         AND caller.file_path = 'types/consumer.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

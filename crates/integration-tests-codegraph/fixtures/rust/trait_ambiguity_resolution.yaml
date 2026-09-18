@@ -89,7 +89,7 @@ fixtures:
 tests:
   - name: "method fallback does not jump to an unrelated visible trait item"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_run' AND callee.name = 'run'
       RETURN callee.fqn AS fqn
     assert:
@@ -98,7 +98,7 @@ tests:
 
   - name: "supertrait default methods resolve to the defining trait item"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_ping' AND callee.name = 'ping'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -107,7 +107,7 @@ tests:
 
   - name: "cross-file method fallback keeps the concrete impl target"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'cross_call_run' AND callee.name = 'run'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
@@ -116,7 +116,7 @@ tests:
 
   - name: "cross-file supertrait default methods still resolve to the defining trait item"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'cross_call_ping' AND callee.name = 'ping'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:

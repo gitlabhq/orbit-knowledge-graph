@@ -6,7 +6,7 @@ fixtures:
 
       public class User {
           private String name;
-          public User(String name) { this.name = name; }
+          public User(String name) { this.identifier_name = name; }
           public String getName() { return name; }
       }
 
@@ -49,7 +49,7 @@ fixtures:
 tests:
   - name: "UserService.createUser → new User (cross-package)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'createUser' AND callee.name = 'User'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -58,7 +58,7 @@ tests:
 
   - name: "App.run → new UserService (explicit import)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'UserService'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -67,7 +67,7 @@ tests:
 
   - name: "App.run → new User (wildcard import)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'User'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -76,7 +76,7 @@ tests:
 
   - name: "App.run → new Project (wildcard import)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'Project'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:

@@ -36,8 +36,8 @@ tests:
 
   - name: inner method nested under Outer
     query: |
-      MATCH (cls:Definition)-[e:DefinitionToDefinition]->(m:Definition)
-      WHERE cls.name = 'Outer' AND m.name = 'inner' AND e.edge_kind = 'Defines'
+      MATCH (cls:Definition)-[e:CALLS|DEFINES|EXTENDS]->(m:Definition)
+      WHERE cls.identifier_name = 'Outer' AND m.name = 'inner' AND e.relationship_kind = 'Defines'
       RETURN cls.fqn AS cls, m.fqn AS method
     assert:
       - { row_count: 1 }

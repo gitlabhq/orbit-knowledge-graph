@@ -42,8 +42,8 @@ tests:
 
   - name: "Both are methods on DynamicProxy"
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
-      WHERE cls.name = 'DynamicProxy' AND m.name IN ['method_missing', 'respond_to_missing?']
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
+      WHERE cls.identifier_name = 'DynamicProxy' AND m.name IN ['method_missing', 'respond_to_missing?']
       RETURN m.name AS name
     assert:
       - { row_count: 2 }

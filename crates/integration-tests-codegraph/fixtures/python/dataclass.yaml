@@ -35,8 +35,8 @@ tests:
 
   - name: "Class contains its fields"
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(f:Definition)
-      WHERE cls.name = 'User' AND f.name = 'id'
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(f:Definition)
+      WHERE cls.identifier_name = 'User' AND f.name = 'id'
       RETURN f.fqn AS fqn
     assert:
       - { row_count: 1 }

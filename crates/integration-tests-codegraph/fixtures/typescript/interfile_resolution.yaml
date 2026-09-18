@@ -53,7 +53,7 @@ tests:
   - name: All imports extracted correctly
     query: |
       MATCH (i:ImportedSymbol)
-      RETURN i.file_path AS file, i.name AS name, i.path AS path
+      RETURN i.file_path AS file, i.identifier_name AS name, i.import_path AS path
       ORDER BY file, name
     assert:
       - { row_count: 3 }
@@ -63,10 +63,10 @@ tests:
 
   - name: run calls buildUser cross-file
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'buildUser'
         AND caller.file_path <> callee.file_path
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -74,8 +74,8 @@ tests:
 
   - name: No call edges from models.ts (it only defines)
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.file_path = 'models.ts' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE caller.file_path = 'models.ts' AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { empty: true }

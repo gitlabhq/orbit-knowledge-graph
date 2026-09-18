@@ -44,10 +44,10 @@ fixtures:
 tests:
   - name: "package, aliased, and dotted package imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'package_import_call'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path
     assert:
       - { row_count: 4 }
@@ -58,10 +58,10 @@ tests:
 
   - name: "from imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'from_import_call'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, name
     assert:
       - { row_count: 2 }
@@ -70,11 +70,11 @@ tests:
 
   - name: "top-level imported calls target imported symbols from the file"
     query: |
-      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'main.py'
-        AND e.edge_kind = 'Calls'
-        AND sym.path = 'sdk.helpers'
-      RETURN file.path AS file, sym.path AS path, sym.name AS name, sym.alias AS alias
+        AND e.relationship_kind = 'Calls'
+        AND sym.import_path = 'sdk.helpers'
+      RETURN file.path AS file, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
     assert:
       - { row_count: 1 }
       - { row: { file: "main.py", path: "sdk.helpers", name: "run", alias: "helper_run" } }
@@ -82,36 +82,36 @@ tests:
   - name: "locally resolved imports do not emit imported-symbol fallback"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'local_import_call'
             AND callee.fqn = 'local_models.LocalClient'
-            AND e.edge_kind = 'Calls'
+            AND e.relationship_kind = 'Calls'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.name = 'local_import_call'
-            AND e.edge_kind = 'Calls'
-          RETURN sym.path AS path
+            AND e.relationship_kind = 'Calls'
+          RETURN sym.import_path AS path
         assert:
           - { empty: true }
 
   - name: "wildcard imports target wildcard imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'wildcard_import_call'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
       - { row: { caller: "main.wildcard_import_call", path: "wildcard_sdk", name: "*", import_type: "WildcardImport" } }
 
   - name: "built-ins do not target wildcard imports"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['builtin_len_call', 'builtin_print_call']
-        AND e.edge_kind = 'Calls'
-      RETURN sym.path AS path
+        AND e.relationship_kind = 'Calls'
+      RETURN sym.import_path AS path
     assert:
       - { empty: true }

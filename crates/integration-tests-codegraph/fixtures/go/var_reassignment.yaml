@@ -41,13 +41,13 @@ tests:
   - name: "varDecl calls Meow via var declaration type"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.fqn = 'main.varDecl' AND e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          WHERE caller.fqn = 'main.varDecl' AND e.relationship_kind = 'Calls'
           RETURN callee.fqn AS callee
         assert:
           - { row: { callee: "main.Meow" } }
       - query: |
-          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'main.varDecl' AND callee.name = 'Bark'
           RETURN callee.name
         assert:
@@ -56,8 +56,8 @@ tests:
   - name: "separateVars calls Meow and Bark without cross-contamination"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.fqn = 'main.separateVars' AND e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          WHERE caller.fqn = 'main.separateVars' AND e.relationship_kind = 'Calls'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -66,8 +66,8 @@ tests:
 
   - name: "reassigned: both Meow and Bark resolve (phi merges both types)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'main.reassigned' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE caller.fqn = 'main.reassigned' AND e.relationship_kind = 'Calls'
       RETURN callee.fqn AS callee
       ORDER BY callee
     assert:
@@ -76,8 +76,8 @@ tests:
 
   - name: "groupedParams: both a and b resolve Query"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'main.groupedParams' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE caller.fqn = 'main.groupedParams' AND e.relationship_kind = 'Calls'
         AND callee.name = 'Query'
       RETURN callee.fqn AS callee
     assert:

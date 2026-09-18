@@ -60,8 +60,8 @@ tests:
 
   - name: main calls largest and print_it
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'main' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE caller.name = 'main' AND e.relationship_kind = 'Calls'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
@@ -70,8 +70,8 @@ tests:
 
   - name: Container.show calls print_it
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'show' AND callee.name = 'print_it' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      WHERE caller.name = 'show' AND callee.name = 'print_it' AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

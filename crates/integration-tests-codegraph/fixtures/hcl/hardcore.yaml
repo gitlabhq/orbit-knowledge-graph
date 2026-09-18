@@ -480,29 +480,29 @@ tests:
 
   - name: "VPC refs resolve: subnet type scope -> aws_vpc.main"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_subnet'
         AND callee.fqn = 'aws_vpc.main'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: false }
 
   - name: "EKS cluster refs resolve to IAM role"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_eks_cluster'
         AND callee.fqn = 'aws_iam_role.eks_cluster'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "EKS node group refs resolve to cluster and IAM role"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_eks_node_group'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "aws_eks_cluster.main" } }
@@ -510,10 +510,10 @@ tests:
 
   - name: "IAM role refs resolve to data source"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_iam_role'
         AND callee.definition_type = 'DataSource'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "aws_iam_policy_document.eks_assume_role" } }
@@ -521,9 +521,9 @@ tests:
 
   - name: "RDS refs resolve: db_instance -> subnet_group, security_group, password"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_db_instance'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "aws_db_subnet_group.main" } }
@@ -532,20 +532,20 @@ tests:
 
   - name: "RDS security group refs EKS security group"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_security_group'
         AND callee.fqn = 'aws_security_group.eks_cluster'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Locals resolve variable refs"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'locals'
         AND callee.definition_type = 'Variable'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN callee.name AS callee
     assert:
       - { row: { callee: "tags" } }
@@ -553,9 +553,9 @@ tests:
 
   - name: "NAT gateway refs resolve to EIP and public subnet"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'aws_nat_gateway'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "aws_eip.nat" } }
@@ -563,8 +563,8 @@ tests:
 
   - name: "Total Calls edges exist (no resolution lost)"
     query: |
-      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
-      WHERE e.edge_kind = 'Calls'
+      MATCH (s:Definition)-[e:CALLS|DEFINES|EXTENDS]->(t:Definition)
+      WHERE e.relationship_kind = 'Calls'
       RETURN count(*) AS total
     assert:
       - { count_gte: { field: total, value: 20 } }

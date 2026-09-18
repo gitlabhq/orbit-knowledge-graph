@@ -6,7 +6,7 @@ fixtures:
       import numpy, torch.nn
       import xml.etree.ElementTree as ET
       import numpy as np, torch as pytorch
-      from os.path import join
+      from os.import_path import join
       from numpy import array, matrix
       from urllib.parse import quote as url_quote
       from typing import List as ListType, Dict as DictType
@@ -40,19 +40,19 @@ tests:
     assert:
       - { count_gte: { field: n, value: 3 } }
 
-  - name: "C5: from import has correct path for os.path"
+  - name: "C5: from import has correct path for os.import_path"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.name = 'join'
-      RETURN i.path AS path
+      WHERE i.identifier_name = 'join'
+      RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
-      - { row: { path: "os.path" } }
+      - { row: { path: "os.import_path" } }
 
   - name: "C6: wildcard import exists"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.name = '*'
+      WHERE i.identifier_name = '*'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 1 } }
@@ -60,7 +60,7 @@ tests:
   - name: "C10: future imports exist"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.path = '__future__'
+      WHERE i.import_path = '__future__'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 3 } }
@@ -68,8 +68,8 @@ tests:
   - name: "numpy alias is np"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.alias = 'np'
-      RETURN i.path AS path
+      WHERE i.identifier_alias = 'np'
+      RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
 

@@ -30,7 +30,7 @@ tests:
   - name: "includes are captured as imported symbols"
     query: |
       MATCH (sym:ImportedSymbol)
-      RETURN sym.file_path AS file, sym.path AS path, sym.name AS name
+      RETURN sym.file_path AS file, sym.import_path AS path, sym.identifier_name AS name
       ORDER BY file, path
     assert:
       - { row_count: 3 }
@@ -40,10 +40,10 @@ tests:
 
   - name: "resolved same-file calls still target definitions"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::local_call'
         AND callee.fqn = 'app::local_helper'
-        AND e.edge_kind = 'Calls'
+        AND e.relationship_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

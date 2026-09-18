@@ -3988,6 +3988,7 @@ dependencies = [
  "ontology",
  "orbit-utils",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "tabled",
