@@ -509,11 +509,12 @@ fn recall_sql(pid: i64, sha: &str, filter: &RecallFilter) -> String {
 ),
 hits AS (
   SELECT s.id, s.score,
-         regexp_replace(lower(d.name), '[^0-9a-z]+', ' ', 'g') = regexp_replace(lower(?1), '[^0-9a-z]+', ' ', 'g') AS exact_hit,
+         regexp_replace(lower(def_name(c.fqn)), '[^0-9a-z]+', ' ', 'g') = regexp_replace(lower(?1), '[^0-9a-z]+', ' ', 'g') AS exact_hit,
          list_contains(
            list_transform(string_split_regex(lower(d.name), '[^0-9a-z]+'), t -> stem(t, '{FTS_STEMMER}')),
            stem(lower(?1), '{FTS_STEMMER}')) AS token_hit
   FROM scored s
+  JOIN search_corpus c ON c.id = s.id
   JOIN {doc_table} d ON d.def_id = s.id AND d.commit_sha = {sha}
   WHERE s.score IS NOT NULL
   ORDER BY s.score DESC, s.id

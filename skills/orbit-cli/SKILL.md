@@ -8,7 +8,7 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.11.0
+version: 0.12.0
 license: MIT
 metadata:
   audience: developers
@@ -43,9 +43,11 @@ orbit context src/lib.rs File:<id> Definition:<id>
 
 One query per call. Quote `a|b|c` for OR alternatives with a shared result limit.
 Different questions need separate calls. OR uses each match's best alternative
-score, not a bonus for matching more alternatives. Each search previews up to three exact-name
-hits, or its top three matches if none are exact. Previews share a 120-line budget
+score, not a bonus for matching more alternatives. Identifier alternatives report
+exact hits and exact misses separately. Each search previews up to three exact-name
+hits, or its top related match if none are exact. Previews share a 120-line budget
 per search; repeated previews and overlapping source print once per invocation.
+Output is already bounded; never pipe it through `head` or `tail`.
 
 `grep` returns `Definition:<id>` references. Pass them to `context`, which
 does not resolve names, FQNs, or globs. A path is shorthand for its indexed
@@ -53,7 +55,8 @@ does not resolve names, FQNs, or globs. A path is shorthand for its indexed
 and followable IDs; Definition targets return complete source. Both list
 connections with edge kind: `<--` is a caller, `-->` is a callee.
 Connections from test, fixture, and generated files appear in their own
-section. Reuse the returned source. Never truncate Orbit output.
+section. Reuse the returned source. Follow the printed `next:` command when
+more source or relationship context is needed.
 
 <!-- orbit:section quick-start -->
 ## Query and map

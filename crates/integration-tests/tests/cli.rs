@@ -1235,7 +1235,9 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("Definition:") && stdout.contains("return open"),
+        stdout.contains("Definition:")
+            && stdout.contains("return open")
+            && stdout.contains("next: orbit context Definition:"),
         "{stdout}"
     );
     let reference = stdout
@@ -1256,7 +1258,15 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
     assert_eq!(context.matches("return open(path).read()").count(), 1);
     let (out, err, ok) = run_cmd(&["grep", "App|read_file|read_file", "--repo", repo_arg], dd);
     assert!(ok && out.contains("class App"), "{err}\n{out}");
+    assert!(out.contains("exact: App | read_file"), "{out}");
     assert_eq!(out.matches("return open(path).read()").count(), 1);
+    let (out, err, ok) = run_cmd(&["grep", "App|missing_symbol", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{out}");
+    assert!(out.contains("exact: App"), "{out}");
+    assert!(
+        out.contains("exact-miss: missing_symbol (showing related matches)"),
+        "{out}"
+    );
     for missing in ["src.utils.read", "' OR true --", "../outside.py"] {
         let (out, err, ok) = run_cmd(&["context", fqn, missing, "--repo", repo_arg], dd);
         assert!(!ok && out.is_empty(), "{out}\n{err}");
@@ -1268,6 +1278,37 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
             "{out}\n{err}"
         );
     }
+}
+
+#[test]
+fn grep_recognizes_camel_case_exact_hits_and_deduplicates_case_variants() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(
+        &repo,
+        &[(
+            "src/sync.py",
+            "def markInSync():\n    return 'synchronized'\n",
+        )],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+
+    let repo_arg = repo.to_str().unwrap();
+    let (out, err, ok) = run_cmd(
+        &[
+            "grep",
+            "markInSync|MARKINSYNC|markinsync",
+            "--repo",
+            repo_arg,
+        ],
+        dd,
+    );
+    assert!(ok, "{err}\n{out}");
+    assert!(out.contains("exact: markInSync"), "{out}");
+    assert!(!out.contains("exact-miss:"), "{out}");
+    assert_eq!(out.matches("return 'synchronized'").count(), 1, "{out}");
 }
 
 #[test]

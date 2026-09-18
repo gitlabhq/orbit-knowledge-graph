@@ -191,6 +191,7 @@ struct GrepArgs {
     #[arg(
         long,
         default_value = "10",
+        value_parser = parse_positive_usize,
         help = "Maximum matched definitions across all alternatives"
     )]
     limit: usize,
@@ -215,6 +216,16 @@ const KIND_ARG_HELP: &str = "Only definitions of these types, as printed in grep
 
 #[derive(Debug, Clone, PartialEq)]
 struct Kinds(Vec<String>);
+
+fn parse_positive_usize(value: &str) -> Result<usize, String> {
+    let value = value
+        .parse::<usize>()
+        .map_err(|_| "expected a positive integer".to_string())?;
+    if value == 0 {
+        return Err("expected a positive integer".to_string());
+    }
+    Ok(value)
+}
 
 fn parse_kinds(value: &str) -> Result<Kinds, String> {
     let kinds: Vec<String> = value
@@ -1207,6 +1218,7 @@ mod tests {
             Cli::parse_from(["orbit", "grep", "who calls this", "--limit", "5"]).command,
             Commands::Grep(_)
         ));
+        assert!(Cli::try_parse_from(["orbit", "grep", "App", "--limit", "0"]).is_err());
         assert!(matches!(
             Cli::parse_from(["orbit", "sql", "SELECT 1"]).command,
             Commands::Sql(_)
