@@ -56,4 +56,9 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 
 ## Billing
 
-MCP and REST API queries consume GitLab Credits. GitLab Duo Agent Platform queries are zero-rated.
+During the beta, GitLab Orbit queries do not consume GitLab Credits.
+
+When GitLab Orbit is generally available, queries consume GitLab Credits. Credit
+rates are published in
+[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
+before charging begins.
