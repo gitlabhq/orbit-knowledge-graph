@@ -150,56 +150,37 @@ impl Lowering {
                                 alias,
                             });
                     } else {
-                        if self.input.query_type == QueryType::PathFinding {
+                        if alias.is_some() || self.input.query_type == QueryType::PathFinding {
                             return Err(invalid(
                                 span,
-                                "property projections are not supported in path_finding RETURN",
+                                "property projections require traversal or neighbors and cannot be renamed",
                             ));
                         }
-                        if let Some(&rel_idx) = self.edges.get(&node) {
-                            let rel = &mut self.input.relationships[rel_idx];
-                            if !rel.columns.contains(&property) {
-                                rel.columns.push(property.clone());
+                        let input_node = self
+                            .input
+                            .nodes
+                            .iter_mut()
+                            .find(|n| n.id == node)
+                            .ok_or_else(|| {
+                                invalid(span, "property projection references an undefined node")
+                            })?;
+                        if selected.insert(node.clone()) {
+                            property_nodes.insert(node.clone());
+                            input_node.columns = Some(ColumnSelection::List(Vec::new()));
+                        } else if !property_nodes.contains(&node) {
+                            return Err(invalid(span, "duplicate or overlapping node projection"));
+                        }
+                        match &mut input_node.columns {
+                            Some(ColumnSelection::List(columns))
+                                if !columns.contains(&property) =>
+                            {
+                                columns.push(property)
                             }
-                            if let Some(alias) = alias {
-                                rel.column_aliases.insert(property, alias);
-                            }
-                        } else {
-                            let input_node = self
-                                .input
-                                .nodes
-                                .iter_mut()
-                                .find(|n| n.id == node)
-                                .ok_or_else(|| {
-                                    invalid(
-                                        span,
-                                        "property projection references an undefined node",
-                                    )
-                                })?;
-                            if selected.insert(node.clone()) {
-                                property_nodes.insert(node.clone());
-                                input_node.columns = Some(ColumnSelection::List(Vec::new()));
-                            } else if !property_nodes.contains(&node) {
+                            _ => {
                                 return Err(invalid(
                                     span,
                                     "duplicate or overlapping node projection",
                                 ));
-                            }
-                            if let Some(alias) = alias {
-                                input_node.column_aliases.insert(property.clone(), alias);
-                            }
-                            match &mut input_node.columns {
-                                Some(ColumnSelection::List(columns))
-                                    if !columns.contains(&property) =>
-                                {
-                                    columns.push(property)
-                                }
-                                _ => {
-                                    return Err(invalid(
-                                        span,
-                                        "duplicate or overlapping node projection",
-                                    ));
-                                }
                             }
                         }
                     }
@@ -324,30 +305,16 @@ impl Lowering {
                 });
             }
             QueryType::Traversal => {
-                let (node, property) = match sort.key {
-                    Target::Property(key) => {
-                        let PropertyRef { node, property } = key.into();
-                        (node, property)
-                    }
+                let key = match sort.key {
+                    Target::Property(key) => key,
                     Target::Variable(name) => {
-                        let alias = name.value;
-                        self.input
-                            .nodes
-                            .iter()
-                            .find_map(|n| {
-                                n.column_aliases
-                                    .iter()
-                                    .find(|(_, a)| **a == alias)
-                                    .map(|(prop, _)| (n.id.clone(), prop.clone()))
-                            })
-                            .ok_or_else(|| {
-                                invalid(
-                                    name.span,
-                                    "traversal ORDER BY requires node.property or a RETURN alias",
-                                )
-                            })?
+                        return Err(invalid(
+                            name.span,
+                            "traversal ORDER BY requires node.property",
+                        ));
                     }
                 };
+                let PropertyRef { node, property } = key.into();
                 self.input.order_by = Some(InputOrderBy {
                     node,
                     property,

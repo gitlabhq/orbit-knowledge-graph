@@ -638,8 +638,6 @@ mod tests {
                     fk_column: None,
                     scope_prefix: None,
                     scope_preserving: false,
-                    columns: Vec::new(),
-                    column_aliases: Default::default(),
                 }],
                 ..Default::default()
             }),

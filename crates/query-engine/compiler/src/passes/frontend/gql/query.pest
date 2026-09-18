@@ -25,7 +25,7 @@ AndExpression = { Predicate ~ (SP ~ ^"AND" ~ SP ~ Predicate)* }
 Predicate = _{ ParenthesizedExpression | TokenPredicate | ComparisonExpression }
 ParenthesizedExpression = { "(" ~ SP? ~ AndExpression ~ SP? ~ ")" }
 ComparisonExpression = { PropertyExpression ~ (SP? ~ ComparisonOperator ~ SP? ~ Value | SP ~ StringOperator ~ SP? ~ Value | SP ~ InOperator ~ SP? ~ ListLiteral | SP ~ NullOperator) }
-ComparisonOperator = @{ "<=" | ">=" | "<>" | "!=" | "=" | "<" | ">" }
+ComparisonOperator = @{ "<=" | ">=" | "=" | "<" | ">" }
 StringOperator = { ^"STARTS" ~ SP ~ ^"WITH" | ^"ENDS" ~ SP ~ ^"WITH" | ^"CONTAINS" }
 InOperator = { ^"IN" }
 NullOperator = { ^"IS" ~ SP ~ Not? ~ ^"NULL" }

@@ -182,28 +182,13 @@ fn node_has_selectivity(node: &InputNode) -> bool {
     false
 }
 
-#[derive(Default)]
-pub struct Skip {
-    pub selectivity: bool,
-}
-
 pub struct Validator<'a> {
     ontology: &'a Ontology,
-    skip: Skip,
 }
 
 impl<'a> Validator<'a> {
     pub fn new(ontology: &'a Ontology) -> Self {
-        Self {
-            ontology,
-            skip: Skip::default(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_skip(mut self, skip: Skip) -> Self {
-        self.skip = skip;
-        self
+        Self { ontology }
     }
 
     /// Returns the virtual source declaration for the field, or `None` for
@@ -837,9 +822,6 @@ impl<'a> Validator<'a> {
     /// The checks are intentionally conservative: they reject shapes that are
     /// structurally guaranteed to be expensive regardless of data volume.
     fn check_selectivity(&self, input: &Input) -> Result<()> {
-        if self.skip.selectivity {
-            return Ok(());
-        }
         match input.query_type {
             // Path-finding endpoints seed BFS frontiers, so each endpoint
             // must have bounded selectivity: node_ids (already capped at 500
