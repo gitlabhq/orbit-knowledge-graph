@@ -104,7 +104,7 @@ tests:
   - name: "Constructor parameter property is extracted as a Property definition"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'PersistentTerminalProcess::_terminalProcess'
+      WHERE d.fqn = 'PersistentTerminalProcess::constructor::_terminalProcess'
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 1 }

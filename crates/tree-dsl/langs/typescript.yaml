@@ -235,7 +235,7 @@ display:
           - '(_*_display_file_path @$M)'
       - match: '(__def)'
         append:
-          - '(_*_display_fqn @$ROOT|concat(".", "ancestor_sym:_*_display_fqn", "child_sym:__defname"))'
+          - '(_*_display_fqn @$ROOT|concat("::", "ancestor_sym:_*_display_fqn", "child_sym:__defname"))'
           - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
   - name: def_type
     rules:
@@ -269,6 +269,11 @@ display:
         append: ['(_*_display_def_type "Property")']
       - match: '(__def (__type_alias))'
         append: ['(_*_display_def_type "TypeAlias")']
+  - name: module_exports
+    rules:
+      - match: '(__module_export)'
+        append:
+          - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
   - name: imports
     rules:
       - match: '(__import)'

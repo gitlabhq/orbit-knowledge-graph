@@ -16,15 +16,20 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
     let mut ds = Datasets::new();
 
     let (file_ids, def_ids, imp_ids, imp_name_ids) = assign_ids(trees);
+    let all_imp_ids: IdMap = imp_ids
+        .iter()
+        .chain(imp_name_ids.iter())
+        .map(|(&k, &v)| (k, v))
+        .collect();
 
     ds.insert("File".into(), build_files(trees, lang, &file_ids)?);
     ds.insert("Definition".into(), build_defs(trees, lang, &def_ids)?);
     ds.insert(
         "ImportedSymbol".into(),
-        build_imports(trees, lang, &imp_ids)?,
+        build_imports(trees, lang, &imp_ids, &imp_name_ids)?,
     );
 
-    let (f2d, f2i) = build_file_edges(trees, edges, &file_ids, &def_ids, &imp_ids);
+    let (f2d, f2i) = build_file_edges(trees, edges, &file_ids, &def_ids, &all_imp_ids);
     ds.insert("FileToDefinition".into(), f2d?);
     ds.insert("FileToImportedSymbol".into(), f2i?);
     ds.insert(
@@ -33,11 +38,11 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
     );
     ds.insert(
         "DefinitionToImportedSymbol".into(),
-        build_def2imp(edges, &def_ids, &imp_name_ids)?,
+        build_def2imp(edges, &def_ids, &all_imp_ids)?,
     );
     ds.insert(
         "ImportedSymbolToDefinition".into(),
-        build_imp2def(edges, &def_ids, &imp_name_ids)?,
+        build_imp2def(edges, &def_ids, &all_imp_ids)?,
     );
 
     Ok(ds)
@@ -89,6 +94,20 @@ fn child_display_sym(c: Cursor, kind: C) -> u32 {
         .find(|ch| ch.kind() == kind as u16)
         .map(|ch| ch.sym())
         .unwrap_or(0)
+}
+
+fn find_display_sym(c: Cursor, kind: C) -> u32 {
+    let direct = child_display_sym(c, kind);
+    if direct != 0 {
+        return direct;
+    }
+    for a in c.ancestors() {
+        let sym = child_display_sym(a, kind);
+        if sym != 0 {
+            return sym;
+        }
+    }
+    0
 }
 
 fn build_files(trees: &[Tree], lang: &Lang, file_ids: &IdMap) -> anyhow::Result<RecordBatch> {
@@ -153,7 +172,7 @@ fn build_defs(trees: &[Tree], lang: &Lang, def_ids: &IdMap) -> anyhow::Result<Re
             };
 
             let fqn_sym = child_display_sym(c, C::DisplayFqn);
-            let fp_sym = child_display_sym(c, C::DisplayFilePath);
+            let fp_sym = find_display_sym(c, C::DisplayFilePath);
             let dt_sym = child_display_sym(c, C::DisplayDefType);
             let name_sym = c.child_sym(C::DefName).unwrap_or(0);
 
@@ -222,7 +241,12 @@ fn build_defs(trees: &[Tree], lang: &Lang, def_ids: &IdMap) -> anyhow::Result<Re
     )
 }
 
-fn build_imports(trees: &[Tree], lang: &Lang, imp_ids: &IdMap) -> anyhow::Result<RecordBatch> {
+fn build_imports(
+    trees: &[Tree],
+    lang: &Lang,
+    imp_ids: &IdMap,
+    imp_name_ids: &IdMap,
+) -> anyhow::Result<RecordBatch> {
     let (mut id_b, mut fp_b, mut it_b, mut path_b, mut name_b, mut alias_b) = (
         Int64Builder::new(),
         StringBuilder::new(),
@@ -296,7 +320,11 @@ fn build_imports(trees: &[Tree], lang: &Lang, imp_ids: &IdMap) -> anyhow::Result
                         c,
                     );
 
-                    id_b.append_value(iid);
+                    let name_id = imp_name_ids
+                        .get(&(fi, name.index()))
+                        .copied()
+                        .unwrap_or(iid);
+                    id_b.append_value(name_id);
                     fp_b.append_value(fp);
                     it_b.append_value(label);
                     path_b.append_value(source);
