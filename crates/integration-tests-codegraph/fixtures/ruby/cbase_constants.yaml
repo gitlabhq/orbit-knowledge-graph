@@ -35,7 +35,7 @@ fixtures:
 tests:
   - name: "cbase call site produces a CALLS edge to the service's execute"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'ProjectsController::enqueue_async_transfer'
         AND callee.fqn = 'Projects::TransferService::execute'
       RETURN callee.fqn AS callee, e.edge_kind AS kind
@@ -45,8 +45,9 @@ tests:
 
   - name: "cbase and unprefixed call sites resolve identically"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE callee.fqn = 'Projects::TransferService::execute'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 2 }
@@ -54,7 +55,7 @@ tests:
 
   - name: "cbase .new is not misattributed to the enclosing class"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'ProjectsController::enqueue_async_transfer'
         AND callee.fqn = 'ProjectsController::new'
       RETURN callee.fqn AS callee

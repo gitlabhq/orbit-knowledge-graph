@@ -66,8 +66,8 @@ tests:
 
   - name: "fetchUser calls findById"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-      WHERE caller.name = 'fetchUser'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'fetchUser' AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "com.example.UserRepository.findById" } }

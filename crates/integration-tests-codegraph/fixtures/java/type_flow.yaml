@@ -193,7 +193,7 @@ tests:
   - name: "typed local: svc.query() resolves to UserService.query"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
@@ -201,7 +201,7 @@ tests:
           - { row: { callee: "query", callee_fqn: "UserService.query" } }
       # no false positive to save()
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
             AND callee.name = 'save'
           RETURN callee.name
@@ -211,7 +211,7 @@ tests:
   - name: "inherited method: d.speak() resolves to Animal.speak"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'test'
           RETURN callee.name AS callee
           ORDER BY callee
@@ -222,14 +222,14 @@ tests:
   - name: "return type propagation: getService().query() resolves"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'useReturnType'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
         assert:
           - { row: { callee: "query", callee_fqn: "UserService.query" } }
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'useReturnType' AND callee.name = 'save'
           RETURN callee.name
         assert:
@@ -238,7 +238,7 @@ tests:
   - name: "implicit this: bare helper() in method body resolves to ImplicitThis.helper"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ImplicitThis'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
         assert:
@@ -248,7 +248,7 @@ tests:
   - name: "super.baseMethod() resolves to Base.baseMethod"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'Child'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
         assert:
@@ -257,7 +257,7 @@ tests:
   - name: "chained call: getService().query() resolves via return type"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ChainedCall'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
@@ -266,7 +266,7 @@ tests:
           - { row: { callee: "getService", callee_fqn: "ChainedCall.getService" } }
       # no false positive to save()
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ChainedCall'
             AND callee.name = 'save'
           RETURN callee.name
@@ -276,7 +276,7 @@ tests:
   - name: "deep chain: pool.getConnection().getDb().execute().fetchAll()"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'DeepChainUser'
           RETURN callee.name AS callee
           ORDER BY callee
@@ -289,7 +289,7 @@ tests:
           - { row: { callee: "fetchAll" } }
       # no edges to methods on wrong types
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'DeepChainUser'
             AND NOT callee.name IN ['Pool', 'getConnection', 'getDb', 'execute', 'fetchAll']
           RETURN callee.name
@@ -299,7 +299,7 @@ tests:
   - name: "diamond: FileStream has own + both interface methods"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'DiamondUser'
           RETURN callee.name AS callee
           ORDER BY callee
@@ -313,7 +313,7 @@ tests:
   - name: "no cross-contamination between typed bindings"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'ShadowTest'
           RETURN callee.name AS callee
           ORDER BY callee
@@ -323,7 +323,7 @@ tests:
           - { row: { callee: "methodB" } }
       # svc.methodB() should NOT resolve (svc is ServiceA, not ServiceB)
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'ShadowTest'
             AND callee.name = 'methodA' AND callee.fqn STARTS WITH 'ServiceB'
           RETURN callee.name
@@ -333,7 +333,7 @@ tests:
   - name: "this.helper() resolves to ThisCall.helper"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ThisCall'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
         assert:
@@ -343,7 +343,7 @@ tests:
   - name: "packaged inheritance: d.speak() resolves via super FQN"
     queries:
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'com.example.PackagedUser'
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
@@ -354,7 +354,7 @@ tests:
           - { row: { callee: "speak", callee_fqn: "com.example.PackagedAnimal.speak" } }
       # no edges to unpackaged Dog/Animal or wrong members
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'com.example.PackagedUser'
             AND NOT callee.fqn STARTS WITH 'com.example'
           RETURN callee.name, callee.fqn

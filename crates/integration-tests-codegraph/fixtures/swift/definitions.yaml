@@ -145,8 +145,8 @@ tests:
 
   - name: Classes and structs contain expected method definitions
     query: |
-      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
-      WHERE parent.name = 'Animal'
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE e.edge_kind = 'Defines' AND parent.name = 'Animal'
       RETURN child.name AS name
     assert:
       - { no_nulls: name }

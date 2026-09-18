@@ -603,6 +603,10 @@ pub struct InputRelationship {
     /// the edge scan (an independent entity like a runner can outlive its edge).
     #[serde(skip)]
     pub scope_preserving: bool,
+    #[serde(skip)]
+    pub columns: Vec<String>,
+    #[serde(skip)]
+    pub column_aliases: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

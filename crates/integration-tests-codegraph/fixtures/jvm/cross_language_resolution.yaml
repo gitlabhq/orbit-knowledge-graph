@@ -68,7 +68,7 @@ tests:
 
   - name: "Kotlin UserService calls Java User.create (static method via import)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'createUser'
         AND callee.name = 'create'
         AND callee.file_path = 'com/example/model/User.java'
@@ -83,7 +83,7 @@ tests:
 
   - name: "Kotlin UserService calls Kotlin capitalize"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'createUser'
         AND callee.name = 'capitalize'
       RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
@@ -97,9 +97,10 @@ tests:
 
   - name: "Java User.create calls Java User (same file)"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.model.User.create'
         AND callee.fqn STARTS WITH 'com.example.model.User'
+        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }

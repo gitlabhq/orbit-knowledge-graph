@@ -193,3 +193,59 @@ fn node_ids_expand_params() {
     assert!(sql.has_operator("IN"));
     assert!(!sql.raw_contains("Array("));
 }
+
+fn compile_gql(cypher: &str) -> Result<compiler::passes::codegen::CompiledQueryContext, String> {
+    compile_local(cypher, Frontend::Gql, &test_ontology()).map_err(|e| e.to_string())
+}
+
+#[test]
+fn gql_untyped_edge_pattern() {
+    let r = compile_gql("MATCH (u:User {id: 1})-[e]->(n:Note) RETURN n.confidential AS c");
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+}
+
+#[test]
+fn gql_open_ended_scan_with_filter() {
+    let r = compile_gql("MATCH (u:User) WHERE u.username = 'alice' RETURN u.username AS name");
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+}
+
+#[test]
+fn gql_count_with_filter() {
+    let r = compile_gql("MATCH (u:User) WHERE u.username = 'alice' RETURN count(u) AS n");
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+}
+
+#[test]
+fn gql_typed_edge_traversal() {
+    let r = compile_gql("MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) RETURN n.confidential AS c");
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+    let sql = r.unwrap().base.render();
+    assert!(
+        sql.contains("relationship_kind"),
+        "edge type filter missing: {sql}"
+    );
+}
+
+#[test]
+fn gql_edge_property_in_return() {
+    let r = compile_gql(
+        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) \
+         RETURN n.confidential AS c, e.relationship_kind AS kind",
+    );
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+    let sql = r.unwrap().base.render();
+    assert!(
+        sql.contains("AS kind"),
+        "edge property alias missing: {sql}"
+    );
+}
+
+#[test]
+fn gql_order_by_across_traversal() {
+    let r = compile_gql(
+        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) \
+         RETURN n.confidential AS c ORDER BY n.confidential",
+    );
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+}

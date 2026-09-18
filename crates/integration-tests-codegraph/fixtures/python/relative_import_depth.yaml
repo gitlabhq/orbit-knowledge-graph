@@ -43,27 +43,27 @@ fixtures:
 tests:
   - name: "One-dot relative import resolves to sibling module"
     query: |
-      MATCH (f:File)-[:IMPORTS]->(i:ImportedSymbol)
-      WHERE f.path = 'pkg/sub/mod.py' AND i.identifier_name = 'helper'
-      RETURN i.import_path AS path
+      MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'pkg/sub/mod.py' AND i.name = 'helper'
+      RETURN i.path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: "pkg.sub.sibling" } }
 
   - name: "Two-dot relative import resolves up one package level"
     query: |
-      MATCH (f:File)-[:IMPORTS]->(i:ImportedSymbol)
-      WHERE f.path = 'pkg/sub/mod.py' AND i.identifier_name = 'authenticate'
-      RETURN i.import_path AS path
+      MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'pkg/sub/mod.py' AND i.name = 'authenticate'
+      RETURN i.path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: "pkg.services.auth" } }
 
   - name: "Bare-dot relative import resolves to the parent package"
     query: |
-      MATCH (f:File)-[:IMPORTS]->(i:ImportedSymbol)
-      WHERE f.path = 'pkg/sub/mod.py' AND i.identifier_name = 'sub_util'
-      RETURN i.import_path AS path
+      MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'pkg/sub/mod.py' AND i.name = 'sub_util'
+      RETURN i.path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: "pkg.sub" } }

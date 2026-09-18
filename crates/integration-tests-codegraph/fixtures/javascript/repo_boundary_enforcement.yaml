@@ -84,15 +84,16 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'app/assets/javascripts/consumer.js'
-      RETURN i.import_path AS path, i.identifier_name AS name
+      RETURN i.path AS path, i.name AS name
     assert:
       - { row_count: 1 }
       - { row: { path: "escaped", name: "steal" } }
 
   - name: Escaping alias does not produce call edges into outside files
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-      WHERE caller.file_path IN [
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN [
           'app/assets/javascripts/consumer.js',
           'app/assets/javascripts/env_consumer.js',
           'app/assets/javascripts/fs_consumer.js'
@@ -104,8 +105,9 @@ tests:
 
   - name: process.env does not unlock escaping aliases
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
-      WHERE caller.file_path = 'app/assets/javascripts/env_consumer.js'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/env_consumer.js'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -113,8 +115,9 @@ tests:
 
   - name: fs existsSync does not unlock escaping aliases
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
-      WHERE caller.file_path = 'app/assets/javascripts/fs_consumer.js'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/fs_consumer.js'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
     assert:
       - { row_count: 1 }

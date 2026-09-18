@@ -42,7 +42,7 @@ tests:
 
   - name: "Both are methods on DynamicProxy"
     query: |
-      MATCH (cls:Definition)-[]->(m:Definition)
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'DynamicProxy' AND m.name IN ['method_missing', 'respond_to_missing?']
       RETURN m.name AS name
     assert:

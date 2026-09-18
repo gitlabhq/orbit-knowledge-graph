@@ -51,7 +51,7 @@ fixtures:
 tests:
   - name: "include emits one ImportedSymbol per module"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
       WHERE f.path = 'app/models/report.rb'
         AND s.import_type = 'Include'
       RETURN s.name AS name, s.path AS path
@@ -62,7 +62,7 @@ tests:
 
   - name: "extend emits a module ImportedSymbol"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
       WHERE f.path = 'app/models/report.rb'
         AND s.import_type = 'Extend'
       RETURN s.name AS name, s.path AS path
@@ -72,7 +72,7 @@ tests:
 
   - name: "prepend emits a module ImportedSymbol"
     query: |
-      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
       WHERE f.path = 'app/models/report.rb'
         AND s.import_type = 'Prepend'
       RETURN s.name AS name, s.path AS path
@@ -82,8 +82,9 @@ tests:
 
   - name: "class links to superclass and composed modules"
     query: |
-      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'Report'
+        AND e.edge_kind = 'Extends'
       RETURN parent.fqn AS parent
     assert:
       - { row_count: 5 }

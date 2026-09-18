@@ -19,7 +19,7 @@ fixtures:
 tests:
   - name: Class has exactly 3 method members
     query: |
-      MATCH (cls:Definition)-[]->(m:Definition)
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'MyClass'
       RETURN count(m) AS n
     assert:
@@ -27,7 +27,7 @@ tests:
 
   - name: instance_method exists in class
     query: |
-      MATCH (cls:Definition)-[]->(m:Definition)
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'MyClass' AND m.name = 'instance_method'
       RETURN m.fqn AS fqn
     assert:
@@ -36,7 +36,7 @@ tests:
 
   - name: class_method exists in class
     query: |
-      MATCH (cls:Definition)-[]->(m:Definition)
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'MyClass' AND m.name = 'class_method'
       RETURN m.fqn AS fqn
     assert:
@@ -45,7 +45,7 @@ tests:
 
   - name: static_method exists in class
     query: |
-      MATCH (cls:Definition)-[]->(m:Definition)
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'MyClass' AND m.name = 'static_method'
       RETURN m.fqn AS fqn
     assert:

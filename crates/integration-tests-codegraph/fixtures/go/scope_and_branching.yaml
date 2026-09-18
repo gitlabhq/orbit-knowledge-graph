@@ -40,8 +40,8 @@ tests:
   - name: "outer calls Handle, Retry, and Close with correct shadowing"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-          WHERE caller.fqn = 'main.outer'
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.outer' AND e.edge_kind = 'Calls'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -53,15 +53,15 @@ tests:
   - name: "withSwitch calls Handle and Retry from separate branches"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e]->(callee:Definition)
-          WHERE caller.fqn = 'main.withSwitch'
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.withSwitch' AND e.edge_kind = 'Calls'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
           - { row: { callee: "main.Handle" } }
           - { row: { callee: "main.Retry" } }
       - query: |
-          MATCH (caller:Definition)-[]->(callee:Definition)
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.fqn = 'main.withSwitch' AND callee.name = 'Close'
           RETURN callee.name
         assert:

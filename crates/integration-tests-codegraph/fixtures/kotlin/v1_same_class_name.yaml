@@ -6,7 +6,7 @@ tests:
 
   - name: "ServerFilter.filter -> Filter.filter (disambiguated)"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.edgecases.filter.ServerFilter.filter'
         AND callee.fqn = 'com.example.edgecases.filter.Filter.filter'
       RETURN caller.fqn AS caller, callee.fqn AS callee

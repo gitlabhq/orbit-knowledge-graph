@@ -60,6 +60,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [ontology]
             mutates: [input]
         }
+
         normalize {
             reads_env: [ontology]
             mutates: [input]

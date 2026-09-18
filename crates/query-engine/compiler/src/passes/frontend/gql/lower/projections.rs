@@ -156,34 +156,50 @@ impl Lowering {
                                 "property projections are not supported in path_finding RETURN",
                             ));
                         }
-                        let input_node = self
-                            .input
-                            .nodes
-                            .iter_mut()
-                            .find(|n| n.id == node)
-                            .ok_or_else(|| {
-                                invalid(span, "property projection references an undefined node")
-                            })?;
-                        if selected.insert(node.clone()) {
-                            property_nodes.insert(node.clone());
-                            input_node.columns = Some(ColumnSelection::List(Vec::new()));
-                        } else if !property_nodes.contains(&node) {
-                            return Err(invalid(span, "duplicate or overlapping node projection"));
-                        }
-                        if let Some(alias) = alias {
-                            input_node.column_aliases.insert(property.clone(), alias);
-                        }
-                        match &mut input_node.columns {
-                            Some(ColumnSelection::List(columns))
-                                if !columns.contains(&property) =>
-                            {
-                                columns.push(property)
+                        if let Some(&rel_idx) = self.edges.get(&node) {
+                            let rel = &mut self.input.relationships[rel_idx];
+                            if !rel.columns.contains(&property) {
+                                rel.columns.push(property.clone());
                             }
-                            _ => {
+                            if let Some(alias) = alias {
+                                rel.column_aliases.insert(property, alias);
+                            }
+                        } else {
+                            let input_node = self
+                                .input
+                                .nodes
+                                .iter_mut()
+                                .find(|n| n.id == node)
+                                .ok_or_else(|| {
+                                    invalid(
+                                        span,
+                                        "property projection references an undefined node",
+                                    )
+                                })?;
+                            if selected.insert(node.clone()) {
+                                property_nodes.insert(node.clone());
+                                input_node.columns = Some(ColumnSelection::List(Vec::new()));
+                            } else if !property_nodes.contains(&node) {
                                 return Err(invalid(
                                     span,
                                     "duplicate or overlapping node projection",
                                 ));
+                            }
+                            if let Some(alias) = alias {
+                                input_node.column_aliases.insert(property.clone(), alias);
+                            }
+                            match &mut input_node.columns {
+                                Some(ColumnSelection::List(columns))
+                                    if !columns.contains(&property) =>
+                                {
+                                    columns.push(property)
+                                }
+                                _ => {
+                                    return Err(invalid(
+                                        span,
+                                        "duplicate or overlapping node projection",
+                                    ));
+                                }
                             }
                         }
                     }

@@ -104,7 +104,7 @@ tests:
 
   - name: Generic pipeline resolves imports across JS-family extensions
     query: |
-      MATCH (i:ImportedSymbol)-[:CALLS]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
       WHERE i.file_path IN [
         'jsx/consumer.js',
         'tsx/consumer.ts',
@@ -113,7 +113,7 @@ tests:
         'mts/consumer.ts',
         'cts/consumer.ts'
       ]
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.import_type AS import_type, d.fqn AS target
+      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.import_type AS import_type, d.fqn AS target
       ORDER BY file_path
     assert:
       - { row_count: 6 }
@@ -126,8 +126,9 @@ tests:
 
   - name: Generic pipeline resolves cross-file calls for JS-family extensions
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-      WHERE caller.file_path IN [
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN [
           'jsx/consumer.js',
           'tsx/consumer.ts',
           'esm/consumer.js',

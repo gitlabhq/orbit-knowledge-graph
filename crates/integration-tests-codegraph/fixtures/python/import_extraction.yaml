@@ -43,8 +43,8 @@ tests:
   - name: "C5: from import has correct path for os.path"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.identifier_name = 'join'
-      RETURN i.import_path AS path
+      WHERE i.name = 'join'
+      RETURN i.path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: "os.path" } }
@@ -52,7 +52,7 @@ tests:
   - name: "C6: wildcard import exists"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.identifier_name = '*'
+      WHERE i.name = '*'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 1 } }
@@ -60,7 +60,7 @@ tests:
   - name: "C10: future imports exist"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.import_path = '__future__'
+      WHERE i.path = '__future__'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 3 } }
@@ -68,8 +68,8 @@ tests:
   - name: "numpy alias is np"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.identifier_alias = 'np'
-      RETURN i.import_path AS path
+      WHERE i.alias = 'np'
+      RETURN i.path AS path
     assert:
       - { row_count: 1 }
 

@@ -14,7 +14,7 @@ tests:
 
   - name: Nested class produces containment edge
     query: |
-      MATCH (outer:Definition)-[]->(inner:Definition)
+      MATCH (outer:Definition)-[:DefinitionToDefinition]->(inner:Definition)
       WHERE outer.name = 'Outer' AND inner.name = 'Inner'
       RETURN outer.fqn AS parent, inner.fqn AS child
     assert:
@@ -23,7 +23,7 @@ tests:
 
   - name: Method belongs to its class
     query: |
-      MATCH (cls:Definition)-[]->(m:Definition)
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'Outer' AND m.name = 'outer_method'
       RETURN cls.fqn AS parent, m.fqn AS child
     assert:
@@ -59,7 +59,7 @@ tests:
 
   - name: Exactly 3 containment edges, all Defines
     query: |
-      MATCH (parent:Definition)-[e]->(child:Definition)
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
     assert:
       - { row_count: 3 }
@@ -79,7 +79,7 @@ tests:
 
   - name: File owns all 4 definitions via Defines edges
     query: |
-      MATCH (f:File)-[e:DEFINES]->(d:Definition)
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
       RETURN f.path AS file, d.name AS def, e.edge_kind AS kind
     assert:
       - { match: { field: file, pattern: "app.py" } }

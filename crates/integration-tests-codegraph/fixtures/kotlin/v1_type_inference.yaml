@@ -7,7 +7,7 @@ tests:
   - name: "whenTypeInference -> Person.getName (when expression)"
     skip: false
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'whenTypeInference'
         AND callee.name = 'getName'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -19,7 +19,7 @@ tests:
   - name: "usageOfIfTypeInference -> Person.getName (if expression)"
     skip: false
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'usageOfIfTypeInference'
         AND callee.name = 'getName'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -31,7 +31,7 @@ tests:
   - name: "tryTypeInference -> Person.getName (try-catch expression)"
     skip: true
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'tryTypeInference'
         AND callee.name = 'getName'
       RETURN caller.fqn AS caller, callee.fqn AS callee

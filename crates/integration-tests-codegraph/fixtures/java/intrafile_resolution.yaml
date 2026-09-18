@@ -29,7 +29,7 @@ fixtures:
 tests:
   - name: "run() calls helper()"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'helper'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -38,7 +38,7 @@ tests:
 
   - name: "callStatic() calls staticMethod()"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callStatic' AND callee.name = 'staticMethod'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -47,7 +47,7 @@ tests:
 
   - name: "All methods have com.example.App FQN prefix"
     query: |
-      MATCH (cls:Definition)-[]->(m:Definition)
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'App'
       RETURN m.fqn AS fqn
     assert:

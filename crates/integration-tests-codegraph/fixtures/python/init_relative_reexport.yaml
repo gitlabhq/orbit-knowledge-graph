@@ -79,52 +79,58 @@ tests:
   - name: "named relative re-export through __init__ binds the caller to the definition"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.fqn = 'app.consumer.build'
             AND callee.fqn = 'app.registry.base.BaseRegistry'
+            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'app.consumer.build'
             AND sym.name = 'BaseRegistry'
+            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller
         assert:
           - { empty: true }
 
   - name: "wildcard relative re-export through __init__ binds the caller to the definition"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'app.consumer.build'
         AND callee.fqn = 'app.registry.helpers.make_widget'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "two-dot relative re-export in a nested __init__ climbs to the parent package"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'proj.sub.caller.make_engine'
         AND callee.fqn = 'proj.core.Engine'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "one-dot relative import in a regular module still resolves (no regression)"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'reg.pkg.mod.use_thing'
         AND callee.fqn = 'reg.pkg.thing.Thing'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "external re-export from a package __init__ stays an ImportedSymbol"
     query: |
-      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ext.caller.build_widget'
         AND sym.name = 'Widget'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

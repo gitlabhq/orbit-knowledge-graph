@@ -125,6 +125,8 @@ impl Lowering {
             fk_column: None,
             scope_prefix: None,
             scope_preserving: false,
+            columns: Vec::new(),
+            column_aliases: HashMap::new(),
         };
         if let Some(alias) = relationship.variable
             && (self.input.nodes.iter().any(|n| n.id == alias.value)

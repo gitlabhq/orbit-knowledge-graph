@@ -14,7 +14,7 @@ fixtures:
 tests:
   - name: Has multiple imports
     query: |
-      MATCH (f:File)-[:IMPORTS]->(i:ImportedSymbol)
+      MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 10 } }
@@ -22,8 +22,8 @@ tests:
   - name: os import exists
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.import_path = 'os'
-      RETURN i.import_path AS path
+      WHERE i.path = 'os'
+      RETURN i.path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: "os" } }
@@ -31,8 +31,8 @@ tests:
   - name: From import exists (Path)
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.identifier_name = 'Path'
-      RETURN i.import_path AS path
+      WHERE i.name = 'Path'
+      RETURN i.path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: "pathlib" } }
@@ -40,7 +40,7 @@ tests:
   - name: Aliased import exists (numpy as np)
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.identifier_alias = 'np'
-      RETURN i.import_path AS path
+      WHERE i.alias = 'np'
+      RETURN i.path AS path
     assert:
       - { row_count: 1 }

@@ -51,7 +51,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
-        AND i.import_path = 'foo::Bar'
+        AND i.path = 'foo::Bar'
       RETURN i.import_type AS type
     assert:
       - { row_count: 1 }

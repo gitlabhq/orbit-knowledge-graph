@@ -148,18 +148,20 @@ tests:
   # One class implementing one interface (FileLogger -> LoggerInterface).
   - name: "FileLogger implements LoggerInterface produces Extends edge"
     query: |
-      MATCH (c:Definition)-[e:CALLS]->(p:Definition)
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Support\Logger\FileLogger'
         AND p.fqn = 'App\Contracts\LoggerInterface'
+        AND e.edge_kind = 'Extends'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "EloquentUserRepository implements UserRepositoryInterface produces Extends edge"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Repositories\EloquentUserRepository'
         AND p.fqn = 'App\Contracts\UserRepositoryInterface'
+        AND e.edge_kind = 'Extends'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -168,18 +170,20 @@ tests:
   # so the call resolves to the INTERFACE method, not the concrete implementation.
   - name: "Controller.show -> UserRepositoryInterface.find via interface-typed property"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Controllers\UserController\show'
         AND callee.fqn = 'App\Contracts\UserRepositoryInterface\find'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Controller.index -> UserRepositoryInterface.all via interface-typed property"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Controllers\UserController\index'
         AND callee.fqn = 'App\Contracts\UserRepositoryInterface\all'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -187,9 +191,10 @@ tests:
   # Repository's own injected interface property — same pattern at a deeper layer.
   - name: "Repository.find -> LoggerInterface.info via interface-typed property"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Repositories\EloquentUserRepository\find'
         AND callee.fqn = 'App\Contracts\LoggerInterface\info'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -198,18 +203,20 @@ tests:
   # should produce a Calls edge from the enclosing function to the class.
   - name: "bootApp -> FileLogger via new (constructor reference as Calls)"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\bootApp'
         AND callee.fqn = 'App\Support\Logger\FileLogger'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "bootApp -> EloquentUserRepository via new"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\bootApp'
         AND callee.fqn = 'App\Repositories\EloquentUserRepository'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }

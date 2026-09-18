@@ -163,7 +163,7 @@ fixtures:
 tests:
   - name: "module aliases resolve callable paths"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'module_alias_call' AND callee.name = 'imported'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -172,7 +172,7 @@ tests:
 
   - name: "local closure shadowing does not create a bogus local edge"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'local_closure_shadowing'
       RETURN callee.name AS callee
     assert:
@@ -180,7 +180,7 @@ tests:
 
   - name: "external std calls do not create repo-local edges"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'external_only'
       RETURN callee.name AS callee
     assert:
@@ -188,8 +188,9 @@ tests:
 
   - name: "external imported Rust calls target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.name = 'external_imported_calls'
+        AND e.edge_kind = 'Calls'
       RETURN caller.name AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path, name, alias
     assert:
@@ -201,16 +202,18 @@ tests:
 
   - name: "local callable shadowing does not target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.name = 'local_callable_shadows_external_import'
+        AND e.edge_kind = 'Calls'
       RETURN sym.name AS name
     assert:
       - { empty: true }
 
   - name: "function-scoped Rust imports only affect their own function"
     query: |
-      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.name IN ['scoped_import_user', 'another_scoped_import_user', 'scoped_import_out_of_scope']
+        AND e.edge_kind = 'Calls'
       RETURN caller.name AS caller, sym.path AS path, sym.name AS name
       ORDER BY caller
     assert:
@@ -220,8 +223,9 @@ tests:
 
   - name: "function-scoped Rust imports shadow top-level imports with the same name"
     query: |
-      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.name IN ['top_level_import_user', 'scoped_import_shadows_top_level']
+        AND e.edge_kind = 'Calls'
       RETURN caller.name AS caller, sym.path AS path, sym.name AS name
       ORDER BY caller
     assert:
@@ -231,8 +235,9 @@ tests:
 
   - name: "qualified Rust external imports target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.name = 'qualified_external_imported_calls'
+        AND e.edge_kind = 'Calls'
       RETURN caller.name AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path, alias
     assert:
@@ -243,7 +248,7 @@ tests:
 
   - name: "resolved Rust aliases and local dispatch do not emit imported-symbol fallback"
     query: |
-      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.name IN [
         'module_alias_call',
         'fn_pointer_from_assoc',
@@ -252,13 +257,14 @@ tests:
         'inherent_call',
         'local_method_same_name_as_external_import'
       ]
+        AND e.edge_kind = 'Calls'
       RETURN caller.name AS caller, sym.path AS path, sym.name AS name
     assert:
       - { empty: true }
 
   - name: "Rust built-ins references std calls and wildcard imports do not emit imported-symbol fallback"
     query: |
-      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.name IN [
         'external_only',
         'builtin_macro_and_std_calls',
@@ -267,13 +273,14 @@ tests:
         'imported_module_constant_reference',
         'wildcard_external_import_user'
       ]
+        AND e.edge_kind = 'Calls'
       RETURN caller.name AS caller, sym.path AS path, sym.name AS name
     assert:
       - { empty: true }
 
   - name: "associated functions stored in fn pointers still resolve"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'fn_pointer_from_assoc' AND callee.name = 'new'
       RETURN caller.file_path AS src, callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -282,7 +289,7 @@ tests:
 
   - name: "generic trait-bound method calls resolve to the trait method"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'generic_trait_bound' AND callee.name = 'trait_ping'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -291,7 +298,7 @@ tests:
 
   - name: "generic trait-bound default calls resolve to the trait default method"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'trait_default_dispatch' AND callee.name = 'defaulted'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -300,7 +307,7 @@ tests:
 
   - name: "trait default bodies still resolve their internal calls"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'dep::Pinger::defaulted' AND callee.name = 'helper'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -309,7 +316,7 @@ tests:
 
   - name: "inherent methods still resolve on concrete receivers"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'inherent_call' AND callee.name = 'inherent_ping'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:

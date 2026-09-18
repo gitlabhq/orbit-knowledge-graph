@@ -160,108 +160,120 @@ tests:
 
   - name: "Closure body call resolves to the cross-file target (make_adder -> add)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\make_adder'
         AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Arrow function body call resolves (arrow_caller -> add)"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\arrow_caller'
         AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Nested closure + arrow body calls attach to the outer function"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\nested_closures'
         AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Local-variable closure body call resolves to add"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\calls_via_local_closure'
         AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Imported function via `use function` resolves (loud -> shout)"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\loud'
         AND callee.fqn = 'App\Lib\shout'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "First-class callable syntax records a Calls edge to the referenced function"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Fcc\as_callables'
         AND callee.fqn = 'App\Lib\shout'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "First-class callable for static method resolves to the method"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Fcc\as_callables'
         AND callee.fqn = 'App\Fcc\Util\format'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Named-argument call still resolves to the target function"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Named\uses_named'
         AND callee.fqn = 'App\Named\greet'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Named-argument cross-namespace call resolves (uses_named_add -> add)"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Named\uses_named_add'
         AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Variadic call resolves to the variadic-parameter function"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Var\calls_variadic'
         AND callee.fqn = 'App\Lib\variadic_sum'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Spread-argument call (...$xs) still resolves to the variadic function"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Var\spread_variadic'
         AND callee.fqn = 'App\Lib\variadic_sum'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Function body call resolves through scalar defaults (with_default_call -> shout)"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Lib\with_default_call'
         AND callee.fqn = 'App\Lib\shout'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

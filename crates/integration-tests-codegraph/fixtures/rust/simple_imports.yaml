@@ -23,7 +23,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'main.rs'
-      RETURN i.identifier_name AS name
+      RETURN i.name AS name
     assert:
       - { row_count: 1 }
       - { row: { name: "create_user" } }
@@ -39,9 +39,10 @@ tests:
 
   - name: Cross-file call from run to create_user does not resolve
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'create_user'
         AND caller.file_path <> callee.file_path
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: true }

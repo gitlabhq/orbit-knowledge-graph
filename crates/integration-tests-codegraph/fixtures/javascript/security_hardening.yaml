@@ -102,8 +102,9 @@ fixtures:
 tests:
   - name: Local alias resolves inside repo
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-      WHERE caller.file_path = 'src/consumer.js'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/consumer.js'
         AND caller.fqn = 'runLocal'
       RETURN caller.fqn AS caller, callee.fqn AS callee, callee.file_path AS callee_file
     assert:
@@ -112,8 +113,9 @@ tests:
 
   - name: node built-in alias injections do not produce cross-file call edges
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
-      WHERE caller.file_path = 'src/consumer.js'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/consumer.js'
         AND caller.fqn IN ['runFs', 'runProc']
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -121,9 +123,10 @@ tests:
 
   - name: refused aliases preserve only imported-symbol call facts
     query: |
-      MATCH (caller:Definition)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'src/consumer.js'
         AND caller.fqn IN ['runFs', 'runProc']
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
       ORDER BY caller
     assert:
@@ -133,8 +136,9 @@ tests:
 
   - name: Node package metadata resolves only through contained repo files
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
-      WHERE caller.file_path = 'src/package_consumer.js'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/package_consumer.js'
         AND caller.fqn = 'runPackage'
       RETURN caller.fqn AS caller, callee.fqn AS callee, callee.file_path AS callee_file
     assert:
@@ -143,8 +147,9 @@ tests:
 
   - name: Duplicate star-reexport specifiers dedup into a single resolved binding
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
-      WHERE caller.file_path = 'src/barrel_consumer.js'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/barrel_consumer.js'
         AND caller.fqn = 'runShared'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -153,8 +158,9 @@ tests:
 
   - name: Normalized module keys allow leading-dot-slash specifiers to resolve
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
-      WHERE caller.file_path = 'src/mod_b.js'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/mod_b.js'
         AND caller.fqn = 'runFromA'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

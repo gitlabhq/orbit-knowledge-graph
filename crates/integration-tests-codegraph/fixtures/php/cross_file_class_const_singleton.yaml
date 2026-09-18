@@ -61,70 +61,77 @@ tests:
 
   - name: "Cross-file class extension: ScopedContainer extends Container"
     query: |
-      MATCH (child:Definition)-[e:CALLS]->(parent:Definition)
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'App\Di\ScopedContainer'
         AND parent.fqn = 'App\Di\Container'
+        AND e.edge_kind = 'Extends'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }
 
   - name: "new self() singleton resolves to declaring class: Container.instance -> Container"
     query: |
-      MATCH (caller:Definition)-[e:EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Di\Container\instance'
         AND callee.fqn = 'App\Di\Container'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "new static() late static binding resolves to declaring class: ScopedContainer.build -> ScopedContainer"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Di\ScopedContainer\build'
         AND callee.fqn = 'App\Di\ScopedContainer'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Foo::class resolves cross-file to the class: ServiceProvider.containerClass -> Container"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\containerClass'
         AND callee.fqn = 'App\Di\Container'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Cross-file static call: ServiceProvider.register -> Container.instance"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\Container\instance'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Cross-file static factory call: ServiceProvider.register -> ScopedContainer.build"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\ScopedContainer\build'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Inherited method dispatch via both static-factory chains: register -> Container.get (2 call sites)"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Registry\ServiceProvider\register'
         AND callee.fqn = 'App\Di\Container\get'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 2 }
 
   - name: "Foo::class does not create a spurious edge to a member literally named 'class'"
     query: |
-      MATCH (s:Definition)-[e]->(t:Definition)
+      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
       WHERE t.name = 'class'
       RETURN t.fqn AS fqn
     assert:

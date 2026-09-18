@@ -33,7 +33,7 @@ fixtures:
 tests:
   - name: MyClass instantiation exists
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'test_instantiation' AND callee.name = 'MyClass'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -59,7 +59,7 @@ tests:
 
   - name: Child class contains child_method
     query: |
-      MATCH (cls:Definition)-[]->(m:Definition)
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'Child' AND m.name = 'child_method'
       RETURN m.fqn AS fqn
     assert:

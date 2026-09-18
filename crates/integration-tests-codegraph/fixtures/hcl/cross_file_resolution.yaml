@@ -89,8 +89,9 @@ tests:
   # returned 0 rows (flat Variable fqn == name was excluded by GlobalName).
   - name: "var.* references resolve ACROSS files"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE callee.definition_type = 'Variable'
+        AND e.edge_kind = 'Calls'
         AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -101,8 +102,9 @@ tests:
 
   - name: "aws_instance (main.tf) resolves all four reference kinds cross-file"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
+        AND e.edge_kind = 'Calls'
         AND caller.file_path <> callee.file_path
       RETURN callee.definition_type AS type
     assert:
@@ -115,9 +117,10 @@ tests:
 
   - name: "var.instance_type resolves from main.tf to variables.tf"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND callee.fqn = 'var.instance_type'
+        AND e.edge_kind = 'Calls'
       RETURN caller.file_path AS sf, callee.file_path AS tf
     assert:
       - { row_count: 1 }
@@ -125,9 +128,10 @@ tests:
 
   - name: "locals reference var.region cross-file at both usages"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'locals'
         AND callee.fqn = 'var.region'
+        AND e.edge_kind = 'Calls'
         AND caller.file_path <> callee.file_path
       RETURN callee.fqn AS callee
     assert:
@@ -135,8 +139,9 @@ tests:
 
   - name: "Local, DataSource and Resource references also resolve cross-file"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
+        AND e.edge_kind = 'Calls'
         AND caller.file_path <> callee.file_path
         AND callee.fqn IN ['locals.common_tags', 'aws_ami.ubuntu', 'aws_subnet.public']
       RETURN callee.fqn AS callee

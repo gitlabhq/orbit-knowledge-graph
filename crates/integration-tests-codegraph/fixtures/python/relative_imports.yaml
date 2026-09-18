@@ -20,14 +20,14 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'mypackage/services.py'
-      RETURN i.import_path AS path, i.identifier_name AS name
+      RETURN i.path AS path, i.name AS name
     assert:
       - { row: { path: "mypackage.models", name: "User" } }
 
   - name: Call through relative import resolves
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-      WHERE caller.name = 'create_user'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'create_user' AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "mypackage.models.User" } }

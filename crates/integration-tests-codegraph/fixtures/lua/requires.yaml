@@ -11,32 +11,32 @@ tests:
   - name: "Simple require extracts path and name"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.import_path = 'utils'
-      RETURN i.import_path AS path, i.identifier_name AS name
+      WHERE i.path = 'utils'
+      RETURN i.path AS path, i.name AS name
     assert:
       - { row: { path: "utils", name: "utils" } }
 
   - name: "Dotted require: path = full, name = last segment"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.import_path = 'vendor.json'
-      RETURN i.import_path AS path, i.identifier_name AS name
+      WHERE i.path = 'vendor.json'
+      RETURN i.path AS path, i.name AS name
     assert:
       - { row: { path: "vendor.json", name: "json" } }
 
   - name: "require without parens is also extracted"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.import_path = 'socket'
-      RETURN i.import_path AS path
+      WHERE i.path = 'socket'
+      RETURN i.path AS path
     assert:
       - { row: { path: "socket" } }
 
   - name: "Deeply nested require: name is last segment"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.import_path = 'some.nested.module'
-      RETURN i.identifier_name AS name
+      WHERE i.path = 'some.nested.module'
+      RETURN i.name AS name
     assert:
       - { row: { name: "module" } }
 
@@ -44,6 +44,6 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path ENDS WITH 'app.lua'
-      RETURN i.import_path AS path
+      RETURN i.path AS path
     assert:
       - { row_count: 4 }

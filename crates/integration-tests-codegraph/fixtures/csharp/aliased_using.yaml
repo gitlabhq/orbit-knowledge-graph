@@ -27,8 +27,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'Services/Worker.cs'
-        AND i.identifier_alias IN ['LogLevel', 'Result']
-      RETURN i.identifier_alias AS alias, i.identifier_name AS name, i.import_path AS path
+        AND i.alias IN ['LogLevel', 'Result']
+      RETURN i.alias AS alias, i.name AS name, i.path AS path
       ORDER BY alias
     assert:
       - { row_count: 2 }
@@ -39,8 +39,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'Services/Worker.cs'
-        AND i.import_path = 'System'
-      RETURN i.identifier_name AS name
+        AND i.path = 'System'
+      RETURN i.name AS name
     assert:
       - { row_count: 1 }
       - { row: { name: null } }
@@ -49,8 +49,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'Services/Worker.cs'
-        AND i.identifier_alias = 'MyList'
-      RETURN i.identifier_alias AS alias, i.identifier_name AS name, i.import_path AS path
+        AND i.alias = 'MyList'
+      RETURN i.alias AS alias, i.name AS name, i.path AS path
     assert:
       - { row_count: 1 }
       - { row: { alias: "MyList", name: "List", path: "System.Collections.Generic.List<int>" } }
@@ -59,8 +59,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'Services/Worker.cs'
-        AND i.identifier_alias IN ['GlobalOrder', 'GlobalThing']
-      RETURN i.identifier_alias AS alias, i.identifier_name AS name, i.import_path AS path
+        AND i.alias IN ['GlobalOrder', 'GlobalThing']
+      RETURN i.alias AS alias, i.name AS name, i.path AS path
       ORDER BY alias
     assert:
       - { row_count: 2 }

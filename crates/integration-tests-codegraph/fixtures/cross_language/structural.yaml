@@ -19,7 +19,7 @@ tests:
 
   - name: No self-referencing call edges
     query: |
-      MATCH (d:Definition)-[]->(d2:Definition)
+      MATCH (d:Definition)-[:DefinitionToDefinition]->(d2:Definition)
       WHERE d.id = d2.id
       RETURN d.fqn AS self_caller
     assert:
@@ -41,7 +41,7 @@ tests:
 
   - name: Directory to file edges exist
     query: |
-      MATCH (d:Directory)-[:CONTAINS]->(f:File)
+      MATCH (d:Directory)-[:DirectoryToFile]->(f:File)
       RETURN d.path AS dir, f.path AS file
     assert:
       - { row_count: 2 }
@@ -49,7 +49,7 @@ tests:
 
   - name: File to definition edges exist
     query: |
-      MATCH (f:File)-[:DEFINES]->(d:Definition)
+      MATCH (f:File)-[:FileToDefinition]->(d:Definition)
       RETURN f.path AS file, d.name AS def
     assert:
       - { row_count: 5 }
@@ -87,7 +87,7 @@ tests:
 
   - name: FileToDefinition edges split by edge_kind
     query: |
-      MATCH (f:File)-[e:DEFINES]->(d:Definition)
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
       RETURN f.path AS file, d.name AS def, e.edge_kind AS kind
     assert:
       - { where: { kind: "Defines" }, row_count: 3 }
@@ -102,14 +102,14 @@ tests:
   - name: Import edge
     query: |
       MATCH (i:ImportedSymbol)
-      RETURN i.file_path AS file, i.import_path AS path, i.identifier_name AS name
+      RETURN i.file_path AS file, i.path AS path, i.name AS name
     assert:
       - { row_count: 1 }
       - { row: { file: "main.py", path: "service", name: "UserService" } }
 
   - name: Definition containment and call edges
     query: |
-      MATCH (parent:Definition)-[e]->(child:Definition)
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
     assert:
       - { where: { kind: "Defines" }, row_count: 2 }

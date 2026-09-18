@@ -19,7 +19,7 @@ tests:
 
   - name: File has edge to foo (structural + call)
     query: |
-      MATCH (f:File)-[:DEFINES]->(d:Definition)
+      MATCH (f:File)-[:FileToDefinition]->(d:Definition)
       WHERE d.name = 'foo'
       RETURN f.path AS file, d.fqn AS target
     assert:

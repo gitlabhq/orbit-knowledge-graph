@@ -201,18 +201,20 @@ tests:
   # ── Extends ────────────────────────────────────────────────────
   - name: "Backed enum implements interface (Extends edge)"
     query: |
-      MATCH (c:Definition)-[e:CALLS]->(p:Definition)
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Domain\Status'
         AND p.fqn = 'App\Contracts\Labeled'
+        AND e.edge_kind = 'Extends'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "ApiRouter extends Router (so parent:: resolves)"
     query: |
-      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Http\ApiRouter'
         AND p.fqn = 'App\Http\Router'
+        AND e.edge_kind = 'Extends'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -220,54 +222,60 @@ tests:
   # ── Calls inside match arms ────────────────────────────────────
   - name: "Match arm: \\$this->ok() resolves to Router.ok"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Router\route'
         AND callee.fqn = 'App\Http\Router\ok'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Match arm: self::redirect() resolves to Router.redirect"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Router\route'
         AND callee.fqn = 'App\Http\Router\redirect'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Match arm: static::missing() resolves to Router.missing"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Router\route'
         AND callee.fqn = 'App\Http\Router\missing'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Match default arm: \\$this->fallback() resolves to Router.fallback"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Router\route'
         AND callee.fqn = 'App\Http\Router\fallback'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Match arm: parent::fallback() resolves to inherited Router.fallback"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\ApiRouter\dispatch'
         AND callee.fqn = 'App\Http\Router\fallback'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Match arm: \\$this->client(\\$code) resolves on subclass"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\ApiRouter\dispatch'
         AND callee.fqn = 'App\Http\ApiRouter\client'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -275,18 +283,20 @@ tests:
   # ── throw-as-expression (PHP 8.0) ──────────────────────────────
   - name: "Match arm: throw Errors::code(500) -> Errors.code Calls edge"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Dispatcher\pick'
         AND callee.fqn = 'App\Errors\Errors\code'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Match arm: \\$this->handleA() resolves alongside throw arms"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Dispatcher\pick'
         AND callee.fqn = 'App\Domain\Dispatcher\handleA'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -304,9 +314,10 @@ tests:
   # Both match arms call self::format(), so the edge resolves (once per arm).
   - name: "Enum method match arm: self::format resolves to Status.format"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Status\label'
         AND callee.fqn = 'App\Domain\Status\format'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row: { c: 'App\Domain\Status\label' } }
@@ -322,9 +333,10 @@ tests:
 
   - name: "Call inside attribute argument: list() -> Logger.level via Logger::level()"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\UserController\list'
         AND callee.fqn = 'App\Support\Logger\level'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -332,18 +344,20 @@ tests:
   # ── Cross-file calls through match ─────────────────────────────
   - name: "boot() match arm: new Router() resolves to App\\Http\\Router"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\boot'
         AND callee.fqn = 'App\Http\Router'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "boot() match arm: new Dispatcher() resolves to App\\Domain\\Dispatcher"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\boot'
         AND callee.fqn = 'App\Domain\Dispatcher'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }

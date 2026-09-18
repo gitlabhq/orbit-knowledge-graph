@@ -147,7 +147,7 @@ tests:
   # ── this.Method() ────────────────────────────────────────────
   - name: "this.Speak() in Dog.Fetch resolves to Dog.Speak"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Models.Dog.Fetch'
         AND callee.fqn = 'Zoo.Models.Dog.Speak'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -159,7 +159,7 @@ tests:
   - name: "base.Eat() in Dog.Fetch resolves to Animal.Eat"
     skip: true  # base is anonymous in C# tree-sitter
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Models.Dog.Fetch'
         AND callee.fqn = 'Zoo.Models.Animal.Eat'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -170,7 +170,7 @@ tests:
   # ── var type inference from constructor ───────────────────────
   - name: "var dog = new Dog() → dog.Fetch() in Kennel.Register"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.Register'
         AND callee.fqn = 'Zoo.Models.Dog.Fetch'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -180,7 +180,7 @@ tests:
 
   - name: "var dog = new Dog() → dog.Speak() in Program.Run"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Models.Dog.Speak'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -190,7 +190,7 @@ tests:
 
   - name: "var dog = new Dog() → dog.Fetch() in Program.Run"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Models.Dog.Fetch'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -201,9 +201,10 @@ tests:
   # ── Constructor CALLS edge ────────────────────────────────────
   - name: "new Dog() in Program.Run produces CALLS to Dog class"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Models.Dog'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
     assert:
       - { row_count: 1 }
@@ -212,7 +213,7 @@ tests:
   # ── Static method calls ──────────────────────────────────────
   - name: "Kennel.Create() same-namespace static call"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
         AND callee.fqn = 'Zoo.Services.Kennel.Create'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -222,7 +223,7 @@ tests:
 
   - name: "Helpers.Format() cross-namespace static call"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Services.Helpers.Format'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -232,7 +233,7 @@ tests:
 
   - name: "Helpers.Count() cross-namespace static call"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Services.Helpers.Count'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -243,7 +244,7 @@ tests:
   # ── Chained calls with var inference ──────────────────────────
   - name: "var kennel = Kennel.Create() → kennel.Register()"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
         AND callee.fqn = 'Zoo.Services.Kennel.Register'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -253,7 +254,7 @@ tests:
 
   - name: "Return type inference: dog = kennel.Register() → dog.Speak()"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
         AND callee.fqn = 'Zoo.Models.Dog.Speak'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
@@ -282,7 +283,7 @@ tests:
 
   - name: "inner.InnerMethod() resolves from OuterMethod"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Outer.OuterMethod'
         AND callee.fqn = 'Zoo.Services.Outer.Inner.InnerMethod'
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind

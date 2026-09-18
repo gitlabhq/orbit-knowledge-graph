@@ -19,7 +19,7 @@ tests:
 
   - name: Cross-file call edge exists
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -28,7 +28,7 @@ tests:
 
   - name: helper() resolves to utils.helper
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE callee.name = 'helper'
       RETURN callee.file_path AS file, caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -52,7 +52,7 @@ tests:
 
   - name: unused() has no incoming call edges
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE callee.name = 'unused'
       RETURN caller.fqn AS caller
     assert:
@@ -61,7 +61,7 @@ tests:
   - name: Import edge
     query: |
       MATCH (i:ImportedSymbol)
-      RETURN i.file_path AS file, i.import_path AS path, i.identifier_name AS name
+      RETURN i.file_path AS file, i.path AS path, i.name AS name
     assert:
       - { row_count: 1 }
       - { row: { file: "main.py", path: "utils", name: "helper" } }

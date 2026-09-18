@@ -153,10 +153,11 @@ pub fn enforce_return(
         };
 
         for (i, rel) in input.relationships.iter().enumerate() {
+            let edge_alias = format!("e{i}");
             let prefix = if rel.hops.max > 1 {
-                format!("hop_e{i}_")
+                format!("hop_{edge_alias}_")
             } else {
-                format!("e{i}_")
+                format!("{edge_alias}_")
             };
             let path_column = (rel.hops.max > 1).then(|| format!("{prefix}path_nodes"));
             ctx.edges.push(EdgeMeta {
@@ -171,6 +172,22 @@ pub fn enforce_return(
                 from_alias: rel.from.clone(),
                 to_alias: rel.to.clone(),
             });
+
+            if let Node::Query(q) = node {
+                for col in &rel.columns {
+                    let output_alias = rel
+                        .column_aliases
+                        .get(col)
+                        .cloned()
+                        .unwrap_or_else(|| format!("{edge_alias}_{col}"));
+                    if !q.selects_alias(&output_alias) {
+                        q.select.push(SelectExpr {
+                            expr: Expr::col(&edge_alias, col.as_str()),
+                            alias: Some(output_alias),
+                        });
+                    }
+                }
+            }
         }
     }
 

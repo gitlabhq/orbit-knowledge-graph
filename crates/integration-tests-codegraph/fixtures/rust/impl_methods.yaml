@@ -44,8 +44,8 @@ tests:
 
   - name: Methods are nested under impl via Defines
     query: |
-      MATCH (parent:Definition)-[e:CALLS]->(child:Definition)
-      WHERE child.name IN ['new', 'speak', 'greet']
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE e.edge_kind = 'Defines' AND child.name IN ['new', 'speak', 'greet']
       RETURN child.name AS method
       ORDER BY method
     assert:
@@ -54,16 +54,16 @@ tests:
 
   - name: self.speak() resolves within impl
     query: |
-      MATCH (caller:Definition)-[e:DEFINES]->(callee:Definition)
-      WHERE caller.name = 'greet' AND callee.name = 'speak'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'greet' AND callee.name = 'speak' AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: No spurious call edges from the struct itself
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
-      WHERE caller.name = 'Dog'
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'Dog' AND e.edge_kind = 'Calls'
       RETURN callee.name AS callee
     assert:
       - { empty: true }

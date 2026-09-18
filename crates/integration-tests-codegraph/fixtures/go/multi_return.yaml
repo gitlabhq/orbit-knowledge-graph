@@ -35,8 +35,8 @@ tests:
   - name: "useBuilder calls NewBuilder, SetName, SetAge"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
-          WHERE caller.fqn = 'main.useBuilder'
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.useBuilder' AND e.edge_kind = 'Calls'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -48,8 +48,8 @@ tests:
           - { row: { callee: "main.SetName" } }
       # Exactly 6 call edges, no false positives
       - query: |
-          MATCH (caller:Definition)-[e]->(callee:Definition)
-          WHERE caller.fqn = 'main.useBuilder'
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.useBuilder' AND e.edge_kind = 'Calls'
           RETURN callee.fqn AS callee
         assert:
           - { row_count: 6 }

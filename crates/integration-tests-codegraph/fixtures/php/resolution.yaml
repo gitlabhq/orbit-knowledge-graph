@@ -98,18 +98,20 @@ tests:
 
   - name: "User extends Model"
     query: |
-      MATCH (child:Definition)-[e:CALLS]->(parent:Definition)
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'App\Models\User'
         AND parent.fqn = 'App\Models\Model'
+        AND e.edge_kind = 'Extends'
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
 
   - name: "Same-class call: Model.save -> Model.persist via \\$this"
     query: |
-      MATCH (caller:Definition)-[e:EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Model\save'
         AND callee.fqn = 'App\Models\Model\persist'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -119,9 +121,10 @@ tests:
 
   - name: "Parent call: User.save -> Model.save via parent::"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\User\save'
         AND callee.fqn = 'App\Models\Model\save'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -131,9 +134,10 @@ tests:
 
   - name: "Typed-property call: User.save -> Logger.log via \\$this->logger"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\User\save'
         AND callee.fqn = 'App\Support\Logger\log'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -143,9 +147,10 @@ tests:
 
   - name: "Same-class call: User.rename -> User.save"
     query: |
-      MATCH (caller:Definition)-[e]->(callee:Definition)
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\User\rename'
         AND callee.fqn = 'App\Models\User\save'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

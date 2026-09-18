@@ -105,9 +105,10 @@ tests:
 
   - name: "Record defines its method via a Defines edge"
     query: |
-      MATCH (r:Definition)-[e:DEFINES]->(m:Definition)
+      MATCH (r:Definition)-[e:DefinitionToDefinition]->(m:Definition)
       WHERE r.fqn = 'Shapes.Circle'
         AND m.fqn = 'Shapes.Circle.Area'
+        AND e.edge_kind = 'Defines'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -132,18 +133,20 @@ tests:
 
   - name: "Outer record defines nested Inner record"
     query: |
-      MATCH (o:Definition)-[e]->(i:Definition)
+      MATCH (o:Definition)-[e:DefinitionToDefinition]->(i:Definition)
       WHERE o.fqn = 'Shapes.Outer'
         AND i.fqn = 'Shapes.Outer.Inner'
+        AND e.edge_kind = 'Defines'
       RETURN i.fqn AS fqn
     assert:
       - { row_count: 1 }
 
   - name: "File defines top-level record"
     query: |
-      MATCH (f:File)-[e:DEFINES]->(d:Definition)
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
       WHERE f.path = 'Shapes/Point.cs'
         AND d.fqn = 'Shapes.Point'
+        AND e.edge_kind = 'Defines'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

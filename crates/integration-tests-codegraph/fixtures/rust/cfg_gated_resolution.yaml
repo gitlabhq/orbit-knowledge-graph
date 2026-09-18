@@ -48,7 +48,7 @@ tests:
 
   - name: "unix cfg call resolves"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'call_unix' AND callee.fqn = 'unix_only::helper'
       RETURN callee.fqn AS fqn
     assert:
@@ -57,7 +57,7 @@ tests:
 
   - name: "target_os cfg call resolves"
     query: |
-      MATCH (caller:Definition)-[]->(callee:Definition)
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'call_linux' AND callee.fqn = 'linux_only::helper'
       RETURN callee.fqn AS fqn
     assert:
