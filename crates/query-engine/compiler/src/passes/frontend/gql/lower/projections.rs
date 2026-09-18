@@ -324,16 +324,30 @@ impl Lowering {
                 });
             }
             QueryType::Traversal => {
-                let key = match sort.key {
-                    Target::Property(key) => key,
+                let (node, property) = match sort.key {
+                    Target::Property(key) => {
+                        let PropertyRef { node, property } = key.into();
+                        (node, property)
+                    }
                     Target::Variable(name) => {
-                        return Err(invalid(
-                            name.span,
-                            "traversal ORDER BY requires node.property",
-                        ));
+                        let alias = name.value;
+                        self.input
+                            .nodes
+                            .iter()
+                            .find_map(|n| {
+                                n.column_aliases
+                                    .iter()
+                                    .find(|(_, a)| **a == alias)
+                                    .map(|(prop, _)| (n.id.clone(), prop.clone()))
+                            })
+                            .ok_or_else(|| {
+                                invalid(
+                                    name.span,
+                                    "traversal ORDER BY requires node.property or a RETURN alias",
+                                )
+                            })?
                     }
                 };
-                let PropertyRef { node, property } = key.into();
                 self.input.order_by = Some(InputOrderBy {
                     node,
                     property,
