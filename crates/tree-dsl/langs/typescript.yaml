@@ -233,6 +233,7 @@ display:
       - match: '$M:__source_file'
         append:
           - '(_*_display_file_path @$M)'
+          - '(_*_display_language @$M|split_last(".")|map("ts:typescript", "tsx:tsx", "js:javascript", "jsx:javascript", "mjs:javascript", "cjs:javascript"))'
 
       - match: '(__def)'
         append:

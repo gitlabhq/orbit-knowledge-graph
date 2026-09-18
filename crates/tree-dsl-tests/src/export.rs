@@ -202,16 +202,15 @@ fn build_files(trees: &[Tree], lang: &Lang, ids: &IdMap) -> anyhow::Result<Recor
         ("language", DataType::Utf8, false),
     ]);
     for (fi, tree) in trees.iter().enumerate() {
-        let path = sym(lang, tree.root().sym());
+        let root = tree.root();
+        let path = sym(lang, root.sym());
         let filename = path.rsplit('/').next().unwrap_or(path);
         let ext = filename.rsplit('.').next().unwrap_or("");
-        let language = match ext {
-            "py" | "pyi" => "python",
-            "ts" => "typescript",
-            "tsx" => "tsx",
-            "js" | "jsx" | "mjs" | "cjs" => "javascript",
-            "rs" => "rust",
-            _ => "unknown",
+        let lang_sym = child_display_sym(root, C::DisplayLanguage);
+        let language = if lang_sym != 0 {
+            sym(lang, lang_sym)
+        } else {
+            "unknown"
         };
         t.row(&[
             Val::I(ids[&(fi, 0)]),

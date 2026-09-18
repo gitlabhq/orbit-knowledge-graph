@@ -184,6 +184,7 @@ display:
         append:
           - '(_*_display_fqn @$M|stem|collapse_index("__init__")|replace("/", "."))'
           - '(_*_display_file_path @$M)'
+          - '(_*_display_language @$M|split_last(".")|map("py:python", "pyi:python"))'
 
       - match: '(__def)'
         append:

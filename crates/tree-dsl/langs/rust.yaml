@@ -171,6 +171,7 @@ display:
       - match: '$M:__source_file'
         append:
           - '(_*_display_file_path @$M)'
+          - '(_*_display_language @$M|split_last(".")|map("rs:rust"))'
 
       - match: '(__def)'
         append:

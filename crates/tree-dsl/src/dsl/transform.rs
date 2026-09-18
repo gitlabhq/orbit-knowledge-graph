@@ -50,6 +50,12 @@ impl Tf {
             "replace" => Tf::Replace(s(0), s(1)),
             "to_rel" => Tf::ToRel(args[0].chars().next().expect("to_rel arg")),
             "collapse_index" => Tf::CollapseIndex(args.iter().map(|a| (*a).into()).collect()),
+            "map" => Tf::Map(
+                args.iter()
+                    .filter_map(|a| a.split_once(':'))
+                    .map(|(k, v)| (k.into(), v.into()))
+                    .collect(),
+            ),
             "field" => Tf::Field(ctx.as_mut().expect("needs context").intern_field(args[0])),
             "child_sym" => Tf::Child(kind(&mut ctx, args[0])),
             "parent_sym" => Tf::ParentSym(kind(&mut ctx, args[0])),
@@ -109,6 +115,14 @@ impl Tf {
             Tf::Stem => {
                 let p = std::path::Path::new(s);
                 p.with_extension("").to_string_lossy().to_string()
+            }
+            Tf::Map(entries) => {
+                for (k, v) in entries {
+                    if s == &**k {
+                        return v.to_string();
+                    }
+                }
+                s.to_string()
             }
             Tf::CollapseIndex(names) => {
                 for name in names {

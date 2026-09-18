@@ -30,6 +30,7 @@ pub enum Tf {
     Concat(Box<str>, Box<Tf>, Box<Tf>),
     Stem,
     CollapseIndex(Vec<Box<str>>),
+    Map(Vec<(Box<str>, Box<str>)>),
     HasEdge(EdgeKind, EdgeDir),
 }
 
