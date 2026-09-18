@@ -2,7 +2,7 @@ use tree_dsl::treesitter::SupportLang;
 
 use super::assertions::{Severity, TestSuite};
 use super::config::make_graph_config;
-use super::datasets::to_datasets;
+use super::export::export;
 use super::validator::{Failure, run_suite};
 
 fn detect_lang(suite: &TestSuite) -> SupportLang {
@@ -24,16 +24,18 @@ async fn build_and_check(
     lang_id: SupportLang,
     suite: &TestSuite,
 ) -> Vec<Failure> {
-    let datasets = to_datasets(
-        &result.trees,
+    let yaml = tree_dsl::treesitter::lang_yaml(lang_id).expect("no lang yaml");
+    let config = tree_dsl::rules::load_lang_full(yaml, &result.lang);
+    tree_dsl::display::apply_display(
+        &mut result.trees,
         &result.edges,
-        &mut result.lang,
-        lang_id,
-        &result.pipeline.resolve,
-    )
-    .expect("Failed to build datasets");
-    let config = make_graph_config().expect("Failed to build graph config");
-    run_suite(suite, &datasets, &config).await
+        &result.lang,
+        &config.display_rules,
+    );
+    let datasets =
+        export(&result.trees, &result.edges, &result.lang).expect("Failed to build datasets");
+    let graph_config = make_graph_config().expect("Failed to build graph config");
+    run_suite(suite, &datasets, &graph_config).await
 }
 
 pub async fn run_yaml_suite(yaml: &str) {

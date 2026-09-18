@@ -220,10 +220,15 @@ impl Tf {
             Tf::Concat(sep, a, b) => {
                 let sa = a.apply_sym(t, lang, id, edge_ctx);
                 let sb = b.apply_sym(t, lang, id, edge_ctx);
-                if sa == 0 {
+                let sa_empty = sa == 0 || lang.syms.resolve(sa).is_empty();
+                let sb_empty = sb == 0 || lang.syms.resolve(sb).is_empty();
+                if sa_empty && sb_empty {
+                    return 0;
+                }
+                if sa_empty {
                     return sb;
                 }
-                if sb == 0 {
+                if sb_empty {
                     return sa;
                 }
                 let result = format!("{}{sep}{}", lang.syms.resolve(sa), lang.syms.resolve(sb));
