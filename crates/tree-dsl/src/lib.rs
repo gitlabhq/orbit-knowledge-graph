@@ -14,7 +14,8 @@ pub mod tree;
 pub mod treesitter;
 
 pub mod pattern {
-    pub use crate::dsl::pattern::*;
+    pub use crate::dsl::rewrite::*;
+    pub use crate::dsl::types::*;
 }
 pub mod rules {
     pub use crate::dsl::rules::*;

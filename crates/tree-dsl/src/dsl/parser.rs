@@ -3,7 +3,7 @@
 // Grammar lives in pattern.pest. Pest produces the parse tree,
 // the visitor below walks it and calls Ctx to intern kinds/slots/filters.
 
-use super::pattern::*;
+use super::types::*;
 
 use pest_derive::Parser;
 

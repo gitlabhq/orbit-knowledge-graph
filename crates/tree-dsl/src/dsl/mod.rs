@@ -1,3 +1,6 @@
+pub(crate) mod matching;
 pub(crate) mod parser;
-pub mod pattern;
+pub(crate) mod rewrite;
 pub mod rules;
+pub mod transform;
+pub mod types;
