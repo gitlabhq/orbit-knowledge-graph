@@ -141,33 +141,29 @@ fn rewrite_query(cypher: &str) -> (String, Vec<(String, String, String)>) {
     (result, aliases)
 }
 
-/// Rename result columns: strip `{node_id}_` prefix, then apply user aliases.
+/// Rename result columns using the alias map from `rewrite_query`.
+/// Columns with an explicit alias get renamed (e.g. `caller_fqn` → `caller`).
+/// Columns without an alias keep the `{node}_{prop}` name to avoid collisions
+/// when multiple nodes project the same property.
 fn apply_aliases(
     batch: RecordBatch,
     input: &compiler::Input,
     aliases: &[(String, String, String)],
 ) -> RecordBatch {
-    let prefixes: Vec<String> = input.nodes.iter().map(|n| format!("{}_", n.id)).collect();
+    let alias_map: HashMap<String, String> = aliases
+        .iter()
+        .map(|(node, prop, alias)| (format!("{node}_{prop}"), alias.clone()))
+        .collect();
     let schema = batch.schema();
     let new_fields: Vec<arrow::datatypes::Field> = schema
         .fields()
         .iter()
         .map(|f| {
             let name = f.name();
-            let mut stripped = name.clone();
-            for prefix in &prefixes {
-                if let Some(s) = name.strip_prefix(prefix.as_str()) {
-                    stripped = s.to_string();
-                    break;
-                }
+            if let Some(alias) = alias_map.get(name.as_str()) {
+                return f.as_ref().clone().with_name(alias);
             }
-            for (node, prop, alias) in aliases {
-                let prefixed = format!("{node}_{prop}");
-                if name == &prefixed {
-                    return f.as_ref().clone().with_name(alias);
-                }
-            }
-            f.as_ref().clone().with_name(stripped)
+            f.as_ref().clone()
         })
         .collect();
     let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
