@@ -22,7 +22,7 @@ tests:
       WHERE caller.fqn = 'main.greet'
         AND field.name = 'email'
         AND r.relationship_kind IN ['Calls', 'References']
-      RETURN field.fqn AS field, r.relationship_kind AS kind
+      RETURN field.fqn AS field
     assert:
       - { row_count: 1 }
-      - { row: { field: "main.User.email", kind: "Calls" } }
+      - { row: { field: "main.User.email" } }

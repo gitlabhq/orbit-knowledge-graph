@@ -63,7 +63,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE e.relationship_kind = 'Calls'
-      RETURN count(*) AS n
+      RETURN count(caller) AS n
     assert:
       - { row_count: 1 }
       - { row: { n: 0 } }

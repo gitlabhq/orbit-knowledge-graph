@@ -66,7 +66,7 @@ tests:
   - name: "re-export aliases are preserved in import metadata"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'src/lib.rs' AND (i.identifier_alias = 'exported_helper' OR i.identifier_alias = 'ExportedService')
+      WHERE i.file_path = 'src/lib.rs' AND i.identifier_alias IN ['exported_helper', 'ExportedService']
       RETURN i.identifier_alias AS alias, i.import_type AS type
     assert:
       - { row_count: 2 }

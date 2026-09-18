@@ -48,7 +48,7 @@ tests:
   - name: "All methods have com.example.App FQN prefix"
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'App'
+      WHERE cls.name = 'App'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 5 }

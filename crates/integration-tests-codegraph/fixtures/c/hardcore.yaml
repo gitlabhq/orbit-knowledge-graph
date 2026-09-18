@@ -209,10 +209,11 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'reader::internal_seek'
         AND callee.fqn = 'reader::internal_flush'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "reader::internal_seek", callee: "reader::internal_flush", kind: Calls } }
+      - { row: { caller: "reader::internal_seek", callee: "reader::internal_flush" } }
 
   # ══════════════════════════════════════════════════════════════
   # NEGATIVE ASSERTIONS — must NOT exist
@@ -254,40 +255,44 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'reader::reader_open'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "app::copy_file", callee: "reader::reader_open", kind: Calls } }
+      - { row: { caller: "app::copy_file", callee: "reader::reader_open" } }
 
   - name: "copy_file calls writer_write (via io/writer.h → writer.c)"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'writer::writer_write'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "app::copy_file", callee: "writer::writer_write", kind: Calls } }
+      - { row: { caller: "app::copy_file", callee: "writer::writer_write" } }
 
   - name: "main calls copy_file (same file)"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
+      - { row: { caller: "app::main", callee: "app::copy_file" } }
 
   - name: "Transitive include: main calls panic (app.c → reader.h → error.h → error.c)"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'error::panic'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "app::main", callee: "error::panic", kind: Calls } }
+      - { row: { caller: "app::main", callee: "error::panic" } }
 
   # ══════════════════════════════════════════════════════════════
   # DUPLICATE EDGE CHECK
@@ -320,10 +325,11 @@ tests:
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'nested::Outer'
         AND child.fqn = 'nested::Outer::Inner'
-      RETURN parent.fqn AS parent, child.fqn AS child, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
-      - { row: { parent: "nested::Outer", child: "nested::Outer::Inner", kind: Defines } }
+      - { row: { parent: "nested::Outer", child: "nested::Outer::Inner" } }
 
   # ══════════════════════════════════════════════════════════════
   # TYPEDEF FUNCTION POINTER
@@ -415,30 +421,33 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'reader::internal_seek'
         AND callee.fqn = 'reader::internal_flush'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "reader::internal_seek", callee: "reader::internal_flush", kind: Calls } }
+      - { row: { caller: "reader::internal_seek", callee: "reader::internal_flush" } }
 
   - name: "Intra-file: main calls copy_file (both in app.c)"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
+      - { row: { caller: "app::main", callee: "app::copy_file" } }
 
   - name: "Intra-file: unrelated_func calls helper (both in unrelated.c)"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'unrelated::unrelated_func'
         AND callee.fqn = 'unrelated::helper'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "unrelated::unrelated_func", callee: "unrelated::helper", kind: Calls } }
+      - { row: { caller: "unrelated::unrelated_func", callee: "unrelated::helper" } }
 
   # ══════════════════════════════════════════════════════════════
   # CROSS-FILE CALLS
@@ -465,10 +474,11 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'error::panic'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "app::main", callee: "error::panic", kind: Calls } }
+      - { row: { caller: "app::main", callee: "error::panic" } }
 
   # ══════════════════════════════════════════════════════════════
   # GENERIC (void*) DATA STRUCTURES
@@ -515,60 +525,66 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_init'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "user::process_users", callee: "list::list_init", kind: Calls } }
+      - { row: { caller: "user::process_users", callee: "list::list_init" } }
 
   - name: "Cross-file: process_users calls list_push"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_push'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "user::process_users", callee: "list::list_push", kind: Calls } }
+      - { row: { caller: "user::process_users", callee: "list::list_push" } }
 
   - name: "Cross-file: process_users calls list_count"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_count'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "user::process_users", callee: "list::list_count", kind: Calls } }
+      - { row: { caller: "user::process_users", callee: "list::list_count" } }
 
   - name: "Cross-file: process_users calls list_pop"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_pop'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "user::process_users", callee: "list::list_pop", kind: Calls } }
+      - { row: { caller: "user::process_users", callee: "list::list_pop" } }
 
   - name: "Cross-file: process_users calls list_empty"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_empty'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "user::process_users", callee: "list::list_empty", kind: Calls } }
+      - { row: { caller: "user::process_users", callee: "list::list_empty" } }
 
   - name: "Cross-file: process_users calls panic via transitive include"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'error::panic'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "user::process_users", callee: "error::panic", kind: Calls } }
+      - { row: { caller: "user::process_users", callee: "error::panic" } }
 
   - name: "process_users total call count"
     query: |

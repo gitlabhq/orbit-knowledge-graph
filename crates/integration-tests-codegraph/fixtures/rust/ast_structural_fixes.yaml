@@ -62,7 +62,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
         AND d.name = 'foo'
-        AND (d.definition_type = 'Method' OR d.definition_type = 'AssociatedFunction')
+        AND d.definition_type IN ['Method', 'AssociatedFunction']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }

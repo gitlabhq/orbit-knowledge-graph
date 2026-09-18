@@ -141,7 +141,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
-        AND (i.identifier_alias = 'PacketKind' OR i.identifier_alias = 'RecordPacket')
+        AND i.identifier_alias IN ['PacketKind', 'RecordPacket']
       RETURN i.import_path AS path, i.identifier_alias AS alias, i.import_type AS type
     assert:
       - { row_count: 2 }

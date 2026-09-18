@@ -104,16 +104,22 @@ fn rewrite_query(cypher: &str) -> (String, Vec<(String, String, String)>) {
     });
     let mut result = rewritten.into_owned();
 
-    let order_re = regex::Regex::new(r"(?i)\bORDER\s+BY\s+(\w+)").unwrap();
-    if let Some(caps) = order_re.captures(&result) {
-        let sort_key = &caps[1];
-        if let Some((node, prop, _)) = aliases.iter().find(|(_, _, a)| a == sort_key) {
-            let replacement = format!("ORDER BY {node}.{prop}");
-            result = order_re.replace(&result, replacement.as_str()).into_owned();
-        }
+    let order_re = regex::Regex::new(r"(?im)\bORDER\s+BY\s+(.+)$").unwrap();
+    if let Some(caps) = order_re.captures(&result.clone()) {
+        let sort_expr = caps[1].trim();
+        let first_key = sort_expr.split(',').next().unwrap().trim();
+        let resolved = if first_key.contains('.') {
+            first_key.to_string()
+        } else if let Some((node, prop, _)) = aliases.iter().find(|(_, _, a)| a == first_key) {
+            format!("{node}.{prop}")
+        } else {
+            first_key.to_string()
+        };
+        result = order_re
+            .replace(&result, format!("ORDER BY {resolved}"))
+            .into_owned();
     }
 
-    let backslash_re = regex::Regex::new(r"'([^']*\\'[^']*)'|'([^']*\\[^']*)'").unwrap();
     if result.contains('\\') {
         let lit_re = regex::Regex::new(r"'([^']*)'").unwrap();
         result = lit_re

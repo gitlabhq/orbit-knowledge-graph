@@ -38,7 +38,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'main.ts'
-      RETURN DISTINCT i.import_path AS path
+      RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: "./models" } }

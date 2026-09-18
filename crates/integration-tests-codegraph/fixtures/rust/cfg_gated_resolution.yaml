@@ -33,7 +33,7 @@ tests:
   - name: "unix cfg items are included in the shell-free server profile"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'unix_only' OR d.name = 'call_unix'
+      WHERE d.name IN ['unix_only', 'call_unix']
       RETURN d.name AS name
     assert:
       - { column_values: { field: name, values: ['call_unix', 'unix_only'] } }
@@ -41,7 +41,7 @@ tests:
   - name: "target_os cfg items are included in the shell-free server profile"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'linux_only' OR d.name = 'call_linux'
+      WHERE d.name IN ['linux_only', 'call_linux']
       RETURN d.name AS name
     assert:
       - { column_values: { field: name, values: ['call_linux', 'linux_only'] } }

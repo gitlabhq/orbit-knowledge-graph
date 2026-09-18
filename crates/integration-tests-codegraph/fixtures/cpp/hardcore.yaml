@@ -264,10 +264,11 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'reader::io::internal_seek'
         AND callee.fqn = 'reader::io::internal_flush'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "reader::io::internal_seek", callee: "reader::io::internal_flush", kind: Calls } }
+      - { row: { caller: "reader::io::internal_seek", callee: "reader::io::internal_flush" } }
 
   # ══════════════════════════════════════════════════════════════
   # NEGATIVE ASSERTIONS
@@ -309,10 +310,11 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
+      - { row: { caller: "app::main", callee: "app::copy_file" } }
 
   # ══════════════════════════════════════════════════════════════
   # DUPLICATE EDGE CHECK
@@ -345,20 +347,22 @@ tests:
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'nested::outer'
         AND child.fqn = 'nested::outer::inner'
-      RETURN parent.fqn AS parent, child.fqn AS child, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
-      - { row: { parent: "nested::outer", child: "nested::outer::inner", kind: Defines } }
+      - { row: { parent: "nested::outer", child: "nested::outer::inner" } }
 
   - name: "Inner namespace defines Widget"
     query: |
       MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
       WHERE parent.fqn = 'nested::outer::inner'
         AND child.fqn = 'nested::outer::inner::Widget'
-      RETURN parent.fqn AS parent, child.fqn AS child, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
-      - { row: { parent: "nested::outer::inner", child: "nested::outer::inner::Widget", kind: Defines } }
+      - { row: { parent: "nested::outer::inner", child: "nested::outer::inner::Widget" } }
 
   # ══════════════════════════════════════════════════════════════
   # TEMPLATE DEFINITIONS
@@ -487,7 +491,8 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'tmpl_usage::extra::use_templates'
         AND callee.fqn = 'templates::tmpl::swap'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "tmpl_usage::extra::use_templates", callee: "templates::tmpl::swap", kind: Calls } }
+      - { row: { caller: "tmpl_usage::extra::use_templates", callee: "templates::tmpl::swap" } }

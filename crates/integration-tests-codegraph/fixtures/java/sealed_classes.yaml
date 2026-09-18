@@ -104,12 +104,12 @@ tests:
         ]
         AND parent.fqn = 'com.example.shapes.Shape'
         AND e.relationship_kind = 'Extends'
-      RETURN child.fqn AS child, parent.fqn AS parent, e.relationship_kind AS kind
+      RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 3 }
-      - { row: { child: "com.example.shapes.Circle", parent: "com.example.shapes.Shape", kind: Extends } }
-      - { row: { child: "com.example.shapes.Rectangle", parent: "com.example.shapes.Shape", kind: Extends } }
-      - { row: { child: "com.example.shapes.Triangle", parent: "com.example.shapes.Shape", kind: Extends } }
+      - { row: { child: "com.example.shapes.Circle", parent: "com.example.shapes.Shape" } }
+      - { row: { child: "com.example.shapes.Rectangle", parent: "com.example.shapes.Shape" } }
+      - { row: { child: "com.example.shapes.Triangle", parent: "com.example.shapes.Shape" } }
 
   - name: "Permits-side references link the sealed parent to each permitted class"
     query: |

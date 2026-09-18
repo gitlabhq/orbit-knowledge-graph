@@ -145,7 +145,7 @@ tests:
   - name: "All source definitions exist with correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'helper' OR d.name = 'module_func' OR d.name = 'helper_func'
+      WHERE d.name IN ['helper', 'module_func', 'helper_func']
       RETURN d.name AS name, d.fqn AS fqn, d.file_path AS file
     assert:
       - { row: { name: "helper", fqn: "src.utils.helper", file: "src/utils.py" } }

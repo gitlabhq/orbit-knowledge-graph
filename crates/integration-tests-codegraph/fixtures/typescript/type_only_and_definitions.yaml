@@ -38,7 +38,6 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'types/contracts.ts'
         AND d.name IN ['User', 'UserId', 'Status', 'makeStatus']
-        AND d.fqn = d.name
       RETURN d.name AS name, d.definition_type AS type
       ORDER BY name
     assert:

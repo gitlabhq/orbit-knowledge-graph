@@ -349,7 +349,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'external/duplicate_aliases.js'
         AND e.relationship_kind = 'Calls'
-      RETURN DISTINCT caller.fqn AS caller, sym.identifier_name AS name, sym.identifier_alias AS alias
+      RETURN caller.fqn AS caller, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY alias
     assert:
       - { row_count: 2 }

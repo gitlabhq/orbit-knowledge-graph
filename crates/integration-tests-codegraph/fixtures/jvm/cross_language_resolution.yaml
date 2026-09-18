@@ -72,10 +72,11 @@ tests:
       WHERE caller.name = 'createUser'
         AND callee.name = 'create'
         AND callee.file_path = 'com/example/model/User.java'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: "com/example/service/UserService.kt", tgt: "com/example/model/User.java", kind: Calls } }
+      - { row: { src: "com/example/service/UserService.kt", tgt: "com/example/model/User.java" } }
 
   # ══════════════════════════════════════════════════════════════
   # KOTLIN CALLING KOTLIN (within family)
@@ -86,10 +87,11 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'createUser'
         AND callee.name = 'capitalize'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: "com/example/service/UserService.kt", tgt: "com/example/util/Strings.kt", kind: Calls } }
+      - { row: { src: "com/example/service/UserService.kt", tgt: "com/example/util/Strings.kt" } }
 
   # ══════════════════════════════════════════════════════════════
   # JAVA CALLING JAVA (within family)

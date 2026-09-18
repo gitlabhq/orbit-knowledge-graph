@@ -22,7 +22,7 @@ tests:
   - name: method is contained in Inner
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'Inner' AND m.name = 'method'
+      WHERE cls.name = 'Inner' AND m.name = 'method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -31,7 +31,7 @@ tests:
   - name: outer_method is contained in Outer
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'Outer' AND m.name = 'outer_method'
+      WHERE cls.name = 'Outer' AND m.name = 'outer_method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }

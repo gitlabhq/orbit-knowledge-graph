@@ -94,9 +94,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Constant'
-        AND (d.name = 'TRIPLE' OR d.name = 'DOUBLE' OR d.name = 'VALIDATE_EMAIL'
-             OR d.name = 'MAKER' OR d.name = 'AUTH' OR d.name = 'handler')
-      RETURN count(*) AS n
+        AND d.name IN ['TRIPLE', 'DOUBLE', 'VALIDATE_EMAIL', 'MAKER', 'AUTH', 'handler']
+      RETURN count(d) AS n
     assert:
       - { row: { n: 0 } }
 
@@ -108,7 +107,8 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Middleware::initialize'
         AND callee.fqn = 'Middleware::AUTH'
-      RETURN callee.definition_type AS dt, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN callee.definition_type AS dt
     assert:
       - { row_count: 1 }
-      - { row: { dt: "Lambda", kind: "Calls" } }
+      - { row: { dt: "Lambda" } }

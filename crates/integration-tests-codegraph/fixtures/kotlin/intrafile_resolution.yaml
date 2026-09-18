@@ -45,7 +45,7 @@ tests:
   - name: "App methods have correct FQN"
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'App' AND cls.definition_type = 'Class'
+      WHERE cls.name = 'App' AND cls.definition_type = 'Class'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 4 }

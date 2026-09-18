@@ -180,10 +180,11 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Model::name'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Model::update", callee: "Model::name", kind: Calls } }
+      - { row: { caller: "Model::update", callee: "Model::name" } }
 
   - name: "Model extends Base"
     query: |
@@ -200,20 +201,22 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Base::save!'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Model::update", callee: "Base::save!", kind: Calls } }
+      - { row: { caller: "Model::update", callee: "Base::save!" } }
 
   - name: "Model.update calls greet (define_method)"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Model::greet'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Model::update", callee: "Model::greet", kind: Calls } }
+      - { row: { caller: "Model::update", callee: "Model::greet" } }
 
   - name: "Presenter.display calls delegated methods"
     query: |
@@ -279,20 +282,22 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Dispatcher::dispatch'
         AND callee.fqn = 'Dispatcher::notify'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::notify", kind: Calls } }
+      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::notify" } }
 
   - name: "public_send(:alert) resolves to Dispatcher::alert"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Dispatcher::dispatch'
         AND callee.fqn = 'Dispatcher::alert'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::alert", kind: Calls } }
+      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::alert" } }
 
   # ══════════════════════════════════════════════════════════════
   # CALLS TO GENERATED METHODS
@@ -307,30 +312,33 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'PostsController::index'
         AND callee.fqn = 'Post::published'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "PostsController::index", callee: "Post::published", kind: Calls } }
+      - { row: { caller: "PostsController::index", callee: "Post::published" } }
 
   - name: "UpdateWorker.perform calls Model.update via constructor chain"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'UpdateWorker::perform'
         AND callee.fqn = 'Model::update'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "UpdateWorker::perform", callee: "Model::update", kind: Calls } }
+      - { row: { caller: "UpdateWorker::perform", callee: "Model::update" } }
 
   - name: "PostsController.index calls Post.recent (qualified receiver chain)"
     query: |
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'PostsController::index'
         AND callee.fqn = 'Post::recent'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "PostsController::index", callee: "Post::recent", kind: Calls } }
+      - { row: { caller: "PostsController::index", callee: "Post::recent" } }
 
   # ══════════════════════════════════════════════════════════════
   # CALLS TO GENERATED METHODS
@@ -375,7 +383,8 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Dynamic::dispatch'
         AND callee.fqn = 'Dynamic::notify'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Dynamic::dispatch", callee: "Dynamic::notify", kind: Calls } }
+      - { row: { caller: "Dynamic::dispatch", callee: "Dynamic::notify" } }

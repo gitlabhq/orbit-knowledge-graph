@@ -20,7 +20,7 @@ tests:
   - name: Class has exactly 3 method members
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'MyClass'
+      WHERE cls.name = 'MyClass'
       RETURN count(m) AS n
     assert:
       - { count_equals: { field: n, value: 3 } }
@@ -28,7 +28,7 @@ tests:
   - name: instance_method exists in class
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'MyClass' AND m.name = 'instance_method'
+      WHERE cls.name = 'MyClass' AND m.name = 'instance_method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -37,7 +37,7 @@ tests:
   - name: class_method exists in class
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'MyClass' AND m.name = 'class_method'
+      WHERE cls.name = 'MyClass' AND m.name = 'class_method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -46,7 +46,7 @@ tests:
   - name: static_method exists in class
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'MyClass' AND m.name = 'static_method'
+      WHERE cls.name = 'MyClass' AND m.name = 'static_method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }

@@ -358,14 +358,20 @@ tests:
       - { row: { caller: "GET", path: "next/server", name: "NextResponse" } }
       - { row: { caller: "PUT", path: "next/server", name: "NextResponse" } }
 
-  - name: Next type-only imports and local route helpers do not emit imported-symbol fallback
+  - name: Next type-only imports do not emit imported-symbol fallback
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE e.relationship_kind = 'Calls'
-        AND (
-          sym.identifier_name = 'NextRequest'
-          OR sym.import_path IN ['@lib', './actions']
-        )
+        AND sym.identifier_name = 'NextRequest'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
+    assert:
+      - { empty: true }
+
+  - name: Next local route helpers do not emit imported-symbol fallback
+    query: |
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      WHERE e.relationship_kind = 'Calls'
+        AND sym.import_path IN ['@lib', './actions']
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }

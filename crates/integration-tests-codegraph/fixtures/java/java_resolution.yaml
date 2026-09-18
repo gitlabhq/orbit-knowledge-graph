@@ -35,7 +35,8 @@ tests:
   - name: Cross-file constructor call resolves
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.file_path <> callee.file_path
+      WHERE caller.fqn = 'com.example.App.main'
+        AND callee.fqn = 'com.example.Service'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

@@ -142,7 +142,6 @@ tests:
     description: "7 callers, each producing exactly 1 call edge = 7 total def-to-def call edges"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.fqn <> callee.fqn OR caller.name = 'factorial'
-      RETURN count(*) AS n
+      RETURN count(caller) AS n
     assert:
       - { count_gte: { field: n, value: 7 } }

@@ -38,10 +38,10 @@ tests:
       MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'ProjectsController::enqueue_async_transfer'
         AND callee.fqn = 'Projects::TransferService::execute'
-      RETURN callee.fqn AS callee, e.relationship_kind AS kind
+        AND e.relationship_kind = 'Calls'
+      RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { kind: Calls } }
 
   - name: "cbase and unprefixed call sites resolve identically"
     query: |

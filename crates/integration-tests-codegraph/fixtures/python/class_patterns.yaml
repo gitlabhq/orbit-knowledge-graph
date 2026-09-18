@@ -60,7 +60,7 @@ tests:
   - name: Child class contains child_method
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'Child' AND m.name = 'child_method'
+      WHERE cls.name = 'Child' AND m.name = 'child_method'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }

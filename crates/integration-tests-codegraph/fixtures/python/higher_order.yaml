@@ -53,7 +53,7 @@ tests:
   - name: Callable class has __call__
     query: |
       MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
-      WHERE cls.identifier_name = 'Callable' AND m.name = '__call__'
+      WHERE cls.name = 'Callable' AND m.name = '__call__'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
