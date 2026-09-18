@@ -24,7 +24,6 @@ members = [
   "crates/orbit-observability",
   "crates/orbit-prompts",
   "crates/orbit-search",
-  "crates/orbit-skill",
   "crates/orbit-migrations",
   "crates/orbit-server-config",
   "crates/object-storage",

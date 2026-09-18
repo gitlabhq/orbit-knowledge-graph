@@ -42,10 +42,8 @@ strum = { workspace = true }
 uuid = { workspace = true }
 
 [build-dependencies]
-orbit-prompts = { path = "../orbit-prompts" }
-orbit-skill = { path = "../orbit-skill" }
+orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
-orbit-skill = { path = "../orbit-skill" }
 tempfile = { workspace = true }

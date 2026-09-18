@@ -58,7 +58,7 @@ fn validate_skills() {
     println!("cargo:rerun-if-changed={}", remote.display());
     println!("cargo:rerun-if-changed={}", local.display());
     println!("cargo:rerun-if-changed={}", commands.display());
-    orbit_skill::validate_skill_pair(remote, local, commands)
+    orbit_prompts::validate_skill_pair(remote, local, commands)
         .unwrap_or_else(|error| panic!("Orbit skill validation failed: {error}"));
 }
 

@@ -1114,7 +1114,7 @@ mod tests {
             .get_subcommands()
             .map(|command| command.get_name().to_string())
             .collect();
-        let generated_help_is_materialized = clap_commands.remove(orbit_skill::CLAP_HELP_COMMAND);
+        let generated_help_is_materialized = clap_commands.remove(orbit_prompts::CLAP_HELP_COMMAND);
         assert!(
             !generated_help_is_materialized,
             "get_subcommands excludes clap's generated help command"
@@ -1122,7 +1122,7 @@ mod tests {
         let unknown: Vec<_> = extracted
             .iter()
             .filter(|command| {
-                command.as_str() != orbit_skill::CLAP_HELP_COMMAND
+                command.as_str() != orbit_prompts::CLAP_HELP_COMMAND
                     && !clap_commands.contains(*command)
             })
             .collect();

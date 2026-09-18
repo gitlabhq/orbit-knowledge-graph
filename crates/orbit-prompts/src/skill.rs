@@ -5,12 +5,12 @@ use comrak::nodes::NodeValue;
 use comrak::{Arena, Options, parse_document};
 use syn::{Expr, ExprLit, Item, Lit, Meta};
 
+use crate::CLAP_HELP_COMMAND;
+
 const MANIFEST: &str = "SKILL.md";
 const SLOT_PREFIX: &str = "<!-- orbit:include local:";
 const SECTION_PREFIX: &str = "<!-- orbit:section ";
 const SECTION_END: &str = "<!-- /orbit:section -->";
-
-pub const CLAP_HELP_COMMAND: &str = "help";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SkillValidation {
@@ -151,18 +151,21 @@ enum MarkerTree {
 }
 
 fn parse_markers(content: &str, tree: MarkerTree) -> Result<BTreeSet<String>, String> {
+    let arena = Arena::new();
+    let root = parse_document(&arena, content, &Options::default());
     let mut ids = BTreeSet::new();
     let mut section: Option<String> = None;
-    let mut fence: Option<(char, usize)> = None;
 
-    for (index, line) in content.replace("\r\n", "\n").lines().enumerate() {
-        let line_number = index + 1;
-        let trimmed = line.trim();
-        if update_fence(trimmed, &mut fence) || fence.is_some() {
-            continue;
-        }
+    for node in root.descendants() {
+        let data = node.data();
+        let marker = match &data.value {
+            NodeValue::HtmlBlock(block) => block.literal.trim(),
+            NodeValue::HtmlInline(inline) => inline.trim(),
+            _ => continue,
+        };
+        let line_number = data.sourcepos.start.line;
 
-        if trimmed == SECTION_END {
+        if marker == SECTION_END {
             if !matches!(tree, MarkerTree::Local) {
                 return Err(format!(
                     "remote {MANIFEST}:{line_number}: unexpected section end"
@@ -173,20 +176,14 @@ fn parse_markers(content: &str, tree: MarkerTree) -> Result<BTreeSet<String>, St
                     "local {MANIFEST}:{line_number}: section end has no start"
                 ));
             }
-            continue;
-        }
-
-        if let Some(id) = exact_marker_id(trimmed, SLOT_PREFIX) {
+        } else if let Some(id) = exact_marker_id(marker, SLOT_PREFIX) {
             if !matches!(tree, MarkerTree::Remote) {
                 return Err(format!(
                     "local {MANIFEST}:{line_number}: include slot is not allowed"
                 ));
             }
             insert_marker_id(&mut ids, id, "slot", line_number)?;
-            continue;
-        }
-
-        if let Some(id) = exact_marker_id(trimmed, SECTION_PREFIX) {
+        } else if let Some(id) = exact_marker_id(marker, SECTION_PREFIX) {
             if !matches!(tree, MarkerTree::Local) {
                 return Err(format!(
                     "remote {MANIFEST}:{line_number}: section export is not allowed"
@@ -199,16 +196,10 @@ fn parse_markers(content: &str, tree: MarkerTree) -> Result<BTreeSet<String>, St
             }
             insert_marker_id(&mut ids, id, "section", line_number)?;
             section = Some(id.to_string());
-            continue;
-        }
-
-        if trimmed.starts_with("<!-- orbit:") || trimmed.starts_with("<!-- /orbit:") {
+        } else if marker.starts_with("<!-- orbit:") || marker.starts_with("<!-- /orbit:") {
             return Err(format!(
-                "{} {MANIFEST}:{line_number}: malformed Orbit marker {trimmed:?}",
-                match tree {
-                    MarkerTree::Remote => "remote",
-                    MarkerTree::Local => "local",
-                }
+                "{} {MANIFEST}:{line_number}: malformed Orbit marker {marker:?}",
+                tree.name()
             ));
         }
     }
@@ -217,6 +208,15 @@ fn parse_markers(content: &str, tree: MarkerTree) -> Result<BTreeSet<String>, St
         return Err(format!("local {MANIFEST}: section {id:?} is not closed"));
     }
     Ok(ids)
+}
+
+impl MarkerTree {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Remote => "remote",
+            Self::Local => "local",
+        }
+    }
 }
 
 fn exact_marker_id<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
@@ -244,33 +244,6 @@ fn insert_marker_id(
         Err(format!(
             "{MANIFEST}:{line_number}: duplicate {kind} ID {id:?}"
         ))
-    }
-}
-
-fn update_fence(line: &str, fence: &mut Option<(char, usize)>) -> bool {
-    let candidate = line.trim_start();
-    let Some(marker) = candidate
-        .chars()
-        .next()
-        .filter(|char| matches!(char, '`' | '~'))
-    else {
-        return false;
-    };
-    let length = candidate.chars().take_while(|char| char == &marker).count();
-    if length < 3 {
-        return false;
-    }
-
-    match fence {
-        Some((open_marker, open_length)) if marker == *open_marker && length >= *open_length => {
-            *fence = None;
-            true
-        }
-        None => {
-            *fence = Some((marker, length));
-            true
-        }
-        Some(_) => false,
     }
 }
 
@@ -590,6 +563,13 @@ mod tests {
         ] {
             assert!(parse_markers(local, MarkerTree::Local).is_err(), "{local}");
         }
+        assert_eq!(
+            parse_markers("\n<!-- orbit:include local:Bad -->", MarkerTree::Remote),
+            Err(
+                "remote SKILL.md:2: malformed Orbit marker \"<!-- orbit:include local:Bad -->\""
+                    .into()
+            )
+        );
     }
 
     #[test]
