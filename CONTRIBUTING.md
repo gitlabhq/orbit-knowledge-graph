@@ -73,8 +73,8 @@ Run `mise lint:docs` before pushing any documentation changes.
 - A person creates each issue and epic. An agent that runs the create call
   needs the author's approval of the draft first. The request to do the work
   is not that approval.
-- Agents may draft content. The author keeps the Problem and Proposed Solution
-  sections in their own words. Put generated content in the Agent context block.
+- Agents may draft content. The author keeps every section above the Agent
+  context block in their own words. Put generated content in that block.
 
 ## MR conventions
 
