@@ -9,7 +9,7 @@ title: Billing and credits
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
@@ -18,6 +18,7 @@ title: Billing and credits
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
 
 {{< /history >}}
 
@@ -26,12 +27,29 @@ title: Billing and credits
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit Remote runs queries on GitLab-hosted infrastructure and meters them with GitLab
-Credits.
+On GitLab.com, GitLab Orbit Remote runs queries on GitLab-hosted infrastructure and meters them
+with GitLab Credits.
 For credit rates, and for how you purchase and consume credits across GitLab features, see
 [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 
 GitLab Orbit Local indexes and queries repositories on your own machine and consumes no credits.
+
+## Availability by offering
+
+Credits apply only on GitLab.com.
+
+| Offering | Billing model |
+|----------|---------------|
+| GitLab.com | Queries consume GitLab Credits after general availability. Schema, status, and discovery calls are free. |
+| GitLab Self-Managed | Queries consume no credits. A Premium or Ultimate license includes GitLab Orbit. |
+
+On GitLab Self-Managed, you run GitLab Orbit next to your own instance, so GitLab does not meter
+the queries the instance runs.
+Access depends on the license tier of the instance instead of on a credit balance.
+For how to run GitLab Orbit on your own instance, see
+[GitLab Orbit on GitLab Self-Managed](../self-managed/_index.md).
+
+The rest of this page applies to GitLab.com.
 
 ## Credit consumption during beta
 

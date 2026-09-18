@@ -39,6 +39,8 @@ GitLab Orbit.
 GitLab Orbit is distributed only as a Helm chart for Kubernetes. The Linux package does not include it.
 Install the chart on the cluster that runs GitLab, or on a separate cluster next to your instance.
 
+A Premium or Ultimate license includes GitLab Orbit, and queries consume no GitLab Credits.
+
 Because GitLab Orbit on GitLab Self-Managed is in beta, contact your account team before you plan a
 deployment to confirm current limitations.
 
