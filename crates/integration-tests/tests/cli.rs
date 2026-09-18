@@ -737,7 +737,7 @@ fn skills_defaults_to_and_serves_bundled_content() {
     assert_eq!(default, manifest);
     assert!(manifest.contains("references/local/sql.md"));
     assert!(
-        manifest.contains("`orbit skills references/local/sql.md`"),
+        manifest.contains("`orbit skills orbit <path>`"),
         "served manifest must tell binary users the version-matched access path"
     );
 

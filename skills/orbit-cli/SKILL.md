@@ -29,7 +29,7 @@ Run `orbit skills` to read this skill; it lists additional skill trees afterward
 when any are available. Use `orbit skills orbit [path]` to name this tree, or
 pass a path alone to use it by default.
 
-Wrapper details: [`references/cli.md`](references/local/cli.md).
+Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 
 ## Find, then read
 

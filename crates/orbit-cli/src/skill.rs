@@ -14,7 +14,16 @@ struct SkillAssets;
 
 const MANIFEST: &str = "SKILL.md";
 const DEFAULT_SKILL: &str = "orbit";
-const KNOWN_SKILLS: &[&str] = &[DEFAULT_SKILL];
+
+struct Skill {
+    name: &'static str,
+    manifest: fn() -> Option<String>,
+}
+
+const KNOWN_SKILLS: &[Skill] = &[Skill {
+    name: DEFAULT_SKILL,
+    manifest: default_manifest,
+}];
 
 #[derive(Debug, PartialEq, Eq)]
 enum Request {
@@ -34,7 +43,7 @@ struct Frontmatter {
 fn manifest_binary_hint() -> String {
     let launcher = crate::commands::setup::spec::launcher();
     format!(
-        "\n\n---\n\nYou are viewing this via the `orbit` binary; the links above are relative to the on-disk skill tree. Fetch referenced files with `{launcher} skills orbit <path>` (e.g. `{launcher} skills references/local/sql.md`).\n"
+        "\n\n---\n\nThe links above refer to the on-disk skill tree. Read a version-matched bundled file with `{launcher} skills orbit <path>`.\n"
     )
 }
 
@@ -52,7 +61,7 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
     };
 
     if is_skill_name(first) {
-        if !KNOWN_SKILLS.contains(&first) {
+        if !KNOWN_SKILLS.iter().any(|skill| skill.name == first) {
             bail!(
                 "unknown skill name {first:?}. Known skills:\n{}",
                 known_skill_list()
@@ -86,8 +95,7 @@ fn print_default_skill() -> Result<()> {
     print_skill_file(MANIFEST)?;
     let others: Vec<_> = KNOWN_SKILLS
         .iter()
-        .copied()
-        .filter(|name| *name != DEFAULT_SKILL)
+        .filter(|skill| skill.name != DEFAULT_SKILL)
         .collect();
     if !others.is_empty() {
         println!("\nOther available skills:");
@@ -96,15 +104,25 @@ fn print_default_skill() -> Result<()> {
     Ok(())
 }
 
-fn print_skill_list(names: &[&str]) -> Result<()> {
-    let manifest =
-        lookup(MANIFEST).ok_or_else(|| anyhow::anyhow!("embedded {MANIFEST} missing"))?;
-    let description = manifest_description(&manifest)?;
-    let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
-    for name in names {
-        println!("{name} — {description}");
-    }
+fn print_skill_list(skills: &[&Skill]) -> Result<()> {
+    print!("{}", format_skill_list(skills)?);
     Ok(())
+}
+
+fn format_skill_list(skills: &[&Skill]) -> Result<String> {
+    let mut output = String::new();
+    for skill in skills {
+        let manifest = (skill.manifest)()
+            .ok_or_else(|| anyhow::anyhow!("embedded {MANIFEST} missing for {}", skill.name))?;
+        let description = manifest_description(&manifest)?;
+        let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
+        output.push_str(&format!("{} — {description}\n", skill.name));
+    }
+    Ok(output)
+}
+
+fn default_manifest() -> Option<String> {
+    lookup(MANIFEST)
 }
 
 fn manifest_description(manifest: &str) -> Result<String> {
@@ -131,7 +149,7 @@ fn print_skill_file(requested: &str) -> Result<()> {
 fn known_skill_list() -> String {
     KNOWN_SKILLS
         .iter()
-        .map(|name| format!("  {name}"))
+        .map(|skill| format!("  {}", skill.name))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -168,6 +186,23 @@ mod tests {
             manifest_description(&manifest)
                 .unwrap()
                 .contains("Orbit CLI")
+        );
+    }
+
+    #[test]
+    fn skill_list_uses_each_manifest_description() {
+        let first = Skill {
+            name: "first",
+            manifest: || Some("---\ndescription: First description\n---\n".to_string()),
+        };
+        let second = Skill {
+            name: "second",
+            manifest: || Some("---\ndescription: Second description\n---\n".to_string()),
+        };
+
+        assert_eq!(
+            format_skill_list(&[&first, &second]).unwrap(),
+            "first — First description\nsecond — Second description\n"
         );
     }
 
@@ -262,7 +297,7 @@ mod tests {
     fn served_manifest_carries_binary_hint_but_subfiles_do_not() {
         let manifest = render(MANIFEST).unwrap();
         assert!(manifest.starts_with("---"), "frontmatter must stay first");
-        assert!(manifest.contains("`orbit skills references/local/sql.md`"));
+        assert!(manifest.contains("`orbit skills orbit <path>`"));
 
         assert!(
             !render("references/local/sql.md")

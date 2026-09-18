@@ -546,7 +546,6 @@ mod tests {
     fn marker_parser_rejects_invalid_duplicate_nested_and_unbalanced_markers() {
         for remote in [
             "<!-- orbit:include local:Bad -->",
-            "<!-- orbit:include local:a -->\n<!-- orbit:include local:a -->",
             "<!-- orbit:section a -->",
             "<!-- /orbit:section -->",
         ] {
@@ -563,6 +562,13 @@ mod tests {
         ] {
             assert!(parse_markers(local, MarkerTree::Local).is_err(), "{local}");
         }
+        assert_eq!(
+            parse_markers(
+                "<!-- orbit:include local:a -->\n<!-- orbit:include local:a -->",
+                MarkerTree::Remote,
+            ),
+            Err("SKILL.md:2: duplicate slot ID \"a\"".into())
+        );
         assert_eq!(
             parse_markers("\n<!-- orbit:include local:Bad -->", MarkerTree::Remote),
             Err(
