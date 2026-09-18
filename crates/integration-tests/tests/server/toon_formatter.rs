@@ -173,7 +173,7 @@ async fn traversal_and_pagination_payload(ctx: &TestContext) {
 async fn path_finding_payload(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
-        r#"{"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100]}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2}}"#,
+        r#"{"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100]}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["MEMBER_OF"]}}"#,
         &allow_all(),
         test_security_context(),
     )

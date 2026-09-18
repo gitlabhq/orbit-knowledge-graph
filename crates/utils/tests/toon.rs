@@ -84,10 +84,9 @@ fn serde_encounter_order_is_independent_of_json_map_order() {
         expected
     );
     assert_eq!(encode(&ordered_json(map)).unwrap(), expected);
-    assert_eq!(
-        encode(&serde_json::from_str::<Value>(map).unwrap()).unwrap(),
-        "alpha: 2\nmiddle: 3\nzebra: 1"
-    );
+    let mut sorted: Value = serde_json::from_str(map).unwrap();
+    sorted.sort_all_objects();
+    assert_eq!(encode(&sorted).unwrap(), "alpha: 2\nmiddle: 3\nzebra: 1");
 }
 
 #[test]
@@ -159,8 +158,8 @@ fn canonical_range_neighbors_preserve_float_value() {
 #[test]
 fn strings_keys_and_controls_are_unambiguous() {
     assert_eq!(
-        encode(&json!({"true": true, "false": false, "null": null})).unwrap(),
-        "false: false\nnull: null\ntrue: true"
+        encode(&ordered_json(r#"{"true":true,"false":false,"null":null}"#)).unwrap(),
+        "true: true\nfalse: false\nnull: null"
     );
     for (value, expected) in [
         ("\u{8}\u{c}\0\u{1f}", r#""\u0008\u000c\u0000\u001f""#),
@@ -185,8 +184,8 @@ fn empty_forms_and_nested_arrays_remain_distinct() {
     assert_eq!(encode(&json!([])).unwrap(), "[]");
     assert_eq!(encode(&Value::Null).unwrap(), "null");
     assert_eq!(
-        encode(&json!({"n": null, "a": [], "o": {}, "s": ""})).unwrap(),
-        "a: []\nn: null\no:\ns: \"\""
+        encode(&ordered_json(r#"{"n":null,"a":[],"o":{},"s":""}"#)).unwrap(),
+        "n: null\na: []\no:\ns: \"\""
     );
     assert_eq!(
         encode(&json!([[], {}, null, [{"x": 1}], [[true, false], "x"]])).unwrap(),

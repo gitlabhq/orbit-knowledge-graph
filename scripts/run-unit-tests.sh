@@ -15,7 +15,7 @@ args=(cargo nextest run --workspace \
   --exclude integration-tests-codegraph \
   --exclude orbit-fuzz \
   --exclude query-profiler \
-  --lib --bin xtask --bin orbit)
+  --lib --bin xtask --bin orbit --test toon --test toon_properties)
 
 # Append caller's arguments last (e.g. --profile ci) so they can
 # override defaults.

@@ -27,9 +27,18 @@ impl ResultFormatter for ToonFormatter {
     }
 
     fn format(&self, output: &PipelineOutput) -> Value {
+        let mut response = GraphFormatter.build_response(output);
+        for properties in response
+            .nodes
+            .iter_mut()
+            .map(|node| &mut node.properties)
+            .chain(response.rows.iter_mut().flatten())
+        {
+            properties.sort_keys();
+            properties.values_mut().for_each(Value::sort_all_objects);
+        }
         Value::String(
-            encode(&GraphFormatter.build_response(output))
-                .expect("graph response contains only TOON-encodable values"),
+            encode(&response).expect("graph response contains only TOON-encodable values"),
         )
     }
 }
