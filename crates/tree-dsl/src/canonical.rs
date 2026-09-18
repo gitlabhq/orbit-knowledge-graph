@@ -231,6 +231,8 @@ pub enum Canonical {
     DisplayImportType,
     #[strum(serialize = "_*_display_language")]
     DisplayLanguage,
+    #[strum(serialize = "_*_display_entity")]
+    DisplayEntity,
 }
 
 impl From<Canonical> for u16 {

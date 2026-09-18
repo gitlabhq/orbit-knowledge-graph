@@ -170,11 +170,13 @@ display:
     rules:
       - match: '$M:__source_file'
         append:
+          - '(_*_display_entity "File")'
           - '(_*_display_file_path @$M)'
           - '(_*_display_language @$M|split_last(".")|map("rs:rust"))'
 
       - match: '(__def)'
         append:
+          - '(_*_display_entity "Definition")'
           - '(_*_display_fqn @$ROOT|concat("::", "ancestor_sym:_*_display_fqn", "child_sym:__defname"))'
           - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
   - name: def_type
@@ -215,6 +217,7 @@ display:
     rules:
       - match: '(__import)'
         append:
+          - '(_*_display_entity "ImportedSymbol")'
           - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
       - match: '(__name)'
         append:
