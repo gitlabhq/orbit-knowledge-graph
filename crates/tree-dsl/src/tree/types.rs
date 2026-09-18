@@ -110,16 +110,6 @@ impl Tree {
         usize::from(id) as u32 - 1
     }
 
-    /// Remap all sym IDs using the given table. Used after merging per-thread interners.
-    pub fn remap_syms(&mut self, remap: &[u32]) {
-        for node in self.arena.iter_mut().filter(|n| !n.is_removed()) {
-            let data = node.get_mut();
-            if data.sym != 0 && (data.sym as usize) < remap.len() {
-                data.sym = remap[data.sym as usize];
-            }
-        }
-    }
-
     pub(crate) fn node(&self, id: NodeId) -> &Node {
         self.arena[id].get()
     }

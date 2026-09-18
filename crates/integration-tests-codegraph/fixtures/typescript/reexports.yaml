@@ -21,16 +21,6 @@ fixtures:
       }
 
 tests:
-  - name: Re-exports are extracted as ModuleExport definitions in index.ts
-    query: |
-      MATCH (d:Definition)
-      WHERE d.file_path = 'index.ts' AND d.definition_type = 'ModuleExport'
-      RETURN d.name AS name
-      ORDER BY name
-    assert:
-      - { row_count: 2 }
-      - { column_values: { field: name, values: ["SuperAdmin", "User"] } }
-
   - name: main.ts imports resolve through re-export to original defs
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)

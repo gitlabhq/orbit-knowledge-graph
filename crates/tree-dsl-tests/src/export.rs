@@ -200,13 +200,6 @@ fn assign_ids(trees: &[Tree]) -> (IdMap, IdMap, IdMap, IdMap) {
             if canonical::has_def_type(c) {
                 def_ids.insert((fi, i), next);
                 next += 1;
-            } else if c.is(C::ModuleExport) {
-                for imp in c.children().filter(|ch| ch.is(C::Import)) {
-                    for name in imp.names() {
-                        def_ids.insert((fi, name.index()), next);
-                        next += 1;
-                    }
-                }
             } else if (c.is(C::Import) || c.is(C::ImportType))
                 && !c.parent().is_some_and(|p| p.is(C::ModuleExport))
             {
@@ -290,22 +283,6 @@ fn build_defs(trees: &[Tree], lang: &Lang, ids: &IdMap) -> anyhow::Result<Record
                     Val::I(loc.end() as i64),
                     Val::I(loc.start_col() as i64 + 1),
                     Val::I(loc.end_col() as i64 + 1),
-                ]);
-            } else if c.is(C::Name) {
-                let display = c.child_sym(C::Alias).filter(|&a| a != 0).unwrap_or(c.sym());
-                let ds = sym(lang, display);
-                t.row(&[
-                    Val::I(did),
-                    Val::S(fp),
-                    Val::S(ds),
-                    Val::S(ds),
-                    Val::S("ModuleExport"),
-                    Val::I(c.start() as i64),
-                    Val::I(c.end() as i64),
-                    Val::I(c.start() as i64),
-                    Val::I(c.end() as i64),
-                    Val::I(0),
-                    Val::I(0),
                 ]);
             }
         }
