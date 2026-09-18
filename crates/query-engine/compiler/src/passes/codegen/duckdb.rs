@@ -272,13 +272,16 @@ impl Context {
 
         let duckdb_name = match name {
             "startsWith" => "starts_with",
+            "endsWith" => "ends_with",
             "substringUTF8" => "substring",
+            "positionCaseInsensitive" => "contains",
             "has" => "list_contains",
+            "hasAny" => "list_has_any",
+            "hasAll" => "list_has_all",
             "array" => "list_value",
             "arrayConcat" => "list_concat",
             "arrayReverse" => "list_reverse",
             "arrayResize" => "list_resize",
-            // ClickHouse map(k1,v1,k2,v2) → DuckDB json_object(k1,v1,k2,v2)
             "map" => "json_object",
             "tuple" => "row",
             other => other,

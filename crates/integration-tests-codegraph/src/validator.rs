@@ -167,6 +167,9 @@ fn apply_aliases(
         })
         .collect();
     let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
+    if batch.num_columns() == 0 {
+        return RecordBatch::new_empty(new_schema);
+    }
     RecordBatch::try_new(new_schema, batch.columns().to_vec())
         .unwrap_or_else(|e| panic!("apply_aliases failed: {e}"))
 }
