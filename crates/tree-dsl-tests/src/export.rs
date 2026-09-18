@@ -141,17 +141,46 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
     let (f2d, f2i) = build_file_edges(trees, edges, &file_ids, &def_ids, &all_imp_ids);
     ds.insert("FileToDefinition".into(), f2d?);
     ds.insert("FileToImportedSymbol".into(), f2i?);
+    let resolved: std::collections::HashSet<(usize, u32)> = edges
+        .iter()
+        .filter(|e| e.kind == EdgeKind::Calls)
+        .map(|e| (e.from_tree as usize, e.from_node))
+        .collect();
     ds.insert(
         "DefinitionToDefinition".into(),
-        build_def2def(edges, &def_ids)?,
+        join_edges(
+            edges,
+            &def_ids,
+            &def_ids,
+            |e| e.kind != EdgeKind::Imports,
+            |e| e.kind.name(),
+            true,
+        )?,
     );
     ds.insert(
         "DefinitionToImportedSymbol".into(),
-        build_def2imp(edges, &def_ids, &all_imp_ids)?,
+        join_edges(
+            edges,
+            &def_ids,
+            &all_imp_ids,
+            |e| {
+                e.kind == EdgeKind::Imports
+                    && !resolved.contains(&(e.from_tree as usize, e.from_node))
+            },
+            |_| "Calls",
+            false,
+        )?,
     );
     ds.insert(
         "ImportedSymbolToDefinition".into(),
-        build_imp2def(edges, &def_ids, &all_imp_ids)?,
+        join_edges(
+            edges,
+            &all_imp_ids,
+            &def_ids,
+            |e| e.kind == EdgeKind::Imports,
+            |_| "Resolves",
+            false,
+        )?,
     );
     Ok(ds)
 }
@@ -446,63 +475,30 @@ fn build_file_edges(
     (d.finish(), i.finish())
 }
 
-fn build_def2def(edges: &[Edge], ids: &IdMap) -> anyhow::Result<RecordBatch> {
+fn join_edges(
+    edges: &[Edge],
+    src_ids: &IdMap,
+    tgt_ids: &IdMap,
+    filter: impl Fn(&Edge) -> bool,
+    label: impl Fn(&Edge) -> &str,
+    dedup_cross: bool,
+) -> anyhow::Result<RecordBatch> {
     let mut t = edge_table();
     let mut seen = std::collections::HashSet::new();
     for e in edges {
-        if e.kind == EdgeKind::Imports {
+        if !filter(e) {
             continue;
         }
-        if let (Some(&from), Some(&to)) = (
-            ids.get(&(e.from_tree as usize, e.from_node)),
-            ids.get(&(e.to_tree as usize, e.to_node)),
-        ) {
-            if e.from_tree != e.to_tree && !seen.insert((from, to, e.kind.name())) {
-                continue;
-            }
-            t.row(&[Val::I(from), Val::I(to), Val::S(e.kind.name())]);
-        }
-    }
-    t.finish()
-}
-
-fn build_def2imp(edges: &[Edge], def_ids: &IdMap, imp_ids: &IdMap) -> anyhow::Result<RecordBatch> {
-    let mut t = edge_table();
-    let resolved: std::collections::HashSet<(usize, u32)> = edges
-        .iter()
-        .filter(|e| e.kind == EdgeKind::Calls)
-        .map(|e| (e.from_tree as usize, e.from_node))
-        .collect();
-    for e in edges {
-        if e.kind != EdgeKind::Imports {
-            continue;
-        }
-        let fi = e.from_tree as usize;
-        if resolved.contains(&(fi, e.from_node)) {
-            continue;
-        }
-        let Some(&caller) = def_ids.get(&(fi, e.from_node)) else {
+        let Some(&from) = src_ids.get(&(e.from_tree as usize, e.from_node)) else {
             continue;
         };
-        if let Some(&iid) = imp_ids.get(&(fi, e.to_node)) {
-            t.row(&[Val::I(caller), Val::I(iid), Val::S("Calls")]);
-        }
-    }
-    t.finish()
-}
-
-fn build_imp2def(edges: &[Edge], def_ids: &IdMap, imp_ids: &IdMap) -> anyhow::Result<RecordBatch> {
-    let mut t = edge_table();
-    for e in edges {
-        if e.kind != EdgeKind::Imports {
-            continue;
-        }
-        let Some(&target) = def_ids.get(&(e.to_tree as usize, e.to_node)) else {
+        let Some(&to) = tgt_ids.get(&(e.to_tree as usize, e.to_node)) else {
             continue;
         };
-        if let Some(&iid) = imp_ids.get(&(e.from_tree as usize, e.from_node)) {
-            t.row(&[Val::I(iid), Val::I(target), Val::S("Resolves")]);
+        if dedup_cross && e.from_tree != e.to_tree && !seen.insert((from, to, label(e))) {
+            continue;
         }
+        t.row(&[Val::I(from), Val::I(to), Val::S(label(e))]);
     }
     t.finish()
 }
