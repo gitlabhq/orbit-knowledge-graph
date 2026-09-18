@@ -232,9 +232,23 @@ Pick the tier at trigger time with the `TIER` variable (`small` by default;
   cluster); both default to `false` so the job reuses an existing cluster
 - `INDEX_WAIT_SECS` -- how long to let indexing settle before scoring
 
-The job authenticates to GCP through the shared `.google-oidc:auth` template.
-The service account it assumes must have `container.developer` and datalake
-bucket read access in `BENCH_PROJECT`; grant that before the first run.
+The job authenticates to GCP through the shared `.google-oidc:auth` template,
+which assumes the shared signer service account. That account has no access to
+the bench project by default, so `get-credentials` fails 403 until a
+bench-project owner grants it once:
+
+```bash
+gcloud projects add-iam-policy-binding gl-knowledgegraph-prj-f2eec59d \
+  --member=serviceAccount:gitlab-orbit-kg-signer@gitlab-ci-runners-signing.iam.gserviceaccount.com \
+  --role=roles/container.developer
+```
+
+`container.developer` covers `get-credentials` plus the in-cluster kubectl and
+helm operations the run performs. The datalake bucket read is already granted
+to the node and import service accounts by `bench/infra/iam.tf`, so the CI
+identity needs only cluster access. For a least-privilege alternative, add a
+dedicated bench CI service account and workload-identity binding in
+`bench/infra/` and override the job's `SERVICE_ACCOUNT` / `WI_POOL_PROVIDER`.
 
 ## Cluster lifecycle
 

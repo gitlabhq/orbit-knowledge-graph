@@ -41,16 +41,30 @@ orbit-ra-bench:
   script:
     - apt-get update -qq
     - apt-get install -y -qq --no-install-recommends
-        kubectl google-cloud-cli-gke-gcloud-auth-plugin python3-pip curl >/dev/null
+        kubectl google-cloud-cli-gke-gcloud-auth-plugin python3-pip curl
+        gettext-base openssl >/dev/null
     - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null
     - curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
     - chmod +x /usr/local/bin/yq
     - pip3 install --quiet --break-system-packages grpcio grpcio-tools protobuf
+    - mkdir -p bench/results
     - export USE_GKE_GCLOUD_AUTH_PLUGIN=True
-    - gcloud container clusters get-credentials "${CLUSTER_NAME}"
-        --zone "${BENCH_ZONE}" --project "${BENCH_PROJECT}"
+    # The CI identity is the shared signer SA. It must be granted access to the
+    # bench project once, or get-credentials fails 403. Surface the fix instead
+    # of a raw gcloud error.
+    - |
+      if ! gcloud container clusters get-credentials "${CLUSTER_NAME}" \
+           --zone "${BENCH_ZONE}" --project "${BENCH_PROJECT}"; then
+        echo "ERROR: ${SERVICE_ACCOUNT} cannot reach cluster ${CLUSTER_NAME} in ${BENCH_PROJECT}."
+        echo "Grant it once (a bench-project owner runs this):"
+        echo "  gcloud projects add-iam-policy-binding ${BENCH_PROJECT} \\"
+        echo "    --member=serviceAccount:${SERVICE_ACCOUNT} \\"
+        echo "    --role=roles/container.developer"
+        exit 1
+      fi
     - export KCTX="gke_${BENCH_PROJECT}_${BENCH_ZONE}_${CLUSTER_NAME}"
     - export RUN_ID="ci-${CI_PIPELINE_ID}"
+    - export PROJECT="${BENCH_PROJECT}"
     - bash bench/scripts/ci.sh
   artifacts:
     when: always
