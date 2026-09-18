@@ -109,7 +109,7 @@ checkout the query runs against every indexed commit, with a note on stderr.
 | `--repo` | Scope the tables to another checkout instead of the current directory. |
 | `--all` | Query every indexed repository and commit. |
 | `-F`, `--format` | Output format: `table` (default), `json`, `ndjson`, or `csv`. |
-| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
 
 ## Inspect the schema
 
@@ -131,7 +131,7 @@ glab orbit schema gl_definition gl_edge      # scoped to two tables
 | Flag | Purpose |
 |------|---------|
 | `--raw` | Emit JSON instead of the default table view. |
-| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
 
 ## Run as an MCP server
 
@@ -142,7 +142,7 @@ glab orbit mcp serve
 ```
 
 It serves `run_sql`, `get_graph_schema`, and `index` over the MCP protocol
-against `~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for the full
+against `~/.gitlab/orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for the full
 agent integration guide.
 
 ## Exit codes
