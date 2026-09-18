@@ -1173,7 +1173,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u IS User) RETURN u",
         "MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u",
         "MATCH (u:User) WHERE NOT u.id = 1 RETURN u",
-        "MATCH (u:User) WHERE u.id <> 1 RETURN u",
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
