@@ -56,6 +56,11 @@ Commands available through `invoke_command`:
 | `get_query_dsl` | Return the `query_graph` JSON DSL grammar and version. |
 | `get_response_format` | Return the `query_graph` response JSON Schema and version. |
 
+GQL query text requires the Rails `orbit_gql_queries` feature flag.
+See the [GQL access requirements](api.md#query-endpoint).
+`list_commands` advertises GQL even when the flag is off.
+Rails rejects GQL requests from users outside the enabled cohort.
+
 ## Connect your MCP client
 
 Configure your MCP client to point at `https://gitlab.com/api/v4/orbit/mcp`.
