@@ -151,11 +151,3 @@ can branch on them without parsing stderr.
 | `403` | `4` | No Knowledge Graph enabled namespaces available. |
 | `429` | `5` | Rate limited. Inspect `Retry-After` and back off. |
 | Other | `1` | Unstructured error. Response body, if any, is included. |
-
-## Billing
-
-During the beta, `glab orbit query` does not consume GitLab Credits.
-
-When GitLab Orbit is generally available, `glab orbit query` consumes GitLab Credits
-the same way as MCP queries. `status`, `ontology`, `tools`, and `graph-status` calls
-stay free.

@@ -197,13 +197,10 @@ Next:
   [see what it changes](access/cli.md#what-it-changes) before you run it.
 - Browse the table layout: [Schema reference](schema.md).
 
-## Billing
-
-GitLab Orbit Local does not consume GitLab Credits. All processing is local.
-
 ## What to try next
 
 - [What GitLab Orbit Local indexes](indexing.md) - language and coverage scope.
 - [Schema reference](schema.md) - the four node types in the local graph.
 - [Cookbook](../remote/cookbook.md) - copy-paste queries (code-only ones apply to Local).
 - [Get started with GitLab Orbit Remote](../remote/getting-started.md) - query your full GitLab instance.
+- [Billing and credits](../remote/billing.md) - which actions consume GitLab Credits.

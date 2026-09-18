@@ -54,19 +54,20 @@ glab orbit status
 
 GitLab Orbit Remote exposes the same graph through three surfaces. Pick the one that matches who's querying:
 
-| Method | Best for | Setup | Billing |
-|---|---|---|---|
-| **GitLab Duo Agent Platform** | End users in the GitLab UI | None | Free during beta, GitLab Credits after GA |
-| **MCP** | Claude Code, Codex, other AI agents | One-time agent config | Free during beta, GitLab Credits after GA |
-| **REST API** | Scripts, dashboards, custom tooling | API token | Free during beta, GitLab Credits after GA |
+| Method | Best for | Setup |
+|---|---|---|
+| GitLab Duo Agent Platform | End users in the GitLab UI | None |
+| MCP | Claude Code, Codex, other AI agents | One-time agent configuration |
+| REST API | Scripts, dashboards, custom tooling | API token |
+
+During beta, queries on all three surfaces are free.
+For more information, see [billing and credits](billing.md).
 
 ### GitLab Duo Agent Platform (no setup required)
 
 GitLab Orbit is wired into GitLab Duo Agent Platform. The GitLab Duo Agent, Planner Agent, Security Analyst Agent, Data Analyst Agent, CI Expert Agent, and Developer Flow call GitLab Orbit's `list_commands` and `invoke_command` tools automatically, running commands such as `query_graph` and `get_graph_schema`, when a question is best answered by graph traversal. No tool selection or configuration required.
 
 For example, file a work item asking to rename the `deploy_user` method. The Developer Flow uses GitLab Orbit to identify every service that calls it, then drafts an MR that updates each one.
-
-During the beta, GitLab Duo queries against GitLab Orbit do not consume GitLab Credits.
 
 ### MCP (Claude Code, Codex, other agents)
 

@@ -49,16 +49,6 @@ GitLab Orbit is wired into the following GitLab Duo Agent Platform agents and fl
 When an agent uses GitLab Orbit to answer a question, the answer is grounded in your
 live graph rather than the agent's general knowledge.
 
-## Billing
-
-During the beta, queries that GitLab Duo Agent Platform makes against GitLab Orbit on
-your behalf do not consume GitLab Credits.
-
-When GitLab Orbit is generally available, these queries consume GitLab Credits. Credit
-rates are published in
-[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
-before charging begins.
-
 ## Example prompts
 
 Ask these in any of the surfaces above - the agent picks the right tool.

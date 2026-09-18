@@ -44,6 +44,7 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 | [Schema reference](schema.md) | All 28 node types across 6 domains |
 | [Cookbook](cookbook.md) | Copy-paste queries for common use cases |
 | [Query language](queries/) | Full query DSL reference |
+| [Billing and credits](billing.md) | Which actions consume GitLab Credits and which are free |
 
 ## Access methods
 
@@ -53,12 +54,3 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 | [MCP](access/mcp.md) | Connect Claude Code, Codex, and other agents |
 | [The GitLab CLI (`glab`)](access/glab.md) | `glab orbit` for scripting and discovery (available in `glab` 1.117 or later) |
 | [REST API](access/api.md) | Query from scripts, CI pipelines, or custom tooling |
-
-## Billing
-
-During the beta, GitLab Orbit queries do not consume GitLab Credits.
-
-When GitLab Orbit is generally available, queries consume GitLab Credits. Credit
-rates are published in
-[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
-before charging begins.

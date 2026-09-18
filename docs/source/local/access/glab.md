@@ -149,10 +149,3 @@ agent integration guide.
 
 `glab orbit` returns `0` on success and a non-zero exit code on failure,
 with details on stderr. Scripts and agents can branch on success or failure.
-
-## Billing
-
-The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
-`mcp`, and `repo-map`) process data locally and do not consume GitLab Credits.
-Hosted verbs require network access, and `query`
-[consumes GitLab Credits](../../remote/access/glab.md#billing).

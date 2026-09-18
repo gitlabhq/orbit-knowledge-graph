@@ -185,17 +185,6 @@ You should get typed results back with project names and paths. If you do, you'r
 connected. If not, run `glab auth status` to confirm you're authenticated, and
 check that GitLab Orbit is enabled on at least one of your groups.
 
-## Billing
-
-During the beta, queries through MCP do not consume GitLab Credits.
-
-When GitLab Orbit is generally available, each `invoke_command` call that runs
-`query_graph` consumes GitLab Credits from your subscription. `list_commands` and the
-`get_graph_schema`, `get_query_dsl`, and `get_response_format` commands stay free.
-Credit rates are published in
-[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
-before charging begins.
-
 ## Using the tools
 
 Once connected, instruct your AI agent to use the GitLab Orbit tools directly:

@@ -77,7 +77,3 @@ index them from separate checkout or worktree paths.
 
 See [index data with GitLab Orbit](../indexed-data.md#supported-languages) for the
 shared language-support table.
-
-## Billing
-
-GitLab Orbit Local does not consume GitLab Credits. All processing is local.

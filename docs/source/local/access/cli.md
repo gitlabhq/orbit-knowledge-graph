@@ -272,10 +272,6 @@ The environment variable overrides the saved setting.
 | `ORBIT_TELEMETRY_ENABLED` | `false` disables telemetry, `true` enables it. Overrides the saved setting. |
 | `ORBIT_TELEMETRY_COLLECTOR_URL` | Send events to a different collector, for testing. Defaults to the GitLab collector. |
 
-## Billing
-
-GitLab Orbit Local does not consume GitLab Credits. All processing is local.
-
 ## What to try next
 
 - [Connect via MCP](mcp.md) - connect Claude Code, Codex, and other agents to
@@ -283,3 +279,4 @@ GitLab Orbit Local does not consume GitLab Credits. All processing is local.
 - [Use GitLab Orbit Local with glab](glab.md) - call the CLI through `glab orbit`.
 - [Schema reference](../../remote/schema.md) - available node types and properties.
 - [Cookbook](../../remote/cookbook.md) - copy-paste queries for common use cases.
+- [Billing and credits](../../remote/billing.md) - which actions consume GitLab Credits.
