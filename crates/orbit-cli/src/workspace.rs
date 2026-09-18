@@ -30,16 +30,18 @@ impl Workspace {
     }
 
     pub fn default_root() -> Result<PathBuf> {
-        static ROOT: OnceLock<PathBuf> = OnceLock::new();
-        if let Some(root) = ROOT.get() {
-            return Ok(root.clone());
-        }
-        let override_dir = std::env::var("ORBIT_DATA_DIR")
-            .ok()
-            .filter(|s| !s.is_empty());
-        let home = dirs::home_dir().context("Could not determine home directory")?;
-        let root = resolve_root(override_dir, &home)?;
-        Ok(ROOT.get_or_init(|| root).clone())
+        // Resolution runs inside the cell so the legacy migration happens at most
+        // once per process, even when MCP tool calls race on the first use.
+        static ROOT: OnceLock<std::result::Result<PathBuf, String>> = OnceLock::new();
+        ROOT.get_or_init(|| {
+            let override_dir = std::env::var("ORBIT_DATA_DIR")
+                .ok()
+                .filter(|s| !s.is_empty());
+            let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+            resolve_root(override_dir, &home).map_err(|e| e.to_string())
+        })
+        .clone()
+        .map_err(anyhow::Error::msg)
     }
 
     pub fn open(root: PathBuf) -> Result<Self> {
@@ -456,6 +458,22 @@ mod tests {
 
         assert_eq!(root, expected);
         assert!(home.path().join(".orbit").exists());
+    }
+
+    #[test]
+    fn resolve_root_keeps_the_legacy_directory_when_the_move_fails() {
+        let home = tempfile::TempDir::new().unwrap();
+        let legacy = home.path().join(".orbit");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("graph.duckdb"), b"data").unwrap();
+        // A file where the parent directory must go makes create_dir_all fail
+        // without relying on permissions, which root ignores in CI containers.
+        std::fs::write(home.path().join(".gitlab"), b"").unwrap();
+
+        let root = resolve_root(None, home.path()).unwrap();
+
+        assert_eq!(root, legacy);
+        assert!(legacy.join("graph.duckdb").exists());
     }
 
     #[test]
