@@ -33,6 +33,22 @@ pub enum Tf {
     HasEdge(EdgeKind, EdgeDir),
 }
 
+impl Tf {
+    pub fn is_node_tf(&self) -> bool {
+        matches!(
+            self,
+            Tf::Field(_)
+                | Tf::Child(_)
+                | Tf::FieldChild(_, _)
+                | Tf::Const(_)
+                | Tf::ParentSym(_)
+                | Tf::AncestorSym(_)
+                | Tf::Concat(_, _, _)
+                | Tf::HasEdge(_, _)
+        )
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum EdgeDir {
     Incoming,

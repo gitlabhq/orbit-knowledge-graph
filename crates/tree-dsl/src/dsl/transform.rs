@@ -7,6 +7,22 @@ use crate::tree::{EdgeKind, Tree};
 
 use super::types::{Ctx, EdgeCtx, EdgeDir, Tf};
 
+fn child_sym(t: &Tree, id: NodeId, pred: impl Fn(&crate::tree::Node) -> bool) -> u32 {
+    id.children(&t.arena)
+        .find(|&c| pred(t.node(c)))
+        .map_or(0, |c| t.node(c).sym)
+}
+
+fn nonempty(lang: &Lang, sym: u32) -> Option<u32> {
+    if sym == 0 {
+        return None;
+    }
+    if lang.syms.resolve(sym).is_empty() {
+        return None;
+    }
+    Some(sym)
+}
+
 fn parse_nested_tf(spec: &str, ctx: Option<&mut Ctx>) -> Tf {
     if let Some((name, arg)) = spec.split_once(':') {
         Tf::from_func(name, &[arg], ctx)
@@ -17,48 +33,50 @@ fn parse_nested_tf(spec: &str, ctx: Option<&mut Ctx>) -> Tf {
 
 impl Tf {
     pub(crate) fn from_func(name: &str, args: &[&str], mut ctx: Option<&mut Ctx>) -> Tf {
+        let s = |i: usize| -> Box<str> { args[i].into() };
+        let kind =
+            |c: &mut Option<&mut Ctx>, a: &str| c.as_mut().expect("needs context").intern_kind(a);
+
         match name {
-            "replace" => {
-                assert_eq!(args.len(), 2, "replace needs 2 args");
-                Tf::Replace(args[0].into(), args[1].into())
-            }
-            "strip_prefix" | "strip" => Tf::Strip(args[0].into()),
-            "strip_suffix" => Tf::StripSuffix(args[0].into()),
-            "prepend" => Tf::Prepend(args[0].into()),
+            "lowercase" | "stem" => match name {
+                "lowercase" => Tf::Lowercase,
+                _ => Tf::Stem,
+            },
+            "strip_prefix" | "strip" => Tf::Strip(s(0)),
+            "strip_suffix" => Tf::StripSuffix(s(0)),
+            "prepend" => Tf::Prepend(s(0)),
+            "split_last" => Tf::SplitLast(s(0)),
+            "split_first" => Tf::SplitFirst(s(0)),
+            "replace" => Tf::Replace(s(0), s(1)),
             "to_rel" => Tf::ToRel(args[0].chars().next().expect("to_rel arg")),
-            "split_last" => Tf::SplitLast(args[0].into()),
-            "split_first" => Tf::SplitFirst(args[0].into()),
-            "lowercase" => Tf::Lowercase,
-            "field" => Tf::Field(ctx.expect("field needs context").intern_field(args[0])),
-            "child_sym" => Tf::Child(ctx.expect("child_sym needs context").intern_kind(args[0])),
-            "parent_sym" => {
-                Tf::ParentSym(ctx.expect("parent_sym needs context").intern_kind(args[0]))
+            "collapse_index" => Tf::CollapseIndex(args.iter().map(|a| (*a).into()).collect()),
+            "field" => Tf::Field(ctx.as_mut().expect("needs context").intern_field(args[0])),
+            "child_sym" => Tf::Child(kind(&mut ctx, args[0])),
+            "parent_sym" => Tf::ParentSym(kind(&mut ctx, args[0])),
+            "ancestor_sym" => Tf::AncestorSym(kind(&mut ctx, args[0])),
+            "has_incoming" | "has_outgoing" => {
+                let ek = EdgeKind::from_str(args[0]).expect("unknown edge kind");
+                let dir = if name == "has_incoming" {
+                    EdgeDir::Incoming
+                } else {
+                    EdgeDir::Outgoing
+                };
+                Tf::HasEdge(ek, dir)
             }
-            "ancestor_sym" => Tf::AncestorSym(
-                ctx.expect("ancestor_sym needs context")
-                    .intern_kind(args[0]),
-            ),
             "concat" => {
-                assert!(args.len() >= 3, "concat needs (sep, tf_a, tf_b)");
                 let a = parse_nested_tf(args[1], ctx.as_mut().map(|c| &mut **c));
                 let b = parse_nested_tf(args[2], ctx);
-                Tf::Concat(args[0].into(), Box::new(a), Box::new(b))
-            }
-            "stem" => Tf::Stem,
-            "collapse_index" => Tf::CollapseIndex(args.iter().map(|a| (*a).into()).collect()),
-            "has_incoming" => {
-                let kind = EdgeKind::from_str(args[0]).expect("unknown edge kind");
-                Tf::HasEdge(kind, EdgeDir::Incoming)
-            }
-            "has_outgoing" => {
-                let kind = EdgeKind::from_str(args[0]).expect("unknown edge kind");
-                Tf::HasEdge(kind, EdgeDir::Outgoing)
+                Tf::Concat(s(0), Box::new(a), Box::new(b))
             }
             _ => panic!("unknown transform: {name}"),
         }
     }
 
     pub(crate) fn apply_to_str(&self, s: &str) -> String {
+        debug_assert!(
+            !self.is_node_tf(),
+            "node transform used as string transform"
+        );
         match self {
             Tf::Id => s.to_string(),
             Tf::Strip(p) => s.strip_prefix(&**p).unwrap_or(s).to_string(),
@@ -104,16 +122,7 @@ impl Tf {
                 }
                 s.to_string()
             }
-            Tf::Field(_)
-            | Tf::Child(_)
-            | Tf::FieldChild(_, _)
-            | Tf::Const(_)
-            | Tf::ParentSym(_)
-            | Tf::AncestorSym(_)
-            | Tf::Concat(_, _, _)
-            | Tf::HasEdge(_, _) => {
-                unreachable!("tree-context transform used as string transform")
-            }
+            _ => s.to_string(),
         }
     }
 
@@ -127,35 +136,29 @@ impl Tf {
         match self {
             Tf::Id => t.node(id).sym,
             Tf::Field(f) => {
-                let fallback = t.node(id).sym;
-                id.children(&t.arena)
-                    .find(|&c| t.node(c).field == *f)
-                    .map_or(fallback, |c| t.node(c).sym)
+                let f = *f;
+                let found = child_sym(t, id, |n| n.field == f);
+                if found != 0 { found } else { t.node(id).sym }
             }
             Tf::Const(s) => lang.syms.intern(s),
-            Tf::Child(k) => id
-                .children(&t.arena)
-                .find(|&c| t.node(c).kind == *k)
-                .map_or(0, |c| t.node(c).sym),
-            Tf::FieldChild(f, k) => id
-                .children(&t.arena)
-                .find(|&c| t.node(c).field == *f)
-                .and_then(|n| n.children(&t.arena).find(|&c| t.node(c).kind == *k))
-                .map_or(0, |c| t.node(c).sym),
-            Tf::ParentSym(k) => id
-                .parent(&t.arena)
-                .into_iter()
-                .flat_map(|p| p.children(&t.arena))
-                .find(|&c| t.node(c).kind == *k)
-                .map_or(0, |c| t.node(c).sym),
+            Tf::Child(k) => child_sym(t, id, |n| n.kind == *k),
+            Tf::FieldChild(f, k) => {
+                let (f, k) = (*f, *k);
+                id.children(&t.arena)
+                    .find(|&c| t.node(c).field == f)
+                    .map_or(0, |n| child_sym(t, n, |n| n.kind == k))
+            }
+            Tf::ParentSym(k) => {
+                let k = *k;
+                id.parent(&t.arena)
+                    .map_or(0, |p| child_sym(t, p, |n| n.kind == k))
+            }
             Tf::AncestorSym(k) => {
+                let k = *k;
                 let mut cur = id;
                 loop {
-                    let found = cur
-                        .children(&t.arena)
-                        .find(|&c| t.node(c).kind == *k)
-                        .map(|c| t.node(c).sym);
-                    if let Some(sym) = found {
+                    let sym = child_sym(t, cur, |n| n.kind == k);
+                    if sym != 0 {
                         break sym;
                     }
                     match cur.parent(&t.arena) {
@@ -182,39 +185,29 @@ impl Tf {
                 lang.syms.intern(if found { "true" } else { "false" })
             }
             Tf::Concat(sep, a, b) => {
-                let sa = a.apply_sym(t, lang, id, edge_ctx);
-                let sb = b.apply_sym(t, lang, id, edge_ctx);
-                let sa_empty = sa == 0 || lang.syms.resolve(sa).is_empty();
-                let sb_empty = sb == 0 || lang.syms.resolve(sb).is_empty();
-                if sa_empty && sb_empty {
-                    return 0;
+                let sa = nonempty(lang, a.apply_sym(t, lang, id, edge_ctx));
+                let sb = nonempty(lang, b.apply_sym(t, lang, id, edge_ctx));
+                match (sa, sb) {
+                    (None, None) => 0,
+                    (Some(a), None) => a,
+                    (None, Some(b)) => b,
+                    (Some(a), Some(b)) => lang.syms.intern(&format!(
+                        "{}{sep}{}",
+                        lang.syms.resolve(a),
+                        lang.syms.resolve(b)
+                    )),
                 }
-                if sa_empty {
-                    return sb;
-                }
-                if sb_empty {
-                    return sa;
-                }
-                let result = format!("{}{sep}{}", lang.syms.resolve(sa), lang.syms.resolve(sb));
-                lang.syms.intern(&result)
             }
             Tf::Pipeline(steps) => {
                 let mut s = lang.syms.resolve(t.node(id).sym).to_string();
                 for step in steps {
-                    match step {
-                        Tf::Child(_)
-                        | Tf::FieldChild(_, _)
-                        | Tf::Field(_)
-                        | Tf::ParentSym(_)
-                        | Tf::AncestorSym(_)
-                        | Tf::Concat(_, _, _)
-                        | Tf::HasEdge(_, _) => {
-                            let sym = step.apply_sym(t, lang, id, edge_ctx);
-                            s = lang.syms.resolve(sym).to_string();
-                        }
-                        _ => {
-                            s = step.apply_to_str(&s);
-                        }
+                    if step.is_node_tf() {
+                        s = lang
+                            .syms
+                            .resolve(step.apply_sym(t, lang, id, edge_ctx))
+                            .to_string();
+                    } else {
+                        s = step.apply_to_str(&s);
                     }
                 }
                 lang.syms.intern(&s)
