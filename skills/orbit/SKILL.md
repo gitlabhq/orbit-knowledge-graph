@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.30.0
+version: 0.31.0
 license: MIT
 metadata:
   audience: developers
@@ -27,6 +27,8 @@ If you must introspect, call `glab orbit ontology <Entity...>` with explicit ent
 glab orbit ontology Project |
   jq '.nodes[] | select(.name == "Project") | .properties'
 ```
+
+The named-query catalog at `GET /api/v4/orbit/templates` is rendered for the caller in the language GitLab has enabled for them: JSON objects by default, GQL text when the `orbit_gql_queries` flag is on. Each entry names its `language`; see [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one `aggregation` query over N traversal queries for "how many X grouped by Y", and batch related lookups.
 

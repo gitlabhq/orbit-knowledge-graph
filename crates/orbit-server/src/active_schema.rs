@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::TryStreamExt;
-use named_queries::{NamedQueries, NamedQuery};
+use named_queries::{Language, NamedQueries, NamedQuery};
 use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 use opentelemetry::KeyValue;
@@ -13,7 +13,7 @@ use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::AppConfig;
-use query_engine::compiler::validate_normalize;
+use query_engine::compiler::{validate_normalize, validate_normalize_gql};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
@@ -216,8 +216,14 @@ impl SnapshotLoader {
 }
 
 fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), String> {
-    let rendered = query.render_example().map_err(|error| error.to_string())?;
-    validate_normalize(&rendered, ontology).map_err(|error| error.to_string())?;
+    let json = query
+        .render_example(Language::Json)
+        .map_err(|error| error.to_string())?;
+    validate_normalize(&json, ontology).map_err(|error| error.to_string())?;
+    let gql = query
+        .render_example(Language::Gql)
+        .map_err(|error| error.to_string())?;
+    validate_normalize_gql(&gql, ontology).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -236,4 +242,52 @@ fn register_state_gauge(active: &Arc<ActiveSchema>) {
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ontology::DataType;
+
+    #[test]
+    fn named_queries_validate_against_the_active_snapshot() {
+        let ontology = Ontology::new()
+            .with_nodes(["User", "MergeRequest"])
+            .with_edges(["MERGED"])
+            .with_fields(
+                "User",
+                [("id", DataType::Int), ("username", DataType::String)],
+            )
+            .with_fields(
+                "MergeRequest",
+                [
+                    ("id", DataType::Int),
+                    ("title", DataType::String),
+                    ("state", DataType::String),
+                ],
+            );
+        let old = SchemaSnapshot::new(1, Arc::new(ontology.clone())).unwrap();
+        assert!(old.named_queries.get("recent_merges").is_none());
+        assert!(old.named_queries.get("my_neighbors").is_some());
+        let ontology = ontology.with_fields("MergeRequest", [("merged_at", DataType::DateTime)]);
+        let current = SchemaSnapshot::new(2, Arc::new(ontology)).unwrap();
+        assert!(current.named_queries.get("recent_merges").is_some());
+    }
+
+    #[test]
+    fn embedded_named_queries_fit_without_a_caller_security_context() {
+        let ontology = Arc::new(
+            Ontology::load_embedded()
+                .unwrap()
+                .with_schema_version_prefix("v99_"),
+        );
+        let snapshot = SchemaSnapshot::new(99, ontology).unwrap();
+        assert_eq!(snapshot.named_queries.iter().count(), 12);
+        assert!(
+            snapshot
+                .named_queries
+                .get("mrs_fixing_vulnerabilities")
+                .is_some()
+        );
+    }
 }

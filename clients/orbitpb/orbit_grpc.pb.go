@@ -69,10 +69,6 @@ type OrbitServiceClient interface {
 	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
 	// command catalog and InvokeAgentCommand instead.
 	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
-	// Lists the server-defined named queries with their DSL rendered for the
-	// caller (bindings resolved from JWT claims, parameters filled with their
-	// declared examples). Lets clients discover and display named queries
-	// without owning copies of the query text.
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(ctx context.Context, in *ListNamedQueriesRequest, opts ...grpc.CallOption) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
@@ -231,10 +227,6 @@ type OrbitServiceServer interface {
 	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
 	// command catalog and InvokeAgentCommand instead.
 	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
-	// Lists the server-defined named queries with their DSL rendered for the
-	// caller (bindings resolved from JWT claims, parameters filled with their
-	// declared examples). Lets clients discover and display named queries
-	// without owning copies of the query text.
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(context.Context, *ListNamedQueriesRequest) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter

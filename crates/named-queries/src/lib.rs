@@ -1,22 +1,8 @@
-//! Server-defined named queries.
-//!
-//! Named queries are graph query templates committed under
-//! `config/named_queries/` so the query text lives with the engine
-//! `orbit-server`'s build script compiles every template against the ontology,
-//! and the same files are embedded into the binary so the server can execute
-//! them by name at runtime.
-//!
-//! Templates may contain two placeholder kinds:
-//!
-//! - `{ "$binding": "<name>" }` — identity values resolved exclusively from
-//!   trusted request context ([`BindingValues`]), never from client input.
-//! - `{ "$param": "<name>" }` — selection values supplied by the client
-//!   (e.g. the entity and ids of a clicked node) and validated against the
-//!   JSON Schema each template declares for the parameter.
-//! - `"$param:<name>": ...` — an object key filled from a string parameter,
-//!   so a template can take the property name to filter on.
-
+mod gql;
+mod json;
 mod query;
+#[cfg(test)]
+mod query_tests;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -25,6 +11,18 @@ use rust_embed::Embed;
 use serde_json::{Map, Value};
 
 pub use query::{BindingValues, NamedQuery};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    #[default]
+    Json,
+    Gql,
+}
+
+impl Language {
+    pub const ALL: [Self; 2] = [Self::Json, Self::Gql];
+}
 
 #[derive(Embed)]
 #[folder = "$NAMED_QUERIES_DIR"]
@@ -150,16 +148,17 @@ impl NamedQueries {
     pub fn render_request(
         &self,
         request: &str,
+        language: Language,
         values: &BindingValues,
     ) -> Result<String, NamedQueryError> {
-        let (name, params) = parse_request(request)?;
-        let Some(query) = self.queries.get(&name) else {
+        let envelope = parse_request(request)?;
+        let Some(query) = self.queries.get(&envelope.name) else {
             return Err(NamedQueryError::Unknown {
-                name,
+                name: envelope.name,
                 available: self.names().map(String::from).collect(),
             });
         };
-        query.render(values, &params)
+        query.render(language, values, &envelope.parameters)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &NamedQuery> {
@@ -175,20 +174,18 @@ impl NamedQueries {
     }
 }
 
-fn parse_request(request: &str) -> Result<(String, Map<String, Value>), NamedQueryError> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Envelope {
-        name: String,
-        #[serde(default)]
-        parameters: Map<String, Value>,
-    }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Envelope {
+    name: String,
+    #[serde(default)]
+    parameters: Map<String, Value>,
+}
 
-    let envelope: Envelope =
-        serde_json::from_str(request).map_err(|e| NamedQueryError::InvalidRequest {
-            message: e.to_string(),
-        })?;
-    Ok((envelope.name, envelope.parameters))
+fn parse_request(request: &str) -> Result<Envelope, NamedQueryError> {
+    serde_json::from_str(request).map_err(|e| NamedQueryError::InvalidRequest {
+        message: e.to_string(),
+    })
 }
 
 #[cfg(test)]
@@ -206,8 +203,14 @@ name: q
 description: A query.
 bindings: [current_user_id]
 query:
-  node_ids:
-    - { $binding: current_user_id }
+  json:
+    query_type: traversal
+    nodes:
+      - id: n
+        entity: User
+        node_ids: [{ $binding: current_user_id }]
+  gql: |
+    MATCH (n:User {id: {{ binding("current_user_id") }}}) RETURN n
 "#;
 
     #[test]
@@ -232,20 +235,33 @@ query:
     }
 
     #[test]
-    fn render_request_without_parameters_substitutes_current_user_id() {
+    fn render_request_renders_the_selected_language_with_current_user_id() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
-        let rendered = queries
-            .render_request(r#"{"name": "my_neighbors"}"#, &values())
+        let json = queries
+            .render_request(r#"{"name": "my_neighbors"}"#, Language::Json, &values())
             .expect("known named query renders");
-        assert!(rendered.contains("\"node_ids\":[42]"), "{rendered}");
-        assert!(!rendered.contains("$binding"), "{rendered}");
+        assert!(json.contains("\"node_ids\":[42]"), "{json}");
+        assert!(!json.contains("$binding"), "{json}");
+        let gql = queries
+            .render_request(r#"{"name": "my_neighbors"}"#, Language::Gql, &values())
+            .expect("known named query renders");
+        assert!(gql.contains("{id: 42}"), "{gql}");
+        assert!(
+            queries
+                .render_request(
+                    r#"{"name": "my_neighbors", "language": "gql"}"#,
+                    Language::Gql,
+                    &values()
+                )
+                .is_err()
+        );
     }
 
     #[test]
     fn render_request_rejects_unknown_name_and_lists_available() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
         let err = queries
-            .render_request(r#"{"name": "nonexistent"}"#, &values())
+            .render_request(r#"{"name": "nonexistent"}"#, Language::Json, &values())
             .unwrap_err();
         assert!(err.to_string().contains("nonexistent"), "{err}");
         assert!(err.to_string().contains("my_neighbors"), "{err}");
@@ -255,7 +271,7 @@ query:
     fn render_request_rejects_bare_name() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
         let err = queries
-            .render_request("my_neighbors", &values())
+            .render_request("my_neighbors", Language::Json, &values())
             .unwrap_err();
         assert!(
             matches!(err, NamedQueryError::InvalidRequest { .. }),
@@ -269,6 +285,17 @@ query:
         let rendered = queries
             .render_request(
                 r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#,
+                Language::Gql,
+                &values(),
+            )
+            .expect("parameterized named query renders");
+        assert!(rendered.contains("center:`Project`"), "{rendered}");
+        assert!(rendered.contains("center.id IN [7,9]"), "{rendered}");
+        assert!(rendered.contains("LIMIT 50"), "{rendered}");
+        let rendered = queries
+            .render_request(
+                r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#,
+                Language::Json,
                 &values(),
             )
             .expect("parameterized named query renders");
@@ -284,6 +311,7 @@ query:
         let err = queries
             .render_request(
                 r#"{"name": "expand_neighbors", "unexpected": 1}"#,
+                Language::Json,
                 &values(),
             )
             .unwrap_err();
@@ -308,11 +336,8 @@ query:
 
     #[test]
     fn multiple_defaults_are_rejected() {
-        let default_yaml = |name: &str| {
-            format!(
-                "name: {name}\ndescription: A query.\ndefault: true\nbindings: [current_user_id]\nquery:\n  node_ids:\n    - {{ $binding: current_user_id }}\n"
-            )
-        };
+        let default_yaml =
+            |name: &str| VALID.replace("name: q", &format!("name: {name}\ndefault: true"));
         let err = NamedQueries::from_files(
             "test",
             [

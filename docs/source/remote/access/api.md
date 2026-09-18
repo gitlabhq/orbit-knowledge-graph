@@ -61,12 +61,11 @@ before charging begins.
 
 ## Query endpoint
 
-Execute a graph query using a JSON Query DSL object (the default) or read-only query text with `language: gql`.
+Execute a graph query. The instance decides the query language: a JSON Query DSL object by default, or read-only GQL text when GitLab has enabled GQL for you.
 
 The request body contains:
 
-- `query`: A JSON Query DSL object, or a text string when `language` is `gql`.
-- `language`: Optional `json` (default) or `gql`. Unknown values and query shapes that do not match the language are rejected.
+- `query`: A JSON Query DSL object, or a text string when GQL is enabled. A query whose shape does not match the enabled language is rejected.
 - `response_format`: Optional response format. Use `raw` for structured JSON, or `llm`
   for compact text optimized for AI agents. Default: `raw`.
 
@@ -84,25 +83,24 @@ curl --request POST \
 
 See the [query language reference](../queries/query-language.md) for the full DSL.
 
-GQL requires the `orbit_gql_queries` feature flag in Rails, which is off by default.
+The `orbit_gql_queries` feature flag in Rails selects the language. It is off by default, which keeps JSON.
 The flag can target your user or a root group.
 For the group gate, you need at least the Developer role in that group or one of its subgroups.
-Without the flag, Rails rejects GQL requests.
-JSON queries do not require this flag.
+With the flag on, the query endpoint, the named-query catalog, and the dashboard editor all use GQL text.
 
-To send read-only query text or inspect its ontology:
+To send read-only query text or inspect its ontology with the flag on:
 
 ```shell
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{"language":"gql","query":"MATCH (u:User {id: 1}) RETURN u.username LIMIT 1","response_format":"llm"}' \
+  --data '{"query":"MATCH (u:User {id: 1}) RETURN u.username LIMIT 1","response_format":"llm"}' \
   "https://gitlab.com/api/v4/orbit/query"
 
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{"language":"gql","query":"CALL db.schema(\"MergeRequest\")","response_format":"raw"}' \
+  --data '{"query":"CALL db.schema(\"MergeRequest\")","response_format":"raw"}' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 

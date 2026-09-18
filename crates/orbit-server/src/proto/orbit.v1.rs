@@ -266,16 +266,15 @@ pub struct ResponseFormatSchema {
     #[prost(string, tag = "2")]
     pub version: ::prost::alloc::string::String,
 }
-/// Request for the named-query catalog.
+/// Request for the named-query catalog. The x-gitlab-orbit-query-language
+/// metadata selects the rendered language (json by default).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListNamedQueriesRequest {}
-/// Response listing every embedded named query.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNamedQueriesResponse {
     #[prost(message, repeated, tag = "1")]
     pub queries: ::prost::alloc::vec::Vec<NamedQueryDefinition>,
 }
-/// A named query with its DSL rendered for the requesting user.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct NamedQueryDefinition {
     /// stable identifier, e.g. "recent_merges"
@@ -284,9 +283,12 @@ pub struct NamedQueryDefinition {
     /// human-readable summary from the template YAML
     #[prost(string, tag = "2")]
     pub description: ::prost::alloc::string::String,
-    /// rendered query DSL as a JSON string, executable as-is
+    /// rendered in the requested language, executable as-is
     #[prost(string, tag = "3")]
     pub raw_query: ::prost::alloc::string::String,
+    /// language of raw_query
+    #[prost(enumeration = "QueryType", tag = "4")]
+    pub query_type: i32,
 }
 /// Wrapper for the redaction handshake within a streaming query.
 /// Server sends `required` with resources to check, client responds with decisions.
@@ -1006,10 +1008,6 @@ pub mod orbit_service_client {
                 .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetQueryDsl"));
             self.inner.unary(req, path, codec).await
         }
-        /// Lists the server-defined named queries with their DSL rendered for the
-        /// caller (bindings resolved from JWT claims, parameters filled with their
-        /// declared examples). Lets clients discover and display named queries
-        /// without owning copies of the query text.
         /// Used by GET /api/v4/orbit/templates.
         pub async fn list_named_queries(
             &mut self,
@@ -1194,10 +1192,6 @@ pub mod orbit_service_server {
             tonic::Response<super::GetQueryDslResponse>,
             tonic::Status,
         >;
-        /// Lists the server-defined named queries with their DSL rendered for the
-        /// caller (bindings resolved from JWT claims, parameters filled with their
-        /// declared examples). Lets clients discover and display named queries
-        /// without owning copies of the query text.
         /// Used by GET /api/v4/orbit/templates.
         async fn list_named_queries(
             &self,

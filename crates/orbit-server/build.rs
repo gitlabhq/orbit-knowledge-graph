@@ -130,11 +130,19 @@ fn validate_named_queries() {
         .unwrap_or_else(|e| panic!("named queries failed to load: {e}"));
 
     for query in queries.iter() {
-        let rendered = query
-            .render_example()
-            .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
-        if let Err(e) = compiler::compile(&rendered, compiler::Frontend::JsonDsl, &ontology, &ctx) {
-            panic!("named query `{}` failed to compile: {e}", query.name);
+        for (language, frontend) in [
+            (named_queries::Language::Json, compiler::Frontend::JsonDsl),
+            (named_queries::Language::Gql, compiler::Frontend::Gql),
+        ] {
+            let rendered = query
+                .render_example(language)
+                .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
+            if let Err(e) = compiler::compile(&rendered, frontend, &ontology, &ctx) {
+                panic!(
+                    "named query `{}` ({language:?}) failed to compile: {e}",
+                    query.name
+                );
+            }
         }
     }
 }

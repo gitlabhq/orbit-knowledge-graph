@@ -32,7 +32,7 @@ A `GraphFormatter` in the Rust query pipeline handles the transformation from ra
 
 Orbit agents discover graph capabilities through a command catalog instead of relying on long MCP tool descriptions. `ListAgentCommands` returns command names, short descriptions, and parameter schemas. `InvokeAgentCommand` executes commands that do not need Rails-specific context.
 
-The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
+The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. When the request header selects GQL, the catalog omits `get_query_dsl` and `query_graph` directs agents to `CALL db.schema()`. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
 
 Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version is the `query_dsl` pin in `config/versions.yaml`. It is tied to the `graph_query` schema `$id` major version. The query response format version is the `raw_output_format` pin in the same file.
 
@@ -44,15 +44,26 @@ The remote manifest uses line-oriented HTML placeholders to show where the local
 
 ### Named Queries
 
-Named queries are server-defined query templates for preset consumers (the Orbit dashboard). Clients invoke a stable name instead of authoring a Query DSL string. That string can drift from the server's grammar and ontology. Templates live as YAML under `config/named_queries/`. They are validated against `config/schemas/named_query.schema.json` and compiled against the ontology by `orbit-server`'s build script. A template that no longer matches the DSL or ontology fails the build.
+Named queries are server-defined queries for consumers such as the Orbit dashboard. Clients invoke a stable name instead of authoring query text. All 12 definitions live in YAML under `config/named_queries/`. Each `query` carries two spellings of the same graph shape: `json` (Query DSL object) and `gql` (query text), like the data-correctness scenarios. The request selects the spelling. `mise named-queries:validate` checks the metadata against `config/schemas/named_query.schema.json`. The server build compiles both rendered examples against the ontology with their frontends. Grammar or ontology drift fails the build.
 
-At runtime the same files are embedded into the binary (via the `named-queries` crate). A client executes one by sending `ExecuteQuery` with `query_type = QUERY_TYPE_NAMED`. In the `query` field, it passes a JSON envelope `{"name": ..., "parameters": {...}}` (`parameters` may be omitted for templates that declare none). The server renders two placeholder kinds and runs the result through the standard pipeline. Quota, security context, redaction, and response formatting behave exactly as for client-authored queries:
+The `named-queries` crate embeds the same files at runtime. Clients send `ExecuteQuery` with `query_type = QUERY_TYPE_NAMED` and a JSON envelope in `query`: `{"name": ..., "parameters": {...}}`. `parameters` may be omitted for definitions that declare none. The `x-gitlab-orbit-query-language` request header selects the spelling (`json` by default); Rails sets it from its rollout flag, so the public REST and MCP surfaces carry no language field. The rendered query runs through the matching compiler frontend and the standard execution pipeline. Authentication, quota, security context, redaction, hydration, and response formatting are identical for both spellings.
 
-- `{ "$binding": ... }`: identity values resolved from trusted request context (currently only `current_user_id`, taken from the caller's JWT claims). Never client-supplied.
-- `{ "$param": ... }`: selection values supplied by the client (e.g. the entity and ids of a node clicked in the graph explorer). They are validated against a JSON Schema each template declares per parameter. Authorization never depends on these: the compiler security pass and redaction filter results regardless of which ids the client asks for. Each parameter also declares an `example` value used to compile the template at build time.
+The JSON spelling uses placeholders replaced by value: `{"$binding": "current_user_id"}` for the caller's ID from trusted JWT claims, `{"$param": "name"}` for a client value, and a `"$param:name"` object key for a string parameter used as a property name.
 
-Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. Clients discover the catalog through the `ListNamedQueries` RPC (surfaced as `GET /api/v4/orbit/templates`). It returns each parameterless query's name, description, and DSL rendered for the caller with bindings resolved from the JWT claims. So the returned DSL is executable as-is and can populate a query editor.
-Queries that declare parameters are executed by name only and do not appear in the catalog. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side. Parameters carry only values. A string parameter may also fill an object key, written `"$param:<name>": ...`, so a template can take the property name to filter on. This preserves the drift-by-construction guarantee.
+The GQL spelling uses MiniJinja lookup functions:
+
+- `binding("current_user_id")` returns the caller's ID, separate from client parameters.
+- `param("name")` encodes a client value as a GQL literal with JSON string escaping. It supports strings, Int64 integers, booleans, and arrays.
+- `identifier("name")` accepts only ASCII identifiers matching `[A-Za-z_][A-Za-z0-9_]*` and emits a backtick-quoted identifier. Use it for dynamic entity and property names. The compiler checks ontology membership.
+- `integer("name")` formats a non-negative decimal Int64 ID, including the existing string-valued definition IDs.
+
+Templates are trusted, checked-in code, not client input. Authors must place GQL lookups at complete literal or identifier positions, outside quotes, backticks, and comments. Raw parameter values are not exposed to MiniJinja, and rendered values are not evaluated as template text. Each parameter keeps one JSON Schema and one build-time example shared by both spellings. Unknown names, missing or unknown parameters, schema violations, undeclared lookups, unused declarations in either spelling, and unknown server bindings are rejected.
+
+`ListNamedQueries`, surfaced as `GET /api/v4/orbit/templates`, returns only parameterless definitions rendered in the request header's language. Each entry contains its name, description, caller-rendered `raw_query`, and the matching `query_type`. The default query leads the catalog; the other entries retain name order. The wire enum remains `JSON=0`, `NAMED=1`, `GQL=2`, so older clients and servers exchange JSON.
+
+Active-schema snapshots validate both rendered examples with shared native shape, reference, and normalization checks. This check needs no caller security context. Definitions that do not fit the active ontology are hidden and rejected by name. Execution still uses the caller's security context and the snapshot's ontology.
+
+Compiler parity tests in `crates/integration-tests/tests/compiler/named_queries.rs` compile both spellings of all 12 definitions and require identical SQL, parameters, result context, and hydration, including hostile strings, dynamic identifiers, ID lists, and binding spoofing. The corpus smoke test executes both spellings.
 
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails. Three factors decide it: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 
