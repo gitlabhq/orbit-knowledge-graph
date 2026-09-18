@@ -53,7 +53,6 @@ Run `mise lint:docs` before pushing any documentation changes.
 ## Engineering conventions
 
 - Explain only reasons that the code cannot show. Do not narrate setup, calls, or assertions in comments.
-- Run the `/remove-llm-comments` skill on comments you changed before you push.
 - Reuse existing handlers, pipelines, helpers, and constructors before you add new ones.
 - Read `crates/indexer/AGENTS.md` before indexer work. Read `crates/code-graph/AGENTS.md` before Code Graph work.
 - Do not ship bare `#[allow(dead_code)]`. Delete unused code or use `#[cfg(test)]` for test-only code.
