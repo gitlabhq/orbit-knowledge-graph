@@ -169,7 +169,7 @@ struct IndexArgs {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -201,7 +201,7 @@ struct GrepArgs {
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
     kind: Option<Kinds>,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -260,7 +260,7 @@ struct ContextArgs {
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -290,7 +290,7 @@ struct SqlArgs {
     #[arg(long)]
     all: bool,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -298,7 +298,7 @@ struct SqlArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("get_graph_schema"))]
 struct SchemaArgs {
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -320,7 +320,7 @@ struct ListArgs {
     #[arg(long, short = 'F', default_value = "table")]
     format: sql_format::Format,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -344,7 +344,7 @@ struct RepoMapArgs {
     #[arg(long = "ext", value_name = "EXT")]
     extensions: Vec<String>,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -442,7 +442,7 @@ enum Commands {
         #[arg(long, value_enum)]
         response_format: Option<remote::ResponseFormat>,
     },
-    /// Read and write persisted CLI settings (`~/.orbit/settings.json`).
+    /// Read and write persisted CLI settings (`~/.gitlab/orbit/settings.json`).
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
@@ -860,12 +860,12 @@ fn index_repo(
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
     let mut filter = code_graph::v2::config::CodeFilter::new(
-        MAX_INDEXED_FILE_BYTES,
-        0,
+        Some(MAX_INDEXED_FILE_BYTES),
+        None,
         code_graph::v2::config::detect_language_from_path,
     );
-    let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(
-        orbit_utils::walk::walk_dir(&git.repo_path, &mut filter)
+    let file_inventory = std::sync::Arc::new(
+        orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
             .context("failed to walk repository files")?,
     );
 
@@ -925,7 +925,6 @@ fn index_repo(
         std::path::Path::new(&root_path),
         file_inventory,
         pipeline_config.clone(),
-        filter.file_reasons(),
         tracer,
         converter,
         on_batch,

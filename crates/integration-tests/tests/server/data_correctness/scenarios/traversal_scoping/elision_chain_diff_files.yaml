@@ -2,13 +2,6 @@
 description: Container-elision 4-hop FK chain counts diff files per project
 
 config:
-  security:
-    scope_prefixes:
-      g: "1/701/"
-      p: "1/701/"
-      mr: "1/701/"
-      d: "1/701/"
-      f: "1/701/"
   extra_seed:
     gl_group:
       - { id: 701, name: g701, full_path: g701, visibility_level: public, traversal_path: "1/701/" }

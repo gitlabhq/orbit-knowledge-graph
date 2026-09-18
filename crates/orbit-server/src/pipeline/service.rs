@@ -19,8 +19,7 @@ use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, Pipel
 
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage,
-    SecurityStage,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
 };
 
 #[derive(Clone)]
@@ -103,7 +102,6 @@ impl QueryPipelineService {
         if let Some(broker) = &self.cache_broker {
             server_extensions.insert(Arc::clone(broker));
         }
-        server_extensions.insert(Arc::clone(&schema.path_resolver));
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
@@ -121,8 +119,6 @@ impl QueryPipelineService {
         let pipeline = async {
             PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&SecurityStage)
-                .await?
-                .then(&PathResolutionStage)
                 .await?
                 .then(&CompilationStage)
                 .await?

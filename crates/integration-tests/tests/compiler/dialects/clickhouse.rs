@@ -527,25 +527,27 @@ fn valid_identifiers_produce_renderable_sql() {
     assert!(rendered.contains("_gkg_node123_id"));
 }
 
-fn multi_table_ontology() -> ontology::Ontology {
+fn multi_table_ontology() -> std::sync::Arc<ontology::Ontology> {
     use ontology::DataType;
-    ontology::Ontology::new()
-        .with_nodes(["User", "Project", "File", "Definition"])
-        .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
-        .with_edge_table("gl_code_edge")
-        .with_edge_for_table("DEFINES", "gl_code_edge")
-        .with_edge_for_table("IMPORTS", "gl_code_edge")
-        .with_fields(
-            "User",
-            [("username", DataType::String), ("state", DataType::String)],
-        )
-        .with_default_columns("User", ["username"])
-        .with_fields("Project", [("name", DataType::String)])
-        .with_default_columns("Project", ["name"])
-        .with_fields("File", [("path", DataType::String)])
-        .with_default_columns("File", ["path"])
-        .with_fields("Definition", [("name", DataType::String)])
-        .with_default_columns("Definition", ["name"])
+    std::sync::Arc::new(
+        ontology::Ontology::new()
+            .with_nodes(["User", "Project", "File", "Definition"])
+            .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
+            .with_edge_table("gl_code_edge")
+            .with_edge_for_table("DEFINES", "gl_code_edge")
+            .with_edge_for_table("IMPORTS", "gl_code_edge")
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("state", DataType::String)],
+            )
+            .with_default_columns("User", ["username"])
+            .with_fields("Project", [("name", DataType::String)])
+            .with_default_columns("Project", ["name"])
+            .with_fields("File", [("path", DataType::String)])
+            .with_default_columns("File", ["path"])
+            .with_fields("Definition", [("name", DataType::String)])
+            .with_default_columns("Definition", ["name"]),
+    )
 }
 
 #[test]
@@ -688,12 +690,14 @@ fn multi_table_path_finding_scans_all_tables() {
 fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
     let orbit_query = "MATCH (f:File)--(n) WHERE f.path CONTAINS 'labkit' RETURN n";
     use ontology::DataType;
-    let ontology = ontology::Ontology::new()
-        .with_nodes(["File"])
-        .with_edges(["DEFINES"])
-        .with_fields("File", [("path", DataType::String)])
-        .with_default_columns("File", ["path"])
-        .with_redaction("File", "project", "project_id");
+    let ontology = std::sync::Arc::new(
+        ontology::Ontology::new()
+            .with_nodes(["File"])
+            .with_edges(["DEFINES"])
+            .with_fields("File", [("path", DataType::String)])
+            .with_default_columns("File", ["path"])
+            .with_redaction("File", "project", "project_id"),
+    );
 
     let json = r#"{
         "query_type": "neighbors",
@@ -736,19 +740,10 @@ fn multi_table_neighbors_scans_all_tables() {
 
 use crate::compiler::setup::{admin_ctx, embedded_ontology};
 
-const SCOPED_PREFIX: &str = "1/24/23/";
-
-fn scoped_ctx() -> compiler::SecurityContext {
-    let mut prefixes = std::collections::HashMap::new();
-    prefixes.insert(
-        "p".to_string(),
-        orbit_utils::traversal_path::TraversalPath::new_unchecked(SCOPED_PREFIX),
-    );
-    admin_ctx().with_scope_prefixes(prefixes)
-}
+const SCOPED_LOOKUP: &str = "FROM gl_project AS _scope WHERE";
 
 fn render_scoped(json: &str, orbit_query: &str) -> String {
-    compile_pair(json, orbit_query, &embedded_ontology(), &scoped_ctx())
+    compile_pair(json, orbit_query, &embedded_ontology(), &admin_ctx())
         .unwrap()
         .base
         .render()
@@ -767,7 +762,11 @@ fn scoped_traversal_injects_tight_prefix() {
         "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
         "limit": 100
     }"#;
-    assert!(render_scoped(json, orbit_query).contains(SCOPED_PREFIX));
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains(SCOPED_LOOKUP) && sql.contains("(_scope.id = 1)"),
+        "{sql}"
+    );
 }
 
 #[test]
@@ -784,7 +783,38 @@ fn scoped_aggregation_injects_tight_prefix() {
         "aggregations": [{"count": "wi", "as": "c"}],
         "limit": 100
     }"#;
-    assert!(render_scoped(json, orbit_query).contains(SCOPED_PREFIX));
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains(SCOPED_LOOKUP) && sql.contains("(_scope.id = 1)"),
+        "{sql}"
+    );
+}
+
+#[test]
+fn scoped_count_condition_excludes_the_scope_lookup() {
+    let orbit_query =
+        "MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) RETURN g, count(u) AS n LIMIT 5";
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "User"},
+            {"id": "g", "entity": "Group", "node_ids": [100]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "group_by": ["g"],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "limit": 5
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    let count_arg = sql
+        .split("countIf(")
+        .nth(1)
+        .unwrap()
+        .split(" AS n")
+        .next()
+        .unwrap();
+    assert!(!count_arg.contains("_scope"), "{sql}");
+    assert!(sql.contains("FROM gl_group AS _scope WHERE"), "{sql}");
 }
 
 #[test]
@@ -804,22 +834,14 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
         "limit": 100
     }"#;
     let ontology = embedded_ontology();
-    let compiled = compile_pair(json, orbit_query, &ontology, &scoped_ctx()).unwrap();
+    let compiled = compile_pair(json, orbit_query, &ontology, &admin_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    let expected = if ontology.partition().is_some() { 5 } else { 3 };
-    assert_eq!(
-        sql.matches(SCOPED_PREFIX).count(),
-        expected,
-        "startsWith on the anchor + two edge scans, plus a _partition_id per edge scan when partitioned"
-    );
-
-    let scoped_filter = sql.split("WHERE").nth(1).unwrap();
-    let scoped_clause = scoped_filter.split("SELECT").next().unwrap();
-    assert!(scoped_clause.contains(SCOPED_PREFIX));
+    let before_related = sql.split("RELATED_TO").next().unwrap();
+    assert!(before_related.contains(SCOPED_LOOKUP), "{sql}");
 
     let after_related = sql.split("RELATED_TO").nth(1).unwrap();
-    assert!(!after_related.contains(SCOPED_PREFIX));
+    assert!(!after_related.contains(SCOPED_LOOKUP), "{sql}");
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");

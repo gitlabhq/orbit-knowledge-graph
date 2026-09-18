@@ -177,10 +177,6 @@ query:
     max_ast_depth: 10000
     query_cache_ttl: 60
 
-path_resolver:
-  cache_ttl_secs: 60
-  cache_capacity: 10000
-
 metrics:
   # log_level: "info"
   otel:

@@ -1,0 +1,76 @@
+# linting gates (task #2933).
+#
+# Deterministic gates that catch mechanical review feedback before it reaches a
+# human: a narration-comment scorer, an MR-description headline scorer, and a
+# prose linter for the text LLMs read. The scorers live in scripts/linting/ and
+# are documented in scripts/linting/README.md.
+#
+# All jobs are advisory (allow_failure: true → yellow). The scripts exit
+# non-zero on findings; remove allow_failure here to promote a gate to blocking.
+#
+# This file is the CI half of the linting kill-switch: deleting it plus
+# the scripts/linting/ folder, the `- local:` include in .gitlab-ci.yml, the
+# lefthook `narration` and `prose` jobs, and the mise `lint:prose*` tasks
+# removes the gates entirely.
+
+# Narration-comment lint. Dependency-free Python scorer
+# (scripts/linting/narration_score.py); also runs as a lefthook
+# pre-commit hook (AGENTS.md "prefer build-time validation").
+#
+# On merge_request_event pipelines: scoped to lines the MR added/changed
+# (--diff-base), so pre-existing legacy narration is not noise.
+# On main: whole-tree scan (no MR diff available).
+lint:narration:
+  stage: lint
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  allow_failure: true
+  script:
+    - apk add --no-cache bash git
+    - |
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        bash ./scripts/linting/check-narration.sh --diff-base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      else
+        bash ./scripts/linting/check-narration.sh
+      fi
+
+# MR-description headline gate. Reads the description from the predefined
+# CI_MERGE_REQUEST_DESCRIPTION variable (no API token needed).
+lint:mr-description:
+  stage: lint
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  allow_failure: true
+  script:
+    - apk add --no-cache bash
+    - bash ./scripts/linting/check-mr-description.sh
+
+# Prose gate for the text LLMs read: prompts, the setup block, skills, agent
+# guides, the glossary, and the MR and issue templates. Scoped to files the MR
+# changed; whole tree on main. Rules live in scripts/linting/README.md.
+lint:prose:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  allow_failure: true
+  script:
+    - apk add --no-cache git
+    - uv run --quiet scripts/linting/prose_lint_test.py
+    - |
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        uv run --quiet scripts/linting/prose_lint.py --diff-base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      else
+        uv run --quiet scripts/linting/prose_lint.py --all
+      fi

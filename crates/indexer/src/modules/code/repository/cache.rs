@@ -2,12 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use code_graph::v2::FileInventoryEntry;
-use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
+use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 use futures::StreamExt;
 use orbit_utils::archive::extract_tar_gz;
-use orbit_utils::fs_stream::StreamError;
-use rustc_hash::FxHashMap;
+use orbit_utils::fs_walk::{FileInventory, StreamError};
+
 use tempfile::TempDir;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
@@ -37,10 +36,7 @@ pub enum RepositoryCacheError {
 #[derive(Debug)]
 pub struct CachedRepository {
     dir: TempDir,
-    pub file_inventory: Arc<[FileInventoryEntry]>,
-    /// Per-path reason for files the stream settled as bare nodes, carried to the
-    /// pipeline so each File node's `gl_file.reason` reflects the stream skip.
-    pub stream_reasons: FxHashMap<String, FilterSkip>,
+    pub file_inventory: Arc<FileInventory>,
 }
 
 impl CachedRepository {
@@ -106,9 +102,10 @@ impl RepositoryCache for LocalRepositoryCache {
 
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
+        let to_cap = |v: u64| if v == 0 { None } else { Some(v) };
         let mut filter = CodeFilter::new(
-            self.max_file_size,
-            self.max_total_bytes,
+            to_cap(self.max_file_size),
+            to_cap(self.max_total_bytes),
             detect_language_from_path,
         );
         // The blocking task owns the `TempDir` for the duration of extraction and hands it back.
@@ -141,8 +138,7 @@ impl RepositoryCache for LocalRepositoryCache {
 
         Ok(CachedRepository {
             dir,
-            file_inventory: Arc::from(file_inventory),
-            stream_reasons: filter.file_reasons().clone(),
+            file_inventory: Arc::new(file_inventory),
         })
     }
 }
@@ -150,6 +146,7 @@ impl RepositoryCache for LocalRepositoryCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use code_graph::v2::config::SkipReason;
     use tempfile::TempDir;
 
     fn create_cache() -> (TempDir, LocalRepositoryCache) {
@@ -495,8 +492,12 @@ mod tests {
             "LFS pointers should still be present in archive inventory"
         );
         assert_eq!(
-            path.stream_reasons.get("data/train.csv"),
-            Some(&FilterSkip::LfsPointer)
+            path.file_inventory
+                .find("data/train.csv")
+                .unwrap()
+                .label
+                .skip,
+            Some(SkipReason::LfsPointer)
         );
         assert!(path.path().join("src/main.rs").exists());
         assert!(!path.path().join("data/train.csv").exists());

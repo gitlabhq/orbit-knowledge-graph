@@ -60,8 +60,8 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Orbit issue, epic, and MR planning taxonomy | `/orbit-planning` skill |
 | Related repos and local paths | `/related-repositories` skill |
-| Iglu schemas (committed; codegen'd at build) | `config/schemas/iglu/<name>/<version>.json` (update via `mise iglu:bump -- <name> <version>`) |
-| Iglu version pins | `config/schemas/iglu/*.version` (bump via `mise iglu:bump -- <name> <version>`, check via `mise iglu:check`) |
+| Iglu schemas (committed; codegen'd at build) | `config/schemas/iglu/<name>/<version>.json` (update via `mise vendor -- iglu`) |
+| Iglu version pins | `vendored.iglu.pins` in `config/versions.yaml` (edit pin, then `mise vendor -- iglu` to fetch; check via `mise check:vendored -- iglu`) |
 | Analytics event definition | `config/events/gkg_query_executed.yml` |
 | Analytics contexts (Snowplow) | `crates/orbit-analytics/src/context.rs` (types), `crates/orbit-server/src/analytics/` (builders + observer) |
 | Billing config + observer | `crates/orbit-billing/`, `crates/orbit-server/src/billing_adapter.rs` |

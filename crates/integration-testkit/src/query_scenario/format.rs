@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use query_engine::compiler::HydrationKind;
 use serde::Deserialize;
 
 use crate::scenario::Seed;
@@ -50,9 +51,6 @@ pub struct SecurityOverride {
     pub org_id: Option<i64>,
     #[serde(default)]
     pub access_level: Option<u32>,
-    /// Per-alias scope prefixes: `{ g: "1/700/", p: "1/700/" }`
-    #[serde(default)]
-    pub scope_prefixes: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -116,6 +114,8 @@ pub struct QueryExpect {
     pub group_columns: BTreeMap<String, String>,
     #[serde(default)]
     pub sql_contains: Vec<String>,
+    #[serde(default)]
+    pub hydration: Option<HydrationKind>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
     /// Assert total edge count across all types.

@@ -33,13 +33,13 @@ Problems:
 Replace `GlobalHandler` and `NamespaceHandler` with one `EntityHandler` per
 ontology entity. Each handler owns a single `Plan` and subscribes to the
 existing global/namespace NATS topic for its scope. The dispatcher publishes
-one message; every entity handler for that scope receives it (NATS pub/sub),
-which gives cross-entity parallelism without per-entity subjects or a new
+one message; every entity handler for that scope receives it (NATS pub/sub).
+This gives cross-entity parallelism without per-entity subjects or a new
 message type.
 
-Intra-entity parallelism comes from a pipeline's `extract.partition_count`: when
-the ontology declares it, the handler computes id-range partitions on the fly
-during the first run and fans them out across a `JoinSet`. Once all partitions complete,
+Intra-entity parallelism comes from a pipeline's `extract.partition_count`.
+When the ontology declares it, the handler computes id-range partitions on the
+fly during the first run. It then fans them out across a `JoinSet`. Once all partitions complete,
 the partition checkpoints are consolidated into a single completed checkpoint
 and subsequent runs skip partitioning.
 
@@ -99,13 +99,13 @@ re-extracting work that already succeeded:
 
 - `run_partitions` loads each partition's checkpoint before spawning. Any
   partition whose checkpoint has `cursor_values: None` (a successful
-  `save_completed` from a prior attempt) is skipped: its task is never
+  `save_completed` from a prior attempt) is skipped. Its task is never
   spawned, and the rows it indexed last time stay in the destination.
 - `consolidate` writes the parent at `min(partition watermarks)` rather than
   the current `request.watermark`. Partitions that completed in an earlier
-  attempt still hold their original (older) watermark; pinning the parent to
+  attempt still hold their original (older) watermark. Pinning the parent to
   the minimum keeps the next incremental run covering the
-  `(old_watermark, request.watermark]` window for those id-ranges, so no data
+  `(old_watermark, request.watermark]` window for those id-ranges. So no data
   is lost.
 
 If every partition is already complete (e.g. the previous attempt finished
@@ -128,15 +128,15 @@ Examples from the current ontology:
 | MergeRequest | `[traversal_path, id]` | `id` |
 | User (global) | `[id]` | `id` |
 
-Entities where the first non-scope column has low cardinality (e.g., Note's
-`noteable_type` with ~10 enum values) are poor partitioning candidates and
-should not have `partition_overrides` set.
+Entities where the first non-scope column has low cardinality are poor
+partitioning candidates. An example is Note's `noteable_type` with ~10 enum
+values. They should not have `partition_overrides` set.
 
 #### Why range over hash
 
-Benchmarks on `siphon_p_ci_builds` (100M rows, PRIMARY KEY
+Benchmarks ran on `siphon_p_ci_builds` (100M rows, PRIMARY KEY
 `(traversal_path, id, partition_id)`, ClickHouse Cloud dev instance,
-2026-05-08) show range filtering on a primary key column reads 3.9× less
+2026-05-08). They show range filtering on a primary key column reads 3.9× less
 data than hash. ClickHouse evaluates the range condition via PREWHERE and
 skips decompressing non-matching columns:
 
@@ -256,8 +256,8 @@ handlers subscribe to those topics.
 semaphore. Increasing `max_concurrent_entities` helped within one handler
 invocation, but the work was still bound to one NATS message and one engine
 worker slot. Multiple workers could not help with a single namespace's
-entities, and one slow entity delayed the NATS ack for the entire message,
-triggering redelivery of all entities.
+entities. One slow entity delayed the NATS ack for the entire message, which
+triggered redelivery of all entities.
 
 ### Per-subject `sdlc.entity.indexing.requested.>` with an `EntityIndexingRequest` envelope
 

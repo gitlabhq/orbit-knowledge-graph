@@ -31,8 +31,8 @@ Bump the `version` field in `SKILL.md` frontmatter on every change under
 
 Canonical prompts for validating skill-discovery routing between `orbit` and its
 sibling `glab` skill. After changing the `description` field, present both skill
-descriptions to the model and ask it to route each prompt to exactly one skill,
-then check the routing matches the expectations below. This is harness-agnostic:
+descriptions to the model. Ask it to route each prompt to exactly one skill.
+Then check the routing matches the expectations below. This is harness-agnostic:
 any agent runner that exposes skill descriptions to the model works.
 
 The sibling `glab` skill description used for routing is:
@@ -40,15 +40,16 @@ The sibling `glab` skill description used for routing is:
 orbit's deferral clause ("Do not use for single-entity…"); glab's description
 carries no counter-signal. Keep this in mind when evaluating borderline cases.
 
-**Tie-break rule for boundary cases:** when a prompt names a **single known
-entity** (one MR, one project) but phrases the question relationally (e.g.
-"who reviewed MR !X?"), route to **glab** unless the question explicitly spans
-**multiple entities/projects** or requires a **group-by or multi-entity
-aggregation**. A simple single-entity count that `glab mr list | wc` can
-answer stays with glab; a group-by breakdown (e.g. "how many MRs per state")
-or a count that joins across entities needs Orbit. `glab mr view` and similar
-commands surface relationship metadata (reviewers, labels, pipelines) for a
-single entity without a graph query.
+**Tie-break rule for boundary cases:** a prompt may name a **single known
+entity** (one MR, one project) but phrase the question relationally. An
+example is "who reviewed MR !X?". Route it to **glab** by default. Use Orbit
+only when the question explicitly spans **multiple entities/projects** or
+requires a **group-by or multi-entity aggregation**. A simple single-entity
+count that `glab mr list | wc` can answer stays with glab. A group-by
+breakdown (e.g. "how many MRs per state") or a count that joins across
+entities needs Orbit. `glab mr view` and similar commands surface
+relationship metadata (reviewers, labels, pipelines) for a single entity
+without a graph query.
 
 ### Should fire orbit
 

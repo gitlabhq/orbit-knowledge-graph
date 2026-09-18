@@ -25,7 +25,7 @@ Every GKG graph query holds a Rails Puma worker for the full duration of a bidir
 6. GKG filters the results, hydrates node properties, and returns the final `ExecuteQueryResult`.
 7. The Puma worker writes the response and is finally released.
 
-The entire round-trip (query compilation, ClickHouse execution, redaction exchange, hydration) keeps the Puma worker blocked. Median latency for basic graph queries sits around 500 ms. Larger queries (1000-row scans with redaction) reach 7–8 seconds. During load testing on staging at 1K requests per second, Puma saturation hit 70%. At 150 RPS, three failure modes appeared: `gRPC deadline exceeded (503)`, `nginx bad gateway (502)`, and `ClickHouse OOM (400)`.
+The entire round-trip (query compilation, ClickHouse execution, redaction exchange, hydration) keeps the Puma worker blocked. Median latency for basic graph queries sits around 500 ms. Larger queries (1000-row scans with redaction) reach 7 to 8 seconds. During load testing on staging at 1K requests per second, Puma saturation hit 70%. At 150 RPS, three failure modes appeared: `gRPC deadline exceeded (503)`, `nginx bad gateway (502)`, and `ClickHouse OOM (400)`.
 
 Puma workers are finite. Each one is a thread that cannot serve other requests while blocked on a gRPC stream. More GKG query traffic, especially from AI agent clients hitting the MCP endpoint, means more threads stuck waiting on ClickHouse and redaction round-trips.
 
@@ -146,7 +146,7 @@ The injecter's `Inject()` method:
 5. Attaches the JWT as gRPC metadata if present in the server config.
 6. Opens a bidirectional `ExecuteQuery` stream and sends the initial `ExecuteQueryRequest`.
 7. Enters a receive loop (max 10 messages) that dispatches on message type:
-   - `RedactionRequired`: forwards the original user's auth headers (`Authorization`, `Private-Token`, `Cookie`) to the internal Rails redaction endpoint via a signed request, converts the response back to a protobuf `RedactionResponse`, and sends it on the stream.
+   - `RedactionRequired`: forwards the original user's auth headers (`Authorization`, `Private-Token`, `Cookie`) to the internal Rails redaction endpoint via a signed request. Then converts the response back to a protobuf `RedactionResponse` and sends it on the stream.
    - `ExecuteQueryResult`: writes the query result as a JSON HTTP response. If `McpId` is present, wraps the result in a JSON-RPC 2.0 envelope with MCP `CallToolResult` structure.
    - `ExecuteQueryError`: maps GKG error codes to HTTP status codes (`compile_error`/`validation_error` to 400, `execution`/`internal` to 502, `timeout` to 504) and writes an error response.
 
@@ -272,7 +272,7 @@ There are three network legs in this architecture, each with different security 
 
 **Client → Workhorse (external):** TLS terminated by NGINX/Workhorse as it is today. No change.
 
-**Workhorse → GKG gRPC (internal):** The GKG gRPC endpoint address is configured in `gitlab.yml` (`knowledge_graph.grpc_endpoint`). When the address uses a `tls://` or `dns+tls:` scheme, Workhorse dials with TLS using the system certificate pool. When the address is plaintext (e.g., `localhost:50054` in development), it uses insecure credentials. This matches the existing Ruby `GrpcClient.channel_credentials` behavior. In production, GKG runs in the same cluster as Workhorse with mTLS handled by the service mesh (Istio), so the plaintext path is only used in GDK.
+**Workhorse → GKG gRPC (internal):** The GKG gRPC endpoint address is configured in `gitlab.yml` (`knowledge_graph.grpc_endpoint`). When the address uses a `tls://` or `dns+tls:` scheme, Workhorse dials with TLS using the system certificate pool. When the address is plaintext (e.g., `localhost:50054` in development), it uses insecure credentials. This matches the existing Ruby `GrpcClient.channel_credentials` behavior. In production, GKG runs in the same cluster as Workhorse with mTLS handled by the service mesh (Istio). So the plaintext path is only used in GDK.
 
 **Workhorse → Rails internal API (internal):** The redaction callback uses the same `secret.NewRoundTripper` signing that all Workhorse-to-Rails internal requests use. The request is signed with a JWT derived from the shared `.gitlab_workhorse_secret` file. This is the same mechanism that protects `/api/v4/internal/*` endpoints for Gitaly, GOB, and other services.
 
@@ -307,7 +307,7 @@ The redaction preloading work reduced SQL queries from 348 to 5 for 100 projects
 
 ### GOB-style proxy (Workhorse intercepts the route directly)
 
-The GOB (GitLab Observability Backend) proxy pattern has Workhorse intercept the route before it reaches Rails, make an internal auth call, then proxy to the upstream service. This would work, but it requires a separate internal authorization endpoint and duplicates the feature flag and permission checks that already exist in the Rails API layer. SendData is simpler: the request still goes through Rails first, so auth, feature flags, and JWT construction happen in the existing code path. Workhorse only takes over for the gRPC I/O.
+The GOB (GitLab Observability Backend) proxy pattern has Workhorse intercept the route before it reaches Rails. It makes an internal auth call, then proxies to the upstream service. This would work. But it requires a separate internal authorization endpoint. It also duplicates the feature flag and permission checks that already exist in the Rails API layer. SendData is simpler: the request still goes through Rails first, so auth, feature flags, and JWT construction happen in the existing code path. Workhorse only takes over for the gRPC I/O.
 
 ### Replicate authorization in GKG
 
@@ -315,7 +315,7 @@ Replicating the full Rails permission model (group hierarchies, custom roles, SA
 
 ### Async job queue (Sidekiq) with polling
 
-Instead of holding the HTTP connection, Rails could enqueue a Sidekiq job for the GKG query, return a job ID, and have the client poll for results. This eliminates Puma blocking but introduces polling latency, job queue contention, and a more complex client contract. The Workhorse approach keeps the request-response model that clients already use.
+Instead of holding the HTTP connection, Rails could enqueue a Sidekiq job for the GKG query. It would return a job ID and have the client poll for results. This eliminates Puma blocking but introduces polling latency, job queue contention, and a more complex client contract. The Workhorse approach keeps the request-response model that clients already use.
 
 ### Expose GKG directly (future consideration)
 

@@ -18,11 +18,13 @@ use super::plan::{self, Plan, PlanBody, Strategy};
 
 impl Plan {
     pub fn emit_edge_chain(&self) -> Result<EmitOutput> {
-        match self.strategy {
+        let mut out = match self.strategy {
             Strategy::SingleNode => single_node::emit_single_node(self),
             Strategy::Fk(ref shape) => fk::emit_fk(self, shape),
             Strategy::Flat | Strategy::Bidirectional { .. } => flat_chain::emit_flat_chain(self),
-        }
+        }?;
+        out.where_parts.extend(self.scope_guards.iter().cloned());
+        Ok(out)
     }
 }
 

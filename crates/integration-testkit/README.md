@@ -317,7 +317,6 @@ Each YAML file contains one `QueryScenario` document.
 | `authorized_paths` | [{path, access_level}] | — | Per-path access levels |
 | `org_id` | i64 | — | Organization ID |
 | `access_level` | u32 | 20 (Reporter) | Default access level |
-| `scope_prefixes` | {alias: prefix} | — | Per-alias traversal scoping |
 
 #### `config.redaction` — `RedactionConfig`
 
@@ -370,6 +369,7 @@ Each YAML file contains one `QueryScenario` document.
 | `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
 | `sql_contains` | [string] | Rendered SQL must contain these |
 | `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
+| `hydration` | `none` / `static` / `dynamic` | Kind of hydration plan the compiler produced |
 
 **Pagination:**
 

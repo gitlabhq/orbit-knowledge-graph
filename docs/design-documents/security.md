@@ -10,7 +10,7 @@ Orbit allows querying across an entire GitLab namespace. To prevent unauthorized
 
 All access to Orbit is proxied through GitLab Rails, which acts as the primary authentication and authorization gateway. This ensures no user or agent can bypass the existing GitLab permission model. As part of the broader Auth Architecture program, these controls will evolve to integrate with future GitLab auth services. Until we have a finalized auth service, Rails remains the enforcement point and source of truth.
 
-For the Duo-specific routing layer that sits *upstream* of these authorization checks — i.e. whether a Duo agent ever reaches the Orbit MCP server in the first place — see [Duo / Orbit prompt routing architecture](duo_orbit_prompt_routing.md). The two systems compose: routing decides whether the request happens, and the layers below decide what data the request can see.
+The Duo-specific routing layer sits *upstream* of these authorization checks. It decides whether a Duo agent ever reaches the Orbit MCP server in the first place. For that layer, see [Duo / Orbit prompt routing architecture](duo_orbit_prompt_routing.md). The two systems compose: routing decides whether the request happens, and the layers below decide what data the request can see.
 
 ## Access Model: Reporter+ Scope with Per-Entity Role Floors
 
@@ -19,8 +19,8 @@ Orbit starts from a group-level Reporter+ scope and tightens that scope per enti
 - **Group-level Reporter+ access required**: Users must have at least Reporter role on a group for that group's traversal path to be eligible at all.
 - **Per-entity role floors**: Entities can declare `redaction.required_role`; security entities use `security_manager`, so Reporter-only paths are dropped for those aliases before SQL is emitted.
 - **Hierarchical access**: The GitLab permission model is hierarchical. If you have Reporter+ access to a group, you automatically have access to all subgroups and projects beneath it in the namespace tree. Orbit honors this hierarchy.
-- **No sparse permissions in V1**: The first iteration does not support individual project-level access or item-level permissions (e.g., access to a single project without group access). This simplification aligns with the existing GitLab Analytics products, which require the same Reporter+ group-level access.
-- **Incremental filtering still applies**: Even with an eligible traversal path, the system still filters by per-path role and performs final redaction checks to handle edge cases like confidential issues and runtime checks (like SAML/IP).
+- **No sparse permissions in V1**: the first iteration does not support individual project-level access or item-level permissions. An example is access to a single project without group access. This simplification aligns with the existing GitLab Analytics products, which require the same Reporter+ group-level access.
+- **Incremental filtering still applies**: even with an eligible traversal path, the system still filters by per-path role and performs final redaction checks. These checks handle edge cases like confidential issues and runtime checks (like SAML/IP).
 
 ### Request Flow
 
@@ -59,7 +59,7 @@ sequenceDiagram
 
 ## Layer 1: Logical Tenant Segregation by Organization
 
-The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). A user's `SecurityContext` carries the exact set of traversal paths that Rails authorized. The compiler injects `startsWith(traversal_path, ?)` predicates for each path, so queries are scoped to exactly those namespaces — regardless of which organization(s) the paths belong to.
+The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). A user's `SecurityContext` carries the exact set of traversal paths that Rails authorized. The compiler injects `startsWith(traversal_path, ?)` predicates for each path, so queries are scoped to exactly those namespaces, regardless of which organization(s) the paths belong to.
 
 This layer limits queries to data within the traversal paths that Rails authorized. A user's authorized paths can span more than one organization.
 
@@ -67,8 +67,8 @@ This layer limits queries to data within the traversal paths that Rails authoriz
 
 **How It's Enforced**:
 
-- **At the ClickHouse Storage Layer**: The indexer writes each row with a `traversal_path` column encoding the full namespace hierarchy, starting with the organization ID as the first path segment.
-- **Query-Level Enforcement**: The query compiler's `SecurityPass` injects `startsWith(traversal_path, ?)` predicates into every generated SQL query. The `CheckPass` then verifies every `gl_*` table alias has a valid `startsWith` predicate before codegen. The `org_id` on `SecurityContext` is metadata (the user's home organization), not a security boundary — access control comes from the traversal paths themselves.
+- **At the ClickHouse Storage Layer**: the indexer writes each row with a `traversal_path` column. That column encodes the full namespace hierarchy, starting with the organization ID as the first path segment.
+- **Query-Level Enforcement**: The query compiler's `SecurityPass` injects `startsWith(traversal_path, ?)` predicates into every generated SQL query. The `CheckPass` then verifies every `gl_*` table alias has a valid `startsWith` predicate before codegen. The `org_id` on `SecurityContext` is metadata (the user's home organization), not a security boundary. Access control comes from the traversal paths themselves.
 - **User-Supplied Traversal Path Filters**: Queries may filter `traversal_path` with exact, `in`, or prefix predicates. Before SQL generation, `RestrictPass` verifies each requested path is a descendant of a JWT traversal path that meets the target entity's `required_role` floor. Relationship `traversal_path` filters use the Reporter floor. Unsupported substring/suffix/comparison predicates are rejected, so user input can only narrow the Rails-granted scope.
 - **Cross-Org Queries Supported**: A user may hold traversal paths spanning multiple organizations (e.g., personal groups under a different org). `SecurityContext` accepts all paths that Rails authorizes, regardless of the user's home `organization_id`. Each query is scoped to exactly the set of paths granted by Rails.
 - **Parameterization**: All traversal path values are bound as parameters, never concatenated into SQL strings.
@@ -81,8 +81,8 @@ This layer limits queries to data within the traversal paths that Rails authoriz
 - Integration tests verify cross-namespace isolation within an organization and cross-organization isolation with multi-org seed data.
 
 **Global table exceptions**: Nodes declare `global: true` in the ontology when their tables are not namespace-scoped.
-The compiler's security and check passes use the ontology supplied for that compilation, including its schema-version table prefixes,
-rather than a cached list from the embedded ontology. This keeps archived or overlaid node classifications consistent with the query.
+The compiler's security and check passes use the ontology supplied for that compilation, including its schema-version table prefixes.
+They do not use a cached list from the embedded ontology. This keeps archived or overlaid node classifications consistent with the query.
 The current global nodes, `User` and `Runner`, rely on Rails-side redaction with `read_user` and `read_runner` abilities respectively.
 Edge tables and other non-global `gl_*` tables still require traversal-path filters, including when joined to global nodes.
 
@@ -122,13 +122,13 @@ Check --> Edges
 
 ## Layer 2: Query-Time Filtering with Traversal IDs
 
-While Layer 1 isolates top-level namespaces, Layer 2 provides fine-grained filtering within a namespace based on the user's group memberships. We leverage the GitLab hierarchical permission model using `traversal_ids`.
+While Layer 1 isolates top-level namespaces, Layer 2 provides fine-grained filtering within a namespace based on the user's group memberships. We build on the GitLab hierarchical permission model using `traversal_ids`.
 
 ### Understanding Traversal IDs and Hierarchical Access
 
-As documented in the [GitLab Namespace documentation](https://docs.gitlab.com/development/namespaces/#querying-namespaces), the `traversal_ids` array represents the full ancestor hierarchy for any given namespace. For example, a project namespace with ID `300` inside a subgroup with ID `200` under a top-level group with ID `100` would have `traversal_ids` of `[100, 200, 300]`.
+As documented in the [GitLab Namespace documentation](https://docs.gitlab.com/development/namespaces/#querying-namespaces), the `traversal_ids` array represents the full ancestor hierarchy for any given namespace. For example, take a project namespace with ID `300` inside a subgroup with ID `200` under a top-level group with ID `100`. It would have `traversal_ids` of `[100, 200, 300]`.
 
-**Hierarchical Access Model**: The GitLab permission system is hierarchical. If a user has Reporter+ access to a group, they automatically have access to all resources in that group and all nested subgroups and projects beneath it. Orbit respects this hierarchy through traversal ID prefix matching.
+**Hierarchical Access Model**: The GitLab permission system is hierarchical. If a user has Reporter+ access to a group, they automatically have access to all resources in that group. This also covers all nested subgroups and projects beneath it. Orbit respects this hierarchy through traversal ID prefix matching.
 
 For example:
 
@@ -141,9 +141,9 @@ For example:
 
 During indexing, we enrich every entity (Issue, MR, Pipeline, etc.) with the `traversal_ids` of its parent project or group. When a user initiates a query:
 
-1. **Rails computes accessible groups**: Rails queries the user's Reporter+ group memberships and group-share access, returning each traversal path with the highest effective access level on that path.
+1. **Rails computes accessible groups**: Rails queries the user's Reporter+ group memberships and group-share access. It returns each traversal path with the highest effective access level on that path.
 2. **Optimize with trie structure**: Rails buckets paths by role, compacts each bucket using a trie structure, and keeps the highest role if compacted buckets overlap.
-3. **Pass to GKG**: This minimal set of `{path, access_level}` traversal prefixes is passed to the Orbit service (in the JWT payload, with JWT+MTLS for enhanced security).
+3. **Pass to GKG**: this minimal set of `{path, access_level}` traversal prefixes is passed to the Orbit service. It travels in the JWT payload, with JWT+MTLS for enhanced security.
 4. **Inject filters**: The query engine generates ClickHouse SQL with prefix matching predicates over `traversal_path`, dropping any path whose `access_level` is below the target entity's `required_role`.
 
 **Code Review Requirements**:
@@ -159,7 +159,7 @@ During indexing, we enrich every entity (Issue, MR, Pipeline, etc.) with the `tr
 - **Audit Logging**: Log queries with the `traversal_ids` filter applied and the number of prefixes used.
 - **Alert**: Trigger warning if a user has more than 100 distinct traversal ID prefixes (indicates potential permission explosion).
 
-The query engine then uses this list to pre-filter the query, ensuring that only nodes belonging to accessible namespace hierarchies are considered.
+The query engine then uses this list to pre-filter the query. Only nodes belonging to accessible namespace hierarchies are considered.
 
 ```mermaid
 graph TD
@@ -217,7 +217,7 @@ In addition to authorization filtering, the query engine implements further safe
 
 ## Layer 3: Final Redaction Layer via Rails Authorization
 
-The final and most authoritative security layer is executed by the Orbit service calling back to GitLab Rails for granular permission checks. After the query engine returns pre-filtered results (from Layers 1 and 2), the Orbit service performs a final authorization pass before returning data to the client.
+The final and most authoritative security layer is executed by the Orbit service calling back to GitLab Rails for granular permission checks. After the query engine returns pre-filtered results (from Layers 1 and 2), the Orbit service performs a final authorization pass. This pass runs before returning data to the client.
 
 ### Why This Layer Is Necessary
 
@@ -378,11 +378,11 @@ This dual approach provides zero-trust security:
 
 Every server binary links the AWS-LC FIPS module; there is no separate FIPS build variant.
 
-- **Provider**: `orbit-server` enables the `rustls` `fips` feature and installs the FIPS-restricted `aws-lc-rs` provider as the process default before any client or listener exists (`crates/orbit-server/src/fips.rs`). Every rustls consumer in the binary (tonic, ClickHouse, reqwest, kube, async-nats) resolves to that provider, so the cipher suites and key exchange groups offered on every hop are the FIPS-approved subset.
+- **Provider**: `orbit-server` enables the `rustls` `fips` feature and installs the FIPS-restricted `aws-lc-rs` provider as the process default before any client or listener exists (`crates/orbit-server/src/fips.rs`). Every rustls consumer in the binary (tonic, ClickHouse, reqwest, kube, async-nats) resolves to that provider. So the cipher suites and key exchange groups offered on every hop are the FIPS-approved subset.
 - **JWT**: `jsonwebtoken` is compiled with only its `aws-lc-rs` backend, so HS256 verification runs inside the same module.
-- **Startup guard**: the binary refuses to start unless the linked module reports FIPS mode and the provider reports FIPS; the `starting` log line carries the linked AWS-LC version.
-- **No second backend**: `async-nats`, `kube`, and `reqwest` are compiled without `ring`; `scripts/check-fips-graph.sh` fails when `ring` re-enters the server graph or when `aws-lc-fips-sys` reaches the `orbit` CLI, and `scripts/check-fips-binary.sh` fails an image build whose binary lacks `aws_lc_fips_*` symbols, carries `ring_core_*` symbols, or carries the non-FIPS `aws_lc_<version>_*` symbols.
-- **Module generation**: the build is declared against AWS-LC-FIPS 4 (`aws-lc-fips-sys` 0.14.x), which has completed lab testing and is in process at CMVP. AWS-LC-FIPS 3.1.0 holds certificates #5298 and #5314 but requires `aws-lc-rs` below 1.18, which `rustls` 0.23.44 and later no longer accept; `rustls` 0.23.45 carries the fix for GHSA-2mjx-qc3c-rqvc, so the validated generation would mean shipping a known TLS 1.3 defect. Patch releases inside a generation are the module's update stream and are taken as they arrive. A unit test pins the linked generation to the declared one so that a dependency bump crossing generations fails CI and forces this section to be revisited.
+- **Startup guard**: the binary refuses to start unless the linked module reports FIPS mode and the provider reports FIPS. The `starting` log line carries the linked AWS-LC version.
+- **No second backend**: `async-nats`, `kube`, and `reqwest` are compiled without `ring`. `scripts/check-fips-graph.sh` fails when `ring` re-enters the server graph or when `aws-lc-fips-sys` reaches the `orbit` CLI. `scripts/check-fips-binary.sh` fails an image build whose binary lacks `aws_lc_fips_*` symbols, carries `ring_core_*` symbols, or carries the non-FIPS `aws_lc_<version>_*` symbols.
+- **Module generation**: the build is declared against AWS-LC-FIPS 4 (`aws-lc-fips-sys` 0.14.x), which has completed lab testing and is in process at CMVP. AWS-LC-FIPS 3.1.0 holds certificates #5298 and #5314. But it requires `aws-lc-rs` below 1.18, which `rustls` 0.23.44 and later no longer accept. `rustls` 0.23.45 carries the fix for GHSA-2mjx-qc3c-rqvc. So the validated generation would mean shipping a known TLS 1.3 defect. Patch releases inside a generation are the module's update stream and are taken as they arrive. A unit test pins the linked generation to the declared one. So a dependency bump crossing generations fails CI and forces this section to be revisited.
 - **Out of scope**: the `orbit` CLI targets Windows and macOS, where the static FIPS module does not build; it stays on the non-FIPS `aws-lc-rs` provider. Content fingerprints (ontology and DDL hashes) are checksums, not security functions, and use the `sha2` crate.
 
 ### Database Access Controls
@@ -411,18 +411,18 @@ Verification, mirroring, registry retention, and failure handling are in the [im
 
 ## Handling Aggregations
 
-Aggregation queries (counts, averages, ...) do not return individual resource rows, so Layer 3 (Rails redaction) cannot be applied after the fact. Earlier versions of the query engine therefore relied entirely on Layer 2 (traversal path filtering at the Reporter floor), which left an oracle: a Reporter user aggregating `count(Vulnerability) group_by Project` could observe vulnerability details through filter-driven counts even though they did not hold `read_vulnerability` on the target entity.
+Aggregation queries (counts, averages, ...) do not return individual resource rows, so Layer 3 (Rails redaction) cannot be applied after the fact. Earlier versions of the query engine therefore relied entirely on Layer 2 (traversal path filtering at the Reporter floor). This left an oracle. A Reporter user aggregating `count(Vulnerability) group_by Project` could observe vulnerability details through filter-driven counts. This held even though they did not hold `read_vulnerability` on the target entity.
 
-To close this, each ontology entity now declares a `required_role` in its redaction block (`config/ontology/nodes/**`). Rails publishes traversal paths tagged with the user's highest access level on the leaf group (`{path, access_level}` tuples in the JWT), and the compiler's `SecurityPass` drops any path whose tag falls below an entity's `required_role` before emitting the `startsWith(traversal_path, ...)` predicate for that entity's alias. If no path qualifies, the alias compiles to `Bool(false)` and the aggregation sees zero rows for that entity.
+To close this, each ontology entity now declares a `required_role` in its redaction block (`config/ontology/nodes/**`). Rails publishes traversal paths tagged with the user's highest access level on the leaf group (`{path, access_level}` tuples in the JWT). The compiler's `SecurityPass` drops any path whose tag falls below an entity's `required_role`. It drops the path before emitting the `startsWith(traversal_path, ...)` predicate for that entity's alias. If no path qualifies, the alias compiles to `Bool(false)` and the aggregation sees zero rows for that entity.
 
 Controls:
 
 - **Per-entity role floor**: `redaction.required_role` defaults to `reporter`. Security-domain entities (Vulnerability, Finding, VulnerabilityScanner, VulnerabilityIdentifier, VulnerabilityOccurrence, SecurityScan) declare `security_manager`, matching the minimum GitLab role designed for security team members.
-- **Edge-only aggregation lowering is disabled for gated entities**: when `required_role` exceeds the default, `lower.rs` keeps the node table in the FROM clause so the security pass has an alias to filter. Without this the compiler would elide the scan and defeat the gate.
-- **Property grouping keeps protected aliases in SQL**: a top-level `group_by` entry with `{"kind": "property"}` groups by a property on a node alias, and the lowerer keeps that alias table-backed so the same role-scoped `SecurityPass` predicate applies before aggregation. A Reporter-only user cannot get `Vulnerability.severity` or `SecurityScan.scan_type` buckets from paths that require Security Manager access.
-- **Traversal path filters cannot raise aggregation access**: when an aggregation query supplies a `traversal_path` filter on a gated entity, `RestrictPass` checks that path against the same role-filtered JWT path set used by `SecurityPass`. A Reporter path cannot satisfy a SecurityManager entity filter, even if the filter names a namespace under the Reporter path.
+- **Edge-only aggregation lowering is disabled for gated entities**: when `required_role` exceeds the default, `lower.rs` keeps the node table in the FROM clause. This gives the security pass an alias to filter. Without this the compiler would elide the scan and defeat the gate.
+- **Property grouping keeps protected aliases in SQL**: a top-level `group_by` entry with `{"kind": "property"}` groups by a property on a node alias. The lowerer keeps that alias table-backed, so the same role-scoped `SecurityPass` predicate applies before aggregation. A Reporter-only user cannot get `Vulnerability.severity` or `SecurityScan.scan_type` buckets from paths that require Security Manager access.
+- **Traversal path filters cannot raise aggregation access**: an aggregation query may supply a `traversal_path` filter on a gated entity. Then `RestrictPass` checks that path against the same role-filtered JWT path set used by `SecurityPass`. A Reporter path cannot satisfy a SecurityManager entity filter, even if the filter names a namespace under the Reporter path.
 - **Pre-filtering stays in place**: Layers 1 and 2 (`organization_id` and `traversal_id` filtering) still run on every query. The per-entity role scope is an additional drop, never a relaxation.
-- **Empty path set fails closed at compile time**: a `SecurityContext` with no traversal paths returns a compilation error rather than a `Bool(false)` everywhere, so misconfigured callers surface instead of silently returning empty results.
+- **Empty path set fails closed at compile time**: a `SecurityContext` with no traversal paths returns a compilation error rather than a `Bool(false)` everywhere. So misconfigured callers surface instead of silently returning empty results.
 
 **Code Review Requirements**:
 

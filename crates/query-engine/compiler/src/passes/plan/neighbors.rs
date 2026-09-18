@@ -96,6 +96,7 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
     nodes.insert(center_alias.clone(), center_np);
 
     Ok(Plan {
+        scope_guards: Vec::new(),
         nodes,
         hops: vec![],
         strategy: Strategy::SingleNode,

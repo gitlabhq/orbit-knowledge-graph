@@ -112,15 +112,9 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
 /// Emitted alongside the broad authorization filter so ClickHouse can seek the
 /// edge PK to the project's contiguous range instead of the whole org.
 fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
-    hop.scope_prefix.as_ref().map(|prefix| {
-        Expr::func(
-            "startsWith",
-            vec![
-                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                Expr::string(prefix.as_str()),
-            ],
-        )
-    })
+    hop.scope_prefix
+        .as_ref()
+        .map(|scope| scope.predicate(alias))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -203,9 +197,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &mut narrowed_nodes,
             )?;
 
-            inner_preds.extend(edge_scope_predicate(hop, &alias));
-
             edge_if_predicates = Expr::conjoin(inner_preds.clone());
+            inner_preds.extend(edge_scope_predicate(hop, &alias));
 
             from = Some(limit_by_scan(
                 &hop.edge_table,
@@ -435,7 +428,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
                             QueryError::Lowering(format!("no sort key for node table '{table}'"))
                         })?;
-                        let (new_from, _selects, nw) = emit_node_join_with_narrowing(
+                        let (new_from, ns, nw) = emit_node_join_with_narrowing(
                             from,
                             np,
                             edge_alias,
@@ -445,6 +438,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             node_sort_key,
                         )?;
                         from = new_from;
+                        selects.extend(ns);
                         where_parts.extend(nw);
                     }
                 }
@@ -456,7 +450,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
                             QueryError::Lowering(format!("no sort key for node table '{table}'"))
                         })?;
-                        let (new_from, _selects, nw) = emit_node_join_with_narrowing(
+                        let (new_from, ns, nw) = emit_node_join_with_narrowing(
                             from,
                             np,
                             edge_alias,
@@ -466,6 +460,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             node_sort_key,
                         )?;
                         from = new_from;
+                        selects.extend(ns);
                         where_parts.extend(nw);
                     }
                 }

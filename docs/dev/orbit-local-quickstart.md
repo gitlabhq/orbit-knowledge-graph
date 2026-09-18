@@ -64,7 +64,7 @@ resulting DuckDB graph with SQL:
 ./target/release/orbit sql -F json 'SELECT path, language FROM gl_file LIMIT 5'
 ```
 
-The graph is written to `~/.orbit/graph.duckdb`. `orbit schema` lists every
+The graph is written to `~/.gitlab/orbit/graph.duckdb`. `orbit schema` lists every
 table and column in it. Orbit Local is queried with DuckDB SQL only; the JSON
 query DSL documented under `docs/source/remote/` applies to Orbit Remote.
 
@@ -88,7 +88,7 @@ first invocation pays the compile cost.
 - The query REST API and authorization paths
 
 The full server integration suite (`mise run test:integration`) also runs
-without GDK — it needs Docker (`mise run colima:start` on macOS), not the
+without GDK. It needs Docker (`mise run colima:start` on macOS), not the
 GDK stack.
 
 For the rest, follow [Local development](local-development.md).
