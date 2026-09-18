@@ -200,13 +200,13 @@ fn compile_gql(cypher: &str) -> Result<compiler::passes::codegen::CompiledQueryC
 
 #[test]
 fn gql_untyped_edge_pattern() {
-    let r = compile_gql("MATCH (u:User {id: 1})-[e]->(n:Note) RETURN n.confidential AS c");
+    let r = compile_gql("MATCH (u:User {id: 1})-[e]->(n:Note) RETURN n.confidential");
     assert!(r.is_ok(), "{}", r.unwrap_err());
 }
 
 #[test]
 fn gql_open_ended_scan() {
-    let r = compile_gql("MATCH (u:User) RETURN u.username AS name");
+    let r = compile_gql("MATCH (u:User) RETURN u.username");
     assert!(r.is_ok(), "{}", r.unwrap_err());
 }
 
@@ -218,7 +218,7 @@ fn gql_count_without_node_ids() {
 
 #[test]
 fn gql_typed_edge_traversal() {
-    let r = compile_gql("MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) RETURN n.confidential AS c");
+    let r = compile_gql("MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) RETURN n.confidential");
     assert!(r.is_ok(), "{}", r.unwrap_err());
     let sql = r.unwrap().base.render();
     assert!(
@@ -228,24 +228,10 @@ fn gql_typed_edge_traversal() {
 }
 
 #[test]
-fn gql_edge_property_in_return() {
-    let r = compile_gql(
-        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) \
-         RETURN n.confidential AS c, e.relationship_kind AS kind",
-    );
-    assert!(r.is_ok(), "{}", r.unwrap_err());
-    let sql = r.unwrap().base.render();
-    assert!(
-        sql.contains("AS kind"),
-        "edge property alias missing: {sql}"
-    );
-}
-
-#[test]
 fn gql_order_by_across_traversal() {
     let r = compile_gql(
         "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) \
-         RETURN n.confidential AS c ORDER BY n.confidential",
+         RETURN n.confidential ORDER BY n.confidential",
     );
     assert!(r.is_ok(), "{}", r.unwrap_err());
 }

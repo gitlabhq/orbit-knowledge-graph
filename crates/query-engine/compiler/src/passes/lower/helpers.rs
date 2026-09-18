@@ -77,14 +77,9 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
     crate::passes::shared::requested_columns(&np.columns)
         .into_iter()
         .map(|col| {
-            let output_name = np
-                .column_aliases
-                .get(&col)
-                .cloned()
-                .unwrap_or_else(|| format!("{alias}_{col}"));
             SelectExpr::new(
                 text_excerpt_projection(alias, &col, &np.text_excerpt),
-                output_name,
+                format!("{alias}_{col}"),
             )
         })
         .collect()
