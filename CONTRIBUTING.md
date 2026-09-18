@@ -52,19 +52,11 @@ Run `mise lint:docs` before pushing any documentation changes.
 
 ## Engineering conventions
 
-- Explain only reasons that the code cannot show. Do not narrate setup, calls, or assertions in comments.
-- Reuse existing handlers, pipelines, helpers, and constructors before you add new ones.
-- Read `crates/indexer/AGENTS.md` before indexer work. Read `crates/code-graph/AGENTS.md` before Code Graph work.
-- Do not ship bare `#[allow(dead_code)]`. Delete unused code or use `#[cfg(test)]` for test-only code.
-- Use a justified `#[expect(dead_code, reason = "...")]` only when an exception is necessary.
-- Put local validation in `build.rs` when it needs no network or Git diff context.
-- Use `ast-grep` for structural changes across multiple sites.
-- Check crates.io for the latest release before you add a dependency.
-- Derive environment-dependent values from the ontology or typed settings. Use named constants for other shared values.
-- Put each graph-shape fact in the ontology. Do not copy that fact into Rust settings or constants.
-- Limit introspected ontology descriptions to one sentence and 200 characters. The top-level schema description has no limit.
-- Read `docs/dev/sox-billing-boundary.md` before you change billing emission or populate `BillingInputs`.
-- Fence executable Orbit query JSON as `json orbit-query`. Put shell commands in separate shell fences.
+- Comments explain why. Do not narrate what the code shows.
+- Reuse existing infrastructure before adding new infrastructure.
+- Before changing an area, read its design document and the crate-local `AGENTS.md`, if present.
+- Treat the ontology as the single source of truth for graph-shape facts.
+- Read `docs/dev/sox-billing-boundary.md` before changing billing.
 
 ## Documentation conventions
 

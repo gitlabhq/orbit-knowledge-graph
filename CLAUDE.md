@@ -27,20 +27,11 @@ git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"
 
 ## Where to find things
 
-Read the linked owner before you act in that area.
+List these directories and read the relevant owner before you act:
 
-| Area | Read first |
-| --- | --- |
-| Architecture and data flow | `docs/design-documents/README.md` |
-| Authorization, security, FIPS | `docs/design-documents/security.md` |
-| Schema changes | `docs/design-documents/schema_management.md` |
-| Query behavior | `docs/design-documents/querying/` |
-| Indexer and ontology work | `crates/indexer/AGENTS.md` |
-| Code Graph work | `crates/code-graph/AGENTS.md` |
-| Server settings | `docs/dev/runbooks/server_configuration.md` |
-| Billing emission | `docs/dev/sox-billing-boundary.md` |
-| Crate inventory | `docs/dev/agents-crate-map.md` |
-| Files, schemas, tools, and checks | `docs/dev/agents-reference-index.md` |
-| Code and comment conventions | [`CONTRIBUTING.md`](CONTRIBUTING.md#engineering-conventions) |
-| Docs to update per change, MR titles, issue references, templates | [`CONTRIBUTING.md`](CONTRIBUTING.md#documentation-conventions), [MR conventions](CONTRIBUTING.md#mr-conventions) |
-| Domain terms | `CONTEXT.md` |
+- `docs/design-documents/` for architecture, security, schema, querying, and indexing.
+- `docs/dev/` for runbooks, the crate map, and the reference index.
+- Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
+
+Read `CONTRIBUTING.md` for engineering, documentation, and MR conventions. Read
+`CONTEXT.md` for domain terms.
