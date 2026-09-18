@@ -183,10 +183,8 @@ fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn validate_local(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
-    let v = validate::Validator::new(ctx.ontology()).with_skip(validate::Skip {
-        selectivity: true,
-        ..Default::default()
-    });
+    let v =
+        validate::Validator::new(ctx.ontology()).with_skip(validate::Skip { selectivity: true });
     v.check_shape(&input)?;
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
