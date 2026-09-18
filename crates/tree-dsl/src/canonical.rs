@@ -227,6 +227,10 @@ pub enum Canonical {
     DisplayResolved,
     #[strum(serialize = "_*_display_source_path")]
     DisplaySourcePath,
+    #[strum(serialize = "_*_display_import_type")]
+    DisplayImportType,
+    #[strum(serialize = "_*_display_language")]
+    DisplayLanguage,
 }
 
 impl From<Canonical> for u16 {

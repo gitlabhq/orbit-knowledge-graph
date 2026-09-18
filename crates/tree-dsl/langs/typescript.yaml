@@ -233,6 +233,7 @@ display:
       - match: '$M:__source_file'
         append:
           - '(_*_display_file_path @$M)'
+
       - match: '(__def)'
         append:
           - '(_*_display_fqn @$ROOT|concat("::", "ancestor_sym:_*_display_fqn", "child_sym:__defname"))'
@@ -276,6 +277,11 @@ display:
           - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
   - name: imports
     rules:
+      - match: '(__import (__cjs_require))'
+        append:
+          - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
+          - '(_*_display_source_path @$ROOT|child_sym("__source"))'
+          - '(_*_display_import_type "CjsRequire")'
       - match: '(__import)'
         append:
           - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
@@ -284,6 +290,23 @@ display:
         append:
           - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
           - '(_*_display_source_path @$ROOT|child_sym("__source"))'
+      - match: '(__name "*" (__alias))'
+        append:
+          - '(_*_display_import_type "NamespaceImport")'
+          - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'
+      - match: '(__name "*")'
+        append:
+          - '(_*_display_import_type "WildcardImport")'
+          - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'
+      - match: '(__name "default")'
+        append:
+          - '(_*_display_import_type "DefaultImport")'
+          - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'
+      - match: '(__name (__alias))'
+        append:
+          - '(_*_display_import_type "AliasedImport")'
+          - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'
       - match: '(__name)'
         append:
+          - '(_*_display_import_type "NamedImport")'
           - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'

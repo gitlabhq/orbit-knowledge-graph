@@ -119,14 +119,27 @@ fn build_files(trees: &[Tree], lang: &Lang, file_ids: &IdMap) -> anyhow::Result<
         StringBuilder::with_capacity(n, n * 8),
     );
     for (fi, tree) in trees.iter().enumerate() {
-        let path = lang.syms.resolve(tree.root().sym());
+        let root = tree.root();
+        let path = lang.syms.resolve(root.sym());
         id_b.append_value(file_ids[&(fi, 0)]);
         path_b.append_value(path);
         let filename = path.rsplit('/').next().unwrap_or(path);
         name_b.append_value(filename);
         let ext = filename.rsplit('.').next().unwrap_or("");
         ext_b.append_value(ext);
-        lang_b.append_value(ext_to_lang(ext));
+        let lang_sym = child_display_sym(root, C::DisplayLanguage);
+        lang_b.append_value(if lang_sym != 0 {
+            lang.syms.resolve(lang_sym)
+        } else {
+            match ext {
+                "py" | "pyi" => "python",
+                "ts" => "typescript",
+                "tsx" => "tsx",
+                "js" | "jsx" | "mjs" | "cjs" => "javascript",
+                "rs" => "rust",
+                _ => "unknown",
+            }
+        });
     }
     make_batch(
         &[
@@ -312,12 +325,17 @@ fn build_imports(
                     let ns = name.sym();
                     let als = name.child_sym(C::Alias).unwrap_or(0);
                     let name_text = lang.syms.resolve(ns);
-                    let label = classify_import(
-                        name_text,
-                        als != 0,
-                        names.len() == 1 && ns == source_sym,
-                        c,
-                    );
+                    let import_type_sym = child_display_sym(*name, C::DisplayImportType);
+                    let parent_type_sym = child_display_sym(c, C::DisplayImportType);
+                    let label = if import_type_sym != 0 {
+                        lang.syms.resolve(import_type_sym)
+                    } else if parent_type_sym != 0 {
+                        lang.syms.resolve(parent_type_sym)
+                    } else if names.len() == 1 && ns == source_sym {
+                        "Import"
+                    } else {
+                        "NamedImport"
+                    };
 
                     let name_id = imp_name_ids
                         .get(&(fi, name.index()))
@@ -391,25 +409,6 @@ fn build_imports(
             Box::new(ec_b),
         ],
     )
-}
-
-fn classify_import(name: &str, has_alias: bool, source_eq_name: bool, imp: Cursor) -> &'static str {
-    let is_cjs = imp.children().any(|c| c.is(C::CjsRequire));
-    if is_cjs {
-        "CjsRequire"
-    } else if name == "*" && has_alias {
-        "NamespaceImport"
-    } else if name == "*" {
-        "WildcardImport"
-    } else if name == "default" {
-        "DefaultImport"
-    } else if has_alias {
-        "AliasedImport"
-    } else if source_eq_name {
-        "Import"
-    } else {
-        "NamedImport"
-    }
 }
 
 fn append_loc(
@@ -592,15 +591,4 @@ fn make_batch(
     let arrays: Vec<Arc<dyn arrow_56::array::Array>> =
         columns.into_iter().map(|mut b| b.finish()).collect();
     Ok(RecordBatch::try_new(schema, arrays)?)
-}
-
-fn ext_to_lang(ext: &str) -> &'static str {
-    match ext {
-        "py" | "pyi" => "python",
-        "ts" => "typescript",
-        "tsx" => "tsx",
-        "js" | "jsx" | "mjs" | "cjs" => "javascript",
-        "rs" => "rust",
-        _ => "unknown",
-    }
 }

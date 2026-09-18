@@ -184,6 +184,7 @@ display:
         append:
           - '(_*_display_fqn @$M|stem|collapse_index("__init__")|replace("/", "."))'
           - '(_*_display_file_path @$M)'
+
       - match: '(__def)'
         append:
           - '(_*_display_fqn @$ROOT|concat(".", "ancestor_sym:_*_display_fqn", "child_sym:__defname"))'
@@ -226,6 +227,14 @@ display:
         append:
           - '(_*_display_file_path @$ROOT|ancestor_sym("_*_display_file_path"))'
           - '(_*_display_source_path @$ROOT|child_sym("__source_path")|replace("/", "."))'
+      - match: '(__name "*")'
+        append:
+          - '(_*_display_import_type "WildcardImport")'
+          - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'
+      - match: '(__name (__alias))'
+        append:
+          - '(_*_display_import_type "AliasedImport")'
+          - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'
       - match: '(__name)'
         append:
           - '(_*_display_resolved @$ROOT|has_incoming("Imports"))'

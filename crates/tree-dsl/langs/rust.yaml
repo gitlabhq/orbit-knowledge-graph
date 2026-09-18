@@ -171,6 +171,7 @@ display:
       - match: '$M:__source_file'
         append:
           - '(_*_display_file_path @$M)'
+
       - match: '(__def)'
         append:
           - '(_*_display_fqn @$ROOT|concat("::", "ancestor_sym:_*_display_fqn", "child_sym:__defname"))'
