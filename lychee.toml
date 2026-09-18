@@ -19,6 +19,9 @@ exclude_path = [
   "node_modules",
   "output",
   ".claude/skills/pajamas",
+  # Synced verbatim from the same path in gitlab-org/gitlab; the links point at
+  # docs.gitlab.com anchors this repo does not host.
+  ".ai/principles/distilled",
 ]
 
 exclude_all_private = true
