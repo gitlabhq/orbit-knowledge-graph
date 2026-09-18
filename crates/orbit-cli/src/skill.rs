@@ -18,7 +18,7 @@ const KNOWN_SKILLS: &[&str] = &[DEFAULT_SKILL];
 
 #[derive(Debug, PartialEq, Eq)]
 enum Request {
-    List,
+    Default,
     Print { name: String, path: String },
 }
 
@@ -40,7 +40,7 @@ fn manifest_binary_hint() -> String {
 
 pub(crate) fn run(name_or_path: Option<String>, path: Option<String>) -> Result<()> {
     match resolve(name_or_path.as_deref(), path.as_deref())? {
-        Request::List => print_skill_list()?,
+        Request::Default => print_default_skill()?,
         Request::Print { path, .. } => print_skill_file(&path)?,
     }
     Ok(())
@@ -48,7 +48,7 @@ pub(crate) fn run(name_or_path: Option<String>, path: Option<String>) -> Result<
 
 fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
     let Some(first) = name_or_path else {
-        return Ok(Request::List);
+        return Ok(Request::Default);
     };
 
     if is_skill_name(first) {
@@ -82,12 +82,26 @@ fn is_skill_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-fn print_skill_list() -> Result<()> {
+fn print_default_skill() -> Result<()> {
+    print_skill_file(MANIFEST)?;
+    let others: Vec<_> = KNOWN_SKILLS
+        .iter()
+        .copied()
+        .filter(|name| *name != DEFAULT_SKILL)
+        .collect();
+    if !others.is_empty() {
+        println!("\nOther available skills:");
+        print_skill_list(&others)?;
+    }
+    Ok(())
+}
+
+fn print_skill_list(names: &[&str]) -> Result<()> {
     let manifest =
         lookup(MANIFEST).ok_or_else(|| anyhow::anyhow!("embedded {MANIFEST} missing"))?;
     let description = manifest_description(&manifest)?;
     let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
-    for name in KNOWN_SKILLS {
+    for name in names {
         println!("{name} — {description}");
     }
     Ok(())
@@ -159,7 +173,7 @@ mod tests {
 
     #[test]
     fn arguments_disambiguate_names_and_paths() {
-        assert_eq!(resolve(None, None).unwrap(), Request::List);
+        assert_eq!(resolve(None, None).unwrap(), Request::Default);
         assert_eq!(
             resolve(Some("SKILL.md"), None).unwrap(),
             Request::Print {

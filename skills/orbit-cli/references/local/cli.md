@@ -24,5 +24,6 @@ glab orbit <subcommand> [flags...]
 
 Set keys with `glab config set <key> <value>`. Leave
 `orbit_local_binary_version` and `orbit_local_last_update_check` alone.
-`orbit skills` lists the embedded skill trees. `orbit skills orbit [path]`
-reads this tree, and a path alone uses it by default.
+`orbit skills` reads the embedded local skill and lists any additional skill
+trees afterward. `orbit skills orbit [path]` reads this tree explicitly, and a
+path alone uses it by default.

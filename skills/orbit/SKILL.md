@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.28.0
+version: 0.29.0
 license: MIT
 metadata:
   audience: developers
@@ -19,7 +19,7 @@ If a `glab orbit` command fails with "command not found", an auth error, or a fe
 
 ## Discovery
 
-`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available runtime skills, or `glab orbit skills orbit references/recipes.md` to read a file from the Orbit skill tree matched to the command source. For entity properties, prefer the recipes in [`references/recipes.md`](references/recipes.md) over schema introspection. They already encode the columns and filters known to work.
+`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to read the bundled local skill and list any additional runtime skills, or `glab orbit skills orbit references/local/sql.md` to read one of its files. For entity properties, prefer the recipes in [`references/recipes.md`](references/recipes.md) over schema introspection. They already encode the columns and filters known to work.
 
 If you must introspect, call `glab orbit ontology <Entity...>` with explicit entity names. The unscoped form returns about 17 KB of output. Call it at most once per session, because the ontology does not change mid-session. `glab orbit dsl` prints the full DSL JSON Schema. The ontology command returns an object with a `nodes` array and does not accept `--jq`, so pipe into `jq`. Per-node `outgoing_edges` and `incoming_edges` are arrays of edge type names, not objects:
 

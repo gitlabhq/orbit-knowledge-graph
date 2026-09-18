@@ -724,18 +724,17 @@ fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
 }
 
 #[test]
-fn skills_lists_and_serves_bundled_content() {
-    let listing = orbit_cmd().arg("skills").output().unwrap();
-    assert!(listing.status.success());
-    let listing = String::from_utf8(listing.stdout).unwrap();
-    assert_eq!(listing.lines().count(), 1);
-    assert!(listing.starts_with("orbit — "));
-    assert!(listing.contains("Orbit CLI"));
+fn skills_defaults_to_and_serves_bundled_content() {
+    let default = orbit_cmd().arg("skills").output().unwrap();
+    assert!(default.status.success());
+    let default = String::from_utf8(default.stdout).unwrap();
+    assert!(default.contains("name: orbit-cli"));
+    assert!(!default.contains("Other available skills:"));
 
     let manifest = orbit_cmd().args(["skills", "orbit"]).output().unwrap();
     assert!(manifest.status.success());
     let manifest = String::from_utf8(manifest.stdout).unwrap();
-    assert!(manifest.contains("name: orbit-cli"));
+    assert_eq!(default, manifest);
     assert!(manifest.contains("references/local/sql.md"));
     assert!(
         manifest.contains("`orbit skills references/local/sql.md`"),
