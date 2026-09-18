@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use rust_embed::Embed;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -10,6 +10,8 @@ const SKILL_NAME: &str = "orbit";
 const MANIFEST: &str = "SKILL.md";
 
 #[derive(Embed)]
+// Serve skills/orbit byte-for-byte, including helper scripts and their tests, so this tree and
+// hash match the artifact installed by `glab skills install orbit`.
 #[folder = "$SKILLS_DIR/orbit"]
 struct SkillAssets;
 
@@ -47,18 +49,6 @@ pub struct SkillNotFound {
     pub known_names: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Frontmatter {
-    name: String,
-    version: semver::Version,
-    description: String,
-    #[serde(default)]
-    license: Option<String>,
-    #[serde(default)]
-    metadata: Option<serde_json::Value>,
-}
-
 #[derive(Debug)]
 struct EmbeddedSkill {
     metadata: SkillMetadata,
@@ -91,14 +81,9 @@ impl SkillCatalog {
             .iter()
             .find(|file| file.path == MANIFEST)
             .ok_or_else(|| format!("embedded {SKILL_NAME} skill is missing {MANIFEST}"))?;
-        let frontmatter = parse_frontmatter(&manifest.content)?;
-        if frontmatter.name != SKILL_NAME {
-            return Err(format!(
-                "embedded skill name {:?} does not match {SKILL_NAME:?}",
-                frontmatter.name
-            ));
-        }
-        let _ = (&frontmatter.license, &frontmatter.metadata);
+        // Keep runtime validation as defense in depth against embedding drift.
+        let frontmatter = orbit_prompts::parse_skill_frontmatter(&manifest.content)
+            .map_err(|error| format!("embedded {error}"))?;
 
         let metadata = SkillMetadata {
             name: frontmatter.name,
@@ -128,17 +113,6 @@ impl SkillCatalog {
             files: (!metadata_only).then(|| skill.files.clone()),
         })
     }
-}
-
-fn parse_frontmatter(manifest: &str) -> Result<Frontmatter, String> {
-    let content = manifest
-        .strip_prefix("---\n")
-        .ok_or_else(|| format!("embedded {MANIFEST} has no YAML frontmatter"))?;
-    let (frontmatter, _) = content
-        .split_once("\n---\n")
-        .ok_or_else(|| format!("embedded {MANIFEST} has unterminated YAML frontmatter"))?;
-    orbit_utils::yaml::from_str(frontmatter)
-        .map_err(|error| format!("parsing embedded {MANIFEST} frontmatter: {error}"))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

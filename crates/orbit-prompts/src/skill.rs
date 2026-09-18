@@ -8,6 +8,7 @@ use syn::{Expr, ExprLit, Item, Lit, Meta};
 use crate::CLAP_HELP_COMMAND;
 
 const MANIFEST: &str = "SKILL.md";
+const SKILL_NAME: &str = "orbit";
 const SLOT_PREFIX: &str = "<!-- orbit:include local:";
 const SECTION_PREFIX: &str = "<!-- orbit:section ";
 const SECTION_END: &str = "<!-- /orbit:section -->";
@@ -15,6 +16,40 @@ const SECTION_END: &str = "<!-- /orbit:section -->";
 #[derive(Debug, PartialEq, Eq)]
 pub struct SkillValidation {
     pub remote_commands: BTreeSet<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillFrontmatter {
+    pub name: String,
+    pub version: semver::Version,
+    pub description: String,
+    #[serde(default, rename = "license")]
+    _license: Option<String>,
+    #[serde(default, rename = "metadata")]
+    _metadata: Option<serde::de::IgnoredAny>,
+}
+
+pub fn parse_skill_frontmatter(manifest: &str) -> Result<SkillFrontmatter, String> {
+    let normalized = manifest.replace("\r\n", "\n");
+    let content = normalized
+        .strip_prefix("---\n")
+        .ok_or_else(|| format!("{MANIFEST} has no YAML frontmatter"))?;
+    let (frontmatter, _) = content
+        .split_once("\n---\n")
+        .ok_or_else(|| format!("{MANIFEST} has unterminated YAML frontmatter"))?;
+    let parsed: SkillFrontmatter = orbit_utils::yaml::from_str(frontmatter)
+        .map_err(|error| format!("parsing {MANIFEST} frontmatter: {error}"))?;
+    if parsed.name != SKILL_NAME {
+        return Err(format!(
+            "skill name {:?} does not match {SKILL_NAME:?}",
+            parsed.name
+        ));
+    }
+    if parsed.description.trim().is_empty() {
+        return Err("skill description must not be empty".to_string());
+    }
+    Ok(parsed)
 }
 
 pub fn validate_skill_pair(
@@ -35,6 +70,7 @@ pub fn validate_skill_pair(
     let local_manifest = local
         .get(MANIFEST)
         .ok_or_else(|| format!("{} is missing {MANIFEST}", local_root.display()))?;
+    parse_skill_frontmatter(remote_manifest)?;
     let slots = parse_markers(remote_manifest, MarkerTree::Remote)?;
     let sections = parse_markers(local_manifest, MarkerTree::Local)?;
     if slots != sections {
@@ -480,13 +516,19 @@ fn to_kebab_case(name: &str) -> String {
 mod tests {
     use super::*;
 
+    fn remote_manifest(body: &str) -> String {
+        format!("---\nname: orbit\nversion: 1.0.0\ndescription: Orbit skill\n---\n{body}")
+    }
+
     fn fixture() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("remote/references")).unwrap();
         std::fs::create_dir_all(root.path().join("local/references/local")).unwrap();
         std::fs::write(
             root.path().join("remote/SKILL.md"),
-            "[remote](references/remote.md)\n<!-- orbit:include local:quick-start -->\n`orbit graph-status --project-id 1`\n",
+            remote_manifest(
+                "[remote](references/remote.md)\n<!-- orbit:include local:quick-start -->\n`orbit graph-status --project-id 1`\n",
+            ),
         )
         .unwrap();
         std::fs::write(root.path().join("remote/references/remote.md"), "remote\n").unwrap();
@@ -526,6 +568,36 @@ mod tests {
             result.remote_commands,
             BTreeSet::from(["graph-status".into()])
         );
+    }
+
+    #[test]
+    fn build_validation_rejects_invalid_frontmatter() {
+        for (original, replacement, expected_error) in [
+            ("version: 1.0.0", "version: not-semver", "not-semver"),
+            (
+                "description: Orbit skill",
+                "description: Orbit skill\nunknown: value",
+                "unknown field",
+            ),
+            ("name: orbit", "name: another-skill", "does not match"),
+            ("description: Orbit skill", "description: '  '", "empty"),
+        ] {
+            let root = fixture();
+            let manifest = std::fs::read_to_string(root.path().join("remote/SKILL.md")).unwrap();
+            std::fs::write(
+                root.path().join("remote/SKILL.md"),
+                manifest.replacen(original, replacement, 1),
+            )
+            .unwrap();
+            let error = validate(root.path()).unwrap_err();
+            assert!(error.contains(expected_error), "{error}");
+        }
+    }
+
+    #[test]
+    fn frontmatter_parser_tolerates_crlf() {
+        let manifest = remote_manifest("body\n").replace('\n', "\r\n");
+        assert_eq!(parse_skill_frontmatter(&manifest).unwrap().name, "orbit");
     }
 
     #[test]
@@ -638,7 +710,9 @@ mod tests {
         let root = fixture();
         std::fs::write(
             root.path().join("remote/SKILL.md"),
-            "[local](references/local/sql.md)\n<!-- orbit:include local:quick-start -->\n`orbit query`\n",
+            remote_manifest(
+                "[local](references/local/sql.md)\n<!-- orbit:include local:quick-start -->\n`orbit query`\n",
+            ),
         )
         .unwrap();
         assert!(validate(root.path()).is_ok());
@@ -650,7 +724,9 @@ mod tests {
             let root = fixture();
             std::fs::write(
                 root.path().join("remote/SKILL.md"),
-                format!("[bad]({destination})\n<!-- orbit:include local:quick-start -->\n"),
+                remote_manifest(&format!(
+                    "[bad]({destination})\n<!-- orbit:include local:quick-start -->\n"
+                )),
             )
             .unwrap();
             assert!(validate(root.path()).is_err(), "{destination}");
@@ -715,7 +791,7 @@ orbit graph-status --project-id 1
         let root = fixture();
         std::fs::write(
             root.path().join("remote/SKILL.md"),
-            "<!-- orbit:include local:quick-start -->\n",
+            remote_manifest("<!-- orbit:include local:quick-start -->\n"),
         )
         .unwrap();
         assert!(
@@ -730,7 +806,9 @@ orbit graph-status --project-id 1
         let root = fixture();
         std::fs::write(
             root.path().join("remote/SKILL.md"),
-            "<!-- orbit:include local:quick-start -->\n`orbit help`\n`orbit imaginary`\n",
+            remote_manifest(
+                "<!-- orbit:include local:quick-start -->\n`orbit help`\n`orbit imaginary`\n",
+            ),
         )
         .unwrap();
         let error = validate(root.path()).unwrap_err();
