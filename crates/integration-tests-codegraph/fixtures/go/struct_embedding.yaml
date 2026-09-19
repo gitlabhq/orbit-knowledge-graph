@@ -29,8 +29,8 @@ tests:
   # finalize().
   - name: svc.Log() resolves via embedding
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'main' AND e.relationship_kind = 'CALLS' AND callee.name = 'Log'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'Log'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "main.Log" } }

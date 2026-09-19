@@ -88,8 +88,7 @@ tests:
 
   - name: FileToDefinition Defines edges
     query: |
-      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
-      WHERE e.relationship_kind = 'DEFINES'
+      MATCH (f:File)-[e:DEFINES]->(d:Definition)
       RETURN f.path AS file, d.name AS def
     assert:
       - { row_count: 3 }
@@ -99,8 +98,7 @@ tests:
 
   - name: FileToDefinition Calls edges
     query: |
-      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
-      WHERE e.relationship_kind = 'CALLS'
+      MATCH (f:File)-[e:CALLS]->(d:Definition)
       RETURN f.path AS file, d.name AS def
     assert:
       - { row_count: 2 }
@@ -118,8 +116,7 @@ tests:
 
   - name: Definition containment edges (Defines)
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
-      WHERE e.relationship_kind = 'DEFINES'
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 2 }
@@ -128,8 +125,7 @@ tests:
 
   - name: Definition call edges (Calls)
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
-      WHERE e.relationship_kind = 'CALLS'
+      MATCH (parent:Definition)-[e:CALLS]->(child:Definition)
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }

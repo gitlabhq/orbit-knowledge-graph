@@ -267,9 +267,8 @@ tests:
 
   - name: Next route components resolve through baseUrl aliases barrels and folder indexes
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path IN [
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN [
           'src/app/(marketing)/blog/[...slug]/page.tsx',
           'src/app/shop/[[...filters]]/page.tsx',
           'src/app/@modal/(.)login/page.tsx',
@@ -295,9 +294,8 @@ tests:
 
   - name: Next route handlers resolve one local helper edge per method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'src/app/api/items/[id]/route.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'src/app/api/items/[id]/route.ts'
         AND callee.file_path = 'src/lib/index.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
       ORDER BY caller, callee
@@ -312,9 +310,8 @@ tests:
 
   - name: Next client and server directives do not block local calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path IN ['src/app/actions.ts', 'src/app/client-panel.tsx']
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN ['src/app/actions.ts', 'src/app/client-panel.tsx']
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
       ORDER BY caller, callee
     assert:
@@ -348,8 +345,7 @@ tests:
   - name: Next external package calls target imported symbols
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
-      WHERE e.relationship_kind = 'CALLS'
-        AND sym.import_path IN ['next/server', 'next/navigation']
+      WHERE sym.import_path IN ['next/server', 'next/navigation']
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
       ORDER BY caller, path, name
     assert:
@@ -362,8 +358,7 @@ tests:
   - name: Next type-only imports do not emit imported-symbol fallback
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
-      WHERE e.relationship_kind = 'CALLS'
-        AND sym.identifier_name = 'NextRequest'
+      WHERE sym.identifier_name = 'NextRequest'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
@@ -371,8 +366,7 @@ tests:
   - name: Next local route helpers do not emit imported-symbol fallback
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
-      WHERE e.relationship_kind = 'CALLS'
-        AND sym.import_path IN ['@lib', './actions']
+      WHERE sym.import_path IN ['@lib', './actions']
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }

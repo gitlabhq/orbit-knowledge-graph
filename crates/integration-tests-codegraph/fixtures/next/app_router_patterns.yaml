@@ -191,9 +191,8 @@ tests:
 
   - name: Next app router cross-file calls resolve helpers and JSX components
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path IN [
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path IN [
           'app/layout.tsx',
           'app/page.tsx',
           'app/blog/[slug]/page.tsx',
@@ -214,9 +213,8 @@ tests:
 
   - name: Next route handler methods share one helper edge per method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'app/api/health/route.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'app/api/health/route.ts'
         AND callee.file_path = 'src/lib/health.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
       ORDER BY caller

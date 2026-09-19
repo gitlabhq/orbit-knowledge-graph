@@ -27,24 +27,24 @@ fixtures:
 tests:
   - name: inner is not nested inside outer via Defines
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
-      WHERE parent.name = 'outer' AND child.name = 'inner' AND e.relationship_kind = 'DEFINES'
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
+      WHERE parent.name = 'outer' AND child.name = 'inner'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { empty: true }
 
   - name: outer calls inner
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'outer' AND callee.name = 'inner' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'outer' AND callee.name = 'inner'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: factorial calls itself
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'factorial' AND callee.name = 'factorial' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'factorial' AND callee.name = 'factorial'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

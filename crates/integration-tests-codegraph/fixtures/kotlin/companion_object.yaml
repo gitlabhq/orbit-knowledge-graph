@@ -23,8 +23,8 @@ fixtures:
 tests:
   - name: Foo.create() resolves to companion method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'main' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'main'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "com.example.Foo.Companion.create" } }

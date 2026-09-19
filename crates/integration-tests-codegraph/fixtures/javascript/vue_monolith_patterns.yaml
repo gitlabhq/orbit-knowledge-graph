@@ -287,9 +287,8 @@ tests:
 
   - name: Imported constants in Vue components do not fabricate call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.fqn = 'GitlabVersionCheckBadge::badConstantCall'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'GitlabVersionCheckBadge::badConstantCall'
         AND callee.file_path = 'app/assets/javascripts/gitlab_version_check/constants.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -297,9 +296,8 @@ tests:
 
   - name: Vue namespace member calls resolve to concrete helper definitions
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.fqn = 'GitlabVersionCheckBadge::badgeTitle'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'GitlabVersionCheckBadge::badgeTitle'
         AND callee.file_path = 'app/assets/javascripts/gitlab_version_check/utils.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -308,9 +306,8 @@ tests:
 
   - name: Vue method chains preserve imported helper and local method calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.fqn = 'SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick'
       RETURN caller.fqn AS caller, callee.fqn AS callee
       ORDER BY callee
     assert:
@@ -346,26 +343,23 @@ tests:
     queries:
       - query: |
           MATCH (file:File)-[e:DEFINES|CALLS]->(callee:Definition)
-          WHERE e.relationship_kind = 'CALLS'
-            AND file.path = 'app/assets/javascripts/gitlab_version_check/index.js'
+          WHERE file.path = 'app/assets/javascripts/gitlab_version_check/index.js'
             AND callee.fqn = 'parseBoolean'
           RETURN file.path AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
           - { row: { caller: "app/assets/javascripts/gitlab_version_check/index.js", callee: "parseBoolean" } }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE e.relationship_kind = 'CALLS'
-            AND caller.fqn = 'mountVersionCheck'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'mountVersionCheck'
             AND callee.fqn = 'parseBoolean'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
           - { row: { caller: "mountVersionCheck", callee: "parseBoolean" } }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE e.relationship_kind = 'CALLS'
-            AND caller.fqn = 'dismissAlert'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'dismissAlert'
             AND callee.file_path = 'app/assets/javascripts/gitlab_version_check/utils.js'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
@@ -373,18 +367,16 @@ tests:
           - { row: { caller: "dismissAlert", callee: "getHideAlertModalCookie" } }
           - { row: { caller: "dismissAlert", callee: "setHideAlertModalCookie" } }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE e.relationship_kind = 'CALLS'
-            AND caller.fqn = 'dismissAlert'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'dismissAlert'
             AND callee.fqn = 'track'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
           - { row: { caller: "dismissAlert", callee: "track" } }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE e.relationship_kind = 'CALLS'
-            AND caller.fqn = 'resolveSchedule'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'resolveSchedule'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 2 }

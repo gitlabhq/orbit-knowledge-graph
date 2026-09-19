@@ -256,9 +256,8 @@ tests:
   # ── Inheritance via `use Trait;` (Extends edges) ──────────────────
   - name: "Multiple traits in one use: Product uses both Loggable and Cacheable"
     query: |
-      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product'
-        AND e.relationship_kind = 'EXTENDS'
         AND p.fqn IN ['App\Concerns\Loggable', 'App\Concerns\Cacheable']
       RETURN p.fqn AS parent
     assert:
@@ -267,19 +266,17 @@ tests:
 
   - name: "Trait composed of trait: Composer uses Base"
     query: |
-      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Concerns\Composer'
         AND p.fqn = 'App\Concerns\Base'
-        AND e.relationship_kind = 'EXTENDS'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Conflict-resolution use still emits Extends for both traits"
     query: |
-      MATCH (c:Definition)-[e:CALLS|DEFINES|EXTENDS]->(p:Definition)
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Models\Speaker'
-        AND e.relationship_kind = 'EXTENDS'
         AND p.fqn IN ['App\Speakers\Left', 'App\Speakers\Right']
       RETURN p.fqn AS parent
     assert:
@@ -289,90 +286,81 @@ tests:
   # ── Calls into trait-provided members ─────────────────────────────
   - name: "Trait method via \\$this: Product.persist -> Loggable.log"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\persist'
         AND callee.fqn = 'App\Concerns\Loggable\log'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Second trait method via \\$this: Product.persist -> Cacheable.cache"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\persist'
         AND callee.fqn = 'App\Concerns\Cacheable\cache'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Abstract-trait greet -> abstract name: Greeter.greet -> Greeter.name"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Concerns\Greeter\greet'
         AND callee.fqn = 'App\Concerns\Greeter\name'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Class invoking inherited trait method: Person.hello -> Greeter.greet"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Person\hello'
         AND callee.fqn = 'App\Concerns\Greeter\greet'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Static trait method via self::: Widget.bump -> Counter.tick"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Widget\bump'
         AND callee.fqn = 'App\Concerns\Counter\tick'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Static trait method via static::: Widget.clear -> Counter.reset"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Widget\clear'
         AND callee.fqn = 'App\Concerns\Counter\reset'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Transitive trait method through composing trait: Host.run -> Composer.compose"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Host\run'
         AND callee.fqn = 'App\Concerns\Composer\compose'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Trait-of-trait \\$this call: Composer.compose -> Base.ping"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Concerns\Composer\compose'
         AND callee.fqn = 'App\Concerns\Base\ping'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Trait-method-on-trait-method via class: App.show -> HasVersion.version"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\App\show'
         AND callee.fqn = 'App\Concerns\HasVersion\version'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }

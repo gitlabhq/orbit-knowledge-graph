@@ -131,9 +131,8 @@ tests:
 
   - name: Vue computed property resolves ee_else_ce helper call
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
         AND callee.file_path = 'ee/app/assets/javascripts/sidebar/constants.js'
       RETURN caller.name AS caller, callee.name AS callee
     assert:
@@ -172,9 +171,8 @@ tests:
 
   - name: Vue monolith helper import from tilde alias resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
         AND callee.file_path = 'app/assets/javascripts/alert.js'
       RETURN caller.name AS caller, callee.name AS callee
     assert:

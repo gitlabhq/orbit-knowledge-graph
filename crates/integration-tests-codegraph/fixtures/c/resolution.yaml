@@ -129,10 +129,9 @@ tests:
 
   - name: "Intra-file: vec_normalize calls vec_length (both in math.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'math::vec_normalize'
         AND callee.fqn = 'math::vec_length'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -144,10 +143,9 @@ tests:
 
   - name: "Cross-file: main calls vec_add (main.c -> math.h -> math.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::main'
         AND callee.fqn = 'math::vec_add'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -155,10 +153,9 @@ tests:
 
   - name: "Cross-file: main calls vec_normalize (main.c -> math.h -> math.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::main'
         AND callee.fqn = 'math::vec_normalize'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -166,10 +163,9 @@ tests:
 
   - name: "Cross-file: main calls vec_length (main.c -> math.h -> math.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::main'
         AND callee.fqn = 'math::vec_length'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -177,10 +173,9 @@ tests:
 
   - name: "Cross-file: main calls create_circle (main.c -> shapes.h -> shapes.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::main'
         AND callee.fqn = 'shapes::create_circle'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -188,10 +183,9 @@ tests:
 
   - name: "Cross-file: main calls get_area (main.c -> shapes.h -> shapes.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::main'
         AND callee.fqn = 'shapes::get_area'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -208,9 +202,8 @@ tests:
 
   - name: "Exact cross-file call count from main"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::main'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 5 }

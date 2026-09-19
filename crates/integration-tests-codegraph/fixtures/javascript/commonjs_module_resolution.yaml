@@ -198,9 +198,8 @@ tests:
 
   - name: Destructured require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'named/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'named/main.js'
         AND callee.file_path = 'named/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -218,9 +217,8 @@ tests:
 
   - name: Namespace require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'namespace/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'namespace/main.js'
         AND callee.file_path = 'namespace/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -238,9 +236,8 @@ tests:
 
   - name: Aliased destructured require call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'alias/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'alias/main.js'
         AND callee.file_path = 'alias/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -258,9 +255,8 @@ tests:
 
   - name: Default module.exports require call resolves to the exported function
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'default/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'default/main.js'
         AND callee.file_path = 'default/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -269,9 +265,8 @@ tests:
 
   - name: Object literal module.exports member call resolves to the named function
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'object/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'object/main.js'
         AND callee.file_path = 'object/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -280,9 +275,8 @@ tests:
 
   - name: Bare require alias chains keep callable primary export identity
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'alias_chain/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'alias_chain/main.js'
         AND callee.file_path = 'alias_chain/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -301,9 +295,8 @@ tests:
 
   - name: Imported CJS constants do not create false call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'no_false_call/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'no_false_call/main.js'
         AND callee.file_path = 'no_false_call/util.js'
         AND callee.name = 'HTTP_STATUS_OK'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -312,9 +305,8 @@ tests:
 
   - name: Imported CJS functions still resolve while constants stay inert
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'no_false_call/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'no_false_call/main.js'
         AND callee.file_path = 'no_false_call/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -323,9 +315,8 @@ tests:
 
   - name: Transpiled CJS default interop resolves namespace default member calls
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'interop/main.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'interop/main.js'
         AND callee.file_path = 'interop/util.js'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -336,7 +327,6 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path IN ['external/namespace.js', 'external/destructured.js']
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS file, caller.fqn AS caller, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY file, name
     assert:
@@ -348,7 +338,6 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'reportAliases'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY alias
     assert:
@@ -368,9 +357,8 @@ tests:
 
   - name: Module-level global CommonJS calls do not target unrelated imports
     query: |
-      MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
+      MATCH (file:File)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE file.path = 'external/module_level_globals.js'
-        AND e.relationship_kind = 'CALLS'
       RETURN file.path AS file, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
@@ -388,7 +376,6 @@ tests:
         'no_false_call/main.js',
         'interop/main.js'
       ]
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS file, caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
@@ -402,7 +389,6 @@ tests:
         'external/imported_reference_only.js',
         'external/globals.js'
       ]
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS file, caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }

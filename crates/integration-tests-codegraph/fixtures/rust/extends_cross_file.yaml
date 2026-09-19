@@ -98,9 +98,8 @@ tests:
   - name: "1. Trait in sibling module file resolves through crate:: path"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'zoo::animals::Bark'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'zoo::animals::Bark'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -109,9 +108,8 @@ tests:
   - name: "2. Impl in one file points at trait declared in another file"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'zoo::animals::Wolf'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'zoo::animals::Wolf'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -120,9 +118,8 @@ tests:
   - name: "3. Impl reached via `use` import resolves to the same FQN as absolute path"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'zoo::animals::Bear'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'zoo::animals::Bear'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -131,9 +128,8 @@ tests:
   - name: "4. Carnivore -> Mammal supertrait edge exists inside zoo crate"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'zoo::traits::Carnivore'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'zoo::traits::Carnivore'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -145,9 +141,8 @@ tests:
   - name: "5. Cross-crate impl resolves trait to its originating crate FQN (via use)"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'zoo_impl::CarHorn'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'zoo_impl::CarHorn'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -156,9 +151,8 @@ tests:
   - name: "6. Cross-crate impl resolves trait to its originating crate FQN (absolute path)"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'zoo_impl::Beep'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'zoo_impl::Beep'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -167,9 +161,8 @@ tests:
   - name: "7. Cross-crate impl of a trait whose supertrait lives in another module"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'zoo_impl::Hound'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'zoo_impl::Hound'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -178,9 +171,8 @@ tests:
   - name: "8. Both cross-crate impls of Audible appear when querying the trait's incoming edges"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND parent.fqn = 'zoo::traits::Audible'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE parent.fqn = 'zoo::traits::Audible'
           RETURN child.fqn AS child
           ORDER BY child
         assert:

@@ -82,9 +82,8 @@ fixtures:
 tests:
   - name: CommonJS bare require call resolves helper factory
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'config/webpack.config.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'config/webpack.config.js'
         AND callee.file_path = 'config/helpers/incremental_webpack_compiler/index.js'
       RETURN caller.name AS caller, callee.name AS callee
     assert:
@@ -93,9 +92,8 @@ tests:
 
   - name: CommonJS namespace member call resolves helper method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'config/webpack.config.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'config/webpack.config.js'
         AND callee.file_path = 'config/helpers/patched_crypto.js'
       RETURN caller.name AS caller, callee.name AS callee
     assert:
@@ -104,9 +102,8 @@ tests:
 
   - name: Consumer module member call resolves into webpack config export
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'config/consumer.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'config/consumer.js'
         AND callee.file_path = 'config/webpack.config.js'
         AND caller.name = 'runCompiler'
       RETURN caller.name AS caller, callee.name AS callee
@@ -116,9 +113,8 @@ tests:
 
   - name: Consumer module member call resolves second exported function
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'config/consumer.js'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'config/consumer.js'
         AND callee.file_path = 'config/webpack.config.js'
         AND caller.name = 'runDllHash'
       RETURN caller.name AS caller, callee.name AS callee

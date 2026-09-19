@@ -147,10 +147,9 @@ tests:
   # ── this.Method() ────────────────────────────────────────────
   - name: "this.Speak() in Dog.Fetch resolves to Dog.Speak"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Models.Dog.Fetch'
         AND callee.fqn = 'Zoo.Models.Dog.Speak'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -160,10 +159,9 @@ tests:
   - name: "base.Eat() in Dog.Fetch resolves to Animal.Eat"
     skip: true  # base is anonymous in C# tree-sitter
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Models.Dog.Fetch'
         AND callee.fqn = 'Zoo.Models.Animal.Eat'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -172,10 +170,9 @@ tests:
   # ── var type inference from constructor ───────────────────────
   - name: "var dog = new Dog() → dog.Fetch() in Kennel.Register"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.Register'
         AND callee.fqn = 'Zoo.Models.Dog.Fetch'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -183,10 +180,9 @@ tests:
 
   - name: "var dog = new Dog() → dog.Speak() in Program.Run"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Models.Dog.Speak'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -194,10 +190,9 @@ tests:
 
   - name: "var dog = new Dog() → dog.Fetch() in Program.Run"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Models.Dog.Fetch'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -206,10 +201,9 @@ tests:
   # ── Constructor CALLS edge ────────────────────────────────────
   - name: "new Dog() in Program.Run produces CALLS to Dog class"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Models.Dog'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -218,10 +212,9 @@ tests:
   # ── Static method calls ──────────────────────────────────────
   - name: "Kennel.Create() same-namespace static call"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
         AND callee.fqn = 'Zoo.Services.Kennel.Create'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -229,10 +222,9 @@ tests:
 
   - name: "Helpers.Format() cross-namespace static call"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Services.Helpers.Format'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -240,10 +232,9 @@ tests:
 
   - name: "Helpers.Count() cross-namespace static call"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
         AND callee.fqn = 'Zoo.Services.Helpers.Count'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -252,10 +243,9 @@ tests:
   # ── Chained calls with var inference ──────────────────────────
   - name: "var kennel = Kennel.Create() → kennel.Register()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
         AND callee.fqn = 'Zoo.Services.Kennel.Register'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -263,10 +253,9 @@ tests:
 
   - name: "Return type inference: dog = kennel.Register() → dog.Speak()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
         AND callee.fqn = 'Zoo.Models.Dog.Speak'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -293,10 +282,9 @@ tests:
 
   - name: "inner.InnerMethod() resolves from OuterMethod"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Outer.OuterMethod'
         AND callee.fqn = 'Zoo.Services.Outer.Inner.InnerMethod'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

@@ -114,9 +114,8 @@ tests:
 
   - name: Vue default import resolves to virtual component when SFC also exports classes
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'app/assets/javascripts/components/component_host.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'app/assets/javascripts/components/component_host.ts'
       RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -135,9 +134,8 @@ tests:
 
   - name: Vue mounted hook resolves this-method call to local method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND callee.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND caller.name = 'mounted'
       RETURN caller.name AS caller, callee.name AS callee
@@ -147,9 +145,8 @@ tests:
 
   - name: Vue local this-method chain resolves load to normalize
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND callee.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND caller.name = 'load'
       RETURN caller.name AS caller, callee.name AS callee
@@ -159,9 +156,8 @@ tests:
 
   - name: Vue this-alias preserves local method resolution
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND caller.name = 'relayNormalize'
         AND callee.file_path = 'app/assets/javascripts/components/parent_panel.vue'
       RETURN caller.name AS caller, callee.name AS callee
@@ -171,9 +167,8 @@ tests:
 
   - name: Vue imported helper call resolves from method to helper definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND callee.file_path = 'app/assets/javascripts/lib/logger.js'
       RETURN caller.name AS caller, callee.name AS callee
     assert:
@@ -182,9 +177,8 @@ tests:
 
   - name: Vue namespace import member call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND callee.file_path = 'app/assets/javascripts/tracking/index.js'
       RETURN caller.name AS caller, callee.name AS callee
     assert:
@@ -195,7 +189,6 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
-        AND e.relationship_kind = 'CALLS'
         AND sym.import_path = '@external/tracking'
       RETURN caller.name AS caller, sym.import_type AS import_type, sym.identifier_alias AS alias
     assert:

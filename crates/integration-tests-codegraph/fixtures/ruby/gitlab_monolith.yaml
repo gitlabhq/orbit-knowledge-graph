@@ -261,30 +261,27 @@ tests:
 
   - name: "MergeRequest extends ApplicationRecord"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'MergeRequest'
         AND parent.fqn = 'ApplicationRecord'
-        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
 
   - name: "MergeRequests::CreateService extends BaseService"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'MergeRequests::CreateService'
         AND parent.fqn = 'BaseService'
-        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
 
   - name: "Controller extends ApplicationController"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'Projects::MergeRequestsController'
         AND parent.fqn = 'ApplicationController'
-        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
@@ -295,9 +292,8 @@ tests:
 
   - name: "MergeRequest includes Issuable and Noteable"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'MergeRequest'
-        AND e.relationship_kind = 'EXTENDS'
         AND parent.fqn IN ['Issuable', 'Noteable']
       RETURN parent.fqn AS mixin
     assert:
@@ -371,30 +367,27 @@ tests:
 
   - name: "Controller#index calls MergeRequest.opened (scope)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Projects::MergeRequestsController::index'
         AND callee.fqn = 'MergeRequest::opened'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Controller#create calls CreateService.execute via constructor chain"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Projects::MergeRequestsController::create'
         AND callee.fqn = 'MergeRequests::CreateService::execute'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Controller#update calls UpdateService.execute via constructor chain"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Projects::MergeRequestsController::update'
         AND callee.fqn = 'MergeRequests::UpdateService::execute'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -405,9 +398,8 @@ tests:
 
   - name: "CreateService#execute calls set_projects!, create, after_create"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'MergeRequests::CreateService::execute'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "MergeRequests::CreateService::set_projects!" } }
@@ -416,10 +408,9 @@ tests:
 
   - name: "CreateService#execute calls MergeRequest (class-ref from constructor chain)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'MergeRequests::CreateService::execute'
         AND callee.fqn = 'MergeRequest'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -438,10 +429,9 @@ tests:
 
   - name: "CreateService inherits project from BaseService"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'MergeRequests::CreateService::set_projects!'
         AND callee.fqn = 'BaseService::project'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -452,20 +442,18 @@ tests:
 
   - name: "Worker calls MergeRequest.find (class method)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'NewMergeRequestWorker::perform'
         AND callee.fqn = 'ApplicationRecord::find'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Worker calls AfterCreateService.execute via constructor chain"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'NewMergeRequestWorker::perform'
         AND callee.fqn = 'MergeRequests::AfterCreateService::execute'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -476,10 +464,9 @@ tests:
 
   - name: "AfterCreateService calls mergeable? which calls draft? (intra-model)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'MergeRequest::mergeable?'
         AND callee.fqn = 'MergeRequest::draft?'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -490,10 +477,9 @@ tests:
 
   - name: "UpdateService calls NotificationService.send_notification via constructor chain"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'MergeRequests::UpdateService::notify_subscribers'
         AND callee.fqn = 'NotificationService::send_notification'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }

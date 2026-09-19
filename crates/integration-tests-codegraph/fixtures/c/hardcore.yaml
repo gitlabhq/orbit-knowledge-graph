@@ -206,10 +206,9 @@ tests:
 
   - name: "Static internal_seek calls internal_flush (same file)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'reader::internal_seek'
         AND callee.fqn = 'reader::internal_flush'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -252,10 +251,9 @@ tests:
 
   - name: "copy_file calls reader_open (via io/reader.h → reader.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'reader::reader_open'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -263,10 +261,9 @@ tests:
 
   - name: "copy_file calls writer_write (via io/writer.h → writer.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'writer::writer_write'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -274,10 +271,9 @@ tests:
 
   - name: "main calls copy_file (same file)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -285,10 +281,9 @@ tests:
 
   - name: "Transitive include: main calls panic (app.c → reader.h → error.h → error.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'error::panic'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -300,9 +295,8 @@ tests:
 
   - name: "copy_file CALLS edges have no duplicates"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { unique: callee }
@@ -322,10 +316,9 @@ tests:
 
   - name: "Outer defines Inner"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'nested::Outer'
         AND child.fqn = 'nested::Outer::Inner'
-        AND e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -418,10 +411,9 @@ tests:
 
   - name: "Intra-file: internal_seek calls internal_flush (both in reader.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'reader::internal_seek'
         AND callee.fqn = 'reader::internal_flush'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -429,10 +421,9 @@ tests:
 
   - name: "Intra-file: main calls copy_file (both in app.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -440,10 +431,9 @@ tests:
 
   - name: "Intra-file: unrelated_func calls helper (both in unrelated.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'unrelated::unrelated_func'
         AND callee.fqn = 'unrelated::helper'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -455,9 +445,8 @@ tests:
 
   - name: "Cross-file: copy_file calls all 6 IO functions via include"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 6 }
@@ -471,10 +460,9 @@ tests:
 
   - name: "Cross-file: main calls panic via transitive include chain"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'error::panic'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -522,10 +510,9 @@ tests:
 
   - name: "Cross-file: process_users calls list_init (user.c -> list.h -> list.c)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_init'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -533,10 +520,9 @@ tests:
 
   - name: "Cross-file: process_users calls list_push"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_push'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -544,10 +530,9 @@ tests:
 
   - name: "Cross-file: process_users calls list_count"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_count'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -555,10 +540,9 @@ tests:
 
   - name: "Cross-file: process_users calls list_pop"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_pop'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -566,10 +550,9 @@ tests:
 
   - name: "Cross-file: process_users calls list_empty"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'list::list_empty'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -577,10 +560,9 @@ tests:
 
   - name: "Cross-file: process_users calls panic via transitive include"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
         AND callee.fqn = 'error::panic'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -588,9 +570,8 @@ tests:
 
   - name: "process_users total call count"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'user::process_users'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 6 }

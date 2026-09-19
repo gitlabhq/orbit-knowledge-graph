@@ -261,10 +261,9 @@ tests:
 
   - name: "Static internal_seek calls internal_flush (same file)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'reader::io::internal_seek'
         AND callee.fqn = 'reader::io::internal_flush'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -307,10 +306,9 @@ tests:
 
   - name: "main calls copy_file (same file)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -343,10 +341,9 @@ tests:
 
   - name: "Nested namespace defines inner namespace"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'nested::outer'
         AND child.fqn = 'nested::outer::inner'
-        AND e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -354,10 +351,9 @@ tests:
 
   - name: "Inner namespace defines Widget"
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'nested::outer::inner'
         AND child.fqn = 'nested::outer::inner::Widget'
-        AND e.relationship_kind = 'DEFINES'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
@@ -487,10 +483,9 @@ tests:
 
   - name: "Template usage calls tmpl::swap via include"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'tmpl_usage::extra::use_templates'
         AND callee.fqn = 'templates::tmpl::swap'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

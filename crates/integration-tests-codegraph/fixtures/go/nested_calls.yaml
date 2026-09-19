@@ -32,8 +32,8 @@ tests:
   - name: "Start calls Info and process, not Error"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.Start' AND e.relationship_kind = 'CALLS'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'main.Start'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -48,8 +48,8 @@ tests:
 
   - name: "process calls Info and Error"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.fqn = 'main.process' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'main.process'
       RETURN callee.fqn AS callee
       ORDER BY callee
     assert:

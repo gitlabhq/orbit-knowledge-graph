@@ -107,9 +107,8 @@ tests:
   - name: "1. Simple supertrait Pet -> Animal"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Pet'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Pet'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -118,9 +117,8 @@ tests:
   - name: "2. Multiple direct supertraits Companion -> {Pet, Sleepable, Trainable}"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Companion'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Companion'
           RETURN parent.fqn AS parent
           ORDER BY parent
         assert:
@@ -131,17 +129,15 @@ tests:
   - name: "3. Direct supertrait chain Domesticated -> Carnivore -> Mammal (each hop)"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Domesticated'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Domesticated'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
           - { row: { parent: "Carnivore" } }
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Carnivore'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Carnivore'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -153,9 +149,8 @@ tests:
   - name: "4. Simple struct impl Dog -> Animal"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Dog'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Dog'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -164,9 +159,8 @@ tests:
   - name: "5. Multiple impls on Cat produce one EXTENDS edge per trait"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Cat'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Cat'
           RETURN parent.fqn AS parent
           ORDER BY parent
         assert:
@@ -176,9 +170,8 @@ tests:
   - name: "6. Inherent impl on Box1 produces no EXTENDS edge"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Box1'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Box1'
           RETURN count(parent) AS n
         assert:
           - { row: { n: 0 } }
@@ -186,9 +179,8 @@ tests:
   - name: "7. Generic Wrapper<T> impl anchors EXTENDS on the self-type"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Wrapper'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Wrapper'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -197,9 +189,8 @@ tests:
   - name: "8. Enum Mood implements Animal"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Mood'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Mood'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -211,9 +202,8 @@ tests:
   - name: "9. Cross-module supertrait Bark -> traits::Audible resolves through module path"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Bark'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Bark'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -222,9 +212,8 @@ tests:
   - name: "10. Cross-module impl File implements io::Reader"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'File'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'File'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -236,9 +225,8 @@ tests:
   - name: "11. Blanket impl<T> Markable for T does not anchor EXTENDS on a type parameter"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND parent.fqn = 'Markable'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE parent.fqn = 'Markable'
           RETURN child.fqn AS child
         assert:
           - { row_count: 0 }
@@ -246,9 +234,8 @@ tests:
   - name: "12. Probe has no EXTENDS edges (no trait impl declared)"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Probe'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Probe'
           RETURN count(parent) AS n
         assert:
           - { row: { n: 0 } }
@@ -259,26 +246,23 @@ tests:
   - name: "13. Diamond supertrait Polygon -> {HasArea, HasPerimeter}, each -> Shape"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Polygon'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Polygon'
           RETURN parent.fqn AS parent
           ORDER BY parent
         assert:
           - { row: { parent: "HasArea" } }
           - { row: { parent: "HasPerimeter" } }
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'HasArea'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'HasArea'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
           - { row: { parent: "Shape" } }
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'HasPerimeter'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'HasPerimeter'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
@@ -290,9 +274,8 @@ tests:
   - name: "14. Counter has trait impl EXTENDS even when an inherent impl also exists"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
-          WHERE e.relationship_kind = 'EXTENDS'
-            AND child.fqn = 'Counter'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
+          WHERE child.fqn = 'Counter'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }

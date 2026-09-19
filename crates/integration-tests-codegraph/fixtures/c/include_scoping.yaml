@@ -35,8 +35,8 @@ tests:
 
   - name: "Call resolves to the #include-reachable definition (lib.c via lib.h pairing)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.fqn = 'app::run' AND callee.name = 'compute' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'app::run' AND callee.name = 'compute'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }

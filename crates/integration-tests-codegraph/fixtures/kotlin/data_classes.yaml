@@ -57,8 +57,8 @@ tests:
 
   - name: usePair calls Pair constructor
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'usePair' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'usePair'
         AND callee.fqn = 'com.example.Pair'
       RETURN callee.fqn AS callee
     assert:
@@ -66,8 +66,8 @@ tests:
 
   - name: useUser calls User constructor
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'useUser' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'useUser'
         AND callee.fqn = 'com.example.User'
       RETURN callee.fqn AS callee
     assert:
@@ -83,8 +83,8 @@ tests:
 
   - name: cross-file consumePair calls Pair
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'consumePair' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'consumePair'
         AND callee.fqn = 'com.example.Pair'
       RETURN callee.fqn AS callee
     assert:
@@ -92,8 +92,8 @@ tests:
 
   - name: cross-file createAndDestructure calls User
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'createAndDestructure' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'createAndDestructure'
         AND callee.fqn = 'com.example.User'
       RETURN callee.fqn AS callee
     assert:

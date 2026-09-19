@@ -81,30 +81,27 @@ tests:
 
   - name: "Functions nest inside their module via containment"
     query: |
-      MATCH (m:Definition)-[e:CALLS|DEFINES|EXTENDS]->(f:Definition)
+      MATCH (m:Definition)-[e:DEFINES]->(f:Definition)
       WHERE m.fqn = 'Greeter'
         AND f.fqn = 'Greeter.hello'
-        AND e.relationship_kind = 'DEFINES'
       RETURN f.fqn AS fqn
     assert:
       - { row_count: 1 }
 
   - name: "Nested module is contained by its parent module"
     query: |
-      MATCH (m:Definition)-[e:CALLS|DEFINES|EXTENDS]->(f:Definition)
+      MATCH (m:Definition)-[e:DEFINES]->(f:Definition)
       WHERE m.fqn = 'Greeter'
         AND f.fqn = 'Greeter.Inner'
-        AND e.relationship_kind = 'DEFINES'
       RETURN f.fqn AS fqn
     assert:
       - { row_count: 1 }
 
   - name: "Functions in a nested module are contained by the nested module"
     query: |
-      MATCH (m:Definition)-[e:CALLS|DEFINES|EXTENDS]->(f:Definition)
+      MATCH (m:Definition)-[e:DEFINES]->(f:Definition)
       WHERE m.fqn = 'Greeter.Inner'
         AND f.fqn = 'Greeter.Inner.run'
-        AND e.relationship_kind = 'DEFINES'
       RETURN f.fqn AS fqn
     assert:
       - { row_count: 1 }

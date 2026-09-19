@@ -104,10 +104,9 @@ tests:
   # resolves to the enclosing class's callable constant.
   - name: "a reference to a callable constant resolves to its Lambda definition"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Middleware::initialize'
         AND callee.fqn = 'Middleware::AUTH'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.definition_type AS dt
     assert:
       - { row_count: 1 }

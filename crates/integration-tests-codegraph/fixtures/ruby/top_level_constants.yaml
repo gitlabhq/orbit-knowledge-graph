@@ -330,10 +330,9 @@ tests:
 
   - name: "qualified constant reference resolves to the Constant Definition"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'ContextUser::allowed_refs'
         AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.definition_type AS type
     assert:
       - { row_count: 1 }
@@ -341,10 +340,9 @@ tests:
 
   - name: "second qualified constant reference (string-valued) also resolves"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'ContextUser::default_label'
         AND callee.fqn = 'Security::ProjectTrackedContext::DEFAULT_NAME'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.definition_type AS type
     assert:
       - { row_count: 1 }
@@ -352,10 +350,9 @@ tests:
 
   - name: "deeply nested constant reference resolves across module chain"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'ContextUser::deep_value'
         AND callee.fqn = 'Outer::Middle::Inner::DEEP_CONST'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.definition_type AS type
     assert:
       - { row_count: 1 }
@@ -373,10 +370,9 @@ tests:
 
   - name: "bare constant ref in same class resolves via ImplicitMember"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Security::ProjectTrackedContext::allow?'
         AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.definition_type AS type
     assert:
       - { row_count: 1 }
@@ -384,10 +380,9 @@ tests:
 
   - name: "bare constant ref to a string-valued constant in initialize"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Security::ProjectTrackedContext::initialize'
         AND callee.fqn = 'Security::ProjectTrackedContext::DEFAULT_NAME'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.definition_type AS type
     assert:
       - { row_count: 1 }

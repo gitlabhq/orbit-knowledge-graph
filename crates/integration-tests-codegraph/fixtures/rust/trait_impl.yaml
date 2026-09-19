@@ -47,9 +47,8 @@ tests:
 
   - name: impl methods are nested via Defines
     query: |
-      MATCH (parent:Definition)-[e:CALLS|DEFINES|EXTENDS]->(child:Definition)
-      WHERE e.relationship_kind = 'DEFINES'
-        AND child.definition_type = 'Method'
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
+      WHERE child.definition_type = 'Method'
       RETURN child.name AS method
       ORDER BY method
     assert:
@@ -58,8 +57,8 @@ tests:
 
   - name: fetch calls self.speak()
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'fetch' AND callee.name = 'speak' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'fetch' AND callee.name = 'speak'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

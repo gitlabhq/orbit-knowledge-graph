@@ -31,8 +31,7 @@ tests:
 
   - name: no call edge resolves through the re-export cycle
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: true }

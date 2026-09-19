@@ -101,10 +101,9 @@ tests:
 
   - name: "C++ engine.cxx calls C add() via ops.h -> ops.c"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'ops::add'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -112,10 +111,9 @@ tests:
 
   - name: "C++ engine.cxx calls C multiply() via ops.h -> ops.c"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'ops::multiply'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -123,10 +121,9 @@ tests:
 
   - name: "C++ engine.cxx calls C log_result() via format.hh -> format.cc"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'format::log_result'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row: { src: "engine.cxx", tgt: "util/format.cc" } }
@@ -137,10 +134,9 @@ tests:
 
   - name: "main.cpp calls record_sum via data.hxx -> data.cpp"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
         AND callee.fqn = 'data::record_sum'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -148,10 +144,9 @@ tests:
 
   - name: "main.cpp calls add via ops.h -> ops.c"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
         AND callee.fqn = 'ops::add'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }

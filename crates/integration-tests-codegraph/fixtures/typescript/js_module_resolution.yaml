@@ -368,9 +368,8 @@ tests:
 
   - name: Named import call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'named/main.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'named/main.ts'
         AND callee.file_path = 'named/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -388,9 +387,8 @@ tests:
 
   - name: Default import call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'default/main.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'default/main.ts'
         AND callee.file_path = 'default/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -408,9 +406,8 @@ tests:
 
   - name: Namespace import call resolves to concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'namespace/main.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'namespace/main.ts'
         AND callee.file_path = 'namespace/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -428,9 +425,8 @@ tests:
 
   - name: Explicit reexport call resolves to source definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'explicit/main.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'explicit/main.ts'
         AND callee.file_path = 'explicit/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -448,9 +444,8 @@ tests:
 
   - name: Star reexport call resolves to source definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'star/main.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'star/main.ts'
         AND callee.file_path = 'star/util.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -468,9 +463,8 @@ tests:
 
   - name: Aliased named import call resolves to local definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'alias/main.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'alias/main.ts'
         AND callee.file_path = 'alias/constants.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -490,9 +484,8 @@ tests:
 
   - name: Imported function from mixed import statement still calls concrete definition
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'identity/consumer.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'identity/consumer.ts'
         AND callee.file_path = 'identity/constants.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -501,9 +494,8 @@ tests:
 
   - name: Imported constants do not create false call edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'no_false_call/main.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'no_false_call/main.ts'
         AND callee.file_path = 'no_false_call/constants.ts'
         AND callee.name = 'HTTP_STATUS_OK'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -512,9 +504,8 @@ tests:
 
   - name: Imported functions still call through while constants stay inert
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'no_false_call/main.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'no_false_call/main.ts'
         AND callee.file_path = 'no_false_call/constants.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -523,9 +514,8 @@ tests:
 
   - name: Constructor, inferred member, and static method calls resolve
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'advanced/consumer.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'advanced/consumer.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 5 }
@@ -537,9 +527,8 @@ tests:
 
   - name: Callback passing does not fabricate direct execution edges
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'advanced/consumer.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'advanced/consumer.ts'
         AND caller.fqn = 'mapItems'
         AND callee.fqn = 'transform'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -548,9 +537,8 @@ tests:
 
   - name: SSA branch merges preserve multiple candidate receiver types
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'ssa/branch.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'ssa/branch.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 4 }
@@ -561,9 +549,8 @@ tests:
 
   - name: SSA alias propagation preserves receiver type through local rebinding
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'ssa/alias.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'ssa/alias.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 2 }
@@ -572,9 +559,8 @@ tests:
 
   - name: SSA loop exit preserves initial and loop-carried receiver types
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'ssa/loop.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'ssa/loop.ts'
         AND callee.name = 'parse'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -584,9 +570,8 @@ tests:
 
   - name: Namespace reexport member chains resolve to underlying static method
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'namespace_chain/consumer.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'namespace_chain/consumer.ts'
         AND callee.file_path = 'namespace_chain/suggestions.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -595,9 +580,8 @@ tests:
 
   - name: Default and namespace barrel exports both resolve through the barrel
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE e.relationship_kind = 'CALLS'
-        AND caller.file_path = 'combo/consumer.ts'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'combo/consumer.ts'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 2 }
@@ -621,7 +605,6 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'unresolved/main.ts'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_type AS import_type, sym.identifier_name AS name
       ORDER BY import_type, name
     assert:
@@ -633,7 +616,6 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'inspectExternalAliases'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, alias
     assert:
@@ -646,7 +628,6 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'namespace_missing/main.ts'
-        AND e.relationship_kind = 'CALLS'
       RETURN sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
@@ -665,7 +646,6 @@ tests:
         'namespace_chain/consumer.ts',
         'combo/consumer.ts'
       ]
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS file, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
@@ -679,7 +659,6 @@ tests:
         'unresolved/shadowed_external.ts',
         'unresolved/global_calls.ts'
       ]
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.file_path AS file, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }

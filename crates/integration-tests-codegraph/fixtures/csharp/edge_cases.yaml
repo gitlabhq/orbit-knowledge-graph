@@ -156,10 +156,9 @@ tests:
   # ── Cross-file member chain ──────────────────────────────────
   - name: "Line.Length calls Point.DistanceTo via typed property"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Geo.Models.Line.Length'
         AND callee.fqn = 'Geo.Models.Point.DistanceTo'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -168,10 +167,9 @@ tests:
   # ── var inference + chained call ──────────────────────────────
   - name: "var p1 = service.Create() → line = new Line(p1, p2) → line.Length()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'
         AND callee.fqn = 'Geo.Models.Line.Length'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -181,10 +179,9 @@ tests:
   - name: "_cached?.Normalize() resolves despite ?."
     skip: true  # ?. is conditional_access_expression, not member_access_expression
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'
         AND callee.fqn = 'Geo.Models.Point.Normalize'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -213,10 +210,9 @@ tests:
 
   - name: "Partial class Clamp calls Point.Normalize"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Geo.Services.PointService.Clamp'
         AND callee.fqn = 'Geo.Models.Point.Normalize'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -224,11 +220,10 @@ tests:
 
   - name: "Runner calls partial class methods from both files"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'
         AND callee.fqn IN ['Geo.Services.PointService.IsValid',
                             'Geo.Services.PointService.Clamp']
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }
@@ -248,10 +243,9 @@ tests:
 
   - name: "Runner.RunAsync calls CreateAsync"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.RunAsync'
         AND callee.fqn = 'Geo.Services.PointService.CreateAsync'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -260,10 +254,9 @@ tests:
   # ── Runner calls PointService.Create via typed field ──────────
   - name: "Runner.Run calls PointService.Create"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'
         AND callee.fqn = 'Geo.Services.PointService.Create'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

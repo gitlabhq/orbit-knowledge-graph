@@ -177,10 +177,9 @@ tests:
 
   - name: "Model.update calls name (attr_accessor)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Model::name'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -188,9 +187,8 @@ tests:
 
   - name: "Model extends Base"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'Model'
-        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
@@ -198,10 +196,9 @@ tests:
 
   - name: "Model.update calls save! (inherited from Base via Extends)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Base::save!'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -209,10 +206,9 @@ tests:
 
   - name: "Model.update calls greet (define_method)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Model::greet'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -279,10 +275,9 @@ tests:
 
   - name: "send(:notify) resolves to Dispatcher::notify"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Dispatcher::dispatch'
         AND callee.fqn = 'Dispatcher::notify'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -290,10 +285,9 @@ tests:
 
   - name: "public_send(:alert) resolves to Dispatcher::alert"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Dispatcher::dispatch'
         AND callee.fqn = 'Dispatcher::alert'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -309,10 +303,9 @@ tests:
 
   - name: "PostsController.index calls Post.published (qualified receiver chain)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'PostsController::index'
         AND callee.fqn = 'Post::published'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -320,10 +313,9 @@ tests:
 
   - name: "UpdateWorker.perform calls Model.update via constructor chain"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'UpdateWorker::perform'
         AND callee.fqn = 'Model::update'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -331,10 +323,9 @@ tests:
 
   - name: "PostsController.index calls Post.recent (qualified receiver chain)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'PostsController::index'
         AND callee.fqn = 'Post::recent'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -346,9 +337,8 @@ tests:
 
   - name: "Post.summarize calls association and scope methods"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Post::summarize'
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "Post::published" } }
@@ -380,10 +370,9 @@ tests:
 
   - name: "__send__(:notify) resolves to Dynamic::notify"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Dynamic::dispatch'
         AND callee.fqn = 'Dynamic::notify'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

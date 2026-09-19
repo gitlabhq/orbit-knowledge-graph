@@ -79,10 +79,9 @@ tests:
   - name: "named relative re-export through __init__ binds the caller to the definition"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
           WHERE caller.fqn = 'app.consumer.build'
             AND callee.fqn = 'app.registry.base.BaseRegistry'
-            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
@@ -90,37 +89,33 @@ tests:
           MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'app.consumer.build'
             AND sym.identifier_name = 'BaseRegistry'
-            AND e.relationship_kind = 'CALLS'
           RETURN caller.fqn AS caller
         assert:
           - { empty: true }
 
   - name: "wildcard relative re-export through __init__ binds the caller to the definition"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app.consumer.build'
         AND callee.fqn = 'app.registry.helpers.make_widget'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "two-dot relative re-export in a nested __init__ climbs to the parent package"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'proj.sub.caller.make_engine'
         AND callee.fqn = 'proj.core.Engine'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "one-dot relative import in a regular module still resolves (no regression)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'reg.pkg.mod.use_thing'
         AND callee.fqn = 'reg.pkg.thing.Thing'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -130,7 +125,6 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ext.caller.build_widget'
         AND sym.identifier_name = 'Widget'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

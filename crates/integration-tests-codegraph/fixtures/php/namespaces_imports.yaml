@@ -247,30 +247,27 @@ tests:
   # ── Grouped use ─────────────────────────────────────────────────
   - name: "Grouped use: unaliased entry resolves (A)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
         AND callee.fqn = 'Vendor\Sub\A\greet'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Grouped use: aliased entry resolves (B as RenamedB -> Vendor\\Sub\\B\\shout)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
         AND callee.fqn = 'Vendor\Sub\B\shout'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Grouped use: third entry resolves (D)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
         AND callee.fqn = 'Vendor\Sub\D\whisper'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -278,20 +275,18 @@ tests:
   # ── use function / use const ────────────────────────────────────
   - name: "use function: bare call resolves to namespaced function"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
         AND callee.fqn = 'Vendor\Util\format'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "use function: aliased call resolves (h -> Vendor\\Util\\helper)"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
         AND callee.fqn = 'Vendor\Util\helper'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -299,10 +294,9 @@ tests:
   # ── Multiple use aliases for same-named classes ─────────────────
   - name: "Two aliases for same-named class disambiguate to different FQNs"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\MultiAlias\run'
         AND callee.fqn IN ['Vendor\X\Foo\fromX', 'Vendor\Y\Foo\fromY']
-        AND e.relationship_kind = 'CALLS'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }
@@ -311,10 +305,9 @@ tests:
   # ── Leading-backslash fully-qualified references ────────────────
   - name: "Leading-backslash static call resolves: \\Vendor\\Other\\Bare::call()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
         AND callee.fqn = 'Vendor\Other\Bare\call'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -324,10 +317,9 @@ tests:
   # form `\Vendor\Other\Bare::call()` and `use`-imported types DO resolve.
   - name: "Known gap: leading-backslash typed-parameter $bare->run()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
         AND callee.fqn = 'Vendor\Other\Bare\run'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 0 }
@@ -335,10 +327,9 @@ tests:
   # ── FQN reference without import ────────────────────────────────
   - name: "Static call by fully-qualified name without use: \\Vendor\\Other\\Bare::call()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
         AND callee.fqn = 'Vendor\Other\Bare\call'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -348,10 +339,9 @@ tests:
   # form `\Vendor\Other\Bare::call()` DO resolve.
   - name: "Known gap: new \\Vendor\\Other\\Bare via local then $b->run()"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
         AND callee.fqn = 'Vendor\Other\Bare\run'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 0 }
@@ -359,20 +349,18 @@ tests:
   # ── Cross-file: deep-namespace inheritance + call ───────────────
   - name: "Deep-namespace child extends imported base across files"
     query: |
-      MATCH (child:Definition)-[e:CALLS|DEFINES|EXTENDS]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'App\Consumer\Sub\Nested\DeepExtends'
         AND parent.fqn = 'Vendor\Base\BaseService'
-        AND e.relationship_kind = 'EXTENDS'
       RETURN child.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Deep-namespace child resolves inherited \\$this->boot() to parent method"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\Sub\Nested\DeepExtends\start'
         AND callee.fqn = 'Vendor\Base\BaseService\boot'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -380,20 +368,18 @@ tests:
   # ── Cross-file static call across deep namespaces via use ───────
   - name: "Deep-namespace static call via use: DeepCaller::go -> Thing::make"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\DeepCaller\go'
         AND callee.fqn = 'Vendor\Pkg\Deep\Inner\Thing\make'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Deep-namespace instance call via use: DeepCaller::go -> Thing::ping"
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\DeepCaller\go'
         AND callee.fqn = 'Vendor\Pkg\Deep\Inner\Thing\ping'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }

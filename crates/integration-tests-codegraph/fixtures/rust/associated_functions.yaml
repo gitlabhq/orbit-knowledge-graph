@@ -45,8 +45,8 @@ tests:
 
   - name: origin calls new (associated function calling associated function)
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'origin' AND callee.name = 'new' AND e.relationship_kind = 'CALLS'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'origin' AND callee.name = 'new'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

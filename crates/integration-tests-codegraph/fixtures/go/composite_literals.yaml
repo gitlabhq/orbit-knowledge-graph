@@ -25,8 +25,8 @@ tests:
   - name: "Composite literals create type references"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-          WHERE caller.fqn = 'main.setup' AND e.relationship_kind = 'CALLS'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'main.setup'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:

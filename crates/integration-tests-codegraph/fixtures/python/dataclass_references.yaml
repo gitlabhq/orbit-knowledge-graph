@@ -21,7 +21,6 @@ tests:
       MATCH (caller:Definition)-[r:CALLS|DEFINES|EXTENDS]->(field:Definition)
       WHERE caller.fqn = 'main.greet'
         AND field.name = 'email'
-        AND r.relationship_kind IN ['CALLS', 'References']
       RETURN field.fqn AS field
     assert:
       - { row_count: 1 }

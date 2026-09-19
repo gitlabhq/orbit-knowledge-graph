@@ -47,9 +47,8 @@ tests:
 
   - name: Cross-module call does not resolve (no cross-file edge)
     query: |
-      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'create_user'
-        AND e.relationship_kind = 'CALLS'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: true }
