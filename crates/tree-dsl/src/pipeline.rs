@@ -6,18 +6,21 @@
 use std::time::Instant;
 
 use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 
 use crate::intern::Lang;
 use crate::pattern::Rewrite;
+use crate::resolver::Resolver;
 use crate::rules::ResolveConfig;
 use crate::tree::{Edge, Tree};
 use crate::treesitter::{self as treesitter, SupportLang};
-use crate::{file_tree, linker, pattern, resolver, rules};
+use crate::{file_tree, linker, pattern, rules};
 
 pub struct IndexResult {
     pub trees: Vec<Tree>,
     pub edges: Vec<Edge>,
     pub lang: Lang,
+    pub resolver: Resolver,
     pub pipeline: Pipeline,
     pub timings: IndexTimings,
 }
@@ -89,6 +92,33 @@ pub fn process_file_timed(
     (tree, edges, [t1 - t0, t2 - t1, t3 - t2, t4 - t3])
 }
 
+fn do_resolve(
+    resolver: &mut Resolver,
+    trees: &mut [Tree],
+    edges: &mut Vec<Edge>,
+    lang: &Lang,
+    dirty_fis: &FxHashSet<usize>,
+    pipeline: &Pipeline,
+) {
+    let paths: Vec<String> = trees.iter().map(|t| t.label.clone()).collect();
+    let dummy: Vec<(String, String)> = paths.iter().map(|p| (p.clone(), String::new())).collect();
+    let walk = file_tree::walk(&paths, &dummy, lang, &pipeline.resolve);
+    let result = resolver.resolve(
+        trees,
+        edges,
+        lang,
+        dirty_fis,
+        pipeline.lang_id,
+        &walk.lookup_prefixes,
+        &pipeline.resolve.external,
+    );
+    for rsp in &result.resolved_source_paths {
+        let nid = trees[rsp.fi].to_id(rsp.node);
+        trees[rsp.fi].node_mut(nid).sym = rsp.sym;
+    }
+    edges.extend(result.cross_edges);
+}
+
 /// Unified indexing entrypoint. All files must be the same language.
 pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
     let (pipeline, lang) = Pipeline::for_lang(lang_id);
@@ -120,21 +150,16 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
     let parse_s = t0.elapsed().as_secs_f64();
     let t1 = Instant::now();
 
-    let file_paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
-    let walk = file_tree::walk(&file_paths, files, &lang, &pipeline.resolve);
-    let result = resolver::resolve(
-        &trees,
-        &edges,
+    let all_fis: FxHashSet<usize> = (0..trees.len()).collect();
+    let mut resolver = Resolver::new(&lang);
+    do_resolve(
+        &mut resolver,
+        &mut trees,
+        &mut edges,
         &lang,
-        lang_id,
-        &walk.lookup_prefixes,
-        &pipeline.resolve.external,
+        &all_fis,
+        &pipeline,
     );
-    for rsp in &result.resolved_source_paths {
-        let nid = trees[rsp.fi].to_id(rsp.node);
-        trees[rsp.fi].node_mut(nid).sym = rsp.sym;
-    }
-    edges.extend(result.cross_edges);
 
     let resolve_s = t1.elapsed().as_secs_f64();
 
@@ -142,6 +167,7 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> IndexResult {
         trees,
         edges,
         lang,
+        resolver,
         pipeline,
         timings: IndexTimings { parse_s, resolve_s },
     }
@@ -192,36 +218,47 @@ pub fn reindex(
         })
         .collect();
 
+    let old_dirty_fis: FxHashSet<usize> = old_labels
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| dirty.contains(l.as_str()))
+        .map(|(i, _)| i)
+        .collect();
+    let reverse_dirty_fis: FxHashSet<usize> = base
+        .resolver
+        .reqs()
+        .iter()
+        .filter(|r| old_dirty_fis.contains(&r.target_fi))
+        .filter_map(|r| label_to_fi.get(old_labels[r.fi].as_str()))
+        .map(|&fi| fi as usize)
+        .collect();
+
+    base.resolver.remap(&old_labels, &label_to_fi);
+
+    let mut dirty_fis: FxHashSet<usize> = reverse_dirty_fis;
     for (path, source) in modified.iter().chain(added.iter()) {
-        let fi = base.trees.len() as u32;
+        let fi = base.trees.len();
         let (tree, intra) = process_file(path, source, &base.lang, &base.pipeline);
         base.trees.push(tree);
         edges.extend(intra.into_iter().map(|mut e| {
-            e.from_tree = fi;
-            e.to_tree = fi;
+            e.from_tree = fi as u32;
+            e.to_tree = fi as u32;
             e
         }));
+        dirty_fis.insert(fi);
     }
 
     let parse_s = t0.elapsed().as_secs_f64();
     let t1 = Instant::now();
 
-    let paths: Vec<String> = base.trees.iter().map(|t| t.label.clone()).collect();
-    let dummy: Vec<(String, String)> = paths.iter().map(|p| (p.clone(), String::new())).collect();
-    let walk = file_tree::walk(&paths, &dummy, &base.lang, &base.pipeline.resolve);
-    let result = resolver::resolve(
-        &base.trees,
-        &edges,
+    do_resolve(
+        &mut base.resolver,
+        &mut base.trees,
+        &mut edges,
         &base.lang,
-        base.pipeline.lang_id,
-        &walk.lookup_prefixes,
-        &base.pipeline.resolve.external,
+        &dirty_fis,
+        &base.pipeline,
     );
-    for rsp in &result.resolved_source_paths {
-        let nid = base.trees[rsp.fi].to_id(rsp.node);
-        base.trees[rsp.fi].node_mut(nid).sym = rsp.sym;
-    }
-    edges.extend(result.cross_edges);
 
     let resolve_s = t1.elapsed().as_secs_f64();
 
@@ -229,6 +266,7 @@ pub fn reindex(
         trees: base.trees,
         edges,
         lang: base.lang,
+        resolver: base.resolver,
         pipeline: base.pipeline,
         timings: IndexTimings { parse_s, resolve_s },
     }

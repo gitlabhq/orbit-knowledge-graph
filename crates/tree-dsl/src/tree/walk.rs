@@ -345,10 +345,6 @@ impl<'a> Cursor<'a> {
     pub fn enclosing(self, pred: impl Fn(Self) -> bool) -> Option<Self> {
         self.ascend(|n| if pred(n) { Step::Out(n) } else { Step::Into })
     }
-
-    pub(crate) fn trees_ref(self) -> &'a [Tree] {
-        self.trees
-    }
 }
 
 pub fn infer_return_type(def: Cursor) -> Option<u32> {
