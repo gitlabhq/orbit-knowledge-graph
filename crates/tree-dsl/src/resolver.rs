@@ -11,7 +11,15 @@ use crate::treesitter::SupportLang;
 use crate::constants::WILDCARD;
 use crate::paths;
 
-type VisibleMap = Vec<FxHashMap<u32, (usize, u32)>>;
+type VisibleMap = Vec<FxHashMap<u32, Loc>>;
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct Loc {
+    pub fi: usize,
+    pub node: u32,
+}
 
 pub struct ResolvedSourcePath {
     pub fi: usize,
@@ -34,7 +42,7 @@ pub struct ImportReq {
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ResolverSnapshot {
-    pub visible: Vec<Vec<(u32, usize, u32)>>,
+    pub visible: Vec<Vec<(u32, Loc)>>,
     pub reqs: Vec<ImportReq>,
 }
 
@@ -59,12 +67,7 @@ impl Resolver {
         let visible = snap
             .visible
             .into_iter()
-            .map(|entries| {
-                entries
-                    .into_iter()
-                    .map(|(sym, fi, node)| (sym, (fi, node)))
-                    .collect()
-            })
+            .map(|entries| entries.into_iter().collect())
             .collect();
         Self {
             visible,
@@ -78,11 +81,7 @@ impl Resolver {
         let visible = self
             .visible
             .iter()
-            .map(|map| {
-                map.iter()
-                    .map(|(&sym, &(fi, node))| (sym, fi, node))
-                    .collect()
-            })
+            .map(|map| map.iter().map(|(&sym, &loc)| (sym, loc)).collect())
             .collect();
         ResolverSnapshot {
             visible,
@@ -106,12 +105,18 @@ impl Resolver {
             else {
                 continue;
             };
-            for (&sym, &(target_old_fi, node)) in names {
+            for (&sym, &loc) in names {
                 if let Some(&target_new_fi) = old_labels
-                    .get(target_old_fi)
+                    .get(loc.fi)
                     .and_then(|l| label_to_fi.get(l.as_str()))
                 {
-                    remapped[new_fi as usize].insert(sym, (target_new_fi as usize, node));
+                    remapped[new_fi as usize].insert(
+                        sym,
+                        Loc {
+                            fi: target_new_fi as usize,
+                            node: loc.node,
+                        },
+                    );
                 }
             }
         }
@@ -161,7 +166,7 @@ impl Resolver {
         }
 
         self.reqs.retain(|r| !dirty_fis.contains(&r.fi));
-        let (new_reqs, mut cross_edges) = gather_imports_subset(
+        let (new_reqs, mut cross_edges) = gather_imports_for(
             trees,
             lang,
             &self.file_index,
@@ -195,7 +200,6 @@ impl Resolver {
             .filter(|r| !dirty_fis.contains(&r.fi) && dirty_fis.contains(&r.target_fi))
             .map(|r| r.fi)
             .collect();
-
         let active_fis: FxHashSet<usize> = dirty_fis.union(&reverse_dirty).copied().collect();
         let active_reqs: Vec<&ImportReq> = self
             .reqs
@@ -203,19 +207,20 @@ impl Resolver {
             .filter(|r| active_fis.contains(&r.fi) || active_fis.contains(&r.target_fi))
             .collect();
 
-        let reverse_visible: FxHashMap<(usize, u32), u32> = self
+        let reverse_visible: FxHashMap<Loc, u32> = self
             .visible
             .iter()
-            .flat_map(|names| names.iter().map(|(&sym, &(vfi, vn))| ((vfi, vn), sym)))
+            .flat_map(|names| names.iter().map(|(&sym, &loc)| (loc, sym)))
             .collect();
 
-        let mut edges_by_tree: FxHashMap<u32, Vec<&Edge>> = FxHashMap::default();
+        let mut edges_by_tree: Vec<Vec<&Edge>> = vec![vec![]; trees.len()];
         for e in edges {
-            edges_by_tree.entry(e.from_tree).or_default().push(e);
+            edges_by_tree[e.from_fi()].push(e);
         }
 
         let ctx = ResolveCtx {
             trees,
+            corpus: Cursor::new(trees, 0, 0),
             edges_by_tree: &edges_by_tree,
             lang,
             visible: &self.visible,
@@ -256,34 +261,53 @@ impl Resolver {
 
 struct ResolveCtx<'a> {
     trees: &'a [Tree],
-    edges_by_tree: &'a FxHashMap<u32, Vec<&'a Edge>>,
+    corpus: Cursor<'a>,
+    edges_by_tree: &'a [Vec<&'a Edge>],
     lang: &'a Lang,
     visible: &'a VisibleMap,
     ambiguous: &'a FxHashSet<(usize, u32)>,
     file_index: &'a FxHashMap<String, usize>,
-    reverse_visible: &'a FxHashMap<(usize, u32), u32>,
+    reverse_visible: &'a FxHashMap<Loc, u32>,
     support_lang: SupportLang,
     index_names: &'a [String],
     wildcard_sym: u32,
 }
 
-fn gather_visible_one(tree: &Tree, fi: usize) -> FxHashMap<u32, (usize, u32)> {
+impl ResolveCtx<'_> {
+    fn edges_for(&self, fi: usize) -> &[&Edge] {
+        &self.edges_by_tree[fi]
+    }
+}
+
+fn gather_visible_one(tree: &Tree, fi: usize) -> FxHashMap<u32, Loc> {
     tree.root().fold_tree(
         FxHashMap::with_capacity_and_hasher(16, Default::default()),
         |names, c, _w| {
             if canonical::has_def_type(c) {
                 if let Some(ns) = c.child_sym(C::DefName) {
-                    names.insert(ns, (fi, c.index()));
+                    names.insert(
+                        ns,
+                        Loc {
+                            fi,
+                            node: c.index(),
+                        },
+                    );
                 }
                 if let Some(ds) = c.child_sym(C::DefaultExport) {
-                    names.insert(ds, (fi, c.index()));
+                    names.insert(
+                        ds,
+                        Loc {
+                            fi,
+                            node: c.index(),
+                        },
+                    );
                 }
             }
         },
     )
 }
 
-fn gather_imports_subset(
+fn gather_imports_for(
     trees: &[Tree],
     lang: &Lang,
     file_index: &FxHashMap<String, usize>,
@@ -359,22 +383,22 @@ fn propagate_reexports(
 ) -> FxHashSet<(usize, u32)> {
     let mut ambiguous: FxHashSet<(usize, u32)> = FxHashSet::default();
     loop {
-        let new_exports: Vec<(usize, u32, usize, u32)> = reqs
+        let new_exports: Vec<(usize, u32, Loc)> = reqs
             .iter()
             .flat_map(|req| {
                 let mut out = Vec::new();
                 for c in trees[req.fi].cursor(req.node).names() {
                     let ns = c.sym();
                     if ns == wildcard_sym {
-                        for (&ds, &(vfi, vn)) in &visible[req.target_fi] {
+                        for (&ds, &loc) in &visible[req.target_fi] {
                             if !visible[req.fi].contains_key(&ds) {
-                                out.push((req.fi, ds, vfi, vn));
+                                out.push((req.fi, ds, loc));
                             }
                         }
-                    } else if let Some(&(vfi, vn)) = visible[req.target_fi].get(&ns) {
+                    } else if let Some(&loc) = visible[req.target_fi].get(&ns) {
                         let export_as = c.child_sym(C::Alias).unwrap_or(ns);
                         if !visible[req.fi].contains_key(&export_as) {
-                            out.push((req.fi, export_as, vfi, vn));
+                            out.push((req.fi, export_as, loc));
                         }
                     }
                 }
@@ -384,24 +408,24 @@ fn propagate_reexports(
         if new_exports.is_empty() {
             break;
         }
-        for (fi, ns, tfi, tn) in new_exports {
-            if let Some(&(efi, en)) = visible[fi].get(&ns) {
-                if efi != tfi || en != tn {
+        for (fi, ns, loc) in new_exports {
+            if let Some(&existing) = visible[fi].get(&ns) {
+                if existing != loc {
                     ambiguous.insert((fi, ns));
                 }
                 continue;
             }
-            visible[fi].insert(ns, (tfi, tn));
+            visible[fi].insert(ns, loc);
         }
     }
     ambiguous
 }
 
-fn name_targets(ctx: &ResolveCtx, corpus: Cursor, tfi: usize, c: Cursor) -> Vec<(usize, u32)> {
+fn name_targets(ctx: &ResolveCtx, tfi: usize, c: Cursor) -> Vec<Loc> {
     let ns = c.sym();
     if ns == ctx.wildcard_sym {
         return if c.child_sym(C::Alias).is_some() {
-            vec![(tfi, 0)]
+            vec![Loc { fi: tfi, node: 0 }]
         } else {
             ctx.visible[tfi]
                 .iter()
@@ -416,7 +440,7 @@ fn name_targets(ctx: &ResolveCtx, corpus: Cursor, tfi: usize, c: Cursor) -> Vec<
     if let Some(&loc) = ctx.visible[tfi].get(&ns) {
         return vec![loc];
     }
-    let target_path = ctx.lang.syms.resolve(corpus.jump(tfi as u32, 0).sym());
+    let target_path = ctx.lang.syms.resolve(ctx.corpus.jump(tfi as u32, 0).sym());
     paths::resolve_submodule(
         target_path,
         ctx.lang.syms.resolve(ns),
@@ -424,7 +448,7 @@ fn name_targets(ctx: &ResolveCtx, corpus: Cursor, tfi: usize, c: Cursor) -> Vec<
         ctx.index_names,
         ctx.file_index,
     )
-    .map(|fi| (fi, 0))
+    .map(|fi| Loc { fi, node: 0 })
     .into_iter()
     .collect()
 }
@@ -444,44 +468,41 @@ fn is_direct(ft: &Tree, ei: u32, import_name: u32) -> bool {
 }
 
 fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
-    let corpus = Cursor::new(ctx.trees, 0, 0);
     let (fi, tfi) = (req.fi, req.target_fi);
-    let import = corpus.jump(fi as u32, req.node);
+    let import = ctx.corpus.jump(fi as u32, req.node);
 
     let import_edges: Vec<Edge> = import
         .names()
         .flat_map(|c| {
-            name_targets(ctx, corpus, tfi, c)
+            name_targets(ctx, tfi, c)
                 .into_iter()
-                .map(move |(rfi, rn)| c.edge_to(c.jump(rfi as u32, rn), EdgeKind::Imports))
+                .map(move |loc| c.edge_to(c.jump(loc.fi as u32, loc.node), EdgeKind::Imports))
         })
         .collect();
 
     let import_node = req.node;
     let nodes = &ctx.trees[fi];
-    let target_files: Vec<usize> = std::iter::once(req.target_fi)
-        .chain(import_edges.iter().map(|e| e.to_tree as usize))
+    let target_files: Vec<usize> = std::iter::once(tfi)
+        .chain(import_edges.iter().map(|e| e.to_fi()))
         .unique()
         .collect();
 
     let mut edges: Vec<Edge> = import_edges.clone();
 
-    let empty = vec![];
-    let file_edges = ctx.edges_by_tree.get(&(fi as u32)).unwrap_or(&empty);
-
-    for edge in file_edges
+    for edge in ctx
+        .edges_for(fi)
         .iter()
         .filter(|e| targets_import(nodes, e, import_node))
     {
-        let caller = corpus.jump(fi as u32, edge.from_node);
+        let caller = ctx.corpus.jump(fi as u32, edge.from_node);
         for (_, m) in caller.member_calls() {
-            let Some(&(dfi, dn)) = target_files
+            let Some(&loc) = target_files
                 .iter()
                 .find_map(|&t| ctx.visible[t].get(&m.sym()))
             else {
                 continue;
             };
-            let tgt = caller.jump(dfi as u32, dn);
+            let tgt = ctx.corpus.jump(loc.fi as u32, loc.node);
             if canonical::is_callable_def(tgt) {
                 edges.push(caller.edge_to(tgt, EdgeKind::Calls));
             }
@@ -489,24 +510,24 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     }
 
     for ie in &import_edges {
-        let target = corpus.jump(ie.to_tree, ie.to_node);
+        let target = ctx.corpus.follow(ie);
         if !canonical::is_callable_def(target) {
             continue;
         }
-        let target_name = ctx
-            .reverse_visible
-            .get(&(ie.to_tree as usize, ie.to_node))
-            .copied()
-            .unwrap_or(0);
-        let ft = &ctx.trees[ie.from_tree as usize];
+        let target_loc = Loc {
+            fi: ie.to_fi(),
+            node: ie.to_node,
+        };
+        let target_name = ctx.reverse_visible.get(&target_loc).copied().unwrap_or(0);
+        let ft = &ctx.trees[ie.from_fi()];
         let is_wild = ft.cursor(ie.from_node).sym() == ctx.wildcard_sym && target_name != 0;
 
-        let from_edges = ctx.edges_by_tree.get(&ie.from_tree).unwrap_or(&empty);
-        for intra in from_edges
+        for intra in ctx
+            .edges_for(ie.from_fi())
             .iter()
             .filter(|i| i.kind == EdgeKind::Imports && is_direct(ft, i.to_node, ie.from_node))
         {
-            let from = corpus.jump(ie.from_tree, intra.from_node);
+            let from = ctx.corpus.jump(ie.from_tree, intra.from_node);
             let used = !is_wild
                 || from
                     .calls()
@@ -521,15 +542,13 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
 }
 
 fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, all_cross: &[Edge]) -> Vec<Edge> {
-    let corpus = Cursor::new(ctx.trees, 0, 0);
-    let target = corpus.follow(ce);
-    let caller = corpus.jump(ce.from_tree, ce.from_node);
+    let target = ctx.corpus.follow(ce);
+    let caller = ctx.corpus.jump(ce.from_tree, ce.from_node);
 
     let Some(ret_sym) = infer_return_type(target) else {
         return vec![];
     };
-    let Some((type_fi, type_node)) =
-        resolve_type(ret_sym, ce.to_tree as usize, corpus, ctx.visible, all_cross)
+    let Some(type_loc) = resolve_type(ret_sym, ce.to_fi(), ctx.corpus, ctx.visible, all_cross)
     else {
         return vec![];
     };
@@ -544,7 +563,7 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, all_cross: &[Edge]) -> Vec<Ed
         })
         .collect();
 
-    let class = caller.jump(type_fi as u32, type_node);
+    let class = ctx.corpus.jump(type_loc.fi as u32, type_loc.node);
     caller
         .member_calls()
         .filter(|(_, mn)| {
@@ -560,15 +579,14 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, all_cross: &[Edge]) -> Vec<Ed
 }
 
 fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
-    let corpus = Cursor::new(ctx.trees, 0, 0);
-    let target = corpus.follow(ce);
+    let target = ctx.corpus.follow(ce);
     if !canonical::def_type_of(target).is_some_and(|k| matches!(k, C::Class | C::Struct)) {
         return vec![];
     }
     let Some(target_name) = target.child_sym(C::DefName) else {
         return vec![];
     };
-    let ft = &ctx.trees[ce.from_tree as usize];
+    let ft = &ctx.trees[ce.from_fi()];
     ft.root().fold_tree(Vec::new(), |edges, n, _w| {
         if !n.is(C::Binding) {
             return;
@@ -592,7 +610,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
             };
             if let Some(m) = find_method_in(target, member.sym()) {
                 edges.push(
-                    corpus
+                    ctx.corpus
                         .jump(ce.from_tree, caller_def.index())
                         .edge_to(m, EdgeKind::Calls),
                 );
@@ -607,16 +625,19 @@ fn resolve_type(
     corpus: Cursor,
     visible: &VisibleMap,
     cross_edges: &[Edge],
-) -> Option<(usize, u32)> {
+) -> Option<Loc> {
     if let Some(&loc) = visible[target_fi].get(&ret_sym) {
         return Some(loc);
     }
     for ce in cross_edges {
-        if ce.from_tree as usize == target_fi
+        if ce.from_fi() == target_fi
             && ce.kind == EdgeKind::Imports
             && corpus.follow(ce).child_sym(C::DefName) == Some(ret_sym)
         {
-            return Some((ce.to_tree as usize, ce.to_node));
+            return Some(Loc {
+                fi: ce.to_fi(),
+                node: ce.to_node,
+            });
         }
     }
     None

@@ -65,6 +65,14 @@ impl Edge {
             kind,
         }
     }
+    pub fn from_fi(&self) -> usize {
+        self.from_tree as usize
+    }
+
+    pub fn to_fi(&self) -> usize {
+        self.to_tree as usize
+    }
+
     pub fn local(from: u32, to: u32, kind: EdgeKind) -> Self {
         Self {
             from_tree: 0,
