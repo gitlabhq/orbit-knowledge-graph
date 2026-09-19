@@ -284,9 +284,31 @@ fn apply_rewrites_inner(
                         t.set_tag(raw, entry.key, val);
                     }
                 }
-                Out::Replace(p) => {
+                Out::Replace(p, tag_entries) => {
                     let built = build_template(t, lang, p, &caps, &r.filters, span, edge_ctx);
+                    let first = built.first().copied();
                     t.replace(target, built);
+                    if let (Some(entries), Some(new_root)) = (tag_entries, first) {
+                        let raw = Tree::to_raw(new_root);
+                        for entry in entries {
+                            let src = caps[entry.slot as usize]
+                                .first()
+                                .copied()
+                                .unwrap_or(new_root);
+                            let val = if entry.val.is_node_tf() {
+                                entry.val.apply_sym(t, lang, src, edge_ctx)
+                            } else {
+                                let base_sym = t.node(src).sym;
+                                if base_sym == 0 {
+                                    entry.val.apply_sym(t, lang, src, edge_ctx)
+                                } else {
+                                    let s = lang.syms.resolve(base_sym).to_string();
+                                    lang.syms.intern(&entry.val.apply_to_str(&s))
+                                }
+                            };
+                            t.set_tag(raw, entry.key, val);
+                        }
+                    }
                     break;
                 }
                 Out::Append(ps) => {

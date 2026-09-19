@@ -96,13 +96,15 @@ stages:
 
       # Trait method signatures (no body) — self variant first
       - match: '(function_signature_item name: $N **/(self_parameter))'
-        replace: '(__def (__defname @$N) (__method) (__self_method))'
+        replace: '(__def (__defname @$N) (__method))'
+        tag: { flavor: self_method }
       - match: '(function_signature_item name: $N)'
         replace: '(__def (__defname @$N) (__function))'
 
       # Functions — self variant first, then generic
       - match: '(function_item name: $N **/(self_parameter) body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__method) (__self_method) $$$ANN $B)'
+        replace: '(__def (__defname @$N) (__method) $$$ANN $B)'
+        tag: { flavor: self_method }
       - match: '(function_item name: $N body: $B $$$ANN:__visibility)'
         replace: '(__def (__defname @$N) (__function) $$$ANN $B)'
 

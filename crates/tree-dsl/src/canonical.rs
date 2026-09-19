@@ -70,8 +70,7 @@ pub enum Canonical {
     SsaReturn,
     #[strum(serialize = "__ssa_typed")]
     SsaTyped,
-    #[strum(serialize = "__cjs_require")]
-    CjsRequire,
+
     #[strum(serialize = "__module_export")]
     ModuleExport,
     #[strum(serialize = "__default_export")]
@@ -202,37 +201,8 @@ pub enum Canonical {
     )]
     EnumVariant,
 
-    // ── Flavors ──
-    #[strum(serialize = "__async", props(flavor = "true"))]
-    Async,
-    #[strum(serialize = "__static", props(flavor = "true"))]
-    Static,
-    #[strum(serialize = "__abstract", props(flavor = "true"))]
-    Abstract,
-    #[strum(serialize = "__generator", props(flavor = "true"))]
-    Generator,
     #[strum(serialize = "__ssa_hint")]
     SsaHint,
-    #[strum(serialize = "__self_method", props(flavor = "true"))]
-    SelfMethod,
-
-    // ── Display (write-once, post-resolution) ──
-    #[strum(serialize = "_*_display_fqn")]
-    DisplayFqn,
-    #[strum(serialize = "_*_display_def_type")]
-    DisplayDefType,
-    #[strum(serialize = "_*_display_file_path")]
-    DisplayFilePath,
-    #[strum(serialize = "_*_display_resolved")]
-    DisplayResolved,
-    #[strum(serialize = "_*_display_source_path")]
-    DisplaySourcePath,
-    #[strum(serialize = "_*_display_import_type")]
-    DisplayImportType,
-    #[strum(serialize = "_*_display_language")]
-    DisplayLanguage,
-    #[strum(serialize = "_*_display_entity")]
-    DisplayEntity,
 }
 
 impl From<Canonical> for u16 {
@@ -260,9 +230,6 @@ impl Canonical {
     }
     pub fn is_scoped(self) -> bool {
         self.get_str("scoped") == Some("true")
-    }
-    pub fn is_flavor(self) -> bool {
-        self.get_str("flavor") == Some("true")
     }
     pub fn display_name(self) -> &'static str {
         self.get_str("display").unwrap_or("")

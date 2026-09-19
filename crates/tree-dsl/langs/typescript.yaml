@@ -95,11 +95,13 @@ stages:
 
       # const { a, b } = require('./source') — CJS destructured require
       - match: '(variable_declarator name: (object_pattern $$$NAMES:shorthand_property_identifier_pattern) value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
-        replace: '(__import (__source @$S) (__source_path @$S) (__cjs_require) $$$NAMES=>__name)'
+        replace: '(__import (__source @$S) (__source_path @$S) $$$NAMES=>__name)'
+        tag: { import_type: CjsRequire }
 
       # const x = require('./source') — CJS namespace require
       - match: '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
-        replace: '(__import (__source @$S) (__source_path @$S) (__cjs_require) (__name "default" (__alias @$N)))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
+        tag: { import_type: CjsRequire }
 
       # export { A, B } from './source' — named re-export with source (before star)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
@@ -157,7 +159,8 @@ stages:
 
       # Abstract method signatures (no body)
       - match: '(abstract_method_signature name: $N)'
-        replace: '(__def (__defname @$N) (__method) (__abstract))'
+        replace: '(__def (__defname @$N) (__method))'
+        tag: { flavor: abstract }
       # Functions
       - match: '(function_declaration name: $N parameters: (formal_parameters $$$P:__binding) body: $B)'
         replace: '(__def (__defname @$N) (__function) $$$P $B)'
@@ -165,15 +168,18 @@ stages:
         replace: '(__def (__defname @$N) (__function) $B)'
       # Methods — static before generic; parameters: captures ctor param properties
       - match: '(method_definition **/(static) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
-        replace: '(__def (__defname @$N) (__method) (__static "StaticMethod") $$$P $B)'
+        replace: '(__def (__defname @$N) (__method) $$$P $B)'
+        tag: { flavor: static }
       - match: '(method_definition **/(static) name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__method) (__static "StaticMethod") $B)'
+        replace: '(__def (__defname @$N) (__method) $B)'
+        tag: { flavor: static }
       - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
         replace: '(__def (__defname @$N) (__method) $$$P $B)'
       - match: '(method_definition name: $N body: $B)'
         replace: '(__def (__defname @$N) (__method) $B)'
       - match: '(generator_function_declaration name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__function) (__generator) $B)'
+        replace: '(__def (__defname @$N) (__function) $B)'
+        tag: { flavor: generator }
       - match: '(interface_declaration name: $N body: $B)'
         replace: '(__def (__defname @$N) (__interface) $B)'
       - match: '(type_alias_declaration name: $N)'
@@ -185,7 +191,8 @@ stages:
       - match: '(class_declaration name: $N body: $B $$$ANN:__supertype)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
       - match: '(abstract_class_declaration name: $N body: $B $$$ANN:__supertype)'
-        replace: '(__def (__defname @$N) (__class) (__abstract) $$$ANN $B)'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
+        tag: { flavor: abstract }
 
   - name: exports
     rules:
@@ -280,12 +287,6 @@ display:
           file_path: '@$ROOT|ancestor_tag("file_path")'
   - name: imports
     rules:
-      - match: '(__import (__cjs_require))'
-        tag:
-          entity: ImportedSymbol
-          file_path: '@$ROOT|ancestor_tag("file_path")'
-          source_path: '@$ROOT|child_sym("__source")'
-          import_type: CjsRequire
       - match: '(__import)'
         tag:
           entity: ImportedSymbol

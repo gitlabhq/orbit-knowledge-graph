@@ -163,7 +163,7 @@ pub struct TagEntry {
 }
 
 pub enum Out {
-    Replace(Pat),
+    Replace(Pat, Option<Vec<TagEntry>>),
     Append(Vec<Pat>),
     Tag(Vec<TagEntry>),
 }

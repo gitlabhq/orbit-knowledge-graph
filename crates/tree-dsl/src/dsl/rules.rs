@@ -247,12 +247,28 @@ fn compile_stage(stage: &Stage, lang: &Lang) -> Vec<Rewrite> {
         .collect()
 }
 
+fn compile_tags(tag_map: &HashMap<String, String>, ctx: &mut crate::pattern::Ctx) -> Vec<TagEntry> {
+    tag_map
+        .iter()
+        .map(|(k, v)| {
+            let key = ctx.lang.syms.intern(k);
+            let (slot, val) = compile_tag_value(v, ctx);
+            TagEntry { key, slot, val }
+        })
+        .collect()
+}
+
 fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
     let pat = &rule.pattern;
 
     if let Some(ref tpl) = rule.replace {
         let tpl = tpl.clone();
-        let mut rw = Rewrite::new(lang, pat, move |c| Out::Replace(c.template(&tpl)));
+        let tags = rule.tag.clone();
+        let mut rw = Rewrite::new(lang, pat, move |c| {
+            let replace = c.template(&tpl);
+            let tag_entries = tags.as_ref().map(|t| compile_tags(t, c));
+            Out::Replace(replace, tag_entries)
+        });
         if let Some(ref wc) = rule.where_clause {
             rw.guards = parse_where_clause(wc, &rw.slots);
         }
@@ -271,21 +287,8 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
     }
 
     if let Some(ref tag_map) = rule.tag {
-        let entries: Vec<(String, String)> = tag_map
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let mut rw = Rewrite::new(lang, pat, move |c| {
-            let tags = entries
-                .iter()
-                .map(|(k, v)| {
-                    let key = c.lang.syms.intern(k);
-                    let (slot, val) = compile_tag_value(v, c);
-                    TagEntry { key, slot, val }
-                })
-                .collect();
-            Out::Tag(tags)
-        });
+        let tag_map = tag_map.clone();
+        let mut rw = Rewrite::new(lang, pat, move |c| Out::Tag(compile_tags(&tag_map, c)));
         if let Some(ref wc) = rule.where_clause {
             rw.guards = parse_where_clause(wc, &rw.slots);
         }

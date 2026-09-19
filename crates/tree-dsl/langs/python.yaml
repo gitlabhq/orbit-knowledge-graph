@@ -140,7 +140,8 @@ stages:
 
       # Methods — has self parameter (before generic function rule)
       - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
-        replace: '(__def (__defname @$N) (__method) (__self_method) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
+        tag: { flavor: self_method }
 
       # Functions — no self parameter
       - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
