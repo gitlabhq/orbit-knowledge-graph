@@ -5,8 +5,9 @@
 # prose linter for the text LLMs read. The scorers live in scripts/linting/ and
 # are documented in scripts/linting/README.md.
 #
-# All jobs are advisory (allow_failure: true → yellow). The scripts exit
-# non-zero on findings; remove allow_failure here to promote a gate to blocking.
+# The narration and MR-description jobs are advisory (allow_failure: true →
+# yellow); the prose job blocks. The scripts exit non-zero on findings; remove
+# allow_failure here to promote a gate to blocking.
 #
 # This file is the CI half of the linting kill-switch: deleting it plus
 # the scripts/linting/ folder, the `- local:` include in .gitlab-ci.yml, the
@@ -64,7 +65,6 @@ lint:prose:
   extends:
     - .mr-and-main-rules
   needs: []
-  allow_failure: true
   script:
     - apk add --no-cache git
     - uv run --quiet scripts/linting/prose_lint_test.py
