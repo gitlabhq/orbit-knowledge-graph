@@ -104,7 +104,7 @@ enum QueryType {
 message ExecuteQueryRequest {
   string query = 1;
   ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: GOON text
-  QueryType query_type = 3;    // defaults to JSON DSL
+  QueryType query_type = 3;
 }
 
 // Server-sent final message with query results.
@@ -263,8 +263,7 @@ message ListNamedQueriesResponse {
 message NamedQueryDefinition {
   string name = 1;         // stable identifier, e.g. "recent_merges"
   string description = 2;  // human-readable summary from the template YAML
-  string raw_query = 3;      // rendered in the requested language, executable as-is
-  QueryType query_type = 4;  // language of raw_query
+  string raw_query = 3;
 }
 
 // ---------------------------------------------------------------------------

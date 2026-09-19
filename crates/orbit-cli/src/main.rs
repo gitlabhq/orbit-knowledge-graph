@@ -429,15 +429,11 @@ enum Commands {
     },
     /// POST a query to the remote Orbit API and stream the response.
     Query {
-        /// With `--language json`: a query body file. `-` or omitted reads stdin.
-        /// With `--language gql`: required inline query text.
-        #[arg(value_name = "FILE|QUERY", required_if_eq("language", "gql"))]
+        #[arg(
+            value_name = "QUERY|FILE",
+            help = "Query text or a request-envelope file; '-' or omitted reads an envelope from stdin"
+        )]
         source: Option<String>,
-
-        /// Input shape: `json` (a query object or envelope file) or `gql`
-        /// (inline query text). The server decides which language it accepts.
-        #[arg(long, value_enum, default_value = "json")]
-        language: remote::query::QueryLanguage,
 
         /// Server response format. Overrides the body's `response_format`;
         /// defaults to `llm` when neither is set.
@@ -691,8 +687,7 @@ async fn dispatch(command: Commands) -> Result<()> {
         Commands::Query {
             source,
             response_format,
-            language,
-        } => Ok(remote::run_query(source, response_format, language).await?),
+        } => Ok(remote::run_query(source, response_format).await?),
         Commands::Status => Ok(remote::run_status().await?),
         Commands::Ontology { nodes } => Ok(remote::run_ontology(nodes).await?),
         Commands::Dsl => Ok(remote::run_dsl().await?),
@@ -1271,15 +1266,15 @@ mod tests {
         let Commands::Query {
             source,
             response_format,
-            language,
         } = Cli::parse_from(["orbit", "query", "--response-format", "raw", "-"]).command
         else {
             panic!("expected query");
         };
         assert_eq!(source.as_deref(), Some("-"));
         assert_eq!(response_format, Some(super::remote::ResponseFormat::Raw));
-        assert_eq!(language, super::remote::query::QueryLanguage::Json);
-        assert!(Cli::try_parse_from(["orbit", "query", "--language", "gql"]).is_err());
+        assert!(
+            Cli::try_parse_from(["orbit", "query", "--language", "gql", "query.json"]).is_err()
+        );
         assert!(matches!(
             Cli::parse_from(["orbit", "status"]).command,
             Commands::Status

@@ -231,20 +231,15 @@ fn query_posts_envelope_with_resolved_response_format() {
 }
 
 #[test]
-fn gql_inline_preserves_query_text_and_response_bytes() {
+fn gql_envelope_preserves_query_text_and_response_bytes() {
     let text = "  MATCH (u:User {username: 'a\\\\b\\\"λ'})\r\nRETURN u LIMIT 1\n";
     let response = "@query\nλ \\\"quoted\\\"\n";
     let (base_url, handle) = serve_once(response, "text/plain");
-    let output = run_orbit(
+    let body = serde_json::to_vec(&serde_json::json!({ "query": text })).unwrap();
+    let output = run_orbit_with_stdin(
         &base_url,
-        &[
-            "query",
-            "--language",
-            "gql",
-            "--response-format",
-            "llm",
-            text,
-        ],
+        &["query", "--response-format", "llm", "-"],
+        &body,
     );
     let request = handle.join().unwrap();
     assert!(
@@ -257,6 +252,48 @@ fn gql_inline_preserves_query_text_and_response_bytes() {
     assert_eq!(sent.get("language"), None);
     assert_eq!(sent["response_format"], "llm");
     assert_eq!(output.stdout, response.as_bytes());
+}
+
+#[test]
+fn existing_file_argument_still_reads_the_request_envelope() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("query.json");
+    std::fs::write(&path, br#"{"query":{"query_type":"traversal"}}"#).unwrap();
+    let (base_url, handle) = serve_once("@query", "text/plain");
+    let output = run_orbit(&base_url, &["query", path.to_str().unwrap()]);
+    let request = handle.join().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sent: serde_json::Value = serde_json::from_str(&request.body).unwrap();
+    assert_eq!(
+        sent,
+        serde_json::json!({
+            "query": { "query_type": "traversal" },
+            "response_format": "llm",
+        })
+    );
+}
+
+#[test]
+fn gql_inline_query_is_a_string_without_a_language_selector() {
+    let text = "  MATCH (u:User {username: 'Zoë'})\r\nRETURN u LIMIT 1\n";
+    let (base_url, handle) = serve_once("@query", "text/plain");
+    let output = run_orbit(&base_url, &["query", text]);
+    let request = handle.join().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sent: serde_json::Value = serde_json::from_str(&request.body).unwrap();
+    assert_eq!(
+        sent,
+        serde_json::json!({ "query": text, "response_format": "llm" })
+    );
+    assert_eq!(output.stdout, b"@query");
 }
 
 #[test]
