@@ -238,10 +238,15 @@ impl Resolver {
             .collect();
         cross_edges.extend(&wave1);
 
+        let mut imports_by_from: Vec<Vec<&Edge>> = vec![vec![]; trees.len()];
+        for e in cross_edges.iter().filter(|e| e.kind == EdgeKind::Imports) {
+            imports_by_from[e.from_fi()].push(e);
+        }
+
         let wave2: Vec<Edge> = wave1
             .par_iter()
             .filter(|e| e.kind == EdgeKind::Calls)
-            .flat_map(|ce| resolve_type_edges(&ctx, ce, &cross_edges))
+            .flat_map(|ce| resolve_type_edges(&ctx, ce, &imports_by_from))
             .collect();
         cross_edges.extend(wave2);
 
@@ -541,15 +546,20 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     edges
 }
 
-fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, all_cross: &[Edge]) -> Vec<Edge> {
+fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, imports_by_from: &[Vec<&Edge>]) -> Vec<Edge> {
     let target = ctx.corpus.follow(ce);
     let caller = ctx.corpus.jump(ce.from_tree, ce.from_node);
 
     let Some(ret_sym) = infer_return_type(target) else {
         return vec![];
     };
-    let Some(type_loc) = resolve_type(ret_sym, ce.to_fi(), ctx.corpus, ctx.visible, all_cross)
-    else {
+    let Some(type_loc) = resolve_type(
+        ret_sym,
+        ce.to_fi(),
+        ctx.corpus,
+        ctx.visible,
+        imports_by_from,
+    ) else {
         return vec![];
     };
 
@@ -624,16 +634,13 @@ fn resolve_type(
     target_fi: usize,
     corpus: Cursor,
     visible: &VisibleMap,
-    cross_edges: &[Edge],
+    imports_by_from: &[Vec<&Edge>],
 ) -> Option<Loc> {
     if let Some(&loc) = visible[target_fi].get(&ret_sym) {
         return Some(loc);
     }
-    for ce in cross_edges {
-        if ce.from_fi() == target_fi
-            && ce.kind == EdgeKind::Imports
-            && corpus.follow(ce).child_sym(C::DefName) == Some(ret_sym)
-        {
+    for ce in &imports_by_from[target_fi] {
+        if corpus.follow(ce).child_sym(C::DefName) == Some(ret_sym) {
             return Some(Loc {
                 fi: ce.to_fi(),
                 node: ce.to_node,
