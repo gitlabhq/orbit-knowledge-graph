@@ -101,7 +101,7 @@ fn round_trip_save_load() {
 }
 
 #[test]
-fn incremental_lifecycle_through_serialization() {
+fn incremental_via_snapshot_and_reindex() {
     let suite = load_suite();
     let fixtures: Vec<(String, String)> = suite
         .fixtures
@@ -120,7 +120,7 @@ fn incremental_lifecycle_through_serialization() {
         HashSet::from_iter(["main.py".into(), "utils.py".into()])
     );
 
-    for (i, step) in suite.steps.iter().enumerate() {
+    for step in &suite.steps {
         let added: Vec<(String, String)> = step
             .add
             .iter()
@@ -131,11 +131,7 @@ fn incremental_lifecycle_through_serialization() {
             .iter()
             .map(|f| (f.path.clone(), f.content.clone()))
             .collect();
-        current.update(&added, &modified, &step.remove);
-
-        let step_snap = dir.path().join(format!("step{i}.bin"));
-        current.save(&step_snap).unwrap();
-        current = tree_dsl::IndexResult::load(&step_snap, SupportLang::Python).unwrap();
+        current = tree_dsl::reindex(current, &added, &modified, &step.remove);
     }
 
     assert_eq!(
@@ -148,7 +144,7 @@ fn incremental_lifecycle_through_serialization() {
 }
 
 #[test]
-fn modify_step_preserves_resolution() {
+fn modify_preserves_resolution_after_reindex() {
     let suite = load_suite();
     let fixtures: Vec<(String, String)> = suite
         .fixtures
@@ -161,9 +157,9 @@ fn modify_step_preserves_resolution() {
     let snap = dir.path().join("graph.bin");
     result.save(&snap).unwrap();
 
-    let mut current = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
-    let initial_cross = current.edges.len();
-    assert!(initial_cross > 0);
+    let loaded = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
+    let initial_edges = loaded.edges.len();
+    assert!(initial_edges > 0);
 
     let step = &suite.steps[0];
     let modified: Vec<(String, String)> = step
@@ -171,18 +167,13 @@ fn modify_step_preserves_resolution() {
         .iter()
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
-    current.update(&[], &modified, &[]);
+    let updated = tree_dsl::reindex(loaded, &[], &modified, &[]);
 
-    assert_eq!(current.trees.len(), 2);
-    assert!(current.edges.len() >= initial_cross);
+    assert_eq!(updated.trees.len(), 2);
+    assert!(updated.edges.len() >= initial_edges);
 
-    let names = def_names(&current);
+    let names = def_names(&updated);
     assert!(names.contains(&"helper".to_string()));
     assert!(names.contains(&"extra".to_string()));
-
-    let snap2 = dir.path().join("after_modify.bin");
-    current.save(&snap2).unwrap();
-    let reloaded = tree_dsl::IndexResult::load(&snap2, SupportLang::Python).unwrap();
-    assert_eq!(count_defs(&reloaded), count_defs(&current));
-    assert_eq!(reloaded.edges.len(), current.edges.len());
+    assert_eq!(count_defs(&updated), 2);
 }

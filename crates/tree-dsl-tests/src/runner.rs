@@ -81,7 +81,7 @@ pub async fn run_yaml_suite(yaml: &str) {
             .iter()
             .map(|f| (f.path.clone(), f.content.clone()))
             .collect();
-        result.update(&added, &modified, &step.remove);
+        result = tree_dsl::reindex(result, &added, &modified, &step.remove);
 
         if !step.tests.is_empty() {
             let step_suite = TestSuite {

@@ -21,4 +21,4 @@ pub mod rules {
     pub use crate::dsl::rules::*;
 }
 
-pub use pipeline::{IndexResult, Pipeline, index, parse};
+pub use pipeline::{IndexResult, Pipeline, index, parse, reindex};
