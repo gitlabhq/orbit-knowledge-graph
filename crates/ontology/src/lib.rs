@@ -884,6 +884,20 @@ impl Ontology {
         }
     }
 
+    pub fn remove_data_model_optimizations(&mut self) {
+        if let Some(table) = self.local_edge_table_name.clone() {
+            self.collapse_edge_tables(&table);
+        }
+        let allowed: std::collections::HashSet<&str> = self
+            .local_edge_columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        self.denormalized_properties
+            .retain(|dp| allowed.contains(dp.edge_column.as_str()));
+        self.denormalized_joins.clear();
+    }
+
     /// Returns the destination table for a given relationship kind.
     ///
     /// Uses the first variant's `destination_table`. This is correct because

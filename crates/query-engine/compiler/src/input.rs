@@ -176,6 +176,11 @@ pub struct CompilerMetadata {
     pub query_hash: u64,
     /// Number of `_gkg_cursor_N` readback columns the cursor pass appended.
     pub cursor_key_count: usize,
+    /// When true, the plan/lower phases emit all node columns inline in
+    /// SELECT and disable FK elision, hydration deferral, and dedup
+    /// strategies that assume a post-query hydration pass. Set by
+    /// `compile_local` for the DuckDB local pipeline.
+    pub inline_all: bool,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -199,6 +204,7 @@ impl Default for CompilerMetadata {
             tp_id_lookup: HashMap::new(),
             query_hash: 0,
             cursor_key_count: 0,
+            inline_all: false,
         }
     }
 }

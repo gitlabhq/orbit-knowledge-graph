@@ -131,9 +131,7 @@ pub fn compile_local(
     ontology: &Arc<Ontology>,
 ) -> Result<CompiledQueryContext> {
     let mut ont = ontology.as_ref().clone();
-    if let Some(local_table) = ontology.local_edge_table_name() {
-        ont.collapse_edge_tables(local_table);
-    }
+    ont.remove_data_model_optimizations();
     let ont = Arc::new(ont);
     match fe {
         Frontend::JsonDsl => {
