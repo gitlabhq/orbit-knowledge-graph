@@ -19,8 +19,10 @@
 //!           fields: { O: object, M: member }
 //! ```
 
+use std::collections::HashMap;
+
 use crate::intern::Lang;
-use crate::pattern::{Out, Rewrite};
+use crate::pattern::{Out, Rewrite, TagEntry, Tf};
 
 pub enum ResolveStage {
     Rules(Vec<Rewrite>),
@@ -125,6 +127,8 @@ struct Rule {
     replace: Option<String>,
     #[serde(default)]
     append: Option<Vec<String>>,
+    #[serde(default)]
+    tag: Option<HashMap<String, String>>,
     #[serde(default, rename = "where")]
     where_clause: Option<String>,
 }
@@ -266,7 +270,71 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
         return vec![rw];
     }
 
+    if let Some(ref tag_map) = rule.tag {
+        let entries: Vec<(String, String)> = tag_map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let mut rw = Rewrite::new(lang, pat, move |c| {
+            let tags = entries
+                .iter()
+                .map(|(k, v)| {
+                    let key = c.lang.syms.intern(k);
+                    let val = compile_tag_value(v, c);
+                    TagEntry { key, val }
+                })
+                .collect();
+            Out::Tag(tags)
+        });
+        if let Some(ref wc) = rule.where_clause {
+            rw.guards = parse_where_clause(wc, &rw.slots);
+        }
+        return vec![rw];
+    }
+
     panic!("rule has no action: {:?}", pat);
+}
+
+fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> Tf {
+    if val.starts_with("@$") {
+        let rest = &val[2..];
+        let (slot_name, pipeline) = match rest.find('|') {
+            Some(i) => (&rest[..i], Some(&rest[i + 1..])),
+            None => (rest, None),
+        };
+        let _slot = ctx.slot(slot_name);
+        match pipeline {
+            Some(pipe) => {
+                let steps: Vec<Tf> = pipe
+                    .split('|')
+                    .map(|seg| {
+                        if let Some((name, raw_args)) = seg.split_once('(') {
+                            let raw_args = raw_args.trim_end_matches(')');
+                            let args: Vec<&str> = if raw_args.is_empty() {
+                                vec![]
+                            } else {
+                                raw_args
+                                    .split(',')
+                                    .map(|a| a.trim().trim_matches('"'))
+                                    .collect()
+                            };
+                            Tf::from_func(name, &args, Some(ctx))
+                        } else {
+                            Tf::from_func(seg, &[], Some(ctx))
+                        }
+                    })
+                    .collect();
+                if steps.len() == 1 {
+                    steps.into_iter().next().unwrap()
+                } else {
+                    Tf::Pipeline(steps)
+                }
+            }
+            None => Tf::Id,
+        }
+    } else {
+        Tf::LitSym(ctx.lang.syms.intern(val))
+    }
 }
 
 fn parse_where_clause(

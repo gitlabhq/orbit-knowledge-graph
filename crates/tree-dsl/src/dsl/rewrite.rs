@@ -5,7 +5,7 @@ use crate::intern::Lang;
 use crate::tree::{Node, Tree};
 
 use super::matching::matches;
-use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, Text};
+use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, Text, Tf};
 
 pub(crate) fn materialize(
     t: &Tree,
@@ -265,23 +265,38 @@ fn apply_rewrites_inner(
             let root_node = t.node(target);
             let span = (root_node.start, root_node.end);
 
-            let is_append = std::matches!(&r.out, Out::Append(_));
-            let pats: &[Pat] = match &r.out {
-                Out::Replace(p) => std::slice::from_ref(p),
-                Out::Append(ps) => ps,
-            };
-            for pat in pats {
-                let built = build_template(t, lang, pat, &caps, &r.filters, span, edge_ctx);
-                if is_append {
-                    for id in built {
-                        target.append(id, &mut t.arena);
+            match &r.out {
+                Out::Tag(entries) => {
+                    let raw = Tree::to_raw(target);
+                    let src = caps[0].first().copied().unwrap_or(target);
+                    for entry in entries {
+                        let val = if entry.val.is_node_tf() {
+                            entry.val.apply_sym(t, lang, src, edge_ctx)
+                        } else {
+                            let base_sym = t.node(src).sym;
+                            if base_sym == 0 {
+                                entry.val.apply_sym(t, lang, src, edge_ctx)
+                            } else {
+                                let s = lang.syms.resolve(base_sym).to_string();
+                                lang.syms.intern(&entry.val.apply_to_str(&s))
+                            }
+                        };
+                        t.set_tag(raw, entry.key, val);
                     }
-                } else {
-                    t.replace(target, built);
                 }
-            }
-            if !is_append {
-                break;
+                Out::Replace(p) => {
+                    let built = build_template(t, lang, p, &caps, &r.filters, span, edge_ctx);
+                    t.replace(target, built);
+                    break;
+                }
+                Out::Append(ps) => {
+                    for pat in ps {
+                        let built = build_template(t, lang, pat, &caps, &r.filters, span, edge_ctx);
+                        for id in built {
+                            target.append(id, &mut t.arena);
+                        }
+                    }
+                }
             }
         }
     }

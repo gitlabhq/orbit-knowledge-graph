@@ -1,8 +1,16 @@
 use indextree::{Arena, NodeEdge, NodeId};
+use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 use crate::canonical;
 
 pub(crate) const NONE: u32 = u32::MAX;
+
+#[derive(Clone, Copy, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct Tag {
+    pub key: u32,
+    pub val: u32,
+}
 
 #[repr(u16)]
 #[derive(
@@ -89,6 +97,7 @@ pub struct Tree {
     pub(crate) arena: Arena<Node>,
     pub(crate) root: NodeId,
     pub label: String,
+    pub tags: FxHashMap<u32, SmallVec<[Tag; 2]>>,
 }
 
 impl Tree {
@@ -99,6 +108,7 @@ impl Tree {
             arena,
             root,
             label: String::new(),
+            tags: FxHashMap::default(),
         }
     }
 
@@ -124,6 +134,22 @@ impl Tree {
 
     pub(crate) fn node_mut(&mut self, id: NodeId) -> &mut Node {
         self.arena[id].get_mut()
+    }
+
+    pub fn set_tag(&mut self, node: u32, key: u32, val: u32) {
+        let entry = self.tags.entry(node).or_default();
+        if let Some(t) = entry.iter_mut().find(|t| t.key == key) {
+            t.val = val;
+        } else {
+            entry.push(Tag { key, val });
+        }
+    }
+
+    pub fn get_tag(&self, node: u32, key: u32) -> Option<u32> {
+        self.tags
+            .get(&node)
+            .and_then(|tags| tags.iter().find(|t| t.key == key))
+            .map(|t| t.val)
     }
 
     pub(crate) fn append(&mut self, parent: NodeId, child: Node) -> NodeId {
@@ -197,6 +223,14 @@ impl Tree {
             };
             id_map.insert(id, new_id);
         }
+        let raw_map: FxHashMap<u32, u32> = id_map
+            .iter()
+            .map(|(&old_id, &new_id)| (Self::to_raw(old_id), Self::to_raw(new_id)))
+            .collect();
+        self.tags = std::mem::take(&mut self.tags)
+            .into_iter()
+            .filter_map(|(old_raw, tags)| Some((*raw_map.get(&old_raw)?, tags)))
+            .collect();
         self.root = id_map[&self.root];
         self.arena = new_arena;
     }
@@ -223,6 +257,7 @@ pub struct SnapshotNode {
 pub struct TreeSnapshot {
     pub nodes: Vec<SnapshotNode>,
     pub label: String,
+    pub tags: Vec<(u32, Vec<Tag>)>,
 }
 
 impl From<&Tree> for TreeSnapshot {
@@ -254,9 +289,15 @@ impl From<&Tree> for TreeSnapshot {
                 parent,
             });
         }
+        let tags: Vec<(u32, Vec<Tag>)> = tree
+            .tags
+            .iter()
+            .map(|(&node, tags)| (node, tags.to_vec()))
+            .collect();
         Self {
             nodes,
             label: tree.label.clone(),
+            tags,
         }
     }
 }
@@ -305,6 +346,9 @@ impl From<TreeSnapshot> for Tree {
             id_map.push(id);
         }
         tree.label = snap.label;
+        for (node, tags) in snap.tags {
+            tree.tags.insert(node, SmallVec::from_vec(tags));
+        }
         tree
     }
 }

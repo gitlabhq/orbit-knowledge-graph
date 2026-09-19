@@ -32,6 +32,9 @@ pub enum Tf {
     CollapseIndex(Vec<Box<str>>),
     Map(Vec<(Box<str>, Box<str>)>),
     HasEdge(EdgeKind, EdgeDir),
+    AncestorTag(u32),
+    Tag(u32),
+    LitSym(u32),
 }
 
 impl Tf {
@@ -44,6 +47,9 @@ impl Tf {
                 | Tf::Const(_)
                 | Tf::ParentSym(_)
                 | Tf::AncestorSym(_)
+                | Tf::AncestorTag(_)
+                | Tf::Tag(_)
+                | Tf::LitSym(_)
                 | Tf::Concat(_, _, _)
                 | Tf::HasEdge(_, _)
         )
@@ -150,9 +156,15 @@ impl Pat {
     }
 }
 
+pub struct TagEntry {
+    pub key: u32,
+    pub val: Tf,
+}
+
 pub enum Out {
     Replace(Pat),
     Append(Vec<Pat>),
+    Tag(Vec<TagEntry>),
 }
 
 pub struct Rewrite {

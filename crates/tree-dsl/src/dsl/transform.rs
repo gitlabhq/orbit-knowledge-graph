@@ -60,6 +60,24 @@ impl Tf {
             "child_sym" => Tf::Child(kind(&mut ctx, args[0])),
             "parent_sym" => Tf::ParentSym(kind(&mut ctx, args[0])),
             "ancestor_sym" => Tf::AncestorSym(kind(&mut ctx, args[0])),
+            "ancestor_tag" => {
+                let key = ctx
+                    .as_mut()
+                    .expect("needs context")
+                    .lang
+                    .syms
+                    .intern(args[0]);
+                Tf::AncestorTag(key)
+            }
+            "tag" => {
+                let key = ctx
+                    .as_mut()
+                    .expect("needs context")
+                    .lang
+                    .syms
+                    .intern(args[0]);
+                Tf::Tag(key)
+            }
             "has_incoming" | "has_outgoing" => {
                 let ek = EdgeKind::from_str(args[0]).expect("unknown edge kind");
                 let dir = if name == "has_incoming" {
@@ -181,6 +199,27 @@ impl Tf {
                     }
                 }
             }
+            Tf::AncestorTag(key) => {
+                let key = *key;
+                let raw = Tree::to_raw(id);
+                if let Some(v) = t.get_tag(raw, key) {
+                    return v;
+                }
+                let mut cur = id;
+                loop {
+                    match cur.parent(&t.arena) {
+                        Some(p) => {
+                            if let Some(v) = t.get_tag(Tree::to_raw(p), key) {
+                                break v;
+                            }
+                            cur = p;
+                        }
+                        None => break 0,
+                    }
+                }
+            }
+            Tf::Tag(key) => t.get_tag(Tree::to_raw(id), *key).unwrap_or(0),
+            Tf::LitSym(s) => *s,
             Tf::HasEdge(kind, dir) => {
                 let raw = Tree::to_raw(id);
                 let found = edge_ctx.is_some_and(|ctx| {
