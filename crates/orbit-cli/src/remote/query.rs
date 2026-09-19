@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::path::Path;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -11,28 +12,16 @@ use super::{ResponseFormat, write_stdout_raw};
 const DEFAULT_QUERY_FORMAT: &str = "llm";
 const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub(crate) enum QueryLanguage {
-    Json,
-    Gql,
-}
-
 pub(crate) async fn run_query(
     source: Option<String>,
     format_override: Option<ResponseFormat>,
-    language: QueryLanguage,
 ) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
-    let request_body = match language {
-        QueryLanguage::Json => {
-            build_query_request(&read_query_body(source.as_deref())?, format_override)?
+    let request_body = match source.as_deref() {
+        Some(query) if query != "-" && !Path::new(query).is_file() => {
+            build_text_request(query, format_override)?
         }
-        QueryLanguage::Gql => build_gql_request(
-            source
-                .as_deref()
-                .ok_or_else(|| RemoteError::new(EXIT_GENERIC, "GQL query text is required"))?,
-            format_override,
-        )?,
+        _ => build_query_request(&read_query_body(source.as_deref())?, format_override)?,
     };
     let response = client.query_raw(request_body).await?;
     write_stdout_raw(&response)
@@ -54,17 +43,13 @@ fn read_query_body(source: Option<&str>) -> anyhow::Result<Vec<u8>> {
     }
 }
 
-fn build_gql_request(
-    query: &str,
-    format_override: Option<ResponseFormat>,
-) -> Result<Vec<u8>, RemoteError> {
-    if query.is_empty() {
+fn build_text_request(query: &str, format: Option<ResponseFormat>) -> Result<Vec<u8>, RemoteError> {
+    if query.trim().is_empty() {
         return Err(RemoteError::new(EXIT_GENERIC, "query body is empty"));
     }
-    let response_format = format_override.map_or(DEFAULT_QUERY_FORMAT, ResponseFormat::as_str);
     serialize_request(&serde_json::json!({
         "query": query,
-        "response_format": response_format,
+        "response_format": format.map_or(DEFAULT_QUERY_FORMAT, ResponseFormat::as_str),
     }))
 }
 
@@ -89,7 +74,7 @@ fn build_query_request(
     let query = envelope.query.ok_or_else(|| {
         RemoteError::new(
             EXIT_GENERIC,
-            "query body must contain a top-level `query` object",
+            "query body must contain a top-level `query` field",
         )
     })?;
 
@@ -126,8 +111,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gql_query_rejects_empty_text() {
-        assert!(build_gql_request("", None).is_err());
+    fn query_envelope_preserves_gql_without_a_selector() {
+        let text = " MATCH (u:User {name: 'Zoë'}) RETURN u\r\n";
+        let body = serde_json::to_vec(&serde_json::json!({ "query": text })).unwrap();
+        let output = build_query_request(&body, None).unwrap();
+        let request: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            request,
+            serde_json::json!({ "query": text, "response_format": "llm" })
+        );
+    }
+
+    #[test]
+    fn query_text_is_sent_unchanged_without_a_selector() {
+        let text = " MATCH (u:User {name: 'Zoë'}) RETURN u\r\n";
+        let output = build_text_request(text, Some(ResponseFormat::Raw)).unwrap();
+        let request: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            request,
+            serde_json::json!({ "query": text, "response_format": "raw" })
+        );
+        assert!(build_text_request(" \n", None).is_err());
     }
 
     #[test]

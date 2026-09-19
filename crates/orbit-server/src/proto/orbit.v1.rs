@@ -28,7 +28,6 @@ pub struct ExecuteQueryRequest {
     /// RAW: tabular JSON rows; LLM: GOON text
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
-    /// defaults to JSON DSL
     #[prost(enumeration = "QueryType", tag = "3")]
     pub query_type: i32,
 }
@@ -339,12 +338,8 @@ pub struct NamedQueryDefinition {
     /// human-readable summary from the template YAML
     #[prost(string, tag = "2")]
     pub description: ::prost::alloc::string::String,
-    /// rendered in the requested language, executable as-is
     #[prost(string, tag = "3")]
     pub raw_query: ::prost::alloc::string::String,
-    /// language of raw_query
-    #[prost(enumeration = "QueryType", tag = "4")]
-    pub query_type: i32,
 }
 /// Wrapper for the redaction handshake within a streaming query.
 /// Server sends `required` with resources to check, client responds with decisions.

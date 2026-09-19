@@ -295,8 +295,16 @@ fn query_render_json_substitutes_values_and_keys() {
         )
         .unwrap();
     assert_eq!(
-        rendered,
-        r#"{"nodes":[{"entity":"Project","filters":{"Project":{"eq":true}},"id":"n","node_ids":[7,9]}],"query_type":"traversal"}"#
+        serde_json::from_str::<Value>(&rendered).unwrap(),
+        json!({
+            "nodes": [{
+                "entity": "Project",
+                "filters": {"Project": {"eq": true}},
+                "id": "n",
+                "node_ids": [7, 9]
+            }],
+            "query_type": "traversal"
+        })
     );
     for placeholder in [
         "{ $param: node_ids, extra: 1 }",

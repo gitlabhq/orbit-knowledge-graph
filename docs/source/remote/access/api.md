@@ -104,6 +104,15 @@ curl --request POST \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
+The CLI accepts GQL text directly, without a language option:
+
+```shell
+glab orbit query 'CALL db.schema()'
+glab orbit query 'MATCH (u:User {id: 1}) RETURN u'
+```
+
+An existing file path, `-`, or no argument still reads a JSON request envelope from a file or stdin.
+
 The query text language, based on openCypher 9 syntax, is documented in the [GitLab Orbit query frontend](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/orbit_query_frontend.md) design document.
 
 ### Example request

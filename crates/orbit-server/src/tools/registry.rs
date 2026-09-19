@@ -11,9 +11,13 @@ pub struct ToolDefinition {
     pub parameters: serde_json::Value,
 }
 
-pub(super) fn command_summaries() -> [(&'static str, &'static str); 4] {
-    [
-        ("query_graph", prompt("tools/query_graph").summary()),
+pub(super) fn command_summaries(frontend: Frontend) -> Vec<(&'static str, &'static str)> {
+    let query_prompt = match frontend {
+        Frontend::JsonDsl => "tools/query_graph",
+        Frontend::Gql => "tools/query_graph_gql",
+    };
+    let mut commands = vec![
+        ("query_graph", prompt(query_prompt).summary()),
         (
             "get_graph_schema",
             prompt("tools/get_graph_schema").summary(),
@@ -23,11 +27,15 @@ pub(super) fn command_summaries() -> [(&'static str, &'static str); 4] {
             "get_response_format",
             prompt("tools/get_response_format").summary(),
         ),
-    ]
+    ];
+    if frontend == Frontend::Gql {
+        commands.retain(|(name, _)| *name != "get_query_dsl");
+    }
+    commands
 }
 
-pub(super) fn list_commands_description() -> String {
-    let commands = command_summaries()
+pub(super) fn list_commands_description(frontend: Frontend) -> String {
+    let commands = command_summaries(frontend)
         .iter()
         .map(|(name, summary)| format!("- {name}: {summary}"))
         .collect::<Vec<_>>()
@@ -116,13 +124,17 @@ pub struct ToolRegistry;
 
 impl ToolRegistry {
     pub fn get_all_tools() -> Vec<ToolDefinition> {
-        vec![Self::list_commands(), Self::invoke_command()]
+        Self::tools_for(Frontend::JsonDsl)
     }
 
-    fn list_commands() -> ToolDefinition {
+    pub fn tools_for(frontend: Frontend) -> Vec<ToolDefinition> {
+        vec![Self::list_commands(frontend), Self::invoke_command()]
+    }
+
+    fn list_commands(frontend: Frontend) -> ToolDefinition {
         ToolDefinition {
             name: "list_commands".into(),
-            description: list_commands_description(),
+            description: list_commands_description(frontend),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -285,7 +297,7 @@ mod tests {
     fn command_summary_mapping_matches_registered_commands() {
         for command in all_commands() {
             assert!(
-                command_summaries()
+                command_summaries(Frontend::JsonDsl)
                     .iter()
                     .any(|(name, _summary)| *name == command.name),
                 "{} missing from command summaries",
@@ -300,7 +312,7 @@ mod tests {
             .into_iter()
             .filter(|tool| tool.name == "list_commands")
         {
-            for (name, summary) in command_summaries() {
+            for (name, summary) in command_summaries(Frontend::JsonDsl) {
                 assert!(
                     tool.description.contains(name),
                     "{} missing command name {name}",
@@ -312,6 +324,20 @@ mod tests {
                     tool.name
                 );
             }
+        }
+    }
+
+    #[test]
+    fn gql_tool_discovery_does_not_advertise_the_json_dsl() {
+        let tools = ToolRegistry::tools_for(Frontend::Gql);
+        let list = tools
+            .iter()
+            .find(|tool| tool.name == "list_commands")
+            .unwrap();
+        assert!(!list.description.contains("get_query_dsl"));
+        for (name, summary) in command_summaries(Frontend::Gql) {
+            assert!(list.description.contains(name));
+            assert!(list.description.contains(summary));
         }
     }
 

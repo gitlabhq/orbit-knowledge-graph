@@ -94,11 +94,12 @@ Only case-sensitive `db.schema` is allowed. `resolve_schema` rejects unknown or 
 ## Remote transport
 
 The gRPC `QueryType` enum is `JSON=0`, `NAMED=1`, `GQL=2`; unknown values reject.
-Rails sends the selected language on every gRPC call as the `x-gitlab-orbit-query-language` metadata header (`json` or `gql`; absent means `json`). `extract_request_context` parses it once into `RequestContext.frontend`, and every surface reads that: ad hoc `ExecuteQuery` still carries `query_type`, named queries render the matching spelling, `ListNamedQueries` renders `raw_query` in it, and `ListAgentCommands` describes `query_graph` for it. Under GQL, `GetQueryDsl` and the `get_query_dsl` command return `NOT_FOUND` and point to `CALL db.schema()`. See [Named Queries](README.md#named-queries).
-REST and MCP `query_graph` have no language field. Rails maps the default-off `orbit_gql_queries` flag onto the header and the ad hoc query type: off sends JSON objects, on sends GQL text.
+Rails selects the language with the `x-gitlab-orbit-query-language` gRPC metadata header (`json` or `gql`; absent means `json`). `extract_request_context` parses it once into `RequestContext.frontend`. Both ad hoc and named queries use that frontend. The existing `JSON` and `GQL` wire values identify ad hoc requests; neither overrides the context. `NAMED` selects template execution.
+The catalog renders `raw_query` in the context's language, without a language field. Tool and command discovery describe only the active mode. Under GQL, `GetQueryDsl` and the `get_query_dsl` command return `NOT_FOUND` and point to `CALL db.schema()`. See [Named Queries](README.md#named-queries).
+REST and MCP `query_graph` have no language field. Rails maps the default-off `orbit_gql_queries` flag onto the header: off accepts JSON objects, on accepts GQL text.
 The flag can target a user or a root group.
 The root-group gate requires the Developer role or higher in that group or one of its subgroups.
-Orbit Remote does not check this flag. The CLI `--language` option only chooses the request body shape.
+Orbit Remote does not evaluate the flag. The CLI accepts inline query text, for example `orbit query 'CALL db.schema()'`, and sends it as the `query` string. Existing request-envelope files and stdin remain supported: `query` is an object for JSON or a string for GQL. The CLI has no language selector.
 The server routing stage parses GQL once and returns its result through `PipelineRunner`.
 For MATCH, it carries the lowered Input into path resolution and compilation; the `gql_parse` wrapper leaves that Input unchanged.
 For CALL, it returns schema metadata before security-context construction, path resolution, ClickHouse, row authorization, redaction, hydration, and graph formatting.
