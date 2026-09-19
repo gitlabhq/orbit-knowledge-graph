@@ -1266,7 +1266,7 @@ fn repo_map_omitted_subcommand_runs_overview() {
 }
 
 #[test]
-fn grep_loads_bundled_extension_and_matches_definition_body() {
+fn grep_loads_bundled_extension_and_returns_discovery_results() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let dd = data_dir.path();
@@ -1286,7 +1286,8 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("Definition:")
-            && stdout.contains("mention (body-only")
+            && stdout.contains("body-only")
+            && !stdout.contains("src/utils.py")
             && !stdout.contains("return open")
             && !stdout.contains("next: orbit context"),
         "{stdout}"
@@ -1308,9 +1309,24 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
     assert!(ok && context.contains(&file), "{err}\n{context}");
     assert_eq!(context.matches("return open(path).read()").count(), 1);
     let (out, err, ok) = run_cmd(&["grep", "App|read_file|read_file", "--repo", repo_arg], dd);
-    assert!(ok && out.contains("class App"), "{err}\n{out}");
+    assert!(ok && out.contains("src.main.App"), "{err}\n{out}");
     assert!(out.contains("exact: App | read_file"), "{out}");
-    assert_eq!(out.matches("return open(path).read()").count(), 1);
+    assert!(out.contains("next: orbit context Definition:"), "{out}");
+    assert!(
+        !out.contains("src/main.py") && !out.contains("src/utils.py"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("class App") && !out.contains("return open(path).read()"),
+        "{out}"
+    );
+    let (mixed, err, ok) = run_cmd(&["grep", "App|utils", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{mixed}");
+    let next = mixed
+        .lines()
+        .find(|line| line.starts_with("next:"))
+        .unwrap();
+    assert!(next.matches("Definition:").count() >= 2, "{mixed}");
     let (out, err, ok) = run_cmd(&["grep", "App|missing_symbol", "--repo", repo_arg], dd);
     assert!(ok, "{err}\n{out}");
     assert!(out.contains("exact: App"), "{out}");
@@ -1359,7 +1375,11 @@ fn grep_recognizes_camel_case_exact_hits_and_deduplicates_case_variants() {
     assert!(ok, "{err}\n{out}");
     assert!(out.contains("exact: markInSync"), "{out}");
     assert!(!out.contains("exact-miss:"), "{out}");
-    assert_eq!(out.matches("return 'synchronized'").count(), 1, "{out}");
+    assert!(out.contains("next: orbit context Definition:"), "{out}");
+    assert!(
+        !out.contains("src/sync.py") && !out.contains("return 'synchronized'"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -1487,8 +1507,11 @@ fn grep_conjunction_mentions_and_explicit_context_preserve_source_comments() {
     }
     let (out, err, ok) = run_cmd(&["grep", "clone", "--repo", repo_arg], dd);
     assert!(ok && out.contains("src.models.copy"), "{err}\n{out}");
-    assert!(out.contains("mention (body-only"), "{out}");
-    assert!(!out.contains("# clone") && !out.contains("next:"), "{out}");
+    assert!(out.contains("body-only"), "{out}");
+    assert!(
+        !out.contains("src/models.py") && !out.contains("# clone") && !out.contains("next:"),
+        "{out}"
+    );
     let reference = out
         .split_whitespace()
         .find(|s| s.starts_with("Definition:"))
@@ -1499,8 +1522,15 @@ fn grep_conjunction_mentions_and_explicit_context_preserve_source_comments() {
         "{err}\n{body}"
     );
     let (out, err, ok) = run_cmd(&["grep", "models", "--repo", repo_arg], dd);
-    assert!(ok && out.contains("# clone"), "{err}\n{out}");
-    assert!(out.contains("previewed lines will repeat"), "{out}");
+    assert!(ok && out.contains("src.models.copy"), "{err}\n{out}");
+    assert!(
+        out.contains("name/path") && out.contains("next: orbit context"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("src/models.py") && !out.contains("# clone"),
+        "{out}"
+    );
     let (out, err, ok) = run_cmd(&["grep", "copy", "--limit", "0", "--repo", repo_arg], dd);
     assert!(!ok, "{err}\n{out}");
 }

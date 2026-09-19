@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use duckdb_client::search::{NodeHydrator, NodeValue};
 use duckdb_client::{i64_column, sql_lit, string_column};
 
-use crate::commands::{definition, relations, setup::spec};
+use crate::commands::{definition, relations};
 use crate::workspace;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,70 +85,6 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     )?);
     print!("{out}");
     Ok(())
-}
-
-pub(crate) const INLINE_BODY_LINES: usize = 120;
-
-pub(crate) fn render_bodies(
-    client: &duckdb_client::DuckDbClient,
-    git: &workspace::GitInfo,
-    nodes: &[NodeValue],
-) -> Result<String> {
-    let defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
-    let hydrator = NodeHydrator::embedded("Definition")?;
-    let mut files = BTreeMap::new();
-    let mut shown = BTreeSet::new();
-    let mut remaining = INLINE_BODY_LINES;
-    let mut out = String::new();
-    for def in &defs {
-        let content = match files.entry(def.file.clone()) {
-            std::collections::btree_map::Entry::Vacant(entry) => entry.insert(
-                std::fs::read_to_string(
-                    git.repo_path
-                        .join(repo_relative(&git.repo_path, &def.file)?),
-                )
-                .with_context(|| format!("failed to read {}", def.file))?,
-            ),
-            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
-        };
-        let lines: Vec<&str> = content.lines().collect();
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        let uncovered: Vec<_> = (def.start..=def.end.min(lines.len()))
-            .filter(|line| !shown.contains(&(def.file.clone(), *line)))
-            .collect();
-        if uncovered.len() <= remaining && def.end.saturating_sub(def.start) < INLINE_BODY_LINES {
-            writeln!(
-                out,
-                "Definition:{}  {}  [{}]  {}:{}-{}",
-                def.id, def.fqn, def.kind, def.file, def.start, def.end
-            )?;
-            if uncovered.len() < def.end.saturating_sub(def.start) + 1 {
-                writeln!(out, "Overlapping source already shown above.")?;
-            }
-            remaining -= uncovered.len();
-            for line in uncovered {
-                write_lines(&mut out, &lines, line, line)?;
-                shown.insert((def.file.clone(), line));
-            }
-        } else {
-            let members =
-                definitions_in_files(client, git, &hydrator, std::slice::from_ref(&def.file))?;
-            let members = members
-                .iter()
-                .map(source_range)
-                .collect::<Result<Vec<_>>>()?;
-            render_outline(&mut out, std::slice::from_ref(def), &members)?;
-            writeln!(
-                out,
-                "Body omitted; run `{} context Definition:{}` for complete source and relationships.",
-                spec::launcher(),
-                def.id
-            )?;
-        }
-    }
-    Ok(out)
 }
 
 fn resolve_targets(
@@ -322,50 +258,6 @@ fn definitions_in_files(
     Ok(nodes)
 }
 
-pub(crate) fn render_outline(
-    out: &mut String,
-    defs: &[SourceRange],
-    members: &[SourceRange],
-) -> std::fmt::Result {
-    for (i, def) in defs.iter().enumerate() {
-        if i > 0 && !members.is_empty() {
-            out.push('\n');
-        }
-        writeln!(
-            out,
-            "Definition:{}  {}  [{}]  {}:{}-{}",
-            def.id, def.fqn, def.kind, def.file, def.start, def.end
-        )?;
-        let mut nested: Vec<&SourceRange> = members
-            .iter()
-            .filter(|m| m != &def && belongs_to(def, m))
-            .collect();
-        nested.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
-        let mut covered_until = 0;
-        for member in nested {
-            if member.start <= covered_until {
-                continue;
-            }
-            covered_until = member.end;
-            writeln!(
-                out,
-                "  Definition:{}  {}  [{}]  L{}-{}",
-                member.id, member.fqn, member.kind, member.start, member.end
-            )?;
-        }
-    }
-    Ok(())
-}
-
-fn belongs_to(def: &SourceRange, member: &SourceRange) -> bool {
-    let by_range = member.start >= def.start && member.end <= def.end;
-    let by_name = member
-        .fqn
-        .strip_prefix(&def.fqn)
-        .is_some_and(|rest| rest.starts_with([':', '.', '#']));
-    by_range || by_name
-}
-
 pub(crate) fn outline(defs: &[SourceRange]) -> BTreeMap<String, Vec<SourceRange>> {
     let mut by_file: BTreeMap<String, Vec<SourceRange>> = BTreeMap::new();
     for def in defs {
@@ -458,40 +350,6 @@ mod tests {
             start,
             end,
         }
-    }
-
-    #[test]
-    fn inline_bodies_preserve_rank_order_across_files() {
-        let repo = tempfile::tempdir().unwrap();
-        std::fs::write(repo.path().join("z.rs"), "fn first() {}\n").unwrap();
-        std::fs::write(repo.path().join("a.rs"), "fn second() {}\n").unwrap();
-        let node = |id, fqn: &str, file: &str| NodeValue {
-            entity_type: "Definition".into(),
-            id,
-            properties: serde_json::from_value(serde_json::json!({
-                "fqn": fqn,
-                "definition_type": "Function",
-                "file_path": file,
-                "start_line": 1,
-                "end_line": 1
-            }))
-            .unwrap(),
-        };
-        let client = duckdb_client::DuckDbClient::open(&repo.path().join("graph.duckdb")).unwrap();
-        let git = workspace::GitInfo {
-            repo_path: dunce::canonicalize(repo.path()).unwrap(),
-            project_id: 1,
-            branch: "main".into(),
-            commit_sha: "current".into(),
-            parent_repo_path: repo.path().to_path_buf(),
-        };
-        let out = render_bodies(
-            &client,
-            &git,
-            &[node(1, "z::first", "z.rs"), node(2, "a::second", "a.rs")],
-        )
-        .unwrap();
-        assert!(out.find("z::first").unwrap() < out.find("a::second").unwrap());
     }
 
     #[test]

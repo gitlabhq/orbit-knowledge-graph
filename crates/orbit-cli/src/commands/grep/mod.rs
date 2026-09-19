@@ -11,8 +11,7 @@ use orbit_search::{RecallFilter, query_alternatives};
 use crate::commands::context;
 use local::LocalBackend;
 
-const EXACT_BODY_LIMIT: usize = 3;
-const RELATED_BODY_LIMIT: usize = 1;
+const CONTEXT_HINT_LIMIT: usize = 3;
 
 pub(crate) fn run(
     query: Option<String>,
@@ -69,44 +68,14 @@ pub(crate) fn run(
     }
 
     report_results(&mut out, &outcome, &nodes)?;
-    let exact: HashSet<_> = outcome
-        .matches
-        .iter()
-        .filter(|hit| hit.exact_name)
-        .map(|hit| hit.id)
-        .collect();
-    let informative: HashSet<_> = outcome
-        .matches
-        .iter()
-        .filter(|hit| hit.exact_name || hit.name_match)
-        .map(|hit| hit.id)
-        .collect();
-    let body_limit = if exact.is_empty() {
-        RELATED_BODY_LIMIT
-    } else {
-        EXACT_BODY_LIMIT
-    };
     let defs: Vec<_> = nodes
         .iter()
-        .filter(|node| {
-            if exact.is_empty() {
-                informative.contains(&node.id)
-            } else {
-                exact.contains(&node.id)
-            }
-        })
-        .take(body_limit)
-        .cloned()
+        .zip(&outcome.matches)
+        .filter(|(_, hit)| hit.exact_name || hit.name_match)
+        .take(CONTEXT_HINT_LIMIT)
+        .map(|(node, _)| node.clone())
         .collect();
-    if !defs.is_empty() {
-        writeln!(out)?;
-        write!(
-            out,
-            "{}",
-            context::render_bodies(backend.search().client(), backend.git(), &defs)?
-        )?;
-        report_context_hint(&mut out, &defs, launcher)?;
-    }
+    report_context_hint(&mut out, &defs, launcher)?;
     Ok(())
 }
 
@@ -143,10 +112,19 @@ fn report_results(
 ) -> Result<()> {
     writeln!(out, "\nDefinitions:")?;
     for (node, hit) in nodes.iter().zip(&outcome.matches) {
-        report_definition(out, node)?;
-        if !hit.exact_name && !hit.name_match {
-            writeln!(out, "    mention (body-only; not a name/path match)")?;
-        }
+        let range = context::source_range(node)?;
+        let label = if hit.exact_name {
+            "exact-name"
+        } else if hit.name_match {
+            "name/path"
+        } else {
+            "body-only"
+        };
+        writeln!(
+            out,
+            "  {}:{}  {}  [{}]  {label}",
+            node.entity_type, node.id, range.fqn, range.kind
+        )?;
     }
     let hidden = outcome.total.saturating_sub(outcome.matches.len());
     if hidden >= BROAD_HIDDEN_HITS {
@@ -167,11 +145,7 @@ fn report_context_hint(out: &mut impl Write, nodes: &[NodeValue], launcher: &str
     if nodes.is_empty() {
         return Ok(());
     }
-    writeln!(
-        out,
-        "\nFor indexed relationships and complete source (previewed lines will repeat):"
-    )?;
-    write!(out, "next: {launcher} context")?;
+    write!(out, "\nnext: {launcher} context")?;
     for node in nodes {
         write!(out, " {}:{}", node.entity_type, node.id)?;
     }
@@ -247,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn results_print_definition_identity_and_full_location() {
+    fn results_print_definition_identity_without_location() {
         let mut result = outcome();
         result.matches.push(orbit_search::GrepMatch {
             id: 481,
@@ -272,7 +246,7 @@ mod tests {
         report_results(&mut buf, &result, &[node]).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "\nDefinitions:\n  Definition:481  Repo::commit_hook  [Method]  crates/repo/src/lib.rs:42-57\n"
+            "\nDefinitions:\n  Definition:481  Repo::commit_hook  [Method]  exact-name\n"
         );
     }
 
@@ -319,7 +293,7 @@ mod tests {
         report_context_hint(&mut buf, &nodes, "orbit").unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "\nFor indexed relationships and complete source (previewed lines will repeat):\nnext: orbit context Definition:481 Definition:482\n"
+            "\nnext: orbit context Definition:481 Definition:482\n"
         );
     }
 }

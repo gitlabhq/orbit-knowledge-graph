@@ -191,13 +191,13 @@ Orbit Local `grep` finds definitions using DuckDB FTS with all searchable terms
 required per alternative and direct BM25 ordering. Quoted `a|b` alternatives share
 one result list using their best score. Case-insensitive exact symbol-name labels
 report hits and misses within scope before the limit, without affecting ranking.
-Previews favor returned exact names, or one name/path match when none are exact.
-Body-only mentions remain listed without automatic previews or context suggestions.
-Previews omit repeated source; their follow-up command adds relationships and
-complete source, explicitly noting that previewed lines repeat. `context` returns
-compact file definition maps with every ID and ten connections per section, with
-omitted counts, or complete definition source and connections. It accepts mixed
-file and definition targets and shows test connections in their own section.
+Results contain Definition IDs, names, kinds, and match labels without file paths
+or source. A follow-up command batches up to three returned exact-name or name/path
+IDs for source and relationships. Body-only mentions remain listed without an
+automatic context suggestion. `context` returns compact file definition maps with
+every ID and ten connections per section, with omitted counts, or complete
+definition source and connections. It accepts mixed file and definition targets
+and shows test connections in their own section.
 
 ### Caller identification
 

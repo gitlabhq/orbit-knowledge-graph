@@ -171,8 +171,10 @@ Results use the best alternative's BM25 score, then definition ID for stable tie
 SQL applies scopes and the result limit before Rust hydrates definitions. Exact
 status compares raw symbol names case-insensitively within scope before limiting,
 independently of BM25. A second conjunctive FTS match restricted to name/path fields
-controls preview eligibility, not ranking; body-only mentions do not automatically
-print source or suggest context. Explicit Definition context returns complete source.
+controls context-suggestion eligibility, not ranking. Search output contains IDs,
+names, kinds, and match labels without file paths or source. Body-only mentions do
+not get automatic context suggestions. Explicit Definition context returns complete
+source.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 

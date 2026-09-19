@@ -11,13 +11,11 @@ description: >-
   This is not regex syntax; each alternative needs search terms.
 
 
-  Returns ranked `Definition:<id>` references. Identifier alternatives report
-  case-insensitive exact symbol-name hits and misses within the selected scope,
-  before the result limit; these labels do not affect ranking. Each search
-  previews up to three returned exact-name hits, or its first name/path match
-  if none are exact, within 120 source lines. Body-only mentions remain listed
-  without automatic source or context suggestions; request their IDs explicitly
-  with context to read them. Repeated previews and overlapping source print once
-  per invocation. The printed `next:` command adds indexed relationships and
-  complete source, repeating previewed lines. Narrow with --path/--kind or raise
-  --limit instead of piping output through `head` or `tail`.
+  Returns ranked `Definition:<id>` references with names, kinds, and match labels.
+  It omits file paths and source. Identifier alternatives report case-insensitive
+  exact symbol-name hits and misses within the selected scope, before the result
+  limit; these labels do not affect ranking. The printed `next:` command batches
+  up to three returned exact-name or name/path IDs for source and relationships.
+  Body-only mentions remain listed without automatic context suggestions; request
+  their IDs explicitly when useful. Narrow with --path/--kind or raise --limit
+  instead of piping output through `head` or `tail`.

@@ -47,12 +47,11 @@ in each alternative and orders results by BM25. OR uses each match's best
 alternative score, not a bonus for matching more alternatives. Identifier
 alternatives report case-insensitive exact symbol-name hits and misses within the
 selected scope, before the result limit. Exact labels do not affect ranking.
-Each search previews up to three returned exact-name hits, or its first name/path
-match if none are exact. Body-only mentions remain listed without automatic
-source or context suggestions; explicitly request their IDs to read them.
-Previews share a 120-line budget per search; repeated previews and overlapping
-source print once per invocation. Narrow with `--path`/`--kind` or raise `--limit`
-instead of piping output through `head` or `tail`.
+Search results contain IDs, names, kinds, and match labels, but no paths or source.
+The printed `next:` command batches up to three returned exact-name or name/path
+IDs. Body-only mentions remain listed without automatic context suggestions;
+explicitly request their IDs when useful. Narrow with `--path`/`--kind` or raise
+`--limit` instead of piping output through `head` or `tail`.
 
 `grep` returns `Definition:<id>` references. Pass them to `context`, which
 also accepts exact FQNs but not short names or globs. A path is shorthand for
@@ -61,8 +60,7 @@ line ranges, and every followable ID. Connections are bounded to ten per section
 with clear omitted counts; choose a Definition ID for complete source and its
 indexed connections. `<--` is a caller, `-->` is a callee. Connections from test,
 fixture, and generated files appear in their own section. Reuse the returned
-source. The printed `next:` command after a preview adds relationships and
-complete source, repeating previewed lines.
+source.
 
 <!-- orbit:section quick-start -->
 ## Query and map
