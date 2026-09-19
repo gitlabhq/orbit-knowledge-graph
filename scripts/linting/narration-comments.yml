@@ -9,7 +9,7 @@
 #     (`Setup`, `Verify`, `Insert`, `Load`, …),
 #   * it does NOT contain a "why" signal word (because / so / since / must /
 #     note / safety / a URL / an issue ref), which marks legitimate intent
-#     comments the AGENTS.md rule wants to keep.
+#     comments the CONTRIBUTING.md rule wants to keep.
 #
 # The second half of H2 — "comment tokens are a subset of the NEXT code line"
 # (token_overlap) — cannot be expressed in ast-grep: the Rust `regex` crate has
@@ -19,7 +19,7 @@
 # build-time/lint-friendly, dependency-free subset.
 #
 # Usage:
-#   mise exec -- ast-grep scan --rule scripts/comment-guard/narration-comments.yml crates/
+#   mise exec -- ast-grep scan --rule scripts/linting/narration-comments.yml crates/
 #
 id: narration-comment-block-label
 language: rust
@@ -27,8 +27,8 @@ severity: warning
 message: >-
   Narration comment: this restates the next line / labels a block. A comment
   must say *why* (a constraint, gotcha, ADR/issue link), never *what*. Delete it
-  or rewrite it as an invariant the code does not state. See AGENTS.md "Code
-  quality". If this is a legitimate why-comment, add a why-word or rephrase.
+  or rewrite it as an invariant the code does not state. See CONTRIBUTING.md
+  "Engineering conventions". If this is a legitimate why-comment, add a why-word or rephrase.
 rule:
   all:
     - kind: line_comment

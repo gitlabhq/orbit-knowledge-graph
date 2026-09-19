@@ -22,7 +22,7 @@ pub struct RunSqlArgs {
     /// produces one result set in the returned JSON array, at the same index.
     pub sql: Vec<String>,
     /// Optional override for the DuckDB file path. Defaults to the workspace
-    /// database (`~/.orbit/graph.duckdb`).
+    /// database (`~/.gitlab/orbit/graph.duckdb`).
     #[serde(default)]
     pub db: Option<PathBuf>,
 }
@@ -45,7 +45,7 @@ pub struct IndexArgs {
     #[serde(default)]
     pub stats: bool,
     /// Optional override for the DuckDB file path. Defaults to the workspace
-    /// database (`~/.orbit/graph.duckdb`).
+    /// database (`~/.gitlab/orbit/graph.duckdb`).
     #[serde(default)]
     pub db: Option<PathBuf>,
 }

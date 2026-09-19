@@ -60,6 +60,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [ontology]
             mutates: [input]
         }
+        validate_local {
+            reads_env: [ontology]
+            mutates: [input]
+        }
         normalize {
             reads_env: [ontology]
             mutates: [input]
@@ -104,6 +108,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [node, input]
             mutates: [result_ctx, query_config, hydration_plan, output]
         }
+        duckdb_codegen {
+            reads_state: [node, input]
+            mutates: [result_ctx, hydration_plan, output]
+        }
     }
 
     pipelines {
@@ -121,6 +129,16 @@ compiler_pipeline_macros::define_compiler_ctx! {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [restrict, plan, lower, enforce, settings, codegen]
+        }
+        duckdb_json_dsl {
+            env: [ontology]
+            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
+            phases: [json_dsl_parse, validate_local, normalize, plan, lower, enforce, duckdb_codegen]
+        }
+        duckdb_gql {
+            env: [ontology]
+            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
+            phases: [gql_parse, validate_local, normalize, plan, lower, enforce, duckdb_codegen]
         }
         validate_normalize {
             env: [ontology]
@@ -157,6 +175,17 @@ fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
         }
         c.seek = Some(cursor::decode(after, input.compiler.query_hash)?);
     }
+    v.check_references(&input)?;
+    v.annotate_filter_types(&mut input);
+    ctx.set_input(input);
+    Ok(())
+}
+
+fn validate_local(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let mut input = require(ctx.take_input(), "input")?;
+    let v =
+        validate::Validator::new(ctx.ontology()).with_skip(validate::Skip { selectivity: true });
+    v.check_shape(&input)?;
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
     ctx.set_input(input);
@@ -303,6 +332,22 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
     let base = codegen::codegen(&node, result_context, query_config)?;
+    let query_type = input.query_type;
+    ctx.set_output(CompiledQueryContext {
+        query_type,
+        base,
+        hydration,
+        input,
+    });
+    Ok(())
+}
+
+fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
+    let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
+    let node = require(ctx.node().clone(), "node")?;
+    let input = require(ctx.input().clone(), "input")?;
+    let base = codegen::duckdb::codegen(&node, result_context)?;
     let query_type = input.query_type;
     ctx.set_output(CompiledQueryContext {
         query_type,

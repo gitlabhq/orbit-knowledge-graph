@@ -1,13 +1,13 @@
 <!--
-TEMPLATE CONVENTION — read before filling this out
+TEMPLATE CONVENTION: read before filling this out
 
 The top sections are for a REVIEWER skimming in 30 seconds: what changed, why,
 how it was verified. They must read as plain prose.
 
-ALL implementation mechanics — function names, type names, constants, encoder
+Put all implementation mechanics in the Agent context block at the bottom,
+never above it. This covers function names, type names, constants, encoder
 details, wire-format traces, file-by-file walkthroughs, alternatives
-considered, full benchmark tables, raw logs, agent reasoning — go in the Agent
-context block at the bottom. Never above it.
+considered, full benchmark tables, raw logs, and agent reasoning.
 
 Agents: if you feel the urge to write a wall of text, write it inside the
 Agent context block. The top sections stay terse.
@@ -19,9 +19,9 @@ Agent context block. The top sections stay terse.
 HARD LIMITS for this section:
   - At most 80 words.
   - At most 3 inline `code` spans.
-  - NO bare function/type/constant names in prose (no foo_bar, Foo::bar,
+  - No bare function/type/constant names in prose (no foo_bar, Foo::bar,
     do_thing(), CONST_NAME). If you need them, you are writing for the wrong
-    section — move it to Agent context.
+    section. Move it to Agent context.
 
 Write 2-3 plain sentences: the operator/user-visible effect, and why. State the
 symptom that motivated it, not the code path that implements it. Keep this
@@ -53,14 +53,14 @@ context block.
 
 <!--
 The headline result and any regression risk. Full flamegraphs, profiler
-output, and benchmark tables go in the Agent context block — link or
+output, and benchmark tables go in the Agent context block. Link to them or
 summarize them here.
 -->
 
 - [ ] This merge request does not introduce any performance regression. If a performance regression is expected, explain why.
 
 <details>
-<summary><b>Agent context</b> — long-form analysis, file-by-file walkthroughs, profiler output, alternatives considered</summary>
+<summary><b>Agent context</b>: long-form analysis, file-by-file walkthroughs, profiler output, alternatives considered</summary>
 
 <!--
 Agents: put extended reasoning here. File-by-file walkthroughs, full
@@ -85,9 +85,9 @@ inside a comment do not run):
 /label ~"type::bug"
 /label ~"type::maintenance"
 
-Also add the matching orbit::<area> label when the area is obvious (the 14
-areas are listed in .gitlab/issue_templates/Default.md), and ~documentation
-on docs MRs, e.g.:
+Also add the matching orbit::<area> label when the area is obvious. The 14
+areas are listed in .gitlab/issue_templates/Default.md. Add ~documentation
+on docs MRs. For example:
 /label ~"orbit::indexing"
 
 Set the milestone to the current release, e.g.:

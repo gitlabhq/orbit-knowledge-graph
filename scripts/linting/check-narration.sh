@@ -4,7 +4,7 @@
 # Runs narration_score.py (co-located) over the given .rs files (or, with no args,
 # the whole crates/ tree) and prints any flagged narration comments. A comment
 # is narration when it restates the next line / labels a block with no "why"
-# content (see AGENTS.md "Code quality"). This is the primary, higher-precision
+# content (see CONTRIBUTING.md "Engineering conventions"). This is the primary, higher-precision
 # lint; narration-comments.yml (co-located) is a lower-precision fallback.
 #
 # Exit codes: non-zero when narration flags are found OR when the scorer
@@ -14,11 +14,11 @@
 #
 # Modes:
 #   Whole-tree / explicit files (lefthook, main-branch CI):
-#     scripts/comment-guard/check-narration.sh                 # scan crates/
-#     scripts/comment-guard/check-narration.sh a.rs b.rs ...   # scan specific files
+#     scripts/linting/check-narration.sh                 # scan crates/
+#     scripts/linting/check-narration.sh a.rs b.rs ...   # scan specific files
 #
 #   MR-diff-scoped (merge_request CI pipelines):
-#     scripts/comment-guard/check-narration.sh --diff-base <sha>
+#     scripts/linting/check-narration.sh --diff-base <sha>
 #     Scans only .rs files changed since <sha> and reports only flags on
 #     added/modified lines, so pre-existing legacy narration is not noise.
 #     Errors out (exit 2) if the base SHA is unreachable — never silently
@@ -163,7 +163,7 @@ if [ "$total" -gt 0 ]; then
         echo "⚠️  narration lint: $total flagged comment(s) across $flagged_files file(s)."
     fi
     echo "   A comment must say *why* (a constraint, gotcha, ADR/issue link), never *what*."
-    echo "   See AGENTS.md \"Code quality\". Rewrite or delete."
+    echo "   See CONTRIBUTING.md \"Engineering conventions\". Rewrite or delete."
 elif [ "$scorer_errors" -eq 0 ]; then
     if [ -n "$DIFF_BASE" ]; then
         echo "✅ narration lint: no new narration comments in this MR."

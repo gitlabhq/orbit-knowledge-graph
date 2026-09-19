@@ -16,6 +16,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
 
     match filter.op {
         None | Some(FilterOp::Eq) => Expr::eq(col, typed(val())),
+        Some(FilterOp::Ne) => Expr::binary(Op::Ne, col, typed(val())),
         Some(FilterOp::Gt) => Expr::binary(Op::Gt, col, typed(val())),
         Some(FilterOp::Gte) => Expr::binary(Op::Ge, col, typed(val())),
         Some(FilterOp::Lt) => Expr::binary(Op::Lt, col, typed(val())),

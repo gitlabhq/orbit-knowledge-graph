@@ -29,7 +29,7 @@ Code indexing and SDLC indexing have fundamentally different resource profiles:
 | External dependencies | ClickHouse datalake + graph | GitLab Rails API + ClickHouse graph |
 | Failure blast radius | A slow namespace blocks the concurrency group | A large repo OOM kills the pod, taking SDLC handlers with it |
 
-Today the Helm chart allocates resources for the worst case (code indexing): 8 CPU, 16 Gi memory, 15 Gi ephemeral storage, and a 10 Gi `/tmp` emptyDir. SDLC indexing alone would need a fraction of that.
+Today the Helm chart allocates resources for the worst case (code indexing). This is 8 CPU, 16 Gi memory, 15 Gi ephemeral storage, and a 10 Gi `/tmp` emptyDir. SDLC indexing alone would need a fraction of that.
 
 ### Problems this creates
 
@@ -64,7 +64,7 @@ A new `CodeIndexerConfig` struct (or a subset of `IndexerConfig`) provides the c
 
 The existing `run()` function stops calling `code::register_handlers()`. It only registers SDLC and namespace deletion handlers.
 
-To support a transition period where operators may not have deployed the new service yet, this could be gated on a config flag (e.g., `indexer.code_indexing_enabled: false` as the new default). The flag would be removed once the migration is complete.
+Operators may not have deployed the new service yet. To support this transition period, a config flag could gate the change (e.g., `indexer.code_indexing_enabled: false` as the new default). The flag would be removed once the migration is complete.
 
 #### 4. Helm chart: new `codeIndexer` deployment
 

@@ -256,6 +256,7 @@ impl QueryParser {
     fn ComparisonOperator(input: Node) -> Result<FilterOp> {
         Ok(match input.as_str() {
             "=" => FilterOp::Eq,
+            "<>" | "!=" => FilterOp::Ne,
             ">" => FilterOp::Gt,
             "<" => FilterOp::Lt,
             ">=" => FilterOp::Gte,

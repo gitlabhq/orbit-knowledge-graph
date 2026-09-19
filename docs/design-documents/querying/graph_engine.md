@@ -77,22 +77,22 @@ Schema calls have no state in the shared compiler contexts. `compiler::compile` 
 The planner emits ClickHouse SQL similar to these patterns:
 
 - One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE startsWith(traversal_path, ?) AND branch = ? AND src_id IN (...)` (for code) or `WHERE startsWith(traversal_path, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
-- Multi-selector traversals: chained JOINs/CTEs with DISTINCT frontiers between selectors to avoid blow-ups. A traversal can contain up to five node selectors and therefore four relationship selectors; each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.
+- Multi-selector traversals: chained JOINs/CTEs with DISTINCT frontiers between selectors to avoid blow-ups. A traversal can contain up to five node selectors and therefore four relationship selectors. Each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.
 - Path finding: bounded expansion over the routed edge tables, with `path.max_depth` capped independently at 3.
 - Reverse hops: filter the edge table on `target_id`, supported by its target ID bloom filter.
-- Alternate relationship types: when a query's relationship types span multiple physical edge tables (or use a wildcard), the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
-- Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results. Top-level `group_by` supports node groups and scalar property groups, and property groups keep the grouped alias table-backed so security filters and latest-row checks apply before aggregation.
+- Alternate relationship types: a query's relationship types may span multiple physical edge tables, or use a wildcard. In that case the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
+- Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results. Top-level `group_by` supports node groups and scalar property groups. Property groups keep the grouped alias table-backed, so security filters and latest-row checks apply before aggregation.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
-- Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions when a latest-row node scan has filters or narrowing predicates that should be applied inside the `FINAL` read. FK-star center scans and joined node scans use this shape.
+- Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. This applies when a latest-row node scan has filters or narrowing predicates that should be applied inside the `FINAL` read. FK-star center scans and joined node scans use this shape.
 - Narrowing CTEs: edge-derived narrowing CTEs use `SELECT DISTINCT` for ID frontiers so high fan-out relationships do not feed millions of duplicate values into an `IN` set.
-- FK candidate prefilters: joined FK plans may add `SELECT DISTINCT id FROM table WHERE ...` CTEs without `FINAL`, then constrain the outer `FINAL` scan with `id IN (...)` and re-apply every predicate after latest-row resolution. Center candidate CTEs are only emitted when they include target-derived predicates; the compiler does not build a same-table center candidate that only repeats the center node's own filters.
+- FK candidate prefilters: joined FK plans may add `SELECT DISTINCT id FROM table WHERE ...` CTEs without `FINAL`. They then constrain the outer `FINAL` scan with `id IN (...)` and re-apply every predicate after latest-row resolution. Center candidate CTEs are only emitted when they include target-derived predicates. The compiler does not build a same-table center candidate that only repeats the center node's own filters.
 - Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
 
-These choices preserve factorization: each hop operates on a compact frontier and prunes the next edge scan via semi‑joins, mirroring Kùzu’s accumulate → semijoin → probe execution.
+These choices preserve factorization. Each hop operates on a compact frontier and prunes the next edge scan via semi‑joins. This mirrors Kùzu’s accumulate → semijoin → probe execution.
 
 ### Row deduplication
 
-Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads, mostly via `FINAL` (hydration arms instead dedup with `LIMIT 1 BY <sort_key>`, which preserves the same latest-non-deleted semantics while keeping column pruning and projections; see the Hydration row below):
+Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads, mostly via `FINAL`. Hydration arms instead dedup with `LIMIT 1 BY <sort_key>`. This preserves the same latest-non-deleted semantics while keeping column pruning and projections (see the Hydration row below):
 
 | Scan type | Strategy | Rationale |
 |---|---|---|
@@ -117,7 +117,7 @@ Edge-only traversals do not join node tables for non-group-by nodes, so they can
 
 ### Denormalized joins
 
-A denormalized join pre-joins a linear chain of tables into one `gl_denorm_<name>` table so the compiler can answer the matching hops with a single scan. It is declared as a chain of edge variants, each realized either through its edge table or, with `via: fk`, directly node to node on the variant's FK column:
+A denormalized join pre-joins a linear chain of tables into one `gl_denorm_<name>` table. The compiler can then answer the matching hops with a single scan. It is declared as a chain of edge variants. Each variant is realized either through its edge table, or, with `via: fk`, directly node to node on the variant's FK column:
 
 ```yaml
 denormalized_joins:
@@ -127,9 +127,9 @@ denormalized_joins:
       - {relationship: IN_PROJECT, from: MergeRequest, to: Project, via: fk}
 ```
 
-That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`. Adjacent tables join on the id or edge id that links them, and every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join. Every other column of every table is copied under a `t{i}_` prefix. The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key. The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning) and emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`. The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor, so a hop may cross namespaces just as it may in an edge chain: a row is returned only when the caller is authorized for every namespace it touches. The loader only requires that at least one table in the chain is scoped.
+That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`. Adjacent tables join on the id or edge id that links them. Every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join. Every other column of every table is copied under a `t{i}_` prefix. The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key. The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning). It emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`. The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor. So a hop may cross namespaces just as it may in an edge chain. A row is returned only when the caller is authorized for every namespace it touches. The loader only requires that at least one table in the chain is scoped.
 
-Before declaring a join in `schema.yaml`, trial it as an ontology overlay under `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, merged over it) and run the data correctness suite against it with `mise test:integration:overlay <name>`. The suite creates the table and its views from the seed, checks the table holds exactly the rows the live source join produces, and runs the YAML query scenarios against the overlaid ontology.
+Before declaring a join in `schema.yaml`, trial it as an ontology overlay under `config/seeds/overlays/<name>/`. That directory mirrors `config/ontology/` and is merged over it. Run the data correctness suite against it with `mise test:integration:overlay <name>`. The suite creates the table and its views from the seed. It checks the table holds exactly the rows the live source join produces. It runs the YAML query scenarios against the overlaid ontology.
 
 ### Scope rewrite (traversal_path prefix injection)
 
@@ -137,7 +137,7 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 
 **When a node is scoped**
 
-- It carries a single `id`, `full_path`, or up to eight `node_ids` for an anchor entity, or a single equality filter on a `namespace_anchor` FK column such as `project_id`.
+- It carries one of two things. Either a single `id`, `full_path`, or up to eight `node_ids` for an anchor entity. Or a single equality filter on a `namespace_anchor` FK column such as `project_id`.
 - Anchors and FK columns come from the ontology's `traversal_path_lookup` declarations and edge scope annotations (`Ontology::is_anchor`, `Ontology::anchor_fk_mappings`).
 - Anchors: `Project`, `Group`, `MergeRequest`, `Definition`, `File`, `Directory`. The code entities let "find callers" traversals scope to the symbol's own project.
 
@@ -146,8 +146,8 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 - No pre-query lookup. The compiler emits a scalar subquery in the same statement: `(SELECT coalesce(if(argMaxOrNull(_deleted, _version), NULL, argMaxOrNull(traversal_path, _version)), '0/') FROM <anchor table> AS _scope WHERE _scope.<key> = ?)`.
 - ClickHouse evaluates it once before index analysis, so pruning equals a literal prefix (production `EXPLAIN`: 273 of 39 350 granules for both forms).
 - The lookup is a bloom-filter point read on the anchor table, a few milliseconds.
-- A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`), so rows whose anchor row is not indexed yet still return, as with the old resolver.
-- When the plan elides a scope anchor (aggregation containers), it adds `<lookup> != '0/'` to the query, so a missing anchor yields no rows instead of counting the whole authorized scope.
+- A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`). So rows whose anchor row is not indexed yet still return, as with the old resolver.
+- When the plan elides a scope anchor (aggregation containers), it adds `<lookup> != '0/'` to the query. A missing anchor then yields no rows, instead of counting the whole authorized scope.
 - Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
 - The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
 
@@ -166,13 +166,13 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 ## Request Flow (Deployed)
 
 1. Client (MCP or REST) submits a tool call or Cypher.
-2. Adapter validates/normalizes input pursuant to the currently deployed schema, computes the user's `traversal_path` prefixes (which encode the organization ID as their first segment) for SDLC queries, and selects the active `branch` for code queries.
+2. Adapter validates/normalizes input pursuant to the currently deployed schema. For SDLC queries it computes the user's `traversal_path` prefixes, which encode the organization ID as their first segment. For code queries it selects the active `branch`.
 3. Planner compiles to ClickHouse SQL (CTEs, recursive CTEs, unions, joins) with bound parameters.
 4. ClickHouse executes; the server returns rows plus the generated SQL for audit.
 
 ### Unified Response Format
 
-The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`, `next_cursor`). Keyset cursors (`{ page_size, after }`) lower into seek predicates in SQL, so each page is a fresh bounded query; there is no offset slicing and no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
+The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`, `next_cursor`). Keyset cursors (`{ page_size, after }`) lower into seek predicates in SQL, so each page is a fresh bounded query. There is no offset slicing and no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
 Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 
@@ -182,7 +182,7 @@ Direct projections and hydration apply ontology-derived [text excerpts](../../so
 
 ## Authorization and Safety
 
-- Hard filters in SQL: every query carries `startsWith(traversal_path, ?)` predicates scoped to the caller's authorized namespaces (organization isolation is implicit — the org ID is the first path segment).
+- Hard filters in SQL: every query carries `startsWith(traversal_path, ?)` predicates scoped to the caller's authorized namespaces. Organization isolation is implicit, because the org ID is the first path segment.
 - Redaction layer: final pass to drop rows the upstream filters could not precisely exclude (e.g., confidential flags). Avoid redaction for aggregates; either pre‑filter or block the query shape.
 - All queries will be parameterized.
 - Depth caps and relationship allow‑lists to prevent runaway traversals; row and time limits per request.
@@ -197,23 +197,23 @@ Direct projections and hydration apply ontology-derived [text excerpts](../../so
 
 ## Integration with Indexing
 
-The indexer writes denormalized, typed node and edge tables in ClickHouse via ETL rather than synchronous materialized views. The exact mechanisms for this are covered in [SDLC Indexing](../indexing/sdlc_indexing.md) and [Schema Management](../schema_management.md). Materialized views would require filtered license checks on every inserted row, reducing ingestion efficiency. ETL decouples transformation from ingestion, allowing the indexer to batch writes and maintain control over schema evolution without impacting ClickHouse insert performance. Materialized views are reserved for precomputing stable summaries (e.g., group closure) that change infrequently and do not require per-row filtering, but these are optional enhancements for performance and may be subject to change.
+The indexer writes denormalized, typed node and edge tables in ClickHouse via ETL rather than synchronous materialized views. The exact mechanisms for this are covered in [SDLC Indexing](../indexing/sdlc_indexing.md) and [Schema Management](../schema_management.md). Materialized views would require filtered license checks on every inserted row, reducing ingestion efficiency. ETL decouples transformation from ingestion, allowing the indexer to batch writes and maintain control over schema evolution without impacting ClickHouse insert performance. Materialized views are reserved for precomputing stable summaries (e.g., group closure) that change infrequently and do not require per-row filtering. But these are optional enhancements for performance and may be subject to change.
 Edge lookups use the ontology-declared sort keys, primary keys, and bloom filter indexes rather than per-table projections.
 
 ## Unified Security and Performance Testing
 
 Security testing and performance testing share the same underlying techniques for the query engine. We treat them as a single validation effort:
 
-- **Fuzzing**: Automated generation of malformed, edge-case, and adversarial inputs to the JSON tool interface and (optionally) Cypher parser. The same fuzzer that finds performance regressions (e.g., queries that blow up in time or memory) will also surface authorization bypass attempts (e.g., queries missing required predicates).
+- **Fuzzing**: Automated generation of malformed, edge-case, and adversarial inputs to the JSON tool interface and (optionally) Cypher parser. The same fuzzer finds performance regressions (e.g., queries that blow up in time or memory). It will also surface authorization bypass attempts (e.g., queries missing required predicates).
 - **Automated Query Generation**: Property-based testing that generates random valid query shapes and verifies:
   - All generated SQL includes `startsWith(traversal_path, ?)` predicates (security invariant).
   - Query execution time stays within bounds (performance invariant).
   - Result sets respect authorization constraints (correctness invariant).
 - **Automated Penetration Testing**: Scripted scenarios that attempt common bypass techniques (SQL injection, predicate stripping, cross-tenant access). These run as part of CI and are informed by the threat model.
 
-This unified approach ensures that security and performance are validated together—an authorization check that slows queries unacceptably is as much a bug as one that fails to block unauthorized access. Results from fuzzing and automated testing feed back into both the threat model and the grammar-based validation described in [Authorization and Safety](#authorization-and-safety).
+This unified approach validates security and performance together. An authorization check that slows queries unacceptably is as much a bug as one that fails to block unauthorized access. Results from fuzzing and automated testing feed back into both the threat model and the grammar-based validation described in [Authorization and Safety](#authorization-and-safety).
 
-In addition to the above, a formal threat model is being developed for the query engine. This will be tracked as an epic under the broader GKGaaS effort, with specific issues for high-risk components such as the query planner and JSON-to-SQL transformation pipeline. For the full authorization model (tenant segregation, traversal path filtering, JWT verification, and final redaction), see [Security Architecture](../security.md).
+In addition to the above, a formal threat model is being developed for the query engine. This will be tracked as an epic under the broader GKGaaS effort. It has specific issues for high-risk components such as the query planner and JSON-to-SQL transformation pipeline. For the full authorization model (tenant segregation, traversal path filtering, JWT verification, and final redaction), see [Security Architecture](../security.md).
 
 ## References
 

@@ -15,8 +15,8 @@ Accepted
 
 ## Context
 
-Breaking schema changes write to a new set of `v<N>_`-prefixed tables while the
-old version keeps serving queries, then promote once the new set is populated.
+Breaking schema changes write to a new set of `v<N>_`-prefixed tables. The old
+version keeps serving queries. The new set promotes once it is populated.
 That layout is described in [`schema_management.md`](../schema_management.md) and
 this ADR does not change it.
 
@@ -24,10 +24,10 @@ The problem is cost. The original flow rebuilt *every* table on every
 `SCHEMA_VERSION` bump: create the full `v<N>_*` set empty, then re-index every
 namespace and repository into it. A one-column change to one SDLC entity cost a
 full re-pull of billions of Siphon rows and every code archive before it could
-promote — even though most tables were byte-for-byte identical to the old version.
+promote. Most tables were byte-for-byte identical to the old version.
 
 Inferring the invalidation set at runtime (diff the ontology, guess which tables
-changed) is unsafe: a missed edge-key change silently leaves a stale row in a
+changed) is unsafe. A missed edge-key change silently leaves a stale row in a
 cloned table, uncatchable after the fact. The decision has to be declared and
 reviewable.
 
@@ -43,9 +43,9 @@ is ambiguous.
 `config/schema-migrations.yaml` carries one entry per `SCHEMA_VERSION`, prepended
 by `mise schema:bump`:
 
-- `scope: "*"` — full rebuild; the fail-safe default for anything unmapped.
-- `scope: sdlc` — SDLC tables, with an optional `entities:` list to narrow further.
-- `scope: code` — the code-graph tables and their edge table.
+- `scope: "*"`: full rebuild; the fail-safe default for anything unmapped.
+- `scope: sdlc`: SDLC tables, with an optional `entities:` list to narrow further.
+- `scope: code`: the code-graph tables and their edge table.
 
 A human may widen an entry but never narrow it below the fingerprint-snapshot
 drift; `migration-ledger-check` (CI) and the `orbit-server` build script enforce
@@ -68,13 +68,13 @@ tombstones code's own edge rows as each namespace's re-index drains. So a code b
 only code.
 
 `classify_tables_for_scope` then marks each table `CloneFromActive` or
-`RebuildEmpty` — rebuilt only when every writer is invalidated.
+`RebuildEmpty`. A table is marked `RebuildEmpty` only when every writer is invalidated.
 `find_invalidated_pipelines` maps the invalidated entities to the pipelines that
 must rerun (`HAS_NOTE` → the `Note` pipeline).
 
 ### Checkpoint seeding drives re-dispatch
 
-The re-index falls out of which checkpoints exist in the new set — the namespace
+The re-index falls out of which checkpoints exist in the new set. The namespace
 sweep re-dispatches any pipeline with no completed checkpoint:
 
 - **Selective SDLC**: copy completed checkpoints for unchanged pipelines, drop the
@@ -88,14 +88,14 @@ Control tables like `gkg_schema_version` are never prefixed, cloned, or dropped.
 ### Promotion gates on the plan
 
 `MigrationCompletionChecker` (`crates/indexer/src/orchestrator/scheduled/migration_completion.rs`)
-promotes the `migrating` version only when every currently enabled namespace has a
+promotes the `migrating` version under one condition. Every currently enabled namespace must have a
 completed checkpoint for every required namespaced pipeline, plus every required
 global pipeline. "Required" is exactly the plan the scope produced, so a selective
 migration gates only on what it re-dispatched.
 
 - A checkpoint from a since-disabled namespace does not count; the enabled set is
   recomputed each check.
-- Code coverage is reported but does not block — a single slow or failing repo must
+- Code coverage is reported but does not block. A single slow or failing repo must
   not hold a migration open.
 
 The gate is checkpoint-based, not row-count-based; full correctness validation
@@ -106,19 +106,19 @@ stays in staging E2E (see
 
 The prefix layout is already a blue-green split. The active version keeps serving
 queries and streaming updates from its `v<N>_` tables while the migrating version
-fills its own set, and promotion flips reads over in one step. The two run side by
-side down to their NATS streams and locks, which are version-segmented, and
+fills its own set. Promotion flips reads over in one step. The two run side by
+side down to their NATS streams and locks, which are version-segmented.
 `/ready` holds the new pods out of rotation until their version is active (see
 [`schema_management.md`](../schema_management.md) and
 [`indexing/sdlc_indexing.md`](../indexing/sdlc_indexing.md)).
 
 What clone-based migration buys is a green side that is cheap to stand up. A full
-rebuild has to re-index from epoch before it can promote, so for hours the blue
+rebuild has to re-index from epoch before it can promote. So for hours the blue
 side alone carries fresh data under heavy Siphon and Gitaly load. Cloning brings
-the green tables up near-complete at once and re-indexes only what changed, so the
+the green tables up near-complete at once and re-indexes only what changed. So the
 blue side is never disturbed and the window shrinks to the size of the delta.
-Promotion is the trigger: it gates on the plan the scope produced
-([Promotion gates on the plan](#promotion-gates-on-the-plan)), so the switch
+Promotion is the trigger. It gates on the plan the scope produced
+([Promotion gates on the plan](#promotion-gates-on-the-plan)). The switch
 happens the moment that delta is done.
 
 ## Consequences
