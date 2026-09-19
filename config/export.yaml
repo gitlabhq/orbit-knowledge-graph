@@ -6,7 +6,7 @@ entities:
       - { name: path, type: Utf8, from: sym }
       - { name: name, type: Utf8, compute: filename }
       - { name: extension, type: Utf8, compute: extension }
-      - { name: language, type: Utf8, compute: language }
+      - { name: language, type: Utf8, from: _*_display_language }
 
   Definition:
     source: __def
@@ -16,21 +16,23 @@ entities:
       - { name: fqn, type: Utf8, from: _*_display_fqn }
       - { name: name, type: Utf8, from: __defname }
       - { name: definition_type, type: Utf8, from: _*_display_def_type }
-      - { name: start_line, type: Int64, compute: start_line }
-      - { name: end_line, type: Int64, compute: end_line }
-      - { name: start_byte, type: Int64, compute: start_byte }
-      - { name: end_byte, type: Int64, compute: end_byte }
-      - { name: start_char, type: Int64, compute: start_col }
-      - { name: end_char, type: Int64, compute: end_col }
+      - { name: start_line, type: Int64, compute: defname_start_line }
+      - { name: end_line, type: Int64, compute: defname_end_line }
+      - { name: start_byte, type: Int64, compute: defname_start_byte }
+      - { name: end_byte, type: Int64, compute: defname_end_byte }
+      - { name: start_char, type: Int64, compute: defname_start_col }
+      - { name: end_char, type: Int64, compute: defname_end_col }
 
   ImportedSymbol:
     source: __import|__import_type
+    exclude_parent: __module_export
+    expand: __name
     columns:
       - { name: id, type: Int64 }
       - { name: file_path, type: Utf8, from: _*_display_file_path }
-      - { name: import_type, type: Utf8, compute: import_kind }
-      - { name: path, type: Utf8, from: __source_path }
-      - { name: name, type: Utf8, from: __name, nullable: true }
+      - { name: import_type, type: Utf8, compute: import_type }
+      - { name: path, type: Utf8, from: _*_display_source_path }
+      - { name: name, type: Utf8, expand_sym: true, nullable: true }
       - { name: alias, type: Utf8, from: __alias, nullable: true }
       - { name: is_type_only, type: Boolean, compute: is_type_only }
       - { name: has_target, type: Boolean, from: _*_display_resolved }
@@ -45,21 +47,31 @@ edges:
   FileToDefinition:
     source: File
     target: Definition
-    kind: Defines
+    tree_containment: true
 
   FileToImportedSymbol:
     source: File
     target: ImportedSymbol
-    kind: Imports
+    tree_containment: true
 
   DefinitionToDefinition:
     source: Definition
     target: Definition
+    from_edges: true
+    exclude_kinds: [Imports]
+    dedup_cross: true
 
   DefinitionToImportedSymbol:
     source: Definition
     target: ImportedSymbol
+    from_edges: true
+    only_kinds: [Imports]
+    skip_if_has_calls: true
+    label: Calls
 
   ImportedSymbolToDefinition:
     source: ImportedSymbol
     target: Definition
+    from_edges: true
+    only_kinds: [Imports]
+    label: Resolves

@@ -13630,6 +13630,7 @@ dependencies = [
  "arrow 56.2.1",
  "arrow 58.3.0",
  "globset",
+ "indexmap 2.14.0",
  "lance-graph",
  "serde",
  "serde_json",
