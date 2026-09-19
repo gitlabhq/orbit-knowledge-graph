@@ -18,7 +18,6 @@ exclude_path = [
   "target",
   "node_modules",
   "output",
-  ".claude/skills/pajamas",
 ]
 
 exclude_all_private = true
