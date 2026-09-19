@@ -47,10 +47,10 @@ impl From<Property<'_>> for PropertyRef {
 }
 
 pub(super) enum Pattern<'i> {
-    Element(PatternElement<'i>),
+    Elements(Vec<PatternElement<'i>>),
     Shortest {
         variable: Name<'i>,
-        element: PatternElement<'i>,
+        element: Box<PatternElement<'i>>,
     },
 }
 

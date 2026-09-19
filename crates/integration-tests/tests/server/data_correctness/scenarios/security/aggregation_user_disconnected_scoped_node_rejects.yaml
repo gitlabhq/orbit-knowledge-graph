@@ -19,6 +19,6 @@ query:
 expect:
   compile_error:
     json: "globally-scoped"
-    gql: "Orbit query syntax"
+    gql: "one connected pattern"
   compile_error_not_contains:
     json: ["target@example.com"]

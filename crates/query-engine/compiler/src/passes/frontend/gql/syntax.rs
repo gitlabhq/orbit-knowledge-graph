@@ -62,13 +62,13 @@ impl QueryParser {
     fn Pattern(input: Node) -> Result<Pattern> {
         Ok(match_nodes!(input.into_children();
             [ShortestPattern(pattern)] => pattern,
-            [PatternElement(element)] => Pattern::Element(element),
+            [PatternElement(elements)..] => Pattern::Elements(elements.collect()),
         ))
     }
 
     fn ShortestPattern(input: Node) -> Result<Pattern> {
         Ok(match_nodes!(input.into_children();
-            [Variable(variable), PathSearch(_), PatternElement(element)] => Pattern::Shortest { variable, element },
+            [Variable(variable), PathSearch(_), PatternElement(element)] => Pattern::Shortest { variable, element: Box::new(element) },
             [Variable(_), LegacyShortestPath(_)] => unreachable!("LegacyShortestPath always errors"),
         ))
     }

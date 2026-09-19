@@ -1188,7 +1188,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
         "MATCH (u:User) RETURN u.username AS renamed",
-        "MATCH (u:User) RETURN u{.username}, count(u)",
         "MATCH (u:User) RETURN u{.username}, u.state",
         "MATCH (u:User) RETURN u.username, u{.state}",
         "MATCH (u:User) RETURN date_trunc('month', u.created_at)",
