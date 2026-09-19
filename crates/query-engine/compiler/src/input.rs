@@ -118,6 +118,7 @@ pub struct TextIndexMeta {
 
 /// Metadata accumulated across compiler passes.
 ///
+/// Per-flag overrides for plan-phase optimizations that assume post-query hydration.
 #[derive(Debug, Default, Clone)]
 pub struct PlanOverrides {
     pub skip_fk_elision: bool,
