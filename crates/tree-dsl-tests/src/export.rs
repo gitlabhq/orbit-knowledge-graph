@@ -203,7 +203,23 @@ fn child_sym_by_kind(c: Cursor, kind_name: &str, lang: &Lang) -> u32 {
         .unwrap_or(0)
 }
 
-fn find_display_sym(c: Cursor, kind_name: &str, lang: &Lang) -> u32 {
+fn find_tag(tree: &Tree, c: Cursor, tag_key: &str, lang: &Lang) -> u32 {
+    let key_sym = lang.syms.intern(tag_key);
+    if let Some(v) = tree.get_tag(c.index(), key_sym) {
+        return v;
+    }
+    for a in c.ancestors() {
+        if let Some(v) = tree.get_tag(a.index(), key_sym) {
+            return v;
+        }
+    }
+    0
+}
+
+fn find_display_sym(tree: &Tree, c: Cursor, kind_name: &str, lang: &Lang) -> u32 {
+    if let Some(tag_key) = kind_name.strip_prefix("tag:") {
+        return find_tag(tree, c, tag_key, lang);
+    }
     let s = child_sym_by_kind(c, kind_name, lang);
     if s != 0 {
         return s;
@@ -218,6 +234,7 @@ fn find_display_sym(c: Cursor, kind_name: &str, lang: &Lang) -> u32 {
 }
 
 fn resolve_column<'a>(
+    tree: &'a Tree,
     c: Cursor<'a>,
     col: &ColumnConfig,
     lang: &'a Lang,
@@ -228,7 +245,7 @@ fn resolve_column<'a>(
         return Val::I(id);
     }
     if let Some(ref compute) = col.compute {
-        return compute_val(c, compute, lang, expand_node);
+        return compute_val(tree, c, compute, lang, expand_node);
     }
     if col.expand_sym {
         if let Some(en) = expand_node {
@@ -245,10 +262,10 @@ fn resolve_column<'a>(
         let raw = if from == "sym" {
             c.sym()
         } else {
-            let mut v = find_display_sym(c, from, lang);
+            let mut v = find_display_sym(tree, c, from, lang);
             if v == 0 {
                 if let Some(en) = expand_node {
-                    v = find_display_sym(en, from, lang);
+                    v = find_display_sym(tree, en, from, lang);
                 }
             }
             v
@@ -273,22 +290,22 @@ fn resolve_column<'a>(
 }
 
 fn compute_val<'a>(
+    tree: &'a Tree,
     c: Cursor<'a>,
     compute: &str,
     lang: &'a Lang,
     expand: Option<Cursor<'a>>,
 ) -> Val<'a> {
+    let import_type_key = lang.syms.intern("import_type");
     match compute {
         "import_type" => {
             if let Some(en) = expand {
-                let it = child_sym_by_kind(en, "_*_display_import_type", lang);
-                if it != 0 {
-                    return Val::S(lang.syms.resolve(it));
+                if let Some(v) = tree.get_tag(en.index(), import_type_key) {
+                    return Val::S(lang.syms.resolve(v));
                 }
             }
-            let it = child_sym_by_kind(c, "_*_display_import_type", lang);
-            if it != 0 {
-                return Val::S(lang.syms.resolve(it));
+            if let Some(v) = tree.get_tag(c.index(), import_type_key) {
+                return Val::S(lang.syms.resolve(v));
             }
             let source_sym = c.child_sym(C::Source).unwrap_or(0);
             if let Some(en) = expand {
@@ -391,7 +408,7 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
                         let row: Vec<Val> = entity_config
                             .columns
                             .iter()
-                            .map(|col| resolve_column(c, col, lang, next_id, None))
+                            .map(|col| resolve_column(tree, c, col, lang, next_id, None))
                             .collect();
                         t.row(&row);
                         next_id += 1;
@@ -401,7 +418,7 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
                             let row: Vec<Val> = entity_config
                                 .columns
                                 .iter()
-                                .map(|col| resolve_column(c, col, lang, next_id, Some(*name)))
+                                .map(|col| resolve_column(tree, c, col, lang, next_id, Some(*name)))
                                 .collect();
                             t.row(&row);
                             next_id += 1;
@@ -412,7 +429,7 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
                     let row: Vec<Val> = entity_config
                         .columns
                         .iter()
-                        .map(|col| resolve_column(c, col, lang, next_id, None))
+                        .map(|col| resolve_column(tree, c, col, lang, next_id, None))
                         .collect();
                     t.row(&row);
                     next_id += 1;

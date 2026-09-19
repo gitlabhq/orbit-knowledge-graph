@@ -158,6 +158,7 @@ impl Pat {
 
 pub struct TagEntry {
     pub key: u32,
+    pub slot: u16,
     pub val: Tf,
 }
 

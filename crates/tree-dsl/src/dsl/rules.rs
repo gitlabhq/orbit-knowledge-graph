@@ -280,8 +280,8 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
                 .iter()
                 .map(|(k, v)| {
                     let key = c.lang.syms.intern(k);
-                    let val = compile_tag_value(v, c);
-                    TagEntry { key, val }
+                    let (slot, val) = compile_tag_value(v, c);
+                    TagEntry { key, slot, val }
                 })
                 .collect();
             Out::Tag(tags)
@@ -295,14 +295,14 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
     panic!("rule has no action: {:?}", pat);
 }
 
-fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> Tf {
+fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> (u16, Tf) {
     if val.starts_with("@$") {
         let rest = &val[2..];
         let (slot_name, pipeline) = match rest.find('|') {
             Some(i) => (&rest[..i], Some(&rest[i + 1..])),
             None => (rest, None),
         };
-        let _slot = ctx.slot(slot_name);
+        let slot = ctx.slot(slot_name);
         match pipeline {
             Some(pipe) => {
                 let steps: Vec<Tf> = pipe
@@ -324,16 +324,17 @@ fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> Tf {
                         }
                     })
                     .collect();
-                if steps.len() == 1 {
+                let tf = if steps.len() == 1 {
                     steps.into_iter().next().unwrap()
                 } else {
                     Tf::Pipeline(steps)
-                }
+                };
+                (slot, tf)
             }
-            None => Tf::Id,
+            None => (slot, Tf::Id),
         }
     } else {
-        Tf::LitSym(ctx.lang.syms.intern(val))
+        (0, Tf::LitSym(ctx.lang.syms.intern(val)))
     }
 }
 

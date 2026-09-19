@@ -201,10 +201,6 @@ impl Tf {
             }
             Tf::AncestorTag(key) => {
                 let key = *key;
-                let raw = Tree::to_raw(id);
-                if let Some(v) = t.get_tag(raw, key) {
-                    return v;
-                }
                 let mut cur = id;
                 loop {
                     match cur.parent(&t.arena) {

@@ -268,8 +268,8 @@ fn apply_rewrites_inner(
             match &r.out {
                 Out::Tag(entries) => {
                     let raw = Tree::to_raw(target);
-                    let src = caps[0].first().copied().unwrap_or(target);
                     for entry in entries {
+                        let src = caps[entry.slot as usize].first().copied().unwrap_or(target);
                         let val = if entry.val.is_node_tf() {
                             entry.val.apply_sym(t, lang, src, edge_ctx)
                         } else {
