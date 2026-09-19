@@ -731,31 +731,17 @@ fn skills_defaults_to_and_serves_bundled_content() {
     assert!(default.contains("name: orbit-cli"));
     assert!(!default.contains("Other available skills:"));
 
-    let manifest = orbit_cmd().args(["skills", "orbit"]).output().unwrap();
+    let manifest = orbit_cmd()
+        .args(["skills", "get", "orbit"])
+        .output()
+        .unwrap();
     assert!(manifest.status.success());
     let manifest = String::from_utf8(manifest.stdout).unwrap();
     assert_eq!(default, manifest);
     assert!(manifest.contains("references/local/sql.md"));
     assert!(
-        manifest.contains("`orbit skills orbit <path>`"),
+        manifest.contains("`orbit skills get orbit <path>`"),
         "served manifest must tell binary users the version-matched access path"
-    );
-
-    let shorthand = orbit_cmd()
-        .args(["skills", "references/local/sql.md"])
-        .output()
-        .unwrap();
-    let explicit = orbit_cmd()
-        .args(["skills", "orbit", "references/local/sql.md"])
-        .output()
-        .unwrap();
-    assert!(shorthand.status.success());
-    assert_eq!(shorthand.stdout, explicit.stdout);
-    assert!(
-        !String::from_utf8(shorthand.stdout)
-            .unwrap()
-            .contains("skills orbit <path>"),
-        "the discovery hint must be manifest-only, not appended to subfiles"
     );
 
     for path in [
@@ -764,18 +750,43 @@ fn skills_defaults_to_and_serves_bundled_content() {
         "references/local/repo_map.md",
     ] {
         let out = orbit_cmd()
-            .args(["skills", "orbit", path])
+            .args(["skills", "get", "orbit", path])
             .output()
             .unwrap();
-        assert!(out.status.success(), "`orbit skills orbit {path}` failed");
+        assert!(
+            out.status.success(),
+            "`orbit skills get orbit {path}` failed"
+        );
         assert!(
             !out.stdout.is_empty(),
-            "`orbit skills orbit {path}` printed nothing"
+            "`orbit skills get orbit {path}` printed nothing"
         );
     }
 
-    let alias = orbit_cmd().args(["skill", "SKILL.md"]).output().unwrap();
-    assert!(alias.status.success());
+    let canonical = orbit_cmd()
+        .args(["skills", "get", "orbit", "references/local/sql.md"])
+        .output()
+        .unwrap();
+    let named_alias = orbit_cmd()
+        .args(["skills", "orbit", "references/local/sql.md"])
+        .output()
+        .unwrap();
+    let path_alias = orbit_cmd()
+        .args(["skills", "references/local/sql.md"])
+        .output()
+        .unwrap();
+    assert!(canonical.status.success());
+    assert_eq!(canonical.stdout, named_alias.stdout);
+    assert_eq!(canonical.stdout, path_alias.stdout);
+    assert!(
+        !String::from_utf8(canonical.stdout)
+            .unwrap()
+            .contains("skills get orbit <path>"),
+        "the discovery hint must be manifest-only, not appended to subfiles"
+    );
+
+    let singular_alias = orbit_cmd().args(["skill", "SKILL.md"]).output().unwrap();
+    assert!(singular_alias.status.success());
 
     let repo_map_ref = orbit_cmd()
         .args(["skills", "references/local/repo_map.md"])
@@ -790,15 +801,47 @@ fn skills_defaults_to_and_serves_bundled_content() {
 }
 
 #[test]
+fn skills_help_presents_get_as_the_canonical_command() {
+    let skills_help = orbit_cmd().args(["skills", "--help"]).output().unwrap();
+    assert!(skills_help.status.success());
+    let skills_help = String::from_utf8(skills_help.stdout).unwrap();
+    assert!(skills_help.contains("get   Print a bundled agent skill file."));
+    assert!(!skills_help.contains("NAME_OR_PATH"));
+
+    let get_help = orbit_cmd()
+        .args(["skills", "get", "--help"])
+        .output()
+        .unwrap();
+    assert!(get_help.status.success());
+    let get_help = String::from_utf8(get_help.stdout).unwrap();
+    assert!(get_help.contains(
+        "Print a file from an agent skill bundled with this binary without installing it."
+    ));
+    assert!(get_help.contains("Usage: orbit skills get <NAME> [PATH]"));
+}
+
+#[test]
 fn skills_reject_unknown_names_and_paths() {
     let unknown_name = orbit_cmd()
-        .args(["skills", "unknown-name"])
+        .args(["skills", "get", "unknown-name"])
         .output()
         .unwrap();
     assert!(!unknown_name.status.success());
     assert!(unknown_name.stdout.is_empty());
     let error = String::from_utf8(unknown_name.stderr).unwrap();
     assert!(error.contains("unknown skill name") && error.contains("orbit"));
+    assert!(error.contains("skills get <name> [path]"));
+
+    let path_as_name = orbit_cmd()
+        .args(["skills", "get", "references/local/sql.md"])
+        .output()
+        .unwrap();
+    assert!(!path_as_name.status.success());
+    assert!(path_as_name.stdout.is_empty());
+    let error = String::from_utf8(path_as_name.stderr).unwrap();
+    assert!(error.contains("unknown skill name \"references/local/sql.md\""));
+    assert!(error.contains("Known skills:") && error.contains("orbit"));
+    assert!(!error.contains("path shorthand"));
 
     for path in [
         "references/does-not-exist.md",
@@ -806,17 +849,24 @@ fn skills_reject_unknown_names_and_paths() {
         "/etc/passwd",
         "references/local/../../../secret",
     ] {
-        let out = orbit_cmd().args(["skills", path]).output().unwrap();
+        let out = orbit_cmd()
+            .args(["skills", "get", "orbit", path])
+            .output()
+            .unwrap();
         assert!(
             !out.status.success(),
-            "`orbit skills {path}` must exit non-zero"
+            "`orbit skills get orbit {path}` must exit non-zero"
         );
-        assert!(out.stdout.is_empty(), "`orbit skills {path}` leaked stdout");
+        assert!(
+            out.stdout.is_empty(),
+            "`orbit skills get orbit {path}` leaked stdout"
+        );
         let err = String::from_utf8(out.stderr).unwrap();
         assert!(
             err.contains("Available files") && err.contains("SKILL.md"),
             "error must list valid paths, got: {err}"
         );
+        assert!(err.contains("skills get <name> [path]"));
     }
 }
 

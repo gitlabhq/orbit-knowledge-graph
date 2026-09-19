@@ -33,5 +33,6 @@ List these directories and read the relevant owner before you act:
 - `docs/dev/` for runbooks, the crate map, and the reference index.
 - Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
 
-Read `CONTRIBUTING.md` for engineering, documentation, and MR conventions. Read
-`CONTEXT.md` for domain terms.
+Do not create a GitLab issue or epic until the author approves the draft.
+Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR
+conventions. Read `CONTEXT.md` for domain terms.

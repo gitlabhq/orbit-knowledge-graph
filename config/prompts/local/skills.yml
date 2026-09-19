@@ -1,10 +1,10 @@
 name: skills
-version: 1.3.0
-short: Print bundled skill content
+version: 1.4.0
+short: Read bundled agent skill files with `skills get`
 description: >-
-  Print bundled skill content.
+  Read bundled agent skill files with `skills get`.
 
 
   With no argument, prints the orbit-cli skill followed by a list of any other available skills.
-  Pass `orbit` and an optional relative path to print bundled content, or pass a path
-  such as `references/local/sql.md` as shorthand for the orbit skill.
+  Use `skills get orbit` with an optional path relative to the skill root to print a bundled file.
+  The path defaults to `SKILL.md`.

@@ -5,9 +5,9 @@ description: >-
   label taxonomy (orbit:: area, type::, priority::), manage portal roadmap
   membership (orbit-roadmap::), set due dates and health, and keep epics
   conforming to the planning doctrine. Use when labeling new or old issues or
-  MRs, adding or marking deliverables on the roadmap, creating or repurposing
+  MRs, adding or marking deliverables on the roadmap, drafting or repurposing
   epics, triaging the backlog, or any "add the appropriate labels" request.
-version: 1.0.1
+version: 1.0.2
 allowed-tools: Read, Bash(glab *)
 ---
 
@@ -265,7 +265,9 @@ touch the same item:
 3. Apply via `workItemUpdate` with label ids, a batch of aliased mutations
    per ~10 items.
 
-New issues get all three axes at creation time. New deliverables additionally
+A person creates each issue and epic. Prepare the draft and the labels. Run
+the create call only after the user approves the draft in this session. New
+issues get all three axes at creation time. New deliverables additionally
 get an epic (or join one), a fixed due date, and an `orbit-roadmap::` label at
 the epic level.
 
