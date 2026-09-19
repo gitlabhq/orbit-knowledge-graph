@@ -160,13 +160,12 @@ pub fn plan(input: &mut Input) -> Plan {
     let hops = build_hops(input);
     let mut nodes = build_node_plans(input);
 
-    let overrides = &input.compiler.plan_overrides;
-
-    let (mut hops, elided_fks, scope_guards, input) = if overrides.skip_fk_elision {
-        (hops, Vec::new(), Vec::new(), input)
-    } else {
-        elide_hops(hops, &mut nodes, input)
-    };
+    let (mut hops, elided_fks, scope_guards, input) =
+        if input.compiler.plan_overrides.skip_fk_elision {
+            (hops, Vec::new(), Vec::new(), input)
+        } else {
+            elide_hops(hops, &mut nodes, input)
+        };
 
     let overrides = &input.compiler.plan_overrides;
 
