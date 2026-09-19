@@ -118,6 +118,24 @@ pub struct TextIndexMeta {
 
 /// Metadata accumulated across compiler passes.
 ///
+/// Per-flag overrides for plan-phase optimizations that assume post-query hydration.
+#[derive(Debug, Default, Clone)]
+pub struct PlanOverrides {
+    pub skip_fk_elision: bool,
+    pub force_join: bool,
+    pub force_emit_select: bool,
+}
+
+impl PlanOverrides {
+    pub fn local() -> Self {
+        Self {
+            skip_fk_elision: true,
+            force_join: true,
+            force_emit_select: true,
+        }
+    }
+}
+
 /// Written by normalize/lowering, read by downstream passes (deduplicate,
 /// optimize, enforce, SIP, fold, etc.).
 #[derive(Debug, Clone)]
@@ -176,11 +194,7 @@ pub struct CompilerMetadata {
     pub query_hash: u64,
     /// Number of `_gkg_cursor_N` readback columns the cursor pass appended.
     pub cursor_key_count: usize,
-    /// When true, the plan/lower phases emit all node columns inline in
-    /// SELECT and disable FK elision, hydration deferral, and dedup
-    /// strategies that assume a post-query hydration pass. Set by
-    /// `compile_local` for the DuckDB local pipeline.
-    pub inline_all: bool,
+    pub plan_overrides: PlanOverrides,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -204,7 +218,7 @@ impl Default for CompilerMetadata {
             tp_id_lookup: HashMap::new(),
             query_hash: 0,
             cursor_key_count: 0,
-            inline_all: false,
+            plan_overrides: PlanOverrides::default(),
         }
     }
 }
