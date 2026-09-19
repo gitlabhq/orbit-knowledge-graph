@@ -160,11 +160,15 @@ pub fn plan(input: &mut Input) -> Plan {
     let hops = build_hops(input);
     let mut nodes = build_node_plans(input);
 
-    let (mut hops, elided_fks, scope_guards, input) = if input.compiler.inline_all {
+    let overrides = &input.compiler.plan_overrides;
+
+    let (mut hops, elided_fks, scope_guards, input) = if overrides.skip_fk_elision {
         (hops, Vec::new(), Vec::new(), input)
     } else {
         elide_hops(hops, &mut nodes, input)
     };
+
+    let overrides = &input.compiler.plan_overrides;
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
@@ -173,7 +177,7 @@ pub fn plan(input: &mut Input) -> Plan {
     }
 
     for node_plan in nodes.values_mut() {
-        if input.compiler.inline_all {
+        if overrides.force_join {
             node_plan.hydration = HydrationStrategy::Join;
         } else {
             node_plan.hydration = determine_hydration(node_plan, input, &hops);
@@ -182,7 +186,7 @@ pub fn plan(input: &mut Input) -> Plan {
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if !input.compiler.inline_all
+    } else if !overrides.skip_fk_elision
         && let Some(shape) = detect_fk(&hops, &nodes)
     {
         Strategy::Fk(shape)
@@ -205,7 +209,7 @@ pub fn plan(input: &mut Input) -> Plan {
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
-    } else if input.compiler.inline_all {
+    } else if overrides.force_emit_select {
         for np in nodes.values_mut() {
             np.emit_select = true;
         }
