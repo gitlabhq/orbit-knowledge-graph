@@ -66,6 +66,9 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
         SupportLang::Go => Some(include_str!("../langs/go.yaml")),
         SupportLang::Php => Some(include_str!("../langs/php.yaml")),
         SupportLang::Java => Some(include_str!("../langs/java.yaml")),
+        SupportLang::Kotlin => Some(include_str!("../langs/kotlin.yaml")),
+        SupportLang::Ruby => Some(include_str!("../langs/ruby.yaml")),
+        SupportLang::CSharp => Some(include_str!("../langs/csharp.yaml")),
         _ => None,
     }
 }

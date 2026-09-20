@@ -16,8 +16,8 @@ pub(crate) struct TestSuite {
     pub pipeline: Option<String>,
     #[serde(default)]
     pub fixtures: Vec<FixtureFile>,
-    #[serde(default, rename = "fixture_dir")]
-    pub _fixture_dir: Option<String>,
+    #[serde(default)]
+    pub fixture_dir: Option<String>,
     #[serde(default, rename = "trace")]
     pub _trace: bool,
     pub tests: Vec<TestCase>,
