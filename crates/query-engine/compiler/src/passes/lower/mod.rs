@@ -108,7 +108,7 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
                 FilterOp::Lt => Op::Lt,
                 FilterOp::Gte => Op::Ge,
                 FilterOp::Lte => Op::Le,
-                _ => Op::Eq,
+                _ => unreachable!("lowering rejects unsupported ops for property-to-property"),
             };
             let pred = Expr::binary(
                 op,
