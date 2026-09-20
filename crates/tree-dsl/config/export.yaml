@@ -53,6 +53,7 @@ edges:
     source: File
     target: ImportedSymbol
     tree_containment: true
+    label: Imports
 
   DefinitionToDefinition:
     source: Definition

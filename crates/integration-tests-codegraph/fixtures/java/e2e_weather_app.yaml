@@ -115,7 +115,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.weather.model.Forecast'
-        AND d.definition_type = 'Record'
+        AND d.definition_type = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

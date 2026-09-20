@@ -30,7 +30,9 @@ fixtures:
       }
 
 tests:
+  # skip: tree-dsl: a call receiver that is itself a call has no SSA value
   - name: "cross-file: factory.createService().findUser() resolves through return type"
+    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)

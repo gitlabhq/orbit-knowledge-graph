@@ -1,0 +1,293 @@
+# Java rewrite rules.
+# Handles: package, imports (named, wildcard, static), class/interface/enum/
+# record/annotation defs, fields, constructors, methods, this./super. calls,
+# unqualified calls as implicit this-calls, control flow, bindings.
+#
+# Import resolution is path-based: `import a.b.C` resolves to a/b/C.java under
+# the repo root or a marked source root (src, java).
+#
+# Known gaps (engine, not rules):
+# - Same-package siblings without an import need a package scope; the
+#   resolver is import-driven.
+# - Wildcard imports (`import a.b.*`) name a directory; the resolver resolves
+#   only files and index files.
+
+stages:
+  - name: imports
+    rules:
+      # import static a.b.C.m;
+      - match: '(import_declaration (static) $S:scoped_identifier)'
+        replace: '(__import (__visibility "static") (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|regex_replace("\.[^.]+$", "")|replace(".", "/")) (__name @$S|split_last(".")))'
+      # import a.b.*;
+      - match: '(import_declaration $S:scoped_identifier (asterisk))'
+        replace: '(__import (__source @$S) (__source_path @$S|replace(".", "/")) (__name "*"))'
+      # import a.b.C;
+      - match: '(import_declaration $S:scoped_identifier)'
+        replace: '(__import (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|replace(".", "/")) (__name @$S|split_last(".")))'
+
+  - name: normalize
+    rules:
+      - match: '(program $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(package_declaration $S:scoped_identifier)'
+        replace: '(__package @$S)'
+      - match: '(package_declaration $S:identifier)'
+        replace: '(__package @$S)'
+      - match: '(return_statement $$$V)'
+        replace: '(__ssa_return $$$V)'
+
+      # Types collapse to a bare type identifier
+      - match: '(generic_type $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+      - match: '(scoped_type_identifier (type_identifier) $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+      - match: '(array_type element: $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+
+      # Annotations → decorators (arguments kept for calls inside them)
+      - match: '(marker_annotation name: $N:identifier)'
+        replace: '(__decorator @$N)'
+      - match: '(annotation name: $N:identifier arguments: $A)'
+        replace: '(__decorator @$N $A)'
+
+      # x instanceof T [name] → type reference plus a typed pattern binding
+      - match: '(instanceof_expression left: $L right: $T:type_identifier name: $N:identifier)'
+        replace: '(instanceof_expression $L (__call (__callee @$T)) (__binding @$N (__ssa_typed @$T)))'
+      - match: '(instanceof_expression left: $L right: $T:type_identifier)'
+        replace: '(instanceof_expression $L (__call (__callee @$T)))'
+
+      # this.x → __ivar
+      - match: '(field_access object: (this) field: $F:identifier)'
+        replace: '(__ivar @$F)'
+
+      # extends / implements → __supertype
+      - match: '(superclass $T:type_identifier)'
+        replace: '(__supertype @$T)'
+      - match: '(super_interfaces (type_list $$$T:type_identifier))'
+        replace: '(super_interfaces $$$T=>__supertype)'
+      - match: '(extends_interfaces (type_list $$$T:type_identifier))'
+        replace: '(extends_interfaces $$$T=>__supertype)'
+
+      # Parameters: typed → SSA-typed binding that references its type
+      - match: '(formal_parameter type: $T:type_identifier name: $N:identifier)'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+      - match: '(formal_parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(spread_parameter (variable_declarator name: $N:identifier))'
+        replace: '(__binding @$N)'
+      - match: '(catch_formal_parameter (catch_type $T:type_identifier) name: $N:identifier)'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+      - match: '(catch_formal_parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+
+  - name: retag-refs
+    rules:
+      - match: '(field_access object: $O:__ivar field: $F:identifier)'
+        replace: '(__member @$F (__object $O))'
+      - match: '(field_access object: $O:__member field: $F:identifier)'
+        replace: '(__member @$F (__object $O))'
+      - match: '(field_access object: $O field: $F:identifier)'
+        replace: '(__member @$F (__object @$O))'
+
+  - name: retag-calls
+    rules:
+      # this.m() / m() — implicit this
+      - match: '(method_invocation object: (this) name: $N:identifier arguments: $A)'
+        replace: '(__call (__callee (__ivar @$N)) $A)'
+      - match: '(method_invocation object: (super) name: $N:identifier arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object (__ivar "super")))) $A)'
+      # x.m() / this.f.m() / a.b.m() / f().m()
+      - match: '(method_invocation object: $O:__ivar name: $N:identifier arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object $O))) $A)'
+      - match: '(method_invocation object: $O:__member name: $N:identifier arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object $O))) $A)'
+      - match: '(method_invocation object: $O:__call name: $N:identifier arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object $O))) $A)'
+      - match: '(method_invocation object: $O name: $N:identifier arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object @$O))) $A)'
+      - match: '(method_invocation name: $N:identifier arguments: $A)'
+        replace: '(__call (__callee (__ivar @$N)) (__member (__object @$N)) $A)'
+      # new T(...) [with optional anonymous body]
+      - match: '(object_creation_expression type: $T:type_identifier arguments: $A $$$B:class_body)'
+        replace: '(__call (__callee @$T) $A $$$B)'
+
+  - name: classify
+    rules:
+      # Local variables
+      - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V))'
+        replace: '(__binding @$N (__rhs @$V))'
+      - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__call))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs $V))'
+      - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs $V))'
+      - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs @$V))'
+      - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier))'
+        replace: '(__binding @$N (__ssa_typed @$T))'
+      - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V:__call))'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V))'
+        replace: '(__binding @$N (__rhs @$V))'
+      - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier))'
+        replace: '(__binding @$N)'
+
+      # Assignments
+      - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
+        replace: '(__binding $N (__rhs $R))'
+      - match: '(assignment_expression left: $N:__ivar right: $R)'
+        replace: '(__binding $N (__rhs @$R))'
+      - match: '(assignment_expression left: $N:identifier right: $R:__call)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:identifier right: $R)'
+        replace: '(__binding @$N (__rhs @$R))'
+
+      # Control flow
+      - match: '(if_statement condition: $C consequence: $Q alternative:? $A)'
+        replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
+      - match: '(switch_expression condition: $C body: (switch_block $$$ARMS:switch_rule|switch_block_statement_group))'
+        replace: '(__ssa_branch $C $$$ARMS->__ssa_arm)'
+      - match: '(ternary_expression condition: $C consequence: $Q alternative: $A)'
+        replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
+      - match: '(try_statement body: $B $$$ALTS:catch_clause|finally_clause)'
+        replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - match: '(try_with_resources_statement resources: $R body: $B $$$ALTS:catch_clause|finally_clause)'
+        replace: '(__ssa_branch $R (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - match: '(enhanced_for_statement type: $T:type_identifier name: $N:identifier value: $V body: $B)'
+        replace: '(__ssa_loop $V (__binding @$N (__ssa_typed @$T)) $B)'
+      - match: '(enhanced_for_statement name: $N:identifier value: $V body: $B)'
+        replace: '(__ssa_loop $V (__binding @$N) $B)'
+      - match: '(for_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(while_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(do_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+
+      # Fields: typed class fields seed this.x dispatch
+      - match: '(field_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value:? $V))'
+        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))) $V)'
+      - match: '(field_declaration declarator: (variable_declarator name: $N:identifier value:? $V))'
+        replace: '(__def (__defname @$N) (__field_def) $V)'
+      - match: '(constant_declaration declarator: (variable_declarator name: $N:identifier))'
+        replace: '(__def (__defname @$N) (__constant))'
+      - match: '(enum_constant name: $N:identifier arguments:? $A body:? $B)'
+        replace: '(__def (__defname @$N) (__enum_variant) $A $B)'
+
+      # Callables
+      - match: '(method_declaration $M?:modifiers type: $RT:type_identifier name: $N:identifier parameters: $P body:? $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__callee @$RT)) $B)'
+      - match: '(method_declaration $M?:modifiers name: $N:identifier parameters: $P body:? $B)'
+        replace: '(__def (__defname @$N) (__method) $M $P $B)'
+      - match: '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)'
+        replace: '(__def (__defname @$N) (__method) (__alias "<init>") $M $P $B)'
+      - match: '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)'
+        replace: '(__def (__defname @$N) (__method) (__alias "<init>") $M $B)'
+
+      # Types (after members)
+      - match: '(class_declaration $M?:modifiers name: $N:identifier $$$PRE superclass: $S:__supertype $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__class) $M $$$PRE $S $$$ANN (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $$$B)'
+      - match: '(class_declaration $M?:modifiers name: $N:identifier $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
+      # Record components become implicit accessor methods (see the records stage)
+      - match: '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__class) $M $$$ANN (record_components $$$P->record_component) $$$B)'
+      - match: '(interface_declaration $M?:modifiers name: $N:identifier $$$ANN body: (interface_body $$$B))'
+        replace: '(__def (__defname @$N) (__interface) $M $$$ANN $$$B)'
+      - match: '(enum_declaration $M?:modifiers name: $N:identifier $$$ANN body: (enum_body $$$B))'
+        replace: '(__def (__defname @$N) (__enum) $M $$$ANN $$$B)'
+      - match: '(annotation_type_declaration $M?:modifiers name: $N:identifier body: $B)'
+        replace: '(__def (__defname @$N) (__interface) $M $B)'
+
+  - name: records
+    rules:
+      - match: '(record_component $T:__ssa_typed)'
+        replace: '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T))'
+      - match: '(record_component)'
+        replace: '(__def (__defname @$ROOT) (__method))'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:identifier)'
+        replace: '(__ssa_return (__rhs @$V))'
+
+resolve:
+  display_source: original
+  lookup_from:
+    - __source_root
+  stages:
+    - name: roots
+      rules:
+        - match: '(__dir "java" $$$REST)'
+          replace: '(__dir "java" (__source_root) $$$REST)'
+        - match: '(__dir "src" $$$REST)'
+          replace: '(__dir "src" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          fqn: '@$M|child_sym("__package")'
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("java:java")'
+      - match: '(__def)'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__method) (__alias "<init>"))'
+        tag: { def_type: Constructor }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__import (__visibility "static"))'
+        tag:
+          import_type: StaticImport
+      - match: '(__name "*")'
+        tag:
+          import_type: WildcardImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'
