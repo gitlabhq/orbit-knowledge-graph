@@ -140,7 +140,7 @@ pub fn traversal_response() -> GraphResponse {
                     ("iid", json!(18)),
                     ("state", json!("merged")),
                     ("title", json!("chore: move skill to project scope")),
-                    ("created_at", json!("2026-05-08 23:07:40.793493")),
+                    ("created_at", json!("2026-05-08T23:07:40.793493Z")),
                 ],
             ),
             node(

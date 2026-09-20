@@ -4626,7 +4626,6 @@ name = "formatters"
 version = "0.1.0"
 dependencies = [
  "arrow 58.3.0",
- "chrono",
  "compiler",
  "indexmap 2.14.2",
  "insta",

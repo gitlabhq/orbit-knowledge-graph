@@ -39,6 +39,7 @@ data_correctness:
     - { id: 3001, note: Confidential feedback on bug B, noteable_type: MergeRequest, noteable_id: 2001, confidential: true, internal: false, created_at: "2024-02-20 14:45:00", traversal_path: "1/100/1000/" }
     - { id: 3002, note: { sql: "concat(repeat('🙂', 10000), 'tail')" }, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/", discussion_id: { sql: "repeat('🙂', 2048)" } }
     - { id: 3003, note: "Robert'); DROP TABLE gl_note;--", noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
+    - { id: 3004, note: Sub-second note, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, created_at: "2024-01-15 10:30:00.123456", author_id: 4, traversal_path: "1/100/1000/" }
 
   gl_merge_request_diff:
     - { id: 5000, merge_request_id: 2000, state: collected, head_commit_sha: aaaaaaaa1111, traversal_path: "1/100/1000/" }
@@ -106,6 +107,7 @@ data_correctness:
     - { traversal_path: "1/101/1001/", source_id: 2, source_kind: User, relationship_kind: AUTHORED, target_id: 2002, target_kind: MergeRequest, source_tags: [], target_tags: [state:merged] }
     - { traversal_path: "1/102/1004/", source_id: 3, source_kind: User, relationship_kind: AUTHORED, target_id: 2003, target_kind: MergeRequest, source_tags: [], target_tags: [state:closed] }
     - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: AUTHORED, target_id: 3000, target_kind: Note, source_tags: [], target_tags: [] }
+    - { traversal_path: "1/100/1000/", source_id: 4, source_kind: User, relationship_kind: AUTHORED, target_id: 3004, target_kind: Note, source_tags: [], target_tags: [] }
     # HAS_NOTE
     - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, source_tags: [state:opened], target_tags: [] }
     - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3002, target_kind: Note, source_tags: [state:opened], target_tags: [] }
