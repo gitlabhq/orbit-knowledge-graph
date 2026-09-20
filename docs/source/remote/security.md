@@ -94,8 +94,9 @@ A fine-grained token works with GitLab Orbit the same way it works with
 The token check is a gateway: it decides whether the token may call the endpoint. The results
 follow the token owner's access in GitLab, not the other permissions on the token.
 
-- A token with the Orbit **Read** permission under **User** can call every Orbit endpoint and
-  sees everything the token owner can see.
+- A token with the Orbit **Read** permission under **User** calls the unscoped endpoints and
+  sees everything the token owner can see. It gets `403` on the group and project routes, the
+  same as Global Search.
 - A token with the Orbit **Read** permission under **Group and project access** must name its
   group or project in each request. Use the group or project routes, such as
   `/api/v4/groups/:id/orbit/query` and `/api/v4/projects/:id/orbit/query`, or the `namespace_id`
