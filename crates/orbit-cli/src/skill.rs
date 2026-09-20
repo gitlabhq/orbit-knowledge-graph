@@ -183,6 +183,7 @@ async fn list_skills() -> Result<()> {
         Ok(response) if matches!(response.status, 401 | 403) => {
             Err(map_http_error(response.status, body_text(&response)).into())
         }
+        // Collection responses are not cached, so there is no validated remote listing to reuse.
         Ok(response) if response.status >= 500 => {
             Err(map_http_error(response.status, body_text(&response)).into())
         }
@@ -217,7 +218,15 @@ async fn print_skill_file(name: &str, requested: &str) -> Result<()> {
     let view = match OrbitClient::from_skill_env()? {
         None => local,
         Some(client) => match resolve_remote_tree(&client, name).await? {
-            Some(remote) => compose_tree(remote.files, local)?,
+            Some(remote) => match compose_tree(remote.files, local.clone()) {
+                Ok(composed) => composed,
+                Err(error) => {
+                    eprintln!(
+                        "warning: could not compose the instance Orbit skill ({error}); using the embedded local skill"
+                    );
+                    local
+                }
+            },
             None => local,
         },
     };
@@ -271,7 +280,8 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             let cached = cached.ok_or_else(|| {
                 anyhow!("Orbit skill server returned 304 but no validated cache entry exists")
             })?;
-            publish_cache(&origin, &cached.tree)?;
+            // The request always revalidates the newest entry, so refreshing its
+            // timestamp cannot affect prune order and would rewrite the whole tree.
             Ok(Some(cached.tree))
         }
         404 => {

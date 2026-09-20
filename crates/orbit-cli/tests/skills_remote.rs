@@ -109,9 +109,13 @@ fn tree_reply(version: &str, body_text: &str) -> Reply {
     let manifest = format!(
         "---\nname: orbit\nversion: {version}\ndescription: Remote Orbit skill\n---\n# {body_text}\n"
     );
+    tree_reply_with_manifest(version, &manifest, body_text)
+}
+
+fn tree_reply_with_manifest(version: &str, manifest: &str, body_text: &str) -> Reply {
     let reference = format!("{body_text}\n");
     let files = BTreeMap::from([
-        ("SKILL.md", manifest.as_str()),
+        ("SKILL.md", manifest),
         ("references/remote.md", reference.as_str()),
     ]);
     let tree_hash = tree_hash(&files);
@@ -171,10 +175,17 @@ fn cache_miss_then_304_downloads_content_exactly_once() {
     let (url, server) = mock_server(vec![first, not_modified]);
 
     let miss = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    let cache_manifest = walk_files(cache.path())
+        .into_iter()
+        .find(|path| path.ends_with(".orbit-cache.json"))
+        .unwrap();
+    let manifest_before_304 = std::fs::read(&cache_manifest).unwrap();
     let hit = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    let manifest_after_304 = std::fs::read(cache_manifest).unwrap();
     assert!(miss.status.success(), "{}", stderr(&miss));
     assert!(hit.status.success(), "{}", stderr(&hit));
     assert_eq!(miss.stdout, hit.stdout);
+    assert_eq!(manifest_before_304, manifest_after_304);
     assert!(String::from_utf8_lossy(&hit.stdout).contains("Remote v1"));
 
     let requests = server.join().unwrap();
@@ -239,6 +250,24 @@ fn endpoint_404_warns_and_falls_back_to_local() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(stderr(&output).contains("does not serve Orbit skills"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("name: orbit-cli"));
+}
+
+#[test]
+fn malformed_remote_markers_warn_and_fall_back_to_local() {
+    let cache = tempfile::tempdir().unwrap();
+    let manifest = include_str!("fixtures/skills/malformed-remote/SKILL.md");
+    let (url, server) = mock_server(vec![tree_reply_with_manifest(
+        "1.0.0",
+        manifest,
+        "remote reference",
+    )]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    server.join().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stderr(&output).contains("could not compose"));
+    assert!(stderr(&output).contains("embedded local skill"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("name: orbit-cli"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Malformed remote markers"));
 }
 
 #[test]
