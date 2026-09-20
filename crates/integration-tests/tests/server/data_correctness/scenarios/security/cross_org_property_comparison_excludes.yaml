@@ -1,0 +1,23 @@
+description: >
+  Cross-node property comparison does not leak data across org boundaries.
+  User 1 authored MRs in both org 1 and org 2. A GQL query with a
+  property-to-property predicate (u.state <> mr.title) scoped to org 1
+  must not return org-2 MR 9100.
+
+config:
+  security: { org_id: 1, paths: ["1/"] }
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+    WHERE u.state <> mr.title
+    RETURN u, mr.title LIMIT 50
+
+expect:
+  node_count: 3
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001]
+      absent: [9100]
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]
