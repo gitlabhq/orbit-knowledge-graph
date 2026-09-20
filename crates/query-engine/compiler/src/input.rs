@@ -106,6 +106,18 @@ pub struct Input {
 
     #[serde(skip)]
     pub path_segment_budget: Option<usize>,
+
+    #[serde(skip)]
+    pub join_predicates: Vec<JoinPredicate>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JoinPredicate {
+    pub lhs_node: String,
+    pub lhs_prop: String,
+    pub op: FilterOp,
+    pub rhs_node: String,
+    pub rhs_prop: String,
 }
 
 /// Text index metadata for a column, used by the optimizer to rewrite
@@ -289,6 +301,7 @@ impl Default for Input {
             compiler: CompilerMetadata::default(),
             hydration_dynamic: false,
             path_segment_budget: None,
+            join_predicates: Vec::new(),
         }
     }
 }

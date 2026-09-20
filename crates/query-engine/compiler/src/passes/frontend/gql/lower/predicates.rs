@@ -33,12 +33,43 @@ impl Lowering {
             value,
             rhs_property,
         } = comparison;
-        let rhs_column =
-            rhs_property.map(|p| (p.node.value.to_string(), p.property.value.to_string()));
+
+        if let Some(rhs) = rhs_property {
+            let lhs_node = property.node.value;
+            let lhs_prop = property.property.value;
+            let rhs_node = rhs.node.value;
+            let rhs_prop = rhs.property.value;
+            if lhs_node == rhs_node {
+                self.input
+                    .nodes
+                    .iter_mut()
+                    .find(|n| n.id == lhs_node)
+                    .ok_or_else(|| invalid(span, &format!("undefined variable {lhs_node}")))?
+                    .filters
+                    .entry(lhs_prop)
+                    .or_default()
+                    .push(InputFilter {
+                        op: Some(op),
+                        rhs_column: Some((rhs_node, rhs_prop)),
+                        ..Default::default()
+                    });
+            } else {
+                self.input
+                    .join_predicates
+                    .push(crate::input::JoinPredicate {
+                        lhs_node,
+                        lhs_prop,
+                        op,
+                        rhs_node,
+                        rhs_prop,
+                    });
+            }
+            return Ok(());
+        }
+
         let filter = InputFilter {
             op: Some(op),
             value,
-            rhs_column,
             ..Default::default()
         };
         let node = property.node.value;

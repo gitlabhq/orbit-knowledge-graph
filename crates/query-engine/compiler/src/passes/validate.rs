@@ -378,6 +378,7 @@ impl<'a> Validator<'a> {
         self.check_depth(input)?;
         self.check_selectivity(input)?;
         self.check_filter_types(input)?;
+        self.check_join_predicates(input)?;
         // Run after individual reference checks so "undefined node X" errors
         // take priority over "node Y is unreferenced".
         self.check_unreferenced_nodes(input)?;
@@ -559,6 +560,28 @@ impl<'a> Validator<'a> {
     /// Relationship filters are validated against the fixed edge table schema.
     /// Unknown edge columns are rejected (fail closed) since they would
     /// produce broken SQL at runtime.
+    fn check_join_predicates(&self, input: &Input) -> Result<()> {
+        let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
+        for jp in &input.join_predicates {
+            for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
+                if !node_ids.contains(&node_id.as_str()) {
+                    return Err(QueryError::ReferenceError(format!(
+                        "join predicate references undefined node \"{node_id}\""
+                    )));
+                }
+                let entity = input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == *node_id)
+                    .and_then(|n| n.entity.as_deref());
+                if let Some(entity) = entity {
+                    self.check_field(entity, prop)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn check_filter_types(&self, input: &Input) -> Result<()> {
         for node in &input.nodes {
             let Some(entity) = node.entity.as_deref() else {
