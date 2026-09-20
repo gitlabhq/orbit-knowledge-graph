@@ -3,7 +3,7 @@ description: Inline datetime renders as ISO 8601 UTC
 query:
   json: |
     {
-        "query_type": "search",
+        "query_type": "traversal",
         "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["created_at"]}],
         "limit": 10
     }
