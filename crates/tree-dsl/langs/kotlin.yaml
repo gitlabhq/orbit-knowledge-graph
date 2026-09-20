@@ -1,0 +1,249 @@
+# Kotlin rewrite rules.
+# Handles: package, imports (named, aliased, wildcard), classes, interfaces,
+# enums, objects, companion objects, extension functions (as __impl wrappers
+# named after the receiver type), properties with this.x typing, functions,
+# this./super. calls, control flow, bindings.
+#
+# Known gaps (engine, not rules):
+# - Same-package siblings without an import need a package scope.
+# - Wildcard imports name a directory; the resolver resolves only files.
+# - The DSL cannot see a node's parent, so local `val`/`var` declarations
+#   get the same treatment as properties: a __def plus SSA bindings.
+
+stages:
+  - name: imports
+    rules:
+      - match: '(import_header $I:identifier (import_alias $A:type_identifier))'
+        replace: '(__import (__source @$I|regex_replace("\.[^.]+$", "")) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".") (__alias @$A)))'
+      - match: '(import_header $I:identifier (wildcard_import))'
+        replace: '(__import (__source @$I) (__source_path @$I|replace(".", "/")) (__name "*"))'
+      - match: '(import_header $I:identifier)'
+        replace: '(__import (__source @$I|regex_replace("\.[^.]+$", "")) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".")))'
+
+  - name: normalize
+    rules:
+      - match: '(source_file $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(package_header $I:identifier)'
+        replace: '(__package @$I)'
+      - match: '(jump_expression (return) $$$V)'
+        replace: '(__ssa_return $$$V)'
+
+      # Types collapse to a bare type identifier
+      - match: '(user_type (type_identifier) (type_identifier) $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+      - match: '(user_type (type_identifier) $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+      - match: '(user_type $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+
+      # Annotations → decorators
+      - match: '(annotation (constructor_invocation $T:type_identifier $A:value_arguments))'
+        replace: '(__decorator @$T $A)'
+      - match: '(annotation $T:type_identifier)'
+        replace: '(__decorator @$T)'
+
+      # this.x → __ivar
+      - match: '(navigation_expression (this_expression) (navigation_suffix $N:simple_identifier))'
+        replace: '(__ivar @$N)'
+
+      # : Base(), : Iface → __supertype
+      - match: '(delegation_specifier (constructor_invocation $T:type_identifier $A:value_arguments))'
+        replace: '(__supertype @$T)'
+      - match: '(delegation_specifier $T:type_identifier)'
+        replace: '(__supertype @$T)'
+
+      # Parameters
+      - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:type_identifier)'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+      - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier)'
+        replace: '(__def (__defname @$N) (__property))'
+      - match: '(class_parameter $N:simple_identifier $T:type_identifier)'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+      - match: '(class_parameter $N:simple_identifier)'
+        replace: '(__binding @$N)'
+      - match: '(parameter $N:simple_identifier $T:type_identifier)'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+      - match: '(parameter $N:simple_identifier)'
+        replace: '(__binding @$N)'
+      - match: '(catch_block $N:simple_identifier $T:type_identifier $$$B)'
+        replace: '(catch_block (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) $$$B)'
+
+  - name: retag-refs
+    rules:
+      - match: '(navigation_expression $O:__ivar (navigation_suffix $M:simple_identifier))'
+        replace: '(__member @$M (__object $O))'
+      - match: '(navigation_expression $O:__member (navigation_suffix $M:simple_identifier))'
+        replace: '(__member @$M (__object $O))'
+      - match: '(navigation_expression $O:call_expression (navigation_suffix $M:simple_identifier))'
+        replace: '(__member @$M (__object $O))'
+      - match: '(navigation_expression (super_expression) (navigation_suffix $M:simple_identifier))'
+        replace: '(__member @$M (__object (__ivar "super")))'
+      - match: '(navigation_expression $O (navigation_suffix $M:simple_identifier))'
+        replace: '(__member @$M (__object @$O))'
+
+  - name: retag-calls
+    rules:
+      - match: '(call_expression $F:__ivar (call_suffix $$$A))'
+        replace: '(__call (__callee $F) $$$A)'
+      - match: '(call_expression $F:__member (call_suffix $$$A))'
+        replace: '(__call (__callee $F) $$$A)'
+      - match: '(call_expression $F:simple_identifier (call_suffix $$$A))'
+        replace: '(__call (__callee @$F) $$$A)'
+      - match: '(call_expression $F (call_suffix $$$A))'
+        replace: '(__call (__callee @$F) $$$A)'
+
+  - name: classify
+    rules:
+      # Properties and locals: a __def for the graph plus SSA bindings
+      - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier) $V:__call)'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier))'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__call)'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
+      - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__ssa_branch)'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $V)))'
+      - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:simple_identifier)'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs @$V)))'
+      - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $$$V)'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $$$V)))'
+      # Extension property: val T.name get() = ...
+      - match: '(property_declaration (binding_pattern_kind) $R:type_identifier (variable_declaration $N:simple_identifier) $$$V)'
+        replace: '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__property) $$$V))'
+
+      # Assignments
+      - match: '(assignment (directly_assignable_expression $N:__ivar) $R:__call)'
+        replace: '(__binding $N (__rhs $R))'
+      - match: '(assignment (directly_assignable_expression $N:__ivar) $R)'
+        replace: '(__binding $N (__rhs @$R))'
+      - match: '(assignment (directly_assignable_expression $N:simple_identifier) $R:__call)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment (directly_assignable_expression $N:simple_identifier) $R)'
+        replace: '(__binding @$N (__rhs @$R))'
+
+      # Control flow
+      - match: '(if_expression condition: $C consequence: $Q alternative:? $A)'
+        replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
+      - match: '(when_expression $S?:when_subject $$$E:when_entry)'
+        replace: '(__ssa_branch $S $$$E->__ssa_arm)'
+      - match: '(try_expression $B:statements $$$ALTS:catch_block|finally_block)'
+        replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - match: '(for_statement $$$C)'
+        replace: '(__ssa_loop $$$C)'
+      - match: '(while_statement $$$C)'
+        replace: '(__ssa_loop $$$C)'
+      - match: '(do_while_statement $$$C)'
+        replace: '(__ssa_loop $$$C)'
+
+      # Enum entries
+      - match: '(enum_entry $N:simple_identifier $$$R)'
+        replace: '(__def (__defname @$N) (__enum_variant) $$$R)'
+
+      # Functions: extension functions become methods of the receiver type
+      - match: '(function_declaration $M?:modifiers $R:type_identifier $N:simple_identifier $P:function_value_parameters $RT?:type_identifier $B?:function_body)'
+        replace: '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M (__binding "this" (__ssa_typed @$R)) $P $B))'
+      - match: '(function_declaration $M?:modifiers $N:simple_identifier $P:function_value_parameters $RT?:type_identifier $B?:function_body)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
+
+      # Class-likes
+      - match: '(companion_object $N?:type_identifier $B:class_body)'
+        replace: '(__def (__defname "Companion") (__class) $B)'
+      - match: '(object_declaration $N:type_identifier $$$D:__supertype $B?:class_body)'
+        replace: '(__def (__defname @$N) (__class) $$$D $B)'
+      - match: '(class_declaration $M?:modifiers (interface) $N:type_identifier $$$D:__supertype $B?:class_body)'
+        replace: '(__def (__defname @$N) (__interface) $M $$$D $B)'
+      - match: '(class_declaration $M?:modifiers (enum) $N:type_identifier $P?:primary_constructor $$$D:__supertype $B?:enum_class_body)'
+        replace: '(__def (__defname @$N) (__enum) $M $P $$$D $B)'
+      - match: '(class_declaration $M?:modifiers $N:type_identifier $P?:primary_constructor $S:__supertype $$$D:__supertype $B?:class_body)'
+        replace: '(__def (__defname @$N) (__class) $M $P $S $$$D (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
+      - match: '(class_declaration $M?:modifiers $N:type_identifier $P?:primary_constructor $B?:class_body)'
+        replace: '(__def (__defname @$N) (__class) $M $P $B)'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:simple_identifier)'
+        replace: '(__ssa_return (__rhs @$V))'
+
+resolve:
+  display_source: original
+  lookup_from:
+    - __source_root
+  stages:
+    - name: roots
+      rules:
+        - match: '(__dir "kotlin" $$$REST)'
+          replace: '(__dir "kotlin" (__source_root) $$$REST)'
+        - match: '(__dir "src" $$$REST)'
+          replace: '(__dir "src" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          fqn: '@$M|child_sym("__package")'
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("kt:kotlin", "kts:kotlin")'
+      - match: '(__def (__impl))'
+        tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__name "*")'
+        tag:
+          import_type: WildcardImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'

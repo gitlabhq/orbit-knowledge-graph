@@ -150,7 +150,7 @@ tests:
   - name: "Enum members with correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumMember'
+      WHERE d.definition_type = 'EnumVariant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

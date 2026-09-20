@@ -1,8 +1,8 @@
 name: "C# enums — members, explicit values, typed base, [Flags] enum"
 
 # Coverage note: csharp.rs maps enum_declaration to definition_type "Enum"
-# (scope("enum_declaration", "Enum")) and enum_member_declaration to "EnumMember"
-# (scope("enum_member_declaration", "EnumMember").no_scope()). csharp/edge_cases.yaml
+# (scope("enum_declaration", "Enum")) and enum_member_declaration to "EnumVariant"
+# (scope("enum_member_declaration", "EnumVariant").no_scope()). csharp/edge_cases.yaml
 # touches a single EnumMember; there was no focused fixture for enum extraction,
 # enum members under a namespace, a byte-typed enum, or a [Flags] enum.
 
@@ -79,7 +79,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
-        AND m.definition_type = 'EnumMember'
+        AND m.definition_type = 'EnumVariant'
         AND edge.edge_kind = 'Defines'
       RETURN m.name AS name
       ORDER BY m.name
@@ -94,7 +94,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
       WHERE e.fqn = 'Models.Priority'
-        AND m.definition_type = 'EnumMember'
+        AND m.definition_type = 'EnumVariant'
         AND edge.edge_kind = 'Defines'
       RETURN m.name AS name
       ORDER BY m.name
@@ -109,7 +109,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
       WHERE e.fqn = 'Models.Permissions'
-        AND m.definition_type = 'EnumMember'
+        AND m.definition_type = 'EnumVariant'
         AND edge.edge_kind = 'Defines'
       RETURN m.name AS name
       ORDER BY m.name
@@ -125,7 +125,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
-        AND m.definition_type = 'EnumMember'
+        AND m.definition_type = 'EnumVariant'
         AND m.name = 'Active'
         AND edge.edge_kind = 'Defines'
       RETURN m.name AS name

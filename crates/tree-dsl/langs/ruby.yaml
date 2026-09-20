@@ -1,0 +1,345 @@
+# Ruby rewrite rules.
+# Handles: require/require_relative, include/extend/prepend (as supertypes
+# and module imports), constant references as Zeitwerk-style autoload imports
+# (Foo::Bar -> foo/bar under a Rails root), classes, modules, methods,
+# singleton methods, constants and lambdas, attr_* and Rails metaprogramming
+# synthetic definitions, self./@ivar calls, implicit-self calls, control flow.
+#
+# Known gaps (engine, not rules):
+# - Bare constant reads resolve to Constant definitions but the linker only
+#   emits Calls edges for callable definitions.
+# - Bare identifiers cannot be told apart from locals, so implicit-self
+#   calls without parentheses are modeled as this-calls and may over-link.
+# - A require has one wildcard slot per file, so unresolved constants fall
+#   back to the last require.
+
+stages:
+  - name: imports
+    rules:
+      - match: '(call method: (identifier "require_relative") arguments: (argument_list (string $S:string_content)))'
+        replace: '(__import (__visibility "relative") (__source @$S) (__source_path @$S|prepend("./")) (__name "*"))'
+      - match: '(call method: (identifier "require") arguments: (argument_list (string $S:string_content)))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__name "*"))'
+      # include/extend/prepend: each module argument becomes a supertype and an import
+      - match: '(call method: (identifier "include") arguments: (argument_list $$$M:constant|scope_resolution))'
+        replace: '(rb_synth $$$M->rb_include)'
+      - match: '(call method: (identifier "extend") arguments: (argument_list $$$M:constant|scope_resolution))'
+        replace: '(rb_synth $$$M->rb_extend)'
+      - match: '(call method: (identifier "prepend") arguments: (argument_list $$$M:constant|scope_resolution))'
+        replace: '(rb_synth $$$M->rb_prepend)'
+
+      # Metaprogramming: literal symbols become synthetic definitions
+      - match: '(call method: (identifier "attr_accessor") arguments: (argument_list $$$S:simple_symbol))'
+        replace: '(rb_synth $$$S->rb_attr)'
+      - match: '(call method: (identifier "attr_reader") arguments: (argument_list $$$S:simple_symbol))'
+        replace: '(rb_synth $$$S->rb_attr)'
+      - match: '(call method: (identifier "attr_writer") arguments: (argument_list $$$S:simple_symbol))'
+        replace: '(rb_synth $$$S->rb_attr)'
+      - match: '(call method: (identifier "class_attribute") arguments: (argument_list $S:simple_symbol))'
+        replace: '(rb_synth (rb_attr @$S))'
+      - match: '(call method: (identifier "delegate") arguments: (argument_list $$$S:simple_symbol))'
+        replace: '(rb_synth $$$S->rb_method)'
+      - match: '(call method: (identifier "def_delegators") arguments: (argument_list (simple_symbol) $$$S:simple_symbol))'
+        replace: '(rb_synth $$$S->rb_method)'
+      - match: '(call method: (identifier "define_method") arguments: (argument_list $S:simple_symbol) block:? $B)'
+        replace: '(rb_synth (rb_method @$S $B))'
+      - match: '(call method: (identifier "has_many") arguments: (argument_list $S:simple_symbol))'
+        replace: '(rb_synth (rb_method @$S))'
+      - match: '(call method: (identifier "has_one") arguments: (argument_list $S:simple_symbol))'
+        replace: '(rb_synth (rb_method @$S))'
+      - match: '(call method: (identifier "belongs_to") arguments: (argument_list $S:simple_symbol))'
+        replace: '(rb_synth (rb_method @$S))'
+      - match: '(call method: (identifier "scope") arguments: (argument_list $S:simple_symbol $$$L))'
+        replace: '(rb_synth (rb_method @$S $$$L))'
+
+      # send(:m) / public_send(:m) / __send__(:m) → implicit-self call
+      - match: '(call method: (identifier "send") arguments: (argument_list $S:simple_symbol))'
+        replace: '(__call (__callee (__ivar @$S|strip=:)))'
+      - match: '(call method: (identifier "public_send") arguments: (argument_list $S:simple_symbol))'
+        replace: '(__call (__callee (__ivar @$S|strip=:)))'
+      - match: '(call method: (identifier "__send__") arguments: (argument_list $S:simple_symbol))'
+        replace: '(__call (__callee (__ivar @$S|strip=:)))'
+
+  - name: synth
+    rules:
+      - match: '(rb_include)'
+        replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__visibility "include") (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
+      - match: '(rb_extend)'
+        replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__visibility "extend") (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
+      - match: '(rb_prepend)'
+        replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__visibility "prepend") (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
+      - match: '(rb_attr)'
+        replace: '(__def (__defname @$ROOT|strip=:) (__property))'
+      - match: '(rb_method $$$B)'
+        replace: '(__def (__defname @$ROOT|strip=:) (__method) $$$B)'
+
+  - name: constants
+    rules:
+      # Callable constants are lambdas; other constant assignments are constants
+      - match: '(assignment left: $N:constant right: $R:lambda)'
+        replace: '(__def (__defname @$N) (__lambda) $R)'
+      - match: '(assignment left: $N:constant right: (call method: (identifier "lambda") block: $B))'
+        replace: '(__def (__defname @$N) (__lambda) $B)'
+      - match: '(assignment left: $N:constant right: (call method: (identifier "proc") block: $B))'
+        replace: '(__def (__defname @$N) (__lambda) $B)'
+      - match: '(assignment left: $N:constant right: (call receiver: (constant "Proc") method: (identifier "new") block: $B))'
+        replace: '(__def (__defname @$N) (__lambda) $B)'
+      - match: '(assignment left: $N:identifier right: $R:lambda)'
+        replace: '(__def (__defname @$N) (__lambda) $R)'
+      - match: '(assignment left: $N:constant right: $R)'
+        replace: '(__def (__defname @$N) (__constant) $R)'
+      - match: '(assignment left: $N:scope_resolution right: $R)'
+        replace: '(__def (__defname @$N|strip=::) (__constant) $R)'
+
+  - name: normalize
+    rules:
+      - match: '(program $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(return $$$V)'
+        replace: '(__ssa_return $$$V)'
+      - match: '(superclass $S:constant)'
+        replace: '(__supertype @$S)'
+      - match: '(superclass $S:scope_resolution)'
+        replace: '(__supertype @$S|strip=::|split_last("::"))'
+      # Parameters
+      - match: '(optional_parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(splat_parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(hash_splat_parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(keyword_parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(block_parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(method_parameters $$$P)'
+        replace: '(method_parameters $$$P=>__binding)'
+      - match: '(block_parameters $$$P)'
+        replace: '(block_parameters $$$P=>__binding)'
+      - match: '(lambda_parameters $$$P)'
+        replace: '(lambda_parameters $$$P=>__binding)'
+      - match: '(exception_variable $V:identifier)'
+        replace: '(__binding @$V)'
+
+  - name: retag-calls
+    rules:
+      # self.m() → this-call
+      - match: '(call receiver: (self) method: $M:identifier arguments:? $A block:? $B)'
+        replace: '(__call (__callee (__ivar @$M)) $A $B)'
+      # @x.m()
+      - match: '(call receiver: $R:instance_variable method: $M:identifier arguments:? $A block:? $B)'
+        replace: '(__call (__callee (__member @$M (__object (__ivar @$R|strip=@)))) $A $B)'
+      # Const.new / Const::Nested.new → constructor call plus autoload import
+      - match: '(call receiver: $R:constant method: (identifier "new") arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+      - match: '(call receiver: $R:scope_resolution method: (identifier "new") arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R|split_last("::"))) (__call (__callee @$R|split_last("::")) $A $B))'
+      # Rails finders and builders return instances of the receiver constant
+      - match: '(call receiver: $R:constant method: (identifier "find") arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+      - match: '(call receiver: $R:constant method: (identifier "find_by") arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+      - match: '(call receiver: $R:constant method: (identifier "create") arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+      - match: '(call receiver: $R:constant method: (identifier "create!") arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+      - match: '(call receiver: $R:constant method: (identifier "build") arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+      # Const.m / Const::Nested.m → member call plus autoload import
+      - match: '(call receiver: $R:constant method: $M:identifier arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee (__member @$M (__object @$R))) $A $B))'
+      - match: '(call receiver: $R:scope_resolution method: $M:identifier arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R|split_last("::"))) (__call (__callee (__member @$M (__object @$R|split_last("::")))) $A $B))'
+      # chained: f().m() and x.m()
+      - match: '(call receiver: $R:__call method: $M:identifier arguments:? $A block:? $B)'
+        replace: '(__call (__callee (__member @$M (__object $R))) $A $B)'
+      - match: '(call receiver: $R:rb_ref method: $M:identifier arguments:? $A block:? $B)'
+        replace: '(__call (__callee (__member @$M (__object $R))) $A $B)'
+      - match: '(call receiver: $R:identifier method: $M:identifier arguments:? $A block:? $B)'
+        replace: '(__call (__callee (__member @$M (__object @$R))) $A $B)'
+      - match: '(call receiver: $R method: $M:identifier arguments:? $A block:? $B)'
+        replace: '(__call (__callee (__member @$M (__object @$R))) $A $B)'
+      # m(...) → implicit self
+      - match: '(call method: $M:identifier arguments:? $A block:? $B)'
+        replace: '(__call (__callee (__ivar @$M)) (__member (__object @$M)) $A $B)'
+
+  - name: classify
+    rules:
+      # Bindings
+      - match: '(assignment left: $L:instance_variable right: $R:__call)'
+        replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
+      - match: '(assignment left: $L:instance_variable right: $R:rb_ref)'
+        replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
+      - match: '(assignment left: $L:instance_variable right: $R:constant)'
+        replace: '(__binding (__ivar @$L|strip=@) (__rhs (__call (__callee @$R))))'
+      - match: '(assignment left: $L:instance_variable right: $R)'
+        replace: '(__binding (__ivar @$L|strip=@) (__rhs @$R))'
+      - match: '(assignment left: $L:identifier right: $R:__call)'
+        replace: '(__binding @$L (__rhs $R))'
+      - match: '(assignment left: $L:identifier right: $R:rb_ref)'
+        replace: '(__binding @$L (__rhs $R))'
+      - match: '(assignment left: $L:identifier right: $R:__ssa_branch)'
+        replace: '(__binding @$L (__rhs $R))'
+      - match: '(assignment left: $L:identifier right: $R:constant)'
+        replace: '(__binding @$L (__rhs (__call (__callee @$R))))'
+      - match: '(assignment left: $L:identifier right: $R:identifier)'
+        replace: '(__binding @$L (__rhs (__call (__callee (__ivar @$R)) (__member (__object @$R)))))'
+      - match: '(assignment left: $L:identifier right: $R)'
+        replace: '(__binding @$L (__rhs @$R))'
+
+      # Control flow
+      - match: '(if condition: $C consequence:? $Q alternative:? $A)'
+        replace: '(__ssa_branch $C (__ssa_arm? $Q) (__ssa_arm? $A))'
+      - match: '(elsif condition: $C consequence:? $Q alternative:? $A)'
+        replace: '(__ssa_branch $C (__ssa_arm? $Q) (__ssa_arm? $A))'
+      - match: '(unless condition: $C consequence:? $Q alternative:? $A)'
+        replace: '(__ssa_branch $C (__ssa_arm? $Q) (__ssa_arm? $A))'
+      - match: '(if_modifier body: $B condition: $C)'
+        replace: '(__ssa_branch $C (__ssa_arm $B))'
+      - match: '(unless_modifier body: $B condition: $C)'
+        replace: '(__ssa_branch $C (__ssa_arm $B))'
+      - match: '(conditional condition: $C consequence: $Q alternative: $A)'
+        replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
+      - match: '(case value:? $V $$$W:when|else)'
+        replace: '(__ssa_branch $V $$$W->__ssa_arm)'
+      - match: '(begin $$$BODY $R:rescue $$$ALTS)'
+        replace: '(__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm)'
+      - match: '(body_statement $$$BODY $R:rescue $$$ALTS)'
+        replace: '(body_statement (__ssa_branch (__ssa_arm $$$BODY) (__ssa_arm $R) $$$ALTS->__ssa_arm))'
+      - match: '(while body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(until body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(for body: $B)'
+        replace: '(__ssa_loop $B)'
+
+      # Definitions
+      - match: '(method name: $N parameters:? $P body:? $B)'
+        replace: '(__def (__defname @$N) (__method) $P $B)'
+      - match: '(singleton_method object: (self) name: $N parameters:? $P body:? $B)'
+        replace: '(__def (__defname @$N) (__method) $P $B)'
+      - match: '(singleton_class value: (self) body: $B)'
+        replace: '(rb_singleton $B)'
+      - match: '(class name: $N superclass: $S:__supertype body:? $B)'
+        replace: '(__def (__defname @$N|strip=::) (__class) $S (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
+      - match: '(class name: $N body:? $B)'
+        replace: '(__def (__defname @$N|strip=::) (__class) $B)'
+      - match: '(module name: $N body:? $B)'
+        replace: '(__def (__defname @$N|strip=::) (__class) $B)'
+
+  - name: refs
+    rules:
+      # Remaining bare identifiers: implicit-self calls (may be locals)
+      - match: '(identifier)'
+        replace: '(__call (__callee (__ivar @$ROOT)) (__member (__object @$ROOT)))'
+      # Remaining bare constants: references
+      - match: '(constant)'
+        replace: '(__call (__callee @$ROOT))'
+      - match: '(scope_resolution)'
+        replace: '(__call (__callee (__member @$ROOT|split_last("::") (__object @$ROOT|strip=::|regex_replace("::[^:]+$", "")))))'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:instance_variable)'
+        replace: '(__ssa_return (__rhs (__ivar @$V|strip=@)))'
+
+resolve:
+  display_source: original
+  lookup_from:
+    - __source_root
+  stages:
+    - name: roots
+      rules:
+        - match: '(__dir "models" $$$REST)'
+          replace: '(__dir "models" (__source_root) $$$REST)'
+        - match: '(__dir "concerns" $$$REST)'
+          replace: '(__dir "concerns" (__source_root) $$$REST)'
+        - match: '(__dir "services" $$$REST)'
+          replace: '(__dir "services" (__source_root) $$$REST)'
+        - match: '(__dir "controllers" $$$REST)'
+          replace: '(__dir "controllers" (__source_root) $$$REST)'
+        - match: '(__dir "workers" $$$REST)'
+          replace: '(__dir "workers" (__source_root) $$$REST)'
+        - match: '(__dir "helpers" $$$REST)'
+          replace: '(__dir "helpers" (__source_root) $$$REST)'
+        - match: '(__dir "policies" $$$REST)'
+          replace: '(__dir "policies" (__source_root) $$$REST)'
+        - match: '(__dir "finders" $$$REST)'
+          replace: '(__dir "finders" (__source_root) $$$REST)'
+        - match: '(__dir "jobs" $$$REST)'
+          replace: '(__dir "jobs" (__source_root) $$$REST)'
+        - match: '(__dir "mailers" $$$REST)'
+          replace: '(__dir "mailers" (__source_root) $$$REST)'
+        - match: '(__dir "lib" $$$REST)'
+          replace: '(__dir "lib" (__source_root) $$$REST)'
+        - match: '(__dir "app" $$$REST)'
+          replace: '(__dir "app" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("rb:ruby")'
+      - match: '(__def)'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat("::", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+          import_type: Require
+      - match: '(__import (__visibility "relative"))'
+        tag: { import_type: RequireRelative }
+      - match: '(__import (__visibility "include"))'
+        tag: { import_type: Include }
+      - match: '(__import (__visibility "extend"))'
+        tag: { import_type: Extend }
+      - match: '(__import (__visibility "prepend"))'
+        tag: { import_type: Prepend }
+      - match: '(__import (__visibility "autoload"))'
+        tag: { import_type: Autoload }
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'
