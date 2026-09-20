@@ -58,10 +58,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
 | **All project links** (repos, epics, infra, people, Helm charts) | `README.md` (single source of truth) |
-| Code history / dead code investigation | `/code-history` skill |
-| AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Orbit issue, epic, and MR planning taxonomy | `/orbit-planning` skill |
-| Related repos and local paths | `/related-repositories` skill; Orbit consumes Siphon and NATS but does not own them |
 | Iglu schemas (committed; codegen'd at build) | `config/schemas/iglu/<name>/<version>.json` (update via `mise vendor -- iglu`) |
 | Iglu version pins | `vendored.iglu.pins` in `config/versions.yaml` (edit pin, then `mise vendor -- iglu` to fetch; check via `mise check:vendored -- iglu`) |
 | Analytics event definition | `config/events/gkg_query_executed.yml` |

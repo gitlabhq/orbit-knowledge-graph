@@ -252,3 +252,18 @@ fn gql_order_by_across_traversal() {
     );
     assert!(r.is_ok(), "{}", r.unwrap_err());
 }
+
+#[test]
+fn gql_property_to_property_comparison() {
+    let r = compile_gql(
+        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) \
+         WHERE u.username <> n.confidential RETURN n.confidential",
+    );
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+    let sql = r.unwrap().base.render();
+    assert!(
+        sql.contains("u.username != n.confidential")
+            || sql.contains("u.username <> n.confidential"),
+        "property-to-property comparison missing: {sql}"
+    );
+}
