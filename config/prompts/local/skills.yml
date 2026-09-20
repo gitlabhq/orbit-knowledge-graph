@@ -1,10 +1,10 @@
 name: skills
-version: 1.4.0
-short: Read bundled agent skill files with `skills get`
+version: 1.5.0
+short: Read instance-matched agent skill files with `skills get`
 description: >-
-  Read bundled agent skill files with `skills get`.
+  Read instance-matched agent skill files with `skills get`.
 
 
-  With no argument, prints the orbit-cli skill followed by a list of any other available skills.
-  Use `skills get orbit` with an optional path relative to the skill root to print a bundled file.
+  With no argument, lists skills from the selected GitLab instance, or from the embedded local tree when offline.
+  Use `skills get orbit` with an optional path relative to the composed skill root.
   The path defaults to `SKILL.md`.
