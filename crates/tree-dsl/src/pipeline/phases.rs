@@ -1,10 +1,11 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::file_tree::ProjectTree;
 use crate::pattern::EdgeCtx;
 use crate::tree::{Edge, Tree};
 use crate::treesitter::SupportLang;
-use crate::{file_tree, linker, pattern, treesitter};
+use crate::{linker, pattern, treesitter};
 
 use super::types::{Env, State};
 
@@ -39,15 +40,14 @@ pub fn parse(env: &Env, state: &mut State, files: Vec<(String, String)>) {
 
 pub fn resolve(env: &Env, state: &mut State, dirty_fis: FxHashSet<usize>) {
     let paths: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
-    let dummy: Vec<(String, String)> = paths.iter().map(|p| (p.clone(), String::new())).collect();
-    let walk = file_tree::walk(&paths, &dummy, &env.lang, &env.resolve_config);
+    let prefixes = ProjectTree::build(&env.lang, &env.resolve_config, &paths, None);
     let result = state.resolver.resolve(
         &state.trees,
         &state.edges,
         &env.lang,
         &dirty_fis,
         env.lang_id,
-        &walk.lookup_prefixes,
+        &prefixes,
         &env.resolve_config.external,
     );
     for rsp in &result.resolved_source_paths {

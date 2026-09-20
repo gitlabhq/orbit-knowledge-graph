@@ -4,7 +4,6 @@ pub mod dsl;
 pub mod file_tree;
 pub mod intern;
 pub mod linker;
-pub mod paths;
 pub mod pipeline;
 pub mod resolver;
 pub mod ssa;

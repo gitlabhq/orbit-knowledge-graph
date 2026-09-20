@@ -4,12 +4,10 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::{self as canonical, Canonical as C};
+use crate::constants::{PATH_SEP, WILDCARD};
 use crate::intern::Lang;
 use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
 use crate::treesitter::SupportLang;
-
-use crate::constants::WILDCARD;
-use crate::paths;
 
 pub const CLASS_LIKE: &[C] = &[C::Class, C::Struct, C::ImplBlock];
 
@@ -139,7 +137,7 @@ impl Resolver {
     ) -> ResolveResult {
         let index_names = support_lang.index_names();
         let labels: Vec<String> = trees.iter().map(|t| t.label.clone()).collect();
-        self.file_index = paths::build_file_index(&labels, support_lang, index_names);
+        self.file_index = build_file_index(&labels, support_lang, index_names);
 
         self.visible.resize_with(trees.len(), Default::default);
         for &fi in dirty_fis {
@@ -317,7 +315,7 @@ fn gather_imports_for(
                         return;
                     };
                     let source_str = lang.syms.resolve(source_sym).to_string();
-                    if paths::is_external(&source_str, external) {
+                    if is_external(&source_str, external) {
                         return;
                     }
                     let resolved_tag_key = lang.syms.intern("resolved_source");
@@ -326,17 +324,17 @@ fn gather_imports_for(
                     };
                     let target_path = lang.syms.resolve(resolved_sym).to_string();
                     let node_idx = cur.index();
-                    let candidates =
-                        match paths::resolve_path(&target_path, file_index, lookup_prefixes) {
-                            Some(tfi) => {
-                                Either::Left(std::iter::once((tfi, target_path.clone(), false)))
-                            }
-                            None => Either::Right(cur.names().filter_map(|c| {
-                                let submod = paths::join(&target_path, lang.syms.resolve(c.sym()));
-                                paths::resolve_path(&submod, file_index, lookup_prefixes)
-                                    .map(|sub_fi| (sub_fi, submod, true))
-                            })),
-                        };
+                    let candidates = match resolve_path(&target_path, file_index, lookup_prefixes) {
+                        Some(tfi) => {
+                            Either::Left(std::iter::once((tfi, target_path.clone(), false)))
+                        }
+                        None => Either::Right(cur.names().filter_map(|c| {
+                            let submod =
+                                format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
+                            resolve_path(&submod, file_index, lookup_prefixes)
+                                .map(|sub_fi| (sub_fi, submod, true))
+                        })),
+                    };
                     for (tfi, path, is_sub) in candidates {
                         if is_sub {
                             edges.push(Edge::new(
@@ -432,7 +430,7 @@ fn name_targets(ctx: &ResolveCtx, tfi: usize, c: Cursor) -> Vec<Loc> {
         return vec![loc];
     }
     let target_path = ctx.lang.syms.resolve(ctx.corpus.jump(tfi as u32, 0).sym());
-    paths::resolve_submodule(
+    resolve_submodule(
         target_path,
         ctx.lang.syms.resolve(ns),
         ctx.support_lang,
@@ -634,4 +632,68 @@ fn resolve_type(
         }
     }
     None
+}
+
+fn build_file_index(
+    labels: &[String],
+    support_lang: SupportLang,
+    index_names: &[String],
+) -> FxHashMap<String, usize> {
+    let mut idx: FxHashMap<String, usize> =
+        FxHashMap::with_capacity_and_hasher(labels.len() * 3, Default::default());
+    for (fi, path) in labels.iter().enumerate() {
+        let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
+        let stem = file_lang.strip_extension(path);
+        idx.insert(path.clone(), fi);
+        idx.insert(stem.to_string(), fi);
+        for name in index_names {
+            let suffix = format!("{PATH_SEP}{name}");
+            if stem.ends_with(&suffix) {
+                let pkg = &stem[..stem.len() - suffix.len()];
+                if !pkg.is_empty() {
+                    idx.insert(pkg.to_string(), fi);
+                }
+            } else if stem == name.as_str() {
+                idx.insert(String::new(), fi);
+            }
+        }
+    }
+    idx
+}
+
+fn is_external(source_str: &str, external: &[String]) -> bool {
+    external
+        .iter()
+        .any(|e| e == source_str.split(PATH_SEP).next().unwrap_or(source_str))
+}
+
+fn resolve_path(
+    target: &str,
+    file_index: &FxHashMap<String, usize>,
+    prefixes: &[String],
+) -> Option<usize> {
+    file_index.get(target).copied().or_else(|| {
+        prefixes.iter().find_map(|p| {
+            let c = if p.is_empty() {
+                target.to_string()
+            } else {
+                format!("{p}{PATH_SEP}{target}")
+            };
+            file_index.get(&c).copied()
+        })
+    })
+}
+
+fn resolve_submodule(
+    target_path: &str,
+    name: &str,
+    support_lang: SupportLang,
+    index_names: &[String],
+    file_index: &FxHashMap<String, usize>,
+) -> Option<usize> {
+    let stem = support_lang.strip_extension(target_path);
+    let dir = index_names
+        .iter()
+        .find_map(|idx| stem.strip_suffix(&format!("{PATH_SEP}{idx}")))?;
+    file_index.get(&format!("{dir}{PATH_SEP}{name}")).copied()
 }
