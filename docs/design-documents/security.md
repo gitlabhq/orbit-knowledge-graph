@@ -57,6 +57,20 @@ sequenceDiagram
     Workhorse-->>-Client: 13. Return final, redacted data
 ```
 
+## Token Gateway: Fine-Grained Personal Access Tokens
+
+Fine-grained personal access tokens follow the Global Search pattern. Rails runs one token check before the route. The check answers one question: may this token call this route for this container? After that check the token is not read again. Results follow the token owner's access through Layers 1 to 3.
+
+- The Orbit **Read** permission (`read_orbit`) lists three scopes: project, group, and user. The Orbit MCP tool **Execute** permission lists only the user scope, the same as the GitLab MCP server permission.
+- Each REST route accepts an optional `namespace_id` or `project_id`. Rails resolves the group or project boundary from that parameter. A route declares three boundaries: group, project, and user. Any match passes.
+- A user-scoped token needs no parameter. A group- or project-scoped token must name its container. A request without a container, or with a container outside the token scope, returns `403`. A container the owner cannot read returns `404`.
+- MCP takes the container as an argument on the `invoke_command` tool. Rails runs the same read check for that container on each call. The MCP URL and OAuth registration stay fixed.
+- When a request names a container, Rails keeps only the traversal paths inside that container before it signs the JWT. Layer 2 then filters to that subtree. Aggregations narrow the same way. This applies to every caller, not only fine-grained tokens. An admin who names a container gets the narrowed paths instead of the admin claim.
+- Orbit does not read the other permissions on the token. A token without the Work item **Read** permission still gets work items from Orbit when the owner can read them in GitLab.
+- Orbit adds no section or toggle of its own to the token UI, and does not parse queries for namespaces.
+
+Prior art in Rails: the [Global Search manifest](https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/authz/permission_groups/assignable_permissions/search/global_search/use.yml) and [routes](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/search.rb), the [Markdown route](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/markdown.rb) with a parameter boundary, and the [MCP tool re-dispatch](https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/services/mcp/tools/base/api_tool.rb).
+
 ## Layer 1: Logical Tenant Segregation by Organization
 
 The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). A user's `SecurityContext` carries the exact set of traversal paths that Rails authorized. The compiler injects `startsWith(traversal_path, ?)` predicates for each path, so queries are scoped to exactly those namespaces, regardless of which organization(s) the paths belong to.
