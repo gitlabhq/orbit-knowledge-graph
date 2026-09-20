@@ -576,6 +576,14 @@ impl<'a> Validator<'a> {
                     .and_then(|n| n.entity.as_deref());
                 if let Some(entity) = entity {
                     self.check_field(entity, prop)?;
+                    if !self
+                        .ontology
+                        .check_field_flag(entity, prop, |f| f.filterable)
+                    {
+                        return Err(QueryError::AllowlistRejected(format!(
+                            "join predicate on \"{prop}\" for {entity}: field is not filterable"
+                        )));
+                    }
                 }
             }
         }
