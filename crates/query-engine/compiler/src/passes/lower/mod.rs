@@ -63,7 +63,7 @@ impl EmitOutput {
 }
 
 pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
-    match &plan.body {
+    let mut node = match &plan.body {
         PlanBody::Traversal => traversal::emit_traversal(plan),
         PlanBody::Aggregation {
             aggregations,
@@ -95,7 +95,34 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
             input.hydration_dynamic,
             input.path_segment_budget,
         ),
+    }?;
+
+    if !input.join_predicates.is_empty() {
+        if let Node::Query(q) = &mut node {
+            for jp in &input.join_predicates {
+                let op = match jp.op {
+                    FilterOp::Eq => Op::Eq,
+                    FilterOp::Ne => Op::Ne,
+                    FilterOp::Gt => Op::Gt,
+                    FilterOp::Lt => Op::Lt,
+                    FilterOp::Gte => Op::Ge,
+                    FilterOp::Lte => Op::Le,
+                    _ => Op::Eq,
+                };
+                let pred = Expr::binary(
+                    op,
+                    Expr::col(&jp.lhs_node, &jp.lhs_prop),
+                    Expr::col(&jp.rhs_node, &jp.rhs_prop),
+                );
+                q.where_clause = Some(match q.where_clause.take() {
+                    Some(existing) => Expr::and(existing, pred),
+                    None => pred,
+                });
+            }
+        }
     }
+
+    Ok(node)
 }
 
 pub fn lower(input: &mut Input) -> Result<Node> {

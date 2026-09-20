@@ -96,6 +96,7 @@ pub(super) struct Comparison<'i> {
     pub property: Property<'i>,
     pub op: FilterOp,
     pub value: Option<Value>,
+    pub rhs_property: Option<Property<'i>>,
 }
 
 pub(super) enum Projections<'i> {
