@@ -180,6 +180,28 @@ fn cache_miss_then_304_downloads_content_exactly_once() {
         .find(|path| path.ends_with(".orbit-cache.json"))
         .unwrap();
     let manifest_before_304 = std::fs::read(&cache_manifest).unwrap();
+    #[cfg(unix)]
+    let (stale_stage, stale_old, fresh_stage) = {
+        let skill_root = std::path::Path::new(&cache_manifest)
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let stale_stage = skill_root.join(".stage-interrupted");
+        let stale_old = skill_root.join(".old-interrupted");
+        let fresh_stage = skill_root.join(".stage-active");
+        for path in [&stale_stage, &stale_old, &fresh_stage] {
+            std::fs::create_dir(path).unwrap();
+        }
+        let stale_time = std::time::SystemTime::now() - Duration::from_secs(20 * 60);
+        for path in [&stale_stage, &stale_old] {
+            std::fs::File::open(path)
+                .unwrap()
+                .set_modified(stale_time)
+                .unwrap();
+        }
+        (stale_stage, stale_old, fresh_stage)
+    };
     let hit = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
     let manifest_after_304 = std::fs::read(cache_manifest).unwrap();
     assert!(miss.status.success(), "{}", stderr(&miss));
@@ -187,6 +209,12 @@ fn cache_miss_then_304_downloads_content_exactly_once() {
     assert_eq!(miss.stdout, hit.stdout);
     assert_eq!(manifest_before_304, manifest_after_304);
     assert!(String::from_utf8_lossy(&hit.stdout).contains("Remote v1"));
+    #[cfg(unix)]
+    {
+        assert!(!stale_stage.exists());
+        assert!(!stale_old.exists());
+        assert!(fresh_stage.exists());
+    }
 
     let requests = server.join().unwrap();
     assert_eq!(requests.len(), 2);
