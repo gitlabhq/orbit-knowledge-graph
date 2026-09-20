@@ -13576,6 +13576,7 @@ dependencies = [
  "pest_consume",
  "pest_derive",
  "rayon",
+ "regex",
  "rkyv",
  "rustc-hash 2.1.3",
  "serde",

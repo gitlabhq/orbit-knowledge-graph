@@ -16,6 +16,14 @@ pub(crate) fn parse(c: &mut Ctx<'_>, src: &str) -> Pat {
     visit_element(c, root.into_children().next().unwrap(), 0)
 }
 
+pub(crate) fn parse_pipeline(c: &mut Ctx<'_>, src: &str) -> Tf {
+    let root = <PatParser as pest_consume::Parser>::parse(Rule::Pipeline, src)
+        .unwrap_or_else(|e| panic!("pipeline parse error: {e}"))
+        .single()
+        .expect("Pipeline produces one pair");
+    visit_tf_chain(c, root.into_children().next().unwrap())
+}
+
 #[pest_consume::parser]
 impl PatParser {}
 

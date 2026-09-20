@@ -38,6 +38,7 @@ indextree = "4.9"
 lasso = { version = "0.7", features = ["multi-threaded", "ahasher"] }
 strum = { workspace = true }
 rayon = { workspace = true }
+regex = "1"
 termtree = "1.0"
 serde_json = { workspace = true }
 toml = { workspace = true }

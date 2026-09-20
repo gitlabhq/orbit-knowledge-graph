@@ -307,33 +307,7 @@ fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> (u16, Tf) {
         };
         let slot = ctx.slot(slot_name);
         match pipeline {
-            Some(pipe) => {
-                let steps: Vec<Tf> = pipe
-                    .split('|')
-                    .map(|seg| {
-                        if let Some((name, raw_args)) = seg.split_once('(') {
-                            let raw_args = raw_args.trim_end_matches(')');
-                            let args: Vec<&str> = if raw_args.is_empty() {
-                                vec![]
-                            } else {
-                                raw_args
-                                    .split(',')
-                                    .map(|a| a.trim().trim_matches('"'))
-                                    .collect()
-                            };
-                            Tf::from_func(name, &args, Some(ctx))
-                        } else {
-                            Tf::from_func(seg, &[], Some(ctx))
-                        }
-                    })
-                    .collect();
-                let tf = if steps.len() == 1 {
-                    steps.into_iter().next().unwrap()
-                } else {
-                    Tf::Pipeline(steps)
-                };
-                (slot, tf)
-            }
+            Some(pipe) => (slot, crate::dsl::parser::parse_pipeline(ctx, pipe)),
             None => (slot, Tf::Id),
         }
     } else {

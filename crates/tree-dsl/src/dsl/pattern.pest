@@ -4,6 +4,7 @@
 // Templates:        (__kind @$Cap|tf (__child? @$Ref->__rekind) $$$Var->__name)
 
 Pattern  =  { SOI ~ SP? ~ Element ~ SP? ~ EOI }
+Pipeline =  { SOI ~ TfChain ~ EOI }
 Element  = _{ Node | Variadic | CapRef | Spread | Capture | Negation | Descendant }
 
 // ── S-expression node ──────────────────────────────────────────────

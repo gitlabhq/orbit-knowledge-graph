@@ -59,6 +59,18 @@ impl Tf {
             "field" => Tf::Field(ctx.as_mut().expect("needs context").intern_field(args[0])),
             "child_sym" => Tf::Child(kind(&mut ctx, args[0])),
             "parent_sym" => Tf::ParentSym(kind(&mut ctx, args[0])),
+            "regex_replace" => {
+                let re = regex::Regex::new(args[0]).expect("invalid regex");
+                Tf::Regex(re, s(1))
+            }
+            "regex_loop" => {
+                let re = regex::Regex::new(args[0]).expect("invalid regex");
+                Tf::RegexLoop(re, s(1))
+            }
+            "regex_match" => {
+                let re = regex::Regex::new(args[0]).expect("invalid regex");
+                Tf::RegexMatch(re)
+            }
             "ancestor_sym" => Tf::AncestorSym(kind(&mut ctx, args[0])),
             "ancestor_tag" => {
                 let key = ctx
@@ -154,6 +166,19 @@ impl Tf {
                 }
                 s.to_string()
             }
+            Tf::Regex(re, replacement) => re.replace_all(s, &**replacement).to_string(),
+            Tf::RegexLoop(re, replacement) => {
+                let mut cur = s.to_string();
+                loop {
+                    let next = re.replace_all(&cur, &**replacement).to_string();
+                    if next == cur {
+                        break;
+                    }
+                    cur = next;
+                }
+                cur
+            }
+            Tf::RegexMatch(re) => if re.is_match(s) { "true" } else { "false" }.to_string(),
             _ => s.to_string(),
         }
     }

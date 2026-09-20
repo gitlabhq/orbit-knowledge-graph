@@ -4,11 +4,11 @@
 use rustc_hash::FxHashMap;
 
 use crate::canonical::Canonical as C;
+use crate::constants::PATH_SEP;
 use crate::intern::Lang;
 use crate::pattern;
 use crate::rules::{ParseFileSpec, ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tree};
-use crate::constants::{PATH_SEP};
 
 pub struct WalkResult {
     /// Paths to try as prefixes when resolving absolute imports.

@@ -35,6 +35,9 @@ pub enum Tf {
     AncestorTag(u32),
     Tag(u32),
     LitSym(u32),
+    Regex(regex::Regex, Box<str>),
+    RegexLoop(regex::Regex, Box<str>),
+    RegexMatch(regex::Regex),
 }
 
 impl Tf {

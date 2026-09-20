@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use crate::constants::{PATH_SEP, RELATIVE_SELF, RELATIVE_PARENT, RELATIVE_DOTDOT, RELATIVE_DOT};
+use crate::constants::{PATH_SEP, RELATIVE_DOT, RELATIVE_DOTDOT, RELATIVE_PARENT, RELATIVE_SELF};
 use crate::treesitter::SupportLang;
 
 pub fn build_file_index(
@@ -39,9 +39,7 @@ pub fn is_index_file(path: &str, support_lang: SupportLang, index_names: &[Strin
 }
 
 pub fn resolve_import_source(source_str: &str, current_file: &str) -> String {
-    if source_str.starts_with(RELATIVE_SELF)
-        || source_str.starts_with(RELATIVE_PARENT)
-    {
+    if source_str.starts_with(RELATIVE_SELF) || source_str.starts_with(RELATIVE_PARENT) {
         resolve_relative(current_file, source_str)
     } else {
         source_str.to_string()
