@@ -1,0 +1,226 @@
+# Go rewrite rules.
+# Handles: package clause, imports, struct/interface/func/method defs,
+# receiver methods (as __impl wrappers named after the receiver type),
+# composite literals as typed bindings, selector calls, control flow.
+#
+# Known gaps (engine, not rules):
+# - Same-package cross-file resolution needs a package namespace; the
+#   resolver is import-driven, and Go files do not import siblings.
+# - The DSL cannot see a node's parent, so package-level and function-local
+#   var/const declarations get the same treatment: every var/const is a
+#   __def plus an SSA __binding.
+
+stages:
+  - name: normalize
+    rules:
+      - match: '(source_file $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(package_clause $P:package_identifier)'
+        replace: '(__package @$P)'
+      - match: '(return_statement $$$VALS)'
+        replace: '(__ssa_return $$$VALS)'
+
+      # *T and T[...] collapse to the bare type identifier (field is kept)
+      - match: '(generic_type type: $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+      - match: '(pointer_type $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+
+      # T{...} composite literal: keep the type name, keep the body for nested calls
+      - match: '(composite_literal type: $T:type_identifier body: $B)'
+        replace: '(__struct_lit @$T $B)'
+      - match: '(unary_expression operand: $O:__struct_lit)'
+        replace: '$O'
+
+      # Parameters: typed → SSA-typed binding; grouped `a, b T` → two bindings
+      - match: '(parameter_declaration name: $A:identifier name: $B:identifier type: $T:type_identifier)'
+        replace: '(parameter_declaration (__binding @$A (__ssa_typed @$T)) (__binding @$B (__ssa_typed @$T)))'
+      - match: '(parameter_declaration name: $N:identifier type: $T:type_identifier)'
+        replace: '(__binding @$N (__ssa_typed @$T))'
+      - match: '(parameter_declaration name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(variadic_parameter_declaration name: $N:identifier)'
+        replace: '(__binding @$N)'
+
+  - name: retag-refs
+    rules:
+      - match: '(selector_expression operand: $O:__member field: $F)'
+        replace: '(__member @$F (__object $O))'
+      - match: '(selector_expression operand: $O field: $F)'
+        replace: '(__member @$F (__object @$O))'
+
+  - name: retag-calls
+    rules:
+      - match: '(call_expression function: $F:__member arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
+      - match: '(call_expression function: $F arguments: $A)'
+        replace: '(__call (__callee @$F) $A)'
+
+  - name: imports
+    rules:
+      # alias "path/pkg"
+      - match: '(import_spec name: $A:package_identifier path: (interpreted_string_literal $P:interpreted_string_literal_content))'
+        replace: '(__import (__source @$P) (__source_path @$P) (__name @$P|split_last("/") (__alias @$A)))'
+      # . "path/pkg" — every exported name of pkg enters scope
+      - match: '(import_spec name: (dot) path: (interpreted_string_literal $P:interpreted_string_literal_content))'
+        replace: '(__import (__source @$P) (__source_path @$P) (__name @$P|split_last("/") (__ssa_hint "*")))'
+      # "path/pkg" and _ "path/pkg"
+      - match: '(import_spec path: (interpreted_string_literal $P:interpreted_string_literal_content))'
+        replace: '(__import (__source @$P) (__source_path @$P) (__name @$P|split_last("/")))'
+
+  - name: classify
+    rules:
+      # Bindings: x := T{} / x := f() / x := y
+      - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
+        replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
+      - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__call))'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R))'
+        replace: '(__binding @$N (__rhs @$R))'
+      - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
+        replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
+      - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__call))'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R))'
+        replace: '(__binding @$N (__rhs @$R))'
+
+      # var/const: a __def for the graph plus a __binding for SSA
+      - match: '(var_spec name: $N:identifier type: $T:type_identifier value: (expression_list $V))'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
+      - match: '(var_spec name: $N:identifier type: $T:type_identifier)'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$T)))'
+      - match: '(var_spec name: $N:identifier value: (expression_list $V:__struct_lit))'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__ssa_typed @$V) (__rhs $V)))'
+      - match: '(var_spec name: $N:identifier value: (expression_list $V:__call))'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs $V)))'
+      - match: '(var_spec name: $N:identifier value: (expression_list $V))'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs @$V)))'
+      - match: '(var_spec name: $N:identifier)'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N))'
+      - match: '(const_spec name: $N:identifier)'
+        replace: '(__def (__defname @$N) (__constant))'
+
+      # Control flow
+      - match: '(if_statement initializer:? $I condition: $COND consequence: $C alternative:? $A)'
+        replace: '(__ssa_branch $I $COND (__ssa_arm $C) (__ssa_arm? $A))'
+      - match: '(expression_switch_statement value:? $V $$$CASES:expression_case|default_case)'
+        replace: '(__ssa_branch $V $$$CASES->__ssa_arm)'
+      - match: '(type_switch_statement $$$CASES:type_case|default_case)'
+        replace: '(__ssa_branch $$$CASES->__ssa_arm)'
+      - match: '(select_statement $$$CASES:communication_case|default_case)'
+        replace: '(__ssa_branch $$$CASES->__ssa_arm)'
+      - match: '(for_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+
+      # Struct fields: named → field def; embedded → supertype
+      - match: '(field_declaration name: $N:field_identifier)'
+        replace: '(__def (__defname @$N) (__field_def))'
+      - match: '(field_declaration type: $T:type_identifier)'
+        replace: '(__supertype @$T)'
+
+      # Interface method signatures
+      - match: '(method_elem name: $N parameters: $P result:? $RT:type_identifier)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
+
+      # Types
+      - match: '(type_spec name: $N type: (struct_type (field_declaration_list $$$F)))'
+        replace: '(__def (__defname @$N) (__struct) $$$F)'
+      - match: '(type_spec name: $N type: (interface_type $$$M))'
+        replace: '(__def (__defname @$N) (__interface) $$$M)'
+      - match: '(type_spec name: $N)'
+        replace: '(__def (__defname @$N) (__type_alias))'
+      - match: '(type_alias name: $N)'
+        replace: '(__def (__defname @$N) (__type_alias))'
+
+      # Functions
+      - match: '(function_declaration name: $N parameters: $P result:? $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+
+      # Receiver methods: wrapped in an __impl named after the receiver type,
+      # so method lookup on the struct reaches them via same-name defs.
+      - match: '(method_declaration receiver: (parameter_list $R:(__binding $T:__ssa_typed)) name: $N parameters: $P result:? $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $R $P $B))'
+      - match: '(method_declaration receiver: (parameter_list (parameter_declaration type: $T:type_identifier)) name: $N parameters: $P result:? $RT:type_identifier body: $B)'
+        replace: '(__def (__defname @$T) (__impl) (__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P $B))'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return (expression_list $V:__struct_lit))'
+        replace: '(__ssa_return (__call (__callee @$V)))'
+      - match: '(__ssa_return (expression_list $V:identifier))'
+        replace: '(__ssa_return (__rhs @$V))'
+
+resolve:
+  display_source: original
+  stages: []
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          fqn: '@$M|child_sym("__package")'
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("go:go")'
+
+      # Receiver wrapper: no fqn of its own, so methods hang off the package
+      - match: '(__def (__impl))'
+        tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+
+      - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source_path")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          import_type: Import
+          resolved: '@$ROOT|has_incoming("Imports")'
