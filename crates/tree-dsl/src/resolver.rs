@@ -3,7 +3,7 @@ use itertools::Itertools;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::canonical::{self as canonical, Canonical as C};
+use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
 use crate::intern::Lang;
 use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
@@ -211,6 +211,7 @@ impl Resolver {
             support_lang,
             index_names,
             wildcard_sym: self.wildcard_sym,
+            callable_key: lang.syms.intern("callable"),
         };
 
         let wave1: Vec<Edge> = active_reqs
@@ -257,6 +258,7 @@ struct ResolveCtx<'a> {
     support_lang: SupportLang,
     index_names: &'a [String],
     wildcard_sym: u32,
+    callable_key: u32,
 }
 
 impl ResolveCtx<'_> {
@@ -269,7 +271,7 @@ fn gather_visible_one(tree: &Tree, fi: usize) -> FxHashMap<u32, Loc> {
     tree.root().fold_tree(
         FxHashMap::with_capacity_and_hasher(16, Default::default()),
         |names, c, _w| {
-            if canonical::has_def_type(c) {
+            if c.is(C::Def) {
                 if let Some(ns) = c.child_sym(C::DefName) {
                     names.insert(
                         ns,
@@ -492,7 +494,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
                 continue;
             };
             let tgt = ctx.corpus.jump(loc.fi as u32, loc.node);
-            if canonical::is_callable_def(tgt) {
+            if tgt.has_tag(ctx.callable_key) {
                 edges.push(caller.edge_to(tgt, EdgeKind::Calls));
             }
         }
@@ -500,7 +502,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
 
     for ie in &import_edges {
         let target = ctx.corpus.follow(ie);
-        if !canonical::is_callable_def(target) {
+        if !target.has_tag(ctx.callable_key) {
             continue;
         }
         let target_loc = Loc {
@@ -574,7 +576,7 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, imports_by_from: &[Vec<&Edge>
 
 fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     let target = ctx.corpus.follow(ce);
-    if !canonical::def_type_of(target).is_some_and(|k| matches!(k, C::Class | C::Struct)) {
+    if !target.children().any(|c| c.is(C::Class) || c.is(C::Struct)) {
         return vec![];
     }
     let Some(target_name) = target.child_sym(C::DefName) else {
@@ -599,7 +601,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
             if member.object_ivar().map(|iv| iv.sym()) != Some(ivar_sym) {
                 continue;
             }
-            let Some(caller_def) = call.enclosing(canonical::has_def_type) else {
+            let Some(caller_def) = call.enclosing(|c| c.is(C::Def)) else {
                 continue;
             };
             if let Some(m) = find_method_in(target, member.sym()) {

@@ -5,7 +5,7 @@ use crate::intern::Lang;
 use crate::tree::{Node, Tree};
 
 use super::matching::matches;
-use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, Text, Tf};
+use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, Text};
 
 pub(crate) fn materialize(
     t: &Tree,

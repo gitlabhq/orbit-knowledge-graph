@@ -326,7 +326,7 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
 
     for tree in &state.trees {
         for c in tree.root().descendants() {
-            if tree_dsl::canonical::has_def_type(c) {
+            if c.is(tree_dsl::canonical::Canonical::Def) {
                 total_defs += 1;
             } else if c.is(tree_dsl::canonical::Canonical::Import)
                 || c.is(tree_dsl::canonical::Canonical::ImportType)

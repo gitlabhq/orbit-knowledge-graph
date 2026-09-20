@@ -1,4 +1,4 @@
-use crate::canonical::{self as canonical, Canonical as C};
+use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
@@ -56,6 +56,8 @@ struct Fold<'t> {
     import_names: Vec<u32>,
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
+    callable_key: u32,
+    scoped_key: u32,
     edges: Vec<Edge>,
 }
 
@@ -95,7 +97,7 @@ impl<'t> Fold<'t> {
         let k = c.kind();
         if k == C::Import || k == C::ImportType {
             self.handle_import(c);
-        } else if canonical::has_def_type(c) {
+        } else if c.is(C::Def) {
             self.handle_def(c, stack);
         } else if k == C::Call {
             self.handle_call(c);
@@ -202,7 +204,7 @@ impl<'t> Fold<'t> {
         for dn in supers {
             self.edges.push(Edge::local(idx, dn, EdgeKind::Extends));
         }
-        if canonical::is_scoped_def(c) {
+        if c.has_tag(self.scoped_key) {
             self.def_stack.push((Some(idx), parent_block));
             stack.push(WorkItem::ExitScope);
             stack.extend(c.children_rev().map(|ch| WorkItem::Visit(ch.index())));
@@ -403,7 +405,7 @@ impl<'t> Fold<'t> {
     fn emit(&mut self, r: &Linked, from: u32) {
         match r {
             Linked::Def(node) => {
-                if canonical::is_callable_def(self.tree.cursor(*node)) {
+                if self.tree.cursor(*node).has_tag(self.callable_key) {
                     self.edges.push(Edge::local(from, *node, EdgeKind::Calls));
                 }
             }
@@ -413,7 +415,7 @@ impl<'t> Fold<'t> {
     }
 
     fn is_class(&self, node: u32) -> bool {
-        canonical::def_type_of(self.tree.cursor(node)) == Some(C::Class)
+        self.tree.cursor(node).children().any(|c| c.is(C::Class))
     }
 
     fn any_class(&self, resolved: &[Linked]) -> bool {
@@ -476,8 +478,8 @@ impl<'t> Fold<'t> {
 
     fn enclosing_class(&self, node: u32) -> Option<u32> {
         let c = self.tree.cursor(node);
-        if canonical::def_type_of(c)
-            .is_some_and(|k| matches!(k, C::Class | C::ImplBlock | C::Trait))
+        if c.children()
+            .any(|ch| ch.is(C::Class) || ch.is(C::ImplBlock) || ch.is(C::Trait))
         {
             Some(node)
         } else {
@@ -604,6 +606,8 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         import_names: Vec::new(),
         def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern(WILDCARD),
+        callable_key: lang.syms.intern("callable"),
+        scoped_key: lang.syms.intern("scoped"),
         edges: Vec::new(),
     };
 

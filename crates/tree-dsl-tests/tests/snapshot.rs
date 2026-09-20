@@ -39,7 +39,7 @@ fn count_defs(state: &tree_dsl::State) -> usize {
         .trees
         .iter()
         .flat_map(|t| t.root().descendants())
-        .filter(|c| tree_dsl::canonical::has_def_type(*c))
+        .filter(|c| c.is(tree_dsl::canonical::Canonical::Def))
         .count()
 }
 
@@ -54,7 +54,7 @@ fn def_names(state: &tree_dsl::State, env: &tree_dsl::Env) -> Vec<String> {
         .flat_map(|t| {
             t.root()
                 .descendants()
-                .filter(|c| tree_dsl::canonical::has_def_type(*c))
+                .filter(|c| c.is(tree_dsl::canonical::Canonical::Def))
                 .filter_map(|c| c.child_sym(tree_dsl::canonical::Canonical::DefName))
                 .map(|s| env.lang.syms.resolve(s).to_string())
                 .collect::<Vec<_>>()

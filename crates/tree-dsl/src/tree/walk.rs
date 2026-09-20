@@ -1,6 +1,6 @@
 use std::ops::ControlFlow;
 
-use crate::canonical::{self as canonical, Canonical as C};
+use crate::canonical::Canonical as C;
 
 use super::types::{Edge, EdgeKind, Node, Tree};
 
@@ -109,6 +109,16 @@ impl<'a> Cursor<'a> {
     #[inline]
     pub fn fi(self) -> u32 {
         self.fi
+    }
+
+    #[inline]
+    pub fn tag(self, key: u32) -> Option<u32> {
+        self.tree().get_tag(self.id, key)
+    }
+
+    #[inline]
+    pub fn has_tag(self, key: u32) -> bool {
+        self.tree().get_tag(self.id, key).is_some()
     }
 
     #[inline]
@@ -248,7 +258,9 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn enclosing_def(self, kinds: &'a [C]) -> Option<Self> {
-        self.enclosing(move |a| canonical::def_type_of(a).is_some_and(|k| kinds.contains(&k)))
+        self.enclosing(move |a| {
+            a.is(C::Def) && a.children().any(|c| kinds.iter().any(|&k| c.kind() == k))
+        })
     }
 
     pub fn jump(self, fi: u32, id: u32) -> Self {
@@ -388,12 +400,8 @@ fn return_sym(ret: Cursor, binds: &rustc_hash::FxHashMap<u32, u32>) -> Option<u3
 
 pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     class.descend(|n| {
-        if canonical::is_def_type_kind(n.kind())
-            && let Some(p) = n.parent()
-            && p.index() != class.index()
-            && p.child_sym(C::DefName) == Some(name)
-        {
-            return Step::Out(p);
+        if n.is(C::Def) && n.index() != class.index() && n.child_sym(C::DefName) == Some(name) {
+            return Step::Out(n);
         }
         Step::Into
     })
