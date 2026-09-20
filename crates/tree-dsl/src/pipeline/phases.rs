@@ -39,7 +39,7 @@ pub fn parse(env: &Env, state: &mut State, files: Vec<(String, String)>) {
 }
 
 pub fn resolve(env: &Env, state: &mut State, dirty_fis: FxHashSet<usize>) {
-    let paths: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
+    let paths: Vec<&str> = state.trees.iter().map(|t| t.label.as_str()).collect();
     let prefixes = ProjectTree::build(&env.lang, &env.resolve_config, &paths, None);
     let result = state.resolver.resolve(
         &state.trees,

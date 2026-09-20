@@ -163,7 +163,7 @@ impl Tf {
             }
             Tf::Stem => {
                 let p = std::path::Path::new(s);
-                Cow::Owned(p.with_extension("").to_string_lossy().to_string())
+                Cow::Owned(p.with_extension("").to_string_lossy().into_owned())
             }
             Tf::Map(entries) => {
                 for (k, v) in entries {
@@ -175,9 +175,9 @@ impl Tf {
             }
             Tf::CollapseIndex(names) => {
                 for name in names {
-                    let suffix = format!("/{name}");
-                    if s.ends_with(&suffix) {
-                        return Cow::Owned(s.strip_suffix(&suffix).unwrap_or("").to_string());
+                    if let Some(prefix) = s.strip_suffix(&**name).and_then(|p| p.strip_suffix('/'))
+                    {
+                        return Cow::Owned(prefix.to_string());
                     }
                     if s == &**name {
                         return Cow::Owned(String::new());

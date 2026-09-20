@@ -4,13 +4,13 @@ use crate::canonical::Canonical as C;
 use crate::constants::PATH_SEP;
 use crate::intern::Lang;
 use crate::pattern;
-use crate::rules::{ParseFileSpec, ParseFormat, ResolveConfig, ResolveStage};
+use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tree};
 
 pub struct ProjectTree<'a> {
     lang: &'a Lang,
     config: &'a ResolveConfig,
-    paths: &'a [String],
+    paths: &'a [&'a str],
     files: Option<&'a [(String, String)]>,
     tree: Tree,
     prefixes: Vec<String>,
@@ -20,7 +20,7 @@ impl<'a> ProjectTree<'a> {
     pub fn build(
         lang: &'a Lang,
         config: &'a ResolveConfig,
-        paths: &'a [String],
+        paths: &'a [&'a str],
         files: Option<&'a [(String, String)]>,
     ) -> Vec<String> {
         let mut pt = Self {
@@ -53,7 +53,7 @@ impl<'a> ProjectTree<'a> {
             .collect();
 
         let mut children_map: FxHashMap<String, Vec<(String, bool)>> = FxHashMap::default();
-        for path in self.paths {
+        for &path in self.paths {
             let parts: Vec<&str> = path.split(PATH_SEP).collect();
             for i in 0..parts.len() {
                 let parent = if i == 0 {
@@ -199,11 +199,11 @@ impl<'a> ProjectTree<'a> {
     }
 
     fn node_path(&self, cursor: Cursor) -> String {
-        let mut parts: Vec<String> = std::iter::once(cursor)
+        let mut parts: Vec<&str> = std::iter::once(cursor)
             .chain(cursor.ancestors())
             .take_while(|n| !n.is(C::Root))
             .filter(|n| n.is(C::Dir) && n.sym() != 0)
-            .map(|n| self.lang.syms.resolve(n.sym()).to_string())
+            .map(|n| self.lang.syms.resolve(n.sym()))
             .collect();
         parts.reverse();
         parts.join(PATH_SEP)
@@ -215,7 +215,7 @@ impl<'a> ProjectTree<'a> {
                 pkgs.push(self.node_path(cursor));
             }
         });
-        for path in self.paths {
+        for &path in self.paths {
             let Some((top, _)) = path.split_once(PATH_SEP) else {
                 continue;
             };

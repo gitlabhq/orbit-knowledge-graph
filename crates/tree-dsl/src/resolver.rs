@@ -136,7 +136,7 @@ impl Resolver {
         external: &[String],
     ) -> ResolveResult {
         let index_names = support_lang.index_names();
-        let labels: Vec<String> = trees.iter().map(|t| t.label.clone()).collect();
+        let labels: Vec<&str> = trees.iter().map(|t| t.label.as_str()).collect();
         self.file_index = build_file_index(&labels, support_lang, index_names);
 
         self.visible.resize_with(trees.len(), Default::default);
@@ -301,6 +301,7 @@ fn gather_imports_for(
     external: &[String],
     dirty_fis: &FxHashSet<usize>,
 ) -> (Vec<ImportReq>, Vec<Edge>) {
+    let resolved_tag_key = lang.syms.intern("resolved_source");
     let dirty_vec: Vec<usize> = dirty_fis.iter().copied().collect();
     let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
         .par_iter()
@@ -314,11 +315,10 @@ fn gather_imports_for(
                     let Some(source_sym) = cur.child_sym(C::SourcePath) else {
                         return;
                     };
-                    let source_str = lang.syms.resolve(source_sym).to_string();
-                    if is_external(&source_str, external) {
+                    let source_str = lang.syms.resolve(source_sym);
+                    if is_external(source_str, external) {
                         return;
                     }
-                    let resolved_tag_key = lang.syms.intern("resolved_source");
                     let Some(resolved_sym) = tree.get_tag(cur.index(), resolved_tag_key) else {
                         return;
                     };
@@ -635,21 +635,22 @@ fn resolve_type(
 }
 
 fn build_file_index(
-    labels: &[String],
+    labels: &[&str],
     support_lang: SupportLang,
     index_names: &[String],
 ) -> FxHashMap<String, usize> {
     let mut idx: FxHashMap<String, usize> =
         FxHashMap::with_capacity_and_hasher(labels.len() * 3, Default::default());
-    for (fi, path) in labels.iter().enumerate() {
+    for (fi, &path) in labels.iter().enumerate() {
         let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
         let stem = file_lang.strip_extension(path);
-        idx.insert(path.clone(), fi);
+        idx.insert(path.to_string(), fi);
         idx.insert(stem.to_string(), fi);
         for name in index_names {
-            let suffix = format!("{PATH_SEP}{name}");
-            if stem.ends_with(&suffix) {
-                let pkg = &stem[..stem.len() - suffix.len()];
+            if let Some(pkg) = stem
+                .strip_suffix(name.as_str())
+                .and_then(|s| s.strip_suffix(PATH_SEP))
+            {
                 if !pkg.is_empty() {
                     idx.insert(pkg.to_string(), fi);
                 }
@@ -674,12 +675,11 @@ fn resolve_path(
 ) -> Option<usize> {
     file_index.get(target).copied().or_else(|| {
         prefixes.iter().find_map(|p| {
-            let c = if p.is_empty() {
-                target.to_string()
+            if p.is_empty() {
+                file_index.get(target).copied()
             } else {
-                format!("{p}{PATH_SEP}{target}")
-            };
-            file_index.get(&c).copied()
+                file_index.get(&format!("{p}{PATH_SEP}{target}")).copied()
+            }
         })
     })
 }
@@ -692,8 +692,9 @@ fn resolve_submodule(
     file_index: &FxHashMap<String, usize>,
 ) -> Option<usize> {
     let stem = support_lang.strip_extension(target_path);
-    let dir = index_names
-        .iter()
-        .find_map(|idx| stem.strip_suffix(&format!("{PATH_SEP}{idx}")))?;
+    let dir = index_names.iter().find_map(|idx| {
+        stem.strip_suffix(idx.as_str())
+            .and_then(|s| s.strip_suffix(PATH_SEP))
+    })?;
     file_index.get(&format!("{dir}{PATH_SEP}{name}")).copied()
 }

@@ -277,8 +277,8 @@ fn apply_rewrites_inner(
                             if base_sym == 0 {
                                 entry.val.apply_sym(t, lang, src, edge_ctx)
                             } else {
-                                let s = lang.syms.resolve(base_sym).to_string();
-                                lang.syms.intern(&entry.val.apply_to_str(&s))
+                                let s = lang.syms.resolve(base_sym);
+                                lang.syms.intern(&entry.val.apply_to_str(s))
                             }
                         };
                         t.set_tag(raw, entry.key, val);
@@ -302,8 +302,8 @@ fn apply_rewrites_inner(
                                 if base_sym == 0 {
                                     entry.val.apply_sym(t, lang, src, edge_ctx)
                                 } else {
-                                    let s = lang.syms.resolve(base_sym).to_string();
-                                    lang.syms.intern(&entry.val.apply_to_str(&s))
+                                    let s = lang.syms.resolve(base_sym);
+                                    lang.syms.intern(&entry.val.apply_to_str(s))
                                 }
                             };
                             t.set_tag(raw, entry.key, val);
