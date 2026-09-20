@@ -18,7 +18,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
             Some(FilterOp::Gte) => Op::Ge,
             Some(FilterOp::Lt) => Op::Lt,
             Some(FilterOp::Lte) => Op::Le,
-            _ => Op::Eq,
+            Some(_) => unreachable!("lowering rejects unsupported ops for property-to-property"),
         };
         return Expr::binary(op, col, rhs);
     }

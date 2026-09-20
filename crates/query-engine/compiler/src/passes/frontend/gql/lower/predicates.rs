@@ -39,6 +39,30 @@ impl Lowering {
             let lhs_prop = property.property.value;
             let rhs_node = rhs.node.value;
             let rhs_prop = rhs.property.value;
+            let lhs_known = self.input.nodes.iter().any(|n| n.id == lhs_node)
+                || self.edges.contains_key(&lhs_node);
+            let rhs_known = self.input.nodes.iter().any(|n| n.id == rhs_node)
+                || self.edges.contains_key(&rhs_node);
+            if !lhs_known {
+                return Err(invalid(span, &format!("undefined variable {lhs_node}")));
+            }
+            if !rhs_known {
+                return Err(invalid(span, &format!("undefined variable {rhs_node}")));
+            }
+            if !matches!(
+                op,
+                FilterOp::Eq
+                    | FilterOp::Ne
+                    | FilterOp::Gt
+                    | FilterOp::Lt
+                    | FilterOp::Gte
+                    | FilterOp::Lte
+            ) {
+                return Err(invalid(
+                    span,
+                    "property-to-property comparisons only support =, <>, !=, <, >, <=, >=",
+                ));
+            }
             if lhs_node == rhs_node {
                 self.input
                     .nodes
