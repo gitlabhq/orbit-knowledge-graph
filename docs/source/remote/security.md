@@ -80,10 +80,10 @@ Programmatic access uses your existing GitLab authentication, scoped to what the
 can see in GitLab.
 
 - REST API: a personal access token with the `read_api` scope, or a fine-grained personal
-  access token with the Orbit **Read** permission, sent as a Bearer token. For more information,
+  access token with the GitLab Orbit **Read** permission, sent as a Bearer token. For more information,
   see [REST API](access/api.md).
 - MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. A fine-grained personal
-  access token needs the Orbit MCP tool **Execute** permission and the Orbit **Read** permission.
+  access token needs the GitLab Orbit MCP tool **Execute** permission and the GitLab Orbit **Read** permission.
   For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
 
@@ -94,18 +94,18 @@ A fine-grained token works with GitLab Orbit the same way it works with
 The token check is a gateway: it decides whether the token may call the endpoint. The results
 follow the token owner's access in GitLab, not the other permissions on the token.
 
-- A token with the Orbit **Read** permission under **User** calls the unscoped endpoints and
+- A token with the GitLab Orbit **Read** permission under **User** calls the unscoped endpoints and
   sees everything the token owner can see. It gets `403` on the group and project routes, the
   same as Global Search.
-- A token with the Orbit **Read** permission under **Group and project access** must name its
+- A token with the GitLab Orbit **Read** permission under **Group and project access** must name its
   group or project in each request. Use the group or project routes, such as
   `/api/v4/groups/:id/orbit/query` and `/api/v4/projects/:id/orbit/query`, or the `namespace_id`
   or `project_id` argument on the MCP `invoke_command` tool. Calls to the unscoped routes, or to a
   group or project outside the token's scope, return `403`.
 - When a request uses a group or project route, results narrow to that group or project for every
   caller, including classic tokens and OAuth.
-- Other permissions on the token have no effect on Orbit results. A token without the Work item
-  **Read** permission still gets work items from Orbit when the owner can read them in GitLab.
+- Other permissions on the token have no effect on GitLab Orbit results. A token without the Work item
+  **Read** permission still gets work items from GitLab Orbit when the owner can read them in GitLab.
 - The Reporter floor and the Security Manager rule in
   [Roles required to query GitLab Orbit](#roles-required-to-query-gitlab-orbit) still apply.
 - Personal access tokens do not go through SAML SSO enforcement. A token from a user with an

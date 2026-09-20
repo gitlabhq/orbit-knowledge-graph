@@ -35,7 +35,7 @@ Claude Code, OpenAI Codex, or any other tool that supports the Model Context Pro
 - GitLab Orbit is [enabled on your group](../getting-started.md).
 - You're authenticated to GitLab. Run `glab auth login` (uses OAuth by default;
   personal access tokens with `read_api` scope also work, and so do fine-grained
-  tokens with the Orbit MCP tool **Execute** and Orbit **Read** permissions).
+  tokens with the GitLab Orbit MCP tool **Execute** and GitLab Orbit **Read** permissions).
 - Your auth has access to the groups you want to query.
 - If your MCP client connects directly over native HTTP (not through
   `mcp-remote`), its OAuth request must include the `mcp_orbit` scope. See the

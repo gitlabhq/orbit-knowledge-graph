@@ -32,7 +32,7 @@ CI pipelines, or custom tooling.
 ## Authentication
 
 All endpoints require a GitLab personal access token with `read_api` scope, or a
-fine-grained personal access token with the Orbit **Read** permission, passed as a
+fine-grained personal access token with the GitLab Orbit **Read** permission, passed as a
 Bearer token:
 
 ```shell
