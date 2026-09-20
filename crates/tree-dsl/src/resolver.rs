@@ -45,6 +45,7 @@ pub struct Resolver {
     reqs: Vec<ImportReq>,
     file_index: FxHashMap<String, usize>,
     wildcard_sym: u32,
+    exports_key: u32,
 }
 
 impl Resolver {
@@ -54,6 +55,7 @@ impl Resolver {
             reqs: Vec::new(),
             file_index: FxHashMap::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
+            exports_key: lang.syms.intern("exports"),
         }
     }
 
@@ -63,6 +65,7 @@ impl Resolver {
             reqs,
             file_index: FxHashMap::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
+            exports_key: lang.syms.intern("exports"),
         }
     }
 
@@ -142,7 +145,7 @@ impl Resolver {
         self.visible.resize_with(trees.len(), Default::default);
         for &fi in dirty_fis {
             if fi < trees.len() {
-                self.visible[fi] = gather_visible_one(&trees[fi], fi);
+                self.visible[fi] = gather_visible_one(&trees[fi], fi, self.exports_key);
             }
         }
 
@@ -212,6 +215,7 @@ impl Resolver {
             index_names,
             wildcard_sym: self.wildcard_sym,
             callable_key: lang.syms.intern("callable"),
+            returns_key: lang.syms.intern("returns"),
         };
 
         let wave1: Vec<Edge> = active_reqs
@@ -259,6 +263,7 @@ struct ResolveCtx<'a> {
     index_names: &'a [String],
     wildcard_sym: u32,
     callable_key: u32,
+    returns_key: u32,
 }
 
 impl ResolveCtx<'_> {
@@ -267,28 +272,23 @@ impl ResolveCtx<'_> {
     }
 }
 
-fn gather_visible_one(tree: &Tree, fi: usize) -> FxHashMap<u32, Loc> {
+fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32, Loc> {
     tree.root().fold_tree(
         FxHashMap::with_capacity_and_hasher(16, Default::default()),
         |names, c, _w| {
             if c.is(C::Def) {
+                let loc = Loc {
+                    fi,
+                    node: c.index(),
+                };
                 if let Some(ns) = c.child_sym(C::DefName) {
-                    names.insert(
-                        ns,
-                        Loc {
-                            fi,
-                            node: c.index(),
-                        },
-                    );
+                    names.insert(ns, loc);
                 }
                 if let Some(ds) = c.child_sym(C::DefaultExport) {
-                    names.insert(
-                        ds,
-                        Loc {
-                            fi,
-                            node: c.index(),
-                        },
-                    );
+                    names.insert(ds, loc);
+                }
+                if let Some(es) = c.tag(exports_key) {
+                    names.insert(es, loc);
                 }
             }
         },
@@ -536,7 +536,10 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, imports_by_from: &[Vec<&Edge>
     let target = ctx.corpus.follow(ce);
     let caller = ctx.corpus.jump(ce.from_tree, ce.from_node);
 
-    let Some(ret_sym) = infer_return_type(target) else {
+    let Some(ret_sym) = target
+        .tag(ctx.returns_key)
+        .or_else(|| infer_return_type(target))
+    else {
         return vec![];
     };
     let Some(type_loc) = resolve_type(
