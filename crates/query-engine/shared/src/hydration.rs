@@ -1,7 +1,7 @@
 //! Shared hydration helpers used by both the server and local pipelines.
 //! The compile + execute step is left to the caller.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
@@ -124,10 +124,7 @@ pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
     }
 }
 
-/// Expects columns: `{alias}_id`, `{alias}_entity_type`, `{alias}_props`
-/// where props is a JSON-encoded object. The hydration SQL stringifies every
-/// value (`toJSONString(map(...))`), so properties the ontology declares as
-/// boolean are re-typed here.
+/// `{alias}_props` arrives as a JSON object of strings, so Bool and DateTime fields are re-typed from the ontology.
 pub fn parse_hydration_batches(
     batches: &[RecordBatch],
     ontology: &Ontology,
@@ -138,7 +135,7 @@ pub fn parse_hydration_batches(
     let id_col = format!("{alias}_id");
 
     let mut result = HashMap::new();
-    let mut bool_fields_cache: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut field_types_cache: HashMap<String, HashMap<String, DataType>> = HashMap::new();
 
     for batch in batches {
         for row_idx in 0..batch.num_rows() {
@@ -157,7 +154,7 @@ pub fn parse_hydration_batches(
                 continue;
             };
 
-            let bool_fields = bool_fields_cache
+            let field_types = field_types_cache
                 .entry(entity_type.clone())
                 .or_insert_with(|| {
                     ontology
@@ -165,8 +162,7 @@ pub fn parse_hydration_batches(
                         .map(|node| {
                             node.fields
                                 .iter()
-                                .filter(|f| f.data_type == DataType::Bool)
-                                .map(|f| f.name.clone())
+                                .map(|f| (f.name.clone(), f.data_type))
                                 .collect()
                         })
                         .unwrap_or_default()
@@ -184,8 +180,9 @@ pub fn parse_hydration_batches(
                         .filter_map(|(k, v)| match ColumnValue::from(v) {
                             ColumnValue::Null => None,
                             ColumnValue::String(s) if s.is_empty() => None,
-                            cv @ ColumnValue::String(_) if bool_fields.contains(&k) => {
-                                Some((k, cv.coerce::<bool>().map_or(cv, ColumnValue::Bool)))
+                            cv @ ColumnValue::String(_) => {
+                                let typed = typed_string(cv, field_types.get(&k));
+                                Some((k, typed))
                             }
                             cv => Some((k, cv)),
                         })
@@ -198,6 +195,17 @@ pub fn parse_hydration_batches(
     }
 
     Ok(result)
+}
+
+fn typed_string(cv: ColumnValue, data_type: Option<&DataType>) -> ColumnValue {
+    match data_type {
+        Some(DataType::Bool) => cv.coerce::<bool>().map_or(cv, ColumnValue::Bool),
+        Some(DataType::DateTime) => cv
+            .as_string()
+            .and_then(|s| ColumnValue::parse_datetime(s))
+            .unwrap_or(cv),
+        _ => cv,
+    }
 }
 
 pub fn merge_static_properties(
