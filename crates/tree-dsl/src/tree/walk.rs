@@ -399,8 +399,6 @@ pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     })
 }
 
-pub const CLASS_LIKE: &[C] = &[C::Class, C::Struct, C::ImplBlock];
-
 impl Tree {
     #[inline]
     pub fn cursor(&self, id: u32) -> Cursor<'_> {

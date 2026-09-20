@@ -8,6 +8,7 @@ use crate::intern::Lang;
 use crate::pattern;
 use crate::rules::{ParseFileSpec, ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tree};
+use crate::constants::{PATH_SEP};
 
 pub struct WalkResult {
     /// Paths to try as prefixes when resolving absolute imports.
@@ -67,12 +68,12 @@ fn build_file_tree(
     let mut children_map: FxHashMap<String, Vec<(String, bool)>> = FxHashMap::default();
 
     for path in paths {
-        let parts: Vec<&str> = path.split('/').collect();
+        let parts: Vec<&str> = path.split(PATH_SEP).collect();
         for i in 0..parts.len() {
             let parent = if i == 0 {
                 String::new()
             } else {
-                parts[..i].join("/")
+                parts[..i].join(PATH_SEP)
             };
             let segment = parts[i].to_string();
             let is_file = i == parts.len() - 1;
@@ -123,7 +124,7 @@ fn build_file_tree(
                     let full_path = if parent_path.is_empty() {
                         segment.clone()
                     } else {
-                        format!("{parent_path}/{segment}")
+                        format!("{parent_path}{PATH_SEP}{segment}")
                     };
                     if let Some(content) = file_contents.get(full_path.as_str()) {
                         inline_config(content, spec.format, nid, tree, lang);
@@ -133,7 +134,7 @@ fn build_file_tree(
                 let child_path = if parent_path.is_empty() {
                     segment.clone()
                 } else {
-                    format!("{parent_path}/{segment}")
+                    format!("{parent_path}{PATH_SEP}{segment}")
                 };
                 add_children(
                     &child_path,
@@ -334,7 +335,7 @@ fn node_path(cursor: Cursor, lang: &Lang) -> String {
         .map(|n| lang.syms.resolve(n.sym()).to_string())
         .collect();
     parts.reverse();
-    parts.join("/")
+    parts.join(PATH_SEP)
 }
 
 /// Collect paths of directories marked `__package` by the resolve rules.
@@ -356,7 +357,7 @@ fn add_fallback_roots(
 ) {
     let mut candidates: Vec<String> = Vec::new();
     for path in paths {
-        let top = match path.split_once('/') {
+        let top = match path.split_once(PATH_SEP) {
             Some((dir, _)) => dir.to_string(),
             None => continue,
         };

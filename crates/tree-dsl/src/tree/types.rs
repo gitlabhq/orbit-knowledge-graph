@@ -4,8 +4,6 @@ use smallvec::SmallVec;
 
 use crate::canonical;
 
-pub(crate) const NONE: u32 = u32::MAX;
-
 #[derive(Clone, Copy, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Tag {
     pub key: u32,

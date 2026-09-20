@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use crate::constants;
+use crate::constants::{PATH_SEP, RELATIVE_SELF, RELATIVE_PARENT, RELATIVE_DOTDOT, RELATIVE_DOT};
 use crate::treesitter::SupportLang;
 
 pub fn build_file_index(
@@ -16,7 +16,7 @@ pub fn build_file_index(
         idx.insert(path.clone(), fi);
         idx.insert(stem.to_string(), fi);
         for name in index_names {
-            let suffix = format!("/{name}");
+            let suffix = format!("{PATH_SEP}{name}");
             if stem.ends_with(&suffix) {
                 let pkg = &stem[..stem.len() - suffix.len()];
                 if !pkg.is_empty() {
@@ -35,12 +35,12 @@ pub fn is_index_file(path: &str, support_lang: SupportLang, index_names: &[Strin
     let stem = file_lang.strip_extension(path);
     index_names
         .iter()
-        .any(|idx| stem.ends_with(&format!("/{idx}")) || stem == idx.as_str())
+        .any(|idx| stem.ends_with(&format!("{PATH_SEP}{idx}")) || stem == idx.as_str())
 }
 
 pub fn resolve_import_source(source_str: &str, current_file: &str) -> String {
-    if source_str.starts_with(constants::RELATIVE_SELF)
-        || source_str.starts_with(constants::RELATIVE_PARENT)
+    if source_str.starts_with(RELATIVE_SELF)
+        || source_str.starts_with(RELATIVE_PARENT)
     {
         resolve_relative(current_file, source_str)
     } else {
@@ -51,11 +51,11 @@ pub fn resolve_import_source(source_str: &str, current_file: &str) -> String {
 pub fn is_external(source_str: &str, external: &[String]) -> bool {
     external
         .iter()
-        .any(|e| e == source_str.split('/').next().unwrap_or(source_str))
+        .any(|e| e == source_str.split(PATH_SEP).next().unwrap_or(source_str))
 }
 
 pub fn join(base: &str, name: &str) -> String {
-    format!("{base}/{name}")
+    format!("{base}{PATH_SEP}{name}")
 }
 
 pub fn resolve_submodule(
@@ -68,8 +68,8 @@ pub fn resolve_submodule(
     let stem = support_lang.strip_extension(target_path);
     let dir = index_names
         .iter()
-        .find_map(|idx| stem.strip_suffix(&format!("/{idx}")))?;
-    file_index.get(&format!("{dir}/{name}")).copied()
+        .find_map(|idx| stem.strip_suffix(&format!("{PATH_SEP}{idx}")))?;
+    file_index.get(&format!("{dir}{PATH_SEP}{name}")).copied()
 }
 
 pub fn resolve_path(
@@ -82,7 +82,7 @@ pub fn resolve_path(
             let c = if p.is_empty() {
                 target.to_string()
             } else {
-                format!("{p}/{target}")
+                format!("{p}{PATH_SEP}{target}")
             };
             file_index.get(&c).copied()
         })
@@ -91,36 +91,36 @@ pub fn resolve_path(
 
 pub fn resolve_relative(current_file: &str, source: &str) -> String {
     let dir = current_file
-        .rsplit_once(constants::PATH_SEP)
+        .rsplit_once(PATH_SEP)
         .map(|(d, _)| d)
         .unwrap_or("");
     let mut parts: Vec<&str> = if dir.is_empty() {
         Vec::new()
     } else {
-        dir.split(constants::PATH_SEP).collect()
+        dir.split(PATH_SEP).collect()
     };
     let mut rest = source;
     loop {
-        if let Some(r) = rest.strip_prefix(constants::RELATIVE_PARENT) {
+        if let Some(r) = rest.strip_prefix(RELATIVE_PARENT) {
             parts.pop();
             rest = r;
-        } else if let Some(r) = rest.strip_prefix(constants::RELATIVE_SELF) {
+        } else if let Some(r) = rest.strip_prefix(RELATIVE_SELF) {
             rest = r;
         } else {
             break;
         }
     }
-    if rest == constants::RELATIVE_DOTDOT {
+    if rest == RELATIVE_DOTDOT {
         parts.pop();
         rest = "";
-    } else if rest == constants::RELATIVE_DOT {
+    } else if rest == RELATIVE_DOT {
         rest = "";
     }
     if rest.is_empty() {
-        parts.join(constants::PATH_SEP)
+        parts.join(PATH_SEP)
     } else if parts.is_empty() {
         rest.to_string()
     } else {
-        format!("{}/{rest}", parts.join(constants::PATH_SEP))
+        format!("{}{PATH_SEP}{rest}", parts.join(PATH_SEP))
     }
 }

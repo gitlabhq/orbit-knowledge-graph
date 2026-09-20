@@ -5,11 +5,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::{self as canonical, Canonical as C};
 use crate::intern::Lang;
-use crate::tree::{CLASS_LIKE, Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
+use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
 use crate::treesitter::SupportLang;
 
 use crate::constants::WILDCARD;
 use crate::paths;
+
+pub const CLASS_LIKE: &[C] = &[C::Class, C::Struct, C::ImplBlock];
 
 type VisibleMap = Vec<FxHashMap<u32, Loc>>;
 
