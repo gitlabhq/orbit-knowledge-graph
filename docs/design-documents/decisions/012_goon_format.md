@@ -244,7 +244,7 @@ Locked by property tests with 64 cases each:
 
 | Layer | Where | Count | Covers |
 |---|---|---|---|
-| Unit | `crates/query-engine/formatters/src/goon/tests.rs` | 51 | Header structure, sections, quoting, escape rules, truncation, numerics, edges, dedup, path-finding, aggregation shapes (property + node + ungrouped), `Value::Null` row cells, depth on variable-length edges |
+| Unit | `crates/query-engine/formatters/src/goon/tests.rs` | 42 | Header structure, sections, quoting, escape rules, truncation, numerics, edges, dedup, path-finding, aggregation shapes (property + node + ungrouped), `Value::Null` row cells, depth on variable-length edges |
 | Property (`proptest`) | `tests/goon_properties.rs` | 4 × 64 | Shuffle invariance, idempotence, header prefix, no unescaped control chars |
 | Snapshot (`insta`) | `tests/goon_snapshots.rs` | 7 | One golden file per query shape + pagination |
 | Integration | `crates/integration-tests/tests/server/goon_formatter.rs` | 8 subtests | Full compile → execute → redact → hydrate → format path against ClickHouse testcontainers; asserts `format_stamped` returns `(Value::String, version, FormatName::Goon)`, headers carry `goon_version`, escape behavior, aggregation shapes, raw/goon count agreement |
