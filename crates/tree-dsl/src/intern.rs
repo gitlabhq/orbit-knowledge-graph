@@ -4,7 +4,7 @@ use strum::IntoEnumIterator;
 use crate::canonical::{self, CANONICAL_BASE, Canonical};
 
 pub struct Interner {
-    rodeo: ThreadedRodeo,
+    pub(crate) rodeo: ThreadedRodeo,
 }
 
 impl Default for Interner {
@@ -28,35 +28,6 @@ impl Clone for Interner {
             new.rodeo.get_or_intern(s);
         }
         new
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct InternerSnapshot {
-    names: Vec<String>,
-}
-
-impl From<&Interner> for InternerSnapshot {
-    fn from(i: &Interner) -> Self {
-        let mut pairs: Vec<(usize, String)> = i
-            .rodeo
-            .iter()
-            .map(|(k, v)| (k.into_usize(), v.to_string()))
-            .collect();
-        pairs.sort_by_key(|(k, _)| *k);
-        InternerSnapshot {
-            names: pairs.into_iter().map(|(_, v)| v).collect(),
-        }
-    }
-}
-
-impl From<InternerSnapshot> for Interner {
-    fn from(s: InternerSnapshot) -> Self {
-        let i = Interner::default();
-        for name in &s.names {
-            i.intern(name);
-        }
-        i
     }
 }
 
@@ -91,33 +62,6 @@ pub struct Lang {
     pub kinds: Interner,
     pub fields: Interner,
     pub syms: Interner,
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct LangSnapshot {
-    pub kinds: InternerSnapshot,
-    pub fields: InternerSnapshot,
-    pub syms: InternerSnapshot,
-}
-
-impl From<&Lang> for LangSnapshot {
-    fn from(l: &Lang) -> Self {
-        LangSnapshot {
-            kinds: InternerSnapshot::from(&l.kinds),
-            fields: InternerSnapshot::from(&l.fields),
-            syms: InternerSnapshot::from(&l.syms),
-        }
-    }
-}
-
-impl From<LangSnapshot> for Lang {
-    fn from(s: LangSnapshot) -> Self {
-        Lang {
-            kinds: Interner::from(s.kinds),
-            fields: Interner::from(s.fields),
-            syms: Interner::from(s.syms),
-        }
-    }
 }
 
 impl Lang {

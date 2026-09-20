@@ -138,26 +138,28 @@ fn cmd_parse(
             print_tree(&tree, &lang);
         }
         Stage::Ast => {
-            let (pipeline, lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
-            let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path);
-            for stage in &pipeline.rewrite_stages {
-                tree_dsl::pattern::apply_rewrites(&mut tree, &lang, stage);
+            let env = tree_dsl::Env::for_lang(lang_id);
+            let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &env.lang, &path);
+            for stage in &env.rewrite_stages {
+                tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, stage);
             }
-            print_tree(&tree, &lang);
+            print_tree(&tree, &env.lang);
         }
         Stage::Ssa => {
-            let (tree, edges, lang, _) = tree_dsl::parse(lang_id, &path, &source);
-            print_tree(&tree, &lang);
-            print_edges(&tree, &edges, &lang);
+            let (env, tree, edges) = tree_dsl::parse_single(lang_id, &path, &source);
+            print_tree(&tree, &env.lang);
+            print_edges(&tree, &edges, &env.lang);
         }
         Stage::Display => {
-            let (tree, edges, lang, _pipeline) = tree_dsl::parse(lang_id, &path, &source);
-            let yaml = tree_dsl::treesitter::lang_yaml(lang_id).expect("no lang yaml");
-            let config = tree_dsl::rules::load_lang_full(yaml, &lang);
-            let mut trees = vec![tree];
-            tree_dsl::display::apply_display(&mut trees, &edges, &lang, &config.display_rules);
-            print_tree(&trees[0], &lang);
-            print_edges(&trees[0], &edges, &lang);
+            let (env, tree, edges) = tree_dsl::parse_single(lang_id, &path, &source);
+            let mut state = tree_dsl::State {
+                trees: vec![tree],
+                edges,
+                resolver: tree_dsl::resolver::Resolver::new(&env.lang),
+            };
+            tree_dsl::phases::display(&env, &mut state);
+            print_tree(&state.trees[0], &env.lang);
+            print_edges(&state.trees[0], &state.edges, &env.lang);
         }
     }
     Ok(())
@@ -190,17 +192,17 @@ fn cmd_rewrite(
     };
 
     let lang_id = resolve_lang(lang_override.as_deref(), Some(&path));
-    let (pipeline, lang) = tree_dsl::pipeline::Pipeline::for_lang(lang_id);
-    let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path);
+    let env = tree_dsl::Env::for_lang(lang_id);
+    let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &env.lang, &path);
 
     if let Some(ref stop) = after {
         let limit: usize = if stop == "all" {
-            pipeline.rewrite_stages.len()
+            env.rewrite_stages.len()
         } else {
-            stop.parse().unwrap_or(pipeline.rewrite_stages.len())
+            stop.parse().unwrap_or(env.rewrite_stages.len())
         };
-        for stage in pipeline.rewrite_stages.iter().take(limit) {
-            tree_dsl::pattern::apply_rewrites(&mut tree, &lang, stage);
+        for stage in env.rewrite_stages.iter().take(limit) {
+            tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, stage);
         }
     }
 
@@ -209,14 +211,14 @@ fn cmd_rewrite(
         .zip(templates.iter())
         .map(|(pat, tpl)| {
             let tpl = tpl.clone();
-            tree_dsl::pattern::Rewrite::new(&lang, pat, move |c| {
-                tree_dsl::pattern::Out::Replace(c.template(&tpl))
+            tree_dsl::pattern::Rewrite::new(&env.lang, pat, move |c| {
+                tree_dsl::pattern::Out::Replace(c.template(&tpl), None)
             })
         })
         .collect();
-    tree_dsl::pattern::apply_rewrites(&mut tree, &lang, &rules);
+    tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, &rules);
 
-    print_tree(&tree, &lang);
+    print_tree(&tree, &env.lang);
     Ok(())
 }
 
@@ -316,13 +318,13 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
         files.first().map(|(p, _)| p.as_str()),
     );
 
-    let result = tree_dsl::index(lang_id, &files);
+    let (env, state) = tree_dsl::index(lang_id, &files);
     let elapsed = t0.elapsed();
 
     let mut total_defs = 0usize;
     let mut total_imports = 0usize;
 
-    for tree in &result.trees {
+    for tree in &state.trees {
         for c in tree.root().descendants() {
             if tree_dsl::canonical::has_def_type(c) {
                 total_defs += 1;
@@ -336,12 +338,10 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
 
     eprintln!();
     eprintln!("--- stats ---");
-    eprintln!("files:        {}", result.trees.len());
+    eprintln!("files:        {}", state.trees.len());
     eprintln!("definitions:  {}", total_defs);
     eprintln!("imports:      {}", total_imports);
-    eprintln!("edges:        {}", result.edges.len());
-    eprintln!("parse:        {:.2}s", result.timings.parse_s);
-    eprintln!("resolve:      {:.2}s", result.timings.resolve_s);
+    eprintln!("edges:        {}", state.edges.len());
     eprintln!("total:        {:.2}s", elapsed.as_secs_f64());
 
     if !no_save {
@@ -355,7 +355,7 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
             .to_string_lossy();
         let snap_path = graphs_dir.join(format!("{name}.bin"));
         let t_save = Instant::now();
-        result.save(&snap_path)?;
+        state.save(&env, &snap_path)?;
         let save_s = t_save.elapsed().as_secs_f64();
         let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
         eprintln!(

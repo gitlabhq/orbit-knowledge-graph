@@ -40,12 +40,6 @@ pub struct ImportReq {
     pub target_path: String,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct ResolverSnapshot {
-    pub visible: Vec<Vec<(u32, Loc)>>,
-    pub reqs: Vec<ImportReq>,
-}
-
 pub struct Resolver {
     visible: VisibleMap,
     reqs: Vec<ImportReq>,
@@ -63,30 +57,17 @@ impl Resolver {
         }
     }
 
-    pub fn from_snapshot(snap: ResolverSnapshot, lang: &Lang) -> Self {
-        let visible = snap
-            .visible
-            .into_iter()
-            .map(|entries| entries.into_iter().collect())
-            .collect();
+    pub fn from_parts(visible: VisibleMap, reqs: Vec<ImportReq>, lang: &Lang) -> Self {
         Self {
             visible,
-            reqs: snap.reqs,
+            reqs,
             file_index: FxHashMap::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
         }
     }
 
-    pub fn to_snapshot(&self) -> ResolverSnapshot {
-        let visible = self
-            .visible
-            .iter()
-            .map(|map| map.iter().map(|(&sym, &loc)| (sym, loc)).collect())
-            .collect();
-        ResolverSnapshot {
-            visible,
-            reqs: self.reqs.clone(),
-        }
+    pub fn visible(&self) -> &VisibleMap {
+        &self.visible
     }
 
     pub fn reqs(&self) -> &[ImportReq] {

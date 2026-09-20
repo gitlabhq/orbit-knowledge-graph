@@ -34,8 +34,8 @@ fn load_suite() -> Suite {
     serde_yaml::from_str(&yaml).expect("bad yaml")
 }
 
-fn count_defs(result: &tree_dsl::IndexResult) -> usize {
-    result
+fn count_defs(state: &tree_dsl::State) -> usize {
+    state
         .trees
         .iter()
         .flat_map(|t| t.root().descendants())
@@ -43,12 +43,12 @@ fn count_defs(result: &tree_dsl::IndexResult) -> usize {
         .count()
 }
 
-fn file_set(result: &tree_dsl::IndexResult) -> HashSet<String> {
-    result.trees.iter().map(|t| t.label.clone()).collect()
+fn file_set(state: &tree_dsl::State) -> HashSet<String> {
+    state.trees.iter().map(|t| t.label.clone()).collect()
 }
 
-fn def_names(result: &tree_dsl::IndexResult) -> Vec<String> {
-    result
+fn def_names(state: &tree_dsl::State, env: &tree_dsl::Env) -> Vec<String> {
+    state
         .trees
         .iter()
         .flat_map(|t| {
@@ -56,7 +56,7 @@ fn def_names(result: &tree_dsl::IndexResult) -> Vec<String> {
                 .descendants()
                 .filter(|c| tree_dsl::canonical::has_def_type(*c))
                 .filter_map(|c| c.child_sym(tree_dsl::canonical::Canonical::DefName))
-                .map(|s| result.lang.syms.resolve(s).to_string())
+                .map(|s| env.lang.syms.resolve(s).to_string())
                 .collect::<Vec<_>>()
         })
         .collect()
@@ -71,28 +71,28 @@ fn round_trip_save_load() {
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
 
-    let result = tree_dsl::index(SupportLang::Python, &fixtures);
-    assert_eq!(result.trees.len(), fixtures.len());
-    assert!(!result.edges.is_empty());
+    let (env, state) = tree_dsl::index(SupportLang::Python, &fixtures);
+    assert_eq!(state.trees.len(), fixtures.len());
+    assert!(!state.edges.is_empty());
 
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
 
-    result.save(&snap).unwrap();
+    state.save(&env, &snap).unwrap();
     assert!(std::fs::metadata(&snap).unwrap().len() > 0);
 
-    let loaded = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
+    let (_, loaded) = tree_dsl::State::load(&snap, SupportLang::Python).unwrap();
 
-    assert_eq!(loaded.trees.len(), result.trees.len());
-    assert_eq!(loaded.edges.len(), result.edges.len());
-    assert_eq!(count_defs(&loaded), count_defs(&result));
-    assert_eq!(file_set(&loaded), file_set(&result));
+    assert_eq!(loaded.trees.len(), state.trees.len());
+    assert_eq!(loaded.edges.len(), state.edges.len());
+    assert_eq!(count_defs(&loaded), count_defs(&state));
+    assert_eq!(file_set(&loaded), file_set(&state));
 
-    for (orig, restored) in result.trees.iter().zip(loaded.trees.iter()) {
+    for (orig, restored) in state.trees.iter().zip(loaded.trees.iter()) {
         assert_eq!(orig.label, restored.label);
         assert_eq!(orig.len(), restored.len());
     }
-    for (orig, restored) in result.edges.iter().zip(loaded.edges.iter()) {
+    for (orig, restored) in state.edges.iter().zip(loaded.edges.iter()) {
         assert_eq!(orig.from_tree, restored.from_tree);
         assert_eq!(orig.from_node, restored.from_node);
         assert_eq!(orig.to_tree, restored.to_tree);
@@ -109,12 +109,12 @@ fn incremental_via_snapshot_and_reindex() {
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
 
-    let result = tree_dsl::index(SupportLang::Python, &fixtures);
+    let (env, state) = tree_dsl::index(SupportLang::Python, &fixtures);
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
-    result.save(&snap).unwrap();
+    state.save(&env, &snap).unwrap();
 
-    let mut current = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
+    let (env, mut current) = tree_dsl::State::load(&snap, SupportLang::Python).unwrap();
     assert_eq!(
         file_set(&current),
         HashSet::from_iter(["main.py".into(), "utils.py".into()])
@@ -131,14 +131,14 @@ fn incremental_via_snapshot_and_reindex() {
             .iter()
             .map(|f| (f.path.clone(), f.content.clone()))
             .collect();
-        current = tree_dsl::reindex(current, &added, &modified, &step.remove);
+        current = tree_dsl::reindex(&env, current, &added, &modified, &step.remove);
     }
 
     assert_eq!(
         file_set(&current),
         HashSet::from_iter(["main.py".into(), "consumer.py".into()]),
     );
-    let names = def_names(&current);
+    let names = def_names(&current, &env);
     assert!(!names.contains(&"helper".to_string()));
     assert!(!names.contains(&"extra".to_string()));
 }
@@ -152,12 +152,12 @@ fn modify_preserves_resolution_after_reindex() {
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
 
-    let result = tree_dsl::index(SupportLang::Python, &fixtures);
+    let (env, state) = tree_dsl::index(SupportLang::Python, &fixtures);
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
-    result.save(&snap).unwrap();
+    state.save(&env, &snap).unwrap();
 
-    let loaded = tree_dsl::IndexResult::load(&snap, SupportLang::Python).unwrap();
+    let (env, loaded) = tree_dsl::State::load(&snap, SupportLang::Python).unwrap();
     let initial_edges = loaded.edges.len();
     assert!(initial_edges > 0);
 
@@ -167,12 +167,12 @@ fn modify_preserves_resolution_after_reindex() {
         .iter()
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
-    let updated = tree_dsl::reindex(loaded, &[], &modified, &[]);
+    let updated = tree_dsl::reindex(&env, loaded, &[], &modified, &[]);
 
     assert_eq!(updated.trees.len(), 2);
     assert!(updated.edges.len() >= initial_edges);
 
-    let names = def_names(&updated);
+    let names = def_names(&updated, &env);
     assert!(names.contains(&"helper".to_string()));
     assert!(names.contains(&"extra".to_string()));
     assert_eq!(count_defs(&updated), 2);

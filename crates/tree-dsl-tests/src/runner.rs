@@ -1,4 +1,5 @@
 use tree_dsl::treesitter::SupportLang;
+use tree_dsl::{Env, State};
 
 use super::assertions::{Severity, TestSuite};
 use super::config::make_graph_config;
@@ -19,21 +20,9 @@ fn detect_lang(suite: &TestSuite) -> SupportLang {
     SupportLang::Python
 }
 
-async fn build_and_check(
-    result: &mut tree_dsl::IndexResult,
-    lang_id: SupportLang,
-    suite: &TestSuite,
-) -> Vec<Failure> {
-    let yaml = tree_dsl::treesitter::lang_yaml(lang_id).expect("no lang yaml");
-    let config = tree_dsl::rules::load_lang_full(yaml, &result.lang);
-    tree_dsl::display::apply_display(
-        &mut result.trees,
-        &result.edges,
-        &result.lang,
-        &config.display_rules,
-    );
-    let datasets =
-        export(&result.trees, &result.edges, &result.lang).expect("Failed to build datasets");
+async fn build_and_check(env: &Env, state: &mut State, suite: &TestSuite) -> Vec<Failure> {
+    tree_dsl::phases::display(env, state);
+    let datasets = export(&state.trees, &state.edges, &env.lang).expect("Failed to build datasets");
     let graph_config = make_graph_config().expect("Failed to build graph config");
     run_suite(suite, &datasets, &graph_config).await
 }
@@ -57,14 +46,14 @@ pub async fn run_yaml_suite(yaml: &str) {
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
 
-    let mut result = tree_dsl::index(lang_id, &fixtures);
+    let (env, mut state) = tree_dsl::index(lang_id, &fixtures);
 
     let mut all_failures = Vec::new();
     let mut total_tests = 0usize;
     let mut total_skipped = 0usize;
 
     if !suite.tests.is_empty() {
-        let failures = build_and_check(&mut result, lang_id, &suite).await;
+        let failures = build_and_check(&env, &mut state, &suite).await;
         total_tests += suite.tests.len();
         total_skipped += suite.tests.iter().filter(|t| t.skip).count();
         all_failures.extend(failures);
@@ -81,7 +70,7 @@ pub async fn run_yaml_suite(yaml: &str) {
             .iter()
             .map(|f| (f.path.clone(), f.content.clone()))
             .collect();
-        result = tree_dsl::reindex(result, &added, &modified, &step.remove);
+        state = tree_dsl::reindex(&env, state, &added, &modified, &step.remove);
 
         if !step.tests.is_empty() {
             let step_suite = TestSuite {
@@ -93,7 +82,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                 tests: step.tests.clone(),
                 steps: Vec::new(),
             };
-            let failures = build_and_check(&mut result, lang_id, &step_suite).await;
+            let failures = build_and_check(&env, &mut state, &step_suite).await;
             total_tests += step.tests.len();
             total_skipped += step.tests.iter().filter(|t| t.skip).count();
             all_failures.extend(failures);

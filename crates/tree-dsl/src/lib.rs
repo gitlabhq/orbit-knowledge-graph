@@ -1,6 +1,5 @@
 pub mod canonical;
 pub mod constants;
-pub mod display;
 pub mod dsl;
 pub mod file_tree;
 pub mod intern;
@@ -8,7 +7,6 @@ pub mod linker;
 pub mod paths;
 pub mod pipeline;
 pub mod resolver;
-pub mod snapshot;
 pub mod ssa;
 pub mod tree;
 pub mod treesitter;
@@ -21,4 +19,6 @@ pub mod rules {
     pub use crate::dsl::rules::*;
 }
 
-pub use pipeline::{IndexResult, Pipeline, index, parse, reindex};
+pub use pipeline::phases;
+pub use pipeline::types::{Env, State};
+pub use pipeline::{index, parse_single, reindex};
