@@ -225,10 +225,13 @@ impl QueryParser {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [PropertyExpression(property), operator(op)] => vec![Comparison {
-                span, property, op, value: None,
+                span, property, op, value: None, rhs_property: None,
             }],
             [PropertyExpression(property), operator(op), value(value)] => vec![Comparison {
-                span, property, op, value: Some(value),
+                span, property, op, value: Some(value), rhs_property: None,
+            }],
+            [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => vec![Comparison {
+                span, property: lhs, op, value: None, rhs_property: Some(rhs),
             }],
         ))
     }
@@ -238,7 +241,7 @@ impl QueryParser {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [TokenFunction(op), PropertyExpression(property), value(value)] => vec![Comparison {
-                span, property, op, value: Some(value),
+                span, property, op, value: Some(value), rhs_property: None,
             }],
         ))
     }

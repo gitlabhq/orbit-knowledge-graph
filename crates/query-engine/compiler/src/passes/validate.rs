@@ -1289,6 +1289,9 @@ fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) 
                 }
                 continue;
             }
+            if filter.rhs_column.is_some() {
+                continue;
+            }
             let value = filter
                 .value
                 .as_ref()

@@ -479,6 +479,9 @@ where
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
+    /// When set, compare against another node's column instead of a literal.
+    /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
+    pub rhs_column: Option<(String, String)>,
     /// Populated by the validate pass; lets the lowerer bind temporal columns
     /// with their typed CH param.
     pub data_type: Option<ontology::DataType>,

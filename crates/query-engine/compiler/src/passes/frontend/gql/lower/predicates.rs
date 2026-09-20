@@ -31,10 +31,14 @@ impl Lowering {
             property,
             op,
             value,
+            rhs_property,
         } = comparison;
+        let rhs_column =
+            rhs_property.map(|p| (p.node.value.to_string(), p.property.value.to_string()));
         let filter = InputFilter {
             op: Some(op),
             value,
+            rhs_column,
             ..Default::default()
         };
         let node = property.node.value;
