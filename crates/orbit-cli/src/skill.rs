@@ -499,6 +499,7 @@ fn newest_cached_tree(origin: &str, name: &str) -> Option<CachedTree> {
         return None;
     }
     let _lock = CacheLock::acquire(&root).ok()?;
+    cleanup_stale_temporary_dirs_now(&root);
     let mut candidates = Vec::new();
     for entry in fs::read_dir(root).ok()?.flatten() {
         let file_type = entry.file_type().ok()?;
@@ -694,9 +695,7 @@ impl Drop for CacheLock {
 
 fn prune_cache(root: &Path) -> Result<()> {
     let _lock = CacheLock::acquire(root)?;
-    if let Some(stale_before) = SystemTime::now().checked_sub(STALE_CACHE_TEMP_AGE) {
-        cleanup_stale_temporary_dirs(root, stale_before);
-    }
+    cleanup_stale_temporary_dirs_now(root);
     let mut versions = Vec::new();
     for entry in fs::read_dir(root)? {
         let entry = entry?;
@@ -714,6 +713,12 @@ fn prune_cache(root: &Path) -> Result<()> {
         let _ = fs::remove_dir_all(path);
     }
     Ok(())
+}
+
+fn cleanup_stale_temporary_dirs_now(root: &Path) {
+    if let Some(stale_before) = SystemTime::now().checked_sub(STALE_CACHE_TEMP_AGE) {
+        cleanup_stale_temporary_dirs(root, stale_before);
+    }
 }
 
 fn cleanup_stale_temporary_dirs(root: &Path, stale_before: SystemTime) {
