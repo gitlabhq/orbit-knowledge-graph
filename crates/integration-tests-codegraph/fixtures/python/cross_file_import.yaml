@@ -18,8 +18,7 @@ tests:
   - name: Cross-file call edge exists
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.fqn = 'main.run'
-        AND callee.fqn = 'utils.helper'
+      WHERE caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

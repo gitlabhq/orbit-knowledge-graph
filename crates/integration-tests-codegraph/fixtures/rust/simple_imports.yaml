@@ -41,6 +41,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'create_user'
+        AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: true }

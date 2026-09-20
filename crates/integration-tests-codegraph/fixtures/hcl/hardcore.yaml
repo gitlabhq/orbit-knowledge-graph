@@ -384,7 +384,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Resource'
-        AND d.name IN ['aws_vpc', 'aws_subnet', 'aws_internet_gateway', 'aws_eip', 'aws_nat_gateway', 'aws_route_table', 'aws_route', 'aws_iam_role', 'aws_iam_role_policy_attachment', 'aws_eks_cluster', 'aws_eks_node_group', 'aws_security_group', 'aws_db_subnet_group', 'aws_db_instance']
+        AND d.fqn = d.name
       RETURN d.name AS name
     assert:
       - { row: { name: "aws_vpc" } }
@@ -406,7 +406,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Resource'
-        AND d.fqn IN ['aws_vpc.main', 'aws_subnet.private', 'aws_subnet.public', 'aws_eks_cluster.main', 'aws_eks_node_group.main', 'aws_security_group.eks_cluster', 'aws_security_group.rds', 'aws_db_instance.postgres', 'aws_iam_role.eks_cluster', 'aws_iam_role.node_group']
+        AND d.fqn <> d.name
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "aws_vpc.main" } }

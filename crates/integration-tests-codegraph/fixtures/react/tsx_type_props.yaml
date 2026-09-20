@@ -40,6 +40,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path IN ['src/types.ts', 'src/Button.tsx', 'src/Toolbar.tsx']
         AND d.name IN ['ButtonProps', 'ButtonVariant', 'Button', 'Toolbar']
+        AND d.fqn = d.name
       RETURN d.file_path AS file_path, d.name AS name, d.definition_type AS type
       ORDER BY file_path, name
     assert:

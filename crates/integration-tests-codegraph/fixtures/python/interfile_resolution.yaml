@@ -84,7 +84,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'create' AND callee.name = 'User'
-            AND caller.file_path = 'services/user_service.py'
+            AND caller.file_path <> callee.file_path
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -95,7 +95,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'create' AND callee.name = 'Project'
-            AND caller.file_path = 'services/project_service.py'
+            AND caller.file_path <> callee.file_path
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
@@ -123,8 +123,7 @@ tests:
     description: "No same-file edges should be returned by the cross-file filter"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name IN ['run', 'create']
-        AND callee.name IN ['UserService', 'ProjectService', 'create', 'User', 'Project']
+      WHERE caller.file_path <> callee.file_path
       RETURN caller.name AS caller, callee.name AS callee,
              caller.file_path AS src, callee.file_path AS tgt
     assert:

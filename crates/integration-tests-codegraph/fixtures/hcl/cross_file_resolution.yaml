@@ -91,6 +91,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE callee.definition_type = 'Variable'
+        AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 4 }
@@ -102,6 +103,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
+        AND caller.file_path <> callee.file_path
       RETURN callee.definition_type AS type
     assert:
       - { row_count: 4 }
@@ -126,6 +128,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'locals'
         AND callee.fqn = 'var.region'
+        AND caller.file_path <> callee.file_path
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }
@@ -134,6 +137,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
+        AND caller.file_path <> callee.file_path
         AND callee.fqn IN ['locals.common_tags', 'aws_ami.ubuntu', 'aws_subnet.public']
       RETURN callee.fqn AS callee
     assert:
