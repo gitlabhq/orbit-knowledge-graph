@@ -46,6 +46,7 @@ pub struct Resolver {
     file_index: FxHashMap<String, usize>,
     wildcard_sym: u32,
     exports_key: u32,
+    visible_from_key: u32,
 }
 
 impl Resolver {
@@ -56,6 +57,7 @@ impl Resolver {
             file_index: FxHashMap::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
             exports_key: lang.syms.intern("exports"),
+            visible_from_key: lang.syms.intern("visible_from"),
         }
     }
 
@@ -66,6 +68,7 @@ impl Resolver {
             file_index: FxHashMap::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
             exports_key: lang.syms.intern("exports"),
+            visible_from_key: lang.syms.intern("visible_from"),
         }
     }
 
@@ -160,8 +163,13 @@ impl Resolver {
         );
         self.reqs.extend(new_reqs);
 
-        let ambiguous =
-            propagate_reexports(trees, &self.reqs, &mut self.visible, self.wildcard_sym);
+        let ambiguous = propagate_reexports(
+            trees,
+            &self.reqs,
+            &mut self.visible,
+            self.wildcard_sym,
+            self.visible_from_key,
+        );
 
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
             .reqs
@@ -371,10 +379,24 @@ fn propagate_reexports(
     reqs: &[ImportReq],
     visible: &mut VisibleMap,
     wildcard_sym: u32,
+    visible_from_key: u32,
 ) -> FxHashSet<(usize, u32)> {
     let mut ambiguous: FxHashSet<(usize, u32)> = FxHashSet::default();
+
+    let visible_from_directives: Vec<(usize, u32)> = trees
+        .iter()
+        .enumerate()
+        .flat_map(|(fi, tree)| {
+            tree.root().fold_tree(Vec::new(), |out, c, _w| {
+                if let Some(source_sym) = c.tag(visible_from_key) {
+                    out.push((fi, source_sym));
+                }
+            })
+        })
+        .collect();
+
     loop {
-        let new_exports: Vec<(usize, u32, Loc)> = reqs
+        let mut new_exports: Vec<(usize, u32, Loc)> = reqs
             .iter()
             .flat_map(|req| {
                 let mut out = Vec::new();
@@ -396,6 +418,23 @@ fn propagate_reexports(
                 out
             })
             .collect();
+
+        for &(fi, source_sym) in &visible_from_directives {
+            if let Some(&loc) = visible
+                .iter()
+                .enumerate()
+                .filter(|&(tfi, _)| tfi != fi)
+                .find_map(|(_, v)| v.get(&source_sym))
+            {
+                let source_fi = loc.fi;
+                for (&ds, &dloc) in &visible[source_fi] {
+                    if !visible[fi].contains_key(&ds) {
+                        new_exports.push((fi, ds, dloc));
+                    }
+                }
+            }
+        }
+
         if new_exports.is_empty() {
             break;
         }
