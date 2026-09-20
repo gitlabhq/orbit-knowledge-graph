@@ -25,6 +25,7 @@ const MANIFEST: &str = "SKILL.md";
 const CACHE_MANIFEST: &str = ".orbit-cache.json";
 const DEFAULT_SKILL: &str = "orbit";
 const LOCK_WAIT: Duration = Duration::from_secs(10);
+const STALE_CACHE_TEMP_AGE: Duration = Duration::from_secs(15 * 60);
 pub(crate) const INSTALL_DIR_NAME: &str = "orbit-cli";
 
 pub(crate) fn embedded_files() -> impl Iterator<Item = (String, Vec<u8>)> {
@@ -693,6 +694,9 @@ impl Drop for CacheLock {
 
 fn prune_cache(root: &Path) -> Result<()> {
     let _lock = CacheLock::acquire(root)?;
+    if let Some(stale_before) = SystemTime::now().checked_sub(STALE_CACHE_TEMP_AGE) {
+        cleanup_stale_temporary_dirs(root, stale_before);
+    }
     let mut versions = Vec::new();
     for entry in fs::read_dir(root)? {
         let entry = entry?;
@@ -710,6 +714,29 @@ fn prune_cache(root: &Path) -> Result<()> {
         let _ = fs::remove_dir_all(path);
     }
     Ok(())
+}
+
+fn cleanup_stale_temporary_dirs(root: &Path, stale_before: SystemTime) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with(".stage-") || name.starts_with(".old-")) {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_dir()
+            && metadata
+                .modified()
+                .is_ok_and(|modified| modified <= stale_before)
+        {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -899,6 +926,29 @@ mod tests {
                 .unwrap()
                 .contains("Local CLI")
         );
+    }
+
+    #[test]
+    fn stale_temporary_cache_directories_are_cleaned_up_best_effort() {
+        let root = tempfile::tempdir().unwrap();
+        for directory in [
+            ".stage-interrupted",
+            ".old-interrupted",
+            ".unrelated",
+            "1.0.0",
+        ] {
+            fs::create_dir(root.path().join(directory)).unwrap();
+        }
+
+        cleanup_stale_temporary_dirs(root.path(), UNIX_EPOCH);
+        assert!(root.path().join(".stage-interrupted").exists());
+        assert!(root.path().join(".old-interrupted").exists());
+
+        cleanup_stale_temporary_dirs(root.path(), SystemTime::now() + Duration::from_secs(1));
+        assert!(!root.path().join(".stage-interrupted").exists());
+        assert!(!root.path().join(".old-interrupted").exists());
+        assert!(root.path().join(".unrelated").exists());
+        assert!(root.path().join("1.0.0").exists());
     }
 
     #[test]
