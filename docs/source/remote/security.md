@@ -97,10 +97,11 @@ follow the token owner's access in GitLab, not the other permissions on the toke
 - A token with the Orbit **Read** permission under **User** can call every Orbit endpoint and
   sees everything the token owner can see.
 - A token with the Orbit **Read** permission under **Group and project access** must name its
-  group or project in each request. Use the `namespace_id` or `project_id` parameter on REST
-  endpoints, or the same argument on the MCP `invoke_command` tool. Requests without a
-  container, or with a container outside the token's scope, return `403`.
-- When a request names a group or project, results narrow to that group or project for every
+  group or project in each request. Use the group or project routes, such as
+  `/api/v4/groups/:id/orbit/query` and `/api/v4/projects/:id/orbit/query`, or the `namespace_id`
+  or `project_id` argument on the MCP `invoke_command` tool. Calls to the unscoped routes, or to a
+  group or project outside the token's scope, return `403`.
+- When a request uses a group or project route, results narrow to that group or project for every
   caller, including classic tokens and OAuth.
 - Other permissions on the token have no effect on Orbit results. A token without the Work item
   **Read** permission still gets work items from Orbit when the owner can read them in GitLab.

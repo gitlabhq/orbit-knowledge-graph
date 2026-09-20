@@ -41,9 +41,10 @@ Bearer token:
 
 Results are scoped to entities the token owner can access in GitLab.
 
-Every endpoint accepts an optional `namespace_id` or `project_id` query parameter. When
-present, results narrow to that group or project. A fine-grained token scoped to a group or
-project must pass this parameter. For more information, see
+Every read endpoint also exists under a group or a project, for example
+`/api/v4/groups/:id/orbit/query` and `/api/v4/projects/:id/orbit/query`. Those routes narrow
+results to that group or project. A fine-grained token scoped to a group or project must use
+them. For more information, see
 [Fine-grained personal access tokens](../security.md#fine-grained-personal-access-tokens).
 
 ## Billing

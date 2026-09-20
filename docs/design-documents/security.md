@@ -62,10 +62,10 @@ sequenceDiagram
 Fine-grained personal access tokens follow the Global Search pattern. Rails runs one token check before the route. The check answers one question: may this token call this route for this container? After that check the token is not read again. Results follow the token owner's access through Layers 1 to 3.
 
 - The Orbit **Read** permission (`read_orbit`) lists three scopes: project, group, and user. The Orbit MCP tool **Execute** permission lists only the user scope, the same as the GitLab MCP server permission.
-- Each REST route accepts an optional `namespace_id` or `project_id`. Rails resolves the group or project boundary from that parameter. A route declares three boundaries: group, project, and user. Any match passes.
-- A user-scoped token needs no parameter. A group- or project-scoped token must name its container. A request without a container, or with a container outside the token scope, returns `403`. A container the owner cannot read returns `404`.
+- Each REST read route is mounted three times. `/orbit/*` checks the user boundary. `/groups/:id/orbit/*` checks the group in the path. `/projects/:id/orbit/*` checks the project in the path. This is the same shape as `/search`, `/groups/:id/search`, and `/projects/:id/search`.
+- A user-scoped token calls the unscoped routes. A group- or project-scoped token must call the route for its container. A call to the unscoped route, or to a container outside the token scope, returns `403`. A container the owner cannot read returns `404`.
 - MCP takes the container as an argument on the `invoke_command` tool. Rails runs the same read check for that container on each call. The MCP URL and OAuth registration stay fixed.
-- When a request names a container, Rails keeps only the traversal paths inside that container before it signs the JWT. Layer 2 then filters to that subtree. Aggregations narrow the same way. This applies to every caller, not only fine-grained tokens. An admin who names a container gets the narrowed paths instead of the admin claim.
+- When a request uses a group or project route, Rails keeps only the traversal paths inside that container before it signs the JWT. Layer 2 then filters to that subtree. Aggregations narrow the same way. This applies to every caller, not only fine-grained tokens. An admin who names a container gets the narrowed paths instead of the admin claim.
 - Orbit does not read the other permissions on the token. A token without the Work item **Read** permission still gets work items from Orbit when the owner can read them in GitLab.
 - Orbit adds no section or toggle of its own to the token UI, and does not parse queries for namespaces.
 
