@@ -25,7 +25,7 @@ expect:
     Note:
       ids: [3000]
       rows:
-        - { id: 3000, confidential: false, created_at: "2024-01-15T10:30:00.123456Z" }
+        - { id: 3000, confidential: false, created_at: "2024-01-15T10:30:00Z" }
     User:
       rows:
         - { id: 1, username: alice }

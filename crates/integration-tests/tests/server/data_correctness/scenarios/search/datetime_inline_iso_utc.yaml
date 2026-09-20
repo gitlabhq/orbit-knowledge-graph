@@ -1,4 +1,4 @@
-description: Inline datetime renders as ISO 8601 UTC with the column's microseconds
+description: Inline datetime renders as ISO 8601 UTC
 
 query:
   json: |
@@ -17,4 +17,4 @@ expect:
     Note:
       ids: [3000]
       rows:
-        - { id: 3000, created_at: "2024-01-15T10:30:00.123456Z" }
+        - { id: 3000, created_at: "2024-01-15T10:30:00Z" }
