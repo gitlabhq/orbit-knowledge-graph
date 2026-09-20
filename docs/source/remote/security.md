@@ -79,8 +79,32 @@ environment, and stores no permission data of its own.
 Programmatic access uses your existing GitLab authentication, scoped to what the token owner
 can see in GitLab.
 
-- REST API: a standard (legacy) personal access token with the `read_api` scope, sent as a
-  Bearer token. Fine-grained personal access tokens are not supported. For more information,
+- REST API: a personal access token with the `read_api` scope, or a fine-grained personal
+  access token with the Orbit **Read** permission, sent as a Bearer token. For more information,
   see [REST API](access/api.md).
-- MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. For more information, see [MCP](access/mcp.md).
+- MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. A fine-grained personal
+  access token needs the Orbit MCP tool **Execute** permission and the Orbit **Read** permission.
+  For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
+
+### Fine-grained personal access tokens
+
+A fine-grained token works with GitLab Orbit the same way it works with
+[Global Search](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens_rest/#search-resources).
+The token check is a gateway: it decides whether the token may call the endpoint. The results
+follow the token owner's access in GitLab, not the other permissions on the token.
+
+- A token with the Orbit **Read** permission under **User** can call every Orbit endpoint and
+  sees everything the token owner can see.
+- A token with the Orbit **Read** permission under **Group and project access** must name its
+  group or project in each request. Use the `namespace_id` or `project_id` parameter on REST
+  endpoints, or the same argument on the MCP `invoke_command` tool. Requests without a
+  container, or with a container outside the token's scope, return `403`.
+- When a request names a group or project, results narrow to that group or project for every
+  caller, including classic tokens and OAuth.
+- Other permissions on the token have no effect on Orbit results. A token without the Work item
+  **Read** permission still gets work items from Orbit when the owner can read them in GitLab.
+- The Reporter floor and the Security Manager rule in
+  [Roles required to query GitLab Orbit](#roles-required-to-query-gitlab-orbit) still apply.
+- Personal access tokens do not go through SAML SSO enforcement. A token from a user with an
+  expired SAML session still reads what the user's memberships allow.
