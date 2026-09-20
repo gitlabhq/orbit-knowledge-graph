@@ -45,6 +45,24 @@ The first release build compiles every dependency and takes a few minutes
 (about 5 minutes on an Apple Silicon laptop). Incremental rebuilds are much
 faster.
 
+## Read the agent skill
+
+`orbit skills` lists the agent skills deployed by the selected GitLab instance.
+`orbit skills get orbit [path]` validates and caches the instance's whole remote
+tree, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
+omitted. The cache uses the operating system's user cache directory and keeps
+instance origins isolated.
+
+When the glab-provided Orbit API and authentication environment is absent or
+incomplete, the command serves the embedded local tree. It makes no network or
+credential-helper call. This makes the local guidance available in offline
+development builds:
+
+```shell
+./target/release/orbit skills
+./target/release/orbit skills get orbit references/local/sql.md
+```
+
 ## Index a repository and run a query
 
 Index the knowledge-graph repository itself as a test target, then query the

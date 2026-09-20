@@ -17,6 +17,13 @@ const DSL_PATH: &str = "/api/v4/orbit/schema/dsl";
 const TOOLS_PATH: &str = "/api/v4/orbit/tools";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
 const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
+const SKILLS_PATH: &str = "/api/v4/orbit/skills";
+
+pub(crate) struct SkillHttpResponse {
+    pub(crate) status: u16,
+    pub(crate) etag: Option<String>,
+    pub(crate) body: Vec<u8>,
+}
 
 pub(crate) struct OrbitClient {
     endpoint: ResolvedEndpoint,
@@ -34,9 +41,31 @@ impl OrbitClient {
     pub(crate) fn from_env() -> Result<Self, RemoteError> {
         let endpoint =
             resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper)?;
+        Self::new(endpoint)
+    }
 
+    /// Skills intentionally use only the complete tuple exported by glab.
+    /// Missing or partial tuples are a silent local-only mode and must not
+    /// invoke the credential helper.
+    pub(crate) fn from_skill_env() -> Result<Option<Self>, RemoteError> {
+        let non_empty = |key: &str| std::env::var(key).ok().filter(|value| !value.is_empty());
+        let endpoint = match (
+            non_empty("ORBIT_API_BASE_URL"),
+            non_empty("ORBIT_AUTH_HEADER_NAME"),
+            non_empty("ORBIT_AUTH_HEADER_VALUE"),
+        ) {
+            (Some(base_url), Some(header_name), Some(header_value)) => ResolvedEndpoint {
+                base_url,
+                header_name,
+                header_value,
+            },
+            _ => return Ok(None),
+        };
+        Self::new(endpoint).map(Some)
+    }
+
+    fn new(endpoint: ResolvedEndpoint) -> Result<Self, RemoteError> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
         let http = reqwest::Client::builder()
             .user_agent(build_user_agent(|key| std::env::var(key).ok()))
             .connect_timeout(CONNECT_TIMEOUT)
@@ -46,8 +75,53 @@ impl OrbitClient {
             .map_err(|e| {
                 RemoteError::new(EXIT_GENERIC, format!("failed to build HTTP client: {e}"))
             })?;
-
         Ok(Self { endpoint, http })
+    }
+
+    pub(crate) fn origin(&self) -> Result<String, RemoteError> {
+        let url = reqwest::Url::parse(&self.endpoint.base_url).map_err(|error| {
+            RemoteError::new(EXIT_GENERIC, format!("invalid Orbit API base URL: {error}"))
+        })?;
+        let origin = url.origin().ascii_serialization();
+        if origin == "null" {
+            return Err(RemoteError::new(
+                EXIT_GENERIC,
+                "Orbit API base URL must have an HTTP(S) origin",
+            ));
+        }
+        Ok(origin)
+    }
+
+    pub(crate) async fn list_skills(&self) -> Result<SkillHttpResponse, RemoteError> {
+        self.skill_response(self.http.get(self.url(SKILLS_PATH)))
+            .await
+    }
+
+    pub(crate) async fn get_skill(
+        &self,
+        name: &str,
+        etag: Option<&str>,
+    ) -> Result<SkillHttpResponse, RemoteError> {
+        let mut request = self.http.get(self.url(&format!("{SKILLS_PATH}/{name}")));
+        if let Some(etag) = etag {
+            request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+        }
+        self.skill_response(request).await
+    }
+
+    async fn skill_response(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<SkillHttpResponse, RemoteError> {
+        let response = self.send_authenticated(request).await?;
+        let status = response.status().as_u16();
+        let etag = response
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let body = read_body(response).await?;
+        Ok(SkillHttpResponse { status, etag, body })
     }
 
     pub(crate) async fn get_status(&self) -> Result<Vec<u8>, RemoteError> {
@@ -107,9 +181,21 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
+        let response = self.send_authenticated(request).await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(map_http_error(status.as_u16(), &body));
+        }
+        Ok(response)
+    }
+
+    async fn send_authenticated(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, RemoteError> {
         let request_id = crate::telemetry::invocation_id();
         let session_id = agent_session_id();
-
         let mut builder = request
             .header("X-Request-ID", &request_id)
             .header("X-Orbit-Request-Id", &request_id)
@@ -117,22 +203,13 @@ impl OrbitClient {
                 self.endpoint.header_name.as_str(),
                 self.endpoint.header_value.as_str(),
             );
-
         if let Some(session_id) = &session_id {
             builder = builder.header("X-Orbit-Session-Id", session_id);
         }
-
-        let response = builder
+        builder
             .send()
             .await
-            .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("Orbit request failed: {e}")))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(map_http_error(status.as_u16(), &body));
-        }
-        Ok(response)
+            .map_err(|e| RemoteError::new(EXIT_GENERIC, format!("Orbit request failed: {e}")))
     }
 }
 

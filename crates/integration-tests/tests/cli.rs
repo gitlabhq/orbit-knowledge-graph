@@ -836,12 +836,13 @@ fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
 }
 
 #[test]
-fn skills_defaults_to_and_serves_bundled_content() {
-    let default = orbit_cmd().arg("skills").output().unwrap();
-    assert!(default.status.success());
-    let default = String::from_utf8(default.stdout).unwrap();
-    assert!(default.contains("name: orbit-cli"));
-    assert!(!default.contains("Other available skills:"));
+fn skills_lists_and_serves_local_content_without_remote_environment() {
+    let listing = orbit_cmd().arg("skills").output().unwrap();
+    assert!(listing.status.success());
+    assert!(listing.stderr.is_empty());
+    let listing = String::from_utf8(listing.stdout).unwrap();
+    assert!(listing.starts_with("orbit — "));
+    assert!(listing.contains("Orbit CLI"));
 
     let manifest = orbit_cmd()
         .args(["skills", "get", "orbit"])
@@ -849,10 +850,10 @@ fn skills_defaults_to_and_serves_bundled_content() {
         .unwrap();
     assert!(manifest.status.success());
     let manifest = String::from_utf8(manifest.stdout).unwrap();
-    assert_eq!(default, manifest);
+    assert!(manifest.contains("name: orbit-cli"));
     assert!(manifest.contains("references/local/sql.md"));
     assert!(
-        manifest.contains("`orbit skills get orbit <path>`"),
+        manifest.contains("`orbit skills get orbit [path]`"),
         "served manifest must tell binary users the version-matched access path"
     );
 
@@ -917,7 +918,7 @@ fn skills_help_presents_get_as_the_canonical_command() {
     let skills_help = orbit_cmd().args(["skills", "--help"]).output().unwrap();
     assert!(skills_help.status.success());
     let skills_help = String::from_utf8(skills_help.stdout).unwrap();
-    assert!(skills_help.contains("get   Print a bundled agent skill file."));
+    assert!(skills_help.contains("get   Print an instance-matched agent skill file."));
     assert!(!skills_help.contains("NAME_OR_PATH"));
 
     let get_help = orbit_cmd()
@@ -927,7 +928,7 @@ fn skills_help_presents_get_as_the_canonical_command() {
     assert!(get_help.status.success());
     let get_help = String::from_utf8(get_help.stdout).unwrap();
     assert!(get_help.contains(
-        "Print a file from an agent skill bundled with this binary without installing it."
+        "Print a file from the selected instance's agent skill, composed with local CLI guidance."
     ));
     assert!(get_help.contains("Usage: orbit skills get <NAME> [PATH]"));
 }

@@ -18,7 +18,7 @@ code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
 labkit-events = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
-orbit-prompts = { path = "../orbit-prompts" }
+orbit-prompts = { path = "../orbit-prompts", features = ["skill-markers"] }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
@@ -39,6 +39,7 @@ rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
+sha2 = { workspace = true }
 strum = { workspace = true }
 toml_edit = { workspace = true }
 uuid = { workspace = true }
