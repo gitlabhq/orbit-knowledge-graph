@@ -4,17 +4,17 @@ query:
   json: |
     {
         "query_type": "search",
-        "nodes": [{"id": "n", "entity": "Note", "node_ids": [3004], "columns": ["created_at"]}],
+        "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["created_at"]}],
         "limit": 10
     }
   gql: |
-    MATCH (n:Note {id: 3004}) RETURN n.created_at LIMIT 10
+    MATCH (n:Note {id: 3000}) RETURN n.created_at LIMIT 10
 
 expect:
   hydration: none
   sql_contains: ["AS n_created_at"]
   nodes:
     Note:
-      ids: [3004]
+      ids: [3000]
       rows:
-        - { id: 3004, created_at: "2024-01-15T10:30:00.123456Z" }
+        - { id: 3000, created_at: "2024-01-15T10:30:00.123456Z" }

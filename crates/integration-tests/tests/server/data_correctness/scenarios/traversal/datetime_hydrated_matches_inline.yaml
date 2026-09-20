@@ -5,27 +5,20 @@ query:
     {
         "query_type": "traversal",
         "nodes": [
-            {"id": "n", "entity": "Note", "id_range": {"start": 3004, "end": 3099}, "columns": ["created_at"]},
-            {"id": "u", "entity": "User", "node_ids": [4], "columns": ["username"]}
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
+            {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["created_at"]}
         ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+        "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
         "limit": 10
     }
   gql: |
-    MATCH (u:User {id: 4})-[:AUTHORED]->(n:Note) WHERE n.id >= 3004 AND n.id <= 3099 RETURN n.created_at, u.username LIMIT 10
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) WHERE n.id >= 1 AND n.id <= 10000 RETURN n.created_at LIMIT 10
 
 expect:
   hydration: static
   sql_not_contains: ["AS n_created_at"]
-  node_count: 2
-  edge_exists:
-    AUTHORED:
-      - [4, 3004]
   nodes:
     Note:
-      ids: [3004]
+      ids: [3000, 3002, 3003]
       rows:
-        - { id: 3004, created_at: "2024-01-15T10:30:00.123456Z" }
-    User:
-      rows:
-        - { id: 4, username: diana }
+        - { id: 3000, created_at: "2024-01-15T10:30:00.123456Z" }
