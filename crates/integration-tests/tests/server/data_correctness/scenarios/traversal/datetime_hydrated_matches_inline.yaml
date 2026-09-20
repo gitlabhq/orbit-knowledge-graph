@@ -5,14 +5,14 @@ query:
     {
         "query_type": "traversal",
         "nodes": [
-            {"id": "n", "entity": "Note", "id_range": {"start": 3004, "end": 3004}, "columns": ["created_at"]},
+            {"id": "n", "entity": "Note", "id_range": {"start": 3004, "end": 3099}, "columns": ["created_at"]},
             {"id": "u", "entity": "User", "node_ids": [4], "columns": ["username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "limit": 10
     }
   gql: |
-    MATCH (u:User {id: 4})-[:AUTHORED]->(n:Note) WHERE n.id >= 3004 AND n.id <= 3004 RETURN n.created_at, u.username LIMIT 10
+    MATCH (u:User {id: 4})-[:AUTHORED]->(n:Note) WHERE n.id >= 3004 AND n.id <= 3099 RETURN n.created_at, u.username LIMIT 10
 
 expect:
   hydration: static
