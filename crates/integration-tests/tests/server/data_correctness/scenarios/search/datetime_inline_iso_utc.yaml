@@ -13,6 +13,7 @@ query:
 expect:
   hydration: none
   sql_contains: ["AS n_created_at"]
+  node_count: 1
   nodes:
     Note:
       ids: [3000]

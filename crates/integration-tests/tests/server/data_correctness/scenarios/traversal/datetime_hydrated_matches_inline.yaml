@@ -17,7 +17,13 @@ query:
 expect:
   hydration: static
   sql_not_contains: ["AS n_created_at"]
+  node_count: 4
+  edge_exists:
+    HAS_NOTE:
+      - [2000, 3000]
   nodes:
+    MergeRequest:
+      ids: [2000]
     Note:
       ids: [3000, 3002, 3003]
       rows:
