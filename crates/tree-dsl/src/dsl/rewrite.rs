@@ -63,7 +63,7 @@ pub(crate) fn materialize(
                     continue;
                 }
                 if let Some(g) = guard
-                    && !matches(t, e, g, &mut scratch)
+                    && !matches(t, lang, e, g, &mut scratch)
                 {
                     continue;
                 }
@@ -106,12 +106,12 @@ pub(crate) fn materialize(
                         }
                         _ => false,
                     });
-                if text_empty || (kids_empty && std::matches!(text, Text::Any)) {
+                if text_empty || (kids_empty && std::matches!(text, Text::Any | Text::Prefix(_))) {
                     return;
                 }
             }
             let sym = match text {
-                Text::Any => 0,
+                Text::Any | Text::Prefix(_) => 0,
                 Text::Lit(s) => *s,
                 Text::From(slot, tf) => {
                     let Some(src) = caps[*slot as usize].first().copied() else {
@@ -243,7 +243,7 @@ fn apply_rewrites_inner(
             for c in &mut caps[..r.nslots] {
                 *c = SmallVec::new();
             }
-            if !matches(t, target, &r.pat, &mut caps) {
+            if !matches(t, lang, target, &r.pat, &mut caps) {
                 continue;
             }
             caps[0] = smallvec![target];

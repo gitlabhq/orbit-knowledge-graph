@@ -37,8 +37,6 @@ stages:
       - match: '(implements_clause $$$TYPES:type_identifier $$$REST)'
         replace: '(implements_clause $$$REST $$$TYPES=>__supertype)'
 
-
-
       # Import alias: capture real name as sym, alias as child
       - match: '(import_specifier name: $N alias: $A)'
         replace: '(import_specifier @$N (__alias @$A))'
@@ -208,6 +206,27 @@ stages:
     rules:
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")'
+      - match: '(__import_type)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import_type (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")'
 
 resolve:
   parse_files:

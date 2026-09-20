@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::str::FromStr;
 
 use indextree::NodeId;
@@ -48,7 +49,7 @@ impl Tf {
             "split_last" => Tf::SplitLast(s(0)),
             "split_first" => Tf::SplitFirst(s(0)),
             "replace" => Tf::Replace(s(0), s(1)),
-            "to_rel" => Tf::ToRel(args[0].chars().next().expect("to_rel arg")),
+
             "collapse_index" => Tf::CollapseIndex(args.iter().map(|a| (*a).into()).collect()),
             "map" => Tf::Map(
                 args.iter()
@@ -62,6 +63,10 @@ impl Tf {
             "regex_replace" => {
                 let re = regex::Regex::new(args[0]).expect("invalid regex");
                 Tf::Regex(re, s(1))
+            }
+            "regex_first" => {
+                let re = regex::Regex::new(args[0]).expect("invalid regex");
+                Tf::RegexFirst(re, s(1))
             }
             "regex_loop" => {
                 let re = regex::Regex::new(args[0]).expect("invalid regex");
@@ -108,78 +113,93 @@ impl Tf {
         }
     }
 
-    pub(crate) fn apply_to_str(&self, s: &str) -> String {
+    pub(crate) fn apply_to_str<'a>(&self, s: &'a str) -> Cow<'a, str> {
         debug_assert!(
             !self.is_node_tf(),
             "node transform used as string transform"
         );
         match self {
-            Tf::Id => s.to_string(),
-            Tf::Strip(p) => s.strip_prefix(&**p).unwrap_or(s).to_string(),
-            Tf::StripSuffix(p) => s.strip_suffix(&**p).unwrap_or(s).to_string(),
-            Tf::StripLeading(ch) => s.trim_start_matches(*ch).to_string(),
-            Tf::SplitLast(sep) => s.rsplit_once(&**sep).map_or(s, |(_, r)| r).to_string(),
-            Tf::SplitFirst(sep) => s.split_once(&**sep).map_or(s, |(l, _)| l).to_string(),
-            Tf::Replace(from, to) => s.replace(&**from, to),
-            Tf::Prepend(p) => format!("{p}{s}"),
-            Tf::Lowercase => s.to_lowercase(),
-            Tf::ToRel(ch) => {
-                let count = s.chars().take_while(|c| c == ch).count();
-                let rest = s[count..].replace(*ch, "/");
-                match count {
-                    0 => rest,
-                    1 => format!("./{rest}"),
-                    n => {
-                        let prefix = "../".repeat(n - 1);
-                        format!("{prefix}{rest}")
-                    }
+            Tf::Id => Cow::Borrowed(s),
+            Tf::Strip(p) => match s.strip_prefix(&**p) {
+                Some(rest) => Cow::Borrowed(rest),
+                None => Cow::Borrowed(s),
+            },
+            Tf::StripSuffix(p) => match s.strip_suffix(&**p) {
+                Some(rest) => Cow::Borrowed(rest),
+                None => Cow::Borrowed(s),
+            },
+            Tf::StripLeading(ch) => {
+                let trimmed = s.trim_start_matches(*ch);
+                if trimmed.len() == s.len() {
+                    Cow::Borrowed(s)
+                } else {
+                    Cow::Borrowed(trimmed)
                 }
             }
-            Tf::Pipeline(steps) => {
-                let mut result = s.to_string();
-                for step in steps {
-                    result = step.apply_to_str(&result);
+            Tf::SplitLast(sep) => match s.rsplit_once(&**sep) {
+                Some((_, r)) => Cow::Borrowed(r),
+                None => Cow::Borrowed(s),
+            },
+            Tf::SplitFirst(sep) => match s.split_once(&**sep) {
+                Some((l, _)) => Cow::Borrowed(l),
+                None => Cow::Borrowed(s),
+            },
+            Tf::Replace(from, to) => {
+                if s.contains(&**from) {
+                    Cow::Owned(s.replace(&**from, to))
+                } else {
+                    Cow::Borrowed(s)
                 }
-                result
+            }
+            Tf::Prepend(p) => Cow::Owned(format!("{p}{s}")),
+            Tf::Lowercase => Cow::Owned(s.to_lowercase()),
+
+            Tf::Pipeline(steps) => {
+                let mut owned = s.to_string();
+                for step in steps {
+                    owned = step.apply_to_str(&owned).into_owned();
+                }
+                Cow::Owned(owned)
             }
             Tf::Stem => {
                 let p = std::path::Path::new(s);
-                p.with_extension("").to_string_lossy().to_string()
+                Cow::Owned(p.with_extension("").to_string_lossy().to_string())
             }
             Tf::Map(entries) => {
                 for (k, v) in entries {
                     if s == &**k {
-                        return v.to_string();
+                        return Cow::Owned(v.to_string());
                     }
                 }
-                s.to_string()
+                Cow::Borrowed(s)
             }
             Tf::CollapseIndex(names) => {
                 for name in names {
                     let suffix = format!("/{name}");
                     if s.ends_with(&suffix) {
-                        return s.strip_suffix(&suffix).unwrap_or("").to_string();
+                        return Cow::Owned(s.strip_suffix(&suffix).unwrap_or("").to_string());
                     }
                     if s == &**name {
-                        return String::new();
+                        return Cow::Owned(String::new());
                     }
                 }
-                s.to_string()
+                Cow::Borrowed(s)
             }
-            Tf::Regex(re, replacement) => re.replace_all(s, &**replacement).to_string(),
+            Tf::Regex(re, replacement) => re.replace_all(s, &**replacement),
+            Tf::RegexFirst(re, replacement) => re.replace(s, &**replacement),
             Tf::RegexLoop(re, replacement) => {
-                let mut cur = s.to_string();
+                let mut cur = Cow::Borrowed(s);
                 loop {
-                    let next = re.replace_all(&cur, &**replacement).to_string();
-                    if next == cur {
+                    let next = re.replace_all(&cur, &**replacement);
+                    if let Cow::Borrowed(_) = next {
                         break;
                     }
-                    cur = next;
+                    cur = Cow::Owned(next.into_owned());
                 }
                 cur
             }
-            Tf::RegexMatch(re) => if re.is_match(s) { "true" } else { "false" }.to_string(),
-            _ => s.to_string(),
+            Tf::RegexMatch(re) => Cow::Borrowed(if re.is_match(s) { "true" } else { "false" }),
+            _ => Cow::Borrowed(s),
         }
     }
 
@@ -281,7 +301,7 @@ impl Tf {
                             .resolve(step.apply_sym(t, lang, id, edge_ctx))
                             .to_string();
                     } else {
-                        s = step.apply_to_str(&s);
+                        s = step.apply_to_str(&s).into_owned();
                     }
                 }
                 lang.syms.intern(&s)
@@ -291,8 +311,8 @@ impl Tf {
                 if sym == 0 {
                     return 0;
                 }
-                let s = lang.syms.resolve(sym).to_string();
-                let result = self.apply_to_str(&s);
+                let s = lang.syms.resolve(sym);
+                let result = self.apply_to_str(s);
                 lang.syms.intern(&result)
             }
         }

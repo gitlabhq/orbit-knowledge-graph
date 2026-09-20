@@ -56,19 +56,19 @@ stages:
     rules:
       # from X import * (must precede named-import rule due to first-match-wins)
       - match: '(import_from_statement module_name: $M $W:wildcard_import)'
-        replace: '(__import (__source @$M) (__source_path @$M|to_rel(".")) (__name @$W))'
+        replace: '(__import (__source @$M) (__source_path @$M) (__name @$W))'
 
       # from X import a, b  /  from X import a as b  /  mixed
       - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name|aliased_import)'
-        replace: '(__import (__source @$M) (__source_path @$M|to_rel(".")) $$$NAMES->__name)'
+        replace: '(__import (__source @$M) (__source_path @$M) $$$NAMES->__name)'
 
       # import X / import X.Y.Z
       - match: '(import_statement name: $N:dotted_name)'
-        replace: '(__import (__source @$N) (__source_path @$N|to_rel(".")) (__name @$N (__ssa_hint @$N|split_first("."))))'
+        replace: '(__import (__source @$N) (__source_path @$N) (__name @$N (__ssa_hint @$N|split_first("."))))'
 
       # import X as Y — rekind capture to __name, keeping __alias subtree
       - match: '(import_statement name: $N:aliased_import)'
-        replace: '(__import (__source @$N) (__source_path @$N|to_rel(".")) @$N->__name)'
+        replace: '(__import (__source @$N) (__source_path @$N) @$N->__name)'
 
       # from __future__ import X
       - match: '(future_import_statement $$$NAMES:dotted_name)'
@@ -158,6 +158,27 @@ stages:
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: tag-source-path
+    rules:
+      - match: '(__import)'
+        tag:
+          source_rel: '@$ROOT|child_sym("__source_path")|regex_loop("(\w)\.(\w)", "$1/$2")|regex_loop("^((?:~/)*)\.", "$1~/")|regex_first("~/", "./")|regex_replace("~/", "../")|regex_loop("^\./\.\./", "../")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|tag("source_rel")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "tag:source_rel")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")'
+
 resolve:
   display_source: resolved
   lookup_from:
@@ -231,7 +252,7 @@ display:
         tag:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
-          source_path: '@$ROOT|child_sym("__source_path")|replace("/", ".")'
+          source_path: '@$ROOT|tag("resolved_source")|replace("/", ".")'
       - match: '(__name "*")'
         tag:
           import_type: WildcardImport

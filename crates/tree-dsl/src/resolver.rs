@@ -320,8 +320,11 @@ fn gather_imports_for(
                     if paths::is_external(&source_str, external) {
                         return;
                     }
-                    let current_file = lang.syms.resolve(tree.root().sym());
-                    let target_path = paths::resolve_import_source(&source_str, current_file);
+                    let resolved_tag_key = lang.syms.intern("resolved_source");
+                    let Some(resolved_sym) = tree.get_tag(cur.index(), resolved_tag_key) else {
+                        return;
+                    };
+                    let target_path = lang.syms.resolve(resolved_sym).to_string();
                     let node_idx = cur.index();
                     let candidates =
                         match paths::resolve_path(&target_path, file_index, lookup_prefixes) {

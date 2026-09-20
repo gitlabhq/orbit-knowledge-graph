@@ -59,12 +59,13 @@ mise run lint:prose:test
 
 ## Where the gates run
 
-- **lefthook** `pre-commit` jobs `narration` and `prose` (advisory; print
-  warnings, do not block — `|| true` in `lefthook.yml`).
+- **lefthook** `pre-commit` job `narration` (advisory; prints warnings, does not
+  block — `|| true` in `lefthook.yml`) and `prose` (blocks the commit).
 - **CI** jobs `lint:narration`, `lint:mr-description`, and `lint:prose`, defined in
-  [`.gitlab/ci/linting.yml`](../../.gitlab/ci/linting.yml). All three use
-  `allow_failure: true` (yellow/advisory). In merge-request pipelines the
-  narration and prose jobs scope to files the MR changed (`--diff-base`).
+  [`.gitlab/ci/linting.yml`](../../.gitlab/ci/linting.yml). The first two use
+  `allow_failure: true` (yellow/advisory); `lint:prose` blocks. In merge-request
+  pipelines the narration and prose jobs scope to files the MR changed
+  (`--diff-base`).
 
 The narration lint measured ~87% precision (~151 flags) over the current
 `crates/` tree (task #2933).

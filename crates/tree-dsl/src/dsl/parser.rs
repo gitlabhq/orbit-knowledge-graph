@@ -59,7 +59,14 @@ fn visit_node(c: &mut Ctx<'_>, node: PNode<'_>, field: u16) -> Pat {
     for child in children {
         match child.as_rule() {
             Rule::Opt => optional = true,
-            Rule::Quoted => text = Text::Lit(c.lang.syms.intern(quoted_inner(&child))),
+            Rule::Quoted => {
+                let s = quoted_inner(&child);
+                if let Some(pfx) = s.strip_prefix('^') {
+                    text = Text::Prefix(c.lang.syms.intern(pfx));
+                } else {
+                    text = Text::Lit(c.lang.syms.intern(s));
+                }
+            }
             Rule::TextField => {
                 let (slot, tf) = visit_text_field(c, child);
                 text = Text::From(slot, tf);

@@ -150,6 +150,12 @@ stages:
       - match: '(__ssa_arm (else_clause $V:block))'
         replace: '(__ssa_arm $V)'
 
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+
 resolve:
   parse_files:
     - name: "Cargo.toml"

@@ -22,7 +22,7 @@ pub enum Tf {
     Replace(Box<str>, Box<str>),
     StripSuffix(Box<str>),
     Prepend(Box<str>),
-    ToRel(char),
+
     Lowercase,
     Pipeline(Vec<Tf>),
     ParentSym(u16),
@@ -36,6 +36,7 @@ pub enum Tf {
     Tag(u32),
     LitSym(u32),
     Regex(regex::Regex, Box<str>),
+    RegexFirst(regex::Regex, Box<str>),
     RegexLoop(regex::Regex, Box<str>),
     RegexMatch(regex::Regex),
 }
@@ -73,6 +74,7 @@ pub struct EdgeCtx<'a> {
 pub enum Text {
     Any,
     Lit(u32),
+    Prefix(u32),
     From(u16, Tf),
 }
 

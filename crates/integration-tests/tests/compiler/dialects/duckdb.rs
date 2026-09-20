@@ -92,7 +92,10 @@ fn aggregation() {
     );
 
     assert!(
-        sql.has_function("COUNT") || sql.has_function("count") || sql.has_function("countIf"),
+        sql.has_function("COUNT")
+            || sql.has_function("count")
+            || sql.has_function("countIf")
+            || sql.has_function("count_if"),
         "expected count function"
     );
     assert!(sql.has_group_by());
@@ -202,6 +205,20 @@ fn compile_gql(cypher: &str) -> Result<compiler::passes::codegen::CompiledQueryC
 fn gql_untyped_edge_pattern() {
     let r = compile_gql("MATCH (u:User {id: 1})-[e]->(n:Note) RETURN n.confidential");
     assert!(r.is_ok(), "{}", r.unwrap_err());
+}
+
+#[test]
+fn gql_both_nodes_projected() {
+    let r = compile_gql(
+        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) RETURN u.username, n.confidential",
+    );
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+    let sql = r.unwrap().base.render();
+    assert!(sql.contains("u_username"), "missing u_username: {sql}");
+    assert!(
+        sql.contains("n_confidential"),
+        "missing n_confidential: {sql}"
+    );
 }
 
 #[test]
