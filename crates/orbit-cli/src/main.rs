@@ -443,6 +443,7 @@ enum Commands {
     },
 }
 
+
 #[derive(Subcommand)]
 enum ConfigCommands {
     /// Print the saved value of a setting.
@@ -797,6 +798,7 @@ mod tests {
                 std::time::Duration::ZERO,
                 None,
             );
+        }
         }
         let emitted: Vec<String> = tracker
             .drain()
