@@ -236,6 +236,45 @@ fn no_credentials_is_a_silent_local_only_mode() {
     assert!(partial.stderr.is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn silent_local_mode_never_spawns_the_glab_credential_helper() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let cache = tempfile::tempdir().unwrap();
+    let fake_bin = tempfile::tempdir().unwrap();
+    let marker = fake_bin.path().join("glab-called");
+    let glab = fake_bin.path().join("glab");
+    std::fs::write(
+        &glab,
+        format!(
+            "#!/bin/sh\nprintf called > '{}'\nexit 1\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&glab).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&glab, permissions).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .args(["skills", "get", "orbit"])
+        .env("PATH", fake_bin.path())
+        .env("XDG_CACHE_HOME", cache.path())
+        .env("ORBIT_TELEMETRY_ENABLED", "true")
+        .env("ORBIT_TELEMETRY_COLLECTOR_URL", "http://127.0.0.1:1")
+        .env_remove("ORBIT_API_BASE_URL")
+        .env_remove("ORBIT_AUTH_HEADER_NAME")
+        .env_remove("ORBIT_AUTH_HEADER_VALUE")
+        .env_remove("GITLAB_TOKEN")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(output.stderr.is_empty());
+    assert!(!marker.exists(), "skills invoked glab in silent-local mode");
+}
+
 #[test]
 fn endpoint_404_warns_and_falls_back_to_local() {
     let cache = tempfile::tempdir().unwrap();

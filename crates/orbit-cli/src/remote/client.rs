@@ -48,18 +48,8 @@ impl OrbitClient {
     /// Missing or partial tuples are a silent local-only mode and must not
     /// invoke the credential helper.
     pub(crate) fn from_skill_env() -> Result<Option<Self>, RemoteError> {
-        let non_empty = |key: &str| std::env::var(key).ok().filter(|value| !value.is_empty());
-        let endpoint = match (
-            non_empty("ORBIT_API_BASE_URL"),
-            non_empty("ORBIT_AUTH_HEADER_NAME"),
-            non_empty("ORBIT_AUTH_HEADER_VALUE"),
-        ) {
-            (Some(base_url), Some(header_name), Some(header_value)) => ResolvedEndpoint {
-                base_url,
-                header_name,
-                header_value,
-            },
-            _ => return Ok(None),
+        let Some(endpoint) = resolve_skill_endpoint(|key| std::env::var(key).ok()) else {
+            return Ok(None);
         };
         Self::new(endpoint).map(Some)
     }
@@ -226,6 +216,22 @@ struct CredentialHelperToken {
     token: String,
 }
 
+fn resolve_skill_endpoint(get_env: impl Fn(&str) -> Option<String>) -> Option<ResolvedEndpoint> {
+    let non_empty = |key: &str| get_env(key).filter(|value| !value.is_empty());
+    match (
+        non_empty("ORBIT_API_BASE_URL"),
+        non_empty("ORBIT_AUTH_HEADER_NAME"),
+        non_empty("ORBIT_AUTH_HEADER_VALUE"),
+    ) {
+        (Some(base_url), Some(header_name), Some(header_value)) => Some(ResolvedEndpoint {
+            base_url,
+            header_name,
+            header_value,
+        }),
+        _ => None,
+    }
+}
+
 fn resolve_endpoint(
     get_env: impl Fn(&str) -> Option<String>,
     credential_helper: impl FnOnce() -> Option<ResolvedEndpoint>,
@@ -311,6 +317,7 @@ fn parse_credential_helper_response(json: &[u8]) -> Option<ResolvedEndpoint> {
     })
 }
 
+
 fn build_user_agent(get_env: impl Fn(&str) -> Option<String>) -> String {
     let mut ua = format!(
         "orbit/{} ({}, {})",
@@ -371,6 +378,24 @@ mod tests {
         assert_eq!(endpoint.base_url, "https://example.test");
         assert_eq!(endpoint.header_name, "Private-Token");
         assert_eq!(endpoint.header_value, "glpat-xyz");
+    }
+
+    #[test]
+    fn skill_endpoint_uses_only_a_complete_orbit_tuple() {
+        let endpoint = resolve_skill_endpoint(env_from(&[
+            ("ORBIT_API_BASE_URL", "https://example.test"),
+            ("ORBIT_AUTH_HEADER_NAME", "Private-Token"),
+            ("ORBIT_AUTH_HEADER_VALUE", "glpat-xyz"),
+            ("GITLAB_TOKEN", "ignored"),
+        ]))
+        .unwrap();
+        assert_eq!(endpoint.base_url, "https://example.test");
+
+        assert!(
+            resolve_skill_endpoint(env_from(&[("ORBIT_API_BASE_URL", "https://example.test")]))
+                .is_none()
+        );
+        assert!(resolve_skill_endpoint(env_from(&[("GITLAB_TOKEN", "ignored")])).is_none());
     }
 
     #[test]
