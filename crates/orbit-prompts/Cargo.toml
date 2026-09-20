@@ -5,7 +5,8 @@ edition = "2024"
 license = "MIT"
 
 [features]
-skill-validation = ["dep:comrak", "dep:syn"]
+skill-markers = ["dep:comrak"]
+skill-validation = ["skill-markers", "dep:syn"]
 
 [dependencies]
 comrak = { workspace = true, optional = true }

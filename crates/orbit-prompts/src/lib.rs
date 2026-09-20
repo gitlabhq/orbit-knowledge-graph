@@ -4,11 +4,15 @@ use std::path::Path;
 use rust_embed::Embed;
 use serde::Deserialize;
 
+#[cfg(feature = "skill-markers")]
+mod marker;
 #[cfg(feature = "skill-validation")]
 mod skill;
 mod skill_frontmatter;
 
 pub const CLAP_HELP_COMMAND: &str = "help";
+#[cfg(feature = "skill-markers")]
+pub use marker::compose_skill_manifests;
 #[cfg(feature = "skill-validation")]
 pub use skill::{SkillValidation, validate_skill_pair};
 pub use skill_frontmatter::{SkillFrontmatter, parse_skill_frontmatter};

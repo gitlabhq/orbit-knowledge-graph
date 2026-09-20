@@ -5,12 +5,10 @@ use comrak::nodes::NodeValue;
 use comrak::{Arena, Options, parse_document};
 use syn::{Expr, ExprLit, Item, Lit, Meta};
 
+use crate::marker::{MarkerTree, parse_markers};
 use crate::{CLAP_HELP_COMMAND, parse_skill_frontmatter};
 
 const MANIFEST: &str = "SKILL.md";
-const SLOT_PREFIX: &str = "<!-- orbit:include local:";
-const SECTION_PREFIX: &str = "<!-- orbit:section ";
-const SECTION_END: &str = "<!-- /orbit:section -->";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SkillValidation {
@@ -142,109 +140,6 @@ fn validate_path_namespace(
     } else {
         Err(format!(
             "remote and local skill paths overlap outside {MANIFEST}: {overlaps:?}"
-        ))
-    }
-}
-
-#[derive(Clone, Copy)]
-enum MarkerTree {
-    Remote,
-    Local,
-}
-
-fn parse_markers(content: &str, tree: MarkerTree) -> Result<BTreeSet<String>, String> {
-    let arena = Arena::new();
-    let root = parse_document(&arena, content, &Options::default());
-    let mut ids = BTreeSet::new();
-    let mut section: Option<String> = None;
-
-    for node in root.descendants() {
-        let data = node.data();
-        let marker = match &data.value {
-            NodeValue::HtmlBlock(block) => block.literal.trim(),
-            NodeValue::HtmlInline(inline) => inline.trim(),
-            _ => continue,
-        };
-        let line_number = data.sourcepos.start.line;
-
-        if marker == SECTION_END {
-            if !matches!(tree, MarkerTree::Local) {
-                return Err(format!(
-                    "remote {MANIFEST}:{line_number}: unexpected section end"
-                ));
-            }
-            if section.take().is_none() {
-                return Err(format!(
-                    "local {MANIFEST}:{line_number}: section end has no start"
-                ));
-            }
-        } else if let Some(id) = exact_marker_id(marker, SLOT_PREFIX) {
-            if !matches!(tree, MarkerTree::Remote) {
-                return Err(format!(
-                    "local {MANIFEST}:{line_number}: include slot is not allowed"
-                ));
-            }
-            insert_marker_id(&mut ids, id, "slot", line_number)?;
-        } else if let Some(id) = exact_marker_id(marker, SECTION_PREFIX) {
-            if !matches!(tree, MarkerTree::Local) {
-                return Err(format!(
-                    "remote {MANIFEST}:{line_number}: section export is not allowed"
-                ));
-            }
-            if let Some(open) = &section {
-                return Err(format!(
-                    "local {MANIFEST}:{line_number}: section {id:?} is nested inside {open:?}"
-                ));
-            }
-            insert_marker_id(&mut ids, id, "section", line_number)?;
-            section = Some(id.to_string());
-        } else if marker.starts_with("<!-- orbit:") || marker.starts_with("<!-- /orbit:") {
-            return Err(format!(
-                "{} {MANIFEST}:{line_number}: malformed Orbit marker {marker:?}",
-                tree.name()
-            ));
-        }
-    }
-
-    if let Some(id) = section {
-        return Err(format!("local {MANIFEST}: section {id:?} is not closed"));
-    }
-    Ok(ids)
-}
-
-impl MarkerTree {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Remote => "remote",
-            Self::Local => "local",
-        }
-    }
-}
-
-fn exact_marker_id<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
-    let id = line.strip_prefix(prefix)?.strip_suffix(" -->")?;
-    is_valid_id(id).then_some(id)
-}
-
-fn is_valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        && id.as_bytes()[0].is_ascii_alphanumeric()
-}
-
-fn insert_marker_id(
-    ids: &mut BTreeSet<String>,
-    id: &str,
-    kind: &str,
-    line_number: usize,
-) -> Result<(), String> {
-    if ids.insert(id.to_string()) {
-        Ok(())
-    } else {
-        Err(format!(
-            "{MANIFEST}:{line_number}: duplicate {kind} ID {id:?}"
         ))
     }
 }
