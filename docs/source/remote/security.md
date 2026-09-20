@@ -95,15 +95,16 @@ The token check is a gateway: it decides whether the token may call the endpoint
 follow the token owner's access in GitLab, not the other permissions on the token.
 
 - A token with the GitLab Orbit **Read** permission under **User** calls the unscoped endpoints and
-  sees everything the token owner can see. It gets `403` on the group and project routes, the
-  same as Global Search.
-- A token with the GitLab Orbit **Read** permission under **Group and project access** must name its
-  group or project in each request. Use the group or project routes, such as
-  `/api/v4/groups/:id/orbit/query` and `/api/v4/projects/:id/orbit/query`, or the `namespace_id`
-  or `project_id` argument on the MCP `invoke_command` tool. Calls to the unscoped routes, or to a
-  group or project outside the token's scope, return `403`.
-- When a request uses a group or project route, results narrow to that group or project for every
-  caller, including classic tokens and OAuth.
+  sees everything the token owner can see. It gets `403` on the group routes, the same as
+  Global Search.
+- A token with the GitLab Orbit **Read** permission on a group must name that group in each
+  request. Use the group routes for queries, agent commands, and graph status, such as
+  `/api/v4/groups/:id/orbit/query`, or the `namespace_id` argument on the MCP `invoke_command`
+  tool. Calls to the unscoped routes, or to a group outside the token's scope, return `403`.
+- Only groups can scope a token. GitLab Orbit authorizes at the group level with the Reporter
+  role, so a token scoped to a single project cannot call GitLab Orbit.
+- When a request uses a group route, results narrow to that group for every caller, including
+  classic tokens and OAuth.
 - Other permissions on the token have no effect on GitLab Orbit results. A token without the Work item
   **Read** permission still gets work items from GitLab Orbit when the owner can read them in GitLab.
 - The Reporter floor and the Security Manager rule in

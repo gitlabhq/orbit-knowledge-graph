@@ -41,10 +41,9 @@ Bearer token:
 
 Results are scoped to entities the token owner can access in GitLab.
 
-Every read endpoint also exists under a group or a project, for example
-`/api/v4/groups/:id/orbit/query` and `/api/v4/projects/:id/orbit/query`. Those routes narrow
-results to that group or project. A fine-grained token scoped to a group or project must use
-them. For more information, see
+The query, named query, agent command, and graph status endpoints also exist under a group,
+for example `/api/v4/groups/:id/orbit/query`. Those routes narrow results to that group. A
+fine-grained token scoped to a group must use them. For more information, see
 [Fine-grained personal access tokens](../security.md#fine-grained-personal-access-tokens).
 
 ## Billing
