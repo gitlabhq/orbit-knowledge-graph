@@ -650,6 +650,25 @@ impl<'a> Validator<'a> {
                     continue;
                 };
                 for filter in filters {
+                    if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
+                        let rhs_entity = input
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == *rhs_node)
+                            .and_then(|n| n.entity.as_deref());
+                        if let Some(rhs_entity) = rhs_entity {
+                            self.check_field(rhs_entity, rhs_prop)?;
+                            if !self
+                                .ontology
+                                .check_field_flag(rhs_entity, rhs_prop, |f| f.filterable)
+                            {
+                                return Err(QueryError::AllowlistRejected(format!(
+                                    "filter on \"{rhs_prop}\" for {rhs_entity}: field is not filterable"
+                                )));
+                            }
+                        }
+                        continue;
+                    }
                     if is_traversal_path_filter {
                         Self::check_traversal_path_filter(
                             &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
