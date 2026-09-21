@@ -6,12 +6,12 @@ description: >-
 
 
   Detects the assistants installed on this machine from their configuration
-  directories and opens a short wizard. Pick assistants, with the detected
-  ones pre-selected, then pick what to install. The defaults are the managed
-  instruction section, the Orbit skill files, and nudge hooks where the
-  assistant supports them. The `orbit` MCP server is opt-in: check it in the
-  wizard or pass `--mcp`. Name assistants to pre-select only those, or pass
-  `--all` for every supported assistant. `--skip` leaves a component out.
+  directories, pre-selects them in a short picker, shows what will change,
+  and asks once. Each assistant gets the managed instruction section, the
+  Orbit skill files, and nudge hooks where the assistant supports them.
+  Pass `--mcp` to also register the `orbit` MCP server. `--skip` leaves a
+  component out. Name assistants to pre-select only those, or pass `--all`
+  for every supported assistant.
   Targets user-global configuration by default, or the project with
   `--project` or `--dir`. Existing files get a one-time `.orbit-backup`
   sibling before the first change. Re-running updates everything in place.

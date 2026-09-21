@@ -54,15 +54,6 @@ impl Component {
             Component::Mcp => "mcp server",
         }
     }
-
-    fn hint(self) -> &'static str {
-        match self {
-            Component::Instructions => "managed section in CLAUDE.md or AGENTS.md",
-            Component::Hooks => "nudge before raw search and read, where supported",
-            Component::Skill => "orbit-cli skill files",
-            Component::Mcp => "register `orbit mcp serve`, opt-in",
-        }
-    }
 }
 
 pub(crate) struct Options {

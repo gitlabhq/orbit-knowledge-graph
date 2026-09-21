@@ -182,13 +182,11 @@ orbit setup
 ```
 
 It detects assistants from their configuration directories, such as
-`~/.claude`, `~/.codex`, and `~/.config/opencode`, then opens a short wizard.
-The first step lists every supported assistant with the detected ones
-pre-selected. The second step lists what each assistant gets: the instruction
-section, the skill files, and the nudge hooks are selected by default, and the
-MCP server is not. The wizard then shows the files it will touch and asks once
-before writing. Supported assistants are GitLab Duo, Claude Code, Codex,
-OpenCode, and Pi.
+`~/.claude`, `~/.codex`, and `~/.config/opencode`, and lists every supported
+assistant with the detected ones pre-selected. It then shows the files it
+will touch and asks once before writing. Each assistant gets the instruction
+section, the skill files, and the nudge hooks. Supported assistants are
+GitLab Duo, Claude Code, Codex, OpenCode, and Pi.
 
 To pre-select specific assistants, name them:
 
@@ -202,8 +200,8 @@ Other options:
 - `--skip <component>` leaves a component out: `instructions`, `hooks`,
   `skill`, or `mcp`.
 - `--all` configures every supported assistant, detected or not.
-- `--yes` skips the wizard and applies the defaults. Required when there is no
-  terminal, for example in scripts.
+- `--yes` skips the picker and the prompt. Required when there is no terminal,
+  for example in scripts.
 - `--dry-run` prints the plan and exits without writing.
 
 ### What it changes
@@ -218,8 +216,8 @@ For every assistant it configures, `orbit setup`:
   `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
   alone. Running the command again replaces the block in place instead of adding
   a second copy.
-- With `--mcp`, or when you select it in the wizard, registers the `orbit` MCP
-  server, which runs `orbit mcp serve`, in the assistant's MCP configuration:
+- With `--mcp`, registers the `orbit` MCP server, which runs
+  `orbit mcp serve`, in the assistant's MCP configuration:
   `~/.claude.json` or `.mcp.json` for Claude Code, `config.toml` for Codex, and
   `opencode.json` for OpenCode. Existing servers, comments, and unrelated
   settings are preserved. If OpenCode uses `opencode.jsonc`, setup stops and

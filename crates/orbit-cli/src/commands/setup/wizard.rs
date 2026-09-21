@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -9,7 +9,7 @@ use super::changes::{self, Report};
 use super::detect::Machine;
 use super::plan::{self, Plan, Selection};
 use super::spec::{self, AssistantSpec};
-use super::{Component, Options, Target};
+use super::{Options, Target};
 
 pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Result<()> {
     let interactive = interactive(&options)?;
@@ -23,7 +23,6 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
             &selection.assistants,
             &detection_hints(&detected, machine),
         )?;
-        selection.components = choose_components(&selection.components)?;
     }
     if selection.assistants.is_empty() {
         cliclack::outro_cancel(format!(
@@ -149,17 +148,6 @@ fn choose_assistants(
         .iter()
         .filter(|assistant| chosen.contains(&assistant.name.as_str()))
         .collect())
-}
-
-fn choose_components(preselected: &BTreeSet<Component>) -> Result<BTreeSet<Component>> {
-    let mut picker = cliclack::multiselect("What should each assistant get?").required(false);
-    for component in Component::ALL {
-        picker = picker.item(component, component.label(), component.hint());
-    }
-    let chosen = picker
-        .initial_values(preselected.iter().copied().collect())
-        .interact()?;
-    Ok(chosen.into_iter().collect())
 }
 
 fn show_plan(plan: &Plan) -> Result<()> {
