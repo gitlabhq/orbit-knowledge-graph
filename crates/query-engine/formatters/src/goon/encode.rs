@@ -439,9 +439,6 @@ fn format_string(raw: &str, key: &str) -> String {
         return String::new();
     }
     let truncated = truncate(raw, key);
-    if let Some(normalized) = normalize_iso_datetime(&truncated) {
-        return normalized;
-    }
     // Strings that look like native scalars must be quoted so a reader can
     // tell `state="true"` (string) from a real boolean.
     if !matches!(truncated.as_ref(), "true" | "false" | "null") && is_bare_token(&truncated) {
@@ -471,31 +468,4 @@ fn string_len_for_breadcrumb(value: &Value, key: &str) -> Option<usize> {
 
 fn is_bare_token(s: &str) -> bool {
     bytes_are_allowed(s.as_bytes(), &BARE_TOKEN_BYTES)
-}
-
-/// ClickHouse emits datetimes as `2026-05-08 23:13:59.643407`. Convert to
-/// ISO 8601 T-form so the value is bare-emittable; spaces inside a value
-/// would break the space-delimited `key=value key=value` row format. We
-/// validate via chrono but rebuild the output byte-for-byte from the
-/// original so microsecond precision (6 digits) is not silently widened
-/// to chrono's nanosecond default (9 digits).
-fn normalize_iso_datetime(s: &str) -> Option<String> {
-    use chrono::{DateTime, NaiveDateTime};
-    if DateTime::parse_from_rfc3339(s).is_ok() {
-        return Some(s.to_string());
-    }
-    let parses = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f").is_ok()
-        || NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").is_ok();
-    if !parses {
-        return None;
-    }
-    if s.as_bytes().get(10) == Some(&b' ') {
-        let mut buf = String::with_capacity(s.len());
-        buf.push_str(&s[..10]);
-        buf.push('T');
-        buf.push_str(&s[11..]);
-        Some(buf)
-    } else {
-        Some(s.to_string())
-    }
 }

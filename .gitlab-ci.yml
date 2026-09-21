@@ -335,6 +335,17 @@ ddl-freshness-check:
   script:
     - bash ./scripts/check-ddl-freshness.sh
 
+integration-test-lane-coverage-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run lint:integration-test-lanes
+    - sccache --show-stats || true
+
 migration-ledger-check:
   stage: lint
   extends:
@@ -757,6 +768,7 @@ corpus-smoke-test:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     TESTCONTAINERS_HOST_OVERRIDE: docker
+    NEXTEST_FILTER: test(corpus_smoke)
   needs: []
   before_script:
     - !reference [.sccache-template, before_script]
@@ -764,7 +776,7 @@ corpus-smoke-test:
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
-    - cargo nextest run --profile ci --all-features --test containers -E 'test(corpus_smoke)'
+    - cargo nextest run --profile ci --all-features --test containers -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
 # Benchmark Stage

@@ -123,26 +123,24 @@ pub fn compile(
 /// Compile a graph query into DuckDB SQL for local execution.
 ///
 /// Collapses edge tables to the local single-table layout before compiling.
+/// No security, hydration, or cursor phases — local mode trusts all data.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(
     raw: &str,
     fe: Frontend,
     ontology: &Arc<Ontology>,
-    ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let mut ont = ontology.as_ref().clone();
-    if let Some(local_table) = ontology.local_edge_table_name() {
-        ont.collapse_edge_tables(local_table);
-    }
+    ont.remove_data_model_optimizations();
     let ont = Arc::new(ont);
     match fe {
         Frontend::JsonDsl => {
-            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&ont), ctx.clone());
+            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&ont));
             c.set_raw(raw.to_string());
             finish(&mut c, config::run_duckdb_json_dsl)
         }
         Frontend::Gql => {
-            let mut c = config::DuckdbGqlCtx::new(Arc::clone(&ont), ctx.clone());
+            let mut c = config::DuckdbGqlCtx::new(Arc::clone(&ont));
             c.set_raw(raw.to_string());
             finish(&mut c, config::run_duckdb_gql)
         }

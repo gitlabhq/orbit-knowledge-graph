@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use ontology::pipelines::PipelineDescriptor;
 use ontology::{EtlScope, Ontology};
 use serde::{Deserialize, Serialize};
 
@@ -169,16 +170,11 @@ pub fn find_invalidated_pipelines(
     let invalidated = invalidated_entities(ontology, scope);
     let descriptors = ontology.pipeline_descriptors();
 
-    for entity in &invalidated {
-        if !descriptors
-            .iter()
-            .any(|descriptor| descriptor.reindex_targets.contains(entity))
-        {
-            tracing::warn!(
-                entity = %entity,
-                "invalidated entity is emitted by no pipeline — orphan, excluded from seeding and gating"
-            );
-        }
+    for entity in orphaned_sdlc_entities(ontology, &invalidated, &descriptors) {
+        tracing::warn!(
+            entity = %entity,
+            "invalidated SDLC entity is emitted by no pipeline — orphan, excluded from seeding and gating"
+        );
     }
 
     let mut namespaced = Vec::new();
@@ -194,6 +190,24 @@ pub fn find_invalidated_pipelines(
     }
 
     InvalidatedPipelines { namespaced, global }
+}
+
+fn orphaned_sdlc_entities(
+    ontology: &Ontology,
+    invalidated: &BTreeSet<String>,
+    descriptors: &[PipelineDescriptor],
+) -> BTreeSet<String> {
+    let code = code_entity_names(ontology);
+    invalidated
+        .iter()
+        .filter(|entity| !code.contains(*entity))
+        .filter(|entity| {
+            !descriptors
+                .iter()
+                .any(|descriptor| descriptor.reindex_targets.contains(*entity))
+        })
+        .cloned()
+        .collect()
 }
 
 fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet<String> {
@@ -428,17 +442,14 @@ mod tests {
     }
 
     #[test]
-    fn every_sdlc_entity_is_reachable_from_a_pipeline() {
+    fn full_scope_has_no_orphans_and_skips_code_entities() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let descriptors = ontology.pipeline_descriptors();
-        let orphans: BTreeSet<String> = sdlc_entity_names(&ontology)
-            .into_iter()
-            .filter(|entity| {
-                !descriptors
-                    .iter()
-                    .any(|descriptor| descriptor.reindex_targets.contains(entity))
-            })
-            .collect();
-        assert_eq!(orphans, BTreeSet::new());
+        let invalidated = invalidated_entities(&ontology, &MigrationScope::Full);
+        assert!(!code_entity_names(&ontology).is_empty());
+        assert_eq!(
+            orphaned_sdlc_entities(&ontology, &invalidated, &descriptors),
+            BTreeSet::new()
+        );
     }
 }

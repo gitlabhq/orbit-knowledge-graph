@@ -180,6 +180,9 @@ impl Context {
     }
 
     fn emit_expr(&mut self, e: &Expr) -> String {
+        if is_deleted_predicate(e) {
+            return "true".to_string();
+        }
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
             Expr::Identifier(name) => name.clone(),
@@ -267,9 +270,25 @@ impl Context {
             return format!("date_trunc('{duckdb_unit}', {inner})");
         }
 
+        if name == "positionCaseInsensitive" && args.len() == 2 {
+            let col = self.emit_expr(&args[0]);
+            let search = self.emit_expr(&args[1]);
+            return format!("contains(lower({col}), lower({search}))");
+        }
+        if name == "sumIf" && args.len() == 2 {
+            let col = self.emit_expr(&args[0]);
+            let cond = self.emit_expr(&args[1]);
+            return format!("SUM({col}) FILTER (WHERE {cond})");
+        }
+
         let duckdb_name = match name {
             "startsWith" => "starts_with",
+            "endsWith" => "ends_with",
+            "substringUTF8" => "substring",
+            "countIf" => "count_if",
             "has" => "list_contains",
+            "hasAny" => "list_has_any",
+            "hasAll" => "list_has_all",
             "array" => "list_value",
             "arrayConcat" => "list_concat",
             "arrayReverse" => "list_reverse",
@@ -393,6 +412,13 @@ fn duckdb_trunc_unit(suffix: &str) -> Option<&'static str> {
         "Year" => Some("year"),
         _ => None,
     }
+}
+
+fn is_deleted_predicate(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::BinaryOp { op: Op::Eq, left, .. } if is_dedup_column(left)
+    )
 }
 
 /// Strip `_deleted = false` predicates from a WHERE clause.

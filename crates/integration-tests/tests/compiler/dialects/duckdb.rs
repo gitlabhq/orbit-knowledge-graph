@@ -1,11 +1,11 @@
 //! DuckDB dialect end-to-end tests.
 
-use crate::compiler::setup::{test_ctx, test_ontology};
+use crate::compiler::setup::test_ontology;
 use crate::compiler::utils::ParsedSql;
 use compiler::{Frontend, compile_local};
 
 fn compile(json: &str) -> compiler::passes::codegen::CompiledQueryContext {
-    compile_local(json, Frontend::JsonDsl, &test_ontology(), &test_ctx()).unwrap()
+    compile_local(json, Frontend::JsonDsl, &test_ontology()).unwrap()
 }
 
 fn parse_duckdb(json: &str) -> ParsedSql {
@@ -92,7 +92,10 @@ fn aggregation() {
     );
 
     assert!(
-        sql.has_function("COUNT") || sql.has_function("count") || sql.has_function("countIf"),
+        sql.has_function("COUNT")
+            || sql.has_function("count")
+            || sql.has_function("countIf")
+            || sql.has_function("count_if"),
         "expected count function"
     );
     assert!(sql.has_group_by());
@@ -169,7 +172,7 @@ fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
                 "limit": 10
             }}"#
         );
-        let result = compile_local(&json, Frontend::JsonDsl, &test_ontology(), &test_ctx())
+        let result = compile_local(&json, Frontend::JsonDsl, &test_ontology())
             .unwrap_or_else(|e| panic!("compile_local failed for unit {unit}: {e:?}"));
         let rendered = result.base.render();
         let expected = format!("date_trunc('{unit}', u.created_at)");
@@ -192,4 +195,60 @@ fn node_ids_expand_params() {
 
     assert!(sql.has_operator("IN"));
     assert!(!sql.raw_contains("Array("));
+}
+
+fn compile_gql(cypher: &str) -> Result<compiler::passes::codegen::CompiledQueryContext, String> {
+    compile_local(cypher, Frontend::Gql, &test_ontology()).map_err(|e| e.to_string())
+}
+
+#[test]
+fn gql_untyped_edge_pattern() {
+    let r = compile_gql("MATCH (u:User {id: 1})-[e]->(n:Note) RETURN n.confidential");
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+}
+
+#[test]
+fn gql_both_nodes_projected() {
+    let r = compile_gql(
+        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) RETURN u.username, n.confidential",
+    );
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+    let sql = r.unwrap().base.render();
+    assert!(sql.contains("u_username"), "missing u_username: {sql}");
+    assert!(
+        sql.contains("n_confidential"),
+        "missing n_confidential: {sql}"
+    );
+}
+
+#[test]
+fn gql_open_ended_scan() {
+    let r = compile_gql("MATCH (u:User) RETURN u.username");
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+}
+
+#[test]
+fn gql_count_without_node_ids() {
+    let r = compile_gql("MATCH (u:User) RETURN count(u) AS n");
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+}
+
+#[test]
+fn gql_typed_edge_traversal() {
+    let r = compile_gql("MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) RETURN n.confidential");
+    assert!(r.is_ok(), "{}", r.unwrap_err());
+    let sql = r.unwrap().base.render();
+    assert!(
+        sql.contains("relationship_kind"),
+        "edge type filter missing: {sql}"
+    );
+}
+
+#[test]
+fn gql_order_by_across_traversal() {
+    let r = compile_gql(
+        "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) \
+         RETURN n.confidential ORDER BY n.confidential",
+    );
+    assert!(r.is_ok(), "{}", r.unwrap_err());
 }

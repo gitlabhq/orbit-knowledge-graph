@@ -25,7 +25,8 @@ There is no environment-variable layer. Every override is a YAML overlay or a se
 
 Adding a setting means adding a field to the struct in `crates/orbit-server-config/` and its
 value to `config/default.yaml`; nothing else. Tests that need a config start from
-`AppConfig::embedded_defaults()` and override the fields they care about.
+`AppConfig::embedded_defaults()` and override the fields they care about. The `orbit` CLI uses its
+own clap configuration instead of `AppConfig`.
 
 The mise dev tasks (`server:start`, `server:dispatch`, `dev:web`, `dev:indexer`, `dev:dispatcher`,
 `dev:healthcheck`) run `scripts/orbit-native-dev.sh`. That script writes `.dev/<mode>.yaml` on every

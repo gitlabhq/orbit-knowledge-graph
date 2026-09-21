@@ -250,33 +250,17 @@ fn other_control_chars_are_dropped() {
 }
 
 #[test]
-fn space_separated_datetime_is_converted_to_t_form() {
+fn iso_datetime_passes_through_bare() {
     let r = response(
         "traversal",
         vec![node(
             "MR",
             1,
-            &[("created_at", json!("2026-05-08 22:55:58.467450"))],
+            &[("created_at", json!("2026-05-08T22:55:58.467450Z"))],
         )],
         vec![],
     );
-    let out = enc(&r);
-    assert!(out.contains("created_at=2026-05-08T22:55:58.467450"));
-    assert!(!out.contains("2026-05-08 22:55:58"));
-}
-
-#[test]
-fn t_separated_datetime_passes_through_bare() {
-    let r = response(
-        "traversal",
-        vec![node(
-            "MR",
-            1,
-            &[("created_at", json!("2026-05-08T22:55:58Z"))],
-        )],
-        vec![],
-    );
-    assert!(enc(&r).contains("created_at=2026-05-08T22:55:58Z"));
+    assert!(enc(&r).contains("created_at=2026-05-08T22:55:58.467450Z"));
 }
 
 #[test]

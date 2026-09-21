@@ -154,5 +154,8 @@ can branch on them without parsing stderr.
 
 ## Billing
 
-`glab orbit query` consumes GitLab Credits the same way as MCP queries.
-`status`, `ontology`, `tools`, and `graph-status` calls are free.
+During the beta, `glab orbit query` does not consume GitLab Credits.
+
+When GitLab Orbit is generally available, `glab orbit query` consumes GitLab Credits
+the same way as MCP queries. `status`, `ontology`, `tools`, and `graph-status` calls
+stay free.
