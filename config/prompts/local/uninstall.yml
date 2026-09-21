@@ -6,6 +6,6 @@ description: >-
 
 
   Removes the instruction section, hooks, MCP server entry, and skill files
-  that `orbit setup` wrote. Files you edited after setup and `.orbit-backup`
-  copies are kept. Targets user-global configuration unless `--project` or
-  `--dir` is given.
+  that `orbit setup` wrote. Files you edited after setup are kept, with their
+  `.orbit-backup` copies. Targets user-global configuration unless `--project`
+  or `--dir` is given.

@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use super::{Report, remove_file};
+use super::{Report, drop_backup_when_restored, remove_file};
 use crate::commands::setup::Target;
 
 pub(super) fn read_object(path: &Path) -> Result<Value> {
@@ -48,6 +48,7 @@ pub(super) fn write_or_delete_when_empty(
     } else {
         write_object(path, root)?;
         report.note(label, "orbit entries removed");
+        drop_backup_when_restored(path, label, report)?;
     }
     Ok(())
 }

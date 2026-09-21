@@ -125,6 +125,20 @@ fn remove_empty_parents(path: &Path, stop: &Path) {
     }
 }
 
+fn drop_backup_when_restored(path: &Path, label: &str, report: &mut Report) -> Result<()> {
+    let backup = backup_path(path);
+    let restored = match (std::fs::read(path), std::fs::read(&backup)) {
+        (Ok(current), Ok(original)) => current == original,
+        _ => false,
+    };
+    if restored {
+        std::fs::remove_file(&backup)
+            .with_context(|| format!("failed to remove {}", backup.display()))?;
+        report.note(label, "backup removed (file is back to its original)");
+    }
+    Ok(())
+}
+
 fn backup_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".orbit-backup");

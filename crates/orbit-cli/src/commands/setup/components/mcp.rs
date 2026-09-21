@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 use super::json;
-use super::{Installer, Report, backup_once, remove_file};
+use super::{Installer, Report, backup_once, drop_backup_when_restored, remove_file};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent, DIRECT_LAUNCHER, McpFormat};
 
@@ -217,6 +217,7 @@ fn remove_toml(
     } else {
         write_toml(path, &document)?;
         report.note(label, "orbit entries removed");
+        drop_backup_when_restored(path, label, report)?;
     }
     Ok(())
 }

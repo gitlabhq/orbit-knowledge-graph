@@ -229,8 +229,9 @@ orbit uninstall
 ```
 
 Name agents to undo only those. It removes what `orbit setup` wrote and leaves
-the rest of each file untouched. Files you edited after setup and backup files
-are kept. `--project` and `--dir` work as they do for `orbit setup`.
+the rest of each file untouched. Files you edited after setup are kept, and so
+are their backups. A backup goes away once its file is back to the original.
+`--project` and `--dir` work as they do for `orbit setup`.
 
 If you would rather not have `orbit setup` touch your files, skip it and add the
 same instruction block, MCP entry, and hooks by hand.
