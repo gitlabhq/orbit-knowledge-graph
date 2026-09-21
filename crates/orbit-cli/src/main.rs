@@ -834,7 +834,7 @@ async fn run_index(
     show_stats: bool,
     db: Option<PathBuf>,
 ) -> Result<()> {
-    for output in index_collect(path, threads, show_stats, db)? {
+    for output in index_collect(path, threads, show_stats, true, db)? {
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
@@ -846,6 +846,7 @@ pub(crate) fn index_collect(
     path: PathBuf,
     threads: usize,
     show_stats: bool,
+    show_progress: bool,
     db: Option<PathBuf>,
 ) -> Result<Vec<IndexOutput>> {
     let db_path = workspace::resolve_db_path(db)?;
@@ -865,6 +866,7 @@ pub(crate) fn index_collect(
 
     let pipeline_config = code_graph::v2::PipelineConfig {
         worker_threads: threads,
+        show_progress,
         per_file_timeout: Some(std::time::Duration::from_secs(2)),
         per_file_parse_timeout: Some(std::time::Duration::from_millis(100)),
         per_file_walk_timeout: Some(std::time::Duration::from_millis(100)),

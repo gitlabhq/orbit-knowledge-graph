@@ -107,7 +107,7 @@ impl OrbitLocalServer {
         Parameters(args): Parameters<IndexArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         blocking_tool(move || {
-            let outputs = index_collect(args.path, args.threads, args.stats, args.db)?;
+            let outputs = index_collect(args.path, args.threads, args.stats, true, args.db)?;
             serde_json::to_string_pretty(&outputs).context("failed to serialise index output")
         })
         .await

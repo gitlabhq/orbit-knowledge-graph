@@ -3,6 +3,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};
+use arrow::array::{Array, StringArray};
 use cliclack::{Theme, ThemeState};
 
 use super::changes::{self, Report};
@@ -50,31 +51,43 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     }
     applied?;
     show_plan(&plan, "Configured")?;
-    let indexed = options.index && index_current_repository()?;
-    cliclack::outro(match indexed {
-        true => "Done. Ask your agent where a function is defined.",
-        false => {
-            "Done. Run orbit index in a repository, then ask your agent where a function is defined."
+    let next_step = match options.index {
+        true => index_current_repository()?,
+        false => None,
+    };
+    cliclack::outro(match next_step {
+        Some(NextStep::Grep(name)) => {
+            format!("Done. Try: {} grep \"{name}\"", spec::launcher())
         }
+        Some(NextStep::Ask) => "Done. Ask your agent where a function is defined.".to_string(),
+        None => format!(
+            "Done. Run {} index in a repository, then ask your agent where a function is defined.",
+            spec::launcher()
+        ),
     })?;
     Ok(())
 }
 
-fn index_current_repository() -> Result<bool> {
+enum NextStep {
+    Grep(String),
+    Ask,
+}
+
+fn index_current_repository() -> Result<Option<NextStep>> {
     let cwd = std::env::current_dir()?;
     let repos = crate::workspace::Workspace::open_default()?.resolve_repos(&cwd)?;
     if repos.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
 
     let command = format!("{} index .", spec::launcher());
     let spinner = cliclack::spinner();
     spinner.start(&command);
-    let outputs = match crate::index_collect(cwd, 0, false, None) {
+    let outputs = match crate::index_collect(cwd.clone(), 0, false, false, None) {
         Ok(outputs) => outputs,
         Err(error) => {
             spinner.error(format!("{command}  skipped: {error}"));
-            return Ok(false);
+            return Ok(None);
         }
     };
     spinner.clear();
@@ -92,7 +105,31 @@ fn index_current_repository() -> Result<bool> {
         .collect::<Vec<_>>()
         .join("\n");
     cliclack::note(command, summaries)?;
-    Ok(true)
+    Ok(Some(
+        most_referenced_definition(&cwd).map_or(NextStep::Ask, NextStep::Grep),
+    ))
+}
+
+fn most_referenced_definition(repo: &std::path::Path) -> Option<String> {
+    let indexed = crate::workspace::open_indexed(Some(repo.to_path_buf()), None).ok()?;
+    let batches = indexed
+        .client
+        .query_arrow_json(
+            "SELECT d.name FROM gl_definition d JOIN gl_edge e ON e.target_id = d.id \
+             WHERE d.project_id = ?1 AND d.commit_sha = ?2 AND length(d.name) > 3 \
+             GROUP BY d.name ORDER BY count(*) DESC, d.name LIMIT 1",
+            &[
+                indexed.git.project_id.into(),
+                indexed.git.commit_sha.clone().into(),
+            ],
+        )
+        .ok()?;
+    let names = batches
+        .first()?
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()?;
+    (!names.is_empty()).then(|| names.value(0).to_string())
 }
 
 fn with_thousands(count: usize) -> String {
