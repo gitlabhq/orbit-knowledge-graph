@@ -183,10 +183,10 @@ orbit setup
 
 It detects agents from their configuration directories, such as
 `~/.claude`, `~/.codex`, and `~/.config/opencode`, and lists every supported
-agent with the detected ones pre-selected. It then shows the files it
-will touch and asks once before writing. Each agent gets the instruction
-section, the skill files, and the nudge hooks. Supported agents are
-GitLab Duo, Claude Code, Codex, OpenCode, and Pi.
+agent with the detected ones pre-selected. Enter applies and prints what
+each agent got. Each agent gets the instruction section, the skill files,
+and the nudge hooks. Supported agents are GitLab Duo, Claude Code, Codex,
+OpenCode, and Pi.
 
 To pre-select specific agents, name them:
 
@@ -200,7 +200,7 @@ Other options:
 - `--skip <component>` leaves a component out: `instructions`, `hooks`,
   `skill`, or `mcp`.
 - `--all` configures every supported agent, detected or not.
-- `--yes` skips the picker and the prompt. Required when there is no terminal,
+- `--yes` skips the picker. Required when there is no terminal,
   for example in scripts.
 - `--dry-run` prints the plan and every path and exits without writing.
 - `--verbose` lists every file touched after applying, instead of a count

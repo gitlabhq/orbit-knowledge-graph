@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Display;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
@@ -38,26 +37,20 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 
     let plan = plan::build(&selection, &target)?;
     if options.dry_run {
+        show_plan(&plan, "Plan")?;
         show_paths(&plan)?;
         cliclack::outro("Dry run: nothing written.")?;
-        return Ok(());
-    }
-    if interactive
-        && !confirm(format!(
-            "Apply to {} agent(s) in {}?",
-            plan.assistants.len(),
-            plan.scope
-        ))?
-    {
-        cliclack::outro_cancel("Nothing written.")?;
         return Ok(());
     }
 
     let mut report = Report::default();
     let applied = changes::install(&selection, &target, &mut report);
-    show_report(&report, options.verbose)?;
+    if options.verbose {
+        show_every_file(&report)?;
+    }
     applied?;
-    cliclack::outro("Done. Ask your agent about your code. Undo with `orbit uninstall`.")?;
+    show_plan(&plan, "Configured")?;
+    cliclack::outro("Done. Ask your agent about your code.")?;
     Ok(())
 }
 
@@ -83,25 +76,19 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
 
     let plan = plan::build(&selection, &target)?;
     if options.dry_run {
+        show_plan(&plan, "Plan")?;
         show_paths(&plan)?;
         cliclack::outro("Dry run: nothing removed.")?;
-        return Ok(());
-    }
-    if interactive
-        && !confirm(format!(
-            "Remove Orbit from {} agent(s) in {}?",
-            plan.assistants.len(),
-            plan.scope
-        ))?
-    {
-        cliclack::outro_cancel("Nothing removed.")?;
         return Ok(());
     }
 
     let mut report = Report::default();
     let removed = changes::remove(&selection, &target, &mut report);
-    show_report(&report, options.verbose)?;
+    if options.verbose {
+        show_every_file(&report)?;
+    }
     removed?;
+    show_plan(&plan, "Removed")?;
     cliclack::outro("Done. Backups (*.orbit-backup) were kept.")?;
     Ok(())
 }
@@ -141,10 +128,6 @@ fn component_list(components: &BTreeSet<Component>) -> String {
         .map(|component| component.label())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn confirm(question: impl Display) -> Result<bool> {
-    Ok(cliclack::confirm(question).initial_value(true).interact()?)
 }
 
 fn choose_assistants(
@@ -192,7 +175,7 @@ impl Theme for PickerKeysFooter {
     }
 }
 
-fn show_plan(plan: &Plan) -> Result<()> {
+fn show_plan(plan: &Plan, title: &str) -> Result<()> {
     let width = plan
         .assistants
         .iter()
@@ -216,11 +199,10 @@ fn show_plan(plan: &Plan) -> Result<()> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    Ok(cliclack::note("Plan", rows)?)
+    Ok(cliclack::note(title, rows)?)
 }
 
 fn show_paths(plan: &Plan) -> Result<()> {
-    show_plan(plan)?;
     let mut by_component: BTreeMap<Component, BTreeSet<&str>> = BTreeMap::new();
     for assistant in &plan.assistants {
         for (component, paths) in &assistant.changes {
@@ -235,59 +217,10 @@ fn show_paths(plan: &Plan) -> Result<()> {
         rows.push(component.label().to_string());
         rows.extend(paths.into_iter().map(|path| format!("  {path}")));
     }
-    cliclack::note(format!("Files in {}", plan.scope), rows.join("\n"))?;
-    Ok(())
-}
-
-fn show_report(report: &Report, verbose: bool) -> Result<()> {
-    if verbose {
-        return show_every_file(report);
-    }
-    let mut groups: Vec<(&str, BTreeSet<&str>)> = Vec::new();
-    let mut backups = 0;
-    let mut kept = 0;
-    for outcome in &report.outcomes {
-        if outcome.action.starts_with("backup at") {
-            backups += 1;
-            continue;
-        }
-        if outcome.action.starts_with("kept") {
-            kept += 1;
-        }
-        match groups.last_mut() {
-            Some((group, labels)) if *group == outcome.group => {
-                labels.insert(&outcome.label);
-            }
-            _ => {
-                groups.push((&outcome.group, BTreeSet::from([outcome.label.as_str()])));
-            }
-        }
-    }
-    for (group, labels) in &groups {
-        let summary = match *group {
-            "skill" => labels.iter().copied().collect::<Vec<_>>().join(", "),
-            _ => format!(
-                "{} file{}",
-                labels.len(),
-                if labels.len() == 1 { "" } else { "s" }
-            ),
-        };
-        cliclack::log::step(format!("{group:<14} {summary}"))?;
-    }
-    if backups > 0 {
-        cliclack::log::step(format!(
-            "{:<14} {backups} original{} saved as *.orbit-backup",
-            "backups",
-            if backups == 1 { "" } else { "s" }
-        ))?;
-    }
-    if kept > 0 {
-        cliclack::log::warning(format!(
-            "{kept} edited file{} kept; rerun with --verbose to see which",
-            if kept == 1 { "" } else { "s" }
-        ))?;
-    }
-    Ok(())
+    Ok(cliclack::note(
+        format!("Files in {}", plan.scope),
+        rows.join("\n"),
+    )?)
 }
 
 fn show_every_file(report: &Report) -> Result<()> {

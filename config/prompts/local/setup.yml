@@ -6,8 +6,8 @@ description: >-
 
 
   Detects the agents installed on this machine from their configuration
-  directories, pre-selects them in a short picker, shows what will change,
-  and asks once. Each agent gets the managed instruction section, the
+  directories, pre-selects them in a short picker, and applies on enter.
+  Each agent gets the managed instruction section, the
   Orbit skill files, and nudge hooks where the agent supports them.
   Pass `--mcp` to also register the `orbit` MCP server. `--skip` leaves a
   component out. Name agents to pre-select only those, or pass `--all`
@@ -15,5 +15,5 @@ description: >-
   Targets user-global configuration by default, or the project with
   `--project` or `--dir`. Existing files get a one-time `.orbit-backup`
   sibling before the first change. Re-running updates everything in place.
-  `--yes` skips the wizard and applies the defaults; `--dry-run` stops before
+  `--yes` skips the picker and applies the defaults; `--dry-run` stops before
   writing; `--verbose` lists every file touched. `orbit uninstall` reverts it.

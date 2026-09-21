@@ -10,5 +10,5 @@ description: >-
   agents you name. Files that held nothing but Orbit entries are deleted.
   Files you edited after setup are kept. `.orbit-backup` copies are never
   touched. Targets user-global configuration by default, or the project with
-  `--project` or `--dir`. Prints the plan and asks once before writing;
-  `--yes` skips the prompt and `--dry-run` stops after the plan.
+  `--project` or `--dir`. A picker selects the agents and enter applies;
+  `--yes` skips the picker and `--dry-run` stops after the plan.
