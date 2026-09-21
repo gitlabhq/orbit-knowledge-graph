@@ -28,6 +28,36 @@ async fn creates_namespace_storage_table_and_refreshable_view() {
 }
 
 #[tokio::test]
+async fn boot_adds_missing_columns_to_an_existing_unversioned_table() {
+    let scenario = NamespaceStorageSnapshotScenario::new().await;
+    scenario
+        .context
+        .execute(
+            "CREATE TABLE namespace_storage_snapshot (snapshot_date Date32, logical_table String) \
+             ENGINE = ReplacingMergeTree ORDER BY logical_table",
+        )
+        .await;
+
+    scenario.create_schema().await;
+
+    let batches = scenario
+        .context
+        .query(
+            "SELECT name FROM system.columns \
+             WHERE database = currentDatabase() AND table = 'namespace_storage_snapshot' \
+             ORDER BY position",
+        )
+        .await;
+    let names = String::extract_column(&batches, 0).unwrap();
+    for column in ["schema_version", "top_level_namespace", "compressed_bytes"] {
+        assert!(
+            names.iter().any(|name| name == column),
+            "missing {column}: {names:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn replacing_refreshable_view_preserves_snapshot_rows() {
     let scenario = NamespaceStorageSnapshotScenario::new().await;
     scenario.create_schema().await;

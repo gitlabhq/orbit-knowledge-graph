@@ -1447,3 +1447,53 @@ mod tests {
         assert!(half.get_array_memory_size() as u64 > 4000);
     }
 }
+
+#[cfg(test)]
+mod unsigned_and_timestamp_tests {
+    use super::*;
+    use arrow::array::UInt64Array;
+    use chrono::TimeZone;
+
+    fn spec(name: &str, col_type: ColumnType) -> ColumnSpec {
+        ColumnSpec {
+            name: name.to_owned(),
+            col_type,
+            nullable: false,
+        }
+    }
+
+    #[test]
+    fn uint_columns_build_unsigned_arrays() {
+        let batch = BatchBuilder::new(&[spec("rank", ColumnType::UInt)], 2)
+            .unwrap()
+            .build(&[7u64, u64::MAX], |value, row| {
+                row.col("rank")?.push_uint(*value)
+            })
+            .unwrap();
+
+        let ranks = ArrowUtils::get_column_by_name::<UInt64Array>(&batch, "rank").unwrap();
+        assert_eq!(ranks.values(), &[7, u64::MAX]);
+    }
+
+    #[test]
+    fn push_uint_rejects_other_column_types() {
+        let mut builder = BatchBuilder::new(&[spec("count", ColumnType::Int)], 1).unwrap();
+
+        assert!(builder.col("count").unwrap().push_uint(1).is_err());
+    }
+
+    #[test]
+    fn timestamp_cells_read_back_as_utc_datetimes() {
+        let at = Utc.with_ymd_and_hms(2026, 9, 21, 12, 0, 0).unwrap();
+        let batch = BatchBuilder::new(&[spec("at", ColumnType::TimestampMicros)], 1)
+            .unwrap()
+            .build(&[at], |value, row| {
+                row.col("at")?
+                    .push_timestamp_micros(value.timestamp_micros())
+            })
+            .unwrap();
+
+        assert_eq!(ArrowUtils::get_column_timestamp(&batch, "at", 0), Some(at));
+        assert_eq!(ArrowUtils::get_column_timestamp(&batch, "missing", 0), None);
+    }
+}

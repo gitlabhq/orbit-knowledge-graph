@@ -122,12 +122,12 @@ impl TestContext {
         query.fetch_arrow().await.map_err(|e| e.to_string())
     }
 
-    /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
-    /// every inserted row.
     pub async fn flush_async_inserts(&self) {
         self.execute("SYSTEM FLUSH ASYNC INSERT QUEUE").await;
     }
 
+    /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
+    /// every inserted row.
     pub async fn optimize_all(&self) {
         let t = std::time::Instant::now();
         let batches = self

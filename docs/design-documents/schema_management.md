@@ -92,9 +92,8 @@ by `ddl-freshness-check`. This keeps the boot-created durable schema reviewable 
 
 Unversioned tables are created with `CREATE TABLE IF NOT EXISTS`, then every declared column is
 applied with `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Adding a column to an unversioned table
-is therefore safe on a live database. Renames and type changes need a new table. The job ledger
-tables `campaign` and `job` are the main users; see
-[ADR 019](decisions/019_job_ledger.md).
+is therefore safe on a live database. Renames and type changes need a new table. The job
+ledger table `job` is the main user; see [ADR 019](decisions/019_job_ledger.md).
 
 `namespace_storage_snapshot` is an unversioned daily history table populated by the versioned
 `namespace_storage_snapshot_refresh` view. Its ontology-relative MiniJinja SQL template uses the
