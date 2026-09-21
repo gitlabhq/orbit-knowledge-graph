@@ -61,8 +61,8 @@ sequenceDiagram
 
 Fine-grained personal access tokens follow the Global Search pattern. Rails runs one token check before the route. The check answers one question: may this token call this route? After that check the token is not read again. Results follow the token owner's access through Layers 1 to 3.
 
-- The Orbit **Read** permission (`read_orbit`) lists the user scope. The Orbit MCP tool **Execute** permission lists the user scope as well, the same as the GitLab MCP server permission.
-- Every Orbit route declares the user boundary, the same as `/search`. A token with the permission under the User tab passes. A token made only under group and project access gets `403`.
+- One permission, Orbit **Read** (`read_orbit`), guards every Orbit REST route and `POST /orbit/mcp`. It lists the user scope. There is no separate MCP permission.
+- Every Orbit route, REST and MCP, declares the user boundary, the same as `/search`. A token with Orbit **Read** under the User tab passes. A token without it, or one made only under group and project access, gets `403`.
 - Orbit does not read the other permissions on the token. A token without the Work item **Read** permission still gets work items from Orbit when the owner can read them in GitLab.
 - Orbit adds no section or toggle of its own to the token UI, and does not parse queries for namespaces.
 - Group scoping is deferred. The design for group routes that narrow the JWT traversal paths lives in the follow-up issue linked from [issue 992](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/992).

@@ -83,7 +83,7 @@ can see in GitLab.
   access token with the GitLab Orbit **Read** permission, sent as a Bearer token. For more information,
   see [REST API](access/api.md).
 - MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. A fine-grained personal
-  access token needs the GitLab Orbit MCP tool **Execute** permission.
+  access token needs the same GitLab Orbit **Read** permission as the REST API.
   For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
 
@@ -95,8 +95,9 @@ The token check is a gateway: it decides whether the token may call the endpoint
 follow the token owner's access in GitLab, not the other permissions on the token.
 
 - Add the GitLab Orbit **Read** permission under the **User** tab. The token can then call every
-  GitLab Orbit REST endpoint and sees everything the token owner can see.
-- For MCP, add the GitLab Orbit MCP tool **Execute** permission under the **User** tab.
+  GitLab Orbit REST endpoint and the MCP endpoint, and sees everything the token owner can see.
+- A fine-grained token without that permission gets `403` from every GitLab Orbit endpoint,
+  including MCP.
 - GitLab Orbit does not offer group or project scopes yet. A token created only under
   **Group and project access** gets `403` from GitLab Orbit.
 - Other permissions on the token have no effect on GitLab Orbit results. A token without the Work item
