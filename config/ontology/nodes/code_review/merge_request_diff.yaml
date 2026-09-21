@@ -1,6 +1,7 @@
 # config/ontology/nodes/code_review/merge_request_diff.yaml
 
 node_type: MergeRequestDiff
+introduced_in: "1.0.0"
 domain: code_review
 description: A snapshot of changes (commits and file diffs) associated with a merge request at a point in time
 label: id
@@ -18,6 +19,7 @@ redaction:
 
 properties:
   id:
+    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -25,6 +27,7 @@ properties:
     description: "Unique ID."
 
   merge_request_id:
+    introduced_in: "1.0.0"
     type: int64
     source: merge_request_id
     nullable: false
@@ -32,6 +35,7 @@ properties:
     description: "Parent merge request ID."
 
   state:
+    introduced_in: "1.0.0"
     type: string
     source: state
     nullable: false
@@ -39,6 +43,7 @@ properties:
     selectivity: low
 
   base_commit_sha:
+    introduced_in: "1.0.0"
     type: string
     source: base_commit_sha
     nullable: false
@@ -46,6 +51,7 @@ properties:
     description: "Base commit SHA (common ancestor)."
 
   head_commit_sha:
+    introduced_in: "1.0.0"
     type: string
     source: head_commit_sha
     nullable: false
@@ -53,6 +59,7 @@ properties:
     description: "Head commit SHA (latest on source branch)."
 
   start_commit_sha:
+    introduced_in: "1.0.0"
     type: string
     source: start_commit_sha
     nullable: false
@@ -60,18 +67,21 @@ properties:
     description: "Start commit SHA (target branch tip at diff creation)."
 
   commits_count:
+    introduced_in: "1.0.0"
     type: int64
     source: commits_count
     nullable: true
     description: "Number of commits."
 
   files_count:
+    introduced_in: "1.0.0"
     type: int64
     source: files_count
     nullable: true
     description: "Number of files changed."
 
   project_id:
+    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -79,6 +89,7 @@ properties:
     description: "Owning project ID."
 
   diff_type:
+    introduced_in: "1.0.0"
     type: enum
     source: diff_type
     nullable: false
@@ -89,18 +100,21 @@ properties:
       2: merge_head
 
   real_size:
+    introduced_in: "1.0.0"
     type: string
     source: real_size
     nullable: false
     description: "Non-truncated diff size from Gitaly, as a stringified integer."
 
   stored_externally:
+    introduced_in: "1.0.0"
     type: boolean
     source: stored_externally
     nullable: false
     description: "Whether diff content is in external object storage."
 
   created_at:
+    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: true
@@ -108,12 +122,14 @@ properties:
     description: "Creation timestamp."
 
   updated_at:
+    introduced_in: "1.0.0"
     type: timestamp
     source: updated_at
     nullable: true
     description: "Last update timestamp."
 
   traversal_path:
+    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false
@@ -121,6 +137,7 @@ properties:
     description: "Namespace path for authz."
 
   patch:
+    introduced_in: "1.0.0"
     type: string
     nullable: true
     virtual:

@@ -19,6 +19,7 @@ fi
 
 # pin, regex of files that require a bump when changed
 COVERS='
+graph_schema_api   ^(config/ontology/nodes/.*\.yaml|config/schemas/ontology\.schema\.json|crates/ontology/src/introspection\.rs|crates/orbit-server/proto/orbit\.proto|crates/orbit-server/src/grpc/service\.rs)$
 query_dsl          ^(config/schemas/graph_query\.schema\.json|crates/query-engine/compiler/src/(input\.rs|passes/validate\.rs))$
 raw_output_format  ^(crates/query-engine/formatters/src/(graph|lib)\.rs|config/schemas/query_response\.json)$
 goon_output_format ^(crates/query-engine/formatters/src/goon/[^/]+\.rs|crates/query-engine/formatters/src/(graph|lib)\.rs)$

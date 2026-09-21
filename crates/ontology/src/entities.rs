@@ -327,6 +327,7 @@ impl RedactionConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeEntity {
     pub name: String,
+    pub introduced_in: semver::Version,
     pub domain: String,
     pub description: String,
     pub label: String,
@@ -357,6 +358,7 @@ impl Default for NodeEntity {
     fn default() -> Self {
         Self {
             name: String::new(),
+            introduced_in: semver::Version::new(1, 0, 0),
             domain: String::new(),
             description: String::new(),
             label: String::new(),
@@ -531,6 +533,7 @@ pub struct TraversalPathLookup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     pub name: String,
+    pub introduced_in: semver::Version,
     pub source: FieldSource,
     pub data_type: DataType,
     pub nullable: bool,
@@ -568,6 +571,7 @@ impl Default for Field {
     fn default() -> Self {
         Self {
             name: String::new(),
+            introduced_in: semver::Version::new(1, 0, 0),
             source: FieldSource::DatabaseColumn(String::new()),
             data_type: DataType::String,
             nullable: false,

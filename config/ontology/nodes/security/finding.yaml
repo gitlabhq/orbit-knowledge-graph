@@ -1,6 +1,7 @@
 # config/ontology/nodes/security/finding.yaml
 
 node_type: Finding
+introduced_in: "1.0.0"
 domain: security
 description: A security scan finding (occurrence) that may be linked to a vulnerability
 label: uuid
@@ -19,6 +20,7 @@ redaction:
 
 properties:
   id:
+    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -26,6 +28,7 @@ properties:
     description: "Unique ID."
 
   uuid:
+    introduced_in: "1.0.0"
     type: uuid
     source: uuid
     nullable: false
@@ -33,24 +36,28 @@ properties:
     description: "Unique UUID."
 
   name:
+    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
     description: "Finding name."
 
   description:
+    introduced_in: "1.0.0"
     type: string
     source: description
     nullable: false
     description: "Detailed description."
 
   solution:
+    introduced_in: "1.0.0"
     type: string
     source: solution
     nullable: false
     description: "Recommended remediation."
 
   severity:
+    introduced_in: "1.0.0"
     type: enum
     source: severity
     nullable: false
@@ -64,12 +71,14 @@ properties:
       7: critical
 
   deduplicated:
+    introduced_in: "1.0.0"
     type: boolean
     source: deduplicated
     nullable: false
     description: "Deduplicated flag."
 
   overridden_uuid:
+    introduced_in: "1.0.0"
     type: uuid
     source: overridden_uuid
     nullable: false
@@ -77,6 +86,7 @@ properties:
     description: "UUID of the overridden finding."
 
   project_id:
+    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -84,6 +94,7 @@ properties:
     description: "Owning project ID."
 
   scan_id:
+    introduced_in: "1.0.0"
     type: int64
     source: scan_id
     nullable: false
@@ -91,6 +102,7 @@ properties:
     description: "Producing security scan ID."
 
   scanner_id:
+    introduced_in: "1.0.0"
     type: int64
     source: scanner_id
     nullable: false
@@ -98,6 +110,7 @@ properties:
     description: "Detecting scanner ID."
 
   traversal_path:
+    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false

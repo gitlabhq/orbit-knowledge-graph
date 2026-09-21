@@ -15,6 +15,8 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 pub struct Versions {
     pub schema: u32,
+    #[serde(default = "default_graph_schema_api")]
+    pub graph_schema_api: semver::Version,
     pub query_dsl: String,
     pub raw_output_format: String,
     pub goon_output_format: String,
@@ -40,6 +42,10 @@ pub struct Extension {
     pub binaries: Option<BTreeMap<String, String>>,
 }
 
+fn default_graph_schema_api() -> semver::Version {
+    semver::Version::new(1, 0, 0)
+}
+
 pub static VERSIONS: LazyLock<Versions> =
     LazyLock::new(|| parse(include_str!(env!("VERSIONS_FILE"))).expect("config/versions.yaml"));
 
@@ -55,7 +61,25 @@ mod tests {
     #[test]
     fn parses_every_pin() {
         assert!(VERSIONS.schema > 0);
+        assert!(VERSIONS.graph_schema_api >= semver::Version::new(1, 0, 0));
         assert!(!VERSIONS.vendored.is_empty());
+    }
+
+    #[test]
+    fn parses_revision_before_graph_schema_api_pin() {
+        let yaml = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/versions.yaml"
+        ));
+        let without_pin = yaml
+            .lines()
+            .filter(|line| !line.starts_with("graph_schema_api:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            parse(&without_pin).unwrap().graph_schema_api,
+            semver::Version::new(1, 0, 0)
+        );
     }
 
     #[test]

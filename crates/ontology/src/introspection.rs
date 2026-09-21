@@ -18,6 +18,7 @@ pub enum IntrospectionScope {
 
 #[derive(Debug, Serialize)]
 pub struct SchemaResponse {
+    pub graph_schema_api: String,
     pub domains: Vec<SchemaDomain>,
     pub edges: Vec<String>,
 }
@@ -31,13 +32,26 @@ pub struct SchemaDomain {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum SchemaNode {
-    Name(String),
+    Summary {
+        name: String,
+        introduced_in: String,
+    },
     Expanded {
         name: String,
-        props: Vec<String>,
+        introduced_in: String,
+        props: Vec<SchemaProperty>,
         out: Vec<String>,
         r#in: Vec<String>,
     },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SchemaProperty {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub description: Option<String>,
+    pub introduced_in: String,
 }
 
 /// `expand_nodes`: pass `["*"]` to expand every node, or specific names.
@@ -48,6 +62,7 @@ pub fn build_schema_response(
     expand_nodes: &[String],
 ) -> SchemaResponse {
     SchemaResponse {
+        graph_schema_api: orbit_versions::VERSIONS.graph_schema_api.to_string(),
         domains: build_domains(ontology, scope, expand_nodes, None),
         edges: build_edge_names(ontology, scope, None),
     }
@@ -60,6 +75,7 @@ pub fn build_node_schema_response(
     node: &str,
 ) -> SchemaResponse {
     SchemaResponse {
+        graph_schema_api: orbit_versions::VERSIONS.graph_schema_api.to_string(),
         domains: build_domains(ontology, scope, &[], Some(node)),
         edges: build_edge_names(ontology, scope, Some(node)),
     }
@@ -102,18 +118,22 @@ fn build_domains(
                 IntrospectionScope::All => node.fields.iter().collect(),
             };
 
-            let props: Vec<String> = fields.iter().map(|f| format_property(f)).collect();
+            let props: Vec<SchemaProperty> = fields.iter().map(|f| format_property(f)).collect();
 
             let (outgoing, incoming) = node_relationships(ontology, scope, &node.name);
 
             SchemaNode::Expanded {
                 name: node.name.clone(),
+                introduced_in: node.introduced_in.to_string(),
                 props,
                 out: outgoing,
                 r#in: incoming,
             }
         } else {
-            SchemaNode::Name(node.name.clone())
+            SchemaNode::Summary {
+                name: node.name.clone(),
+                introduced_in: node.introduced_in.to_string(),
+            }
         };
 
         domain_map.entry(domain_name).or_default().push(node_info);
@@ -215,22 +235,13 @@ fn node_relationships(
     (outgoing, incoming)
 }
 
-fn format_property(field: &Field) -> String {
-    let nullable = if field.nullable { "?" } else { "" };
-    match &field.description {
-        Some(desc) => format!(
-            "{}:{}{} — {}",
-            field.name,
-            field.data_type.to_string().to_lowercase(),
-            nullable,
-            desc
-        ),
-        None => format!(
-            "{}:{}{}",
-            field.name,
-            field.data_type.to_string().to_lowercase(),
-            nullable
-        ),
+fn format_property(field: &Field) -> SchemaProperty {
+    SchemaProperty {
+        name: field.name.clone(),
+        data_type: field.data_type.to_string().to_lowercase(),
+        nullable: field.nullable,
+        description: field.description.clone(),
+        introduced_in: field.introduced_in.to_string(),
     }
 }
 
@@ -252,8 +263,9 @@ mod tests {
             .iter()
             .flat_map(|d| {
                 d.nodes.iter().map(|n| match n {
-                    SchemaNode::Name(s) => s.clone(),
-                    SchemaNode::Expanded { name, .. } => name.clone(),
+                    SchemaNode::Summary { name, .. } | SchemaNode::Expanded { name, .. } => {
+                        name.clone()
+                    }
                 })
             })
             .collect();
@@ -305,7 +317,7 @@ mod tests {
             .expect("Definition should be expanded");
 
         assert!(
-            props.iter().any(|p| p.starts_with("traversal_path:")),
+            props.iter().any(|p| p.name == "traversal_path"),
             "traversal_path should be included in local scope for hydration TP narrowing"
         );
     }
@@ -319,8 +331,9 @@ mod tests {
             .iter()
             .flat_map(|d| {
                 d.nodes.iter().map(|n| match n {
-                    SchemaNode::Name(s) => s.clone(),
-                    SchemaNode::Expanded { name, .. } => name.clone(),
+                    SchemaNode::Summary { name, .. } | SchemaNode::Expanded { name, .. } => {
+                        name.clone()
+                    }
                 })
             })
             .collect();
@@ -358,6 +371,7 @@ mod tests {
                     out,
                     r#in,
                     props,
+                    ..
                 } if name == "File" => Some((out.clone(), r#in.clone(), props.clone())),
                 _ => None,
             })
@@ -379,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn property_format_is_name_colon_type() {
+    fn properties_are_structured_and_versioned() {
         let ont = load();
         let response =
             build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()]);
@@ -393,8 +407,10 @@ mod tests {
             })
             .expect("File expanded");
         assert!(
-            props.iter().any(|p| p.starts_with("path:string")),
-            "expected path:string in {props:?}"
+            props.iter().any(|p| {
+                p.name == "path" && p.data_type == "string" && p.introduced_in == "1.0.0"
+            }),
+            "expected structured path property in {props:?}"
         );
     }
 }

@@ -1,6 +1,7 @@
 # config/ontology/nodes/source_code/definition.yaml
 
 node_type: Definition
+introduced_in: "1.0.0"
 domain: source_code
 description: A code definition such as a class, function, method, or module
 label: name
@@ -19,6 +20,7 @@ redaction:
 
 properties:
   id:
+    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -30,6 +32,7 @@ properties:
       key_column: id
 
   traversal_path:
+    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false
@@ -37,6 +40,7 @@ properties:
     description: "Namespace path for authz."
 
   project_id:
+    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -44,6 +48,7 @@ properties:
     description: "Owning project ID."
 
   branch:
+    introduced_in: "1.0.0"
     type: string
     source: branch
     nullable: false
@@ -51,6 +56,7 @@ properties:
     description: "Git branch."
 
   commit_sha:
+    introduced_in: "1.0.0"
     type: string
     source: commit_sha
     nullable: false
@@ -58,6 +64,7 @@ properties:
     description: "Indexed commit SHA."
 
   file_path:
+    introduced_in: "1.0.0"
     type: string
     source: file_path
     nullable: false
@@ -65,6 +72,7 @@ properties:
     description: "Containing file path."
 
   fqn:
+    introduced_in: "1.0.0"
     type: string
     source: fqn
     nullable: false
@@ -72,6 +80,7 @@ properties:
     description: "Fully qualified name (e.g., MyModule::MyClass#my_method)."
 
   name:
+    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
@@ -79,6 +88,7 @@ properties:
     description: "Short name."
 
   definition_type:
+    introduced_in: "1.0.0"
     type: string
     source: definition_type
     nullable: false
@@ -87,6 +97,7 @@ properties:
     selectivity: low
 
   start_line:
+    introduced_in: "1.0.0"
     type: int64
     source: start_line
     nullable: false
@@ -94,6 +105,7 @@ properties:
     description: "Start line."
 
   end_line:
+    introduced_in: "1.0.0"
     type: int64
     source: end_line
     nullable: false
@@ -101,6 +113,7 @@ properties:
     description: "End line."
 
   start_byte:
+    introduced_in: "1.0.0"
     type: int64
     source: start_byte
     nullable: false
@@ -108,6 +121,7 @@ properties:
     description: "Start byte offset."
 
   end_byte:
+    introduced_in: "1.0.0"
     type: int64
     source: end_byte
     nullable: false
@@ -115,6 +129,7 @@ properties:
     description: "End byte offset."
 
   start_char:
+    introduced_in: "1.0.0"
     type: int64
     source: start_char
     nullable: false
@@ -122,6 +137,7 @@ properties:
     description: "Start column."
 
   end_char:
+    introduced_in: "1.0.0"
     type: int64
     source: end_char
     nullable: false
@@ -129,6 +145,7 @@ properties:
     description: "End column."
 
   content:
+    introduced_in: "1.0.0"
     type: string
     virtual:
       service: gitaly

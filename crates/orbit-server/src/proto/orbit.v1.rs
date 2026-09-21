@@ -118,6 +118,8 @@ pub struct StructuredSchema {
     pub nodes: ::prost::alloc::vec::Vec<SchemaNode>,
     #[prost(message, repeated, tag = "4")]
     pub edges: ::prost::alloc::vec::Vec<SchemaEdge>,
+    #[prost(string, tag = "5")]
+    pub graph_schema_api: ::prost::alloc::string::String,
 }
 /// Logical grouping of related node types (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -155,6 +157,9 @@ pub struct SchemaNode {
     /// populated when expanded
     #[prost(string, repeated, tag = "9")]
     pub incoming_edges: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// graph schema API version where this node first appeared
+    #[prost(string, tag = "10")]
+    pub introduced_in: ::prost::alloc::string::String,
 }
 /// A single property on a node type.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -172,6 +177,9 @@ pub struct SchemaProperty {
     /// human-readable description from the ontology
     #[prost(string, tag = "5")]
     pub description: ::prost::alloc::string::String,
+    /// graph schema API version where this property first appeared
+    #[prost(string, tag = "6")]
+    pub introduced_in: ::prost::alloc::string::String,
 }
 /// A named relationship type with its valid source/target combinations.
 #[derive(Clone, PartialEq, ::prost::Message)]

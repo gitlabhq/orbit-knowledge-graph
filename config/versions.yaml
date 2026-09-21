@@ -5,6 +5,9 @@
 # Graph schema version; prefixes every versioned ClickHouse table (vN_).
 # Bump with `mise schema:bump`, which also appends a migration ledger entry.
 schema: 99
+# Public graph schema API version. Bump when nodes, properties, or their
+# introspection encoding changes.
+graph_schema_api: 1.0.0
 
 # Accepted query-DSL shape. Bump when graph_query.schema.json or the
 # compiler's input/validate passes change what queries are accepted.

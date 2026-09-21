@@ -1,6 +1,7 @@
 # config/ontology/nodes/source_code/commit.yaml
 
 node_type: Commit
+introduced_in: "1.0.0"
 domain: source_code
 description: A Git commit, shared target for commit-related edges
 label: sha
@@ -19,6 +20,7 @@ redaction:
 
 properties:
   id:
+    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -26,6 +28,7 @@ properties:
     description: "Synthetic id: sipHash64(target_project_id, sha). Edges must derive target_id with the same formula."
 
   sha:
+    introduced_in: "1.0.0"
     type: string
     source: sha
     nullable: false
@@ -33,6 +36,7 @@ properties:
     description: "Clean hex commit SHA (40-char SHA-1 or 64-char SHA-256)."
 
   project_id:
+    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -40,6 +44,7 @@ properties:
     description: "Owning project ID."
 
   traversal_path:
+    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false

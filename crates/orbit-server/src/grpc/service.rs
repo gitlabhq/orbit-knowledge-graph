@@ -748,6 +748,7 @@ impl OrbitServiceImpl {
                                 .map(|ev| ev.values().cloned().collect())
                                 .unwrap_or_default(),
                             description: f.description.clone().unwrap_or_default(),
+                            introduced_in: f.introduced_in.to_string(),
                         })
                         .collect()
                 } else {
@@ -783,6 +784,7 @@ impl OrbitServiceImpl {
                     style,
                     outgoing_edges,
                     incoming_edges,
+                    introduced_in: n.introduced_in.to_string(),
                 }
             })
             .collect();
@@ -819,6 +821,7 @@ impl OrbitServiceImpl {
             domains,
             nodes,
             edges,
+            graph_schema_api: orbit_versions::VERSIONS.graph_schema_api.to_string(),
         }
     }
 
@@ -980,6 +983,7 @@ mod tests {
         );
 
         assert!(!response.schema_version.is_empty());
+        assert_eq!(response.graph_schema_api, "1.0.0");
         assert!(!response.nodes.is_empty());
         assert!(!response.edges.is_empty());
         assert!(!response.domains.is_empty());
@@ -988,6 +992,7 @@ mod tests {
         assert!(user_node.is_some());
         let user = user_node.unwrap();
         assert_eq!(user.domain, "core");
+        assert_eq!(user.introduced_in, "1.0.0");
         assert!(
             user.properties.is_empty(),
             "Unexpanded node should have no properties"
@@ -1018,6 +1023,11 @@ mod tests {
         assert!(
             !user.properties.is_empty(),
             "Expanded node should have properties"
+        );
+        assert!(
+            user.properties
+                .iter()
+                .all(|property| property.introduced_in == "1.0.0")
         );
         assert!(user.style.is_some(), "Expanded node should have style");
         assert!(

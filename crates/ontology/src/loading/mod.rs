@@ -39,6 +39,14 @@ struct PipelineNodeMetadata {
 
 pub(crate) trait ReadOntologyFile {
     fn read(&self, path: &str) -> Result<String, OntologyError>;
+
+    fn legacy_introduced_in(&self) -> Option<semver::Version> {
+        None
+    }
+
+    fn validates_graph_schema_api(&self) -> bool {
+        true
+    }
 }
 
 pub(crate) struct DirReader<'a>(pub &'a Path);
@@ -829,8 +837,32 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_derived_emits_registered(&ontology)?;
     validate_etl_edges_match_variants(&ontology)?;
     validate_unique_pipeline_names(&ontology)?;
+    if reader.validates_graph_schema_api() {
+        validate_introduced_in_versions(&ontology)?;
+    }
 
     Ok(ontology)
+}
+
+fn validate_introduced_in_versions(ontology: &Ontology) -> Result<(), OntologyError> {
+    let current = &orbit_versions::VERSIONS.graph_schema_api;
+    for node in ontology.nodes() {
+        if node.introduced_in > *current {
+            return Err(OntologyError::Validation(format!(
+                "node '{}' was introduced in {}, newer than graph_schema_api {}",
+                node.name, node.introduced_in, current
+            )));
+        }
+        for field in &node.fields {
+            if field.introduced_in > *current {
+                return Err(OntologyError::Validation(format!(
+                    "property '{}.{}' was introduced in {}, newer than graph_schema_api {}",
+                    node.name, field.name, field.introduced_in, current
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn get_pipeline_node_metadata(
@@ -1545,6 +1577,20 @@ mod tests {
     };
     use indexmap::IndexMap;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn introduced_in_cannot_exceed_graph_schema_api() {
+        let mut ontology = crate::Ontology::new()
+            .with_nodes(["Future"])
+            .with_fields("Future", [("future_property", crate::DataType::String)]);
+        ontology.nodes.get_mut("Future").unwrap().introduced_in = semver::Version::new(2, 0, 0);
+        assert!(validate_introduced_in_versions(&ontology).is_err());
+
+        let node = ontology.nodes.get_mut("Future").unwrap();
+        node.introduced_in = orbit_versions::VERSIONS.graph_schema_api.clone();
+        node.fields[0].introduced_in = semver::Version::new(2, 0, 0);
+        assert!(validate_introduced_in_versions(&ontology).is_err());
+    }
 
     fn system_note(emits: &[&str]) -> DerivedEntity {
         DerivedEntity {

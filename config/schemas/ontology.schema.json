@@ -18,6 +18,12 @@
     }
   ],
   "definitions": {
+    "semanticVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "maxLength": 20,
+      "description": "Public graph schema API version in which an element first appeared."
+    },
     "domainName": {
       "type": "string",
       "enum": [
@@ -125,6 +131,9 @@
           "properties": {
             "type": {
               "$ref": "#/definitions/propertyType"
+            },
+            "introduced_in": {
+              "$ref": "#/definitions/semanticVersion"
             },
             "source": {
               "type": "string",
@@ -234,6 +243,9 @@
             "type": {
               "$ref": "#/definitions/propertyType"
             },
+            "introduced_in": {
+              "$ref": "#/definitions/semanticVersion"
+            },
             "virtual": {
               "$ref": "#/definitions/virtualSourceDefinition"
             },
@@ -254,6 +266,18 @@
             "description"
           ],
           "additionalProperties": false
+        }
+      ]
+    },
+    "nodePropertyDefinition": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/propertyDefinition"
+        },
+        {
+          "required": [
+            "introduced_in"
+          ]
         }
       ]
     },
@@ -1133,6 +1157,9 @@
           "type": "string",
           "description": "Name of the node type (e.g., 'Project', 'User')."
         },
+        "introduced_in": {
+          "$ref": "#/definitions/semanticVersion"
+        },
         "domain": {
           "$ref": "#/definitions/domainName"
         },
@@ -1160,7 +1187,7 @@
           "type": "object",
           "description": "Property definitions for this node.",
           "additionalProperties": {
-            "$ref": "#/definitions/propertyDefinition"
+            "$ref": "#/definitions/nodePropertyDefinition"
           }
         },
         "enrichment_props": {
@@ -1218,6 +1245,7 @@
       },
       "required": [
         "node_type",
+        "introduced_in",
         "domain",
         "description",
         "label",

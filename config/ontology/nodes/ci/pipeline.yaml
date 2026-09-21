@@ -1,6 +1,7 @@
 # config/ontology/nodes/ci/pipeline.yaml
 
 node_type: Pipeline
+introduced_in: "1.0.0"
 domain: ci
 description: A CI/CD pipeline that runs a series of stages and jobs to build, test, and deploy code
 label: id
@@ -19,6 +20,7 @@ redaction:
 
 properties:
   id:
+    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -26,6 +28,7 @@ properties:
     description: "Unique ID."
 
   iid:
+    introduced_in: "1.0.0"
     type: int64
     source: iid
     nullable: true
@@ -33,6 +36,7 @@ properties:
     description: "Project-scoped pipeline number."
 
   sha:
+    introduced_in: "1.0.0"
     type: string
     source: sha
     nullable: false
@@ -40,6 +44,7 @@ properties:
     description: "Commit SHA the pipeline runs against."
 
   ref:
+    introduced_in: "1.0.0"
     type: string
     source: ref
     nullable: false
@@ -47,6 +52,7 @@ properties:
     description: "Branch or tag name."
 
   status:
+    introduced_in: "1.0.0"
     type: enum
     source: status
     nullable: false
@@ -69,6 +75,7 @@ properties:
     terminal_values: [success, failed, canceled, skipped]
 
   source:
+    introduced_in: "1.0.0"
     type: enum
     source: source
     nullable: false
@@ -97,6 +104,7 @@ properties:
       19: dependency_management_security_update
 
   tag:
+    introduced_in: "1.0.0"
     type: boolean
     source: tag
     nullable: false
@@ -104,12 +112,14 @@ properties:
     description: "Whether running on a git tag."
 
   duration:
+    introduced_in: "1.0.0"
     type: int64
     source: duration
     nullable: true
     description: "Wall-clock duration in seconds (first job start to last job finish, excluding queued time)."
 
   failure_reason:
+    introduced_in: "1.0.0"
     type: enum
     source: failure_reason
     nullable: false
@@ -130,6 +140,7 @@ properties:
       30: filtered_by_no_pipeline
 
   created_at:
+    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: true
@@ -137,18 +148,21 @@ properties:
     description: "Creation timestamp."
 
   started_at:
+    introduced_in: "1.0.0"
     type: timestamp
     source: started_at
     nullable: true
     description: "Execution start timestamp."
 
   finished_at:
+    introduced_in: "1.0.0"
     type: timestamp
     source: finished_at
     nullable: true
     description: "Execution finish timestamp."
 
   committed_at:
+    introduced_in: "1.0.0"
     type: timestamp
     source: committed_at
     nullable: true
@@ -156,12 +170,14 @@ properties:
     description: "Commit timestamp."
 
   updated_at:
+    introduced_in: "1.0.0"
     type: timestamp
     source: updated_at
     nullable: true
     description: "Last update timestamp."
 
   before_sha:
+    introduced_in: "1.0.0"
     type: string
     source: before_sha
     nullable: false
@@ -169,18 +185,21 @@ properties:
     description: "Previous commit SHA before the triggering push."
 
   yaml_errors:
+    introduced_in: "1.0.0"
     type: string
     source: yaml_errors
     nullable: false
     description: "CI config parsing errors."
 
   protected:
+    introduced_in: "1.0.0"
     type: boolean
     source: protected
     nullable: true
     description: "Whether the ref is protected."
 
   project_id:
+    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -188,6 +207,7 @@ properties:
     description: "Owning project ID."
 
   user_id:
+    introduced_in: "1.0.0"
     type: int64
     source: user_id
     nullable: true
@@ -195,6 +215,7 @@ properties:
     description: "Triggering user ID."
 
   merge_request_id:
+    introduced_in: "1.0.0"
     type: int64
     source: merge_request_id
     nullable: true
@@ -202,12 +223,14 @@ properties:
     description: "Triggering MR ID."
 
   auto_canceled_by_id:
+    introduced_in: "1.0.0"
     type: int64
     source: auto_canceled_by_id
     nullable: true
     description: "Pipeline ID that auto-canceled this one."
 
   traversal_path:
+    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false

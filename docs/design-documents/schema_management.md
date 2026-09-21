@@ -25,6 +25,20 @@ A request's `migration_version` is the version of the archive it was served from
 the ClickHouse `log_comment` report it. Introspection's `schema_version` is still the ontology
 format version (`0.1`).
 
+### Public graph schema API
+
+The `graph_schema_api` semver pin in `config/versions.yaml` versions the public introspection
+contract independently of the integer storage `schema` pin and the ontology document's
+`schema_version`. Every node and property definition records its first API version in
+`introduced_in`. Introspection emits both the current API version and these stable, per-element
+versions. Relationships do not carry this annotation.
+
+New nodes and properties must use the next `graph_schema_api` value and land with the matching pin
+bump. Additive contract changes bump the minor version, compatible corrections bump the patch
+version, and breaking changes wait for and bump the major version. An element's `introduced_in`
+value never changes after release and cannot exceed the current pin. Historical ontology archives
+that predate these annotations load them as `1.0.0` for rollback compatibility.
+
 ### The `schema` pin in `config/versions.yaml`
 
 `config/versions.yaml` holds every pinned version in the repo (schema, query DSL, output

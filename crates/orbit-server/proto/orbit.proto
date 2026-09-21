@@ -166,6 +166,7 @@ message StructuredSchema {
   repeated SchemaDomain domains = 2;
   repeated SchemaNode nodes = 3;
   repeated SchemaEdge edges = 4;
+  string graph_schema_api = 5;
 }
 
 // Logical grouping of related node types (e.g. "ci", "core", "plan").
@@ -187,6 +188,7 @@ message SchemaNode {
   SchemaNodeStyle style = 7;                // populated when expanded
   repeated string outgoing_edges = 8;       // populated when expanded
   repeated string incoming_edges = 9;       // populated when expanded
+  string introduced_in = 10;                // graph schema API version where this node first appeared
 }
 
 // A single property on a node type.
@@ -196,6 +198,7 @@ message SchemaProperty {
   bool nullable = 3;
   repeated string enum_values = 4; // allowed values for enum-typed properties
   string description = 5;         // human-readable description from the ontology
+  string introduced_in = 6;       // graph schema API version where this property first appeared
 }
 
 // A named relationship type with its valid source/target combinations.

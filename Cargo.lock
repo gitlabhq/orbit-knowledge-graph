@@ -5205,7 +5205,9 @@ dependencies = [
  "indexmap 2.14.2",
  "minijinja",
  "orbit-utils",
+ "orbit-versions",
  "rust-embed",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -5588,6 +5590,7 @@ dependencies = [
 name = "orbit-versions"
 version = "0.1.0"
 dependencies = [
+ "semver",
  "serde",
  "serde-saphyr 1.1.0",
 ]

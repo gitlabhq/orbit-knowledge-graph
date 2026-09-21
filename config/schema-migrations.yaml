@@ -19,10 +19,8 @@ migrations:
 - version: 99
   scope: none
   note: >-
-    Adds the CALLS File -> ImportedSymbol variant that the code indexer already
-    emits for top-level calls to unresolved imports. Indexed rows are byte-identical;
-    the variant only declares existing edges so query validation can check relationship
-    endpoints.
+    Adds the CALLS File -> ImportedSymbol variant already emitted by the code indexer,
+    and introduced_in annotations for introspection. Neither changes DDL or indexed rows.
 - version: 98
   scope: none
   note: >-

@@ -182,6 +182,14 @@ impl ReadOntologyFile for OntologyArchive {
                 ),
             })
     }
+
+    fn legacy_introduced_in(&self) -> Option<semver::Version> {
+        (self.schema_version <= 98).then(|| semver::Version::new(1, 0, 0))
+    }
+
+    fn validates_graph_schema_api(&self) -> bool {
+        false
+    }
 }
 
 fn read_sources(bytes: &[u8]) -> Result<BTreeMap<String, String>, ArchiveError> {

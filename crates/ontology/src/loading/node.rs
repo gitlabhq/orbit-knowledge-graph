@@ -28,6 +28,8 @@ pub(crate) struct NodeYaml {
         reason = "human-facing self-documentation; the entity name is read from the schema.yaml registry key, this field mirrors it for readability in the node file"
     )]
     node_type: String,
+    #[serde(default)]
+    introduced_in: Option<semver::Version>,
     domain: String,
     #[serde(default)]
     global: bool,
@@ -171,6 +173,8 @@ enum EndpointKindYaml {
 struct PropertyYaml {
     #[serde(rename = "type")]
     data_type: DataType,
+    #[serde(default)]
+    introduced_in: Option<semver::Version>,
     /// Source column name. Required for column-backed fields, absent for virtual fields.
     #[serde(default)]
     source: Option<String>,
@@ -314,6 +318,15 @@ impl NodeYaml {
         internal_column_prefix: &str,
         reader: &impl ReadOntologyFile,
     ) -> Result<NodeEntity, OntologyError> {
+        let legacy_introduced_in = reader.legacy_introduced_in();
+        let introduced_in = self
+            .introduced_in
+            .or_else(|| legacy_introduced_in.clone())
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "node '{name}' requires an introduced_in version"
+                ))
+            })?;
         let mut primary_keys = Vec::new();
 
         let fields: Vec<Field> = self
@@ -323,6 +336,15 @@ impl NodeYaml {
                 if prop_name == DEFAULT_PRIMARY_KEY {
                     primary_keys.push(prop_name.clone());
                 }
+
+                let field_introduced_in = prop_def
+                    .introduced_in
+                    .or_else(|| legacy_introduced_in.clone())
+                    .ok_or_else(|| {
+                        OntologyError::Validation(format!(
+                            "property '{prop_name}' on node '{name}' requires an introduced_in version"
+                        ))
+                    })?;
 
                 let source = match (prop_def.source, prop_def.virtual_config) {
                     (Some(col), None) => FieldSource::DatabaseColumn(col),
@@ -371,6 +393,7 @@ impl NodeYaml {
 
                 Ok(Field {
                     name: prop_name,
+                    introduced_in: field_introduced_in,
                     source,
                     data_type: prop_def.data_type,
                     nullable: prop_def.nullable,
@@ -523,6 +546,7 @@ impl NodeYaml {
 
         Ok(NodeEntity {
             name,
+            introduced_in,
             domain: self.domain,
             description: self.description,
             label: self.label,
@@ -1037,6 +1061,10 @@ mod tests {
                 path: path.to_string(),
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, path.to_string()),
             })
+        }
+
+        fn legacy_introduced_in(&self) -> Option<semver::Version> {
+            Some(semver::Version::new(1, 0, 0))
         }
     }
 

@@ -1757,6 +1757,10 @@ mod tests {
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, path.to_string()),
             })
         }
+
+        fn legacy_introduced_in(&self) -> Option<semver::Version> {
+            Some(semver::Version::new(1, 0, 0))
+        }
     }
 
     #[test]
@@ -2905,17 +2909,20 @@ edges: {}
             "nodes/core/user.yaml".to_string(),
             r##"
 node_type: User
+introduced_in: "1.0.0"
 domain: core
 description: A user
 label: username
 destination_table: gl_user
 properties:
   id:
+    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
     description: "ID"
   username:
+    introduced_in: "1.0.0"
     type: string
     source: username
     nullable: false

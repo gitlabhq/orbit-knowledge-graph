@@ -335,6 +335,7 @@ mod tests {
     fn test_node(fields: Vec<Field>) -> ontology::NodeEntity {
         ontology::NodeEntity {
             name: "TestNode".to_string(),
+            introduced_in: "1.0.0".parse().unwrap(),
             domain: "test".to_string(),
             description: String::new(),
             label: String::new(),

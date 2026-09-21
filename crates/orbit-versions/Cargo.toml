@@ -5,6 +5,7 @@ edition = "2024"
 license = "LicenseRef-EE"
 
 [dependencies]
+semver = { workspace = true }
 serde = { workspace = true }
 serde-saphyr = { workspace = true }
 

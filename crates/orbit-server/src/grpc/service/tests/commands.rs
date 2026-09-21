@@ -312,13 +312,14 @@ async fn test_expand_nodes_shows_relationships() {
 }
 
 #[tokio::test]
-async fn test_property_format_has_type() {
+async fn test_property_format_has_type_and_version() {
     let output = graph_schema_text(r#"{"expand_nodes": ["User"]}"#).await;
 
     assert!(
-        output.contains("id:int") || output.contains("id:integer"),
-        "Properties should include type: {}",
-        output
+        output.contains("{name,data_type,nullable,description,introduced_in}")
+            && output.contains("id,int,false")
+            && output.contains("\"1.0.0\""),
+        "Properties should include type and introduced version: {output}"
     );
 }
 
@@ -336,8 +337,17 @@ async fn graph_schema_keeps_unexpanded_nodes_compact() {
         .flat_map(|domain| domain["nodes"].as_array().unwrap())
         .collect();
 
-    assert!(nodes.iter().any(|node| node.as_str() == Some("Project")));
-    let expanded: Vec<_> = nodes.iter().filter(|node| node.is_object()).collect();
+    let project = nodes
+        .iter()
+        .find(|node| node["name"] == "Project")
+        .expect("Project summary");
+    assert_eq!(project["introduced_in"], "1.0.0");
+    assert!(project.get("props").is_none());
+
+    let expanded: Vec<_> = nodes
+        .iter()
+        .filter(|node| node.get("props").is_some())
+        .collect();
     assert_eq!(expanded.len(), 1);
     assert_eq!(expanded[0]["name"], "User");
     assert!(!expanded[0]["props"].as_array().unwrap().is_empty());
@@ -398,7 +408,11 @@ async fn schema_rpc_and_command_use_the_supplied_ontology() {
                 assert_eq!(
                     serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
                     serde_json::json!({
-                        "domains": [{"name": "other", "nodes": ["CustomNode"]}],
+                        "graph_schema_api": "1.0.0",
+                        "domains": [{
+                            "name": "other",
+                            "nodes": [{"name": "CustomNode", "introduced_in": "1.0.0"}],
+                        }],
                         "edges": [],
                     })
                 );

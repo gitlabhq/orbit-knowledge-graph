@@ -4,13 +4,19 @@
   "title": "GitLab Orbit Versions",
   "description": "Schema for config/versions.yaml: pinned versions and vendored dependencies.",
   "type": "object",
-  "required": ["schema", "query_dsl", "raw_output_format", "goon_output_format", "vendored"],
+  "required": ["schema", "graph_schema_api", "query_dsl", "raw_output_format", "goon_output_format", "vendored"],
   "additionalProperties": false,
   "properties": {
     "schema": {
       "description": "Graph schema version; prefixes every versioned ClickHouse table.",
       "type": "integer",
       "minimum": 1
+    },
+    "graph_schema_api": {
+      "description": "Public graph schema API version (semver).",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "maxLength": 20
     },
     "query_dsl": {
       "description": "Accepted query-DSL shape version (semver).",
