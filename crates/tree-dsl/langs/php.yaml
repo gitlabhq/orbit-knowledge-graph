@@ -92,7 +92,7 @@ stages:
         replace: '(catch_clause (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) $B)'
 
       # $x instanceof T references T
-      - match: '(binary_expression left: $L right: $T:name)'
+      - match: '(binary_expression left: $L (instanceof) right: $T:name)'
         replace: '(binary_expression $L (__member (__object @$T)))'
 
   - name: retag-refs
