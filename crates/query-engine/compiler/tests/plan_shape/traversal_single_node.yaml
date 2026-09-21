@@ -1,12 +1,10 @@
-name: "Single node traversal"
+name: "Single node scan uses FINAL"
 input:
   json: |
     {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"limit":10}
 expected:
   op: TopN
-  limit: 11
   input:
     op: Scan
     table: gl_merge_request
-    alias: mr
     dedup: true

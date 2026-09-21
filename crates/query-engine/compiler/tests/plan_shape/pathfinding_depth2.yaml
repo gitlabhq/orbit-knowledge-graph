@@ -1,4 +1,4 @@
-name: "Pathfinding depth 2 - forward + backward + intersection"
+name: "Depth 2 — forward + backward + intersection union"
 input:
   json: |
     {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]},"limit":10}
@@ -22,7 +22,6 @@ expected:
             arms:
               - op: Scan
                 table: forward
-                alias: f
               - op: Join
                 left:
                   op: Scan

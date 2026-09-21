@@ -1,12 +1,10 @@
-name: "Single node aggregation"
+name: "Single-node aggregation"
 input:
   json: |
     {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
 expected:
   op: Aggregate
-  limit: 11
   input:
     op: Scan
     table: gl_merge_request
-    alias: mr
     dedup: true

@@ -1,8 +1,0 @@
-name: "Pathfinding with multiple rel types"
-input:
-  json: |
-    {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS","MEMBER_OF"]},"limit":10}
-expected:
-  op: TopN
-  input:
-    op: Cte

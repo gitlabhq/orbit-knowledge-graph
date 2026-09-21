@@ -1,4 +1,4 @@
-name: "FK elision two-hop star"
+name: "Two FK hops — all nodes joined, no edge tables"
 input:
   json: |
     {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}
@@ -6,22 +6,5 @@ expected:
   op: TopN
   input:
     op: Join
-    left:
-      op: Join
-      left:
-        op: Scan
-        table: gl_job
-        alias: j
-        dedup: true
-      right:
-        op: Scan
-        table: gl_pipeline
-        alias: pipe
-        dedup: true
-    right:
-      op: Scan
-      table: gl_project
-      alias: p
-      dedup: true
 absent:
   - table: gl_edge

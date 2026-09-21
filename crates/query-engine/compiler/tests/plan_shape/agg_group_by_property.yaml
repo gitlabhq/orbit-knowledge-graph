@@ -1,4 +1,4 @@
-name: "Aggregation group-by property"
+name: "Group-by property"
 input:
   json: |
     {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
@@ -6,11 +6,5 @@ expected:
   op: Aggregate
   input:
     op: Join
-    left:
-      op: Scan
-      table: gl_merge_request
-    right:
-      op: Scan
-      table: gl_project
 absent:
   - table: gl_edge

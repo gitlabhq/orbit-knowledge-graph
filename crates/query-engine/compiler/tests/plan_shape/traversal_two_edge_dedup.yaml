@@ -1,0 +1,22 @@
+name: "Multi-edge chain uses FINAL on each edge scan"
+input:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"p","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
+expected:
+  op: Aggregate
+  input:
+    op: Join
+    left:
+      op: Join
+      left:
+        op: Join
+        left:
+          op: Join
+          left:
+            op: Scan
+            alias: e0
+            dedup: true
+          right:
+            op: Scan
+            alias: e1
+            dedup: true

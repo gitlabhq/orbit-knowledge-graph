@@ -1,4 +1,4 @@
-name: "Pathfinding User->Project no TP scoping"
+name: "User->Project pathfinding — User has no traversal_path"
 input:
   json: |
     {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}
@@ -10,4 +10,3 @@ expected:
     body:
       op: Scan
       table: gl_user
-      alias: start

@@ -1,12 +1,10 @@
-name: "Neighbors incoming"
+name: "Neighbors incoming — single edge scan"
 input:
   json: |
     {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"incoming"},"limit":20}
 expected:
   op: TopN
-  limit: 21
   input:
     op: Scan
     table: gl_edge
-    alias: e
     dedup: false

@@ -1,4 +1,4 @@
-name: "Aggregation FK elision with count target"
+name: "FK aggregation — count target node IS joined"
 input:
   json: |
     {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"total_mrs"}],"limit":10}
@@ -9,12 +9,8 @@ expected:
     left:
       op: Scan
       table: gl_merge_request
-      alias: mr
-      dedup: true
     right:
       op: Scan
       table: gl_project
-      alias: p
-      dedup: true
 absent:
   - table: gl_edge

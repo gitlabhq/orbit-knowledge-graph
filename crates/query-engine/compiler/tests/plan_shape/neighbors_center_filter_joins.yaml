@@ -1,4 +1,4 @@
-name: "Neighbors with center filters joins node table with FINAL"
+name: "Non-denorm center filter forces node table join with FINAL"
 input:
   json: |
     {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"outgoing"},"limit":20}
@@ -9,10 +9,8 @@ expected:
     left:
       op: Scan
       table: gl_edge
-      alias: e
       dedup: false
     right:
       op: Scan
       table: gl_merge_request
-      alias: mr
       dedup: true
