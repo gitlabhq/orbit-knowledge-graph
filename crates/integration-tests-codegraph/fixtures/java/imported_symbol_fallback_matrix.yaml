@@ -58,9 +58,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "com.example.app.Main.staticImport", path: "java.util.Collections", name: "emptyList", import_type: "StaticImport" } }
 
-  # skip: tree-dsl: a member call on an unbound receiver does not bind to wildcard imports; the C# matrix asserts the opposite for Console, so this needs a builtin table
   - name: "wildcard imports target wildcard imported symbols"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.WildcardMain.wildcardImport'

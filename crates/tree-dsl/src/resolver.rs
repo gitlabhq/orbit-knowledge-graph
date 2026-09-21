@@ -722,7 +722,8 @@ fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, depth: u8) -> 
 
 fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
     let mut out = Vec::new();
-    for d in ctx.trees[fi].root().descendants().filter(|d| d.is(C::Def)) {
+    let root = ctx.trees[fi].root();
+    for d in root.descendants().filter(|d| d.is(C::Def)) {
         for dec in d.children_of(C::Decorator) {
             if let Some(l) = ctx.visible[fi].get(&dec.sym()).filter(|l| l.fi != fi) {
                 let target = ctx.corpus.jump(l.fi as u32, l.node);
@@ -734,33 +735,47 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
             }
         }
     }
-    for (call, m) in ctx.trees[fi].root().member_calls() {
-        let bound = |s: u32| {
-            call.enclosing(|c| c.is(C::Def)).is_some_and(|d| {
-                d.descendants()
-                    .any(|b| b.is(C::Binding) && b.sym_opt() == Some(s))
-            })
-        };
-        let loc = m
-            .child_sym(C::Object)
-            .filter(|&s| !bound(s))
-            .and_then(|s| ctx.visible[fi].get(&s))
-            .filter(|l| l.fi != fi);
-        let Some(target) = loc.map(|l| ctx.corpus.jump(l.fi as u32, l.node)) else {
+    let local = |n: Cursor| {
+        n.child_sym(C::Alias)
+            .or(n.child_sym(C::SsaHint))
+            .unwrap_or(n.sym())
+    };
+    let imports = root
+        .descendants()
+        .filter(|c| c.is(C::Import))
+        .flat_map(|i| i.names());
+    let (wild, named): (Vec<Cursor>, Vec<Cursor>) =
+        imports.partition(|n| local(*n) == ctx.wildcard_sym);
+    let wild: Vec<u32> = wild.iter().map(|n| n.index()).collect();
+    let named: FxHashSet<u32> = named.iter().map(|n| local(*n)).collect();
+    for (call, m) in root.member_calls() {
+        let Some(from) = call.enclosing(|c| c.is(C::Def)) else {
             continue;
         };
-        if !CLASS_LIKE.iter().any(|&k| target.has(k)) {
+        let bound = |s: u32| {
+            from.descendants()
+                .any(|b| b.is(C::Binding) && b.sym_opt() == Some(s))
+        };
+        let Some(obj) = m.child_sym(C::Object).filter(|&s| !bound(s)) else {
+            continue;
+        };
+        let caller = ctx.corpus.jump(fi as u32, from.index());
+        let Some(loc) = ctx.visible[fi].get(&obj) else {
+            if named.contains(&obj) {
+                continue;
+            }
+            out.extend(
+                wild.iter()
+                    .map(|&w| caller.edge_to(caller.jump(fi as u32, w), EdgeKind::Imports)),
+            );
+            continue;
+        };
+        let target = ctx.corpus.jump(loc.fi as u32, loc.node);
+        if loc.fi == fi || !CLASS_LIKE.iter().any(|&k| target.has(k)) {
             continue;
         }
-        if let (Some(from), Some(method)) = (
-            call.enclosing(|c| c.is(C::Def)),
-            method_up(ctx, target, m.sym(), 0),
-        ) {
-            out.push(
-                ctx.corpus
-                    .jump(fi as u32, from.index())
-                    .edge_to(method, EdgeKind::Calls),
-            );
+        if let Some(method) = method_up(ctx, target, m.sym(), 0) {
+            out.push(caller.edge_to(method, EdgeKind::Calls));
         }
     }
     out

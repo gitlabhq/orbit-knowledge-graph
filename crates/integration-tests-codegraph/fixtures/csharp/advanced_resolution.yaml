@@ -199,9 +199,7 @@ tests:
       - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Models.Dog.Fetch, kind: Calls } }
 
   # ── Constructor CALLS edge ────────────────────────────────────
-  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "new Dog() in Program.Run produces CALLS to Dog class"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'

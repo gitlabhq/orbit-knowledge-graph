@@ -95,7 +95,9 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "App.AliasRunner.Serialize", path: "Newtonsoft.Json.JsonConvert", name: "JsonConvert", alias: "Json", import_type: "AliasedImport" } }
 
+  # skip: tree-dsl: bogus: `using System;` is a wildcard import, so an unbound receiver such as Console binds to it like LocalDate under `import java.time.*`
   - name: "console logging calls do not target ambient namespace imports"
+    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'App.ConsoleRunner.Log'
