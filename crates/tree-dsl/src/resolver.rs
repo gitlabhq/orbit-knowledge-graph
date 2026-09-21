@@ -310,7 +310,7 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
     tree.root().fold_tree(
         FxHashMap::with_capacity_and_hasher(16, Default::default()),
         |names, c, _w| {
-            if c.is(C::Def) {
+            if c.is(C::Def) && !c.has(C::Constructor) {
                 let loc = Loc {
                     fi,
                     node: c.index(),
@@ -443,7 +443,8 @@ fn propagate_reexports(
             .flat_map(|req| {
                 let mut out = Vec::new();
                 for c in trees[req.fi].cursor(req.node).names() {
-                    let ns = c.sym();
+                    let hint = c.child_sym(C::SsaHint).filter(|&h| h == wildcard_sym);
+                    let ns = hint.unwrap_or(c.sym());
                     if ns == wildcard_sym {
                         for (&ds, &loc) in &visible[req.target_fi] {
                             if !visible[req.fi].contains_key(&ds) {
@@ -692,21 +693,57 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, imports_by_from: &[Vec<&Edge>
 }
 
 fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, depth: u8) -> Option<Cursor<'a>> {
-    find_method_in(cls, name).or_else(|| {
-        let supers = cls
-            .children_of(C::SuperType)
-            .filter_map(|s| ctx.visible[cls.fi() as usize].get(&s.sym()));
-        supers
-            .filter(|_| depth < 8)
-            .find_map(|l| method_up(ctx, ctx.corpus.jump(l.fi as u32, l.node), name, depth + 1))
-    })
+    let same = cls.child_sym(C::DefName).map(|n| {
+        ctx.trees[cls.fi() as usize]
+            .root()
+            .descendants()
+            .filter(move |d| d.is(C::Def) && d.child_sym(C::DefName) == Some(n))
+    });
+    let mut bodies: Vec<Cursor<'a>> = same
+        .into_iter()
+        .flatten()
+        .map(|d| cls.jump(cls.fi(), d.index()))
+        .collect();
+    bodies.retain(|d| d.index() != cls.index());
+    bodies.insert(0, cls);
+    bodies
+        .iter()
+        .find_map(|b| find_method_in(*b, name))
+        .or_else(|| {
+            let supers = bodies
+                .iter()
+                .flat_map(|b| b.children_of(C::SuperType))
+                .filter_map(|s| ctx.visible[cls.fi() as usize].get(&s.sym()));
+            supers
+                .filter(|_| depth < 8)
+                .find_map(|l| method_up(ctx, ctx.corpus.jump(l.fi as u32, l.node), name, depth + 1))
+        })
 }
 
 fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
     let mut out = Vec::new();
+    for d in ctx.trees[fi].root().descendants().filter(|d| d.is(C::Def)) {
+        for dec in d.children_of(C::Decorator) {
+            if let Some(l) = ctx.visible[fi].get(&dec.sym()).filter(|l| l.fi != fi) {
+                let target = ctx.corpus.jump(l.fi as u32, l.node);
+                out.push(
+                    ctx.corpus
+                        .jump(fi as u32, d.index())
+                        .edge_to(target, EdgeKind::Calls),
+                );
+            }
+        }
+    }
     for (call, m) in ctx.trees[fi].root().member_calls() {
+        let bound = |s: u32| {
+            call.enclosing(|c| c.is(C::Def)).is_some_and(|d| {
+                d.descendants()
+                    .any(|b| b.is(C::Binding) && b.sym_opt() == Some(s))
+            })
+        };
         let loc = m
             .child_sym(C::Object)
+            .filter(|&s| !bound(s))
             .and_then(|s| ctx.visible[fi].get(&s))
             .filter(|l| l.fi != fi);
         let Some(target) = loc.map(|l| ctx.corpus.jump(l.fi as u32, l.node)) else {

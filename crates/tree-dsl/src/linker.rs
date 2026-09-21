@@ -57,7 +57,6 @@ struct Fold<'t> {
     wildcards: Vec<u32>,
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
-    callable_key: u32,
     scoped_key: u32,
     edges: Vec<Edge>,
 }
@@ -405,11 +404,7 @@ impl<'t> Fold<'t> {
 
     fn emit(&mut self, r: &Linked, from: u32) {
         match r {
-            Linked::Def(node) => {
-                if self.tree.cursor(*node).has_tag(self.callable_key) {
-                    self.edges.push(Edge::local(from, *node, EdgeKind::Calls));
-                }
-            }
+            Linked::Def(node) => self.edges.push(Edge::local(from, *node, EdgeKind::Calls)),
             Linked::Import(node) => self.edges.push(Edge::local(from, *node, EdgeKind::Imports)),
             Linked::Type(_) => {}
         }
@@ -602,7 +597,6 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         wildcards: Vec::new(),
         def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern(WILDCARD),
-        callable_key: lang.syms.intern("callable"),
         scoped_key: lang.syms.intern("scoped"),
         edges: Vec::new(),
     };

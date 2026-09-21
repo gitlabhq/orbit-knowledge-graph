@@ -49,6 +49,8 @@ stages:
       # Annotations → decorators (arguments kept for calls inside them)
       - match: '(marker_annotation name: $N:identifier)'
         replace: '(__decorator @$N)'
+      - match: '(permits (type_list $$$T:type_identifier))'
+        replace: '(java_permits $$$T->__decorator)'
       - match: '(annotation name: $N:identifier arguments: $A)'
         replace: '(__decorator @$N $A)'
 
