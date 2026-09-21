@@ -220,9 +220,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "User extends Model — Extends edge present"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'App\User' AND parent.fqn = 'App\Model'
@@ -231,9 +229,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Account extends Model — Extends edge present"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'App\Account' AND parent.fqn = 'App\Model'
@@ -242,9 +238,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Repo extends Query — Extends edge present"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'App\Repo' AND parent.fqn = 'App\Query'
@@ -283,9 +277,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "Typed-property __toString call resolves cross-class"
-    skip: true
     query: |
       MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
       WHERE a.fqn = 'App\Service\callToString'
@@ -295,9 +287,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "Typed-property __invoke explicit method call resolves cross-class"
-    skip: true
     query: |
       MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
       WHERE a.fqn = 'App\Service\callInvokeMethod'
@@ -307,9 +297,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Subclass calling inherited static create() resolves via Extends to Model::create"
-    skip: true
     query: |
       MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
       WHERE a.fqn = 'App\boot'
@@ -319,9 +307,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Subclass calling inherited static find() resolves to Model::find"
-    skip: true
     query: |
       MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
       WHERE a.fqn = 'App\lookup'
@@ -331,9 +317,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Different subclass also resolves inherited create() to Model::create"
-    skip: true
     query: |
       MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
       WHERE a.fqn = 'App\accountOf'
@@ -343,9 +327,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "static::from() inside Repo resolves to inherited Query::from"
-    skip: true
     query: |
       MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
       WHERE a.fqn = 'App\Repo\fetch'
@@ -355,9 +337,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "self::from() inside Repo also resolves to inherited Query::from"
-    skip: true
     query: |
       MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
       WHERE a.fqn = 'App\Repo\fetchSelf'

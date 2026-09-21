@@ -123,9 +123,7 @@ tests:
       - { row: { name: "EARTH" } }
       - { row: { name: "MERCURY" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Enum Planet has an Extends edge to the Describable interface"
-    skip: true
     query: |
       MATCH (e:Definition)-[r:DefinitionToDefinition]->(i:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'

@@ -96,9 +96,7 @@ tests:
     assert:
       - { row: { fqn: 'App\bootstrap' } }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "User extends Model"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'App\Models\User'
@@ -121,9 +119,7 @@ tests:
       - { no_nulls: callee }
       - { row: { caller: 'App\Models\Model\save', callee: 'App\Models\Model\persist' } }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Parent call: User.save -> Model.save via parent::"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\User\save'

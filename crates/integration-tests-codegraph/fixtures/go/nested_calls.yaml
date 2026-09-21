@@ -29,9 +29,7 @@ fixtures:
       }
 
 tests:
-  # skip: tree-dsl: process() is defined after Start; the linker resolves names in a single forward pass
   - name: "Start calls Info and process, not Error"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)

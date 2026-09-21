@@ -81,7 +81,7 @@ tests:
     assert:
       - { row: { fqn: "com.example.consumePair" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: bogus: Pair is only a parameter type; destructuring calls component functions, not the class
   - name: cross-file consumePair calls Pair
     skip: true
     query: |
@@ -92,9 +92,7 @@ tests:
     assert:
       - { row: { callee: "com.example.Pair" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: cross-file createAndDestructure calls User
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'createAndDestructure' AND e.edge_kind = 'Calls'

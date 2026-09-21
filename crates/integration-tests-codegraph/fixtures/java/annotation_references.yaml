@@ -25,7 +25,7 @@ fixtures:
       }
 
 tests:
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: an annotation is a __decorator reference; the resolver binds only calls to package-visible names
   - name: Annotation ref attributed to the annotated method
     skip: true
     query: |
@@ -36,7 +36,7 @@ tests:
       - { row: { callee: "MyAnnotation" } }
       - { not: true, row: { callee: "OtherAnnotation" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: an annotation is a __decorator reference; the resolver binds only calls to package-visible names
   - name: Each method references its own annotation
     skip: true
     query: |

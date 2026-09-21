@@ -175,9 +175,7 @@ tests:
       - { unique: fqn }
       - { no_nulls: fqn }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Three-level Extends chain: Mammal->Animal, Canine->Mammal, Dog->Canine"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE e.edge_kind = 'Extends'
@@ -193,9 +191,7 @@ tests:
       - { row: { child: 'App\Zoo\Canine', parent: 'App\Zoo\Mammal' } }
       - { row: { child: 'App\Zoo\Dog', parent: 'App\Zoo\Canine' } }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Grandparent call: Dog.describe -> Animal.kingdom via inherited \\$this"
-    skip: true
     query: |
       MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
       WHERE a.fqn = 'App\Zoo\Dog\describe'
@@ -205,9 +201,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Parent-level call: Dog.describe -> Canine.pack via inherited \\$this"
-    skip: true
     query: |
       MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
       WHERE a.fqn = 'App\Zoo\Dog\describe'

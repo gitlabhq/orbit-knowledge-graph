@@ -216,9 +216,7 @@ tests:
       - { row_count: 4 }
       - { unique: fqn }
 
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "Typed property invocation: TypedProps.lookup -> Repo.find via \\$this->repo"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\TypedProps\lookup'
@@ -229,9 +227,7 @@ tests:
       - { row_count: 1 }
 
   # ── Param-typed method call (the classic case) ─────────────────
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "Top-level function parameter typed Repo: boot -> Repo.find via \\$repo"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\boot'
@@ -241,9 +237,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "Top-level function parameter typed Cache: boot -> Cache.get via \\$cache"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\boot'
@@ -254,9 +248,7 @@ tests:
       - { row_count: 1 }
 
   # ── Nullable types ?T (PHP 7.1) ────────────────────────────────
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "Nullable param ?Repo: NullableTypes.fetch -> Repo.save"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\NullableTypes\fetch'
@@ -271,9 +263,7 @@ tests:
   # graph should record a Calls edge to AT LEAST ONE member type's
   # `find` if one exists. Only Repo has `find`, so the edge to
   # Repo.find is the correct minimum.
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "Union param Repo|Cache resolves \\$svc->find to Repo.find"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\UnionTypes\process'
@@ -295,9 +285,7 @@ tests:
   # ── Intersection types A&B (PHP 8.1) ───────────────────────────
   # $other is both Countable and Stringable. The graph should
   # resolve $other->count() to Countable.count.
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "Intersection param Countable&Stringable resolves \\$other->count to Countable.count"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\IntersectionUser\measure'
@@ -311,9 +299,7 @@ tests:
   # (Countable&Stringable)|Empty_ — $x->count() is valid on the
   # intersection arm. At minimum the engine should record a Calls
   # edge to Countable.count.
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "DNF param (Countable&Stringable)|Empty_ resolves \\$x->count to Countable.count"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\DnfTypes\inspect'
@@ -366,9 +352,7 @@ tests:
       - { unique: fqn }
 
   # ── Cross-arm: ensure intersection class implements both ifaces ──
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Counter implements Countable and Stringable"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Iface\Counter'

@@ -31,9 +31,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: extension functions and interface members of imported types resolve only through same-file defs
   - name: "main -> Baz.baz (interface through inheritance)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.main'

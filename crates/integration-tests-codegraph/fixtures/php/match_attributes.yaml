@@ -209,9 +209,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "ApiRouter extends Router (so parent:: resolves)"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Http\ApiRouter'
@@ -262,9 +260,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Match arm: parent::fallback() resolves to inherited Router.fallback"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\ApiRouter\dispatch'
@@ -316,9 +312,7 @@ tests:
 
   # ── Enum body match arms ───────────────────────────────────────
   # Both match arms call self::format(), so the edge resolves (once per arm).
-  # skip: tree-dsl: enclosing_class accepts Class, Impl, and Trait but not Enum, so self:: and $this inside enums do not resolve
   - name: "Enum method match arm: self::format resolves to Status.format"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\Status\label'

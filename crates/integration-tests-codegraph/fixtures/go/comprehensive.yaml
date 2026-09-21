@@ -127,9 +127,7 @@ tests:
 
   # ── Simple function calls from main ──
 
-  # skip: tree-dsl: same-package cross-file lookup needs a package namespace; the resolver is import-driven
   - name: "main calls exactly NewDatabase, NewUserService, FindUser, Greet, Promote, Query"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
@@ -155,9 +153,7 @@ tests:
 
   # ── Method chaining via return types ──
 
-  # skip: tree-dsl: same-package cross-file lookup needs a package namespace; the resolver is import-driven
   - name: "db.Query resolves to Database.Query via NewDatabase return type"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)

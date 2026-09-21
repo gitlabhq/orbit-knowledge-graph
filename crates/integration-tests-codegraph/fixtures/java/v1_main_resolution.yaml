@@ -113,9 +113,7 @@ tests:
       - { unique: fqn }
       - { no_nulls: fqn }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Main extends Application"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'com.example.app.Main'
@@ -126,7 +124,7 @@ tests:
       - { row_count: 1 }
       - { row: { kind: Extends } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: an annotation is a __decorator reference; the resolver binds only calls to package-visible names
   - name: "Main.main -> Traceable annotation"
     skip: true
     query: |
@@ -138,9 +136,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: com.example.app.Main.main, callee: com.example.app.Traceable, kind: Calls } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Main constructor -> new Foo()"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.Main'
@@ -150,9 +146,7 @@ tests:
       - { row_count: 1 }
       - { row: { kind: Calls } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Main.main -> Foo.bar (this.myParameter.bar())"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -162,9 +156,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: com.example.app.Main.main, callee: com.example.app.Foo.bar, kind: Calls } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Main.main -> Bar.baz (pattern variable instanceof)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -174,9 +166,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: com.example.app.Main.main, callee: com.example.app.Bar.baz, kind: Calls } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Main.main -> Bar (instanceof type ref)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -186,9 +176,7 @@ tests:
       - { row_count: 1 }
       - { row: { kind: Calls } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Main.main -> Executor.execute (method reference)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -208,9 +196,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: com.example.app.Main.main, callee: com.example.app.Main.await, kind: Calls } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Main.main -> Application.run (super call)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -240,7 +226,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.outerMethod, kind: Calls } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: a constructor reached through a member chain (Outer.Inner()) has no SSA type
   - name: "Main.main -> Outer.Inner (nested class constructor)"
     skip: true
     query: |
@@ -282,9 +268,7 @@ tests:
       - { row_count: 1 }
       - { row: { kind: Calls } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Main.main -> EnumClass.enumMethod1 (enum constant method)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -294,9 +278,7 @@ tests:
       - { row_count: 1 }
       - { row: { kind: Calls } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Main.main -> EnumClass.enumMethod2 (enum var method)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
