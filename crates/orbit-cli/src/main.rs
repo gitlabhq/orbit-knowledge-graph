@@ -394,6 +394,10 @@ struct SetupFlags {
     #[arg(long)]
     dry_run: bool,
 
+    /// List every file touched instead of a per-component summary.
+    #[arg(long, short = 'v')]
+    verbose: bool,
+
     /// Write into the current project instead of the user-global config
     /// files.
     #[arg(long)]
@@ -416,6 +420,7 @@ impl SetupFlags {
             all,
             yes: self.yes,
             dry_run: self.dry_run,
+            verbose: self.verbose,
             components,
         }
     }

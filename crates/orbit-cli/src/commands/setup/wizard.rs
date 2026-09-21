@@ -55,9 +55,9 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 
     let mut report = Report::default();
     let applied = changes::install(&selection, &target, &mut report);
-    show_report(&report)?;
+    show_report(&report, options.verbose)?;
     applied?;
-    cliclack::outro("Done. Undo any time with `orbit uninstall`.")?;
+    cliclack::outro("Done. Ask your agent about your code. Undo with `orbit uninstall`.")?;
     Ok(())
 }
 
@@ -100,7 +100,7 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
 
     let mut report = Report::default();
     let removed = changes::remove(&selection, &target, &mut report);
-    show_report(&report)?;
+    show_report(&report, options.verbose)?;
     removed?;
     cliclack::outro("Done. Backups (*.orbit-backup) were kept.")?;
     Ok(())
@@ -239,7 +239,58 @@ fn show_paths(plan: &Plan) -> Result<()> {
     Ok(())
 }
 
-fn show_report(report: &Report) -> Result<()> {
+fn show_report(report: &Report, verbose: bool) -> Result<()> {
+    if verbose {
+        return show_every_file(report);
+    }
+    let mut groups: Vec<(&str, BTreeSet<&str>)> = Vec::new();
+    let mut backups = 0;
+    let mut kept = 0;
+    for outcome in &report.outcomes {
+        if outcome.action.starts_with("backup at") {
+            backups += 1;
+            continue;
+        }
+        if outcome.action.starts_with("kept") {
+            kept += 1;
+        }
+        match groups.last_mut() {
+            Some((group, labels)) if *group == outcome.group => {
+                labels.insert(&outcome.label);
+            }
+            _ => {
+                groups.push((&outcome.group, BTreeSet::from([outcome.label.as_str()])));
+            }
+        }
+    }
+    for (group, labels) in &groups {
+        let summary = match *group {
+            "skill" => labels.iter().copied().collect::<Vec<_>>().join(", "),
+            _ => format!(
+                "{} file{}",
+                labels.len(),
+                if labels.len() == 1 { "" } else { "s" }
+            ),
+        };
+        cliclack::log::step(format!("{group:<14} {summary}"))?;
+    }
+    if backups > 0 {
+        cliclack::log::step(format!(
+            "{:<14} {backups} original{} saved as *.orbit-backup",
+            "backups",
+            if backups == 1 { "" } else { "s" }
+        ))?;
+    }
+    if kept > 0 {
+        cliclack::log::warning(format!(
+            "{kept} edited file{} kept; rerun with --verbose to see which",
+            if kept == 1 { "" } else { "s" }
+        ))?;
+    }
+    Ok(())
+}
+
+fn show_every_file(report: &Report) -> Result<()> {
     let mut cards: Vec<(&str, Vec<String>)> = Vec::new();
     for outcome in &report.outcomes {
         let line = format!("{}  {}", outcome.label, outcome.action);

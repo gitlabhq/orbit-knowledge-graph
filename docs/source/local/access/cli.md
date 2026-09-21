@@ -202,7 +202,9 @@ Other options:
 - `--all` configures every supported agent, detected or not.
 - `--yes` skips the picker and the prompt. Required when there is no terminal,
   for example in scripts.
-- `--dry-run` prints the plan and exits without writing.
+- `--dry-run` prints the plan and every path and exits without writing.
+- `--verbose` lists every file touched after applying, instead of a count
+  per component.
 
 ### What it changes
 

@@ -16,4 +16,4 @@ description: >-
   `--project` or `--dir`. Existing files get a one-time `.orbit-backup`
   sibling before the first change. Re-running updates everything in place.
   `--yes` skips the wizard and applies the defaults; `--dry-run` stops before
-  writing. `orbit uninstall` reverts it.
+  writing; `--verbose` lists every file touched. `orbit uninstall` reverts it.

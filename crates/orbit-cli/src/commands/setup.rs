@@ -61,6 +61,7 @@ pub(crate) struct Options {
     pub(crate) all: bool,
     pub(crate) yes: bool,
     pub(crate) dry_run: bool,
+    pub(crate) verbose: bool,
     pub(crate) components: BTreeSet<Component>,
 }
 
@@ -129,6 +130,7 @@ mod tests {
             all: false,
             yes: true,
             dry_run: false,
+            verbose: false,
             components: Component::selection(false, &[]),
         }
     }
