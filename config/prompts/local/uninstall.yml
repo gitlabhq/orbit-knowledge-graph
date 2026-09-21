@@ -1,0 +1,11 @@
+name: uninstall
+version: 1.0.0
+short: Remove what `orbit setup` wrote into AI coding agents
+description: >-
+  Remove what `orbit setup` wrote into AI coding agents
+
+
+  Removes the instruction section, hooks, MCP server entry, and skill files
+  that `orbit setup` wrote. Files you edited after setup are kept, with their
+  `.orbit-backup` copies. Targets user-global configuration unless `--project`
+  or `--dir` is given.
