@@ -140,6 +140,7 @@ impl Resolver {
         support_lang: SupportLang,
         lookup_prefixes: &[String],
         external: &[String],
+        aliases: &[(String, String)],
     ) -> ResolveResult {
         let index_names = support_lang.index_names();
         let labels: Vec<&str> = trees.iter().map(|t| t.label.as_str()).collect();
@@ -160,6 +161,7 @@ impl Resolver {
             lookup_prefixes,
             external,
             dirty_fis,
+            aliases,
         );
         self.reqs.extend(new_reqs);
 
@@ -310,6 +312,7 @@ fn gather_imports_for(
     lookup_prefixes: &[String],
     external: &[String],
     dirty_fis: &FxHashSet<usize>,
+    aliases: &[(String, String)],
 ) -> (Vec<ImportReq>, Vec<Edge>) {
     let resolved_tag_key = lang.syms.intern("resolved_source");
     let dirty_vec: Vec<usize> = dirty_fis.iter().copied().collect();
@@ -332,7 +335,8 @@ fn gather_imports_for(
                     let Some(resolved_sym) = tree.get_tag(cur.index(), resolved_tag_key) else {
                         return;
                     };
-                    let target_path = lang.syms.resolve(resolved_sym).to_string();
+                    let raw_path = lang.syms.resolve(resolved_sym);
+                    let target_path = apply_aliases(raw_path, aliases);
                     let node_idx = cur.index();
                     let candidates = match resolve_path(&target_path, file_index, lookup_prefixes) {
                         Some(tfi) => {
@@ -741,4 +745,18 @@ fn resolve_submodule(
             .and_then(|s| s.strip_suffix(PATH_SEP))
     })?;
     file_index.get(&format!("{dir}{PATH_SEP}{name}")).copied()
+}
+
+fn apply_aliases(path: &str, aliases: &[(String, String)]) -> String {
+    for (key, val) in aliases {
+        if let Some(rest) = path.strip_prefix(key.as_str()) {
+            let rest = rest.strip_prefix('/').unwrap_or(rest);
+            return if rest.is_empty() {
+                val.clone()
+            } else {
+                format!("{val}/{rest}")
+            };
+        }
+    }
+    path.to_string()
 }

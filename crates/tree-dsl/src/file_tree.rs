@@ -7,6 +7,11 @@ use crate::pattern;
 use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tree};
 
+pub struct WalkResult {
+    pub prefixes: Vec<String>,
+    pub aliases: Vec<(String, String)>,
+}
+
 pub struct ProjectTree<'a> {
     lang: &'a Lang,
     config: &'a ResolveConfig,
@@ -14,6 +19,7 @@ pub struct ProjectTree<'a> {
     files: Option<&'a [(String, String)]>,
     tree: Tree,
     prefixes: Vec<String>,
+    aliases: Vec<(String, String)>,
 }
 
 impl<'a> ProjectTree<'a> {
@@ -22,7 +28,7 @@ impl<'a> ProjectTree<'a> {
         config: &'a ResolveConfig,
         paths: &'a [&'a str],
         files: Option<&'a [(String, String)]>,
-    ) -> Vec<String> {
+    ) -> WalkResult {
         let mut pt = Self {
             lang,
             config,
@@ -34,14 +40,22 @@ impl<'a> ProjectTree<'a> {
                 ..Default::default()
             }),
             prefixes: vec![],
+            aliases: vec![],
         };
         if config.stages.is_empty() && config.lookup_from.is_empty() {
-            return vec![];
+            return WalkResult {
+                prefixes: vec![],
+                aliases: vec![],
+            };
         }
         pt.build_dir_tree();
         pt.run_stages();
+        pt.collect_aliases();
         pt.collect_prefixes();
-        pt.prefixes
+        WalkResult {
+            prefixes: pt.prefixes,
+            aliases: pt.aliases,
+        }
     }
 
     fn build_dir_tree(&mut self) {
@@ -173,6 +187,30 @@ impl<'a> ProjectTree<'a> {
                 },
             );
         }
+    }
+
+    fn collect_aliases(&mut self) {
+        self.aliases = self
+            .tree
+            .root()
+            .fold_tree(Vec::new(), |aliases, cursor, _w| {
+                if cursor.kind() != C::ConfigField {
+                    return;
+                }
+                let key = cursor.sym();
+                if key == 0 {
+                    return;
+                }
+                if let Some(val) = cursor.children().find(|c| c.is(C::Str)) {
+                    let val_sym = val.sym();
+                    if val_sym != 0 {
+                        aliases.push((
+                            self.lang.syms.resolve(key).to_string(),
+                            self.lang.syms.resolve(val_sym).to_string(),
+                        ));
+                    }
+                }
+            });
     }
 
     fn collect_prefixes(&mut self) {

@@ -15,7 +15,7 @@ pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> (Env, State) {
     let mut state = State::new(&env);
     parse(&env, &mut state, files.to_vec());
     let all_fis: FxHashSet<usize> = (0..state.trees.len()).collect();
-    resolve(&env, &mut state, all_fis);
+    resolve(&env, &mut state, all_fis, Some(files));
     (env, state)
 }
 
@@ -38,7 +38,7 @@ pub fn reindex(
     let new_base = state.trees.len();
     parse(env, &mut state, new_files);
     dirty_fis.extend(new_base..state.trees.len());
-    resolve(env, &mut state, dirty_fis);
+    resolve(env, &mut state, dirty_fis, None);
     state
 }
 

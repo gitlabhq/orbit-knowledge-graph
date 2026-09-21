@@ -262,9 +262,7 @@ resolve:
         # tsconfig baseUrl → source root
         - match: '(__file "tsconfig.json" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" (__str $V)) $$$REST))) $$$OUTER)'
           replace: '(__file "tsconfig.json" (__source_root @$V|strip_prefix("./")) $$$OUTER)'
-        # webpack alias → source root
-        - match: '(__file "webpack.config.js" (__field $K (__str $V)) $$$REST)'
-          replace: '(__file "webpack.config.js" (__source_root @$V|strip_prefix("./")) $$$REST)'
+
     - name: packages
       rules:
         - match: '(__dir (__file "package.json") $$$REST)'

@@ -38,17 +38,23 @@ pub fn parse(env: &Env, state: &mut State, files: Vec<(String, String)>) {
     }
 }
 
-pub fn resolve(env: &Env, state: &mut State, dirty_fis: FxHashSet<usize>) {
+pub fn resolve(
+    env: &Env,
+    state: &mut State,
+    dirty_fis: FxHashSet<usize>,
+    files: Option<&[(String, String)]>,
+) {
     let paths: Vec<&str> = state.trees.iter().map(|t| t.label.as_str()).collect();
-    let prefixes = ProjectTree::build(&env.lang, &env.resolve_config, &paths, None);
+    let walk = ProjectTree::build(&env.lang, &env.resolve_config, &paths, files);
     let result = state.resolver.resolve(
         &state.trees,
         &state.edges,
         &env.lang,
         &dirty_fis,
         env.lang_id,
-        &prefixes,
+        &walk.prefixes,
         &env.resolve_config.external,
+        &walk.aliases,
     );
     for rsp in &result.resolved_source_paths {
         let nid = state.trees[rsp.fi].to_id(rsp.node);

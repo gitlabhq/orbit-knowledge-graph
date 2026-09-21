@@ -48,6 +48,7 @@ pub struct ResolveConfig {
     pub lookup_from: Vec<u16>,
     pub external: Vec<String>,
     pub display_source: DisplaySource,
+    pub aliases: Vec<(String, String)>,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +66,7 @@ impl Default for ResolveConfig {
             lookup_from: vec![],
             external: vec![],
             display_source: DisplaySource::Original,
+            aliases: vec![],
         }
     }
 }
@@ -246,6 +248,7 @@ fn compile_resolve(section: &ResolveSection, lang: &Lang) -> ResolveConfig {
             Some("resolved") => DisplaySource::Resolved,
             _ => DisplaySource::Original,
         },
+        aliases: vec![],
     }
 }
 
