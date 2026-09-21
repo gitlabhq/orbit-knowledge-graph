@@ -31,11 +31,9 @@ const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
 
 const JWT_EXPIRY_SECONDS: i64 = 300;
 
-/// Buffer subtracted from the Cloud Connector token's own `exp` claim, so a
-/// token cached as "valid" doesn't lapse in flight to the billing collector.
-/// Rails used to compute and apply this same buffer server-side before
-/// returning `expires_at`; it now returns only the raw token, so decoding
-/// `exp` and applying the buffer are gkg's responsibility.
+/// Safety margin subtracted from the token's `exp` claim so it doesn't lapse
+/// in flight to the collector. Rails used to apply this same buffer
+/// server-side; now it only returns the raw token, so gkg applies it.
 const CC_TOKEN_EXPIRY_BUFFER_SECS: i64 = 60;
 
 fn into_byte_stream(response: reqwest::Response) -> ByteStream {
@@ -60,17 +58,13 @@ struct JwtClaims {
     exp: i64,
 }
 
-/// Wire shape of the `cloud_connector_token` route's response — just the raw
-/// token; Rails no longer computes or sends an `expires_at`.
+/// Rails no longer sends `expires_at`, just the raw token.
 #[derive(Deserialize)]
 struct CloudConnectorTokenResponse {
     token: String,
 }
 
-/// Claims read from the Cloud Connector token itself. Decoded without
-/// signature verification — the party that presents the token elsewhere
-/// (the billing collector) is responsible for verifying it; gkg only needs
-/// `exp` to know when to refresh.
+/// Decoded without verifying the signature — the collector does that, not gkg.
 #[derive(Deserialize)]
 struct CloudConnectorTokenClaims {
     exp: i64,
@@ -432,8 +426,6 @@ impl GitlabClient {
     }
 }
 
-/// Reads the `exp` claim from a Cloud Connector token without verifying its
-/// signature, and subtracts [`CC_TOKEN_EXPIRY_BUFFER_SECS`].
 fn decode_token_expiry(token: &str) -> Result<i64, GitlabClientError> {
     let data = insecure_decode::<CloudConnectorTokenClaims>(token)
         .map_err(|e| GitlabClientError::JwtDecoding(e.to_string()))?;
@@ -490,8 +482,7 @@ mod tests {
 
     #[test]
     fn decode_token_expiry_ignores_signature() {
-        // Signed with a key gkg has no knowledge of — verification is the
-        // collector's job, not gkg's; insecure_decode must still read `exp`.
+        // Different key than gkg would ever have — verification is the collector's job.
         let key = EncodingKey::from_secret(b"some-other-key-entirely");
         let now = chrono::Utc::now().timestamp();
         let token = encode(
