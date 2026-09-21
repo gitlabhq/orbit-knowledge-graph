@@ -699,22 +699,7 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
         let Some(loc) = ctx.visible[ce.to_fi()].get(&ret_sym) else {
             return vec![];
         };
-        let resolved = ctx.corpus.jump(loc.fi as u32, loc.node);
-        if target.has(C::SsaReturnType) || target.has_tag(ctx.returns_key) {
-            let Some(ty) = std::iter::once(resolved)
-                .chain(resolved.ancestors())
-                .find(|d| {
-                    CLASS_LIKE.iter().any(|&k| d.has(k))
-                        && (d.index() == resolved.index()
-                            || d.child_sym(C::DefName) == Some(ret_sym))
-                })
-            else {
-                return vec![];
-            };
-            ty
-        } else {
-            resolved
-        }
+        ctx.corpus.jump(loc.fi as u32, loc.node)
     };
     let class = if class.has(C::Constructor) {
         let Some(owner) = class.enclosing_def(CLASS_LIKE) else {
