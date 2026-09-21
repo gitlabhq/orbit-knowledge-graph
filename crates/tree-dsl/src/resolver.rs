@@ -735,15 +735,11 @@ fn visible_type<'a>(ctx: &'a ResolveCtx, fi: u32, sym: u32) -> Option<Cursor<'a>
 
 fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
     let c = c.reference();
-    match c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) {
-        Some(m) => method_up(
-            ctx,
-            resolve_chain(ctx, m.child(C::Object)?)?,
-            m.sym(),
-            c.fi() as usize,
-            0,
-        ),
-        None => visible_type(ctx, c.fi(), c.sym()),
+    if let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) {
+        let receiver = resolve_chain(ctx, m.child(C::Object)?)?;
+        method_up(ctx, receiver, m.sym(), c.fi() as usize, 0)
+    } else {
+        visible_type(ctx, c.fi(), c.sym())
     }
 }
 
@@ -800,14 +796,13 @@ fn method_up<'a>(
     fi: usize,
     depth: u8,
 ) -> Option<Cursor<'a>> {
-    let bodies = std::iter::once(cls).chain(cls.jump(cls.fi(), 0).descendants().filter(|d| {
+    let mut bodies = std::iter::once(cls).chain(cls.jump(cls.fi(), 0).descendants().filter(|d| {
         d.is(C::Def)
             && (d.has(C::ImplBlock) || cls.has(C::ImplBlock))
             && d.child_sym(C::DefName) == cls.child_sym(C::DefName)
     }));
     bodies
-        .filter_map(|b| find_method_in(b, name))
-        .next()
+        .find_map(|b| find_method_in(b, name))
         .or_else(|| {
             supertypes(ctx, cls)
                 .into_iter()
@@ -864,10 +859,7 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
         let Some(from) = call.enclosing(|c| c.is(C::Def)) else {
             continue;
         };
-        let bound = |s: u32| {
-            from.descendants()
-                .any(|b| b.is(C::Binding) && b.sym_opt() == Some(s))
-        };
+        let bound = |s: u32| from.any_desc(|b| b.is(C::Binding) && b.sym_opt() == Some(s));
         let Some(object) = m.child(C::Object) else {
             continue;
         };
@@ -926,7 +918,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
                         ivar.is_some()
                     } else {
                         ivar.is_none()
-                            || !caller.descendants().any(|binding| {
+                            || !caller.any_desc(|binding| {
                                 binding.is(C::Binding) && binding.sym_opt() == Some(var)
                             })
                     }

@@ -99,27 +99,16 @@ impl<'t> Fold<'t> {
     }
 
     fn handle_branch(&mut self, branch: Cursor<'t>) {
-        let non_arms: Vec<u32> = branch
-            .children()
-            .filter(|c| !c.is(C::SsaArm))
-            .map(|c| c.index())
-            .collect();
-        for &child in &non_arms {
-            self.run(vec![WorkItem::Visit(child)]);
+        for child in branch.children().filter(|c| !c.is(C::SsaArm)) {
+            self.run(vec![WorkItem::Visit(child.index())]);
         }
 
         let pre = self.cur;
-        let arms: Vec<u32> = branch
-            .children()
-            .filter(|c| c.is(C::SsaArm))
-            .map(|c| c.index())
-            .collect();
-
-        let mut exit_blocks = Vec::with_capacity(arms.len());
-        for &arm in &arms {
+        let mut exit_blocks = Vec::new();
+        for arm in branch.children().filter(|c| c.is(C::SsaArm)) {
             let entry = self.ssa.add_sealed_successor(pre);
             self.cur = entry;
-            self.walk_children(self.tree.cursor(arm));
+            self.walk_children(arm);
             exit_blocks.push(self.cur);
         }
         exit_blocks.push(pre);
@@ -469,12 +458,10 @@ impl<'t> Fold<'t> {
                 Linked::Type(ts) => {
                     for inner in self.lookup(*ts) {
                         if let Linked::Def(target) = inner {
-                            if let Some(callable) = self.tree.cursor(target).child_sym(C::Callable)
+                            let callable = self.tree.cursor(target).child_sym(C::Callable);
+                            if let Some(target) = callable
+                                .map_or(Some(target), |name| self.find_method_in(target, name))
                             {
-                                if let Some(m) = self.find_method_in(target, callable) {
-                                    self.edges.push(Edge::local(from, m, EdgeKind::Calls));
-                                }
-                            } else {
                                 self.edges.push(Edge::local(from, target, EdgeKind::Calls));
                             }
                         }
