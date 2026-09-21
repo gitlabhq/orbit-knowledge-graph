@@ -1,13 +1,18 @@
 name: setup
-version: 1.0.0
+version: 1.1.0
 short: Configure AI coding assistants to consult the graph
 description: >-
   Configure AI coding assistants to consult the graph
 
 
-  Writes a managed section into each assistant's user-global instruction file,
-  or into the project with `--project` or `--dir`. The section tells the
-  assistant to query the graph before it searches raw files with grep. Claude Code and
-  OpenCode also get nudge hooks. Existing files get a one-time `.orbit-backup`
-  sibling before the first change. Re-running updates the section in place.
-  `--remove` uninstalls.
+  Without assistant names, detects the assistants installed on this machine
+  from their configuration directories and configures every one of them.
+  Name assistants to configure only those, or pass `--all` for every
+  supported assistant. For each assistant it writes a managed section into
+  the instruction file and registers the `orbit` MCP server. It also installs
+  the Orbit skill files and adds nudge hooks where the assistant supports them.
+  Targets user-global configuration by default, or the project with
+  `--project` or `--dir`. Existing files get a one-time `.orbit-backup`
+  sibling before the first change. Re-running updates everything in place.
+  Prints the plan and asks once before writing; `--yes` skips the prompt and
+  `--dry-run` stops after the plan. `orbit uninstall` reverts it.

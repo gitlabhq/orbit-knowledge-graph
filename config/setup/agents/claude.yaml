@@ -1,7 +1,9 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
 # Claude Code honors PreToolUse additionalContext, so search/read calls also get an
-# `orbit hook-guard` nudge on top of the CLAUDE.md block.
+# `orbit hook-guard` nudge on top of the CLAUDE.md block. Claude Code does not scan
+# `.agents/skills`, so the shared skill dir is linked into `.claude/skills`.
 name: claude
+detect: ["$CLAUDE_CONFIG_DIR", "~/.claude", "~/.claude.json"]
 instruction_file:
   project: CLAUDE.md
   global: "~/.claude/CLAUDE.md"
@@ -20,3 +22,15 @@ json_merges:
         hooks:
           - type: command
             command: "{{orbit}} hook-guard read"
+mcp:
+  file:
+    project: .mcp.json
+    global: "~/.claude.json"
+  format: claude
+skills:
+  dir:
+    project: .agents/skills
+    global: "~/.agents/skills"
+  link:
+    project: .claude/skills
+    global: "~/.claude/skills"

@@ -2,6 +2,7 @@
 # Pi reads AGENTS.md natively (project root, or ~/.pi/agent/AGENTS.md for user scope), so the
 # instruction file is the whole integration.
 name: pi
+detect: ["~/.pi/agent"]
 instruction_file:
   project: AGENTS.md
   global: "~/.pi/agent/AGENTS.md"

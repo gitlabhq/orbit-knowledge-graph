@@ -1,8 +1,8 @@
 //! Declarative assistant specs embedded from `config/setup/agents/`. Each YAML file describes
-//! one assistant as four generic operations (instruction file, marker-owned JSON merges,
-//! templated files, string registrations), so adding an assistant means adding a YAML file, not
-//! Rust. The instruction block, hook nudges, and template values live in
-//! `config/setup/setup.yaml`.
+//! one assistant as generic operations (detection paths, instruction file, marker-owned JSON
+//! merges, templated files, string registrations, MCP entry, skill directories), so adding an
+//! assistant means adding a YAML file, not Rust. The instruction block, hook nudges, MCP server,
+//! and template values live in `config/setup/setup.yaml`.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -18,6 +18,7 @@ struct SetupAssets;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetupTexts {
+    mcp_server: McpServerText,
     instructions: String,
     nudge_search: String,
     nudge_read: String,
@@ -120,8 +121,32 @@ pub(crate) fn nudge_read() -> &'static str {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct McpServerText {
+    name: String,
+    command: String,
+}
+
+pub(super) struct McpServer {
+    pub(super) name: &'static str,
+    pub(super) command: String,
+    pub(super) args: Vec<String>,
+}
+
+pub(super) fn mcp_server() -> McpServer {
+    let rendered = render_launcher(&TEXTS.mcp_server.command, launcher());
+    let mut words = rendered.split_whitespace().map(str::to_string);
+    McpServer {
+        name: &TEXTS.mcp_server.name,
+        command: words.next().expect("mcp_server.command is non-empty"),
+        args: words.collect(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct AssistantSpec {
     pub(super) name: String,
+    pub(super) detect: Vec<String>,
     pub(super) instruction_file: ScopedPath,
     #[serde(default)]
     pub(super) json_merges: Vec<JsonMerge>,
@@ -129,6 +154,30 @@ pub(super) struct AssistantSpec {
     pub(super) template_files: Vec<TemplateFile>,
     #[serde(default)]
     pub(super) registrations: Vec<Registration>,
+    pub(super) mcp: Option<McpEntry>,
+    pub(super) skills: Option<SkillDirs>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct McpEntry {
+    pub(super) file: ScopedPath,
+    pub(super) format: McpFormat,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum McpFormat {
+    Claude,
+    Codex,
+    Opencode,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SkillDirs {
+    pub(super) dir: ScopedPath,
+    pub(super) link: Option<ScopedPath>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,6 +364,10 @@ mod tests {
                         .iter()
                         .flat_map(|r| [&r.file.global, &r.value.global]),
                 )
+                .chain(spec.mcp.iter().map(|entry| &entry.file.global))
+                .chain(spec.skills.iter().flat_map(|dirs| {
+                    std::iter::once(&dirs.dir.global).chain(dirs.link.iter().map(|l| &l.global))
+                }))
             {
                 assert!(global.starts_with("~/"), "{}: {global}", spec.name);
             }
