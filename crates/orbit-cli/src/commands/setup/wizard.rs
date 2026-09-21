@@ -36,12 +36,20 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         return Ok(());
     }
 
-    show_plan(&plan::build(&selection, &target)?)?;
+    let plan = plan::build(&selection, &target)?;
     if options.dry_run {
+        show_paths(&plan)?;
         cliclack::outro("Dry run: nothing written.")?;
         return Ok(());
     }
-    if interactive && !confirm(format!("Apply to {} agent(s)?", selection.assistants.len()))? {
+    show_plan(&plan)?;
+    if interactive
+        && !confirm(format!(
+            "Apply to {} agent(s) in {}?",
+            plan.assistants.len(),
+            plan.scope
+        ))?
+    {
         cliclack::outro_cancel("Nothing written.")?;
         return Ok(());
     }
@@ -74,15 +82,18 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
         return Ok(());
     }
 
-    show_plan(&plan::build(&selection, &target)?)?;
+    let plan = plan::build(&selection, &target)?;
     if options.dry_run {
+        show_paths(&plan)?;
         cliclack::outro("Dry run: nothing removed.")?;
         return Ok(());
     }
+    show_plan(&plan)?;
     if interactive
         && !confirm(format!(
-            "Remove Orbit from {} agent(s)?",
-            selection.assistants.len()
+            "Remove Orbit from {} agent(s) in {}?",
+            plan.assistants.len(),
+            plan.scope
         ))?
     {
         cliclack::outro_cancel("Nothing removed.")?;
@@ -184,6 +195,33 @@ impl Theme for PickerKeysFooter {
 }
 
 fn show_plan(plan: &Plan) -> Result<()> {
+    let width = plan
+        .assistants
+        .iter()
+        .map(|assistant| assistant.title.len())
+        .max()
+        .unwrap_or_default();
+    let rows = plan
+        .assistants
+        .iter()
+        .map(|assistant| {
+            let components = match assistant.changes.is_empty() {
+                true => "nothing selected applies".to_string(),
+                false => assistant
+                    .changes
+                    .iter()
+                    .map(|(component, _)| component.label())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            };
+            format!("{:<width$}   {components}", assistant.title)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(cliclack::note("Plan", rows)?)
+}
+
+fn show_paths(plan: &Plan) -> Result<()> {
     for assistant in &plan.assistants {
         let body = if assistant.changes.is_empty() {
             "nothing selected applies to this agent".to_string()
@@ -197,7 +235,7 @@ fn show_plan(plan: &Plan) -> Result<()> {
         };
         cliclack::note(&assistant.title, body)?;
     }
-    Ok(cliclack::log::remark(&plan.scope)?)
+    Ok(cliclack::log::remark(format!("Scope: {}", plan.scope))?)
 }
 
 fn show_report(report: &Report) -> Result<()> {

@@ -103,10 +103,8 @@ impl Target {
 
     fn describe(&self) -> String {
         match self {
-            Target::Global => {
-                "Scope: your user config (pass --project to target one repository)".to_string()
-            }
-            Target::Project(root) => format!("Scope: project {}", root.display()),
+            Target::Global => "your user config".to_string(),
+            Target::Project(root) => format!("project {}", root.display()),
         }
     }
 }
