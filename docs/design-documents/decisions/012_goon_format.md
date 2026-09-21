@@ -95,13 +95,10 @@ For aggregation queries with node-kind group columns, the encoder lifts each uni
 | Integer | bare digits | `iid=18`, `id=12971673076` (precision preserved up to `i64`) |
 | Finite float | bare | `avg_duration=941.131772070606` |
 | `NaN`, `±Inf` | dropped | (key does not appear) |
-| String matching `[A-Za-z0-9_\-:./@+]+` or an ISO datetime | bare | `username=stanhu`, `created_at=2026-05-08T22:55:58Z` |
-| ClickHouse datetime `YYYY-MM-DD HH:MM:SS[.fraction]` | T-form (space at position 10 swapped to `T`) | `created_at=2026-05-08T22:55:58.467450` |
+| String matching `[A-Za-z0-9_\-:./@+]+`, which includes every ISO 8601 datetime the pipeline emits | bare | `username=stanhu`, `created_at=2026-05-08T22:55:58.467450Z` |
 | Any other string | double-quoted with `\\`, `\"`, `\n`, `\r`, `\t` escapes; other control chars dropped | `title="line one\nline two"` |
 | Long text (`body`, `description`, `name`, `note`, `title`) over 200 chars | truncated with `...` plus a sibling `<key>_len=N` breadcrumb | `description="..." description_len=2308` |
 | Any other string over 1000 chars | same truncation + breadcrumb | |
-
-Datetime validation goes through `chrono::NaiveDateTime::parse_from_str` and `DateTime::parse_from_rfc3339`. The output is built byte-for-byte from the input with at most one byte (the space at position 10) swapped to `T`. The source's fractional precision is preserved exactly rather than being round-tripped through chrono's nanosecond default.
 
 Property order within a node row is column-priority then alphabetical. Identity fields come first (`iid`, `username`, `name`, `full_path`, `path`, `uuid`). Status enums follow (`state`, `status`, `visibility_level`), then everything else. Timestamps come next (`created_at`, `updated_at`, `merged_at`, `closed_at`). Long text (`title`, `description`, `body`, `note`) comes last. This means a truncated description never hides a shorter identity field.
 
@@ -247,7 +244,7 @@ Locked by property tests with 64 cases each:
 
 | Layer | Where | Count | Covers |
 |---|---|---|---|
-| Unit | `crates/query-engine/formatters/src/goon/tests.rs` | 51 | Header structure, sections, quoting, escape rules, datetime normalization, truncation, numerics, edges, dedup, path-finding, aggregation shapes (property + node + ungrouped), `Value::Null` row cells, depth on variable-length edges |
+| Unit | `crates/query-engine/formatters/src/goon/tests.rs` | 42 | Header structure, sections, quoting, escape rules, truncation, numerics, edges, dedup, path-finding, aggregation shapes (property + node + ungrouped), `Value::Null` row cells, depth on variable-length edges |
 | Property (`proptest`) | `tests/goon_properties.rs` | 4 × 64 | Shuffle invariance, idempotence, header prefix, no unescaped control chars |
 | Snapshot (`insta`) | `tests/goon_snapshots.rs` | 7 | One golden file per query shape + pagination |
 | Integration | `crates/integration-tests/tests/server/goon_formatter.rs` | 8 subtests | Full compile → execute → redact → hydrate → format path against ClickHouse testcontainers; asserts `format_stamped` returns `(Value::String, version, FormatName::Goon)`, headers carry `goon_version`, escape behavior, aggregation shapes, raw/goon count agreement |

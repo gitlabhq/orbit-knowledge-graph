@@ -11,10 +11,10 @@ schema: 98
 query_dsl: 12.1.8
 
 # Response envelope of the raw (JSON) formatter.
-raw_output_format: 5.0.2
+raw_output_format: 5.0.3
 
 # Response envelope of the GOON formatter.
-goon_output_format: 4.0.2
+goon_output_format: 4.0.3
 
 # Vendored dependencies. Each entry declares its pins, artifact location,
 # and vendor/check scripts. Vendor scripts read pins and write computed

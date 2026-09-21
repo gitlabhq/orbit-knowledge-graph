@@ -59,6 +59,7 @@ include:
   - local: .gitlab/ci/release-local.yml
   - local: .gitlab/ci/stale-mr.yml
   - local: .gitlab/ci/e2e-pin-bump.yml
+  - local: .gitlab/ci/doc-principles-sync.yml
   - local: .gitlab/ci/release-deploy-mr.yml
   - local: .gitlab/ci/linting.yml
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'

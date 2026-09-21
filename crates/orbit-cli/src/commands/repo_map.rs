@@ -1,8 +1,8 @@
 //! Native `orbit repo-map` — a high-level, LLM-oriented map of a locally
 //! checked-out repository, built in-process from the DuckDB graph. This is the
-//! Rust port of the former `skills/orbit-local/scripts/repo_map.py`: same six
-//! subcommands, same compact `file:line` output, but no Python runtime and no
-//! shelling back out to `orbit sql`.
+//! Rust port of the former `repo_map.py` script: same six subcommands, same
+//! compact `file:line` output, but no Python runtime and no shelling back out
+//! to `orbit sql`.
 
 use std::io::Write;
 use std::path::PathBuf;
