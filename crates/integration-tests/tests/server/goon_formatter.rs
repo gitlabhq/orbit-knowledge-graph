@@ -73,7 +73,7 @@ async fn run_pipeline(
     svc: &MockRedactionService,
     security_ctx: SecurityContext,
 ) -> PipelineOutput {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let client = Arc::new(ctx.create_client());
     let compiled = Arc::new(
         compile(

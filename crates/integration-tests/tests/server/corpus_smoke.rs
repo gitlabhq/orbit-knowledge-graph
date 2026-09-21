@@ -81,7 +81,7 @@ impl PipelineStage for AuthorizeAllStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<ExtractionOutput>()
+            .remove::<ExtractionOutput>()
             .ok_or_else(|| PipelineError::custom("ExtractionOutput not found in phases"))?;
         let authorizations = input
             .query_result
@@ -97,7 +97,7 @@ impl PipelineStage for AuthorizeAllStage {
             })
             .collect();
         Ok(AuthorizationOutput {
-            query_result: input.query_result.clone(),
+            query_result: input.query_result,
             authorizations,
         })
     }
@@ -444,7 +444,7 @@ async fn corpus_smoke() {
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
 
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     // Admin claims -> Owner over org root, so access-gated entities are visible
     // and the real SQL runs (not `WHERE false`).
     let claims = Claims::dummy();

@@ -2,7 +2,7 @@ Statement = { SOI ~ SP? ~ (Query | SchemaCall) ~ SP? ~ ";"? ~ SP? ~ EOI }
 Query = { Match ~ SP? ~ Return ~ (SP ~ Order)? ~ (SP ~ (Limit | Page))? ~ (SP ~ Debug)? }
 SchemaCall = { ^"CALL" ~ SP ~ "db.schema" ~ SP? ~ "(" ~ SP? ~ (StringLiteral ~ SP?)? ~ ")" }
 Match = { ^"MATCH" ~ SP? ~ Pattern ~ (SP? ~ Where)? }
-Pattern = { ShortestPattern | PatternElement }
+Pattern = { ShortestPattern | PatternElement ~ (SP? ~ "," ~ SP? ~ PatternElement)* }
 ShortestPattern = { Variable ~ SP? ~ "=" ~ SP? ~ (PathSearch ~ SP? ~ PatternElement | LegacyShortestPath) }
 PathSearch = { ^"ANY" ~ SP ~ ^"SHORTEST" | ^"SHORTEST" ~ SP ~ UnsignedInteger }
 LegacyShortestPath = { ^"shortestPath" ~ SP? ~ "(" ~ SP? ~ PatternElement ~ SP? ~ ")" }
@@ -24,8 +24,8 @@ Where = { ^"WHERE" ~ SP ~ AndExpression }
 AndExpression = { Predicate ~ (SP ~ ^"AND" ~ SP ~ Predicate)* }
 Predicate = _{ ParenthesizedExpression | TokenPredicate | ComparisonExpression }
 ParenthesizedExpression = { "(" ~ SP? ~ AndExpression ~ SP? ~ ")" }
-ComparisonExpression = { PropertyExpression ~ (SP? ~ ComparisonOperator ~ SP? ~ Value | SP ~ StringOperator ~ SP? ~ Value | SP ~ InOperator ~ SP? ~ ListLiteral | SP ~ NullOperator) }
-ComparisonOperator = @{ "<=" | ">=" | "=" | "<" | ">" }
+ComparisonExpression = { PropertyExpression ~ (SP? ~ ComparisonOperator ~ SP? ~ (Value | PropertyExpression) | SP ~ StringOperator ~ SP? ~ Value | SP ~ InOperator ~ SP? ~ ListLiteral | SP ~ NullOperator) }
+ComparisonOperator = @{ "<=" | ">=" | "<>" | "!=" | "=" | "<" | ">" }
 StringOperator = { ^"STARTS" ~ SP ~ ^"WITH" | ^"ENDS" ~ SP ~ ^"WITH" | ^"CONTAINS" }
 InOperator = { ^"IN" }
 NullOperator = { ^"IS" ~ SP ~ Not? ~ ^"NULL" }

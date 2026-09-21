@@ -14,35 +14,27 @@ set -euo pipefail
 : "${CI_JOB_TOKEN:?CI_JOB_TOKEN is required}"
 
 VERSION="${CI_COMMIT_TAG#v}"
-LEGACY_PACKAGE_NAME="orbit-local"
 PACKAGE_NAME="orbit-cli"
 
-LEGACY_ARTIFACTS=(
-  "orbit-local-linux-x86_64.tar.gz"
-  "orbit-local-linux-aarch64.tar.gz"
-  "orbit-local-linux-musl-x86_64.tar.gz"
-  "orbit-local-linux-musl-aarch64.tar.gz"
-  "orbit-local-darwin-x86_64.tar.gz"
-  "orbit-local-darwin-aarch64.tar.gz"
-  "orbit-local-windows-x86_64.zip"
+ARTIFACTS=(
+  "orbit-cli-linux-x86_64.tar.gz"
+  "orbit-cli-linux-aarch64.tar.gz"
+  "orbit-cli-linux-musl-x86_64.tar.gz"
+  "orbit-cli-linux-musl-aarch64.tar.gz"
+  "orbit-cli-darwin-x86_64.tar.gz"
+  "orbit-cli-darwin-aarch64.tar.gz"
+  "orbit-cli-windows-x86_64.zip"
 )
 
-for artifact in "${LEGACY_ARTIFACTS[@]}"; do
+for artifact in "${ARTIFACTS[@]}"; do
   if [ ! -f "$artifact" ]; then
     echo "missing build artifact: $artifact" >&2
     exit 1
   fi
 done
 
-CLI_ARTIFACTS=()
-for artifact in "${LEGACY_ARTIFACTS[@]}"; do
-  cli_artifact="${artifact/orbit-local/orbit-cli}"
-  cp "$artifact" "$cli_artifact"
-  CLI_ARTIFACTS+=("$cli_artifact")
-done
-
 echo "Generating sha256 checksums..."
-for artifact in "${LEGACY_ARTIFACTS[@]}" "${CLI_ARTIFACTS[@]}"; do
+for artifact in "${ARTIFACTS[@]}"; do
   sha256sum "$artifact" > "${artifact}.sha256"
   cat "${artifact}.sha256"
 done
@@ -106,12 +98,11 @@ add_release_link() {
     > /dev/null
 }
 
-upload_package "$LEGACY_PACKAGE_NAME" "${LEGACY_ARTIFACTS[@]}"
-upload_package "$PACKAGE_NAME" "${CLI_ARTIFACTS[@]}"
+upload_package "$PACKAGE_NAME" "${ARTIFACTS[@]}"
 
 wait_for_release
 
-for artifact in "${CLI_ARTIFACTS[@]}"; do
+for artifact in "${ARTIFACTS[@]}"; do
   add_release_link "$artifact" "package"
   add_release_link "${artifact}.sha256" "other"
 done

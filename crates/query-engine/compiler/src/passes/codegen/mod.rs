@@ -3,6 +3,7 @@
 
 pub mod clickhouse;
 pub mod ddl;
+pub mod duckdb;
 
 use orbit_server_config::QueryConfig;
 
@@ -11,6 +12,7 @@ use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
 pub use orbit_utils::clickhouse::ParamValue;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 pub use clickhouse::codegen;
 
@@ -18,6 +20,7 @@ pub use clickhouse::codegen;
 pub enum SqlDialect {
     #[default]
     ClickHouse,
+    DuckDb,
 }
 
 #[derive(Debug, Clone)]
@@ -44,17 +47,34 @@ impl ParameterizedQuery {
     /// **Not for execution** — inlines params into SQL; use parameterized
     /// queries to prevent injection.
     pub fn render(&self) -> String {
-        use regex::Regex;
-
-        let re = Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex");
-        re.replace_all(&self.sql, |caps: &regex::Captures| {
-            let name = &caps[1];
-            match self.params.get(name) {
-                Some(param) => param.render_literal(),
-                None => caps[0].to_string(),
+        match self.dialect {
+            SqlDialect::ClickHouse => {
+                static CH_RE: LazyLock<regex::Regex> =
+                    LazyLock::new(|| regex::Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex"));
+                CH_RE
+                    .replace_all(&self.sql, |caps: &regex::Captures| {
+                        let name = &caps[1];
+                        match self.params.get(name) {
+                            Some(param) => param.render_literal(),
+                            None => caps[0].to_string(),
+                        }
+                    })
+                    .into_owned()
             }
-        })
-        .into_owned()
+            SqlDialect::DuckDb => {
+                static DUCK_RE: LazyLock<regex::Regex> =
+                    LazyLock::new(|| regex::Regex::new(r"\$(\d+)").expect("valid regex"));
+                DUCK_RE
+                    .replace_all(&self.sql, |caps: &regex::Captures| {
+                        let key = format!("p{}", &caps[1]);
+                        match self.params.get(&key) {
+                            Some(param) => param.render_literal(),
+                            None => caps[0].to_string(),
+                        }
+                    })
+                    .into_owned()
+            }
+        }
     }
 }
 

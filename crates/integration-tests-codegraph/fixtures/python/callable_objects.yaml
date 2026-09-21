@@ -16,8 +16,8 @@ fixtures:
 tests:
   - name: All call edges from use_handler
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'use_handler' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use_handler'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "main.Handler" } }

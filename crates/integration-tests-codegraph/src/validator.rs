@@ -1,17 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use arrow_56::array::{
-    Array, BooleanArray, BooleanBuilder, Int64Array, Int64Builder, StringArray, StringBuilder,
-};
-use arrow_56::record_batch::RecordBatch;
-use lance_graph::{CypherQuery, GraphConfig};
+use arrow::array::{Array, Int64Array, StringArray};
+use arrow::record_batch::RecordBatch;
+use compiler::{Frontend, compile_local};
+use duckdb_client::DuckDbClient;
+use ontology::Ontology;
+use orbit_utils::arrow::ArrowUtils;
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{
     Assert, AssertCheck, FieldValueArgs, QueryBlock, Severity, TestCase, TestSuite,
 };
-use super::datasets::LanceDatasets;
 
 #[derive(Debug)]
 pub(crate) struct Failure {
@@ -20,10 +20,10 @@ pub(crate) struct Failure {
     pub message: String,
 }
 
-pub(crate) async fn run_suite(
+pub(crate) fn run_suite(
     suite: &TestSuite,
-    datasets: &LanceDatasets,
-    config: &GraphConfig,
+    client: &DuckDbClient,
+    ontology: &Arc<Ontology>,
 ) -> Vec<Failure> {
     let mut failures = Vec::new();
     for test in &suite.tests {
@@ -31,14 +31,14 @@ pub(crate) async fn run_suite(
             eprintln!("  [SKIP] \"{}\"", test.name);
             continue;
         }
-        failures.extend(run_test(test, datasets, config).await);
+        failures.extend(run_test(test, client, ontology));
     }
     failures
 }
 
-async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfig) -> Vec<Failure> {
+fn run_test(test: &TestCase, client: &DuckDbClient, ontology: &Arc<Ontology>) -> Vec<Failure> {
     if test.debug {
-        dump_datasets(datasets, config).await;
+        dump_datasets(client, ontology);
     }
 
     let blocks = test.all_queries();
@@ -50,66 +50,161 @@ async fn run_test(test: &TestCase, datasets: &LanceDatasets, config: &GraphConfi
         } else {
             format!("{} [query {}]", test.name, i + 1)
         };
-        failures.extend(run_query_block(&label, test.severity, block, datasets, config).await);
+        failures.extend(run_query_block(
+            &label,
+            test.severity,
+            block,
+            client,
+            ontology,
+        ));
     }
 
-    // Auto-dump on failure so debugging doesn't require re-running with debug: true
     if !failures.is_empty() && !test.debug {
-        dump_datasets(datasets, config).await;
+        dump_datasets(client, ontology);
     }
 
     failures
 }
 
-async fn dump_datasets(datasets: &LanceDatasets, config: &GraphConfig) {
+fn execute_cypher(
+    cypher: &str,
+    client: &DuckDbClient,
+    ontology: &Arc<Ontology>,
+) -> anyhow::Result<RecordBatch> {
+    let (clean_query, aliases) = rewrite_query(cypher);
+    if !aliases.is_empty() {
+        eprintln!("  ALIASES: {aliases:?}");
+        eprintln!("  REWRITTEN: {clean_query}");
+    }
+    let compiled = compile_local(&clean_query, Frontend::Gql, ontology)?;
+    let sql = compiled.base.render();
+    eprintln!("  SQL: {sql}");
+    let batches = client.query_arrow(&sql)?;
+    let batch = if batches.is_empty() {
+        let schema = Arc::new(arrow::datatypes::Schema::empty());
+        RecordBatch::new_empty(schema)
+    } else if batches.len() == 1 {
+        batches.into_iter().next().unwrap()
+    } else {
+        arrow::compute::concat_batches(&batches[0].schema(), &batches)
+            .map_err(|e| anyhow::anyhow!("concat batches: {e}"))?
+    };
+    Ok(apply_aliases(batch, &compiled.input, &aliases))
+}
+
+/// Rewrite a fixture Cypher query for the Orbit GQL compiler:
+/// - Strip `AS alias` from RETURN property items and collect the mapping
+/// - Rewrite `ORDER BY alias` to `ORDER BY node.prop`
+/// - Escape backslashes inside single-quoted string literals
+fn rewrite_query(cypher: &str) -> (String, Vec<(String, String, String)>) {
+    let alias_re = regex::Regex::new(r"(?i)\b(\w+)\.(\w+)\s+AS\s+(\w+)").unwrap();
+    let mut aliases = Vec::new();
+    let rewritten = alias_re.replace_all(cypher, |caps: &regex::Captures| {
+        let node = caps[1].to_string();
+        let prop = caps[2].to_string();
+        let alias = caps[3].to_string();
+        aliases.push((node.clone(), prop.clone(), alias));
+        format!("{node}.{prop}")
+    });
+    let mut result = rewritten.into_owned();
+
+    let order_re = regex::Regex::new(r"(?im)\bORDER\s+BY\s+(.+)$").unwrap();
+    if let Some(caps) = order_re.captures(&result.clone()) {
+        let sort_expr = caps[1].trim();
+        let first_key = sort_expr.split(',').next().unwrap().trim();
+        let resolved = if first_key.contains('.') {
+            first_key.to_string()
+        } else if let Some((node, prop, _)) = aliases.iter().find(|(_, _, a)| a == first_key) {
+            format!("{node}.{prop}")
+        } else {
+            first_key.to_string()
+        };
+        result = order_re
+            .replace(&result, format!("ORDER BY {resolved}"))
+            .into_owned();
+    }
+
+    if result.contains('\\') {
+        let lit_re = regex::Regex::new(r"'([^']*)'").unwrap();
+        result = lit_re
+            .replace_all(&result, |caps: &regex::Captures| {
+                let inner = &caps[1];
+                if inner.contains('\\') {
+                    format!("'{}'", inner.replace('\\', "\\\\"))
+                } else {
+                    caps[0].to_string()
+                }
+            })
+            .into_owned();
+    }
+
+    (result, aliases)
+}
+
+/// Rename result columns using the alias map from `rewrite_query`.
+/// Columns with an explicit alias get renamed (e.g. `caller_fqn` → `caller`).
+/// Columns without an alias keep the `{node}_{prop}` name to avoid collisions
+/// when multiple nodes project the same property.
+fn apply_aliases(
+    batch: RecordBatch,
+    _input: &compiler::Input,
+    aliases: &[(String, String, String)],
+) -> RecordBatch {
+    let alias_map: HashMap<String, String> = aliases
+        .iter()
+        .map(|(node, prop, alias)| (format!("{node}_{prop}"), alias.clone()))
+        .collect();
+    let schema = batch.schema();
+    let new_fields: Vec<arrow::datatypes::Field> = schema
+        .fields()
+        .iter()
+        .map(|f| {
+            let name = f.name();
+            if let Some(alias) = alias_map.get(name.as_str()) {
+                return f.as_ref().clone().with_name(alias);
+            }
+            f.as_ref().clone()
+        })
+        .collect();
+    let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
+    if batch.num_columns() == 0 {
+        return RecordBatch::new_empty(new_schema);
+    }
+    RecordBatch::try_new(new_schema, batch.columns().to_vec())
+        .unwrap_or_else(|e| panic!("apply_aliases failed: {e}"))
+}
+
+fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {
     let debug_queries = [
         (
             "Definitions",
-            "MATCH (d:Definition) RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file",
+            "MATCH (d:Definition) RETURN d.name, d.fqn, d.definition_type, d.file_path",
         ),
-        (
-            "Files",
-            "MATCH (f:File) RETURN f.path AS path, f.language AS lang",
-        ),
+        ("Files", "MATCH (f:File) RETURN f.path, f.language"),
         (
             "Imports",
-            "MATCH (i:ImportedSymbol) RETURN i.file_path AS file, i.path AS path, i.name AS name, i.alias AS alias",
-        ),
-        (
-            "DefinitionToDefinition",
-            "MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition) RETURN s.fqn AS source, t.fqn AS target, e.edge_kind AS kind",
-        ),
-        (
-            "FileToDefinition",
-            "MATCH (f:File)-[e:FileToDefinition]->(d:Definition) RETURN f.path AS file, d.fqn AS def, e.edge_kind AS kind",
+            "MATCH (i:ImportedSymbol) RETURN i.file_path, i.import_path, i.identifier_name, i.identifier_alias",
         ),
     ];
 
     eprintln!("\n  ╔══ DEBUG DUMP ══════════════════════════════════════");
     for (label, cypher) in debug_queries {
-        if let Ok(q) = CypherQuery::new(cypher) {
-            let q = q.with_config(config.clone());
-            if let Ok(batch) = q.execute(datasets.clone(), None).await {
-                print_result(&format!("  {label}"), cypher, &batch);
-            }
+        match execute_cypher(cypher, client, ontology) {
+            Ok(batch) => print_result(&format!("  {label}"), cypher, &batch),
+            Err(e) => eprintln!("  {label}: query failed: {e}"),
         }
     }
     eprintln!("  ╚══════════════════════════════════════════════════\n");
 }
 
-async fn run_query_block(
+fn run_query_block(
     label: &str,
     severity: Severity,
     block: &QueryBlock,
-    datasets: &LanceDatasets,
-    config: &GraphConfig,
+    client: &DuckDbClient,
+    ontology: &Arc<Ontology>,
 ) -> Vec<Failure> {
-    let query = match CypherQuery::new(&block.query) {
-        Ok(q) => q.with_config(config.clone()),
-        Err(e) => return vec![fail(label, severity, format!("Cypher parse error: {e}"))],
-    };
-
-    let batch = match query.execute(datasets.clone(), None).await {
+    let batch = match execute_cypher(&block.query, client, ontology) {
         Ok(b) => b,
         Err(e) => return vec![fail(label, severity, format!("Query execution error: {e}"))],
     };
@@ -144,29 +239,21 @@ fn print_result(label: &str, query: &str, batch: &RecordBatch) {
 }
 
 fn format_cell(array: &dyn Array, row: usize) -> String {
-    if array.is_null(row) {
-        return "NULL".into();
-    }
-    if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
-        return arr.value(row).to_string();
-    }
-    if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
-        return arr.value(row).to_string();
-    }
-    if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
-        return arr.value(row).to_string();
-    }
-    "<?>".into()
+    ArrowUtils::array_value_to_string(array, row).unwrap_or_else(|| "NULL".into())
 }
 
 fn expected_value_matches(array: &dyn Array, row: usize, expected: &serde_json::Value) -> bool {
     match expected {
-        serde_json::Value::Null => array.is_null(row),
+        serde_json::Value::Null => array.is_null(row) || format_cell(array, row).is_empty(),
         serde_json::Value::Bool(value) => {
             !array.is_null(row) && format_cell(array, row) == value.to_string()
         }
         serde_json::Value::Number(value) => {
-            !array.is_null(row) && format_cell(array, row) == value.to_string()
+            if array.is_null(row) {
+                value.as_i64() == Some(0) || value.as_f64() == Some(0.0)
+            } else {
+                format_cell(array, row) == value.to_string()
+            }
         }
         serde_json::Value::String(value) => {
             !array.is_null(row) && format_cell(array, row) == *value
@@ -200,50 +287,14 @@ fn apply_filter(batch: &RecordBatch, where_clause: &HashMap<String, String>) -> 
         })
         .collect();
 
-    let schema = batch.schema();
+    let indices =
+        arrow::array::UInt32Array::from(matching.iter().map(|&i| i as u32).collect::<Vec<_>>());
     let columns: Vec<Arc<dyn Array>> = (0..batch.num_columns())
-        .map(|col_idx| {
-            let col = batch.column(col_idx);
-            if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
-                let mut b = StringBuilder::new();
-                for &row in &matching {
-                    if arr.is_null(row) {
-                        b.append_null();
-                    } else {
-                        b.append_value(arr.value(row));
-                    }
-                }
-                Arc::new(b.finish()) as Arc<dyn Array>
-            } else if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
-                let mut b = Int64Builder::new();
-                for &row in &matching {
-                    if arr.is_null(row) {
-                        b.append_null();
-                    } else {
-                        b.append_value(arr.value(row));
-                    }
-                }
-                Arc::new(b.finish()) as Arc<dyn Array>
-            } else if let Some(arr) = col.as_any().downcast_ref::<BooleanArray>() {
-                let mut b = BooleanBuilder::new();
-                for &row in &matching {
-                    if arr.is_null(row) {
-                        b.append_null();
-                    } else {
-                        b.append_value(arr.value(row));
-                    }
-                }
-                Arc::new(b.finish()) as Arc<dyn Array>
-            } else {
-                panic!(
-                    "where filter: unsupported column type {:?}",
-                    col.data_type()
-                );
-            }
-        })
+        .map(|col_idx| arrow::compute::take(batch.column(col_idx), &indices, None).unwrap())
         .collect();
 
-    RecordBatch::try_new(schema, columns).unwrap_or_else(|e| panic!("where filter failed: {e}"))
+    RecordBatch::try_new(batch.schema(), columns)
+        .unwrap_or_else(|e| panic!("where filter failed: {e}"))
 }
 
 fn check_assertions(

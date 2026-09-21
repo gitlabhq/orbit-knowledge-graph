@@ -42,8 +42,13 @@ Results are scoped to entities the token owner can access in GitLab.
 
 ## Billing
 
-API calls consume GitLab Credits from your subscription. Each call to
-`POST /api/v4/orbit/query` uses credits. The other endpoints are free.
+During the beta, API calls do not consume GitLab Credits.
+
+When GitLab Orbit is generally available, each call to `POST /api/v4/orbit/query`
+consumes GitLab Credits from your subscription. The other endpoints stay free.
+Credit rates are published in
+[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
+before charging begins.
 
 ## Endpoints
 

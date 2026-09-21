@@ -187,9 +187,14 @@ check that GitLab Orbit is enabled on at least one of your groups.
 
 ## Billing
 
-Queries through MCP consume GitLab Credits. Each `invoke_command` call that runs
-`query_graph` uses credits from your GitLab subscription. `list_commands` and the
-`get_graph_schema`, `get_query_dsl`, and `get_response_format` commands are free.
+During the beta, queries through MCP do not consume GitLab Credits.
+
+When GitLab Orbit is generally available, each `invoke_command` call that runs
+`query_graph` consumes GitLab Credits from your subscription. `list_commands` and the
+`get_graph_schema`, `get_query_dsl`, and `get_response_format` commands stay free.
+Credit rates are published in
+[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
+before charging begins.
 
 ## Using the tools
 

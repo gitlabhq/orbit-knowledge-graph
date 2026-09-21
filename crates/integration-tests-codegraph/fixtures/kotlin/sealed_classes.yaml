@@ -92,13 +92,12 @@ tests:
 
   - name: "Each subclass defines its overriding eval() via a Defines edge"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      MATCH (c:Definition)-[e:DEFINES]->(m:Definition)
       WHERE c.fqn IN [
           'com.example.sealed.Const',
           'com.example.sealed.Add',
           'com.example.sealed.Zero'
         ]
-        AND e.edge_kind = 'Defines'
         AND m.definition_type = 'Function'
       RETURN m.fqn AS fqn
       ORDER BY m.fqn
@@ -108,9 +107,8 @@ tests:
 
   - name: "File defines the sealed interface and all three subclasses"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'com/example/sealed/Expr.kt'
-        AND e.edge_kind = 'Defines'
         AND d.fqn IN [
           'com.example.sealed.Expr',
           'com.example.sealed.Const',

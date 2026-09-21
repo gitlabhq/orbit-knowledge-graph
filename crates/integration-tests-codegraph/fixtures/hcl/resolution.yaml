@@ -128,50 +128,45 @@ tests:
 
   - name: "Resource ref resolves: aws_instance type scope -> aws_subnet.public"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND callee.fqn = 'aws_subnet.public'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Variable ref resolves: aws_instance type scope -> instance_type"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND callee.name = 'instance_type'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.name AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Data source ref resolves: aws_instance type scope -> aws_ami.ubuntu"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'aws_instance'
         AND callee.fqn = 'aws_ami.ubuntu'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Local ref resolves: aws_vpc type scope -> locals.common_tags"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'aws_vpc'
         AND callee.name = 'common_tags'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.name AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Subnet ref resolves: aws_subnet type scope -> aws_vpc.main"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'aws_subnet'
         AND callee.fqn = 'aws_vpc.main'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

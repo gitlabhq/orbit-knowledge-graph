@@ -46,18 +46,18 @@ the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismat
 NATS KV distributed lock and reads the requested scope from the migration ledger. A table-local
 SDLC change rebuilds the affected table and clones unaffected tables from the active version. If an
 affected table has writers outside the requested scope, the dispatcher widens the migration to a
-full rebuild. A code migration is the exception: it clones the shared `gl_edge` table intact (rather
-than widening) and lets the code stale sweep tombstone its own rows as the re-index drains, so it
+full rebuild. A code migration is the exception. It clones the shared `gl_edge` table intact rather
+than widening. The code stale sweep then tombstones its own rows as the re-index drains. So it
 re-indexes only code without re-pulling SDLC.
 
 Selective migrations seed the new checkpoint table with completed checkpoints for unchanged
 pipelines. Required pipelines are left out so the normal sweep tasks run them again. The dispatcher
 then marks the version as `migrating` and opens a re-index **campaign**
-(`campaign::CampaignState`, in-memory) that it stamps onto requests as `campaign_id` until
+(`campaign::CampaignState`, in-memory). It stamps the campaign onto requests as `campaign_id` until
 completion clears it.
 
-Indexers do not run DDL. Before consuming, the indexer calls `schema::version::wait_until_ready()`,
-which polls `gkg_schema_version` with backoff until its version is `active`/`migrating`, exiting
+Indexers do not run DDL. Before consuming, the indexer calls `schema::version::wait_until_ready()`.
+It polls `gkg_schema_version` with backoff until its version is `active`/`migrating`. It exits
 non-zero (→ restart) if the budget is exhausted or the binary is outdated. All write paths
 (checkpoints, namespace deletion, ontology-driven tables) use
 `prefixed_table_name(table, SCHEMA_VERSION)` so they always target the current schema version's
@@ -71,34 +71,35 @@ every required namespaced pipeline. Disabled namespace checkpoints do not count.
 pipelines must also be complete. Promotion requires a valid target archive, writes active/retired
 statuses together, and clears the campaign. Invalid archives leave the migration pending for retry.
 
-A single SQL query then enumerates all `v<N>_*` objects in `system.tables` whose version falls
-outside a keep-set computed in the same query (active + most recently recorded retired versions within
-`max_retained_versions` + all migrating versions). Retirement timestamps have second precision;
+A single SQL query then enumerates all `v<N>_*` objects in `system.tables`. It enumerates objects
+whose version falls outside a keep-set computed in the same query. The keep-set is active, plus the
+most recently recorded retired versions within `max_retained_versions`, plus all migrating versions.
+Retirement timestamps have second precision;
 higher version numbers win ties. Ontology-known objects are always dropped. Objects not in the ontology
-(rename-orphans like `v56_gl_edge_v2`, removed entities) are also dropped unless their base name
-(after stripping the `v<N>_` prefix) matches a `gc_preserve_patterns` regex from the ontology
-settings.
+are also dropped. These are rename-orphans like `v56_gl_edge_v2` and removed entities. One exception
+applies: an object survives if its base name (after stripping the `v<N>_` prefix) matches a
+`gc_preserve_patterns` regex from the ontology settings.
 
 ### Stale FK-edge reconciliation
 
 `orchestrator::scheduled::StaleEdgeReconciliation` is a DispatchIndexing-mode `ScheduledTask` that tombstones
 stale FK-derived edges. A mutable-FK "latest" edge (e.g. `HAS_LATEST_DIFF`) orphans its old row when
-the FK changes, because `target_id` is part of the `ReplacingMergeTree` identity, so the prior
+the FK changes. The reason: `target_id` is part of the `ReplacingMergeTree` identity. So the prior
 `(source, old_target)` row is never replaced. The task runs one idempotent `INSERT … SELECT` per
-`(relationship_kind, FK-owner)` variant against the changed-owner set (`_version >= cursor`), pruned
-to the changed set by a dual `IN` on the edge PK; the swept set is ontology-derived (edges marked
+`(relationship_kind, FK-owner)` variant against the changed-owner set (`_version >= cursor`). A dual
+`IN` on the edge PK prunes it to the changed set. The swept set is ontology-derived (edges marked
 `mutable: true`), as is each variant's metadata. It runs directly in the dispatcher (not dispatched to indexer workers):
 one cheap global sweep, off the insert hot path. See
 `docs/design-documents/indexing/sdlc_indexing.md` ("Stale FK-edge reconciliation").
 
 ### Entry point
 
-The `run()` function in `lib.rs` wires everything together: waits for the schema version to be
-ready, connects to NATS and ClickHouse, registers handlers via `sdlc::register_handlers()`,
-`code::register_handlers()`, and `namespace_deletion::register_handlers()`, builds the engine,
-and runs until shutdown.
+The `run()` function in `lib.rs` wires everything together. It waits for the schema version, then
+connects to NATS and ClickHouse. Handlers come from `sdlc::register_handlers()`,
+`code::register_handlers()`, and `namespace_deletion::register_handlers()`. With those registered,
+it builds the engine and runs until shutdown.
 
-`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `crates/orbit-server-config/src/engine.rs` — no string-keyed lookups.
+`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `crates/orbit-server-config/src/engine.rs`. There are no string-keyed lookups.
 
 ## Development
 
@@ -126,7 +127,7 @@ Located in `testkit/`:
 
 Most handler work re-derives infrastructure the crate already provides. Before scaffolding a
 self-contained module, do an explicit "what does the codebase already give me?" pass. This is a
-reuse-first **default**, not a hard rule — but in review it is the single most common class of
+reuse-first **default**. It is not a hard rule. In review it is the single most common class of
 preventable feedback (see #2772, !1416). Check each of these first:
 
 - **Paging + checkpoint + cursor:** `Pipeline::run_plan` and `EntityHandler`
@@ -137,35 +138,37 @@ preventable feedback (see #2772, !1416). Check each of these first:
 - **Arrow extraction:** decode datalake `RecordBatch` rows with the `orbit_utils::arrow` helpers
   (`get_column`, `get_column_string`, `get_string_list`, `extract_row` in
   `crates/utils/src/arrow.rs`), not bespoke `col_i64` / `col_string` functions.
-- **Edge/node `RecordBatch` specs:** derive column specs from the ontology — `edge_specs(ontology)`
+- **Edge/node `RecordBatch` specs:** derive column specs from the ontology. Use `edge_specs(ontology)`
   in `modules/code/arrow_converter.rs` (also `crates/duckdb-client/src/converter.rs`). Do not
   hardcode them; hardcoded specs silently drift from `config/graph.sql`.
 - **Extraction SQL:** declare the source shape in ontology pipelines. Use `query: generated` for
   single-table projections and extracts with point lookups. Generated extracts list only their base
-  table; lookup tables resolve from the referenced node pipelines. Nodes may declare
+  table; standalone edges put their base projection in `extract.fields`. Lookup tables resolve from
+  the referenced node pipelines. Nodes may declare
   `enrichment_props`. A slim lookup with only `node` and `id` expands source columns and stable
-  aliases from that contract; an endpoint with `enrich: true` independently expands its property
+  aliases from that contract. An endpoint with `enrich: true` independently expands its property
   bindings from the same contract. Same-node references derive distinct field namespaces from
   their ID fields. Explicit lookup `fields` and endpoint `properties` remain escape hatches. The
-  indexer builds lookup joins without reading transform mappings. Use an `extract.filter` for row predicates; use a
-  co-located `.sql.j2` file (`query: <name>.sql.j2`) only for genuinely complex joins or
-  materialized arrays, so rows you discard never cross the wire. The ontology carries a `.sql.j2`
-  file's raw content verbatim as `ExtractQuery::Sql`; the indexer's `plan/extract/sql.rs` renders
-  `{{version_column}}`/`{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan build,
-  derives the qualified watermark expression from the file's `AS _version`, recovers `AS _deleted`, and passes `{{filters}}`/
-  `{{batch_size}}` through to query time. All ClickHouse dialect and SQL generation live in the
-  indexer's `plan/` module. `build.rs` is the only place that reads `pipeline.transform`: it
-  decomposes each pipeline and hands `extract/` transform-neutral inputs (it produces an
-  `ExtractSpec` with a validated `ExtractTemplate`) and `transform.rs` an owned, narrow
-  `TransformDeclaration`; Arrow `RecordBatch` schemas are the runtime extract-transform contract,
-  not a duplicated planning type. Transform endpoint property bindings determine which batch
+  indexer builds lookup joins without reading transform mappings. Use an `extract.filter` for row
+  predicates. Use a co-located `.sql.j2` file (`query: <name>.sql.j2`) only for genuinely complex
+  joins or materialized arrays. Then rows you discard never cross the wire. The ontology carries a
+  `.sql.j2` file's raw content verbatim as `ExtractQuery::Sql`. The indexer's `plan/extract/sql.rs`
+  renders `{{version_column}}`/`{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan
+  build. It derives the qualified watermark expression from the file's `AS _version`. It recovers
+  `AS _deleted`. It passes `{{filters}}`/`{{batch_size}}` through to query time. All ClickHouse
+  dialect and SQL generation live in the
+  indexer's `plan/` module. `build.rs` is the only place that reads `pipeline.transform`. It
+  decomposes each pipeline and hands `extract/` transform-neutral inputs. Those inputs are an
+  `ExtractSpec` with a validated `ExtractTemplate`. It hands `transform.rs` an owned, narrow
+  `TransformDeclaration`. Arrow `RecordBatch` schemas are the runtime extract-transform contract.
+  They are not a duplicated planning type. Transform endpoint property bindings determine which batch
   fields form denormalized edge tags; no extraction metadata side channel exists.
   `extract/lookup.rs` derives its internal `_eN` joins only from the extract declaration.
   `extract/` imports nothing from `transform`. None of the SQL generation lives in the ontology crate.
 - **Concurrency:** independent datalake lookups (routes / MR / work-item) should run concurrently
   (e.g. `tokio::try_join!`), not sequentially.
 - **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding
-  magic numbers; if a value is environment-dependent, make it a `HandlersConfiguration` field.
+  magic numbers. If a value is environment-dependent, make it a `HandlersConfiguration` field.
 - **Siphon columns:** hand-written datalake SQL must use
   `ontology::siphon_version_column()`, `ontology::siphon_watermark_column()`, and
   `ontology::siphon_deleted_column()`, never literal column names. They derive at runtime from
@@ -176,22 +179,22 @@ preventable feedback (see #2772, !1416). Check each of these first:
 If none of the above fits and you genuinely need new infrastructure, prefer generalizing into a
 shared place (`crates/utils/`, `modules/.../pipeline.rs`) over duplicating logic per handler.
 
-Do not ship `#[allow(dead_code)]` to silence scaffold warnings — see the no-shipped-dead-code rule
+Do not ship `#[allow(dead_code)]` to silence scaffold warnings. See the no-shipped-dead-code rule
 below and in the root `AGENTS.md`.
 
 ### When a Rust transform is justified (ADR 015)
 
-The SDLC transform stage is pluggable (`modules/sdlc/transform/`): the built-in `datafusion`
-transform is a row-wise SQL projection of one extracted block and is the **default** for every
+The SDLC transform stage is pluggable (`modules/sdlc/transform/`). The built-in `datafusion`
+transform is a row-wise SQL projection of one extracted block. It is the **default** for every
 node and standalone-edge plan. A hand-written `BlockTransform` (a derived entity pipeline's
 `transform.type`)
-is justified **only when the graph shape cannot be expressed as that SQL projection** — concretely,
-when it needs:
+is justified **only when the graph shape cannot be expressed as that SQL projection**. Concretely,
+it is justified when it needs:
 
-- **multi-hop datalake reads** mid-transform (e.g. resolving GFM references to entity IDs via a
-  second `IN`-list lookup against `siphon_routes` and entity tables), or
-- **cross-row or free-text work** SQL can't do (parsing note bodies, fanning one source row into
-  several edge kinds).
+- **multi-hop datalake reads** mid-transform. Example: resolving GFM references to entity IDs via a
+  second `IN`-list lookup against `siphon_routes` and entity tables.
+- **cross-row or free-text work** SQL can't do. Examples: parsing note bodies, or fanning one source
+  row into several edge kinds.
 
 If the transform is a per-row projection of one extracted batch, express it as an ontology plan +
 `datafusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
@@ -200,11 +203,11 @@ If the transform is a per-row projection of one extracted batch, express it as a
 ### Adding a handler
 
 1. Run the **reuse-infra checklist above** before writing new code.
-2. Define event type implementing `Event`
-3. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
-4. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
-5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `crates/orbit-server-config/src/engine.rs`
-6. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
+2. Define event type implementing `Event`.
+3. Create handler implementing `Handler` (`name`, `subscription`, `handle`).
+4. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy.
+5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `crates/orbit-server-config/src/engine.rs`.
+6. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`.
 
 ### No `#[allow(dead_code)]` in shipped code
 
@@ -220,25 +223,26 @@ in `Cargo.toml`). Scaffold-era `#[allow(dead_code)]` markers must not survive in
 
 ### No panics in the indexer data path
 
-`handle`/transform/`emit` code processes untrusted production rows one at a time, so a `panic!`,
-`unreachable!`, `unwrap`, or `expect` on a data-dependent branch can crash-loop the worker: one
-malformed or unexpected row takes down every row behind it. Prefer **log-and-skip**
-(`tracing::warn!` with enough context to debug — the unexpected value plus the relevant ids — then
-`continue`) over panicking. Compute branch-dependent values in one fallible step that returns
-`Option`/`Result` and skip on the unexpected case, rather than mirroring a match in two places and
-needing an `unreachable!()` fallthrough in each (see the `lifecycle_edge_kind` helper in
-`modules/sdlc/transform/system_notes/emit.rs`, which returns `None` for any non-lifecycle action so
-the caller can log-and-skip instead of `unreachable!`-panicking if the outer match drifts).
+`handle`/transform/`emit` code processes untrusted production rows one at a time. So a `panic!`,
+`unreachable!`, `unwrap`, or `expect` on a data-dependent branch can crash-loop the worker. One
+malformed or unexpected row takes down every row behind it. Prefer **log-and-skip** over panicking.
+Use `tracing::warn!` with enough context to debug, then `continue`. Include the unexpected value
+plus the relevant ids. Compute branch-dependent values in one fallible step that returns
+`Option`/`Result`. Skip on the unexpected case. Do not mirror a match in two places, which needs an
+`unreachable!()` fallthrough in each. The `lifecycle_edge_kind` helper in
+`modules/sdlc/transform/system_notes/emit.rs` shows the pattern. It returns `None` for any
+non-lifecycle action. So the caller can log-and-skip if the outer match drifts, instead of
+`unreachable!`-panicking.
 Panicking is only acceptable on a genuine programmer invariant that no production data can reach.
 
 ### New edge/action routing needs an end-to-end YAML scenario
 
 When you route a new action (or noteable/edge kind) to a `gl_edge`, add an integration scenario
-under `crates/integration-tests/tests/indexer/scenarios/sdlc/...` (run by `scenario_indexing`), not
-just `emit.rs`/`parse.rs` unit tests. Seed the real siphon rows and assert the emitted `gl_edge`
-rows — direction and `traversal_path`. Include any cross-namespace / `traversal_path` invariant
-(e.g. a child in one namespace under a parent in another) so the partition-side property is guarded
-end-to-end; unit tests that reuse one traversal path cannot catch a target-vs-source partition bug.
+under `crates/integration-tests/tests/indexer/scenarios/sdlc/...` (run by `scenario_indexing`). Unit
+tests in `emit.rs`/`parse.rs` are not enough. Seed the real siphon rows and assert the emitted
+`gl_edge` rows: direction and `traversal_path`. Include any cross-namespace / `traversal_path`
+invariant (e.g. a child in one namespace under a parent in another). This guards the partition-side
+property end-to-end. Unit tests that reuse one traversal path cannot catch a target-vs-source partition bug.
 See `processes_work_item_parent_links.yaml` for the `WorkItem CONTAINS WorkItem` shape.
 
 ### Concurrency

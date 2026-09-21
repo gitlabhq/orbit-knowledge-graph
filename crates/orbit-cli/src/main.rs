@@ -169,7 +169,7 @@ struct IndexArgs {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -201,7 +201,7 @@ struct GrepArgs {
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
     kind: Option<Kinds>,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -260,7 +260,7 @@ struct ContextArgs {
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -290,7 +290,7 @@ struct SqlArgs {
     #[arg(long)]
     all: bool,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -298,7 +298,7 @@ struct SqlArgs {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("get_graph_schema"))]
 struct SchemaArgs {
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -320,7 +320,7 @@ struct ListArgs {
     #[arg(long, short = 'F', default_value = "table")]
     format: sql_format::Format,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
@@ -344,12 +344,44 @@ struct RepoMapArgs {
     #[arg(long = "ext", value_name = "EXT")]
     extensions: Vec<String>,
 
-    /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Option<commands::repo_map::RepoMapCommand>,
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("skills"), long_about = descriptions::long("skills"))]
+struct SkillsArgs {
+    #[command(subcommand)]
+    command: Option<SkillsCommands>,
+
+    /// Skill name or a path in the default orbit skill.
+    #[arg(value_name = "NAME_OR_PATH", hide = true)]
+    name_or_path: Option<String>,
+
+    /// File to print from the named skill.
+    #[arg(value_name = "PATH", hide = true)]
+    path: Option<String>,
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+enum SkillsCommands {
+    #[command(
+        about = "Print a bundled agent skill file.",
+        long_about = "Print a file from an agent skill bundled with this binary without installing it."
+    )]
+    Get {
+        /// Skill name.
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// File relative to the skill root.
+        #[arg(value_name = "PATH", default_value = "SKILL.md")]
+        path: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -365,12 +397,8 @@ enum Commands {
     Mcp(McpArgs),
     #[command(name = "repo-map")]
     RepoMap(RepoMapArgs),
-    #[command(about = descriptions::short("skill"), long_about = descriptions::long("skill"))]
-    Skill {
-        /// Skill file to print, relative to the skill root (default: SKILL.md).
-        #[arg(value_name = "PATH")]
-        path: Option<String>,
-    },
+    #[command(name = "skills", alias = "skill")]
+    Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
     Setup {
         /// Assistants to configure. Required when installing. `--remove`
@@ -442,7 +470,7 @@ enum Commands {
         #[arg(long, value_enum)]
         response_format: Option<remote::ResponseFormat>,
     },
-    /// Read and write persisted CLI settings (`~/.orbit/settings.json`).
+    /// Read and write persisted CLI settings (`~/.gitlab/orbit/settings.json`).
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
@@ -629,7 +657,14 @@ async fn dispatch(command: Commands) -> Result<()> {
             ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
             ConfigCommands::List => commands::config::list(),
         },
-        Commands::Skill { path } => skill::run(path),
+        Commands::Skills(SkillsArgs {
+            command,
+            name_or_path,
+            path,
+        }) => match command {
+            Some(SkillsCommands::Get { name, path }) => skill::get(name, path),
+            None => skill::run(name_or_path, path),
+        },
         Commands::Setup {
             assistants,
             remove,
@@ -1098,6 +1133,35 @@ mod tests {
     #[test]
     fn cli_command_tree_verifies() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn remote_skill_commands_exist_in_the_clap_inventory() {
+        let extracted: std::collections::BTreeSet<_> = env!("ORBIT_SKILL_REMOTE_COMMANDS")
+            .split(',')
+            .map(str::to_string)
+            .collect();
+        assert!(
+            !extracted.is_empty(),
+            "remote skill command extraction must not be empty"
+        );
+        let mut clap_commands: std::collections::BTreeSet<_> = Cli::command()
+            .get_subcommands()
+            .map(|command| command.get_name().to_string())
+            .collect();
+        let generated_help_is_materialized = clap_commands.remove(orbit_prompts::CLAP_HELP_COMMAND);
+        assert!(
+            !generated_help_is_materialized,
+            "get_subcommands excludes clap's generated help command"
+        );
+        let unknown: Vec<_> = extracted
+            .iter()
+            .filter(|command| {
+                command.as_str() != orbit_prompts::CLAP_HELP_COMMAND
+                    && !clap_commands.contains(*command)
+            })
+            .collect();
+        assert!(unknown.is_empty(), "unknown skill commands: {unknown:?}");
     }
 
     fn action_for(argv: &[&str]) -> String {

@@ -106,6 +106,18 @@ pub struct Input {
 
     #[serde(skip)]
     pub path_segment_budget: Option<usize>,
+
+    #[serde(skip)]
+    pub join_predicates: Vec<JoinPredicate>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JoinPredicate {
+    pub lhs_node: String,
+    pub lhs_prop: String,
+    pub op: FilterOp,
+    pub rhs_node: String,
+    pub rhs_prop: String,
 }
 
 /// Text index metadata for a column, used by the optimizer to rewrite
@@ -118,6 +130,24 @@ pub struct TextIndexMeta {
 
 /// Metadata accumulated across compiler passes.
 ///
+/// Per-flag overrides for plan-phase optimizations that assume post-query hydration.
+#[derive(Debug, Default, Clone)]
+pub struct PlanOverrides {
+    pub skip_fk_elision: bool,
+    pub force_join: bool,
+    pub force_emit_select: bool,
+}
+
+impl PlanOverrides {
+    pub fn local() -> Self {
+        Self {
+            skip_fk_elision: true,
+            force_join: true,
+            force_emit_select: true,
+        }
+    }
+}
+
 /// Written by normalize/lowering, read by downstream passes (deduplicate,
 /// optimize, enforce, SIP, fold, etc.).
 #[derive(Debug, Clone)]
@@ -176,6 +206,7 @@ pub struct CompilerMetadata {
     pub query_hash: u64,
     /// Number of `_gkg_cursor_N` readback columns the cursor pass appended.
     pub cursor_key_count: usize,
+    pub plan_overrides: PlanOverrides,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -199,6 +230,7 @@ impl Default for CompilerMetadata {
             tp_id_lookup: HashMap::new(),
             query_hash: 0,
             cursor_key_count: 0,
+            plan_overrides: PlanOverrides::default(),
         }
     }
 }
@@ -269,6 +301,7 @@ impl Default for Input {
             compiler: CompilerMetadata::default(),
             hydration_dynamic: false,
             path_segment_budget: None,
+            join_predicates: Vec::new(),
         }
     }
 }
@@ -459,6 +492,9 @@ where
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
+    /// When set, compare against another node's column instead of a literal.
+    /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
+    pub rhs_column: Option<(String, String)>,
     /// Populated by the validate pass; lets the lowerer bind temporal columns
     /// with their typed CH param.
     pub data_type: Option<ontology::DataType>,
@@ -472,6 +508,7 @@ pub struct InputFilter {
 #[strum(serialize_all = "snake_case")]
 pub enum FilterOp {
     Eq,
+    Ne,
     Gt,
     Lt,
     Gte,

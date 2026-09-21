@@ -16,11 +16,11 @@ Accepted
 
 ## Context
 
-The GKG server returns graph query results through `ResponseFormat`: `RAW` produces structured JSON from `GraphFormatter`; `LLM` produces text from `GoonFormatter`. The `LLM` path existed in proto, gRPC routing, and CLI wiring before any encoding shipped — `GoonFormatter` delegated to `GraphFormatter` and returned the same JSON. No LLM-optimized encoding existed.
+The GKG server returns graph query results through `ResponseFormat`: `RAW` produces structured JSON from `GraphFormatter`; `LLM` produces text from `GoonFormatter`. The `LLM` path existed in proto, gRPC routing, and CLI wiring before any encoding shipped. `GoonFormatter` delegated to `GraphFormatter` and returned the same JSON. No LLM-optimized encoding existed.
 
-When an agent calls `query_graph` and receives the full `GraphResponse` JSON, a traversal of 50 users and 200 merge requests with 200 edges runs roughly 12,000–15,000 tokens. The same information in a columnar text format fits in 5,000–7,000 tokens while preserving the graph topology the agent needs. Over a multi-turn session of 5–10 graph queries, that is 50,000–80,000 tokens of context spent on structural JSON syntax.
+When an agent calls `query_graph`, it receives the full `GraphResponse` JSON. A traversal of 50 users and 200 merge requests with 200 edges runs roughly 12,000 to 15,000 tokens. The same information in a columnar text format fits in 5,000 to 7,000 tokens while preserving the graph topology the agent needs. Over a multi-turn session of 5 to 10 graph queries, that is 50,000 to 80,000 tokens of context spent on structural JSON syntax.
 
-Encoding choice also affects correctness. Google's "Talk like a Graph" study (Fatemi et al., ICLR 2024) measured graph reasoning accuracy as a function of encoding alone and observed swings between 4.8% and 61.8% per task. Incident encoding (grouping edges by source) outperformed flat edge lists and adjacency matrices across most tasks. Dense encodings with many edges acted as distractors. Application-context framing ("who authored which merge requests") outperformed abstract graph framing by up to 18 percentage points.
+Encoding choice also affects correctness. Google's "Talk like a Graph" study (Fatemi et al., ICLR 2024) measured graph reasoning accuracy as a function of encoding alone. It observed swings between 4.8% and 61.8% per task. Incident encoding (grouping edges by source) outperformed flat edge lists and adjacency matrices across most tasks. Dense encodings with many edges acted as distractors. Application-context framing ("who authored which merge requests") outperformed abstract graph framing by up to 18 percentage points.
 
 The encoding choice is a correctness concern as much as a token-budget one.
 
@@ -31,14 +31,14 @@ Adopt GOON, a line-oriented text format for `format=llm` responses. Section-mark
 The format spec was validated by:
 
 - A **5-variant Pareto benchmark** on Haiku 4.5 against the production GitLab.com graph (`gitlab-org/orbit/gkg-evals-harness`). 430 task-runs over two cohorts measured cost, duration, and tool-call correctness for `kv`, `col`, `hier`, `min`, `incident`, and the raw JSON baseline.
-- A **corpus audit pass** running the full query corpus (then `fixtures/queries/corpus-input.json`, since reorganized under `fixtures/queries/corpus/`) against production via four parallel sub-agents, surfacing six production-confirmed encoder gaps (each fixed and regression-tested).
+- A **corpus audit pass** ran the full query corpus (then `fixtures/queries/corpus-input.json`, since reorganized under `fixtures/queries/corpus/`) against production via four parallel sub-agents. It surfaced six production-confirmed encoder gaps (each fixed and regression-tested).
 - A **post-merge data-loss audit** using two parallel sub-agents to walk every field of `GraphResponse` and verify the encoder reads it. Four silent drops found and fixed.
 
-The `kv` variant was Pareto-dominant over raw JSON: −11% cost, −15% duration, +4.8pp correctness, p=0.043 on `tool_sequence_length`. The `min` variant matched `kv` on accuracy at lower token cost, which led to the `@hints` block being descoped from the format — its presence in `kv` did not improve agent behavior over `min`'s absence of it.
+The `kv` variant was Pareto-dominant over raw JSON: −11% cost, −15% duration, +4.8pp correctness, p=0.043 on `tool_sequence_length`. The `min` variant matched `kv` on accuracy at lower token cost. This led to the `@hints` block being descoped from the format. Its presence in `kv` did not improve agent behavior over `min`'s absence of it.
 
 ## Format specification
 
-GOON is line-oriented text. Sections are delimited by `@`-prefixed markers, emitted in a fixed order: `@header`, `@nodes`, then exactly one of `@edges` (for `traversal`, `search`, `neighbors`) or `@paths` (for `path_finding`), and `@rows` for `aggregation`. Empty sections still emit their marker so a parser does not have to special-case absence.
+GOON is line-oriented text. Sections are delimited by `@`-prefixed markers, emitted in a fixed order. The order is `@header`, `@nodes`, then exactly one of `@edges` (for `traversal`, `search`, `neighbors`) or `@paths` (for `path_finding`), and `@rows` for `aggregation`. Empty sections still emit their marker so a parser does not have to special-case absence.
 
 ### `@header`
 
@@ -95,15 +95,12 @@ For aggregation queries with node-kind group columns, the encoder lifts each uni
 | Integer | bare digits | `iid=18`, `id=12971673076` (precision preserved up to `i64`) |
 | Finite float | bare | `avg_duration=941.131772070606` |
 | `NaN`, `±Inf` | dropped | (key does not appear) |
-| String matching `[A-Za-z0-9_\-:./@+]+` or an ISO datetime | bare | `username=stanhu`, `created_at=2026-05-08T22:55:58Z` |
-| ClickHouse datetime `YYYY-MM-DD HH:MM:SS[.fraction]` | T-form (space at position 10 swapped to `T`) | `created_at=2026-05-08T22:55:58.467450` |
+| String matching `[A-Za-z0-9_\-:./@+]+`, which includes every ISO 8601 datetime the pipeline emits | bare | `username=stanhu`, `created_at=2026-05-08T22:55:58.467450Z` |
 | Any other string | double-quoted with `\\`, `\"`, `\n`, `\r`, `\t` escapes; other control chars dropped | `title="line one\nline two"` |
 | Long text (`body`, `description`, `name`, `note`, `title`) over 200 chars | truncated with `...` plus a sibling `<key>_len=N` breadcrumb | `description="..." description_len=2308` |
 | Any other string over 1000 chars | same truncation + breadcrumb | |
 
-Datetime validation goes through `chrono::NaiveDateTime::parse_from_str` and `DateTime::parse_from_rfc3339`. The output is built byte-for-byte from the input with at most one byte (the space at position 10) swapped to `T`; the source's fractional precision is preserved exactly rather than being round-tripped through chrono's nanosecond default.
-
-Property order within a node row is column-priority then alphabetical: identity (`iid`, `username`, `name`, `full_path`, `path`, `uuid`) first, then status enums (`state`, `status`, `visibility_level`), then everything else, then timestamps (`created_at`, `updated_at`, `merged_at`, `closed_at`), then long text (`title`, `description`, `body`, `note`) last. This means a truncated description never hides a shorter identity field.
+Property order within a node row is column-priority then alphabetical. Identity fields come first (`iid`, `username`, `name`, `full_path`, `path`, `uuid`). Status enums follow (`state`, `status`, `visibility_level`), then everything else. Timestamps come next (`created_at`, `updated_at`, `merged_at`, `closed_at`). Long text (`title`, `description`, `body`, `note`) comes last. This means a truncated description never hides a shorter identity field.
 
 ### `@edges`
 
@@ -222,9 +219,9 @@ The encoder reads every field of `GraphResponse` (audited via parallel sub-agent
 
 Fields intentionally not surfaced:
 
-- `GraphResponse.format_version` — the upstream RAW schema version. The encoder emits `goon_version` instead; mixing both in one header creates the same field-name conflict that motivated the rename.
-- `GroupColumnDescriptor.node` — the source node alias is internal compiler state.
-- `GraphEdge.path_id` / `step` — used as sort keys and to drive `@paths` chain order; not surfaced as visible fields.
+- `GraphResponse.format_version`: the upstream RAW schema version. The encoder emits `goon_version` instead; mixing both in one header creates the same field-name conflict that motivated the rename.
+- `GroupColumnDescriptor.node`: the source node alias is internal compiler state.
+- `GraphEdge.path_id` / `step`: used as sort keys and to drive `@paths` chain order; not surfaced as visible fields.
 
 ### Determinism
 
@@ -247,7 +244,7 @@ Locked by property tests with 64 cases each:
 
 | Layer | Where | Count | Covers |
 |---|---|---|---|
-| Unit | `crates/query-engine/formatters/src/goon/tests.rs` | 51 | Header structure, sections, quoting, escape rules, datetime normalization, truncation, numerics, edges, dedup, path-finding, aggregation shapes (property + node + ungrouped), `Value::Null` row cells, depth on variable-length edges |
+| Unit | `crates/query-engine/formatters/src/goon/tests.rs` | 42 | Header structure, sections, quoting, escape rules, truncation, numerics, edges, dedup, path-finding, aggregation shapes (property + node + ungrouped), `Value::Null` row cells, depth on variable-length edges |
 | Property (`proptest`) | `tests/goon_properties.rs` | 4 × 64 | Shuffle invariance, idempotence, header prefix, no unescaped control chars |
 | Snapshot (`insta`) | `tests/goon_snapshots.rs` | 7 | One golden file per query shape + pagination |
 | Integration | `crates/integration-tests/tests/server/goon_formatter.rs` | 8 subtests | Full compile → execute → redact → hydrate → format path against ClickHouse testcontainers; asserts `format_stamped` returns `(Value::String, version, FormatName::Goon)`, headers carry `goon_version`, escape behavior, aggregation shapes, raw/goon count agreement |
@@ -258,9 +255,9 @@ Locked by property tests with 64 cases each:
 
 **Return natural language summaries.** Natural language is the least token-efficient encoding. "User alice authored merge request 42 titled Fix auth bug which is merged" is 15 tokens; `42 iid=101 title="Fix auth bug" state=merged` is 9. It is also unparseable for follow-up queries.
 
-**Pipe-delimited columnar tables (TOON-style headers + values).** Declaring column names once and emitting `1|alice|active` is ~10–15% more token-efficient than `key=value` for large result sets. Analysis of 316 AI coding sessions (83 Claude Code, 233 Codex) showed models never produce columnar output when formatting graph data. They consistently use inline `key=value`. The Pareto benchmark confirmed: `col` did not beat `kv` on cost-adjusted correctness.
+**Pipe-delimited columnar tables (TOON-style headers + values).** Declaring column names once and emitting `1|alice|active` is ~10 to 15% more token-efficient than `key=value` for large result sets. Analysis of 316 AI coding sessions (83 Claude Code, 233 Codex) showed models never produce columnar output when formatting graph data. They consistently use inline `key=value`. The Pareto benchmark confirmed: `col` did not beat `kv` on cost-adjusted correctness.
 
-**Return the same JSON as `format=raw`.** Wastes 40–60% of tokens on `{`, `}`, `"key":`, and commas. The starting point that motivated this ADR.
+**Return the same JSON as `format=raw`.** Wastes 40 to 60% of tokens on `{`, `}`, `"key":`, and commas. The starting point that motivated this ADR.
 
 **JSON with abbreviated keys.** Shortening `"username"` to `"u"` saves tokens but forces the model to maintain a key mapping across the response. The `key=value` shape keeps full names inline at comparable token cost.
 
@@ -272,10 +269,10 @@ Locked by property tests with 64 cases each:
 
 What improves:
 
-- 40–60% token reduction on the LLM path, validated across all five query shapes against production data.
+- 40 to 60% token reduction on the LLM path, validated across all five query shapes against production data.
 - −11% cost, −15% duration, +4.8pp correctness against raw JSON on Haiku 4.5 (p=0.043 on `tool_sequence_length`).
 - Format matches what models naturally produce and consume for graph data (validated against 316 session transcripts).
-- The shape is a pure function of `GraphResponse` — every visible field is a function of one input field. Adding a new field to the wire response is the only way to extend the format.
+- The shape is a pure function of `GraphResponse`. Every visible field is a function of one input field. Adding a new field to the wire response is the only way to extend the format.
 - `orbit query --format=llm` outputs human-scannable text instead of dense JSON.
 
 What gets harder:
@@ -288,7 +285,7 @@ Cross-language parity (Rust encoder vs the Python prototype in `gkg-evals-harnes
 
 ## Out of scope
 
-**HTTP response body shape.** Workhorse owns the HTTP response. For `format=llm`, the body is currently `{result: "<goon-text>", query_type, raw_query_strings, row_count}` — the goon string lives in the `result` field of a JSON envelope. Returning the goon text as a plain `text/plain` body (so a viewer renders real newlines instead of `\n` escapes) requires a change in `workhorse/internal/orbit/sendquery.go`, not in GKG. That change is not part of this ADR.
+**HTTP response body shape.** Workhorse owns the HTTP response. For `format=llm`, the body is currently `{result: "<goon-text>", query_type, raw_query_strings, row_count}`. The goon string lives in the `result` field of a JSON envelope. Returning the goon text as a plain `text/plain` body (so a viewer renders real newlines instead of `\n` escapes) requires a change in `workhorse/internal/orbit/sendquery.go`. It does not change GKG. That change is not part of this ADR.
 
 ## References
 

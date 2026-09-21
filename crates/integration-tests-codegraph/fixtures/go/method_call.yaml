@@ -16,8 +16,8 @@ fixtures:
 tests:
   - name: svc.Run() resolves to Service's Run method
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'main' AND e.edge_kind = 'Calls' AND callee.name = 'Run'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'Run'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "main.Run" } }

@@ -26,7 +26,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'main.ts'
-      RETURN i.name AS name, i.alias AS alias
+      RETURN i.identifier_name AS name, i.identifier_alias AS alias
       ORDER BY alias, name
     assert:
       - { row_count: 5 }
@@ -38,7 +38,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'main.ts'
-      RETURN DISTINCT i.path AS path
+      RETURN i.import_path AS path
     assert:
-      - { row_count: 1 }
+      - { row_count: 5 }
       - { row: { path: "./models" } }

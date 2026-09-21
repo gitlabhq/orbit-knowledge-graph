@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod dashboards;
 mod ddl;
+mod integration_lanes;
 mod metrics_catalog;
 mod migration_ledger;
 mod query_docs;
@@ -75,6 +76,12 @@ enum Command {
     MigrationLedger {
         #[command(subcommand)]
         command: MigrationLedgerCommand,
+    },
+    /// Verify that the integration lanes partition every container test.
+    IntegrationLanes {
+        /// Check the filters in .gitlab-ci.yml.
+        #[arg(long)]
+        check: bool,
     },
     /// Regenerate the auto-derived tables in the query language reference doc
     /// from the ontology (currently the text-indexed properties table).
@@ -291,6 +298,7 @@ async fn main() -> Result<()> {
         },
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
+        Command::IntegrationLanes { check } => integration_lanes::run(check),
         Command::QueryDocs { doc, check } => query_docs::run(doc, check),
     }
 }

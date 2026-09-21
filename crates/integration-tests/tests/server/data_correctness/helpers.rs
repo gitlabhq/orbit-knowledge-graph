@@ -52,7 +52,7 @@ pub(super) async fn run_query_with_security(
     svc: &MockRedactionService,
     security_ctx: SecurityContext,
 ) -> ResponseView {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let client = Arc::new(ctx.create_client());
     let compiled = Arc::new(
         compile(

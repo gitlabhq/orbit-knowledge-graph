@@ -1,7 +1,7 @@
 mod predicates;
 mod projections;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::input::{
     Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
@@ -68,37 +68,74 @@ struct Lowering {
 
 impl Lowering {
     fn pattern(&mut self, pattern: Pattern<'_>) -> Result<()> {
-        let element = match pattern {
-            Pattern::Element(element) => element,
+        let elements = match pattern {
+            Pattern::Elements(elements) => elements,
             Pattern::Shortest { variable, element } => {
                 self.path = Some(variable.value);
-                element
+                vec![*element]
             }
         };
-        let PatternElement { head, chain } = element;
-        self.node(head)?;
-        for (relationship, node) in chain {
-            let from = self.input.nodes.last().expect("previous node").id.clone();
-            self.node(node)?;
-            let to = self.input.nodes.last().expect("next node").id.clone();
-            self.edge(relationship, from, to)?;
+        for PatternElement { head, chain } in elements {
+            let mut from = self.node(head)?;
+            for (relationship, node) in chain {
+                let to = self.node(node)?;
+                self.edge(relationship, from, to.clone())?;
+                from = to;
+            }
+        }
+        self.check_connected_pattern()
+    }
+
+    fn check_connected_pattern(&self) -> Result<()> {
+        let mut reached = HashSet::new();
+        for edge in &self.input.relationships {
+            if edge.from == edge.to
+                || (!reached.is_empty()
+                    && reached.contains(&edge.from) == reached.contains(&edge.to))
+            {
+                return Err(QueryError::Validation(
+                    "each relationship must connect one new node to the preceding pattern; disconnected hops and cycles are unsupported".into(),
+                ));
+            }
+            reached.insert(&edge.from);
+            reached.insert(&edge.to);
+        }
+        if self.input.nodes.len() > 1 && reached.len() != self.input.nodes.len() {
+            return Err(QueryError::Validation(
+                "all declared nodes must belong to one connected pattern".into(),
+            ));
         }
         Ok(())
     }
 
-    fn node(&mut self, pattern: NodePattern<'_>) -> Result<()> {
+    fn node(&mut self, pattern: NodePattern<'_>) -> Result<String> {
         let id = pattern.variable.value;
-        if self.input.nodes.iter().any(|n| n.id == id)
-            || self.edges.contains_key(&id)
-            || self.path.as_ref() == Some(&id)
-        {
+        if self.edges.contains_key(&id) || self.path.as_ref() == Some(&id) {
             return Err(invalid(
                 pattern.span,
-                "variables must be unique; repeated nodes and cycles are unsupported",
+                "node, relationship, and path variables must be distinct",
             ));
         }
+        if let Some(node) = self.input.nodes.iter().find(|node| node.id == id) {
+            if pattern
+                .label
+                .is_some_and(|label| node.entity.as_deref() != Some(&label.value))
+            {
+                return Err(invalid(
+                    pattern.span,
+                    "a repeated node must keep its original label",
+                ));
+            }
+            if !pattern.properties.is_empty() {
+                return Err(invalid(
+                    pattern.span,
+                    "declare a node's properties once or use WHERE predicates",
+                ));
+            }
+            return Ok(id);
+        }
         let mut node = InputNode {
-            id,
+            id: id.clone(),
             entity: pattern.label.map(|label| label.value),
             ..Default::default()
         };
@@ -111,7 +148,7 @@ impl Lowering {
             node.filters.remove("id");
         }
         self.input.nodes.push(node);
-        Ok(())
+        Ok(id)
     }
 
     fn edge(&mut self, relationship: Relationship<'_>, from: String, to: String) -> Result<()> {

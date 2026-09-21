@@ -527,25 +527,27 @@ fn valid_identifiers_produce_renderable_sql() {
     assert!(rendered.contains("_gkg_node123_id"));
 }
 
-fn multi_table_ontology() -> ontology::Ontology {
+fn multi_table_ontology() -> std::sync::Arc<ontology::Ontology> {
     use ontology::DataType;
-    ontology::Ontology::new()
-        .with_nodes(["User", "Project", "File", "Definition"])
-        .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
-        .with_edge_table("gl_code_edge")
-        .with_edge_for_table("DEFINES", "gl_code_edge")
-        .with_edge_for_table("IMPORTS", "gl_code_edge")
-        .with_fields(
-            "User",
-            [("username", DataType::String), ("state", DataType::String)],
-        )
-        .with_default_columns("User", ["username"])
-        .with_fields("Project", [("name", DataType::String)])
-        .with_default_columns("Project", ["name"])
-        .with_fields("File", [("path", DataType::String)])
-        .with_default_columns("File", ["path"])
-        .with_fields("Definition", [("name", DataType::String)])
-        .with_default_columns("Definition", ["name"])
+    std::sync::Arc::new(
+        ontology::Ontology::new()
+            .with_nodes(["User", "Project", "File", "Definition"])
+            .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
+            .with_edge_table("gl_code_edge")
+            .with_edge_for_table("DEFINES", "gl_code_edge")
+            .with_edge_for_table("IMPORTS", "gl_code_edge")
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("state", DataType::String)],
+            )
+            .with_default_columns("User", ["username"])
+            .with_fields("Project", [("name", DataType::String)])
+            .with_default_columns("Project", ["name"])
+            .with_fields("File", [("path", DataType::String)])
+            .with_default_columns("File", ["path"])
+            .with_fields("Definition", [("name", DataType::String)])
+            .with_default_columns("Definition", ["name"]),
+    )
 }
 
 #[test]
@@ -688,12 +690,14 @@ fn multi_table_path_finding_scans_all_tables() {
 fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
     let orbit_query = "MATCH (f:File)--(n) WHERE f.path CONTAINS 'labkit' RETURN n";
     use ontology::DataType;
-    let ontology = ontology::Ontology::new()
-        .with_nodes(["File"])
-        .with_edges(["DEFINES"])
-        .with_fields("File", [("path", DataType::String)])
-        .with_default_columns("File", ["path"])
-        .with_redaction("File", "project", "project_id");
+    let ontology = std::sync::Arc::new(
+        ontology::Ontology::new()
+            .with_nodes(["File"])
+            .with_edges(["DEFINES"])
+            .with_fields("File", [("path", DataType::String)])
+            .with_default_columns("File", ["path"])
+            .with_redaction("File", "project", "project_id"),
+    );
 
     let json = r#"{
         "query_type": "neighbors",
@@ -1169,7 +1173,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u IS User) RETURN u",
         "MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u",
         "MATCH (u:User) WHERE NOT u.id = 1 RETURN u",
-        "MATCH (u:User) WHERE u.id <> 1 RETURN u",
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
@@ -1185,7 +1188,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
         "MATCH (u:User) RETURN u.username AS renamed",
-        "MATCH (u:User) RETURN u{.username}, count(u)",
         "MATCH (u:User) RETURN u{.username}, u.state",
         "MATCH (u:User) RETURN u.username, u{.state}",
         "MATCH (u:User) RETURN date_trunc('month', u.created_at)",
@@ -1524,6 +1526,17 @@ fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
         "edge source must be the User side: {}",
         compiled.base.sql
     );
+}
+
+#[test]
+fn orbit_query_repeated_node_projections_ignore_property_order() {
+    let json = r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","name"]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":[{"key":"u","as":"author"},{"key":"u","as":"owner"}],"aggregations":[{"count":"mr","as":"mr_count"}]}"#;
+    for properties in [".username, .name", ".name, .username"] {
+        let query = format!(
+            "MATCH (u:User {{id: 1}})-[:AUTHORED]->(mr:MergeRequest) RETURN u{{.username, .name}} AS author, u{{{properties}}} AS owner, count(mr) AS mr_count"
+        );
+        compile_pair(json, &query, &embedded_ontology(), &test_ctx()).unwrap();
+    }
 }
 
 #[test]

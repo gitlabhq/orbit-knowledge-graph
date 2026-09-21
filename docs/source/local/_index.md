@@ -27,7 +27,7 @@ the Query DSL instead. No GitLab account or network connection is required.
 
 - Indexes: Code in the current working tree, including files, definitions, and
   cross-file references.
-- Storage: DuckDB (local file at `~/.orbit/graph.duckdb`)
+- Storage: DuckDB (local file at `~/.gitlab/orbit/graph.duckdb`)
 
 [Get started with GitLab Orbit Local](getting-started.md)
 

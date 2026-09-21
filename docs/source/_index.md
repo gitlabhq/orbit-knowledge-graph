@@ -88,7 +88,7 @@ flowchart LR
     accDescr: The GitLab Orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI or connect an AI agent through the stdio MCP server.
 
     Repo[Local repository] --> CLI["orbit CLI"]
-    CLI --> DB[("DuckDB\n~/.orbit/graph.duckdb")]
+    CLI --> DB[("DuckDB\n~/.gitlab/orbit/graph.duckdb")]
     DB --> Query[CLI query]
     DB --> MCP[stdio MCP server]
 ```

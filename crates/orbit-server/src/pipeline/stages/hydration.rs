@@ -90,9 +90,13 @@ impl HydrationStage {
             })?;
 
         let rendered_sql = compiled.base.render();
-        let debug = DebugQuery {
-            sql: compiled.base.sql.clone(),
-            rendered: rendered_sql.clone(),
+        let debug = if ctx.compiled()?.input.options.include_debug_sql {
+            vec![DebugQuery {
+                sql: compiled.base.sql.clone(),
+                rendered: rendered_sql.clone(),
+            }]
+        } else {
+            Vec::new()
         };
 
         let start = Instant::now();
@@ -135,7 +139,7 @@ impl HydrationStage {
         };
 
         let props = hydration_helpers::parse_hydration_batches(&batches, &ctx.ontology)?;
-        Ok((props, vec![debug], vec![execution]))
+        Ok((props, debug, vec![execution]))
     }
 }
 
@@ -150,11 +154,11 @@ impl PipelineStage for HydrationStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<RedactionOutput>()
+            .remove::<RedactionOutput>()
             .ok_or_else(|| PipelineError::Execution("RedactionOutput not found in phases".into()))
             .inspect_err(|e| obs.record_error(e))?;
         let t = Instant::now();
-        let mut query_result = input.query_result.clone();
+        let mut query_result = input.query_result;
         let redacted_count = input.redacted_count;
         let result_context = query_result.ctx().clone();
         let mut hydration_queries = Vec::new();

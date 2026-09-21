@@ -173,7 +173,15 @@ fn path_endpoint_has_selectivity(node: &InputNode) -> bool {
 /// Whether a node has explicit selectivity (node_ids, filters, or a narrow id_range).
 /// Queries where no node is selective tend to produce full-table scans.
 fn node_has_selectivity(node: &InputNode) -> bool {
-    if !node.node_ids.is_empty() || !node.filters.is_empty() {
+    if !node.node_ids.is_empty() {
+        return true;
+    }
+    let has_literal_filter = node
+        .filters
+        .values()
+        .flatten()
+        .any(|f| f.rhs_column.is_none());
+    if has_literal_filter {
         return true;
     }
     if let Some(ref range) = node.id_range {
@@ -182,13 +190,28 @@ fn node_has_selectivity(node: &InputNode) -> bool {
     false
 }
 
+#[derive(Default)]
+pub struct Skip {
+    pub selectivity: bool,
+}
+
 pub struct Validator<'a> {
     ontology: &'a Ontology,
+    skip: Skip,
 }
 
 impl<'a> Validator<'a> {
     pub fn new(ontology: &'a Ontology) -> Self {
-        Self { ontology }
+        Self {
+            ontology,
+            skip: Skip::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_skip(mut self, skip: Skip) -> Self {
+        self.skip = skip;
+        self
     }
 
     /// Returns the virtual source declaration for the field, or `None` for
@@ -363,6 +386,7 @@ impl<'a> Validator<'a> {
         self.check_depth(input)?;
         self.check_selectivity(input)?;
         self.check_filter_types(input)?;
+        self.check_join_predicates(input)?;
         // Run after individual reference checks so "undefined node X" errors
         // take priority over "node Y is unreferenced".
         self.check_unreferenced_nodes(input)?;
@@ -544,6 +568,68 @@ impl<'a> Validator<'a> {
     /// Relationship filters are validated against the fixed edge table schema.
     /// Unknown edge columns are rejected (fail closed) since they would
     /// produce broken SQL at runtime.
+    fn check_join_predicates(&self, input: &Input) -> Result<()> {
+        if !input.join_predicates.is_empty() && !matches!(input.query_type, QueryType::Traversal) {
+            return Err(QueryError::Validation(
+                "cross-node property comparisons are only supported in traversal queries".into(),
+            ));
+        }
+        let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
+        for jp in &input.join_predicates {
+            for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
+                if !node_ids.contains(&node_id.as_str()) {
+                    return Err(QueryError::ReferenceError(format!(
+                        "join predicate references undefined node \"{node_id}\""
+                    )));
+                }
+                let entity = input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == *node_id)
+                    .and_then(|n| n.entity.as_deref());
+                if let Some(entity) = entity {
+                    self.check_field(entity, prop)?;
+                    if !self
+                        .ontology
+                        .check_field_flag(entity, prop, |f| f.filterable)
+                    {
+                        return Err(QueryError::AllowlistRejected(format!(
+                            "join predicate on \"{prop}\" for {entity}: field is not filterable"
+                        )));
+                    }
+                    if self.virtual_source(entity, prop).is_some() {
+                        return Err(QueryError::Validation(format!(
+                            "property comparison cannot reference virtual column \"{prop}\" on {entity}"
+                        )));
+                    }
+                }
+            }
+            let lhs_entity = input
+                .nodes
+                .iter()
+                .find(|n| n.id == jp.lhs_node)
+                .and_then(|n| n.entity.as_deref());
+            let rhs_entity = input
+                .nodes
+                .iter()
+                .find(|n| n.id == jp.rhs_node)
+                .and_then(|n| n.entity.as_deref());
+            if let (Some(le), Some(re)) = (lhs_entity, rhs_entity) {
+                let lhs_type = self.ontology.get_field_type(le, &jp.lhs_prop);
+                let rhs_type = self.ontology.get_field_type(re, &jp.rhs_prop);
+                if let (Some(lt), Some(rt)) = (lhs_type, rhs_type)
+                    && lt != rt
+                {
+                    return Err(QueryError::Validation(format!(
+                        "type mismatch in join predicate: {}.{} is {lt:?} but {}.{} is {rt:?}",
+                        jp.lhs_node, jp.lhs_prop, jp.rhs_node, jp.rhs_prop
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn check_filter_types(&self, input: &Input) -> Result<()> {
         for node in &input.nodes {
             let Some(entity) = node.entity.as_deref() else {
@@ -604,6 +690,30 @@ impl<'a> Validator<'a> {
                     continue;
                 };
                 for filter in filters {
+                    if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
+                        let rhs_entity = input
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == *rhs_node)
+                            .and_then(|n| n.entity.as_deref());
+                        if let Some(rhs_entity) = rhs_entity {
+                            self.check_field(rhs_entity, rhs_prop)?;
+                            if !self
+                                .ontology
+                                .check_field_flag(rhs_entity, rhs_prop, |f| f.filterable)
+                            {
+                                return Err(QueryError::AllowlistRejected(format!(
+                                    "filter on \"{rhs_prop}\" for {rhs_entity}: field is not filterable"
+                                )));
+                            }
+                            if self.virtual_source(rhs_entity, rhs_prop).is_some() {
+                                return Err(QueryError::Validation(format!(
+                                    "property comparison cannot reference virtual column \"{rhs_prop}\" on {rhs_entity}"
+                                )));
+                            }
+                        }
+                        continue;
+                    }
                     if is_traversal_path_filter {
                         Self::check_traversal_path_filter(
                             &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
@@ -822,6 +932,9 @@ impl<'a> Validator<'a> {
     /// The checks are intentionally conservative: they reject shapes that are
     /// structurally guaranteed to be expensive regardless of data volume.
     fn check_selectivity(&self, input: &Input) -> Result<()> {
+        if self.skip.selectivity {
+            return Ok(());
+        }
         match input.query_type {
             // Path-finding endpoints seed BFS frontiers, so each endpoint
             // must have bounded selectivity: node_ids (already capped at 500
@@ -1269,6 +1382,9 @@ fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) 
                         "null checks cannot have a value".into(),
                     ));
                 }
+                continue;
+            }
+            if filter.rhs_column.is_some() {
                 continue;
             }
             let value = filter

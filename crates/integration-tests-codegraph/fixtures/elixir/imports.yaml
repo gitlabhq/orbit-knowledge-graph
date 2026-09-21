@@ -19,10 +19,10 @@ fixtures:
 tests:
   - name: "alias emits one ImportedSymbol with the last segment as the name"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
       WHERE f.path = 'lib/consumer.ex'
         AND s.import_type = 'Alias'
-      RETURN s.path AS path, s.name AS name, s.alias AS alias
+      RETURN s.import_path AS path, s.identifier_name AS name, s.identifier_alias AS alias
     assert:
       - { row_count: 4 }
       - { row: { path: "Helpers", name: "Format", alias: null } }
@@ -32,10 +32,10 @@ tests:
 
   - name: "import, use, and require each emit their own ImportedSymbol"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
       WHERE f.path = 'lib/consumer.ex'
         AND s.import_type IN ['Import', 'Use', 'Require']
-      RETURN s.import_type AS import_type, s.path AS path, s.name AS name
+      RETURN s.import_type AS import_type, s.import_path AS path, s.identifier_name AS name
     assert:
       - { row_count: 3 }
       - { row: { import_type: "Import", path: "Enum", name: "Enum" } }
@@ -44,7 +44,7 @@ tests:
 
   - name: "Ordinary function definitions do not produce imports"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(s:ImportedSymbol)
       WHERE f.path = 'lib/consumer.ex'
       RETURN count(s) AS n
     assert:

@@ -1,5 +1,7 @@
 # Crate map
 
+Every `[workspace]` member needs a row here; `crates/xtask/build.rs` enforces this. Additions, removals, and renames must also update [the documentation sync points](../../CONTRIBUTING.md#documentation-conventions) in the same MR.
+
 Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, HealthCheck via `--mode`).
 
 | Crate | Role |
@@ -9,7 +11,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `orbit-analytics` | Consumer-owned Snowplow context types (`OrbitCommonContext`, `OrbitQueryContext`) and tracker infrastructure (`AnalyticsTracker` trait, `SnowplowAnalyticsTracker`, `InMemoryAnalyticsTracker`). Context wrappers implement `labkit_events::SnowplowContext` over typify-codegen'd data types. `build.rs` runs `typify::TypeSpace` over `config/schemas/iglu/<name>/<version>.json` at build time and emits a module per schema (struct + `SCHEMA_URI` + `SCHEMA_JSON` consts) into `OUT_DIR/iglu_schemas.rs`; runtime never reads schema files. `load_schema_json()` returns the embedded JSON for test-time validator compilation. |
 | `orbit-billing` | Snowplow billing-event emission (`BillingObserver`, `BillingTracker`, `BillingInputs`) and CDot quota enforcement (`QuotaService`). Licensed as `LicenseRef-EE`. The billing adapter in `orbit-server/src/billing_adapter.rs` is the single `Claims → BillingInputs` conversion point (SOX auditable surface). Billing event metrics: `gkg.billing.events.{emitted,dropped,rejected,delivered,delivery_failed}`. |
 | `object-storage` | Reference client over the `object_store` crate: builds an S3 or GCS store from `AppConfig::object_storage` and exposes write, read and delete. `examples/roundtrip.rs` exercises a config file against a real bucket |
-| `orbit-prompts` | Embeds the versioned YAML prompts under `config/prompts/` via rust-embed and validates them (consumer build scripts fail the build on a malformed prompt) |
+| `orbit-prompts` | Embeds and validates the versioned YAML prompts under `config/prompts/`, and validates the standalone remote and local Orbit skill trees at build time: matching placeholders and sections, unique combined paths, relative links, and documented CLI commands against the clap source inventory |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
 | `query-engine/compiler` | JSON DSL and typed Input -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
@@ -38,6 +40,6 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
 | `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), CLI test harness (`cli` module) for CLI integration tests |
 | `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness via YAML scenarios, graph formatting) + cli (concurrency, worktrees); depends on orbit-server, compiler, integration-testkit |
-| `integration-tests-codegraph` | Code-graph-specific integration tests (linker, lance-graph) |
+| `integration-tests-codegraph` | Code-graph-specific integration tests (linker, Orbit DuckDB compiler) |
 | `fuzz` | Fuzz testing harness (bolero) for the query compiler, code parsers, and indexer message handling |
 | `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |

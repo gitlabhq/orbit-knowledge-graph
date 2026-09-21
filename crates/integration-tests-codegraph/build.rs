@@ -17,7 +17,7 @@ fn main() {
     let code: String = tests
         .iter()
         .map(|(name, path)| {
-            format!("#[tokio::test]\nasync fn {name}() {{ run_yaml_suite(include_str!(\"{path}\")).await; }}\n")
+            format!("#[test]\nfn {name}() {{ run_yaml_suite(include_str!(\"{path}\")); }}\n")
         })
         .collect();
 

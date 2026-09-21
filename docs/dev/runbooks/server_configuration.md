@@ -7,13 +7,13 @@ Reference for all configurable knobs in the GKG server. All four modes (Webserve
 Config is loaded in layers, each overriding the previous:
 
 1. **Embedded defaults**: `config/default.yaml`, compiled into the binary. It declares every
-   section and scalar the server reads; the Rust config structs carry no fallback values, so a
+   section and scalar the server reads. The Rust config structs carry no fallback values. So a
    key removed from this file fails startup with a "missing field" error. Optional keys are
    `Option` fields (passwords, TLS paths, values derived from container resources) and are
-   commented out in the file. These are **deployment defaults**: a production pod runs on them for
-   every key the Helm ConfigMap does not set, so the file holds no local-development tuning. Its
-   maps stay empty unless an entry is a genuine universal default, because config-rs deep-merges
-   maps and any entry here that a partial ConfigMap does not set would leak into production.
+   commented out in the file. These are **deployment defaults**. A production pod runs on them for
+   every key the Helm ConfigMap does not set. So the file holds no local-development tuning. Its
+   maps stay empty unless an entry is a genuine universal default. The reason: config-rs
+   deep-merges maps. Any entry here that a partial ConfigMap does not set would leak into production.
 2. **On-disk `config/default.yaml`**, relative to the working directory, when present. This is
    the key the Helm chart's ConfigMap currently uses; treat it as a partial overlay.
 3. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
@@ -25,16 +25,18 @@ There is no environment-variable layer. Every override is a YAML overlay or a se
 
 Adding a setting means adding a field to the struct in `crates/orbit-server-config/` and its
 value to `config/default.yaml`; nothing else. Tests that need a config start from
-`AppConfig::embedded_defaults()` and override the fields they care about.
+`AppConfig::embedded_defaults()` and override the fields they care about. The `orbit` CLI uses its
+own clap configuration instead of `AppConfig`.
 
 The mise dev tasks (`server:start`, `server:dispatch`, `dev:web`, `dev:indexer`, `dev:dispatcher`,
-`dev:healthcheck`) run `scripts/orbit-native-dev.sh`, which writes `.dev/<mode>.yaml` on every start
-and passes it as the single `--config` file. The file is a `yq` deep merge of, in increasing priority:
+`dev:healthcheck`) run `scripts/orbit-native-dev.sh`. That script writes `.dev/<mode>.yaml` on every
+start and passes it as the single `--config` file. The file is a `yq` deep merge of, in increasing priority:
 
 1. `config/dev.yaml`: the committed description of the dev environment: bind addresses, NATS URL and
    consumer name, database names and users, laptop tuning.
-2. Values read from the GDK checkout: ClickHouse URLs from `gdk.yml`, the GitLab base URL, the Siphon
-   stream name from GDK's Siphon config, JWT keys and the ClickHouse password from the GitLab secret files.
+2. Values read from the GDK checkout. These are ClickHouse URLs from `gdk.yml`, the GitLab base URL,
+   and the Siphon stream name from GDK's Siphon config. They also include JWT keys and the ClickHouse
+   password from the GitLab secret files.
 3. The mode's Prometheus port, so the processes `mise run dev` starts side by side do not collide once
    metrics are enabled.
 4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
@@ -160,9 +162,9 @@ On the graph connection the switch does three things:
 
 1. Prefixes `Replicated` onto every `*MergeTree` engine in DDL, the same rewrite GitLab Rails applies on a `Replicated` database. A `Replicated` database replicates metadata only; without replicated table engines, rows stay on the replica that took the write. ClickHouse takes the ZooKeeper path and replica name from the server settings `default_replica_path` and `default_replica_name`, so the DDL carries no customer macros.
 1. Applies the quorum session settings below.
-1. Retries a request that fails with error 286 (`UNSATISFIED_QUORUM`), error 289 (`REPLICA_IS_NOT_IN_QUORUM`),
-   a Keeper session error, a DDL that timed out waiting for a replica, a query cancelled by a replica
-   that shuts down, a connection error, or a 5xx from the load balancer.
+1. Retries a request that fails with any of these. Error 286 (`UNSATISFIED_QUORUM`), error 289 (`REPLICA_IS_NOT_IN_QUORUM`),
+   a Keeper session error, or a DDL that timed out waiting for a replica. Also a query cancelled by a
+   replica that shuts down, a connection error, or a 5xx from the load balancer.
    The backoff is linear, 100 ms per attempt, capped at 1 s, up to 20 attempts.
    All of these errors are transient by design. Serialized quorum inserts collide.
    A sequential-consistency read can land on a replica that has not received the last quorum write.
@@ -215,9 +217,9 @@ The worker pool limits how many messages are processed concurrently. It uses a t
 
 These fields derive from the container's resources at startup when left unset; an explicit config value always wins. Each derived value logs once at info level with its input, so an operator can read a pod's choice from its logs without exec'ing in.
 
-- `max_concurrent_workers` unset → the container's available parallelism (`std::thread::available_parallelism`, which is cgroup-aware on Linux, so it tracks the pod's CPU limit), capped by the cgroup memory limit at 1.5 GiB per worker so a CPU-rich but memory-tight pod cannot derive more workers than it can feed. The budget is calibrated on production's hand-tuned pools (code: 16 workers in 24 GiB, sdlc: 20 in 32 GiB). No readable memory limit (unlimited cgroup, bare metal, macOS) means CPU alone decides.
-- `concurrency_groups` empty → derived from the modules the pool registers (`engine.modules`) and the resolved worker cap. A single-group pool gives that group the whole cap; a pool spanning both the SDLC and code groups splits the cap 75% / 25% (the historical universal-pool ratio of sdlc 12 / code 4 out of 16). Namespace deletion shares the sdlc group.
-- `handlers.entity-handler.datalake_batch_size` unset → the SDLC datalake page size scales with the cgroup memory limit, anchored at prod's 32 GiB sdlc pool (its hand-tuned 500k page), floored at 100k rows so a memory-scarce host can't OOM on a full page. No readable memory limit means the 500k anchor default. `batch_size_overrides` still apply on top per entity.
+- `max_concurrent_workers` unset → the container's available parallelism (`std::thread::available_parallelism`, which is cgroup-aware on Linux, so it tracks the pod's CPU limit). The cgroup memory limit caps this at 1.5 GiB per worker. So a CPU-rich but memory-tight pod cannot derive more workers than it can feed. The budget is calibrated on production's hand-tuned pools (code: 16 workers in 24 GiB, sdlc: 20 in 32 GiB). No readable memory limit (unlimited cgroup, bare metal, macOS) means CPU alone decides.
+- `concurrency_groups` empty → derived from the modules the pool registers (`engine.modules`) and the resolved worker cap. A single-group pool gives that group the whole cap. A pool spanning both the SDLC and code groups splits the cap 75% / 25%. That is the historical universal-pool ratio of sdlc 12 / code 4 out of 16. Namespace deletion shares the sdlc group.
+- `handlers.entity-handler.datalake_batch_size` unset → the SDLC datalake page size scales with the cgroup memory limit. It is anchored at prod's 32 GiB sdlc pool (its hand-tuned 500k page). It is floored at 100k rows, so a memory-scarce host can't OOM on a full page. No readable memory limit means the 500k anchor default. `batch_size_overrides` still apply on top per entity.
 
 On a 16-core universal pool this reproduces the previous hardcoded defaults exactly (16 workers, sdlc 12 / code 4).
 
@@ -238,20 +240,20 @@ engine:
 ## Topic configuration
 
 Each topic's default subscription policy (retry, DLQ, concurrency group) is
-**declared in Rust** by the indexer module that owns the topic, next to the
-handler it protects:
+**declared in Rust**. The indexer module that owns the topic declares it, next
+to the handler it protects:
 
-- `code-indexing-task` — `crates/indexer/src/modules/code/mod.rs`
-- `global-handler`, `namespace-handler` — `crates/indexer/src/modules/sdlc/mod.rs`
-- `namespace-deletion` — `crates/indexer/src/modules/namespace_deletion/mod.rs`
+- `code-indexing-task`: `crates/indexer/src/modules/code/mod.rs`
+- `global-handler`, `namespace-handler`: `crates/indexer/src/modules/sdlc/mod.rs`
+- `namespace-deletion`: `crates/indexer/src/modules/namespace_deletion/mod.rs`
 
 Because the policy lives in code, a deployment that omits config still gets the
-correct policy — omitting `engine.topics` no longer silently disables
+correct policy. Omitting `engine.topics` no longer silently disables
 `code-indexing-task` retries and dead-lettering.
 
 An `engine.topics.<name>` entry in YAML is a **sparse, field-wise override**
-layered on top of the declared default: only the fields the entry sets change;
-every unset field keeps the module default. `dead_letter_on_exhaustion` is
+layered on top of the declared default. Only the fields the entry sets change.
+Every unset field keeps the module default. `dead_letter_on_exhaustion` is
 `Option<bool>`, so an entry can explicitly turn it off, not just on.
 
 | Config path | Overrides | Description |
@@ -328,13 +330,13 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each s
 | Stale-edge reconciliation | `schedule.tasks.stale-edge-reconciliation.cron` | `0 */30 * * * *` (every 30 minutes) | Tombstones stale mutable-FK edges |
 
 The namespace dispatcher is checkpoint-driven. With no change-detection checkpoint it
-dispatches every enabled namespace once (cold start) and records a checkpoint;
-every later tick queries Siphon-backed datalake tables for changes since that checkpoint,
+dispatches every enabled namespace once (cold start) and records a checkpoint.
+Every later tick queries Siphon-backed datalake tables for changes since that checkpoint,
 however old it is. The same task re-dispatches every enabled namespace when its separate
 sweep checkpoint is older than `schedule.tasks.namespace.sweep_interval_secs` (default
 `3600`), backstopping migration backfill and missed windows.
 
-`APPLY DELETED MASK` is idempotent. A failed or skipped run is safe — the next
+`APPLY DELETED MASK` is idempotent. A failed or skipped run is safe. The next
 run picks up all outstanding masks. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
 failed table and moves on.
@@ -625,7 +627,7 @@ nats:
 
 ## Helm chart configuration
 
-In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML. The chart renders the values it knows about into a ConfigMap mounted at `/app/config`; every key the chart does not render comes from the embedded `config/default.yaml`.
+In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML. The chart renders the values it knows about into a ConfigMap mounted at `/app/config`. Every key the chart does not render comes from the embedded `config/default.yaml`.
 
 ### Key Helm values mapping
 

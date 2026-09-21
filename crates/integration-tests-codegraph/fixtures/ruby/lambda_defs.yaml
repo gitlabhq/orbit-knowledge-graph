@@ -94,9 +94,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Constant'
-        AND (d.name = 'TRIPLE' OR d.name = 'DOUBLE' OR d.name = 'VALIDATE_EMAIL'
-             OR d.name = 'MAKER' OR d.name = 'AUTH' OR d.name = 'handler')
-      RETURN count(*) AS n
+        AND d.name IN ['TRIPLE', 'DOUBLE', 'VALIDATE_EMAIL', 'MAKER', 'AUTH', 'handler']
+      RETURN count(d) AS n
     assert:
       - { row: { n: 0 } }
 
@@ -105,10 +104,10 @@ tests:
   # resolves to the enclosing class's callable constant.
   - name: "a reference to a callable constant resolves to its Lambda definition"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Middleware::initialize'
         AND callee.fqn = 'Middleware::AUTH'
-      RETURN callee.definition_type AS dt, e.edge_kind AS kind
+      RETURN callee.definition_type AS dt
     assert:
       - { row_count: 1 }
-      - { row: { dt: "Lambda", kind: "Calls" } }
+      - { row: { dt: "Lambda" } }

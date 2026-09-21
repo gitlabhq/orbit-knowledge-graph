@@ -84,10 +84,9 @@ tests:
 
   - name: "struct constructor is extracted"
     query: |
-      MATCH (s:Definition)-[e:DefinitionToDefinition]->(c:Definition)
+      MATCH (s:Definition)-[e:DEFINES]->(c:Definition)
       WHERE s.fqn = 'Geometry.Point'
         AND c.definition_type = 'Constructor'
-        AND e.edge_kind = 'Defines'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
@@ -95,7 +94,7 @@ tests:
 
   - name: "readonly-struct properties Width and Height are extracted as Property definitions"
     query: |
-      MATCH (s:Definition)-[:DefinitionToDefinition]->(p:Definition)
+      MATCH (s:Definition)-[:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE s.fqn = 'Geometry.Size'
         AND p.definition_type = 'Property'
       RETURN p.name AS name
@@ -108,20 +107,18 @@ tests:
 
   - name: "struct defines its method via a Defines edge"
     query: |
-      MATCH (s:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      MATCH (s:Definition)-[e:DEFINES]->(m:Definition)
       WHERE s.fqn = 'Geometry.Point'
         AND m.fqn = 'Geometry.Point.DistanceToOrigin'
-        AND e.edge_kind = 'Defines'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
 
   - name: "File defines the struct"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'Geometry/Point.cs'
         AND d.fqn = 'Geometry.Point'
-        AND e.edge_kind = 'Defines'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

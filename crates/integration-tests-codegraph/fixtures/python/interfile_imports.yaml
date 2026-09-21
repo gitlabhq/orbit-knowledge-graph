@@ -35,7 +35,7 @@ fixtures:
 tests:
   - name: "G1: absolute import resolves (utils.helper_func)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'main' AND callee.name = 'helper_func'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -44,7 +44,7 @@ tests:
 
   - name: "G2: absolute import of package module resolves"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run_app' AND callee.name = 'PackageClass'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -54,7 +54,7 @@ tests:
   - name: "G7: non-existent import produces no edge"
     description: "There is no import for 'nonexistent' so no call edge should exist"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE callee.name = 'nonexistent'
       RETURN callee.name AS callee
     assert:
@@ -85,7 +85,7 @@ tests:
 
   - name: "unused_func has no incoming call edges"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE callee.name = 'unused_func'
       RETURN caller.name AS caller
     assert:

@@ -1,15 +1,13 @@
 <!--
-TEMPLATE CONVENTION — read before filling this out
+TEMPLATE CONVENTION: read before filling this out
+
+A person creates this issue. Agents: show the draft and wait for approval
+before you create it (see CONTRIBUTING.md, Issue conventions). Put generated
+content in the Agent context block at the bottom. The sections above it stay
+in the author's own words and stay short.
 
 Each section below is for the *important* content a triager needs: the
-problem statement and the shape of the solution. Keep it short.
-
-Long-form output — exhaustive design exploration, related-code dumps,
-alternatives considered, agent reasoning — goes in the Agent context
-block at the bottom, not in the sections above.
-
-Agents: if you feel the urge to write a wall of text, write it inside the
-Agent context block. The top sections stay terse.
+problem statement and the shape of the solution.
 -->
 
 ### Problem to Solve
@@ -20,7 +18,7 @@ Describe at a high level what the problem is and why it needs to be solved.
 Headline first, supporting detail below. Diagrams and key links belong
 here. Long narratives belong in the Agent context block.
 
-Please keep this description updated with any discussion that takes place so
+Keep this description updated with any discussion that takes place so
 that reviewers can understand your intent. Keeping the description updated is
 especially important if they didn't participate in the discussion.
 -->
@@ -34,7 +32,7 @@ alternatives and full design exploration go in the Agent context block.
 -->
 
 <details>
-<summary><b>Agent context</b> — extended analysis, alternatives considered, related-code dumps</summary>
+<summary><b>Agent context</b>: extended analysis, alternatives considered, related-code dumps</summary>
 
 <!--
 Agents: put extended reasoning here. Full design exploration, alternatives
@@ -47,7 +45,7 @@ sections above belongs in this block.
 <!--
 LABELS: every Orbit issue is classified on three axes, exactly one
 orbit::<area>, one type::, and one priority::. The two standing labels are
-applied below; add the three axis labels with quick actions under this
+applied below. Add the three axis labels with quick actions under this
 comment (quick actions inside a comment do not run) or in the UI.
 
 Pick the area from the issue's substance, not its title keywords. When two

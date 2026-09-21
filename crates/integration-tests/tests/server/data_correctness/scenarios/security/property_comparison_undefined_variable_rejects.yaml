@@ -1,0 +1,12 @@
+description: >
+  Property comparison referencing an undefined variable is rejected.
+  The RHS node must be bound in the MATCH pattern.
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+    WHERE u.username <> ghost.username
+    RETURN mr.title LIMIT 10
+
+expect:
+  compile_error: "undefined variable ghost"

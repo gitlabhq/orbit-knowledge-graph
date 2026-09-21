@@ -4,9 +4,17 @@ version.workspace = true
 edition = "2024"
 license = "MIT"
 
+[features]
+skill-validation = ["dep:comrak", "dep:syn"]
+
 [dependencies]
+comrak = { workspace = true, optional = true }
 minijinja = { workspace = true }
 rust-embed = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
+syn = { workspace = true, optional = true }
 orbit-utils = { path = "../utils" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

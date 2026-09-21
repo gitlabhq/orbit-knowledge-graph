@@ -56,9 +56,9 @@ GitLab Orbit Remote exposes the same graph through three surfaces. Pick the one 
 
 | Method | Best for | Setup | Billing |
 |---|---|---|---|
-| **GitLab Duo Agent Platform** | End users in the GitLab UI | None | Zero-rated |
-| **MCP** | Claude Code, Codex, other AI agents | One-time agent config | GitLab Credits |
-| **REST API** | Scripts, dashboards, custom tooling | API token | GitLab Credits |
+| **GitLab Duo Agent Platform** | End users in the GitLab UI | None | Free during beta, GitLab Credits after GA |
+| **MCP** | Claude Code, Codex, other AI agents | One-time agent config | Free during beta, GitLab Credits after GA |
+| **REST API** | Scripts, dashboards, custom tooling | API token | Free during beta, GitLab Credits after GA |
 
 ### GitLab Duo Agent Platform (no setup required)
 
@@ -66,7 +66,7 @@ GitLab Orbit is wired into GitLab Duo Agent Platform. The GitLab Duo Agent, Plan
 
 For example, file a work item asking to rename the `deploy_user` method. The Developer Flow uses GitLab Orbit to identify every service that calls it, then drafts an MR that updates each one.
 
-GitLab Duo queries are zero-rated and do not consume GitLab Credits.
+During the beta, GitLab Duo queries against GitLab Orbit do not consume GitLab Credits.
 
 ### MCP (Claude Code, Codex, other agents)
 

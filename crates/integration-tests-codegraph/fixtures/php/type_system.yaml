@@ -218,10 +218,9 @@ tests:
 
   - name: "Typed property invocation: TypedProps.lookup -> Repo.find via \\$this->repo"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\TypedProps\lookup'
         AND callee.fqn = 'App\Service\Repo\find'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -229,20 +228,18 @@ tests:
   # ── Param-typed method call (the classic case) ─────────────────
   - name: "Top-level function parameter typed Repo: boot -> Repo.find via \\$repo"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\boot'
         AND callee.fqn = 'App\Service\Repo\find'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "Top-level function parameter typed Cache: boot -> Cache.get via \\$cache"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\boot'
         AND callee.fqn = 'App\Service\Cache\get'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -250,10 +247,9 @@ tests:
   # ── Nullable types ?T (PHP 7.1) ────────────────────────────────
   - name: "Nullable param ?Repo: NullableTypes.fetch -> Repo.save"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\NullableTypes\fetch'
         AND callee.fqn = 'App\Service\Repo\save'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -265,10 +261,9 @@ tests:
   # Repo.find is the correct minimum.
   - name: "Union param Repo|Cache resolves \\$svc->find to Repo.find"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\UnionTypes\process'
         AND callee.fqn = 'App\Service\Repo\find'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -287,10 +282,9 @@ tests:
   # resolve $other->count() to Countable.count.
   - name: "Intersection param Countable&Stringable resolves \\$other->count to Countable.count"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\IntersectionUser\measure'
         AND callee.fqn = 'App\Iface\Countable\count'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -301,10 +295,9 @@ tests:
   # edge to Countable.count.
   - name: "DNF param (Countable&Stringable)|Empty_ resolves \\$x->count to Countable.count"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\DnfTypes\inspect'
         AND callee.fqn = 'App\Iface\Countable\count'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
@@ -317,20 +310,18 @@ tests:
   # the chain `$this->step()->finish()` continues to Builder.finish.
   - name: "self return-type chain FluentBuilder.go -> Builder.finish"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\FluentBuilder\go'
         AND callee.fqn = 'App\Service\Builder\finish'
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
       - { row_count: 1 }
 
   - name: "FluentBuilder extends Builder"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Service\FluentBuilder'
         AND p.fqn = 'App\Service\Builder'
-        AND e.edge_kind = 'Extends'
       RETURN c.fqn AS c
     assert:
       - { row_count: 1 }
@@ -352,9 +343,8 @@ tests:
   # ── Cross-arm: ensure intersection class implements both ifaces ──
   - name: "Counter implements Countable and Stringable"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
       WHERE c.fqn = 'App\Iface\Counter'
-        AND e.edge_kind = 'Extends'
       RETURN p.fqn AS parent
     assert:
       - { row: { parent: 'App\Iface\Countable' } }

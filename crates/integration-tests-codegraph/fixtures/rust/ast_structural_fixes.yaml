@@ -51,7 +51,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
-        AND i.path = 'foo::Bar'
+        AND i.import_path = 'foo::Bar'
       RETURN i.import_type AS type
     assert:
       - { row_count: 1 }
@@ -62,7 +62,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
         AND d.name = 'foo'
-        AND (d.definition_type = 'Method' OR d.definition_type = 'AssociatedFunction')
+        AND d.definition_type IN ['Method', 'AssociatedFunction']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }

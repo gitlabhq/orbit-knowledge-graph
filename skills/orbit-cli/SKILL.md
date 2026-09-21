@@ -8,7 +8,7 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.7.1
+version: 0.10.1
 license: MIT
 metadata:
   audience: developers
@@ -25,6 +25,11 @@ production data, use the `orbit` skill.
 
 The binary is `orbit`, or `glab orbit` through the wrapper. Add `--yes` in
 non-interactive shells. Run `orbit <command> --help` before you guess a flag.
+Run `orbit skills` to read this skill; it lists additional skill trees afterward
+when any are available. Use `orbit skills get orbit [path]` to read a file from
+this tree. The path defaults to `SKILL.md`.
+
+Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 
 ## Find, then read
 
@@ -40,6 +45,7 @@ is a callee. Connections from test, fixture, and generated files are hidden
 but counted, and `--tests` shows them. Reuse the returned source. Never
 truncate Orbit output.
 
+<!-- orbit:section quick-start -->
 ## Query and map
 
 ```shell
@@ -47,6 +53,8 @@ orbit schema gl_definition
 orbit sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
 orbit repo-map overview                 # then tree, api, class, extends, imports
 ```
+
+<!-- /orbit:section -->
 
 Gotchas:
 
@@ -62,6 +70,6 @@ Gotchas:
 
 | Topic | Location |
 |---|---|
-| CLI wrapper flags, config keys, pass-through args | [`references/cli.md`](references/cli.md) |
-| DuckDB tables and paste-ready SQL recipes | [`references/sql.md`](references/sql.md) |
-| Repository-map workflow (`orbit repo-map`) | [`references/repo_map.md`](references/repo_map.md) |
+| CLI wrapper flags, config keys, pass-through args | [`references/cli.md`](references/local/cli.md) |
+| DuckDB tables and paste-ready SQL recipes | [`references/sql.md`](references/local/sql.md) |
+| Repository-map workflow (`orbit repo-map`) | [`references/repo_map.md`](references/local/repo_map.md) |
