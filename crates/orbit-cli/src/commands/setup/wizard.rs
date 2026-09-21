@@ -223,14 +223,19 @@ fn show_plan(plan: &Plan) -> Result<()> {
 
 fn show_paths(plan: &Plan) -> Result<()> {
     show_plan(plan)?;
-    let mut rows: Vec<String> = Vec::new();
+    let mut by_component: BTreeMap<Component, BTreeSet<&str>> = BTreeMap::new();
     for assistant in &plan.assistants {
-        for (component, place) in &assistant.changes {
-            let row = format!("{:<13} {place}", component.label());
-            if !rows.contains(&row) {
-                rows.push(row);
-            }
+        for (component, paths) in &assistant.changes {
+            by_component
+                .entry(*component)
+                .or_default()
+                .extend(paths.iter().map(String::as_str));
         }
+    }
+    let mut rows: Vec<String> = Vec::new();
+    for (component, paths) in by_component {
+        rows.push(component.label().to_string());
+        rows.extend(paths.into_iter().map(|path| format!("  {path}")));
     }
     cliclack::note(format!("Files in {}", plan.scope), rows.join("\n"))?;
     Ok(())

@@ -11,7 +11,7 @@ use crate::commands::setup::spec::{self, AssistantSpec};
 pub(super) struct Hooks;
 
 impl Change for Hooks {
-    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Option<String>> {
+    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Vec<String>> {
         let files: BTreeSet<String> = assistant
             .json_merges
             .iter()
@@ -20,7 +20,7 @@ impl Change for Hooks {
             .chain(assistant.registrations.iter().map(|entry| &entry.file))
             .map(|scoped| target.resolve(scoped).map(|(_, label)| label))
             .collect::<Result<_>>()?;
-        Ok((!files.is_empty()).then(|| files.into_iter().collect::<Vec<_>>().join(", ")))
+        Ok(files.into_iter().collect())
     }
 
     fn install(

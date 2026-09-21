@@ -13,7 +13,7 @@ use super::spec::{self, AssistantSpec};
 use super::{Component, Target};
 
 pub(super) trait Change {
-    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Option<String>>;
+    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Vec<String>>;
 
     fn install(
         &self,

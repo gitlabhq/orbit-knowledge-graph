@@ -12,18 +12,12 @@ use crate::commands::setup::spec::{self, AssistantSpec, DIRECT_LAUNCHER, McpForm
 pub(super) struct McpServer;
 
 impl Change for McpServer {
-    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Option<String>> {
+    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Vec<String>> {
         assistant
             .mcp
-            .as_ref()
-            .map(|entry| {
-                Ok(format!(
-                    "{} in {}",
-                    spec::mcp_server().name,
-                    target.resolve(&entry.file)?.1
-                ))
-            })
-            .transpose()
+            .iter()
+            .map(|entry| target.resolve(&entry.file).map(|(_, label)| label))
+            .collect()
     }
 
     fn install(

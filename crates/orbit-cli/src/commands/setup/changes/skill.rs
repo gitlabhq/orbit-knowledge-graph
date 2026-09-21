@@ -11,14 +11,17 @@ use crate::skill::{INSTALL_DIR_NAME, embedded_files};
 pub(super) struct Skill;
 
 impl Change for Skill {
-    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Option<String>> {
-        Ok(targets(&[assistant], target)?
-            .into_iter()
-            .next()
-            .map(|skill| match skill.link {
-                Some((_, link_label)) => format!("{} (linked from {link_label})", skill.label),
-                None => skill.label,
-            }))
+    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Vec<String>> {
+        let mut paths: Vec<String> = Vec::new();
+        for skill in targets(&[assistant], target)? {
+            paths.push(skill.label);
+            paths.extend(
+                skill
+                    .link
+                    .map(|(_, link_label)| format!("{link_label} (link)")),
+            );
+        }
+        Ok(paths)
     }
 
     fn install(

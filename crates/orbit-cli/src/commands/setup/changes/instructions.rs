@@ -12,8 +12,8 @@ const BLOCK_END: &str = "<!-- orbit:setup:end -->";
 pub(super) struct Instructions;
 
 impl Change for Instructions {
-    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Option<String>> {
-        Ok(Some(target.resolve(&assistant.instruction_file)?.1))
+    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Vec<String>> {
+        Ok(vec![target.resolve(&assistant.instruction_file)?.1])
     }
 
     fn install(

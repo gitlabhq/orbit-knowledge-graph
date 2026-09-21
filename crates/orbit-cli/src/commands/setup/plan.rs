@@ -58,16 +58,17 @@ pub(super) struct Plan {
 
 pub(super) struct AssistantPlan {
     pub(super) title: String,
-    pub(super) changes: Vec<(Component, String)>,
+    pub(super) changes: Vec<(Component, Vec<String>)>,
 }
 
 pub(super) fn build(selection: &Selection, target: &Target) -> Result<Plan> {
     let mut assistants: Vec<AssistantPlan> = Vec::new();
     for assistant in &selection.assistants {
-        let mut planned: Vec<(Component, String)> = Vec::new();
+        let mut planned: Vec<(Component, Vec<String>)> = Vec::new();
         for component in &selection.components {
-            if let Some(place) = changes::for_component(*component).plan(assistant, target)? {
-                planned.push((*component, place));
+            let paths = changes::for_component(*component).plan(assistant, target)?;
+            if !paths.is_empty() {
+                planned.push((*component, paths));
             }
         }
         assistants.push(AssistantPlan {
