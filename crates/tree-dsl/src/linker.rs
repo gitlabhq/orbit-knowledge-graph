@@ -340,14 +340,18 @@ impl<'t> Fold<'t> {
 
         let sym = self.tail_sym(rhs);
         if sym != 0 {
-            let r = self.lookup(sym);
-            if self.any_class(&r) {
-                Value::Type(sym)
-            } else {
-                Value::Alias(sym)
-            }
+            self.tail_value(sym)
         } else {
             Value::Opaque
+        }
+    }
+
+    fn tail_value(&mut self, sym: u32) -> Value {
+        let r = self.lookup(sym);
+        if self.any_class(&r) {
+            Value::Type(sym)
+        } else {
+            Value::Alias(sym)
         }
     }
 
@@ -361,14 +365,7 @@ impl<'t> Fold<'t> {
             self.walk_children(arm);
             let sym = self.tail_sym(arm);
             if sym != 0 {
-                let val = {
-                    let r = self.lookup(sym);
-                    if self.any_class(&r) {
-                        Value::Type(sym)
-                    } else {
-                        Value::Alias(sym)
-                    }
-                };
+                let val = self.tail_value(sym);
                 self.ssa.write_variable(lhs, self.cur, val);
             }
             exits.push(self.cur);
@@ -378,8 +375,7 @@ impl<'t> Fold<'t> {
     }
 
     fn tail_sym(&self, node: Cursor<'_>) -> u32 {
-        let last = node.children().filter(|c| c.named()).last();
-        match last {
+        match node.last_named() {
             Some(c) if c.size() == 1 && c.sym_opt().is_some() => c.sym(),
             Some(c) if c.size() > 1 => self.tail_sym(c),
             Some(c) => c.sym(),
