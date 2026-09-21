@@ -56,6 +56,16 @@ This installs the skill to `.agents/skills/orbit` in the project root.
 If the skill is already installed, `glab` reports that `SKILL.md` exists and
 suggests `--force` to overwrite.
 
+Claude Code does not scan `.agents/skills`. Link the skill into its own
+directory so it can find it:
+
+```shell
+ln -s ../../.agents/skills/orbit ~/.claude/skills/orbit
+```
+
+For the local `orbit-cli` skill, [`orbit setup`](local/access/cli.md#set-up-your-ai-agent)
+writes the files and the Claude Code link for you.
+
 ## Update the GitLab Orbit skill
 
 To update to the latest version, re-run the install command with `--force`:

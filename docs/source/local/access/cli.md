@@ -171,32 +171,58 @@ orbit mcp serve
 It serves `run_sql`, `get_graph_schema`, and `index` against
 `~/.gitlab/orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
 
-## Set up your AI assistant
+## Set up your AI agent
 
-`orbit setup` configures an AI coding assistant to consult the graph before it
-reaches for grep. Choose an assistant:
+`orbit setup` configures your AI coding agents to consult the graph before
+they reach for grep. Run it without arguments to configure every agent
+installed on your machine:
 
-```plaintext
-orbit setup <duo|claude|codex|opencode|pi>
+```shell
+orbit setup
 ```
 
-Supported assistants are GitLab Duo, Claude Code, Codex, OpenCode, and Pi. The
-guidance tells them to run `orbit grep` and `orbit context` before raw source
-tools.
+It detects agents from their configuration directories, such as
+`~/.claude`, `~/.codex`, and `~/.config/opencode`, and prints what each agent
+got. Each agent gets the instruction section, the skill files, and the nudge
+hooks. Supported agents are GitLab Duo, Claude Code, Codex, OpenCode, and Pi.
+
+To configure specific agents, name them:
+
+```shell
+orbit setup claude codex
+```
+
+Other options:
+
+- `--mcp` also registers the `orbit` MCP server.
+- `--skip <component>` leaves a component out: `instructions`, `hooks`,
+  `skill`, or `mcp`.
+- `--all` configures every supported agent, detected or not.
+- `--dry-run` prints every path and exits without writing.
 
 ### What it changes
 
 This command modifies files that belong to you. It never runs on its own, only
 when you invoke it.
 
-For every assistant you name, `orbit setup`:
+For every agent it configures, `orbit setup`:
 
-- Adds a block to that assistant's instruction file, such as `CLAUDE.md` or
+- Adds a block to that agent's instruction file, such as `CLAUDE.md` or
   `AGENTS.md`. The block sits between `<!-- orbit:setup:begin -->` and
   `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
   alone. Running the command again replaces the block in place instead of adding
   a second copy.
-- Adds entries to that assistant's JSON configuration, where the assistant
+- With `--mcp`, registers the `orbit` MCP server, which runs
+  `orbit mcp serve`, in the agent's MCP configuration:
+  `~/.claude.json` or `.mcp.json` for Claude Code, `config.toml` for Codex, and
+  `opencode.json` for OpenCode. Existing servers, comments, and unrelated
+  settings are preserved. If OpenCode uses `opencode.jsonc`, setup stops and
+  prints the entry for you to add by hand.
+- Installs the `orbit-cli` skill into `.agents/skills/`, the directory Codex,
+  OpenCode, Cursor, and Gemini CLI scan. Claude Code does not scan that
+  directory, so it also gets a `.claude/skills/orbit-cli` link to the same
+  files.
+- Adds entries to that agent's JSON configuration, where the agent
   supports it. For Claude Code this is a `PreToolUse` hook in
   `settings.json`; for OpenCode it is a plugin file and its registration.
   Entries carry an `orbit` marker, and only marked entries are ever replaced or
@@ -217,19 +243,23 @@ teammates. User-global scope, the default, affects only you.
 
 ### Remove it
 
-To undo the changes, run:
+To undo the changes for every agent, run:
 
 ```shell
-orbit setup claude --remove
+orbit uninstall
 ```
 
-This strips the marker-delimited block and the marked JSON entries, and leaves
-the rest of each file untouched. If a file contained nothing but `orbit`
-entries, it is deleted. Omit the assistant names to remove the setup for all of
-them. Backup files are not deleted.
+Name agents to undo only those, for example `orbit uninstall claude`. Pass
+`--project` or `--dir <path>` to target a project instead of your user-global
+configuration. `--dry-run` works as it does for `orbit setup`.
+
+This strips the marker-delimited block, the `orbit` MCP server entry, the
+marked JSON entries, and the installed skill files, and leaves the rest of each
+file untouched. If a file contained nothing but `orbit` entries, it is deleted.
+Files you edited after setup are kept. Backup files are not deleted.
 
 If you would rather not have `orbit setup` touch your files, skip it and add the
-same instruction block and hooks by hand.
+same instruction block, MCP entry, and hooks by hand.
 
 ## Storage
 

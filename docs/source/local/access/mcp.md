@@ -40,6 +40,11 @@ The GitLab Orbit Local MCP server is stateless. This means the server has the fo
 
 ## Connect a client to the GitLab Orbit Local MCP server
 
+The quickest path is [`orbit setup --mcp`](./cli.md#set-up-your-ai-agent).
+It detects Claude Code, Codex, and OpenCode on your machine and registers the
+server as `orbit` in each one. The sections below show the equivalent manual
+configuration for those clients and for Cursor.
+
 The GitLab Orbit Local MCP server supports stdio transport. Arguments and commands
 vary depending on the MCP client and your local environment.
 

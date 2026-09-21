@@ -1,11 +1,57 @@
-//! Generic, invertible JSON operations behind assistant specs: a marker-owned array merge
-//! (hook entries) and a string registration (plugin lists). Both preserve everything they do
-//! not own, and removal prunes containers they emptied.
+use std::path::Path;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
-pub(super) fn contains_marker(value: &Value, marker: &str) -> bool {
+use super::Report;
+
+pub(super) fn read_object(path: &Path) -> Result<Value> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => {
+            let value: Value = serde_json::from_str(&raw).with_context(|| {
+                format!(
+                    "{} is not valid JSON; fix or remove it and re-run",
+                    path.display()
+                )
+            })?;
+            if !value.is_object() {
+                bail!("{} is not a JSON object", path.display());
+            }
+            Ok(value)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
+        Err(e) => Err(e).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+pub(super) fn write_object(path: &Path, value: &Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let mut raw = serde_json::to_string_pretty(value).context("failed to serialize JSON")?;
+    raw.push('\n');
+    std::fs::write(path, raw).with_context(|| format!("failed to write {}", path.display()))
+}
+
+pub(super) fn write_or_delete_when_empty(
+    path: &Path,
+    root: &Value,
+    label: &str,
+    report: &mut Report,
+) -> Result<()> {
+    if root.as_object().is_some_and(|map| map.is_empty()) {
+        std::fs::remove_file(path)
+            .with_context(|| format!("failed to remove {}", path.display()))?;
+        report.note(label, "removed (was orbit-only)");
+    } else {
+        write_object(path, root)?;
+        report.note(label, "orbit entries removed");
+    }
+    Ok(())
+}
+
+pub(in crate::commands::setup) fn contains_marker(value: &Value, marker: &str) -> bool {
     match value {
         Value::String(s) => s.contains(marker),
         Value::Array(items) => items.iter().any(|item| contains_marker(item, marker)),
@@ -130,6 +176,30 @@ fn retain_and_prune(value: &mut Value, path: &[String], keep: &dyn Fn(&Value) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_file_reads_as_empty_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let value = read_object(&dir.path().join("nope.json")).unwrap();
+        assert_eq!(value, json!({}));
+    }
+
+    #[test]
+    fn invalid_json_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.json");
+        std::fs::write(&path, "{not json").unwrap();
+        let err = read_object(&path).unwrap_err();
+        assert!(err.to_string().contains("not valid JSON"));
+    }
+
+    #[test]
+    fn non_object_root_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("array.json");
+        std::fs::write(&path, "[]").unwrap();
+        assert!(read_object(&path).is_err());
+    }
 
     fn hook_path() -> Vec<String> {
         vec!["hooks".into(), "PreToolUse".into()]

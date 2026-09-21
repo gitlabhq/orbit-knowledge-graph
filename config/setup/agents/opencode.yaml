@@ -2,6 +2,8 @@
 # OpenCode has no PreToolUse-style context injection, so a tool.execute.before plugin prepends
 # a one-per-session graph reminder to the first bash command.
 name: opencode
+title: OpenCode
+detect: ["$XDG_CONFIG_HOME/opencode", "~/.config/opencode"]
 instruction_file:
   project: AGENTS.md
   global: "~/.config/opencode/AGENTS.md"
@@ -18,3 +20,12 @@ registrations:
     value:
       project: .opencode/plugins/orbit.js
       global: "~/.config/opencode/plugins/orbit.js"
+mcp:
+  file:
+    project: opencode.json
+    global: "~/.config/opencode/opencode.json"
+  format: opencode
+skills:
+  dir:
+    project: .agents/skills
+    global: "~/.agents/skills"
