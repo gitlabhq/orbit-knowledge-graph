@@ -92,14 +92,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
-        AND (
-          d.name = 'ROOT_CONST'
-          OR d.name = 'ROOT_STATIC'
-          OR d.name = 'RootAlias'
-          OR d.name = 'local_macro'
-          OR d.name = 'inner'
-          OR d.name = 'use_everything'
-        )
+        AND d.name IN ['ROOT_CONST', 'ROOT_STATIC', 'RootAlias', 'local_macro', 'inner', 'use_everything']
       RETURN d.name AS name
     assert:
       - { column_values: { field: name, values: ['ROOT_CONST', 'ROOT_STATIC', 'RootAlias', 'local_macro', 'inner', 'use_everything'] } }
@@ -134,7 +127,7 @@ tests:
   - name: "trait and union definitions are retained"
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'src/lib.rs' AND (d.name = 'Runner' OR d.name = 'Bits')
+      WHERE d.file_path = 'src/lib.rs' AND d.name IN ['Runner', 'Bits']
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 2 }
@@ -145,7 +138,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'ModDeclaration'
-      RETURN i.import_type AS type, i.path AS path
+      RETURN i.import_type AS type, i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { type: 'ModDeclaration', path: 'generated' } }
@@ -154,7 +147,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'AliasedExternCrate'
-      RETURN i.path AS path, i.alias AS alias
+      RETURN i.import_path AS path, i.identifier_alias AS alias
     assert:
       - { row_count: 1 }
       - { row: { path: 'core', alias: 'rust_core' } }
@@ -163,8 +156,9 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
-        AND (i.alias = 'inner_helper' OR i.alias = 'inner_mod' OR i.name = 'Worker')
-      RETURN i.import_type AS type, i.path AS path, i.name AS name
+        AND i.import_path IN ['crate::inner::helper', 'crate::inner', 'crate::inner::Worker']
+        AND i.import_type IN ['UseGroup', 'PubUseGroup']
+      RETURN i.import_type AS type, i.import_path AS path, i.identifier_name AS name
     assert:
       - { row_count: 3 }
       - { row: { type: 'UseGroup', path: 'crate::inner::helper', name: 'helper' } }
@@ -175,8 +169,8 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
-        AND (i.alias = 'inner_helper' OR i.alias = 'inner_mod' OR i.alias = 'crate_helper')
-      RETURN i.alias AS alias
+        AND i.identifier_alias IN ['inner_helper', 'inner_mod', 'crate_helper']
+      RETURN i.identifier_alias AS alias
     assert:
       - { column_values: { field: alias, values: ['crate_helper', 'inner_helper', 'inner_mod'] } }
 
@@ -184,7 +178,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'GlobUse'
-      RETURN i.path AS path
+      RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { path: 'crate::inner::nested' } }
@@ -192,15 +186,15 @@ tests:
   - name: "restricted visibility uses stay private in import metadata"
     query: |
       MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'src/lib.rs' AND i.alias = 'crate_helper'
-      RETURN i.import_type AS type, i.path AS path
+      WHERE i.file_path = 'src/lib.rs' AND i.identifier_alias = 'crate_helper'
+      RETURN i.import_type AS type, i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { type: 'AliasedUse', path: 'crate::inner::helper' } }
 
   - name: "local extern functions are captured and callable"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_local_extern' AND callee.name = 'exported_c'
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
@@ -209,7 +203,7 @@ tests:
 
   - name: "foreign extern declarations do not create bogus local call edges"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_foreign_extern'
       RETURN callee.name AS name
     assert:

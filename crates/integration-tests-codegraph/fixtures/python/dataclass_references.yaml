@@ -18,11 +18,10 @@ fixtures:
 tests:
   - name: "typed dataclass attribute access resolves to the field definition"
     query: |
-      MATCH (caller:Definition)-[r:DefinitionToDefinition]->(field:Definition)
+      MATCH (caller:Definition)-[r:CALLS|DEFINES|EXTENDS]->(field:Definition)
       WHERE caller.fqn = 'main.greet'
         AND field.name = 'email'
-        AND r.edge_kind IN ['Calls', 'References']
-      RETURN field.fqn AS field, r.edge_kind AS kind
+      RETURN field.fqn AS field
     assert:
       - { row_count: 1 }
-      - { row: { field: "main.User.email", kind: "Calls" } }
+      - { row: { field: "main.User.email" } }

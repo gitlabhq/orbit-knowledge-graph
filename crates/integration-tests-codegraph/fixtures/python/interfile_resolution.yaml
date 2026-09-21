@@ -61,7 +61,7 @@ tests:
   - name: "Layer 3→2: main.run calls UserService"
     description: "from services.user_service import UserService; UserService() in run()"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'UserService'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -71,7 +71,7 @@ tests:
 
   - name: "Layer 3→2: main.run calls ProjectService"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'ProjectService'
       RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
@@ -82,7 +82,7 @@ tests:
   - name: "Layer 2→1: UserService.create calls User"
     description: "from models.user import User; User(name) in create()"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'create' AND callee.name = 'User'
             AND caller.file_path <> callee.file_path
       RETURN caller.file_path AS src, callee.file_path AS tgt
@@ -93,7 +93,7 @@ tests:
 
   - name: "Layer 2→1: ProjectService.create calls Project"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'create' AND callee.name = 'Project'
             AND caller.file_path <> callee.file_path
       RETURN caller.file_path AS src, callee.file_path AS tgt
@@ -122,7 +122,7 @@ tests:
   - name: "All cross-file call edges connect different files"
     description: "No same-file edges should be returned by the cross-file filter"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.file_path <> callee.file_path
       RETURN caller.name AS caller, callee.name AS callee,
              caller.file_path AS src, callee.file_path AS tgt

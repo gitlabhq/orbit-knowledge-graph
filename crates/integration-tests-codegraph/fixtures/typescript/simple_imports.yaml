@@ -25,7 +25,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'main.ts'
-      RETURN i.name AS name, i.path AS path
+      RETURN i.identifier_name AS name, i.import_path AS path
       ORDER BY name
     assert:
       - { row_count: 2 }
@@ -44,10 +44,9 @@ tests:
 
   - name: Cross-file call from run to createUser
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'createUser'
         AND caller.file_path <> callee.file_path
-        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
