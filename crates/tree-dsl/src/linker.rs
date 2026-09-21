@@ -161,7 +161,9 @@ impl<'t> Fold<'t> {
             let sym = n.sym();
             self.import_count += 1;
             self.imports.push(n.index());
-            self.import_names.push(sym);
+            let hint = n.child_sym(C::SsaHint);
+            self.import_names
+                .push(n.child_sym(C::Alias).or(hint).unwrap_or(sym));
             self.ssa
                 .write_variable(sym, self.cur, Value::ImportRef(self.import_count - 1));
             for kind in [C::Alias, C::SsaHint] {
@@ -385,21 +387,14 @@ impl<'t> Fold<'t> {
     }
 
     fn lookup(&mut self, sym: u32) -> Vec<Linked> {
-        let result: Vec<Linked> = self
-            .ssa
-            .read_variable(sym, self.cur)
-            .iter()
-            .filter_map(|pv| self.to_linked(pv))
-            .collect();
-        if result.is_empty() {
-            self.ssa
-                .read_variable(sym, BlockId(0))
-                .iter()
-                .filter_map(|pv| self.to_linked(pv))
-                .collect()
-        } else {
-            result
+        for block in [self.cur, BlockId(0)] {
+            let vals = self.ssa.read_variable(sym, block);
+            let result: Vec<Linked> = vals.iter().filter_map(|pv| self.to_linked(pv)).collect();
+            if !result.is_empty() {
+                return result;
+            }
         }
+        Vec::new()
     }
 
     fn emit(&mut self, r: &Linked, from: u32) {
@@ -443,7 +438,9 @@ impl<'t> Fold<'t> {
     fn resolve_name(&mut self, sym: u32, from: u32) {
         let mut targets = self.lookup(sym);
         if targets.is_empty() {
-            targets = self.lookup(self.wildcard);
+            let names = self.imports.iter().zip(&self.import_names);
+            let all = names.filter(|&(_, &s)| s == self.wildcard);
+            targets = all.map(|(&n, _)| Linked::Import(n)).collect();
         }
         for r in &targets {
             match r {
