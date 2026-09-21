@@ -119,7 +119,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
+  # skip: tree-dsl: bogus: cross-file Calls rows are unique per caller and target; both get call sites already resolve
   - name: "Inherited method dispatch via both static-factory chains: register -> Container.get (2 call sites)"
     skip: true
     query: |

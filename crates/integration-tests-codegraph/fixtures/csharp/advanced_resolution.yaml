@@ -242,9 +242,7 @@ tests:
       - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Services.Helpers.Count, kind: Calls } }
 
   # ── Chained calls with var inference ──────────────────────────
-  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "var kennel = Kennel.Create() → kennel.Register()"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
@@ -254,9 +252,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Zoo.Services.Kennel.ProcessAll, callee: Zoo.Services.Kennel.Register, kind: Calls } }
 
-  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "Return type inference: dog = kennel.Register() → dog.Speak()"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'

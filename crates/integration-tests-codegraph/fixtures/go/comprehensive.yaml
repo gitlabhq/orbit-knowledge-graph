@@ -171,7 +171,7 @@ tests:
 
   # ── Promoted method via embedding ──
 
-  # skip: tree-dsl: same-package cross-file lookup needs a package namespace; the resolver is import-driven
+  # skip: tree-dsl: bogus: cross-file Calls rows are unique per caller and target; both Greet call sites already resolve
   - name: "admin.Greet resolves via User embedding"
     skip: true
     query: |
@@ -183,9 +183,7 @@ tests:
 
   # ── Intra-service method calls ──
 
-  # skip: tree-dsl: Save lives in models.go; same-package cross-file lookup needs a package namespace
   - name: "DeleteUser calls exactly FindUser and Save"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)

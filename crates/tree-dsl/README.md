@@ -180,6 +180,17 @@ and column endpoints use the selected range. Java methods include annotations.
 
 After per-file rewriting and SSA linking, the resolver runs across all files to produce cross-file edges (Imports, Calls). Resolution runs in parallel. Return-type waves repeat until no new call edges appear.
 
+Internal call edges retain their call sites. The exported table has one
+cross-file row per caller, target, and edge kind.
+
+### Lexical declarations
+
+The reserved `hoisted` tag predeclares the direct definitions in a scope before
+its body runs. Elixir modules use this tag so plain callees reach local functions
+regardless of definition order. Wildcard imports bind unbound names only while
+their lexical scope is active. An `__ssa_hint "*"` imports the target's visible
+names; an alias keeps a namespace binding.
+
 ### Phase 1: File tree walk
 
 The resolver builds a synthetic tree from all file paths:

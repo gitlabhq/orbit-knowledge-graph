@@ -210,9 +210,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "new parent() resolves to the declared super: NotFoundException.rebuild -> DomainException"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'

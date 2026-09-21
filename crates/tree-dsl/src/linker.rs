@@ -1,3 +1,5 @@
+use rustc_hash::FxHashMap;
+
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
 use crate::intern::Lang;
@@ -14,7 +16,7 @@ enum Linked {
 
 enum WorkItem {
     Visit(u32),
-    ExitScope,
+    ExitScope(usize),
 }
 
 enum Receiver {
@@ -53,7 +55,7 @@ struct Fold<'t> {
     tree: &'t Tree,
     ssa: SsaEngine,
     cur: BlockId,
-    root_seen: u32,
+    predeclared: FxHashMap<u32, u32>,
     import_count: u32,
     defs: Vec<u32>,
     imports: Vec<u32>,
@@ -62,6 +64,7 @@ struct Fold<'t> {
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
     scoped_key: u32,
+    hoisted_key: u32,
     edges: Vec<Edge>,
 }
 
@@ -70,7 +73,8 @@ impl<'t> Fold<'t> {
         self.def_stack.last().and_then(|&(d, _)| d).unwrap_or(0)
     }
 
-    fn exit_scope(&mut self) {
+    fn exit_scope(&mut self, wildcards: usize) {
+        self.wildcards.truncate(wildcards);
         if self.def_stack.len() > 1
             && let Some((_, saved)) = self.def_stack.pop()
         {
@@ -81,7 +85,7 @@ impl<'t> Fold<'t> {
     fn run(&mut self, mut stack: Vec<WorkItem>) {
         while let Some(item) = stack.pop() {
             match item {
-                WorkItem::ExitScope => self.exit_scope(),
+                WorkItem::ExitScope(wildcards) => self.exit_scope(wildcards),
                 WorkItem::Visit(i) => self.dispatch(self.tree.cursor(i), &mut stack),
             }
         }
@@ -192,9 +196,8 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
-        let def_idx = if self.defs.get(self.root_seen as usize) == Some(&idx) {
-            self.root_seen += 1;
-            self.root_seen - 1
+        let def_idx = if let Some(def_idx) = self.predeclared.remove(&idx) {
+            def_idx
         } else {
             self.defs.push(idx);
             self.defs.len() as u32 - 1
@@ -213,9 +216,23 @@ impl<'t> Fold<'t> {
             self.edges.push(Edge::local(idx, dn, EdgeKind::Extends));
         }
         if c.has_tag(self.scoped_key) {
+            if c.has_tag(self.hoisted_key) {
+                self.predeclare(c);
+            }
             self.def_stack.push((Some(idx), parent_block));
-            stack.push(WorkItem::ExitScope);
+            stack.push(WorkItem::ExitScope(self.wildcards.len()));
             stack.extend(c.children_rev().map(|ch| WorkItem::Visit(ch.index())));
+        }
+    }
+
+    fn predeclare(&mut self, scope: Cursor<'t>) {
+        for d in scope.children().filter(|d| d.is(C::Def)) {
+            if let Some(name) = d.child_sym(C::DefName) {
+                let def_idx = self.defs.len() as u32;
+                self.defs.push(d.index());
+                self.predeclared.insert(d.index(), def_idx);
+                self.declare(d, name, def_idx);
+            }
         }
     }
 
@@ -551,7 +568,7 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         tree,
         ssa,
         cur: entry,
-        root_seen: 0,
+        predeclared: FxHashMap::default(),
         import_count: 0,
         defs: Vec::new(),
         imports: Vec::new(),
@@ -560,15 +577,12 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern(WILDCARD),
         scoped_key: lang.syms.intern("scoped"),
+        hoisted_key: lang.syms.intern("hoisted"),
         edges: Vec::new(),
     };
 
     let root = tree.root();
-    let root_defs = root.children().filter(|d| d.is(C::Def));
-    for (d, name) in root_defs.filter_map(|d| Some((d, d.child_sym(C::DefName)?))) {
-        f.defs.push(d.index());
-        f.declare(d, name, f.defs.len() as u32 - 1);
-    }
+    f.predeclare(root);
     let mut stack = Vec::new();
     Fold::push_children(root, &mut stack);
     f.run(stack);

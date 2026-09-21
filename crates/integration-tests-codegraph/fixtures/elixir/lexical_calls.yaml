@@ -1,0 +1,66 @@
+name: "Elixir lexical calls and import scope"
+fixtures:
+  - path: util.ex
+    content: |
+      defmodule Util do
+        def dub(x), do: x
+        def internal(x), do: x
+      end
+  - path: callers.ex
+    content: |
+      defmodule Imported do
+        import Util
+        def doubled(x), do: dub(x)
+        def local(x), do: internal(x)
+        defp internal(x), do: x
+      end
+      defmodule Isolated do
+        def unresolved(x), do: dub(x)
+      end
+      defmodule Scoped do
+        def imported(x) do
+          import Util
+          dub(x)
+        end
+        def sibling(x), do: dub(x)
+      end
+      defmodule Ordered do
+        def before_import(x), do: dub(x)
+        import Util
+        def after_import(x), do: dub(x)
+      end
+
+tests:
+  - name: "Imported calls bind to functions in the imported module"
+    query: |
+      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
+      WHERE e.edge_kind = 'Calls' AND t.fqn = 'Util.dub'
+      RETURN s.fqn AS caller
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: Imported.doubled } }
+      - { row: { caller: Scoped.imported } }
+      - { row: { caller: Ordered.after_import } }
+  - name: "Forward local functions take lexical precedence"
+    query: |
+      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
+      WHERE e.edge_kind = 'Calls' AND s.fqn = 'Imported.local'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: Imported.internal } }
+  - name: "Imports do not enter sibling or earlier scopes"
+    query: |
+      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND s.fqn IN ['Isolated.unresolved', 'Scoped.sibling', 'Ordered.before_import']
+      RETURN t.fqn AS callee
+    assert:
+      - { empty: true }
+  - name: "Modules are not callable values"
+    query: |
+      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
+      WHERE e.edge_kind = 'Calls' AND t.definition_type = 'Class'
+      RETURN t.fqn AS callee
+    assert:
+      - { empty: true }

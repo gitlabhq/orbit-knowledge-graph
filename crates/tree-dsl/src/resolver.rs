@@ -522,7 +522,7 @@ fn name_targets(ctx: &ResolveCtx, tfi: usize, c: Cursor) -> Vec<Loc> {
     let hint = c.child_sym(C::SsaHint).filter(|&h| h == ctx.wildcard_sym);
     let ns = hint.unwrap_or(c.sym());
     if ns == ctx.wildcard_sym {
-        return if c.child_sym(C::Alias).is_some() || hint.is_some() {
+        return if c.child_sym(C::Alias).is_some() {
             vec![Loc { fi: tfi, node: 0 }]
         } else {
             ctx.visible[tfi]
@@ -613,7 +613,10 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         };
         let target_name = ctx.reverse_visible.get(&target_loc).copied().unwrap_or(0);
         let ft = &ctx.trees[ie.from_fi()];
-        let is_wild = ft.cursor(ie.from_node).sym() == ctx.wildcard_sym && target_name != 0;
+        let name = ft.cursor(ie.from_node);
+        let is_wild = (name.sym() == ctx.wildcard_sym
+            || name.child_sym(C::SsaHint) == Some(ctx.wildcard_sym))
+            && target_name != 0;
 
         for intra in ctx
             .edges_for(ie.from_fi())

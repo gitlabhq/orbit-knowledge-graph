@@ -35,14 +35,15 @@ canonical nodes named here.
   promoted into H's visible names. Every co-includer of H then reaches it.
   Files that do not include H never take part.
 - Forward references. The linker pre-declares every root definition before
-  the walk.
+  the walk. The `hoisted` tag also pre-declares direct definitions inside a scope.
 - Inheritance. `method_up` climbs `__supertype` chains across files through
   each file's visible names. `resolve_inheritance` adds Extends edges and
   implicit-receiver dispatch; `resolve_receivers` resolves member calls on a
   visible class name; `resolve_field_edges` dispatches through typed bindings,
   field or local.
 - Wildcard binders. Every `__name` whose local name is `*` binds unbound bare
-  calls. A name whose SSA hint is `*` imports every visible name.
+  calls in its lexical scope. A name whose SSA hint is `*` imports every visible
+  name unless it carries a namespace alias.
 - Builtins. A rule per language empties the callee of a predeclared function
   (`(identifier "/^(len|println|...)$/")` -> `(__callee)`), so it binds to
   nothing.

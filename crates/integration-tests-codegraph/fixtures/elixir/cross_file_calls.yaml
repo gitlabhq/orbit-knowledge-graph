@@ -67,9 +67,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the module is defined in another file; alias and import paths follow lib/snake_case and do not reach the fixture files
   - name: "Bare call through import resolves: Foo.doubled -> Util.dub"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Foo.doubled'

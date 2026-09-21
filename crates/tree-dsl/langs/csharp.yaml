@@ -70,6 +70,8 @@ stages:
 
   - name: retag-expressions
     rules:
+      - match: '(await_expression $V:__call)'
+        replace: '$V'
       - match: '(member_access_expression expression: $O:__ivar name: $M:identifier)'
         replace: '(__member @$M (__object $O))'
       - match: '(member_access_expression expression: $O:__member name: $M:identifier)'
