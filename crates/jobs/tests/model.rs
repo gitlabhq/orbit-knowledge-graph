@@ -39,14 +39,9 @@ fn kinds_serialize_as_bare_strings_and_reject_invalid_input() {
 }
 
 #[test]
-fn job_state_ranks_increase_in_declared_order() {
+fn job_state_ranks_follow_the_declared_order() {
     let ranks: Vec<u64> = JobState::ALL.iter().map(|state| state.rank()).collect();
-    let mut sorted = ranks.clone();
-    sorted.sort_unstable();
-    sorted.dedup();
-    assert_eq!(ranks, sorted);
-    assert_eq!(JobState::Pending.rank(), 0);
-    assert_eq!(JobState::Succeeded.rank(), 7);
+    assert_eq!(ranks, [0, 1, 2, 3, 4, 5, 6, 7]);
 }
 
 #[test]
@@ -65,17 +60,31 @@ fn terminal_states_are_failed_skipped_and_succeeded() {
         .collect();
     assert_eq!(
         terminal,
-        vec![JobState::Failed, JobState::Skipped, JobState::Succeeded]
+        [JobState::Failed, JobState::Skipped, JobState::Succeeded]
     );
 }
 
-fn phase(required: bool, discovery_closed: bool, counts: &[(JobState, u64)]) -> PhaseSummary {
+fn open_phase(required: bool, counts: &[(JobState, u64)]) -> PhaseSummary {
     PhaseSummary {
         kind: TEST_KIND,
         required,
-        discovery_closed,
+        discovery_closed: false,
         abandoned: false,
         counts_by_state: BTreeMap::from_iter(counts.iter().copied()),
+    }
+}
+
+fn closed_phase(required: bool, counts: &[(JobState, u64)]) -> PhaseSummary {
+    PhaseSummary {
+        discovery_closed: true,
+        ..open_phase(required, counts)
+    }
+}
+
+fn abandoned_phase() -> PhaseSummary {
+    PhaseSummary {
+        abandoned: true,
+        ..open_phase(true, &[])
     }
 }
 
@@ -93,13 +102,10 @@ fn campaign(phases: Vec<PhaseSummary>) -> CampaignSummary {
 #[test]
 fn campaign_is_complete_when_every_phase_is_closed_and_terminal() {
     let summary = campaign(vec![
-        phase(
-            true,
-            true,
-            &[(JobState::Succeeded, 3), (JobState::Failed, 1)],
-        ),
-        phase(false, true, &[(JobState::Skipped, 2)]),
+        closed_phase(true, &[(JobState::Succeeded, 3), (JobState::Failed, 1)]),
+        closed_phase(false, &[(JobState::Skipped, 2)]),
     ]);
+
     assert!(summary.is_complete());
     assert!(summary.is_ready());
     assert!(!summary.is_abandoned());
@@ -109,7 +115,8 @@ fn campaign_is_complete_when_every_phase_is_closed_and_terminal() {
 
 #[test]
 fn campaign_with_open_discovery_is_not_complete_even_with_no_jobs() {
-    let summary = campaign(vec![phase(true, false, &[])]);
+    let summary = campaign(vec![open_phase(true, &[])]);
+
     assert!(!summary.is_complete());
     assert!(!summary.is_ready());
 }
@@ -117,31 +124,31 @@ fn campaign_with_open_discovery_is_not_complete_even_with_no_jobs() {
 #[test]
 fn campaign_is_ready_when_only_optional_phases_are_unfinished() {
     let summary = campaign(vec![
-        phase(true, true, &[(JobState::Succeeded, 5)]),
-        phase(false, true, &[(JobState::Running, 1)]),
+        closed_phase(true, &[(JobState::Succeeded, 5)]),
+        closed_phase(false, &[(JobState::Running, 1)]),
     ]);
+
     assert!(summary.is_ready());
     assert!(!summary.is_complete());
 }
 
 #[test]
 fn campaign_with_a_pending_job_in_a_closed_phase_is_not_complete() {
-    let summary = campaign(vec![phase(
-        true,
+    let summary = campaign(vec![closed_phase(
         true,
         &[(JobState::Succeeded, 9), (JobState::Pending, 1)],
     )]);
+
     assert!(!summary.is_complete());
 }
 
 #[test]
 fn campaign_is_abandoned_when_any_phase_is_abandoned() {
-    let mut abandoned = phase(true, false, &[]);
-    abandoned.abandoned = true;
     let summary = campaign(vec![
-        phase(true, true, &[(JobState::Succeeded, 1)]),
-        abandoned,
+        closed_phase(true, &[(JobState::Succeeded, 1)]),
+        abandoned_phase(),
     ]);
+
     assert!(summary.is_abandoned());
     assert!(!summary.is_complete());
 }

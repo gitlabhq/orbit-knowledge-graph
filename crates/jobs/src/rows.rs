@@ -1,3 +1,4 @@
+use std::iter::repeat_n;
 use std::sync::Arc;
 
 use arrow::array::{
@@ -7,97 +8,74 @@ use arrow::datatypes::{Field, Schema};
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
-use crate::model::{CampaignId, JobRef, JobState, PhaseSpec, PhaseState};
+use crate::model::{CampaignId, JobRef, JobTransition, PhaseSpec, PhaseState};
 
 pub(crate) const CAMPAIGN_TABLE: &str = "campaign";
 pub(crate) const JOB_TABLE: &str = "job";
 
-pub(crate) struct CampaignRow<'a> {
-    pub campaign: &'a CampaignId,
-    pub phase: &'a PhaseSpec,
-    pub state: PhaseState,
-    pub recorded_at: DateTime<Utc>,
+pub(crate) fn campaign_batch(
+    campaign: &CampaignId,
+    phases: &[PhaseSpec],
+    state: PhaseState,
+    recorded_at: DateTime<Utc>,
+) -> Result<RecordBatch, ArrowError> {
+    let count = phases.len();
+
+    let kind = strings(repeat_n(campaign.kind.as_str(), count));
+    let subject = strings(repeat_n(campaign.subject.as_str(), count));
+    let generation = timestamps(repeat_n(campaign.generation, count));
+    let job_kind = strings(phases.iter().map(|phase| phase.kind.as_str()));
+    let required = booleans(phases.iter().map(|phase| phase.required));
+    let phase_state = strings(repeat_n(state.as_str(), count));
+    let recorded = timestamps(repeat_n(recorded_at, count));
+    let version = unsigned(repeat_n(state.rank(), count));
+
+    batch(vec![
+        ("kind", kind),
+        ("subject", subject),
+        ("generation", generation),
+        ("job_kind", job_kind),
+        ("required", required),
+        ("state", phase_state),
+        ("recorded_at", recorded),
+        ("_version", version),
+    ])
 }
 
-pub(crate) struct JobRow<'a> {
-    pub job: &'a JobRef,
-    pub dispatch_id: Uuid,
-    pub attempt: i64,
-    pub state: JobState,
-    pub reason: &'a str,
-    pub recorded_at: DateTime<Utc>,
-}
+pub(crate) fn job_batch(transitions: &[JobTransition]) -> Result<RecordBatch, ArrowError> {
+    let jobs = || transitions.iter().map(|transition| &transition.job);
+    let each = || transitions.iter();
 
-pub(crate) fn campaign_batch(rows: &[CampaignRow<'_>]) -> Result<RecordBatch, ArrowError> {
-    let columns: Vec<(&str, ArrayRef)> = vec![
-        ("kind", strings(rows, |r| r.campaign.kind.as_str())),
-        ("subject", strings(rows, |r| r.campaign.subject.as_str())),
-        ("generation", timestamps(rows, |r| r.campaign.generation)),
-        ("job_kind", strings(rows, |r| r.phase.kind.as_str())),
-        (
-            "required",
-            Arc::new(BooleanArray::from_iter(
-                rows.iter().map(|r| Some(r.phase.required)),
-            )),
-        ),
-        ("state", strings(rows, |r| r.state.as_str())),
-        ("recorded_at", timestamps(rows, |r| r.recorded_at)),
-        (
-            "_version",
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|r| r.state.rank()),
-            )),
-        ),
-    ];
-    batch(columns)
-}
+    let campaign_kind = strings(jobs().map(campaign_kind));
+    let campaign_subject = strings(jobs().map(campaign_subject));
+    let campaign_generation = timestamps(jobs().map(campaign_generation));
+    let namespace_id = integers(jobs().map(|job| job.namespace_id));
+    let traversal_path = strings(jobs().map(|job| job.traversal_path.as_str()));
+    let kind = strings(jobs().map(|job| job.kind.as_str()));
+    let key = strings(jobs().map(|job| job.key.as_str()));
+    let dispatch_id = strings(each().map(|t| t.dispatch_id.to_string()));
+    let attempt = integers(each().map(|t| i64::from(t.attempt)));
+    let state = strings(each().map(|t| t.state.as_str()));
+    let reason = strings(each().map(|t| t.reason.as_deref().unwrap_or("")));
+    let recorded_at = timestamps(each().map(|t| t.recorded_at));
+    let version = unsigned(each().map(|t| t.state.rank()));
 
-pub(crate) fn job_batch(rows: &[JobRow<'_>]) -> Result<RecordBatch, ArrowError> {
-    let columns: Vec<(&str, ArrayRef)> = vec![
-        ("campaign_kind", strings(rows, |r| campaign_kind(r.job))),
-        (
-            "campaign_subject",
-            strings(rows, |r| campaign_subject(r.job)),
-        ),
-        (
-            "campaign_generation",
-            timestamps(rows, |r| campaign_generation(r.job)),
-        ),
-        (
-            "namespace_id",
-            Arc::new(Int64Array::from_iter_values(
-                rows.iter().map(|r| r.job.namespace_id),
-            )),
-        ),
-        (
-            "traversal_path",
-            strings(rows, |r| r.job.traversal_path.as_str()),
-        ),
-        ("kind", strings(rows, |r| r.job.kind.as_str())),
-        ("key", strings(rows, |r| r.job.key.as_str())),
-        (
-            "dispatch_id",
-            Arc::new(StringArray::from_iter_values(
-                rows.iter().map(|r| r.dispatch_id.to_string()),
-            )),
-        ),
-        (
-            "attempt",
-            Arc::new(Int64Array::from_iter_values(rows.iter().map(|r| r.attempt))),
-        ),
-        ("state", strings(rows, |r| r.state.as_str())),
-        ("reason", strings(rows, |r| r.reason)),
-        ("recorded_at", timestamps(rows, |r| r.recorded_at)),
-        (
-            "_version",
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|r| r.state.rank()),
-            )),
-        ),
-    ];
-    batch(columns)
+    batch(vec![
+        ("campaign_kind", campaign_kind),
+        ("campaign_subject", campaign_subject),
+        ("campaign_generation", campaign_generation),
+        ("namespace_id", namespace_id),
+        ("traversal_path", traversal_path),
+        ("kind", kind),
+        ("key", key),
+        ("dispatch_id", dispatch_id),
+        ("attempt", attempt),
+        ("state", state),
+        ("reason", reason),
+        ("recorded_at", recorded_at),
+        ("_version", version),
+    ])
 }
 
 fn campaign_kind(job: &JobRef) -> &str {
@@ -118,12 +96,24 @@ fn campaign_generation(job: &JobRef) -> DateTime<Utc> {
         .map_or(DateTime::<Utc>::UNIX_EPOCH, |campaign| campaign.generation)
 }
 
-fn strings<'a, R>(rows: &'a [R], value: impl Fn(&'a R) -> &'a str) -> ArrayRef {
-    Arc::new(StringArray::from_iter_values(rows.iter().map(value)))
+fn strings<S: AsRef<str>>(values: impl Iterator<Item = S>) -> ArrayRef {
+    Arc::new(StringArray::from_iter_values(values))
 }
 
-fn timestamps<R>(rows: &[R], value: impl Fn(&R) -> DateTime<Utc>) -> ArrayRef {
-    let micros = rows.iter().map(|row| value(row).timestamp_micros());
+fn integers(values: impl Iterator<Item = i64>) -> ArrayRef {
+    Arc::new(Int64Array::from_iter_values(values))
+}
+
+fn unsigned(values: impl Iterator<Item = u64>) -> ArrayRef {
+    Arc::new(UInt64Array::from_iter_values(values))
+}
+
+fn booleans(values: impl Iterator<Item = bool>) -> ArrayRef {
+    Arc::new(BooleanArray::from_iter(values.map(Some)))
+}
+
+fn timestamps(values: impl Iterator<Item = DateTime<Utc>>) -> ArrayRef {
+    let micros = values.map(|value| value.timestamp_micros());
     Arc::new(TimestampMicrosecondArray::from_iter_values(micros).with_timezone("UTC"))
 }
 
