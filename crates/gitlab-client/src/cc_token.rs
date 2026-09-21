@@ -11,13 +11,10 @@ use crate::client::GitlabClient;
 use crate::error::GitlabClientError;
 use crate::types::CloudConnectorToken;
 
-/// Refresh this many seconds before `expires_at`, which is itself already
-/// buffered against the real `exp` (see `CC_TOKEN_EXPIRY_BUFFER_SECS` in
-/// `client.rs`).
-const REFRESH_BUFFER_SECS: i64 = 60;
-
-/// Extra random lead time on top of `REFRESH_BUFFER_SECS`, so a fleet with
-/// identical `expires_at` values doesn't stampede the Rails route at once.
+/// Random lead time subtracted from `expires_at` (itself already buffered
+/// against the real `exp`, see `CC_TOKEN_EXPIRY_BUFFER_SECS` in `client.rs`),
+/// so a fleet with identical `expires_at` values doesn't stampede the Rails
+/// route at once.
 const REFRESH_JITTER_MAX_SECS: i64 = 30;
 
 pub trait CloudConnectorTokenFetcher: Send + Sync {
@@ -89,7 +86,7 @@ impl CloudConnectorTokenCache {
 }
 
 fn compute_refresh_at(expires_at: i64, jitter_secs: i64) -> i64 {
-    expires_at - REFRESH_BUFFER_SECS - jitter_secs
+    expires_at - jitter_secs
 }
 
 fn jitter_secs() -> i64 {
@@ -134,16 +131,13 @@ mod tests {
     }
 
     #[test]
-    fn refresh_at_subtracts_buffer_and_jitter() {
-        assert_eq!(compute_refresh_at(1_000, 0), 1_000 - REFRESH_BUFFER_SECS);
-        assert_eq!(
-            compute_refresh_at(1_000, 30),
-            1_000 - REFRESH_BUFFER_SECS - 30
-        );
+    fn refresh_at_subtracts_jitter() {
+        assert_eq!(compute_refresh_at(1_000, 0), 1_000);
+        assert_eq!(compute_refresh_at(1_000, 30), 970);
     }
 
     #[test]
-    fn the_two_expiry_buffers_compose_to_120_150_seconds_of_lead_time() {
+    fn the_expiry_buffer_and_jitter_compose_to_60_90_seconds_of_lead_time() {
         use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 
         let real_exp = Utc::now().timestamp() + 3_600;
@@ -162,8 +156,8 @@ mod tests {
             let refresh_at = compute_refresh_at(expires_at, jitter);
             let lead_time = real_exp - refresh_at;
             assert!(
-                (120..=150).contains(&lead_time),
-                "lead_time={lead_time} out of [120, 150] for jitter={jitter}"
+                (60..=90).contains(&lead_time),
+                "lead_time={lead_time} out of [60, 90] for jitter={jitter}"
             );
         }
     }
@@ -192,7 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn refetches_when_cached_token_is_within_refresh_window() {
-        let near_expiry = Utc::now().timestamp() + REFRESH_BUFFER_SECS - 1;
+        let near_expiry = Utc::now().timestamp() - 5;
         let fetcher = Arc::new(StubFetcher::new(near_expiry));
         let cache = CloudConnectorTokenCache::new(fetcher.clone());
 
