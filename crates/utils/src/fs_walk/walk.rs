@@ -83,12 +83,14 @@ mod tests {
             (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
                 .then_some((Decision::ListOnly, FileLabel::default()))
         }
-        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
-            if content.contains(&0) {
-                (Decision::ListOnly, FileLabel::default())
-            } else {
-                (Decision::Parse, FileLabel::default())
-            }
+        fn on_contents(&mut self, items: &[(&FileInventoryEntry, &[u8])]) -> Vec<(Decision, FileLabel)> {
+            items.iter().map(|(_, content)| {
+                if content.contains(&0) {
+                    (Decision::ListOnly, FileLabel::default())
+                } else {
+                    (Decision::Parse, FileLabel::default())
+                }
+            }).collect()
         }
     }
 

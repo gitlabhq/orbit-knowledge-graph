@@ -156,23 +156,19 @@ pub trait FileStreamHooks {
     }
     /// Settle from path + size alone, before any bytes are read. `Some` is
     /// final; `None` reads the content. On a first pass over raw files,
-    /// `Parse` should only come from `on_content` (it needs bytes). On a
+    /// `Parse` should only come from `on_contents` (it needs bytes). On a
     /// refinement pass (`FileInventory::refine`) the entry already carries a
     /// prior label, so returning `Parse` from `on_header` is valid.
     fn on_header(&mut self, _file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
         None
     }
-    /// Decide with the file's full (size-capped) content; only reached when
-    /// `on_header` returned `None`.
-    fn on_content(&mut self, _file: &FileInventoryEntry, _content: &[u8]) -> (Decision, FileLabel) {
-        (Decision::Parse, FileLabel::default())
-    }
-    /// Batch variant of `on_content`; `refine` passes all unsettled entries at once.
+    /// Classify entries from their content. The single content classification
+    /// path for both streaming sources (batch of one) and `refine` (full batch).
     fn on_contents(
         &mut self,
-        items: &[(&FileInventoryEntry, &[u8])],
+        _items: &[(&FileInventoryEntry, &[u8])],
     ) -> Vec<(Decision, FileLabel)> {
-        items.iter().map(|(f, c)| self.on_content(f, c)).collect()
+        _items.iter().map(|_| (Decision::Parse, FileLabel::default())).collect()
     }
     /// Settle a non-regular entry (symlink, etc.) — no content to sniff, never a
     /// parse candidate. Routed here (instead of decided in the source) so the
@@ -195,7 +191,7 @@ pub fn step<H: FileStreamHooks>(
         return Ok(settled);
     }
     sniff(content)?;
-    Ok(hooks.on_content(file, content))
+    Ok(hooks.on_contents(&[(file, content)]).pop().unwrap())
 }
 
 /// A capped running total; the first `add` to overflow short-circuits the

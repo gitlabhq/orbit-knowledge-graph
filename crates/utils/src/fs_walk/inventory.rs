@@ -4,7 +4,7 @@ use std::ops::Deref;
 use rustc_hash::FxHashMap;
 
 use super::stream::{
-    Decision, FileInventoryEntry, FileStreamHooks, StreamError, canonicalize_inventory,
+    Decision, FileInventoryEntry, FileStreamHooks, StreamError, canonicalize_inventory, step,
 };
 
 #[derive(Debug, Clone)]
@@ -70,46 +70,22 @@ impl FileInventory {
         groups
     }
 
-    /// Run a second [`FileStreamHooks`] pass over the inventory.
-    /// Unsettled entries are classified in one `on_contents` batch call.
+    /// Run a second [`FileStreamHooks`] pass. `read_content` provides bytes
+    /// on demand (`None` = header-only). Drops entries reclassified as `Drop`.
     pub fn refine<H: FileStreamHooks>(
         self,
         hooks: &mut H,
         read_content: impl Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<Self, StreamError> {
-        let mut settled = Vec::with_capacity(self.0.len());
-        let mut unsettled = Vec::new();
-
-        for (i, entry) in self.0.iter().enumerate() {
-            hooks.admit(entry)?;
-            if let Some(result) = hooks.on_header(entry) {
-                settled.push((i, result));
-            } else {
-                unsettled.push(i);
-            }
-        }
-
-        let contents: Vec<Vec<u8>> = unsettled
-            .iter()
-            .map(|&i| read_content(&self.0[i].path).unwrap_or_default())
-            .collect();
-        let batch: Vec<(&FileInventoryEntry, &[u8])> = unsettled
-            .iter()
-            .zip(&contents)
-            .map(|(&i, bytes)| (&self.0[i], bytes.as_slice()))
-            .collect();
-        let content_results = hooks.on_contents(&batch);
-
         let mut out = Vec::with_capacity(self.0.len());
-        let mut settled_iter = settled.into_iter().peekable();
-        let mut content_iter = content_results.into_iter();
-        for (i, mut entry) in self.0.into_iter().enumerate() {
-            let (decision, label) =
-                if settled_iter.peek().is_some_and(|(si, _)| *si == i) {
-                    settled_iter.next().unwrap().1
-                } else {
-                    content_iter.next().unwrap()
-                };
+        let mut buf = Vec::new();
+        for mut entry in self.0 {
+            let (decision, label) = step(hooks, &entry, &mut buf, |buf| {
+                if let Some(bytes) = read_content(&entry.path) {
+                    buf.extend_from_slice(&bytes);
+                }
+                Ok(())
+            })?;
             entry.decision = decision;
             entry.label = label;
             if entry.decision != Decision::Drop {
