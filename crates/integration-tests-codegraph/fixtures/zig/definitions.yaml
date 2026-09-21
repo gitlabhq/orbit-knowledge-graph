@@ -146,7 +146,7 @@ tests:
   - name: All container types are in the same file
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Struct', 'Enum', 'Struct']
+      WHERE d.definition_type IN ['Struct', 'Enum']
       RETURN d.name AS name, d.file_path AS file
     assert:
       - { no_nulls: file }

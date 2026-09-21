@@ -42,6 +42,42 @@ stages:
       - match: '(function_definition name: $N:word body: $B)'
         replace: '(__def (__defname @$N) (__function) $B)'
 
+  - name: tag-defs
+    rules:
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true" }
+      - match: '(__def (__struct))'
+        tag: { scoped: "true" }
+      - match: '(__def (__impl))'
+        tag: { scoped: "true" }
+      - match: '(__def (__trait))'
+        tag: { scoped: "true" }
+      - match: '(__def (__enum))'
+        tag: { scoped: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")'
+
 resolve:
   display_source: original
   stages: []
