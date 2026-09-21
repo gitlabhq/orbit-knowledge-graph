@@ -744,7 +744,8 @@ integration-test:
       not test(corpus_smoke) & not (
         test(=indexer::sdlc::scenario_indexing) |
         test(=server::data_correctness::data_correctness_scenarios) |
-        test(=server::data_correctness::data_correctness)
+        test(=server::data_correctness::data_correctness) |
+        test(=server::performance::performance_queries)
       )
 
 integration-test-data-correctness:
@@ -753,7 +754,8 @@ integration-test-data-correctness:
     NEXTEST_FILTER: >-
       test(=indexer::sdlc::scenario_indexing) |
       test(=server::data_correctness::data_correctness_scenarios) |
-      test(=server::data_correctness::data_correctness)
+      test(=server::data_correctness::data_correctness) |
+      test(=server::performance::performance_queries)
 
 corpus-smoke-test:
   stage: test
