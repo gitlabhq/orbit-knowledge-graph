@@ -536,12 +536,9 @@ impl<'t> Fold<'t> {
             self.enclosing_class(binding)
                 .and_then(|cls| self.ivar_type(cls, obj))
         } else if obj != 0 {
-            self.lookup(obj).into_iter().find_map(|r| {
-                if let Linked::Type(ts) = r {
-                    Some(ts)
-                } else {
-                    None
-                }
+            self.lookup(obj).into_iter().find_map(|r| match r {
+                Linked::Type(ts) => Some(ts),
+                _ => None,
             })
         } else {
             None
