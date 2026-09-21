@@ -405,12 +405,18 @@ struct SetupFlags {
 }
 
 impl SetupFlags {
-    fn options(&self, assistants: Vec<String>, all: bool) -> commands::setup::Options {
+    fn options(
+        &self,
+        assistants: Vec<String>,
+        all: bool,
+        components: std::collections::BTreeSet<commands::setup::Component>,
+    ) -> commands::setup::Options {
         commands::setup::Options {
             assistants,
             all,
             yes: self.yes,
             dry_run: self.dry_run,
+            components,
         }
     }
 
@@ -448,6 +454,14 @@ enum Commands {
         /// Configure every supported assistant, detected or not.
         #[arg(long, conflicts_with = "assistants")]
         all: bool,
+
+        /// Also register the `orbit` MCP server. Off by default.
+        #[arg(long)]
+        mcp: bool,
+
+        /// Leave a component out (repeatable).
+        #[arg(long, value_enum, value_name = "COMPONENT")]
+        skip: Vec<commands::setup::Component>,
 
         #[command(flatten)]
         flags: SetupFlags,
@@ -710,15 +724,18 @@ async fn dispatch(command: Commands) -> Result<()> {
         Commands::Setup {
             assistants,
             all,
+            mcp,
+            skip,
             flags,
         } => {
-            let options = flags.options(assistants, all);
+            let components = commands::setup::Component::selection(mcp, &skip);
+            let options = flags.options(assistants, all, components);
             let machine = commands::setup::detect::Machine::current()?;
-            commands::setup::install(options, flags.target()?, &machine)
+            commands::setup::wizard::install(options, flags.target()?, &machine)
         }
         Commands::Uninstall { assistants, flags } => {
-            let options = flags.options(assistants, false);
-            commands::setup::uninstall(options, flags.target()?)
+            let options = flags.options(assistants, false, Default::default());
+            commands::setup::wizard::uninstall(options, flags.target()?)
         }
         Commands::HookGuard { kind, mode: _ } => {
             commands::hook_guard::run(kind);

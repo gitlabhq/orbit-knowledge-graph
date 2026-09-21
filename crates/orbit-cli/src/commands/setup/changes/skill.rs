@@ -3,10 +3,95 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::skill;
+use super::{Change, Report};
+use crate::commands::setup::Target;
+use crate::commands::setup::spec::AssistantSpec;
+use crate::skill::{INSTALL_DIR_NAME, embedded_files};
 
-pub(super) fn install(skill_root: &Path, label: &str) -> Result<()> {
-    for (relative, contents) in skill::embedded_files() {
+pub(super) struct Skill;
+
+impl Change for Skill {
+    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Option<String>> {
+        Ok(targets(&[assistant], target)?
+            .into_iter()
+            .next()
+            .map(|skill| match skill.link {
+                Some((_, link_label)) => format!("{} (linked from {link_label})", skill.label),
+                None => skill.label,
+            }))
+    }
+
+    fn install(
+        &self,
+        assistants: &[&AssistantSpec],
+        target: &Target,
+        report: &mut Report,
+    ) -> Result<()> {
+        for skill in targets(assistants, target)? {
+            write_files(&skill.root, &skill.label, report)?;
+            if let Some((link_path, link_label)) = &skill.link {
+                link(link_path, &skill.root, link_label, report)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn remove(
+        &self,
+        assistants: &[&AssistantSpec],
+        target: &Target,
+        report: &mut Report,
+    ) -> Result<()> {
+        for skill in targets(assistants, target)? {
+            if let Some((link_path, link_label)) = &skill.link {
+                unlink(link_path, link_label, report)?;
+            }
+            remove_files(&skill.root, &skill.label, report)?;
+        }
+        Ok(())
+    }
+}
+
+struct SkillTarget {
+    root: PathBuf,
+    label: String,
+    link: Option<(PathBuf, String)>,
+}
+
+fn targets(assistants: &[&AssistantSpec], target: &Target) -> Result<Vec<SkillTarget>> {
+    let mut targets: Vec<SkillTarget> = Vec::new();
+    for dirs in assistants
+        .iter()
+        .filter_map(|assistant| assistant.skills.as_ref())
+    {
+        let (dir, dir_label) = target.resolve(&dirs.dir)?;
+        let root = dir.join(INSTALL_DIR_NAME);
+        let link = dirs
+            .link
+            .as_ref()
+            .map(|link| target.resolve(link))
+            .transpose()?
+            .map(|(dir, label)| {
+                (
+                    dir.join(INSTALL_DIR_NAME),
+                    format!("{label}/{INSTALL_DIR_NAME}"),
+                )
+            });
+
+        match targets.iter_mut().find(|existing| existing.root == root) {
+            Some(existing) => existing.link = existing.link.take().or(link),
+            None => targets.push(SkillTarget {
+                root,
+                label: format!("{dir_label}/{INSTALL_DIR_NAME}"),
+                link,
+            }),
+        }
+    }
+    Ok(targets)
+}
+
+fn write_files(skill_root: &Path, label: &str, report: &mut Report) -> Result<()> {
+    for (relative, contents) in embedded_files() {
         let destination = skill_root.join(&relative);
         if std::fs::read(&destination).is_ok_and(|current| current == contents) {
             continue;
@@ -18,18 +103,18 @@ pub(super) fn install(skill_root: &Path, label: &str) -> Result<()> {
         std::fs::write(&destination, contents)
             .with_context(|| format!("failed to write {}", destination.display()))?;
     }
-    println!("  {label}  ->  skill installed");
+    report.note(label, "skill installed");
     Ok(())
 }
 
-pub(super) fn link(link_path: &Path, skill_root: &Path, label: &str) -> Result<()> {
+fn link(link_path: &Path, skill_root: &Path, label: &str, report: &mut Report) -> Result<()> {
     if let Ok(metadata) = std::fs::symlink_metadata(link_path) {
         let state = if metadata.is_symlink() {
             "already linked"
         } else {
             "kept (exists)"
         };
-        println!("  {label}  ->  {state}");
+        report.note(label, state);
         return Ok(());
     }
     if let Some(parent) = link_path.parent() {
@@ -39,20 +124,20 @@ pub(super) fn link(link_path: &Path, skill_root: &Path, label: &str) -> Result<(
 
     match symlink_dir(&relative_to(link_path, skill_root), link_path) {
         Ok(()) => {
-            println!("  {label}  ->  linked to {}", skill_root.display());
+            report.note(label, format!("linked to {}", skill_root.display()));
             Ok(())
         }
-        Err(_) => install(link_path, label),
+        Err(_) => write_files(link_path, label, report),
     }
 }
 
-pub(super) fn remove(skill_root: &Path, label: &str) -> Result<()> {
+fn remove_files(skill_root: &Path, label: &str, report: &mut Report) -> Result<()> {
     if !skill_root.exists() {
         return Ok(());
     }
     let mut kept = false;
     let mut directories: BTreeSet<PathBuf> = BTreeSet::new();
-    for (relative, contents) in skill::embedded_files() {
+    for (relative, contents) in embedded_files() {
         let installed = skill_root.join(&relative);
         match std::fs::read(&installed) {
             Ok(current) if current == contents => {
@@ -79,24 +164,24 @@ pub(super) fn remove(skill_root: &Path, label: &str) -> Result<()> {
     remove_empty_skills_dirs(skill_root);
 
     if kept {
-        println!("  {label}  ->  kept (edited since install; delete it by hand)");
+        report.note(label, "kept (edited since install; delete it by hand)");
     } else {
-        println!("  {label}  ->  skill removed");
+        report.note(label, "skill removed");
     }
     Ok(())
 }
 
-pub(super) fn unlink(link_path: &Path, label: &str) -> Result<()> {
+fn unlink(link_path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(link_path) else {
         return Ok(());
     };
     if !metadata.is_symlink() {
-        return remove(link_path, label);
+        return remove_files(link_path, label, report);
     }
     remove_symlink(link_path)
         .with_context(|| format!("failed to remove {}", link_path.display()))?;
     remove_empty_skills_dirs(link_path);
-    println!("  {label}  ->  link removed");
+    report.note(label, "link removed");
     Ok(())
 }
 

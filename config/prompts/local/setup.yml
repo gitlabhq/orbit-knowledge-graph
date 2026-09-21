@@ -5,14 +5,15 @@ description: >-
   Configure AI coding assistants to consult the graph
 
 
-  Without assistant names, detects the assistants installed on this machine
-  from their configuration directories and configures every one of them.
-  Name assistants to configure only those, or pass `--all` for every
-  supported assistant. For each assistant it writes a managed section into
-  the instruction file and registers the `orbit` MCP server. It also installs
-  the Orbit skill files and adds nudge hooks where the assistant supports them.
+  Detects the assistants installed on this machine from their configuration
+  directories and opens a short wizard. Pick assistants, with the detected
+  ones pre-selected, then pick what to install. The defaults are the managed
+  instruction section, the Orbit skill files, and nudge hooks where the
+  assistant supports them. The `orbit` MCP server is opt-in: check it in the
+  wizard or pass `--mcp`. Name assistants to pre-select only those, or pass
+  `--all` for every supported assistant. `--skip` leaves a component out.
   Targets user-global configuration by default, or the project with
   `--project` or `--dir`. Existing files get a one-time `.orbit-backup`
   sibling before the first change. Re-running updates everything in place.
-  Prints the plan and asks once before writing; `--yes` skips the prompt and
-  `--dry-run` stops after the plan. `orbit uninstall` reverts it.
+  `--yes` skips the wizard and applies the defaults; `--dry-run` stops before
+  writing. `orbit uninstall` reverts it.

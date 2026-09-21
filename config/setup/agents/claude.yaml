@@ -3,6 +3,7 @@
 # `orbit hook-guard` nudge on top of the CLAUDE.md block. Claude Code does not scan
 # `.agents/skills`, so the shared skill dir is linked into `.claude/skills`.
 name: claude
+title: Claude Code
 detect: ["$CLAUDE_CONFIG_DIR", "~/.claude", "~/.claude.json"]
 instruction_file:
   project: CLAUDE.md

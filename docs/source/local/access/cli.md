@@ -182,11 +182,15 @@ orbit setup
 ```
 
 It detects assistants from their configuration directories, such as
-`~/.claude`, `~/.codex`, and `~/.config/opencode`, prints the files it will
-touch, and asks once before writing. Supported assistants are GitLab Duo,
-Claude Code, Codex, OpenCode, and Pi.
+`~/.claude`, `~/.codex`, and `~/.config/opencode`, then opens a short wizard.
+The first step lists every supported assistant with the detected ones
+pre-selected. The second step lists what each assistant gets: the instruction
+section, the skill files, and the nudge hooks are selected by default, and the
+MCP server is not. The wizard then shows the files it will touch and asks once
+before writing. Supported assistants are GitLab Duo, Claude Code, Codex,
+OpenCode, and Pi.
 
-To configure specific assistants, name them:
+To pre-select specific assistants, name them:
 
 ```shell
 orbit setup claude codex
@@ -194,9 +198,12 @@ orbit setup claude codex
 
 Other options:
 
+- `--mcp` also registers the `orbit` MCP server.
+- `--skip <component>` leaves a component out: `instructions`, `hooks`,
+  `skill`, or `mcp`.
 - `--all` configures every supported assistant, detected or not.
-- `--yes` skips the confirmation prompt. Required when there is no terminal,
-  for example in scripts.
+- `--yes` skips the wizard and applies the defaults. Required when there is no
+  terminal, for example in scripts.
 - `--dry-run` prints the plan and exits without writing.
 
 ### What it changes
@@ -211,11 +218,12 @@ For every assistant it configures, `orbit setup`:
   `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
   alone. Running the command again replaces the block in place instead of adding
   a second copy.
-- Registers the `orbit` MCP server, which runs `orbit mcp serve`, in the
-  assistant's MCP configuration: `~/.claude.json` or `.mcp.json` for Claude
-  Code, `config.toml` for Codex, and `opencode.json` for OpenCode. Existing
-  servers, comments, and unrelated settings are preserved. If OpenCode uses
-  `opencode.jsonc`, setup stops and prints the entry for you to add by hand.
+- With `--mcp`, or when you select it in the wizard, registers the `orbit` MCP
+  server, which runs `orbit mcp serve`, in the assistant's MCP configuration:
+  `~/.claude.json` or `.mcp.json` for Claude Code, `config.toml` for Codex, and
+  `opencode.json` for OpenCode. Existing servers, comments, and unrelated
+  settings are preserved. If OpenCode uses `opencode.jsonc`, setup stops and
+  prints the entry for you to add by hand.
 - Installs the `orbit-cli` skill into `.agents/skills/`, the directory Codex,
   OpenCode, Cursor, and Gemini CLI scan. Claude Code does not scan that
   directory, so it also gets a `.claude/skills/orbit-cli` link to the same

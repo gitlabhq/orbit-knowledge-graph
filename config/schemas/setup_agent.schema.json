@@ -4,13 +4,18 @@
   "title": "Orbit setup assistant spec",
   "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: detection paths, a managed instruction-file block, marker-owned JSON merges, templated files, string registrations, an MCP server entry, and skill directories. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
   "type": "object",
-  "required": ["name", "detect", "instruction_file"],
+  "required": ["name", "title", "detect", "instruction_file"],
   "additionalProperties": false,
   "properties": {
     "name": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$",
       "description": "Assistant identifier accepted by `orbit setup <ASSISTANT>`. Must match the YAML file stem."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Display name shown in the setup wizard, e.g. Claude Code."
     },
     "detect": {
       "type": "array",

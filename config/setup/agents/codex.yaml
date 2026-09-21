@@ -2,6 +2,7 @@
 # Codex rejects additionalContext on PreToolUse hooks, so AGENTS.md, the MCP entry, and the
 # shared skill dir are the whole integration.
 name: codex
+title: Codex
 detect: ["$CODEX_HOME", "~/.codex"]
 instruction_file:
   project: AGENTS.md

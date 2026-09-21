@@ -146,6 +146,7 @@ pub(super) fn mcp_server() -> McpServer {
 #[serde(deny_unknown_fields)]
 pub(super) struct AssistantSpec {
     pub(super) name: String,
+    pub(super) title: String,
     pub(super) detect: Vec<String>,
     pub(super) instruction_file: ScopedPath,
     #[serde(default)]
@@ -272,7 +273,7 @@ fn embedded_text(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::setup::json_ops;
+    use crate::commands::setup::json;
 
     #[test]
     fn all_specs_parse_and_expected_assistants_exist() {
@@ -289,7 +290,7 @@ mod tests {
                 assert!(!merge.marker.is_empty(), "{}: empty marker", spec.name);
                 for entry in &merge.entries {
                     assert!(
-                        json_ops::contains_marker(entry, &merge.marker),
+                        json::contains_marker(entry, &merge.marker),
                         "{}: entry {entry} does not contain marker {:?}",
                         spec.name,
                         merge.marker

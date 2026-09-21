@@ -1,28 +1,78 @@
-//! Managed instruction-file block: a marker-delimited section spliced into AGENTS.md /
-//! CLAUDE.md. Re-running setup replaces the section in place, so upgrades refresh the guidance
-//! without duplicating it or touching the rest of the file.
-
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+
+use super::{Change, Report, backup_once};
+use crate::commands::setup::Target;
+use crate::commands::setup::spec::{self, AssistantSpec};
 
 const BLOCK_BEGIN: &str = "<!-- orbit:setup:begin -->";
 const BLOCK_END: &str = "<!-- orbit:setup:end -->";
 
-fn rendered_block() -> String {
-    format!(
-        "{BLOCK_BEGIN}\n{}\n{BLOCK_END}",
-        super::spec::instructions()
-    )
+pub(super) struct Instructions;
+
+impl Change for Instructions {
+    fn plan(&self, assistant: &AssistantSpec, target: &Target) -> Result<Option<String>> {
+        Ok(Some(target.resolve(&assistant.instruction_file)?.1))
+    }
+
+    fn install(
+        &self,
+        assistants: &[&AssistantSpec],
+        target: &Target,
+        report: &mut Report,
+    ) -> Result<()> {
+        for (path, label) in files(assistants, target)? {
+            upsert_block_in_file(&path, &label, report)?;
+        }
+        Ok(())
+    }
+
+    fn remove(
+        &self,
+        assistants: &[&AssistantSpec],
+        target: &Target,
+        report: &mut Report,
+    ) -> Result<()> {
+        for (path, label) in files(assistants, target)? {
+            strip_block_from_file(&path, &label, report)?;
+        }
+        Ok(())
+    }
 }
 
-pub(super) fn upsert_block_in_file(path: &Path, label: &str) -> Result<()> {
+fn files(assistants: &[&AssistantSpec], target: &Target) -> Result<Vec<(PathBuf, String)>> {
+    let mut resolved: Vec<(PathBuf, String)> = assistants
+        .iter()
+        .map(|assistant| target.resolve(&assistant.instruction_file))
+        .collect::<Result<_>>()?;
+    resolved.sort_by(|a, b| a.0.cmp(&b.0));
+    resolved.dedup_by(|a, b| a.0 == b.0);
+
+    let mut files: Vec<(PathBuf, String)> = Vec::new();
+    let mut canonicals: Vec<PathBuf> = Vec::new();
+    for (path, label) in resolved {
+        let canonical = dunce::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        if canonicals.contains(&canonical) {
+            continue;
+        }
+        canonicals.push(canonical);
+        files.push((path, label));
+    }
+    Ok(files)
+}
+
+fn rendered_block() -> String {
+    format!("{BLOCK_BEGIN}\n{}\n{BLOCK_END}", spec::instructions())
+}
+
+fn upsert_block_in_file(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let block = rendered_block();
     let (updated, action) = match std::fs::read_to_string(path) {
         Ok(existing) => match splice_block(&existing, &block) {
             Some(updated) => (updated, "orbit section updated"),
             None => {
-                super::backup_once(path, label)?;
+                backup_once(path, label, report)?;
                 (append_block(&existing, &block), "orbit section written")
             }
         },
@@ -36,11 +86,11 @@ pub(super) fn upsert_block_in_file(path: &Path, label: &str) -> Result<()> {
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     std::fs::write(path, updated).with_context(|| format!("failed to write {}", path.display()))?;
-    println!("  {label}  ->  {action}");
+    report.note(label, action);
     Ok(())
 }
 
-pub(super) fn strip_block_from_file(path: &Path, label: &str) -> Result<()> {
+fn strip_block_from_file(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let existing = match std::fs::read_to_string(path) {
         Ok(existing) => existing,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -52,11 +102,11 @@ pub(super) fn strip_block_from_file(path: &Path, label: &str) -> Result<()> {
     if remaining.trim().is_empty() {
         std::fs::remove_file(path)
             .with_context(|| format!("failed to remove {}", path.display()))?;
-        println!("  {label}  ->  removed (was orbit-only)");
+        report.note(label, "removed (was orbit-only)");
     } else {
         std::fs::write(path, remaining)
             .with_context(|| format!("failed to write {}", path.display()))?;
-        println!("  {label}  ->  orbit section removed");
+        report.note(label, "orbit section removed");
     }
     Ok(())
 }
@@ -98,6 +148,48 @@ fn block_span(existing: &str) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn specs_for(names: &[&str]) -> Vec<&'static AssistantSpec> {
+        names.iter().map(|name| spec::get(name).unwrap()).collect()
+    }
+
+    fn project(dir: &Path) -> Target {
+        Target::project(Some(dir.to_path_buf())).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn files_dedupes_symlinked_claude_md() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# rules\n").unwrap();
+        std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
+
+        let files = files(&specs_for(&["claude", "codex"]), &project(dir.path()));
+        let labels: Vec<String> = files.unwrap().into_iter().map(|(_, label)| label).collect();
+        assert_eq!(labels, vec!["AGENTS.md"]);
+    }
+
+    #[test]
+    fn files_split_when_distinct() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = files(&specs_for(&["claude", "pi"]), &project(dir.path()));
+        let labels: Vec<String> = files.unwrap().into_iter().map(|(_, label)| label).collect();
+        assert_eq!(labels, vec!["AGENTS.md", "CLAUDE.md"]);
+    }
+
+    #[test]
+    fn global_files_are_per_assistant() {
+        let files = files(&specs_for(&["claude", "codex", "pi"]), &Target::Global);
+        let labels: Vec<String> = files.unwrap().into_iter().map(|(_, label)| label).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "~/.claude/CLAUDE.md",
+                "~/.codex/AGENTS.md",
+                "~/.pi/agent/AGENTS.md"
+            ]
+        );
+    }
 
     #[test]
     fn append_then_splice_is_idempotent() {
@@ -144,13 +236,13 @@ mod tests {
         let path = dir.path().join("AGENTS.md");
         std::fs::write(&path, "# My rules\n").unwrap();
 
-        upsert_block_in_file(&path, "AGENTS.md").unwrap();
-        upsert_block_in_file(&path, "AGENTS.md").unwrap();
+        upsert_block_in_file(&path, "AGENTS.md", &mut Report::default()).unwrap();
+        upsert_block_in_file(&path, "AGENTS.md", &mut Report::default()).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert_eq!(written.matches(BLOCK_BEGIN).count(), 1);
         assert!(written.contains("# My rules"));
 
-        strip_block_from_file(&path, "AGENTS.md").unwrap();
+        strip_block_from_file(&path, "AGENTS.md", &mut Report::default()).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# My rules\n");
     }
 
@@ -159,10 +251,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("CLAUDE.md");
 
-        upsert_block_in_file(&path, "CLAUDE.md").unwrap();
+        upsert_block_in_file(&path, "CLAUDE.md", &mut Report::default()).unwrap();
         assert!(path.is_file());
 
-        strip_block_from_file(&path, "CLAUDE.md").unwrap();
+        strip_block_from_file(&path, "CLAUDE.md", &mut Report::default()).unwrap();
         assert!(!path.exists());
     }
 }
