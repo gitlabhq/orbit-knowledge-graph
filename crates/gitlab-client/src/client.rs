@@ -32,8 +32,7 @@ const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
 const JWT_EXPIRY_SECONDS: i64 = 300;
 
 /// Safety margin subtracted from the token's `exp` claim so it doesn't lapse
-/// in flight to the collector. Rails used to apply this same buffer
-/// server-side; now it only returns the raw token, so gkg applies it.
+/// in flight to the collector.
 const CC_TOKEN_EXPIRY_BUFFER_SECS: i64 = 60;
 
 fn into_byte_stream(response: reqwest::Response) -> ByteStream {
