@@ -9,7 +9,14 @@ use crate::intern::Lang;
 use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
 use crate::treesitter::SupportLang;
 
-pub const CLASS_LIKE: &[C] = &[C::Class, C::Struct, C::ImplBlock, C::Interface, C::Trait];
+pub const CLASS_LIKE: &[C] = &[
+    C::Class,
+    C::Struct,
+    C::ImplBlock,
+    C::Interface,
+    C::Trait,
+    C::Enum,
+];
 
 type VisibleMap = Vec<FxHashMap<u32, Loc>>;
 
@@ -32,6 +39,21 @@ pub struct ResolveResult {
     pub resolved_source_paths: Vec<ResolvedSourcePath>,
 }
 
+#[derive(Default)]
+pub struct FileIndex {
+    keys: FxHashMap<String, usize>,
+    dirs: FxHashMap<String, Vec<usize>>,
+}
+
+impl FileIndex {
+    fn insert(&mut self, key: String, fi: usize) {
+        if let Some((dir, _)) = key.rsplit_once(PATH_SEP) {
+            self.dirs.entry(dir.to_string()).or_default().push(fi);
+        }
+        self.keys.insert(key, fi);
+    }
+}
+
 #[derive(Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ImportReq {
     pub fi: usize,
@@ -43,7 +65,7 @@ pub struct ImportReq {
 pub struct Resolver {
     visible: VisibleMap,
     reqs: Vec<ImportReq>,
-    file_index: FxHashMap<String, usize>,
+    file_index: FileIndex,
     wildcard_sym: u32,
     exports_key: u32,
     visible_from_key: u32,
@@ -54,7 +76,7 @@ impl Resolver {
         Self {
             visible: Vec::new(),
             reqs: Vec::new(),
-            file_index: FxHashMap::default(),
+            file_index: FileIndex::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
             exports_key: lang.syms.intern("exports"),
             visible_from_key: lang.syms.intern("visible_from"),
@@ -65,7 +87,7 @@ impl Resolver {
         Self {
             visible,
             reqs,
-            file_index: FxHashMap::default(),
+            file_index: FileIndex::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
             exports_key: lang.syms.intern("exports"),
             visible_from_key: lang.syms.intern("visible_from"),
@@ -269,7 +291,7 @@ struct ResolveCtx<'a> {
     lang: &'a Lang,
     visible: &'a VisibleMap,
     ambiguous: &'a FxHashSet<(usize, u32)>,
-    file_index: &'a FxHashMap<String, usize>,
+    file_index: &'a FileIndex,
     reverse_visible: &'a FxHashMap<Loc, u32>,
     support_lang: SupportLang,
     index_names: &'a [String],
@@ -310,7 +332,7 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
 fn gather_imports_for(
     trees: &[Tree],
     lang: &Lang,
-    file_index: &FxHashMap<String, usize>,
+    file_index: &FileIndex,
     lookup_prefixes: &[String],
     external: &[String],
     dirty_fis: &FxHashSet<usize>,
@@ -340,11 +362,14 @@ fn gather_imports_for(
                     let raw_path = lang.syms.resolve(resolved_sym);
                     let target_path = apply_aliases(raw_path, aliases);
                     let node_idx = cur.index();
-                    let candidates = match resolve_path(&target_path, file_index, lookup_prefixes) {
-                        Some(tfi) => {
-                            Either::Left(std::iter::once((tfi, target_path.clone(), false)))
-                        }
-                        None => Either::Right(cur.names().flat_map(|c| {
+                    let direct = resolve_glob(&target_path, file_index, lookup_prefixes);
+                    let candidates = match direct.is_empty() {
+                        false => Either::Left(
+                            direct
+                                .into_iter()
+                                .map(|tfi| (tfi, target_path.clone(), false)),
+                        ),
+                        true => Either::Right(cur.names().flat_map(|c| {
                             let submod =
                                 format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
                             resolve_glob(&submod, file_index, lookup_prefixes)
@@ -352,7 +377,7 @@ fn gather_imports_for(
                                 .map(move |sub_fi| (sub_fi, submod.clone(), true))
                         })),
                     };
-                    for (tfi, path, is_sub) in candidates {
+                    for (tfi, path, is_sub) in candidates.filter(|c| c.0 != fi) {
                         if is_sub {
                             edges.push(Edge::new(
                                 fi as u32,
@@ -402,6 +427,16 @@ fn propagate_reexports(
         })
         .collect();
 
+    let declared: Vec<Vec<u32>> = trees
+        .iter()
+        .map(|t| {
+            t.root()
+                .descendants()
+                .filter(|c| c.is(C::Decl))
+                .filter_map(|c| c.child_sym(C::DefName))
+                .collect()
+        })
+        .collect();
     loop {
         let mut new_exports: Vec<(usize, u32, Loc)> = reqs
             .iter()
@@ -442,6 +477,14 @@ fn propagate_reexports(
             }
         }
 
+        for req in reqs {
+            for &n in &declared[req.target_fi] {
+                let own = visible[req.fi].get(&n).filter(|l| l.fi == req.fi);
+                if let Some(&loc) = own.filter(|_| !visible[req.target_fi].contains_key(&n)) {
+                    new_exports.push((req.target_fi, n, loc));
+                }
+            }
+        }
         if new_exports.is_empty() {
             break;
         }
@@ -513,6 +556,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         .flat_map(|c| {
             name_targets(ctx, tfi, c)
                 .into_iter()
+                .filter(move |loc| loc.fi != fi)
                 .map(move |loc| c.edge_to(c.jump(loc.fi as u32, loc.node), EdgeKind::Imports))
         })
         .collect();
@@ -588,6 +632,10 @@ fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
                 let parent = ctx.corpus.jump(loc.fi as u32, loc.node);
                 out.push(child.edge_to(parent, EdgeKind::Extends));
                 for call in child.calls() {
+                    let owner = call.enclosing(|e| CLASS_LIKE.iter().any(|&k| e.has(k)));
+                    if owner.map(|o| o.index()) != Some(d.index()) {
+                        continue;
+                    }
                     let callee = call
                         .child(C::Callee)
                         .and_then(|k| k.child(C::Ivar)?.sym_opt());
@@ -716,9 +764,8 @@ fn build_file_index(
     lang: &Lang,
     support_lang: SupportLang,
     index_names: &[String],
-) -> FxHashMap<String, usize> {
-    let mut idx: FxHashMap<String, usize> =
-        FxHashMap::with_capacity_and_hasher(trees.len() * 3, Default::default());
+) -> FileIndex {
+    let mut idx = FileIndex::default();
     let sep = support_lang.fqn_separator();
     for (fi, (tree, path)) in trees.iter().map(|t| (t, t.label.as_str())).enumerate() {
         let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
@@ -741,22 +788,26 @@ fn build_file_index(
         let pkg = root.child_sym(C::Package).map_or(String::new(), |s| {
             lang.syms.resolve(s).replace(sep, PATH_SEP) + PATH_SEP
         });
-        for name in root.children().filter_map(|d| d.child_sym(C::DefName)) {
-            let key = format!("{pkg}{}", lang.syms.resolve(name));
-            idx.entry(key).or_insert(fi);
+        let defs = root.children().filter(|d| d.is(C::Def));
+        for name in defs.filter_map(|d| d.child_sym(C::DefName)) {
+            let key = format!("{pkg}{}", lang.syms.resolve(name).replace(sep, PATH_SEP));
+            idx.insert(key, fi);
         }
     }
     idx
 }
 
-fn resolve_glob(target: &str, idx: &FxHashMap<String, usize>, prefixes: &[String]) -> Vec<usize> {
+fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<usize> {
     let Some(dir) = target.strip_suffix(&format!("{PATH_SEP}{WILDCARD}")) else {
         return resolve_path(target, idx, prefixes).into_iter().collect();
     };
-    let under = |d: &str| d == dir || prefixes.iter().any(|p| d == format!("{p}{PATH_SEP}{dir}"));
-    let in_dir = |k: &str| k.rsplit_once(PATH_SEP).is_some_and(|(d, _)| under(d));
-    let hits = idx.iter().filter(|(k, _)| in_dir(k));
-    hits.map(|(_, &fi)| fi).unique().collect()
+    let dirs = std::iter::once(dir.to_string())
+        .chain(prefixes.iter().map(|p| format!("{p}{PATH_SEP}{dir}")));
+    dirs.filter_map(|d| idx.dirs.get(&d))
+        .flatten()
+        .copied()
+        .unique()
+        .collect()
 }
 
 fn is_external(source_str: &str, external: &[String]) -> bool {
@@ -765,17 +816,16 @@ fn is_external(source_str: &str, external: &[String]) -> bool {
         .any(|e| e == source_str.split(PATH_SEP).next().unwrap_or(source_str))
 }
 
-fn resolve_path(
-    target: &str,
-    file_index: &FxHashMap<String, usize>,
-    prefixes: &[String],
-) -> Option<usize> {
-    file_index.get(target).copied().or_else(|| {
+fn resolve_path(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Option<usize> {
+    file_index.keys.get(target).copied().or_else(|| {
         prefixes.iter().find_map(|p| {
             if p.is_empty() {
-                file_index.get(target).copied()
+                file_index.keys.get(target).copied()
             } else {
-                file_index.get(&format!("{p}{PATH_SEP}{target}")).copied()
+                file_index
+                    .keys
+                    .get(&format!("{p}{PATH_SEP}{target}"))
+                    .copied()
             }
         })
     })
@@ -786,14 +836,17 @@ fn resolve_submodule(
     name: &str,
     support_lang: SupportLang,
     index_names: &[String],
-    file_index: &FxHashMap<String, usize>,
+    file_index: &FileIndex,
 ) -> Option<usize> {
     let stem = support_lang.strip_extension(target_path);
     let dir = index_names.iter().find_map(|idx| {
         stem.strip_suffix(idx.as_str())
             .and_then(|s| s.strip_suffix(PATH_SEP))
     })?;
-    file_index.get(&format!("{dir}{PATH_SEP}{name}")).copied()
+    file_index
+        .keys
+        .get(&format!("{dir}{PATH_SEP}{name}"))
+        .copied()
 }
 
 fn apply_aliases(path: &str, aliases: &[(String, String)]) -> String {

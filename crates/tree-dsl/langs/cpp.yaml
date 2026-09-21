@@ -72,6 +72,10 @@ stages:
 
   - name: classify
     rules:
+      - match: '(declaration declarator: (function_declarator declarator: $N:identifier))'
+        replace: '(__decl (__defname @$N))'
+      - match: '(declaration declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier)))'
+        replace: '(__decl (__defname @$N))'
       # Method declarations and definitions inside a class body
       - match: '(field_declaration type:? $RT:type_identifier declarator: (function_declarator declarator: $N:field_identifier parameters: $P))'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'

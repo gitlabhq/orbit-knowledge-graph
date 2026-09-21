@@ -13,9 +13,9 @@ stages:
     rules:
       # Namespaces first, before qualified names collapse
       - match: '(namespace_declaration name: $N body: (declaration_list $$$B))'
-        replace: '(namespace_declaration (__package @$N) $$$B)'
+        replace: '(namespace_declaration (cs_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*")))) $$$B)'
       - match: '(file_scoped_namespace_declaration name: $N)'
-        replace: '(__package @$N)'
+        replace: '(cs_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(using_directive (static) $Q:qualified_name)'
         replace: '(__import (__import_kind "static") (__source @$Q) (__source_path @$Q|replace(".", "/")) (__name @$Q|split_last(".")))'
       - match: '(using_directive (static) $Q:identifier)'

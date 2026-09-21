@@ -16,7 +16,7 @@ stages:
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_clause $P:package_identifier)'
-        replace: '(__package @$P)'
+        replace: '(go_pkg (__package @$P) (__module_export (__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
 
@@ -51,6 +51,8 @@ stages:
 
   - name: retag-calls
     rules:
+      - match: '(call_expression function: (identifier "/^(append|cap|clear|close|complex|copy|delete|imag|len|make|max|min|new|panic|print|println|real|recover)$/") arguments: $A)'
+        replace: '(__call (__callee) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'

@@ -25,7 +25,7 @@ stages:
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_header $I:identifier)'
-        replace: '(__package @$I)'
+        replace: '(kt_pkg (__package @$I) (__module_export (__import (__source @$I) (__source_path @$I|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(jump_expression (return) $$$V)'
         replace: '(__ssa_return $$$V)'
 
@@ -88,6 +88,8 @@ stages:
         replace: '(__call (__callee $F) $$$A)'
       - match: '(call_expression $F:__member (call_suffix $$$A))'
         replace: '(__call (__callee $F) $$$A)'
+      - match: '(call_expression (simple_identifier "/^(println|print|readLine|require|requireNotNull|check|checkNotNull|error|TODO|lazy|run|with|repeat|arrayOf|listOf|setOf|mapOf|mutableListOf|mutableSetOf|mutableMapOf|emptyList|emptySet|emptyMap)$/") (call_suffix $$$A))'
+        replace: '(__call (__callee) $$$A)'
       - match: '(call_expression $F:simple_identifier (call_suffix $$$A))'
         replace: '(__call (__callee @$F) $$$A)'
       - match: '(call_expression $F (call_suffix $$$A))'

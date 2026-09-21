@@ -7,17 +7,17 @@ stages:
   - name: imports
     rules:
       - match: '(call target: (identifier "alias") (arguments (dot left: $L:alias right: (tuple $$$M:alias))))'
-        replace: '(__import (__import_kind "alias") (__source @$L) (__source_path @$L|replace(".", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) $$$M->__name)'
+        replace: '(__import (__import_kind "alias") (__source @$L) (__source_path @$L|replace(".", "/")) $$$M->__name)'
       - match: '(call target: (identifier "alias") (arguments $A:alias (keywords (pair value: $T:alias))))'
-        replace: '(__import (__import_kind "alias") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$A|split_last(".") (__alias @$T)))'
+        replace: '(__import (__import_kind "alias") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A (__alias @$T)))'
       - match: '(call target: (identifier "alias") (arguments $A:alias))'
-        replace: '(__import (__import_kind "alias") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$A|split_last(".")))'
+        replace: '(__import (__import_kind "alias") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A (__alias @$A|split_last("."))))'
       - match: '(call target: (identifier "import") (arguments $A:alias $$$R))'
-        replace: '(__import (__import_kind "import") (__source @$A) (__source_path @$A|replace(".", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$A|split_last(".") (__ssa_hint "*")))'
+        replace: '(__import (__import_kind "import") (__source @$A) (__source_path @$A|replace(".", "/")) (__name @$A (__ssa_hint "*")))'
       - match: '(call target: (identifier "require") (arguments $A:alias $$$R))'
-        replace: '(__import (__import_kind "require") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$A|split_last(".")))'
+        replace: '(__import (__import_kind "require") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A (__alias @$A|split_last("."))))'
       - match: '(call target: (identifier "use") (arguments $A:alias $$$R))'
-        replace: '(__import (__import_kind "use") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$A|split_last(".")))'
+        replace: '(__import (__import_kind "use") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A (__alias @$A|split_last("."))))'
 
   - name: defs
     rules:
@@ -63,7 +63,7 @@ stages:
   - name: retag-calls
     rules:
       - match: '(call target: (dot left: $M:alias right: $F:identifier) $A:arguments)'
-        replace: '(ex_ref (__import (__import_kind "module") (__source @$M) (__source_path @$M|replace(".", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$M|split_last("."))) (__call (__callee (__member @$F (__object @$M|split_last(".")))) $A))'
+        replace: '(ex_ref (__import (__import_kind "module") (__source @$M) (__source_path @$M|replace(".", "/")) (__name @$M (__alias @$M|split_last(".")))) (__call (__callee (__member @$F (__object @$M|split_last(".")))) $A))'
       - match: '(call target: (dot left: $M:identifier right: $F:identifier) $A:arguments)'
         replace: '(__call (__callee (__member @$F (__object @$M))) $A)'
       - match: '(call target: $F:identifier $A:arguments $$$B)'
