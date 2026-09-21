@@ -200,9 +200,7 @@ fn remove_toml(
     };
     let owned = servers
         .get(name)
-        .and_then(|entry| entry.get("command"))
-        .and_then(Item::as_str)
-        .is_some_and(|command| command.contains(DIRECT_LAUNCHER));
+        .is_some_and(|entry| entry.to_string().contains(DIRECT_LAUNCHER));
     if !owned {
         return Ok(());
     }
