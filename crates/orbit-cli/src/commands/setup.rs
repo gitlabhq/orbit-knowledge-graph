@@ -415,6 +415,29 @@ mod tests {
     }
 
     #[test]
+    fn uninstall_removes_mcp_entries_written_by_either_distribution() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join(".codex/config.toml");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config,
+            "[mcp_servers.orbit]\ncommand = \"glab\"\nargs = [\"orbit\", \"mcp\", \"serve\"]\n",
+        )
+        .unwrap();
+        let mcp_json = dir.path().join(".mcp.json");
+        std::fs::write(
+            &mcp_json,
+            r#"{"mcpServers": {"orbit": {"type": "stdio", "command": "glab", "args": ["orbit", "mcp", "serve"]}}}"#,
+        )
+        .unwrap();
+
+        teardown(&["claude", "codex"], dir.path());
+
+        assert!(!config.exists());
+        assert!(!mcp_json.exists());
+    }
+
+    #[test]
     fn broken_config_files_are_never_clobbered() {
         for (agent, file, contents, complaint) in [
             (

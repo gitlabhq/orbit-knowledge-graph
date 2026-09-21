@@ -69,6 +69,7 @@ fn install_for(assistant: Agent, target: &Target, report: &mut Report) -> Result
     for registration in &assistant.registrations {
         let (path, label) = target.resolve(&registration.file)?;
         let value = target.registration_value(&registration.value)?;
+        let (_, value_label) = target.resolve(&registration.value)?;
         let mut root = json::read_object(&path)?;
         if json::register(&mut root, &registration.path, &value)
             .with_context(|| format!("failed to update {}", path.display()))?
@@ -77,7 +78,7 @@ fn install_for(assistant: Agent, target: &Target, report: &mut Report) -> Result
                 backup_once(&path, &label, report)?;
             }
             json::write_object(&path, &root)?;
-            report.note(&label, format!("{} registered", registration.value.project));
+            report.note(&label, format!("{value_label} registered"));
         }
     }
 
