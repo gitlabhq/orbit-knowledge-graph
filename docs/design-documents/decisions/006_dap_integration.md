@@ -188,12 +188,14 @@ agent a shell get Orbit this way for free; the MCP path exists for the
 surfaces that do not.
 
 Orbit Local `grep` finds definitions using DuckDB FTS with all searchable terms
-required per alternative and direct BM25 ordering. Quoted `a|b` alternatives share
-one result list using their best score. Case-insensitive exact symbol-name labels
-report hits and misses within scope before the limit, without affecting ranking.
-Results contain Definition IDs, names, kinds, and match labels without file paths
-or source. A follow-up command batches up to three returned exact-name or name/path
-IDs for source and relationships. Body-only mentions remain listed without an
+required per alternative; single-token alternatives must also appear literally.
+Quoted `a|b` alternatives share one result list using their best score. Results
+order exact-name hits first, then name/path hits, then body-only mentions, BM25
+within each group. Case-insensitive exact symbol-name labels report hits and misses
+within scope before the limit. Results contain Definition IDs, names, kinds, and
+match labels without file paths or source. A follow-up command, printed before the
+list, batches up to three returned exact-name or name/path IDs for source and
+relationships. Body-only mentions remain listed without an
 automatic context suggestion. `context` returns compact file definition maps with
 every ID and ten connections per section, with omitted counts, or complete
 definition source and connections. It accepts mixed file and definition targets

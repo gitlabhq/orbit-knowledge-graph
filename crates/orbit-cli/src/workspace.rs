@@ -135,11 +135,6 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     if stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() != Some(CODE_INDEX_REVISION)
         || indexed_count(&client)? == 0
     {
-        eprintln!(
-            "current commit {} needs indexing — indexing {} first",
-            git.short_sha(),
-            git.repo_path.display()
-        );
         drop(client);
         crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
             .context("failed to index the repository")?;

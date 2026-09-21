@@ -167,11 +167,15 @@ Query preparation uses the index's FTS tokenizer and removes only empty tokens
 before conjunction, retaining every real term, including tokens absent from the
 index. Index-time identifier tokenization retains whole CamelCase names
 and split words. There is no query-time vocabulary removal or fallback matching.
-Results use the best alternative's BM25 score, then definition ID for stable ties;
-SQL applies scopes and the result limit before Rust hydrates definitions. Exact
-status compares raw symbol names case-insensitively within scope before limiting,
-independently of BM25. A second conjunctive FTS match restricted to name/path fields
-controls context-suggestion eligibility, not ranking. Search output contains IDs,
+Single-token alternatives must also appear literally, case-insensitively, in the
+definition's FQN, path, or source. This removes matches that share only the
+underscore-split words of an identifier. Results order exact-name hits first, then
+name/path hits, then body-only mentions. Within each group, the best alternative's
+BM25 score orders results and definition ID breaks ties. SQL applies scopes and the
+result limit before Rust hydrates definitions. Exact status compares raw symbol names
+case-insensitively within scope before limiting. A second conjunctive FTS match
+restricted to name/path fields, with the same literal requirement, marks name/path
+hits and controls context-suggestion eligibility. Search output contains IDs,
 names, kinds, and match labels without file paths or source. Body-only mentions do
 not get automatic context suggestions. Explicit Definition context returns complete
 source.

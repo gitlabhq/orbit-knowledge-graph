@@ -1330,10 +1330,7 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
     let (out, err, ok) = run_cmd(&["grep", "App|missing_symbol", "--repo", repo_arg], dd);
     assert!(ok, "{err}\n{out}");
     assert!(out.contains("exact: App"), "{out}");
-    assert!(
-        out.contains("exact-miss: missing_symbol (no exact symbol name within scope)"),
-        "{out}"
-    );
+    assert!(out.contains("exact-miss: missing_symbol"), "{out}");
     for missing in ["src.utils.read", "' OR true --", "../outside.py"] {
         let (out, err, ok) = run_cmd(&["context", fqn, missing, "--repo", repo_arg], dd);
         assert!(!ok && out.is_empty(), "{out}\n{err}");
@@ -1378,6 +1375,74 @@ fn grep_recognizes_camel_case_exact_hits_and_deduplicates_case_variants() {
     assert!(out.contains("next: orbit context Definition:"), "{out}");
     assert!(
         !out.contains("src/sync.py") && !out.contains("return 'synchronized'"),
+        "{out}"
+    );
+}
+
+#[test]
+fn grep_orders_exact_names_first_and_requires_literal_identifiers() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(
+        &repo,
+        &[
+            (
+                "src/get_ia.py",
+                "def get_marc_record_from_ia():\n    return 1\n",
+            ),
+            (
+                "src/importer.py",
+                concat!(
+                    "def show_ia():\n",
+                    "    return get_ia_record()\n",
+                    "\n",
+                    "def get_ia_record():\n",
+                    "    return 2\n",
+                    "\n",
+                    "def scattered():\n",
+                    "    # get the ia record later\n",
+                    "    return 3\n",
+                ),
+            ),
+        ],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+    let repo_arg = repo.to_str().unwrap();
+
+    let (out, err, ok) = run_cmd(&["grep", "get_ia_record", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{out}");
+    let lines: Vec<_> = out.lines().collect();
+    assert_eq!(lines[1], "exact: get_ia_record", "{out}");
+    assert!(
+        lines[2].starts_with("next: orbit context Definition:"),
+        "{out}"
+    );
+    assert!(
+        lines[3].contains("src.importer.get_ia_record") && lines[3].ends_with("exact-name"),
+        "{out}"
+    );
+    let exact_id = lines[3].split_whitespace().next().unwrap();
+    assert_eq!(lines[2], format!("next: orbit context {exact_id}"), "{out}");
+    assert!(
+        out.contains("src.importer.show_ia  [Function]  body-only"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("get_marc_record_from_ia") && !out.contains("scattered"),
+        "{out}"
+    );
+
+    let (out, err, ok) = run_cmd(&["grep", "get ia record", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{out}");
+    assert!(
+        out.contains("scattered") && out.contains("get_marc_record_from_ia"),
+        "{out}"
+    );
+    assert!(!out.contains("exact-name"), "{out}");
+    assert!(
+        out.rfind("name/path").unwrap() < out.find("body-only").unwrap(),
         "{out}"
     );
 }

@@ -8,7 +8,7 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.13.0
+version: 0.14.0
 license: MIT
 metadata:
   audience: developers
@@ -43,15 +43,14 @@ orbit context src/lib.rs File:<id> Definition:<id>
 
 One query per call. Quote `a|b|c` for OR alternatives with a shared result limit.
 Different questions need separate calls. DuckDB FTS requires all searchable terms
-in each alternative and orders results by BM25. OR uses each match's best
-alternative score, not a bonus for matching more alternatives. Identifier
-alternatives report case-insensitive exact symbol-name hits and misses within the
-selected scope, before the result limit. Exact labels do not affect ranking.
-Search results contain IDs, names, kinds, and match labels, but no paths or source.
-The printed `next:` command batches up to three returned exact-name or name/path
-IDs. Body-only mentions remain listed without automatic context suggestions;
-explicitly request their IDs when useful. Narrow with `--path`/`--kind` or raise
-`--limit` instead of piping output through `head` or `tail`.
+in each alternative. A single-token alternative such as `get_ia_record` must also
+appear literally, case-insensitively, in the definition's name, path, or body.
+Results list exact-name hits first, then name/path hits, then body-only mentions,
+ordered by BM25 within each group. Identifier alternatives report case-insensitive
+exact symbol-name hits and misses within the selected scope. Results contain IDs,
+names, kinds, and match labels, but no paths or source. The `next:` line, printed
+before the list, batches up to three exact-name or name/path IDs. Narrow with
+`--path`/`--kind` or raise `--limit`.
 
 `grep` returns `Definition:<id>` references. Pass them to `context`, which
 also accepts exact FQNs but not short names or globs. A path is shorthand for

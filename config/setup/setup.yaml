@@ -8,18 +8,17 @@ mcp_server:
 instructions: |
   ## Orbit
 
-  Prefer Orbit for code search and callers/callees.
+  Prefer Orbit for code search and callers/callees. Grep means `{{orbit}} grep`.
 
-  - Find code: `{{orbit}} grep 'words'`. FTS, not regex. Terms AND; `a|b` OR. No `\b`, `.*`, or anchors.
-  - File known? Read needed lines.
-  - Source shown? Reuse it. Read missing lines or what Edit needs.
-  - Need source + callers/callees? `{{orbit}} context Definition:123`. Use returned IDs. Batch them.
-  - Need file map? `{{orbit}} context path`. No source bodies.
-  - Too broad? Scope grep with `--path`/`--kind`. No `head`/`tail`; they cut source.
+  - Unknown code? `{{orbit}} grep 'words'`. FTS, not regex. Terms AND; `a|b` OR.
+  - grep returns IDs only. Run the printed `next: {{orbit}} context ...` for source and callers/callees.
+  - Do not reread unchanged files. Reuse shown source.
+  - Need file map? `{{orbit}} context path`.
+  - Too broad? Add `--path`/`--kind`.
 
 nudge_search: |
-  Prefer `{{orbit}} grep 'words'` for code search. FTS, not regex. Terms AND; `a|b` OR. Scope with --path/--kind. No head/tail.
+  Grep means `{{orbit}} grep 'words'`. FTS, not regex. Terms AND; `a|b` OR. Then run printed next context. Add --path/--kind.
 nudge_read: |
-  Read needed lines. Reuse shown source. Need callers/callees? Prefer `{{orbit}} context Definition:123`. Use returned IDs. Batch them. No head/tail.
+  Do not reread unchanged files. Reuse shown source. Callers/callees? `{{orbit}} context Definition:123`.
 template_vars:
-  reminder: "[orbit] Unknown code? run {{orbit}} grep 'words'. FTS, not regex."
+  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. FTS, not regex."

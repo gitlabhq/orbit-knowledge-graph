@@ -324,15 +324,16 @@ mod tests {
                 "Prefer Orbit for code search and callers/callees",
                 "FTS, not regex",
                 "Terms AND; `a|b` OR",
-                "File known? Read needed lines",
-                "Source shown? Reuse it",
+                "Grep means `",
+                "grep returns IDs only",
+                "Do not reread unchanged files",
             ] {
                 assert!(rendered.contains(phrase), "{launcher}: {phrase}");
             }
             assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
         }
         assert!(search_nudge_text().contains("FTS, not regex"));
-        assert!(read_nudge_text().contains("Read needed lines"));
+        assert!(read_nudge_text().contains("Do not reread unchanged files"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }

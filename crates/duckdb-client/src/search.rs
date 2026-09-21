@@ -325,9 +325,10 @@ impl DuckDbSearch {
         anyhow::ensure!(limit > 0, "search limit must be positive");
         let alternatives = query_alternatives(query).map_err(anyhow::Error::msg)?;
         let params: Vec<Value> = alternatives.iter().cloned().map(Value::String).collect();
-        let batches = self
-            .client
-            .query_arrow_json(&recall_sql(self.pid, &alternatives, limit, filter), &params)?;
+        let batches = self.client.query_arrow_json(
+            &recall_sql(self.pid, &self.sha, &alternatives, limit, filter),
+            &params,
+        )?;
         let total = i64_column(&batches, "total")[0] as usize;
         let exact_indices: Vec<usize> =
             serde_json::from_str(&string_column(&batches, "exact_alternatives")[0])?;
@@ -433,16 +434,27 @@ fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Res
     Ok(())
 }
 
-fn recall_sql(pid: i64, alternatives: &[String], limit: usize, filter: &RecallFilter) -> String {
+fn recall_sql(
+    pid: i64,
+    sha: &str,
+    alternatives: &[String],
+    limit: usize,
+    filter: &RecallFilter,
+) -> String {
     let doc_table = def_doc_table(pid);
+    let sha = sql_lit(sha);
     let scored = alternatives.iter().enumerate().map(|(i, _)| {
         let param = i + 1;
         let query = format!("array_to_string(list_filter(fts_main_{doc_table}.tokenize(?{param}), token -> token <> ''), ' ')");
+        let phrase = format!("regexp_matches(?{param}, '\\s')");
         format!(
             "SELECT c.id, {i} AS alternative, lower(c.name) = lower(?{param}) AS exact_name,
-       fts_main_{doc_table}.match_bm25(c.id, {query}, fields := 'name,context,source', conjunctive := true) AS score,
-       fts_main_{doc_table}.match_bm25(c.id, {query}, fields := 'name,context', conjunctive := true) IS NOT NULL AS name_match
-FROM search_corpus c WHERE TRUE
+       CASE WHEN {phrase} OR contains(lower(d.context || ' ' || d.source), lower(?{param}))
+            THEN fts_main_{doc_table}.match_bm25(c.id, {query}, fields := 'name,context,source', conjunctive := true) END AS score,
+       ({phrase} OR contains(lower(d.context), lower(?{param})))
+       AND fts_main_{doc_table}.match_bm25(c.id, {query}, fields := 'name,context', conjunctive := true) IS NOT NULL AS name_match
+FROM search_corpus c JOIN {doc_table} d ON d.def_id = c.id AND d.commit_sha = {sha}
+WHERE TRUE
 {}", kind_scope("definition_type", &filter.kinds))
     }).collect::<Vec<_>>().join("\nUNION ALL\n");
     format!(
@@ -452,7 +464,9 @@ hits AS (
          bool_or(name_match) AS name_match
   FROM scored GROUP BY id HAVING count(score) > 0
 ),
-limited AS (SELECT * FROM hits ORDER BY score DESC, id LIMIT {limit}),
+limited AS (
+  SELECT * FROM hits ORDER BY exact_name DESC, name_match DESC, score DESC, id LIMIT {limit}
+),
 stats AS (SELECT count(*) AS total FROM hits),
 exact AS (
   SELECT COALESCE(to_json(list(DISTINCT alternative ORDER BY alternative)
@@ -462,7 +476,7 @@ SELECT COALESCE(id, 0) AS id, COALESCE(score, 0.0) AS score,
        COALESCE(exact_name, false) AS exact_name, COALESCE(name_match, false) AS name_match,
        total, exact_alternatives
 FROM stats CROSS JOIN exact LEFT JOIN limited ON TRUE
-ORDER BY score DESC, id"
+ORDER BY exact_name DESC, name_match DESC, score DESC, id"
     )
 }
 

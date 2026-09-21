@@ -51,23 +51,19 @@ pub(crate) fn run(
 
     if nodes.is_empty() {
         if paths.is_empty() && filter.is_empty() {
-            writeln!(out, "\nNo definitions match those terms.")?;
+            writeln!(
+                out,
+                "No definitions match. Try a symbol name, or `{launcher} context <path>`."
+            )?;
         } else {
             writeln!(
                 out,
-                "\nNo definitions match those terms within that scope; drop --path/--kind to widen."
+                "No definitions match in scope. Drop --path/--kind, or try a symbol name."
             )?;
         }
-        writeln!(
-            out,
-            "Retry once with a source identifier. If raw search is still needed, \
-             use it only to locate a file, then run `{launcher} context <path>`; \
-             never read source with cat, head, or sed."
-        )?;
         return Ok(());
     }
 
-    report_results(&mut out, &outcome, &nodes)?;
     let defs: Vec<_> = nodes
         .iter()
         .zip(&outcome.matches)
@@ -76,6 +72,7 @@ pub(crate) fn run(
         .map(|(node, _)| node.clone())
         .collect();
     report_context_hint(&mut out, &defs, launcher)?;
+    report_results(&mut out, &outcome, &nodes)?;
     Ok(())
 }
 
@@ -110,7 +107,6 @@ fn report_results(
     outcome: &orbit_search::GrepOutcome,
     nodes: &[NodeValue],
 ) -> Result<()> {
-    writeln!(out, "\nDefinitions:")?;
     for (node, hit) in nodes.iter().zip(&outcome.matches) {
         let range = context::source_range(node)?;
         let label = if hit.exact_name {
@@ -130,13 +126,10 @@ fn report_results(
     if hidden >= BROAD_HIDDEN_HITS {
         writeln!(
             out,
-            "  … {hidden} more — the query is broad; scope with --path <dir>/--kind <Kind> or use a more specific identifier"
+            "  … {hidden} more; broad query. Add --path/--kind or a specific name."
         )?;
     } else if hidden > 0 {
-        writeln!(
-            out,
-            "  … {hidden} more (narrow with --path/--kind, or raise --limit)"
-        )?;
+        writeln!(out, "  … {hidden} more; add --path/--kind or --limit.")?;
     }
     Ok(())
 }
@@ -145,7 +138,7 @@ fn report_context_hint(out: &mut impl Write, nodes: &[NodeValue], launcher: &str
     if nodes.is_empty() {
         return Ok(());
     }
-    write!(out, "\nnext: {launcher} context")?;
+    write!(out, "next: {launcher} context")?;
     for node in nodes {
         write!(out, " {}:{}", node.entity_type, node.id)?;
     }
@@ -191,18 +184,10 @@ fn report_exact_query_note(
         .filter(|alternative| !exact.contains(&alternative.to_lowercase()))
         .collect();
     if !matched.is_empty() {
-        writeln!(
-            out,
-            "exact: {} (symbol name, case-insensitive; within scope, before limit)",
-            matched.join(" | ")
-        )?;
+        writeln!(out, "exact: {}", matched.join(" | "))?;
     }
     if !missing.is_empty() {
-        writeln!(
-            out,
-            "exact-miss: {} (no exact symbol name within scope)",
-            missing.join(" | ")
-        )?;
+        writeln!(out, "exact-miss: {}", missing.join(" | "))?;
     }
     Ok(())
 }
@@ -246,7 +231,7 @@ mod tests {
         report_results(&mut buf, &result, &[node]).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "\nDefinitions:\n  Definition:481  Repo::commit_hook  [Method]  exact-name\n"
+            "  Definition:481  Repo::commit_hook  [Method]  exact-name\n"
         );
     }
 
@@ -257,7 +242,7 @@ mod tests {
         let mut buf = Vec::new();
         report_results(&mut buf, &o, &[]).unwrap();
         let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("42 more (narrow"), "{text}");
+        assert!(text.contains("42 more; add"), "{text}");
 
         o.total = 0;
         let mut buf = Vec::new();
@@ -278,7 +263,7 @@ mod tests {
         report_exact_query_note(&mut buf, &result).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "exact: present (symbol name, case-insensitive; within scope, before limit)\nexact-miss: missing (no exact symbol name within scope)\n"
+            "exact: present\nexact-miss: missing\n"
         );
     }
 
@@ -293,7 +278,7 @@ mod tests {
         report_context_hint(&mut buf, &nodes, "orbit").unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "\nnext: orbit context Definition:481 Definition:482\n"
+            "next: orbit context Definition:481 Definition:482\n"
         );
     }
 }
