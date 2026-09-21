@@ -50,8 +50,8 @@ tests:
   - name: All call edges from useGenericReturn
     description: "getUsers() returns List<UserService> — inner() extracts UserService from type_arguments"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'useGenericReturn' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'useGenericReturn'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 4 }
@@ -62,8 +62,8 @@ tests:
 
   - name: All call edges from useGenericLocal
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'useGenericLocal' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'useGenericLocal'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 4 }

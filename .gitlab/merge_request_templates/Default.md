@@ -47,6 +47,10 @@ Does this MR close or contribute to any issues/epics? `Closes #N` or
 How did you verify the change? One or two lines plus a CI job link is
 usually enough. Full test transcripts and exploratory notes go in the Agent
 context block.
+
+If the change alters what a user sees (CLI output, skill text, MCP tool
+descriptions, rendered docs), paste the before and after output here.
+A screenshot works too.
 -->
 
 ### Performance Analysis

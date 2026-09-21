@@ -26,7 +26,7 @@ fixtures:
 tests:
   - name: get_value() called from dispatcher
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'dispatcher' AND callee.name = 'get_value'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -35,7 +35,7 @@ tests:
 
   - name: handle_one() called from dispatcher
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'dispatcher' AND callee.name = 'handle_one'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -44,7 +44,7 @@ tests:
 
   - name: handle_default() called from dispatcher
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'dispatcher' AND callee.name = 'handle_default'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

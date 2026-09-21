@@ -153,7 +153,7 @@ tests:
   - name: "Every import: all include flavors plus trigger.include, ArgoCD sources, Helm dependencies; include under a job and MyChart.yaml yield none"
     query: |
       MATCH (i:ImportedSymbol)
-      RETURN i.import_type AS type, i.path AS path, i.name AS name, i.alias AS alias
+      RETURN i.import_type AS type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias
     assert:
       - { row_count: 10 }
       - { row: { type: CiLocalInclude, path: "/ci/lint.gitlab-ci.yml", name: null, alias: null } }

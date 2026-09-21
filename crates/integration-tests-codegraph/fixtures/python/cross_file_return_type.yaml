@@ -32,8 +32,8 @@ fixtures:
 tests:
   - name: Cross-file factory return type resolves
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'handle_request' AND callee.name = 'create' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'handle_request' AND callee.name = 'create'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
@@ -41,18 +41,17 @@ tests:
 
   - name: No resolution to Decoy.create
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'handle_request' AND callee.fqn = 'models.Decoy.create' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'handle_request' AND callee.fqn = 'models.Decoy.create'
       RETURN caller.fqn AS caller
     assert:
       - { empty: true }
 
   - name: External imported call creates imported-symbol edge
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'external_call'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path
+      RETURN caller.fqn AS caller, sym.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { caller: "handlers.external_call", path: "requests" } }
@@ -60,18 +59,16 @@ tests:
   - name: Resolved factory chain has no stale imported-symbol fallback
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
           WHERE caller.name = 'handle_request'
             AND callee.fqn = 'models.UserService.create'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
           - { row: { caller: "handlers.handle_request", callee: "models.UserService.create" } }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.name = 'handle_request'
-            AND e.edge_kind = 'Calls'
-          RETURN sym.path AS path
+          RETURN sym.import_path AS path
         assert:
           - { empty: true }

@@ -62,13 +62,13 @@ impl QueryParser {
     fn Pattern(input: Node) -> Result<Pattern> {
         Ok(match_nodes!(input.into_children();
             [ShortestPattern(pattern)] => pattern,
-            [PatternElement(element)] => Pattern::Element(element),
+            [PatternElement(elements)..] => Pattern::Elements(elements.collect()),
         ))
     }
 
     fn ShortestPattern(input: Node) -> Result<Pattern> {
         Ok(match_nodes!(input.into_children();
-            [Variable(variable), PathSearch(_), PatternElement(element)] => Pattern::Shortest { variable, element },
+            [Variable(variable), PathSearch(_), PatternElement(element)] => Pattern::Shortest { variable, element: Box::new(element) },
             [Variable(_), LegacyShortestPath(_)] => unreachable!("LegacyShortestPath always errors"),
         ))
     }
@@ -225,10 +225,13 @@ impl QueryParser {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [PropertyExpression(property), operator(op)] => vec![Comparison {
-                span, property, op, value: None,
+                span, property, op, value: None, rhs_property: None,
             }],
             [PropertyExpression(property), operator(op), value(value)] => vec![Comparison {
-                span, property, op, value: Some(value),
+                span, property, op, value: Some(value), rhs_property: None,
+            }],
+            [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => vec![Comparison {
+                span, property: lhs, op, value: None, rhs_property: Some(rhs),
             }],
         ))
     }
@@ -238,7 +241,7 @@ impl QueryParser {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [TokenFunction(op), PropertyExpression(property), value(value)] => vec![Comparison {
-                span, property, op, value: Some(value),
+                span, property, op, value: Some(value), rhs_property: None,
             }],
         ))
     }

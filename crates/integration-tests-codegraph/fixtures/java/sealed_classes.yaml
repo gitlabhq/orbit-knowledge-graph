@@ -96,26 +96,24 @@ tests:
 
   - name: "Extends edges connect permitted classes to the sealed interface"
     query: |
-      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn IN [
           'com.example.shapes.Circle',
           'com.example.shapes.Rectangle',
           'com.example.shapes.Triangle'
         ]
         AND parent.fqn = 'com.example.shapes.Shape'
-        AND e.edge_kind = 'Extends'
-      RETURN child.fqn AS child, parent.fqn AS parent, e.edge_kind AS kind
+      RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 3 }
-      - { row: { child: "com.example.shapes.Circle", parent: "com.example.shapes.Shape", kind: Extends } }
-      - { row: { child: "com.example.shapes.Rectangle", parent: "com.example.shapes.Shape", kind: Extends } }
-      - { row: { child: "com.example.shapes.Triangle", parent: "com.example.shapes.Shape", kind: Extends } }
+      - { row: { child: "com.example.shapes.Circle", parent: "com.example.shapes.Shape" } }
+      - { row: { child: "com.example.shapes.Rectangle", parent: "com.example.shapes.Shape" } }
+      - { row: { child: "com.example.shapes.Triangle", parent: "com.example.shapes.Shape" } }
 
   - name: "Permits-side references link the sealed parent to each permitted class"
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      MATCH (parent:Definition)-[e:CALLS]->(child:Definition)
       WHERE parent.fqn = 'com.example.shapes.Shape'
-        AND e.edge_kind = 'Calls'
         AND child.fqn IN [
           'com.example.shapes.Circle',
           'com.example.shapes.Rectangle',
@@ -130,20 +128,18 @@ tests:
 
   - name: "Malformed child: no Extends edge exists between Square and Quad"
     query: |
-      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'com.example.shapes.Square'
         AND parent.fqn = 'com.example.shapes.Quad'
-        AND e.edge_kind = 'Extends'
       RETURN child.fqn AS child
     assert:
       - { empty: true }
 
   - name: "Malformed child: the permits-side reference is the only remaining link"
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      MATCH (parent:Definition)-[e:CALLS]->(child:Definition)
       WHERE parent.fqn = 'com.example.shapes.Quad'
         AND child.fqn = 'com.example.shapes.Square'
-        AND e.edge_kind = 'Calls'
       RETURN child.fqn AS child
     assert:
       - { row_count: 1 }

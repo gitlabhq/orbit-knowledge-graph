@@ -61,9 +61,8 @@ tests:
 
   - name: No call edges (no function calls in this fixture)
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE e.edge_kind = 'Calls'
-      RETURN count(*) AS n
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      RETURN count(caller) AS n
     assert:
       - { row_count: 1 }
       - { row: { n: 0 } }

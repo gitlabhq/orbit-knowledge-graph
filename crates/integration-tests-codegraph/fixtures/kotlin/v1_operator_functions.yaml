@@ -6,7 +6,7 @@ tests:
 
   - name: "AnimalList.Companion.of -> AnimalList.plus (operator)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.operator.AnimalList.Companion.of'
         AND callee.fqn = 'com.example.operator.AnimalList.plus'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -15,7 +15,7 @@ tests:
 
   - name: "AnimalList.Companion.of -> AnimalList.display"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.operator.AnimalList.Companion.of'
         AND callee.fqn = 'com.example.operator.AnimalList.display'
       RETURN caller.fqn AS caller, callee.fqn AS callee

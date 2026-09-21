@@ -19,7 +19,7 @@ query:
       "limit": 10
     }
   gql: |
-    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.id, .username}, count(mr) AS mr_count LIMIT 10
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(mr) AS mr_count LIMIT 10
 
 expect:
   groups:
