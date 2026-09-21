@@ -20,6 +20,9 @@ stages:
         replace: '(__import (__import_kind "relative") (__source @$S) (__source_path @$S|prepend("./")) (__name "*"))'
       - match: '(call method: (identifier "require") arguments: (argument_list (string $S:string_content)))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "*"))'
+      - match: '(call method: (identifier "included") block: (do_block $$$B))'
+        replace: '(rb_synth $$$B)'
+
       # include/extend/prepend: each module argument becomes a supertype and an import
       - match: '(call method: (identifier "include") arguments: (argument_list $$$M:constant|scope_resolution))'
         replace: '(rb_synth $$$M->rb_include)'
