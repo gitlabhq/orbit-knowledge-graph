@@ -24,6 +24,9 @@ use std::collections::HashMap;
 use crate::intern::Lang;
 use crate::pattern::{Out, Rewrite, TagEntry, Tf};
 
+use super::parser::parse;
+use super::types::{Ctx, Pat};
+
 pub enum ResolveStage {
     Rules(Vec<Rewrite>),
     Climb { while_kind: u16, mark_kind: u16 },
@@ -136,6 +139,19 @@ struct Rule {
     tag: Option<HashMap<String, String>>,
     #[serde(default, rename = "where")]
     where_clause: Option<String>,
+    #[serde(default)]
+    unique: Option<String>,
+}
+
+fn unique_guard(lang: &Lang, spec: &str) -> (Pat, u16, usize) {
+    let (src, kind) = match spec.starts_with('(') {
+        true => (spec, lang.intern_kind("__defname")),
+        false => ("(__def)", lang.intern_kind(spec)),
+    };
+    let mut ctx = Ctx::new(lang);
+    ctx.slot("ROOT");
+    let pat = parse(&mut ctx, src);
+    (pat, kind, ctx.slots.len())
 }
 
 /// Compile a YAML rule file into stages of rewrites.
@@ -285,6 +301,7 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
         if let Some(ref wc) = rule.where_clause {
             rw.guards = parse_where_clause(wc, &rw.slots);
         }
+        rw.unique = rule.unique.as_deref().map(|u| unique_guard(lang, u));
         return vec![rw];
     }
 

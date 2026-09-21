@@ -194,7 +194,7 @@ stages:
         replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
       # Record components become implicit accessor methods (see the records stage)
       - match: '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))'
-        replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B (record_components $$$P->record_component))'
+        replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B $$$P->record_component)'
       - match: '(interface_declaration $M?:modifiers name: $N:identifier $$$ANN body: (interface_body $$$B))'
         replace: '(__def (__defname @$N) (__interface) $M $$$ANN $$$B)'
       - match: '(enum_declaration $M?:modifiers name: $N:identifier $$$ANN body: (enum_body $$$B))'
@@ -206,13 +206,10 @@ stages:
     rules:
       - match: '(record_component $T:__ssa_typed)'
         replace: '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T) (formal_parameters))'
+        unique: '(__def (__method) !(__constructor) (formal_parameters !(__binding)))'
       - match: '(record_component)'
         replace: '(__def (__defname @$ROOT) (__method) (formal_parameters))'
-
-  - name: member-identity
-    rules:
-      - match: '(__def (__method) !(__constructor) (formal_parameters !(__binding)))'
-        tag: { dedup: '@$ROOT|child_sym("__defname")' }
+        unique: '(__def (__method) !(__constructor) (formal_parameters !(__binding)))'
 
   - name: ssa-cleanup
     rules:

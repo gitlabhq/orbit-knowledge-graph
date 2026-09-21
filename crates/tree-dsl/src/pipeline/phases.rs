@@ -15,23 +15,6 @@ pub fn process_file(env: &Env, path: &str, source: &str) -> (Tree, Vec<Edge>) {
         pattern::apply_rewrites(&mut tree, &env.lang, stage);
     }
     tree.prune();
-    let dedup = env.lang.syms.lookup("dedup");
-    if dedup != 0
-        && tree
-            .tags
-            .values()
-            .any(|tags| tags.iter().any(|tag| tag.key == dedup))
-    {
-        let mut seen = FxHashSet::default();
-        for id in tree.preorder() {
-            if !id.is_removed(&tree.arena)
-                && let Some(key) = tree.get_tag(Tree::to_raw(id), dedup)
-                && !seen.insert((id.parent(&tree.arena), key))
-            {
-                id.remove_subtree(&mut tree.arena);
-            }
-        }
-    }
     tree.compact();
     let edges = linker::link(&tree, &env.lang);
     (tree, edges)

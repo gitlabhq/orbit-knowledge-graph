@@ -16,12 +16,12 @@ entities:
       - { name: fqn, type: Utf8, from: tag:fqn }
       - { name: name, type: Utf8, from: __defname }
       - { name: definition_type, type: Utf8, from: tag:def_type }
-      - { name: start_line, type: Int64, compute: defname_start_line }
-      - { name: end_line, type: Int64, compute: defname_end_line }
-      - { name: start_byte, type: Int64, compute: defname_start_byte }
-      - { name: end_byte, type: Int64, compute: defname_end_byte }
-      - { name: start_char, type: Int64, compute: defname_start_col }
-      - { name: end_char, type: Int64, compute: defname_end_col }
+      - { name: start_line, type: Int64, compute: defname_start_line, span: tag:definition_span }
+      - { name: end_line, type: Int64, compute: defname_end_line, span: tag:definition_span }
+      - { name: start_byte, type: Int64, compute: defname_start_byte, span: tag:definition_span }
+      - { name: end_byte, type: Int64, compute: defname_end_byte, span: tag:definition_span }
+      - { name: start_char, type: Int64, compute: defname_start_col, span: tag:definition_span }
+      - { name: end_char, type: Int64, compute: defname_end_col, span: tag:definition_span }
 
   ImportedSymbol:
     source: __import|__import_type

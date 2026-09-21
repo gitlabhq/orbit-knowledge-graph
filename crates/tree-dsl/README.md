@@ -167,14 +167,18 @@ Because inner nodes are processed first:
 
 ### Member identity and source ranges
 
-The `dedup` tag declares a member key. After pruning, the engine keeps the first
-tagged node with that key under each parent. Rule files must order declarations
-by priority. Java puts explicit zero-argument methods before implicit record
-accessors. Methods with parameters do not share this key.
+A `replace:` rule can carry `unique:`. Before the rule writes its node, the
+engine looks at the matched node's siblings. With `unique: <kind>`, a sibling
+`__def` whose `<kind>` child has the same symbol blocks the rule. With a
+pattern, `unique: '(__def (__method) (formal_parameters !(__binding)))'`, a
+sibling that matches the pattern and shares the `__defname` blocks it. First
+writer wins. Java record accessors use the pattern form, so only an explicit
+zero-argument method suppresses the synthesized accessor.
 
-The `definition_span: "true"` tag selects the full definition range for export.
-Without this tag, the exporter uses the definition name range. All line, byte,
-and column endpoints use the selected range. Java methods include annotations.
+Position columns in `config/export.yaml` accept `span:`. The default is the
+definition name range; `span: definition` selects the whole definition; `span:
+tag:<key>` selects the whole definition for nodes carrying that user tag. Java
+methods carry `definition_span`, so annotated methods start at the annotation.
 
 ## Resolution
 

@@ -141,6 +141,12 @@ impl<'a> Cursor<'a> {
         self.kind() == ck
     }
 
+    pub fn child_sym_of_kind(self, kind: u16) -> Option<u32> {
+        self.children()
+            .find(|c| c.kind() == kind)
+            .and_then(|c| c.sym_opt())
+    }
+
     #[inline]
     pub fn named(self) -> bool {
         self.tree().node(self.nid()).named

@@ -42,6 +42,8 @@ struct ColumnConfig {
     nullable: bool,
     #[serde(default)]
     expand_sym: bool,
+    #[serde(default)]
+    span: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -118,6 +120,7 @@ impl Table {
                 compute: None,
                 nullable: false,
                 expand_sym: false,
+                span: None,
             },
             ColumnConfig {
                 name: "target_id".into(),
@@ -126,6 +129,7 @@ impl Table {
                 compute: None,
                 nullable: false,
                 expand_sym: false,
+                span: None,
             },
             ColumnConfig {
                 name: "edge_kind".into(),
@@ -134,6 +138,7 @@ impl Table {
                 compute: None,
                 nullable: false,
                 expand_sym: false,
+                span: None,
             },
         ])
     }
@@ -245,7 +250,7 @@ fn resolve_column<'a>(
         return Val::I(id);
     }
     if let Some(ref compute) = col.compute {
-        return compute_val(tree, c, compute, lang, expand_node);
+        return compute_val(tree, c, compute, lang, expand_node, col.span.as_deref());
     }
     if col.expand_sym {
         if let Some(en) = expand_node {
@@ -295,10 +300,18 @@ fn compute_val<'a>(
     compute: &str,
     lang: &'a Lang,
     expand: Option<Cursor<'a>>,
+    span: Option<&str>,
 ) -> Val<'a> {
     let import_type_key = lang.syms.intern("import_type");
+    let whole = match span {
+        Some("definition") => true,
+        Some(tag) => tag
+            .strip_prefix("tag:")
+            .is_some_and(|k| c.has_tag(lang.syms.intern(k))),
+        None => false,
+    };
     let definition = || {
-        if c.tag(lang.syms.intern("definition_span")) == Some(lang.syms.intern("true")) {
+        if whole {
             c
         } else {
             c.child(C::DefName).unwrap_or(c)
