@@ -50,6 +50,13 @@ orbit-utils = { path = "../utils" }
 orbit-migrations = { path = "../orbit-migrations" }
 orbit-versions = { path = "../orbit-versions" }
 query-engine = { path = "../query-engine" }
+# Load-test subcommand: gRPC client + JWT auth, reusing the canonical proto
+# and claims from orbit-server (no vendored proto, no hand-rolled JWT).
+orbit-server = { path = "../orbit-server" }
+tonic = { workspace = true }
+tokio-stream = { workspace = true }
+jsonwebtoken = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }
