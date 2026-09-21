@@ -19,44 +19,13 @@ enum WorkItem {
     ExitScope(usize),
 }
 
-enum Receiver {
-    Ivar(u32),
-    Sym(u32),
-    Call(u32),
-}
-
-enum CalleeShape {
-    Method { recv: Receiver, method: u32 },
-    IvarCall(u32),
-    Name(u32),
-}
-
-fn callee_shape(callee: Cursor) -> Option<CalleeShape> {
-    if let Some(m) = callee.child(C::Member) {
-        let recv = match m.child(C::Object).and_then(|o| o.child(C::Call)) {
-            Some(call) => Receiver::Call(call.index()),
-            None => match m.object_ivar() {
-                Some(iv) => Receiver::Ivar(iv.sym()),
-                None => Receiver::Sym(root_object_sym(m)),
-            },
-        };
-        return Some(CalleeShape::Method {
-            recv,
-            method: m.sym(),
-        });
-    }
-    if let Some(iv) = callee.child(C::Ivar) {
-        return iv.sym_opt().map(CalleeShape::IvarCall);
-    }
-    callee.sym_opt().map(CalleeShape::Name)
-}
-
 struct Fold<'t> {
     tree: &'t Tree,
     ssa: SsaEngine,
     cur: BlockId,
     predeclared: FxHashMap<u32, u32>,
     defs: Vec<u32>,
+    supertypes: FxHashMap<u32, Vec<u32>>,
     imports: Vec<u32>,
     wildcards: Vec<u32>,
     callable_key: u32,
@@ -207,16 +176,22 @@ impl<'t> Fold<'t> {
             self.defs.push(idx);
             self.defs.len() as u32 - 1
         };
+        let supers = c
+            .children()
+            .filter(|s| s.is(C::SuperType))
+            .flat_map(|s| self.lookup_chain(s))
+            .filter_map(|r| match r {
+                Linked::Def(d) => Some(d),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        self.supertypes.insert(idx, supers.clone());
         self.declare(c, name, def_idx);
         let parent_block = self.cur;
         self.cur = self.ssa.add_sealed_successor(parent_block);
         if let Some(&(Some(parent), _)) = self.def_stack.last() {
             self.edges.push(Edge::local(parent, idx, EdgeKind::Defines));
         }
-        let supers: Vec<u32> = c
-            .children_of(C::SuperType)
-            .filter_map(|st| self.defs_named(st.sym()).next())
-            .collect();
         for dn in supers {
             self.edges.push(Edge::local(idx, dn, EdgeKind::Extends));
         }
@@ -243,6 +218,9 @@ impl<'t> Fold<'t> {
 
     fn declare(&mut self, c: Cursor<'t>, name: u32, def_idx: u32) {
         for sym in std::iter::once(name).chain(c.children_of(C::Alias).map(|a| a.sym())) {
+            if sym == name && c.has(C::ImplBlock) && self.lookup(name).iter().any(|r| matches!(r, Linked::Def(d) if self.tree.cursor(*d).is_class() && !self.tree.cursor(*d).has(C::ImplBlock))) {
+                continue;
+            }
             self.ssa
                 .write_variable(sym, self.cur, Value::LocalDef(def_idx));
         }
@@ -259,44 +237,42 @@ impl<'t> Fold<'t> {
         let Some(callee) = c.child(C::Callee) else {
             return;
         };
-        let from = self.enclosing();
-        let Some(shape) = callee_shape(callee) else {
+        if c.has(C::Property) && self.chain_is_class(callee) {
             return;
-        };
+        }
+        let from = self.enclosing();
         let first = self.edges.len();
-        match shape {
-            CalleeShape::Method {
-                recv: Receiver::Call(call),
-                ..
-            } => {
-                self.edges.push(Edge::local(from, call, EdgeKind::TypeFlow));
-            }
-            CalleeShape::Method {
-                recv: Receiver::Ivar(ivar_sym),
-                method,
-            } => {
-                if let Some(cls) = self.enclosing_class(from)
-                    && let Some(ts) = self.ivar_type(cls, ivar_sym)
-                {
-                    self.resolve_method(ts, method, from);
+        if let Some(m) = callee.child(C::Member) {
+            if let Some(obj) = m.child(C::Object) {
+                if let Some(call) = obj.child(C::Call) {
+                    if call.has(C::Property) && self.chain_is_class(obj) {
+                        self.resolve_obj(obj, m.sym(), from);
+                    } else {
+                        self.edges
+                            .push(Edge::local(from, call.index(), EdgeKind::TypeFlow));
+                    }
+                } else if let Some(iv) = obj.child(C::Ivar) {
+                    if let Some(cls) = self.enclosing_class(from)
+                        && let Some(ty) = self.ivar_type(cls, iv.sym())
+                    {
+                        if let Some(call) = ty.parent().filter(|p| p.is(C::Call)) {
+                            self.edges
+                                .push(Edge::local(from, call.index(), EdgeKind::TypeFlow));
+                        }
+                        self.resolve_obj(ty, m.sym(), from);
+                    }
+                } else {
+                    self.resolve_obj(obj, m.sym(), from);
                 }
             }
-            CalleeShape::Method {
-                recv: Receiver::Sym(obj_sym),
-                method,
-            } => {
-                self.resolve_obj(obj_sym, method, from);
+        } else if let Some(iv) = callee.child(C::Ivar) {
+            if let Some(cls) = self.enclosing_class(from)
+                && let Some(m) = self.find_method_in(cls, iv.sym())
+            {
+                self.edges.push(Edge::local(from, m, EdgeKind::Calls));
             }
-            CalleeShape::IvarCall(ivar_sym) => {
-                if let Some(cls) = self.enclosing_class(from)
-                    && let Some(m) = self.find_method_in(cls, ivar_sym)
-                {
-                    self.edges.push(Edge::local(from, m, EdgeKind::Calls));
-                }
-            }
-            CalleeShape::Name(sym) => {
-                self.resolve_name(sym, from);
-            }
+        } else if let Some(sym) = callee.sym_opt() {
+            self.resolve_name(sym, from);
         }
         for edge in &mut self.edges[first..] {
             edge.site = Some(c.index());
@@ -451,29 +427,25 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn is_class(&self, node: u32) -> bool {
-        let c = self.tree.cursor(node);
-        CLASS_LIKE.iter().any(|&k| c.has(k))
-    }
-
     fn any_class(&self, resolved: &[Linked]) -> bool {
         resolved
             .iter()
-            .any(|r| matches!(r, Linked::Def(n) if self.is_class(*n)))
+            .any(|r| matches!(r, Linked::Def(n) if self.tree.cursor(*n).is_class()))
     }
 
-    fn resolve_obj(&mut self, obj: u32, method: u32, from: u32) {
-        for r in self.lookup(obj) {
+    fn resolve_obj(&mut self, obj: Cursor, method: u32, from: u32) {
+        for r in self.lookup_chain(obj) {
             match r {
                 Linked::Type(ts) => self.resolve_method(ts, method, from),
                 Linked::Def(node) => {
                     if let Some(m) = self.find_method_in(node, method) {
                         self.edges.push(Edge::local(from, m, EdgeKind::Calls));
-                    } else {
+                    } else if obj.is(C::Object) {
                         self.emit(&Linked::Def(node), from);
                     }
                 }
-                _ => self.emit(&r, from),
+                _ if obj.is(C::Object) => self.emit(&r, from),
+                _ => {}
             }
         }
     }
@@ -525,23 +497,56 @@ impl<'t> Fold<'t> {
 
     fn enclosing_class(&self, node: u32) -> Option<u32> {
         let c = self.tree.cursor(node);
-        if CLASS_LIKE.iter().any(|&k| c.has(k)) {
+        if c.is_class() {
             Some(node)
         } else {
             c.enclosing_def(CLASS_LIKE).map(|n| n.index())
         }
     }
 
-    fn ivar_type(&self, class: u32, attr: u32) -> Option<u32> {
+    fn ivar_type(&self, class: u32, attr: u32) -> Option<Cursor<'t>> {
         self.tree.cursor(class).descend(|n| {
             if n.is(C::Binding)
                 && n.child(C::Ivar).is_some_and(|iv| iv.sym() == attr)
-                && let Some(s) = n.child_sym(C::SsaTyped).or_else(|| n.rhs_callee())
+                && let Some(s) = n
+                    .child(C::SsaTyped)
+                    .or_else(|| n.child(C::Rhs)?.child(C::Call)?.child(C::Callee))
             {
                 return Step::Out(s);
             }
             Step::Into
         })
+    }
+
+    fn chain_is_class(&mut self, c: Cursor) -> bool {
+        let targets = self.lookup_chain(c);
+        self.any_class(&targets)
+    }
+
+    fn lookup_chain(&mut self, c: Cursor) -> Vec<Linked> {
+        let c = c.reference();
+        let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) else {
+            return self.lookup(c.sym());
+        };
+        let Some(obj) = m.child(C::Object) else {
+            return vec![];
+        };
+        let targets: Vec<_> = self
+            .lookup_chain(obj)
+            .into_iter()
+            .flat_map(|r| match r {
+                Linked::Type(s) => self.lookup(s),
+                _ => vec![r],
+            })
+            .collect();
+        targets
+            .into_iter()
+            .filter_map(|r| match r {
+                Linked::Def(d) => self.find_method_in(d, m.sym()).map(Linked::Def),
+                Linked::Import(_) => Some(r),
+                _ => None,
+            })
+            .collect()
     }
 
     fn find_method_in(&self, container: u32, name: u32) -> Option<u32> {
@@ -551,31 +556,15 @@ impl<'t> Fold<'t> {
                 .child_sym(C::DefName)
                 .into_iter()
                 .flat_map(|n| self.defs_named(n))
-                .filter(move |&d| d != dn);
-            let supers = c
-                .children_of(C::SuperType)
-                .flat_map(|s| self.defs_named(s.sym()));
+                .filter(move |&d| {
+                    d != dn && (c.has(C::ImplBlock) || self.tree.cursor(d).has(C::ImplBlock))
+                });
+            let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
             same_name.chain(supers).collect::<Vec<_>>()
         };
         reachable(container, succ)
             .find_map(|dn| find_method_in(self.tree.cursor(dn), name).map(|m| m.index()))
     }
-}
-
-fn root_object_sym(member: Cursor) -> u32 {
-    let Some(obj) = member.child(C::Object) else {
-        return 0;
-    };
-    if obj.child(C::Ivar).is_some() {
-        return 0;
-    }
-    if let Some(s) = obj.sym_opt() {
-        return s;
-    }
-    if let Some(inner) = obj.child(C::Member) {
-        return root_object_sym(inner);
-    }
-    0
 }
 
 pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
@@ -589,6 +578,7 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         cur: entry,
         predeclared: FxHashMap::default(),
         defs: Vec::new(),
+        supertypes: FxHashMap::default(),
         imports: Vec::new(),
         wildcards: Vec::new(),
         callable_key: lang.syms.intern("callable"),
@@ -607,12 +597,12 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
 
-    for &dn in &f.defs {
-        for c in tree.cursor(dn).children_of(C::Decorator) {
-            for pv in &f.ssa.read_variable(c.sym(), entry) {
-                if let ParseValue::LocalDef(di) = pv {
-                    f.edges
-                        .push(Edge::local(dn, f.defs[*di as usize], EdgeKind::Calls));
+    f.cur = entry;
+    for dn in f.defs.clone() {
+        for c in tree.cursor(dn).children().filter(|c| c.is(C::Decorator)) {
+            for target in f.lookup_chain(c) {
+                if let Linked::Def(target) = target {
+                    f.edges.push(Edge::local(dn, target, EdgeKind::Calls));
                 }
             }
         }

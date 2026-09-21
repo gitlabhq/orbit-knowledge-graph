@@ -38,11 +38,16 @@ stages:
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
 
-      # Types collapse to a bare type identifier
+      - match: '(generic_type $T:__member)'
+        replace: '$T'
+      - match: '(array_type element: $T:__member)'
+        replace: '$T'
       - match: '(generic_type $T:type_identifier)'
         replace: '(type_identifier @$T)'
-      - match: '(scoped_type_identifier (type_identifier) $T:type_identifier)'
-        replace: '(type_identifier @$T)'
+      - match: '(scoped_type_identifier $O:__member $T:type_identifier)'
+        replace: '(__member @$T (__object $O))'
+      - match: '(scoped_type_identifier $O:type_identifier $T:type_identifier)'
+        replace: '(__member @$T (__object @$O))'
       - match: '(array_type element: $T:type_identifier)'
         replace: '(type_identifier @$T)'
 
@@ -67,24 +72,42 @@ stages:
         replace: '(__ivar @$F)'
 
       # extends / implements → __supertype
+      - match: '(superclass $T:__member)'
+        replace: '(__supertype $T)'
       - match: '(superclass $T:type_identifier)'
         replace: '(__supertype @$T)'
-      - match: '(super_interfaces (type_list $$$T:type_identifier))'
-        replace: '(super_interfaces $$$T=>__supertype)'
-      - match: '(extends_interfaces (type_list $$$T:type_identifier))'
-        replace: '(extends_interfaces $$$T=>__supertype)'
+      - match: '(super_interfaces (type_list $$$T:type_identifier|__member))'
+        replace: '(java_supertypes $$$T->__supertype)'
+      - match: '(extends_interfaces (type_list $$$T:type_identifier|__member))'
+        replace: '(java_supertypes $$$T->__supertype)'
 
       # Parameters: typed → SSA-typed binding that references its type
+      - match: '(formal_parameter type: $T:__member name: $N:identifier)'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))))'
       - match: '(formal_parameter type: $T:type_identifier name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
       - match: '(formal_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(spread_parameter (variable_declarator name: $N:identifier))'
         replace: '(__binding @$N)'
+      - match: '(catch_formal_parameter (catch_type $T:__member) name: $N:identifier)'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))))'
       - match: '(catch_formal_parameter (catch_type $T:type_identifier) name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
       - match: '(catch_formal_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
+
+  - name: qualified-references
+    rules:
+      - match: '(scoped_identifier scope: $O:__member name: $N:identifier)'
+        replace: '(__member @$N (__object $O))'
+      - match: '(scoped_identifier scope: $O:identifier name: $N:identifier)'
+        replace: '(__member @$N (__object @$O))'
+      - match: '(marker_annotation name: $N:__member)'
+        replace: '(__decorator $N)'
+      - match: '(annotation name: $N:__member arguments: $A)'
+        replace: '(__decorator $N $A)'
+
 
   - name: retag-expressions
     rules:
@@ -112,11 +135,15 @@ stages:
       - match: '(method_invocation name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__ivar @$N)) (__member (__object @$N)) $A)'
       # new T(...) [with optional anonymous body]
+      - match: '(object_creation_expression type: $T:__member arguments: $A $$$B:class_body)'
+        replace: '(__call (__callee $T) $A $$$B)'
       - match: '(object_creation_expression type: $T:type_identifier arguments: $A $$$B:class_body)'
         replace: '(__call (__callee @$T) $A $$$B)'
 
   - name: classify
     rules:
+      - match: '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))) $V)'
       # Local variables
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__rhs $V))'
@@ -169,6 +196,8 @@ stages:
       - match: '(do_statement body: $B)'
         replace: '(__ssa_loop $B)'
 
+      - match: '(field_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
+        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee $T)))) $V)'
       # Fields: typed class fields seed this.x dispatch
       - match: '(field_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value:? $V))'
         replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))) $V)'
@@ -179,6 +208,8 @@ stages:
       - match: '(enum_constant name: $N:identifier arguments:? $A body:? $B)'
         replace: '(__def (__defname @$N) (__enum_variant) $A $B)'
 
+      - match: '(method_declaration $M?:modifiers type: $RT:__member name: $N:identifier parameters: $P body:? $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type $RT) $M $P $B)'
       # Callables
       - match: '(method_declaration $M?:modifiers type: $RT:type_identifier name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $M $P (__call (__callee @$RT)) $B)'
@@ -191,7 +222,7 @@ stages:
 
       # Types (after members)
       - match: '(class_declaration $M?:modifiers name: $N:identifier $$$PRE superclass: $S:__supertype $$$ANN body: (class_body $$$B))'
-        replace: '(__def (__defname @$N) (__class) $M $$$PRE $S $$$ANN (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $$$B)'
+        replace: '(__def (__defname @$N) (__class) $M $$$PRE $S $$$ANN (__binding (__ivar "super") (__rhs (__call @$S->__callee))) $$$B)'
       - match: '(class_declaration $M?:modifiers name: $N:identifier $$$ANN body: (class_body $$$B))'
         replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
       # Record components become implicit accessor methods (see the records stage)

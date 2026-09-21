@@ -23,9 +23,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: getter is a sibling of its property in the CST; YAML must attach its body to the receiver-owned property and TypeFlow must retain that intermediate result
   - name: "callToExtensions -> ExtendMeFromProperty.printValue (extension property method)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToExtensions'

@@ -1,6 +1,7 @@
 use std::ops::ControlFlow;
 
 use crate::canonical::Canonical as C;
+use crate::resolver::CLASS_LIKE;
 
 use super::types::{Edge, EdgeKind, Node, Tree};
 
@@ -251,6 +252,17 @@ impl<'a> Cursor<'a> {
             .filter(|(_, m)| m.sym_opt().is_some())
     }
 
+    pub fn is_class(self) -> bool {
+        CLASS_LIKE.iter().any(|&k| self.has(k))
+    }
+
+    pub fn reference(self) -> Self {
+        self.child(C::Call)
+            .filter(|c| c.has(C::Property))
+            .and_then(|c| c.child(C::Callee))
+            .unwrap_or(self)
+    }
+
     pub fn member(self) -> Option<Self> {
         self.child(C::Callee)?.child(C::Member)
     }
@@ -408,6 +420,9 @@ pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     class.descend(|n| {
         if n.is(C::Def) && n.index() != class.index() && n.child_sym(C::DefName) == Some(name) {
             return Step::Out(n);
+        }
+        if n.is_class() && !n.has(C::ImplBlock) && !n.has(C::Companion) {
+            return Step::Over;
         }
         Step::Into
     })

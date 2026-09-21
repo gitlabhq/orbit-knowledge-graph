@@ -20,6 +20,13 @@ stages:
       - match: '(import_header $I:identifier)'
         replace: '(__import (__source @$I|regex_replace("\.[^.]+$", "")) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".")))'
 
+  - name: attach-getters
+    rules:
+      - match: '(source_file $$$A $P:property_declaration $G:getter $$$B)'
+        replace: '(source_file @$ROOT $$$A $P { $G } $$$B)'
+      - match: '(class_body $$$A $P:property_declaration $G:getter $$$B)'
+        replace: '(class_body $$$A $P { $G } $$$B)'
+
   - name: normalize
     rules:
       - match: '(source_file $$$C)'
@@ -29,15 +36,19 @@ stages:
       - match: '(jump_expression (return) $$$V)'
         replace: '(__ssa_return $$$V)'
 
-      # Types collapse to a bare type identifier
-      - match: '(user_type (type_identifier) (type_identifier) $T:type_identifier)'
-        replace: '(type_identifier @$T)'
-      - match: '(user_type (type_identifier) $T:type_identifier)'
-        replace: '(type_identifier @$T)'
+      - match: '(user_type $A:type_identifier $B:type_identifier $C:type_identifier $D:type_identifier)'
+        replace: '$ROOT'
+      - match: '(user_type $O:type_identifier $I:type_identifier $T:type_identifier)'
+        replace: '(__member @$T (__object (__member @$I (__object @$O))))'
+      - match: '(user_type $O:type_identifier $T:type_identifier)'
+        replace: '(__member @$T (__object @$O))'
       - match: '(user_type $T:type_identifier)'
         replace: '(type_identifier @$T)'
 
-      # Annotations → decorators
+      - match: '(annotation (constructor_invocation $T:__member $A:value_arguments))'
+        replace: '(__decorator $T $A)'
+      - match: '(annotation $T:__member)'
+        replace: '(__decorator $T)'
       - match: '(annotation (constructor_invocation $T:type_identifier $A:value_arguments))'
         replace: '(__decorator @$T $A)'
       - match: '(annotation $T:type_identifier)'
@@ -48,20 +59,30 @@ stages:
         replace: '(__ivar @$N)'
 
       # : Base(), : Iface → __supertype
+      - match: '(delegation_specifier (constructor_invocation $T:__member $A:value_arguments))'
+        replace: '(__supertype $T)'
+      - match: '(delegation_specifier $T:__member)'
+        replace: '(__supertype $T)'
       - match: '(delegation_specifier (constructor_invocation $T:type_identifier $A:value_arguments))'
         replace: '(__supertype @$T)'
       - match: '(delegation_specifier $T:type_identifier)'
         replace: '(__supertype @$T)'
 
       # Parameters
+      - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:__member)'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding (__ivar @$N) (__rhs (__call (__callee $T)))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T)))))'
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:type_identifier)'
         replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier)'
         replace: '(__def (__defname @$N) (__property))'
+      - match: '(class_parameter $N:simple_identifier $T:__member)'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))))'
       - match: '(class_parameter $N:simple_identifier $T:type_identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
       - match: '(class_parameter $N:simple_identifier)'
         replace: '(__binding @$N)'
+      - match: '(parameter $N:simple_identifier $T:__member)'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))))'
       - match: '(parameter $N:simple_identifier $T:type_identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
       - match: '(parameter $N:simple_identifier)'
@@ -99,8 +120,21 @@ stages:
       - match: '(call_expression $F (call_suffix $$$A))'
         replace: '(__call (__callee @$F) $$$A)'
 
+  - name: property-receivers
+    rules:
+      - match: '(__call (__callee $M:(__member (__object $P:__member))) $$$A)'
+        replace: '(__call (__callee (__member @$M (__object (__call (__property) (__callee $P))))) $$$A)'
+
   - name: classify
     rules:
+      - match: '(property_declaration (binding_pattern_kind) $R:type_identifier (variable_declaration $N:simple_identifier) $$$V)'
+        replace: '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__property) $$$V))'
+      - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $G:getter)'
+        replace: '(__def (__defname @$N) (__property) (__ssa_return_type $T) $G)'
+      - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T?:type_identifier) $G:getter)'
+        replace: '(__def (__defname @$N) (__property) (__ssa_return_type? @$T) $G)'
+      - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $$$V)'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T)))) (__binding (__ivar @$N) (__rhs (__call (__callee $T)))) $$$V)'
       # Properties and locals: a __def for the graph plus SSA bindings
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier) $V:__call)'
         replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
@@ -114,9 +148,6 @@ stages:
         replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs @$V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $$$V)'
         replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $$$V)))'
-      # Extension property: val T.name get() = ...
-      - match: '(property_declaration (binding_pattern_kind) $R:type_identifier (variable_declaration $N:simple_identifier) $$$V)'
-        replace: '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__property) $$$V))'
 
       # Assignments
       - match: '(assignment (directly_assignable_expression $N:__ivar) $R:__call)'
@@ -133,8 +164,10 @@ stages:
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
       - match: '(when_expression $S?:when_subject $$$E:when_entry)'
         replace: '(__ssa_branch $S $$$E->__ssa_arm)'
-      - match: '(try_expression $B:statements $$$ALTS:catch_block|finally_block)'
-        replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - match: '(try_expression $B:statements $$$ALTS:catch_block $F?:finally_block)'
+        replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm $F)'
+      - match: '(function_body ("=") $V)'
+        replace: '(function_body (__ssa_return $V))'
       - match: '(for_statement $$$C)'
         replace: '(__ssa_loop $$$C)'
       - match: '(while_statement $$$C)'
@@ -146,6 +179,8 @@ stages:
       - match: '(enum_entry $N:simple_identifier $$$R)'
         replace: '(__def (__defname @$N) (__enum_variant) $$$R)'
 
+      - match: '(function_declaration $M?:modifiers $N:simple_identifier $P:function_value_parameters $RT:__member $B?:function_body)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type $RT) $M $P $B)'
       # Functions: extension functions become methods of the receiver type
       - match: '(function_declaration $M?:modifiers $R:type_identifier $N:simple_identifier $P:function_value_parameters $RT?:type_identifier $B?:function_body)'
         replace: '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M (__binding "this" (__ssa_typed @$R)) $P $B))'
@@ -154,15 +189,15 @@ stages:
 
       # Class-likes
       - match: '(companion_object $N?:type_identifier $B:class_body)'
-        replace: '(__def (__defname "Companion") (__class) $B)'
+        replace: '(__def (__defname "Companion") (__class) (__companion) $B)'
       - match: '(object_declaration $N:type_identifier $$$D:__supertype $B?:class_body)'
         replace: '(__def (__defname @$N) (__class) $$$D $B)'
       - match: '(class_declaration $M?:modifiers (interface) $N:type_identifier $$$D:__supertype $B?:class_body)'
         replace: '(__def (__defname @$N) (__interface) $M $$$D $B)'
       - match: '(class_declaration $M?:modifiers (enum) $N:type_identifier $P?:primary_constructor $$$D:__supertype $B?:enum_class_body)'
-        replace: '(__def (__defname @$N) (__enum) $M $P $$$D $B)'
+        replace: '(__def (__defname @$N) (__enum @$N) $M $P $$$D $B)'
       - match: '(class_declaration $M?:modifiers $N:type_identifier $P?:primary_constructor $S:__supertype $$$D:__supertype $B?:class_body)'
-        replace: '(__def (__defname @$N) (__class) $M $P $S $$$D (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
+        replace: '(__def (__defname @$N) (__class) $M $P $S $$$D (__binding (__ivar "super") (__rhs (__call @$S->__callee))) $B)'
       - match: '(class_declaration $M?:modifiers $N:type_identifier $P?:primary_constructor $B?:class_body)'
         replace: '(__def (__defname @$N) (__class) $M $P $B)'
 
@@ -173,6 +208,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(__def (__property))'
+        tag: { callable: "true", scoped: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'
@@ -182,7 +219,9 @@ stages:
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true" }
+        tag:
+          callable: "true"
+          returns: '@$ROOT|ancestor_sym("__enum")'
       - match: '(__def (__struct))'
         tag: { scoped: "true" }
       - match: '(__def (__impl))'

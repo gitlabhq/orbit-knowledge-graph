@@ -209,6 +209,8 @@ pub enum Canonical {
     Decl,
     #[strum(serialize = "__constructor")]
     Constructor,
+    #[strum(serialize = "__companion")]
+    Companion,
 }
 
 impl From<Canonical> for u16 {

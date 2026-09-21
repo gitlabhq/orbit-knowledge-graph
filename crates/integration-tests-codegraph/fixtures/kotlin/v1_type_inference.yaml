@@ -15,9 +15,7 @@ tests:
 
   # ── K5: test_kotlin_type_inference_from_if_expression ──
 
-  # skip: tree-dsl: expression-body return flow and a common-supertype join are missing; Admin and User must join to Person rather than two overrides
   - name: "usageOfIfTypeInference -> Person.getName (if expression)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'usageOfIfTypeInference'
@@ -29,7 +27,6 @@ tests:
   # ── K6: test_kotlin_type_inference_from_try_catch ──
 
   - name: "tryTypeInference -> Person.getName (try-catch expression)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'tryTypeInference'
