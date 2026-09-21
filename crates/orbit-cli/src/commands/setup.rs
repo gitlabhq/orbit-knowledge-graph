@@ -101,16 +101,16 @@ pub(crate) fn run(assistants: Vec<String>, remove: bool, target: Target) -> Resu
 
 fn ensure_glab_auto_run() {
     let ok = std::process::Command::new("glab")
-        .args(["config", "set", "orbit_local_auto_run", "true"])
+        .args(["config", "set", "orbit_cli_auto_run", "true"])
         .status()
         .map(|status| status.success())
         .unwrap_or(false);
     if ok {
-        println!("  glab config  ->  orbit_local_auto_run=true (hooks run without prompting)");
+        println!("  glab config  ->  orbit_cli_auto_run=true (hooks run without prompting)");
     } else {
         eprintln!(
-            "warning: failed to set orbit_local_auto_run; run `glab config set \
-             orbit_local_auto_run true` so the installed hooks never prompt"
+            "warning: failed to set orbit_cli_auto_run; run `glab config set \
+             orbit_cli_auto_run true` so the installed hooks never prompt"
         );
     }
 }
