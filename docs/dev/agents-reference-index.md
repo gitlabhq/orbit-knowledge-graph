@@ -65,4 +65,5 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Analytics contexts (Snowplow) | `crates/orbit-analytics/src/context.rs` (types), `crates/orbit-server/src/analytics/` (builders + observer) |
 | Billing config + observer | `crates/orbit-billing/`, `crates/orbit-server/src/billing_adapter.rs` |
 | SOX billing authoring rules | `docs/dev/sox-billing-boundary.md` |
+| GitLab documentation principles (synced) | `.ai/principles/distilled/` (synced daily from the same path in `gitlab-org/gitlab` by `.gitlab/ci/doc-principles-sync.yml`) |
 | Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |

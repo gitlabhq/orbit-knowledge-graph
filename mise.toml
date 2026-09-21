@@ -488,7 +488,7 @@ run = "vale --minAlertLevel error *.md docs docs-locale"
 description = "Run Vale prose linting on markdown files"
 
 [tasks."lint:links"]
-run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode '**/*.md'"
+run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode --exclude-path .ai/principles/distilled '**/*.md'"
 description = "Check for broken links in markdown files"
 
 [tasks."lint:prose"]
@@ -503,6 +503,10 @@ description = "Run the prose linter's unit tests"
 depends = ["lint:markdown", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
 description = "Run all documentation linters"
+
+[tasks."docs:principles:sync"]
+run = "DRY_RUN=true bash ./scripts/ci/sync-doc-principles.sh"
+description = "Rehearse the documentation-principles sync: fetch upstream and show the diff"
 
 [tasks."skill:sync:orbit"]
 run = "cp docs/source/remote/queries/query-language.md skills/orbit/references/query_language.md"
