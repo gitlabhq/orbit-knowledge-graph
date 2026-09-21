@@ -11,18 +11,15 @@ use crate::client::GitlabClient;
 use crate::error::GitlabClientError;
 use crate::types::CloudConnectorToken;
 
-/// Refresh this many seconds before `expires_at`, so an in-flight emission
-/// never presents a token that has already lapsed. `expires_at` itself is
-/// already buffered against the token's real `exp` (see
-/// `CC_TOKEN_EXPIRY_BUFFER_SECS` in `client.rs`), so the real lead time
-/// before `exp` is the sum of both buffers plus jitter.
+/// Refresh this many seconds before `expires_at`, which is itself already
+/// buffered against the real `exp` (see `CC_TOKEN_EXPIRY_BUFFER_SECS` in
+/// `client.rs`).
 const REFRESH_BUFFER_SECS: i64 = 60;
 
 /// Extra random lead time on top of `REFRESH_BUFFER_SECS`, so a fleet with
 /// identical `expires_at` values doesn't stampede the Rails route at once.
 const REFRESH_JITTER_MAX_SECS: i64 = 30;
 
-/// Abstracted so the cache below can be unit-tested without HTTP.
 pub trait CloudConnectorTokenFetcher: Send + Sync {
     fn fetch(
         &self,
@@ -43,8 +40,6 @@ struct Cached {
     refresh_at: i64,
 }
 
-/// In-memory cache of the Cloud Connector token for billing auth on
-/// Self-Managed / Dedicated. No persistent state.
 pub struct CloudConnectorTokenCache {
     fetcher: std::sync::Arc<dyn CloudConnectorTokenFetcher>,
     cached: RwLock<Option<Cached>>,
@@ -60,7 +55,6 @@ impl CloudConnectorTokenCache {
         }
     }
 
-    /// Safe to call concurrently, including from labkit's async emitter callback.
     pub async fn token(&self) -> Result<String, GitlabClientError> {
         if let Some(token) = self.fresh_token(Utc::now().timestamp()) {
             return Ok(token);
