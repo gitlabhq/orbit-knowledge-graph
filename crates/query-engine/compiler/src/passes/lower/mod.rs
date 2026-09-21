@@ -3,7 +3,7 @@
 pub mod aggregation;
 mod fk;
 mod flat_chain;
-mod helpers;
+pub mod helpers;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;

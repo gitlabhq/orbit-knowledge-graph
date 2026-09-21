@@ -20,11 +20,13 @@ use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
 use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
-use crate::passes::plan::QueryPlan;
+use crate::passes::plan_v2::PlanMetadata;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, restrict, security, settings,
-    validate,
+    check, codegen, cursor, enforce, hydrate, lower_v2, normalize, plan_v2, restrict, security,
+    settings, validate,
 };
+
+type QueryPlan = PlanMetadata;
 use crate::types::SecurityContext;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
@@ -210,27 +212,22 @@ fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
-    // The hydration pipeline skips `normalize`, so source node sort keys (used
-    // for LIMIT BY dedup) straight from the ontology when absent.
-    if input.compiler.table_sort_keys.is_empty() {
-        for node in ctx.ontology().nodes() {
-            input
-                .compiler
-                .table_sort_keys
-                .insert(node.destination_table.clone(), node.sort_key.clone());
-        }
-    }
-    let mut query_plan = plan::plan(&mut input)?;
-    query_plan.resolve_text_excerpts(ctx.ontology());
+    let ontology = ctx.ontology().clone();
+    let (mut meta, op) = plan_v2::plan(&mut input, &ontology)?;
+    meta.phys_op = Some(op);
     ctx.set_input(input);
-    ctx.set_query_plan(query_plan);
+    ctx.set_query_plan(meta);
     Ok(())
 }
 
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
+    let mut query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let input = require(ctx.input().clone(), "input")?;
-    let node = lower::emit(&query_plan, &input)?;
+    let op = query_plan
+        .phys_op
+        .take()
+        .ok_or_else(|| QueryError::PipelineInvariant("phys_op not set".into()))?;
+    let node = lower_v2::lower(op, &input)?;
     ctx.set_query_plan(query_plan);
     ctx.set_node(node);
     Ok(())
@@ -238,7 +235,7 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let node_edge_col = query_plan.node_edge_mappings();
+    let node_edge_col = query_plan.node_edge_mappings.clone();
     ctx.set_query_plan(query_plan);
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
@@ -299,7 +296,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     }
 
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    if query_plan.hops.len() >= 3 {
+    if query_plan.hop_count >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries

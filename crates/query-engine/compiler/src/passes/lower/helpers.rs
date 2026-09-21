@@ -609,7 +609,7 @@ pub(super) fn build_multi_hop_union(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_depth_arm(
+pub fn build_depth_arm(
     depth: u32,
     edge_table: &str,
     start_col: &str,
