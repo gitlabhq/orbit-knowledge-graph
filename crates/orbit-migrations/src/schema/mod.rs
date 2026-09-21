@@ -135,6 +135,7 @@ pub struct UnversionedDefinition {
     pub entity_type: String,
     pub name: String,
     pub create_statement: String,
+    pub add_column_statements: Vec<String>,
 }
 
 impl GraphSchema {
@@ -273,6 +274,19 @@ impl Table {
         }
 
         clauses.join("\n")
+    }
+
+    pub fn to_add_column_sql(&self) -> Vec<String> {
+        self.columns
+            .iter()
+            .map(|column| {
+                format!(
+                    "ALTER TABLE {} ADD COLUMN IF NOT EXISTS {}",
+                    self.name,
+                    column.to_definition_sql().trim_start()
+                )
+            })
+            .collect()
     }
 }
 

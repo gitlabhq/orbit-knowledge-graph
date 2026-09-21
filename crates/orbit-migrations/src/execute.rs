@@ -130,6 +130,9 @@ pub async fn create_unversioned_definitions(
 ) -> Result<(), MigrationError> {
     for definition in &schema.unversioned_definitions {
         run_ddl(graph, &definition.name, &definition.create_statement).await?;
+        for statement in &definition.add_column_statements {
+            run_ddl(graph, &definition.name, statement).await?;
+        }
     }
     Ok(())
 }

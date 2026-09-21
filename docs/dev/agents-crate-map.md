@@ -25,6 +25,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `code-graph` | Code parsing and linking pipeline under `src/v2/` (`pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`); the old `src/legacy/` parser and linker have been removed. Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |
 | `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper (kept as a separate sub-crate for compile-time isolation) |
 | `orbit-migrations` | Schema migrations |
+| `jobs` | Job ledger: `JobLedger` over the unversioned ClickHouse tables `campaign` and `job`; opaque `JobKind`/`CampaignKind` owned by integrations, `JobState` lifecycle, `CampaignSummary` completion predicates |
 | `orbit-versions` | Typed access to the pins in `config/versions.yaml` (`Versions`, `VERSIONS`); depends only on serde so build scripts can use it |
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`), Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait, strict-mode YAML parse/serialize helpers (`yaml`) |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |

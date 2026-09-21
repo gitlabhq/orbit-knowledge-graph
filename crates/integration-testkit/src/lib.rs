@@ -81,6 +81,19 @@ pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::Lazy
     Box::leak(sql.into_boxed_str())
 });
 
+pub static PERSISTENT_SCHEMA_SQL: std::sync::LazyLock<&'static str> =
+    std::sync::LazyLock::new(|| {
+        let ontology = load_unprefixed_ontology();
+        let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
+        let sql = schema
+            .unversioned_definitions
+            .iter()
+            .map(|definition| format!("{};", definition.create_statement))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Box::leak(sql.into_boxed_str())
+    });
+
 pub async fn collect_subtest_results(handles: Vec<(String, tokio::task::JoinHandle<()>)>) {
     let mut failed: Vec<String> = Vec::new();
     for (name, handle) in handles {

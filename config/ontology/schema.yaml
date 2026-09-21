@@ -297,6 +297,38 @@ settings:
         - {name: compressed_bytes, type: int64}
       order_by: [logical_table, top_level_namespace, snapshot_date]
       ttl: snapshot_date + INTERVAL 400 DAY
+    - name: campaign
+      versioned: false
+      version_type: uint64
+      columns:
+        - {name: kind, type: string}
+        - {name: subject, type: string}
+        - {name: generation, type: timestamp}
+        - {name: job_kind, type: string}
+        - {name: required, type: boolean}
+        - {name: state, type: string}
+        - {name: recorded_at, type: timestamp}
+      order_by: [kind, subject, generation, job_kind]
+    - name: job
+      versioned: false
+      version_type: uint64
+      columns:
+        - {name: campaign_kind, type: string, default: "''"}
+        - {name: campaign_subject, type: string, default: "''"}
+        - {name: campaign_generation, type: timestamp}
+        - {name: namespace_id, type: int64}
+        - {name: traversal_path, type: string, codec: ["ZSTD(1)"]}
+        - {name: kind, type: string}
+        - {name: key, type: string}
+        - {name: dispatch_id, type: string}
+        - {name: attempt, type: int64}
+        - {name: state, type: string}
+        - {name: reason, type: string, default: "''"}
+        - {name: recorded_at, type: timestamp, codec: ["Delta(8)", "ZSTD(1)"]}
+      order_by: [campaign_kind, campaign_subject, campaign_generation, namespace_id, kind, key, dispatch_id, attempt]
+      projections:
+        - {type: reorder, name: by_namespace, order_by: [namespace_id, kind, key, recorded_at]}
+      ttl: recorded_at + INTERVAL 30 DAY WHERE campaign_kind = ''
     - name: checkpoint
       columns:
         - {name: key, type: string, codec: ["ZSTD(1)"]}

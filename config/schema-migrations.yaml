@@ -16,11 +16,14 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 99
+  scope: none
+  note: "Unversioned campaign and job ledger tables for #1281. No versioned table or produced row changes."
 - version: 98
   scope: none
   note: >-
-    Dropped the unused traversal_path_lookup.dictionary annotation from Project
-    and Group (MR !2539); DDL and produced rows are byte-identical.
+    Dropped the unused traversal_path_lookup.dictionary annotation from Project and
+    Group (MR !2539); DDL and produced rows are byte-identical.
 - version: 97
   scope: none
   note: >-

@@ -128,6 +128,7 @@ pub fn build_unversioned_definitions(
             entity_type: "TABLE".into(),
             name: table.name.clone(),
             create_statement: table.to_create_sql(""),
+            add_column_statements: table.to_add_column_sql(),
         });
     }
 
@@ -145,6 +146,7 @@ pub fn build_unversioned_definitions(
             entity_type: "MATERIALIZED VIEW".into(),
             name: view.name.clone(),
             create_statement: view.to_create_sql(),
+            add_column_statements: vec![],
         });
     }
 

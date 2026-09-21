@@ -5891,6 +5891,7 @@ dependencies = [
  "gitlab-client",
  "indexer",
  "integration-testkit",
+ "jobs",
  "jsonschema",
  "jsonwebtoken 10.4.0",
  "labkit",
@@ -6136,6 +6137,20 @@ checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
 dependencies = [
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "jobs"
+version = "0.1.0"
+dependencies = [
+ "arrow 58.3.0",
+ "chrono",
+ "clickhouse-client",
+ "orbit-utils",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]

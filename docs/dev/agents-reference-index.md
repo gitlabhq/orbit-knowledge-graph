@@ -16,6 +16,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
 | Namespace deletion pipeline | `docs/design-documents/indexing/namespace_deletion.md` |
 | Schema migration strategy | `docs/design-documents/schema_management.md` |
+| Job ledger (campaign and job tables, `JobLedger`) | `crates/jobs/`; design in `docs/design-documents/decisions/019_job_ledger.md` |
 | Observability / SLOs | `docs/design-documents/observability.md` |
 | Duo / Orbit prompt routing (Rails-side) | `docs/design-documents/duo_orbit_prompt_routing.md` |
 | Ontology node definitions | `config/ontology/nodes/` |

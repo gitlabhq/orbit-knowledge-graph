@@ -1,0 +1,20 @@
+[package]
+name = "jobs"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[dependencies]
+arrow = { workspace = true }
+chrono = { workspace = true }
+clickhouse-client = { workspace = true }
+orbit-utils = { path = "../utils" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,6 +1,10 @@
 mod common;
 mod indexer;
 
+mod jobs {
+    pub mod ledger;
+}
+
 mod canary {
     pub mod setup_test;
 }

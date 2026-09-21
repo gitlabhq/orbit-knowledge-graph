@@ -6,6 +6,9 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
 
 - **`TestContext`** — Starts a ClickHouse container via testcontainers, runs schema DDL,
   and exposes `query()`, `execute()`, and `query_parameterized()` for Arrow-based results.
+- **`GRAPH_SCHEMA_SQL`** / **`PERSISTENT_SCHEMA_SQL`** — Versioned graph DDL and the
+  unversioned auxiliary tables (`campaign`, `job`, `namespace_storage_snapshot`), both
+  generated from the embedded ontology. Pass the second one when a test needs the job ledger.
 - **`TestContext::fork()`** — Creates an isolated database per subtest so subtests can run
   in parallel against one container.
 - **`TestContext::optimize_all()`** — Queries `system.tables` for the current database and

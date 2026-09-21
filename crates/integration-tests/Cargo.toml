@@ -22,6 +22,7 @@ indexer = { path = "../indexer", features = ["testkit"] }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true, features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }
+jobs = { path = "../jobs" }
 ontology = { path = "../ontology" }
 orbit-migrations = { path = "../orbit-migrations" }
 query-engine = { path = "../query-engine", features = ["testutils"] }
