@@ -141,6 +141,6 @@ Pipeline stages per file:
 
 ## Supported languages
 
-Full pipeline (rewrites + linking + resolver): **Python**, **TypeScript**, **JavaScript**, **Rust**
+Full pipeline (rewrites + linking + resolver): **Python**, **TypeScript**, **JavaScript**, **Rust**, **Go**, **PHP**, **Java**, **Kotlin**, **Ruby**, **C#**, **C**, **C++**, **Scala**, **Bash**, **Elixir**, **Lua**, **Swift**, **Zig**
 
-Parsing only (tree-sitter grammar, no rewrites): Bash, C, C++, C#, Elixir, Go, HCL, Haskell, Java, Kotlin, Lua, OCaml, PHP, Ruby, Scala, Swift, Zig
+Parsing only (tree-sitter grammar, no rewrites): HCL, Haskell, OCaml. See `../tree-dsl/GAPS.md` for engine gaps the rule files hit.
