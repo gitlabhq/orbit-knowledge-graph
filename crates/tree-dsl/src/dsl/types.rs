@@ -75,6 +75,7 @@ pub enum Text {
     Any,
     Lit(u32),
     Prefix(u32),
+    Regex(regex::Regex),
     From(u16, Tf),
 }
 

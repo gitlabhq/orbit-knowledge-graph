@@ -63,6 +63,8 @@ fn visit_node(c: &mut Ctx<'_>, node: PNode<'_>, field: u16) -> Pat {
                 let s = quoted_inner(&child);
                 if let Some(pfx) = s.strip_prefix('^') {
                     text = Text::Prefix(c.lang.syms.intern(pfx));
+                } else if let Some(re) = s.strip_prefix('/').and_then(|r| r.strip_suffix('/')) {
+                    text = Text::Regex(regex::Regex::new(re).expect("invalid pattern regex"));
                 } else {
                     text = Text::Lit(c.lang.syms.intern(s));
                 }

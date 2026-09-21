@@ -106,12 +106,15 @@ pub(crate) fn materialize(
                         }
                         _ => false,
                     });
-                if text_empty || (kids_empty && std::matches!(text, Text::Any | Text::Prefix(_))) {
+                if text_empty
+                    || (kids_empty
+                        && std::matches!(text, Text::Any | Text::Prefix(_) | Text::Regex(_)))
+                {
                     return;
                 }
             }
             let sym = match text {
-                Text::Any | Text::Prefix(_) => 0,
+                Text::Any | Text::Prefix(_) | Text::Regex(_) => 0,
                 Text::Lit(s) => *s,
                 Text::From(slot, tf) => {
                     let Some(src) = caps[*slot as usize].first().copied() else {

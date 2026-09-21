@@ -112,7 +112,7 @@ impl<'a> ProjectTree<'a> {
                         format!("{parent_path}{PATH_SEP}{segment}")
                     };
                     if let Some(content) = file_contents.get(full_path.as_str()) {
-                        inline_config(content, spec.format, nid, &mut self.tree, self.lang);
+                        inline_config(content, &spec.format, nid, &mut self.tree, self.lang);
                     }
                 }
             } else {
@@ -228,22 +228,52 @@ impl<'a> ProjectTree<'a> {
 
 fn inline_config(
     content: &str,
-    format: ParseFormat,
+    format: &ParseFormat,
     parent: indextree::NodeId,
     tree: &mut Tree,
     lang: &Lang,
 ) {
-    let value: serde_json::Value = match format {
-        ParseFormat::Json => match serde_json::from_str(content) {
-            Ok(v) => v,
-            Err(_) => return,
-        },
-        ParseFormat::Toml => match toml::from_str::<toml::Value>(content) {
-            Ok(tv) => toml_to_json(tv),
-            Err(_) => return,
-        },
-    };
-    emit_json_value(&value, parent, tree, lang);
+    match format {
+        ParseFormat::Raw(re) => {
+            for cap in re.captures_iter(content) {
+                let Some(key) = cap.get(1) else { continue };
+                let Some(val) = cap.get(2) else { continue };
+                let val_str = val.as_str().strip_prefix("./").unwrap_or(val.as_str());
+                let field = tree.append(
+                    parent,
+                    Node {
+                        kind: C::ConfigField.into(),
+                        named: true,
+                        sym: lang.syms.intern(key.as_str()),
+                        ..Default::default()
+                    },
+                );
+                tree.append(
+                    field,
+                    Node {
+                        kind: C::Str.into(),
+                        named: true,
+                        sym: lang.syms.intern(val_str),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        _ => {
+            let value: serde_json::Value = match format {
+                ParseFormat::Json => match serde_json::from_str(content) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                },
+                ParseFormat::Toml => match toml::from_str::<toml::Value>(content) {
+                    Ok(tv) => toml_to_json(tv),
+                    Err(_) => return,
+                },
+                ParseFormat::Raw(_) => unreachable!(),
+            };
+            emit_json_value(&value, parent, tree, lang);
+        }
+    }
 }
 
 fn toml_to_json(v: toml::Value) -> serde_json::Value {

@@ -35,10 +35,11 @@ pub struct ParseFileSpec {
     pub format: ParseFormat,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum ParseFormat {
     Json,
     Toml,
+    Raw(regex::Regex),
 }
 
 pub struct ResolveConfig {
@@ -94,6 +95,8 @@ struct ResolveSection {
 struct ParseFileEntry {
     name: String,
     format: String,
+    #[serde(default)]
+    extract: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -196,6 +199,13 @@ fn compile_resolve(section: &ResolveSection, lang: &Lang) -> ResolveConfig {
             format: match pf.format.as_str() {
                 "json" => ParseFormat::Json,
                 "toml" => ParseFormat::Toml,
+                "raw" => {
+                    let pattern = pf
+                        .extract
+                        .as_deref()
+                        .expect("raw format requires extract pattern");
+                    ParseFormat::Raw(regex::Regex::new(pattern).expect("invalid extract regex"))
+                }
                 other => panic!("unknown parse_files format: {other}"),
             },
         })
