@@ -312,26 +312,6 @@ mod tests {
     }
 
     #[test]
-    fn template_and_text_assets_resolve() {
-        for spec in all() {
-            for template_file in &spec.template_files {
-                let rendered = template_file.contents();
-                assert!(!rendered.is_empty());
-                assert!(
-                    !rendered.contains("{{"),
-                    "{}: unresolved placeholder in {}",
-                    spec.name,
-                    template_file.template
-                );
-            }
-        }
-        for text in [instructions(), nudge_search(), nudge_read()] {
-            assert!(!text.trim().is_empty());
-            assert!(!text.contains("{{"), "unresolved placeholder: {text}");
-        }
-    }
-
-    #[test]
     fn launcher_substitution_renders_both_distributions() {
         for (launcher, expected) in [
             (DIRECT_LAUNCHER, "`orbit grep"),

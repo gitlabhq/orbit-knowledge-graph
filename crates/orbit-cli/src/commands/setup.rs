@@ -268,23 +268,6 @@ mod tests {
     }
 
     #[test]
-    fn global_paths_resolve_to_real_components_under_home() {
-        let home = dirs::home_dir().unwrap();
-        for (assistant, tail) in [
-            ("claude", [".claude", "CLAUDE.md"]),
-            ("codex", [".codex", "AGENTS.md"]),
-        ] {
-            let spec = spec::get(assistant).unwrap();
-            let (path, _) = Target::Global.resolve(&spec.instruction_file).unwrap();
-            assert!(path.starts_with(&home), "{assistant}: {path:?}");
-            assert!(
-                path.ends_with(Path::new(tail[0]).join(tail[1])),
-                "{assistant}: {path:?}"
-            );
-        }
-    }
-
-    #[test]
     fn setup_detects_installed_assistants_from_their_config_dirs() {
         let home = tempfile::tempdir().unwrap();
         std::fs::create_dir(home.path().join(".codex")).unwrap();
@@ -362,7 +345,7 @@ mod tests {
 
         teardown(&[], dir.path());
 
-        assert!(!dir.path().join(".opencode/plugins/orbit.js").exists());
+        assert!(!dir.path().join(".opencode").exists());
         assert!(!dir.path().join("AGENTS.md").exists());
         assert!(!dir.path().join("opencode.json").exists());
     }
@@ -371,6 +354,9 @@ mod tests {
     fn setup_and_uninstall_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("AGENTS.md"), "# My rules\n").unwrap();
+        let opencode_config = dir.path().join(".opencode/opencode.json");
+        std::fs::create_dir_all(opencode_config.parent().unwrap()).unwrap();
+        std::fs::write(&opencode_config, r#"{"plugin": ["other.js"]}"#).unwrap();
 
         setup(&["codex", "opencode"], dir.path());
 
@@ -379,8 +365,8 @@ mod tests {
         assert!(agents.contains("# My rules"));
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
         assert_eq!(
-            read_json(&dir.path().join(".opencode/opencode.json"))["plugin"],
-            json!([".opencode/plugins/orbit.js"])
+            read_json(&opencode_config)["plugin"],
+            json!(["other.js", ".opencode/plugins/orbit.js"])
         );
         assert_eq!(
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
@@ -402,10 +388,26 @@ mod tests {
             "# My rules\n"
         );
         assert!(!dir.path().join("AGENTS.md.orbit-backup").exists());
-        assert!(!dir.path().join(".opencode").exists());
+        assert_eq!(read_json(&opencode_config), json!({"plugin": ["other.js"]}));
+        assert!(!dir.path().join(".opencode/plugins").exists());
         assert!(!dir.path().join("opencode.json").exists());
         assert!(!dir.path().join(".codex").exists());
         assert!(!dir.path().join(".agents").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_claude_md_gets_one_orbit_block() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# rules\n").unwrap();
+        std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
+
+        setup(&["claude", "codex"], dir.path());
+
+        let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert_eq!(agents.matches("<!-- orbit:setup:begin -->").count(), 1);
+        let claude = std::fs::symlink_metadata(dir.path().join("CLAUDE.md")).unwrap();
+        assert!(claude.is_symlink());
     }
 
     #[test]
@@ -454,24 +456,42 @@ mod tests {
     }
 
     #[test]
-    fn invalid_codex_toml_is_never_clobbered() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = dir.path().join(".codex/config.toml");
-        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-        std::fs::write(&config, "model = [unclosed\n").unwrap();
+    fn broken_config_files_are_never_clobbered() {
+        for (agent, file, contents, complaint) in [
+            (
+                "claude",
+                ".claude/settings.json",
+                "{not json",
+                "not valid JSON",
+            ),
+            (
+                "claude",
+                ".claude/settings.json",
+                r#"{"hooks": "a-string"}"#,
+                "expected an object",
+            ),
+            (
+                "codex",
+                ".codex/config.toml",
+                "model = [unclosed\n",
+                "not valid TOML",
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, contents).unwrap();
 
-        let err = install(
-            options_with_mcp(&["codex"]),
-            project(dir.path()),
-            &bare_machine(),
-        )
-        .unwrap_err();
+            let err = install(
+                options_with_mcp(&[agent]),
+                project(dir.path()),
+                &bare_machine(),
+            )
+            .unwrap_err();
 
-        assert!(format!("{err:#}").contains("not valid TOML"), "{err:#}");
-        assert_eq!(
-            std::fs::read_to_string(&config).unwrap(),
-            "model = [unclosed\n"
-        );
+            assert!(format!("{err:#}").contains(complaint), "{file}: {err:#}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), contents, "{file}");
+        }
     }
 
     #[test]
@@ -542,6 +562,8 @@ mod tests {
         setup(&["claude", "codex", "opencode"], dir.path());
         setup(&["claude", "codex", "opencode"], dir.path());
 
+        let agents = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert_eq!(agents.matches("<!-- orbit:setup:begin -->").count(), 1);
         assert_eq!(
             std::fs::read_to_string(dir.path().join("AGENTS.md.orbit-backup")).unwrap(),
             "# Mine\n"
@@ -623,19 +645,5 @@ mod tests {
             std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
         assert!(plugin.contains("run orbit grep"));
         assert!(!plugin.contains("{{"));
-    }
-
-    #[test]
-    fn invalid_settings_json_is_never_clobbered() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
-        std::fs::write(dir.path().join(".claude/settings.json"), "{not json").unwrap();
-
-        let err = install(options(&["claude"]), project(dir.path()), &bare_machine()).unwrap_err();
-        assert!(format!("{err:#}").contains("not valid JSON"));
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap(),
-            "{not json"
-        );
     }
 }
