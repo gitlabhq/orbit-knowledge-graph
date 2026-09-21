@@ -191,7 +191,8 @@ pub fn step<H: FileStreamHooks>(
         return Ok(settled);
     }
     sniff(content)?;
-    Ok(hooks.on_contents(&[(file, content)]).pop().unwrap())
+    Ok(hooks.on_contents(&[(file, content)]).pop()
+        .unwrap_or((Decision::Parse, FileLabel::default())))
 }
 
 /// A capped running total; the first `add` to overflow short-circuits the
