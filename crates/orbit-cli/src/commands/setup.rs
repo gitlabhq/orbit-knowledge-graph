@@ -185,16 +185,22 @@ impl Target {
         Ok(Target::Project(root))
     }
 
+    fn root(&self) -> Result<PathBuf> {
+        match self {
+            Target::Project(root) => Ok(root.clone()),
+            Target::Global => dirs::home_dir().context("could not determine home directory"),
+        }
+    }
+
     fn resolve(&self, scoped: &ScopedPath) -> Result<(PathBuf, String)> {
         match self {
             Target::Project(root) => Ok((root.join(&scoped.project), scoped.project.clone())),
             Target::Global => {
-                let home = dirs::home_dir().context("could not determine home directory")?;
                 let rest = scoped
                     .global
                     .strip_prefix("~/")
                     .with_context(|| format!("global path {} must start with ~/", scoped.global))?;
-                Ok((home.join(rest), scoped.global.clone()))
+                Ok((self.root()?.join(rest), scoped.global.clone()))
             }
         }
     }
@@ -395,10 +401,9 @@ mod tests {
             std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
             "# My rules\n"
         );
-        assert!(!dir.path().join(".opencode/plugins/orbit.js").exists());
-        assert!(!dir.path().join(".opencode/opencode.json").exists());
+        assert!(!dir.path().join(".opencode").exists());
         assert!(!dir.path().join("opencode.json").exists());
-        assert!(!dir.path().join(".codex/config.toml").exists());
+        assert!(!dir.path().join(".codex").exists());
         assert!(!dir.path().join(".agents").exists());
     }
 

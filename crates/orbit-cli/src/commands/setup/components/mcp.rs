@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 use super::json;
-use super::{Installer, Report, backup_once};
+use super::{Installer, Report, backup_once, remove_file};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent, DIRECT_LAUNCHER, McpFormat};
 
@@ -48,9 +48,9 @@ impl Installer for McpServer {
                 continue;
             }
             match entry.format {
-                McpFormat::Codex => remove_toml(&path, &label, name, report)?,
+                McpFormat::Codex => remove_toml(&path, &label, name, target, report)?,
                 McpFormat::Claude | McpFormat::Opencode => {
-                    remove_json(&path, &label, entry.format, name, report)?
+                    remove_json(&path, &label, entry.format, name, target, report)?
                 }
             }
         }
@@ -130,6 +130,7 @@ fn remove_json(
     label: &str,
     format: McpFormat,
     name: &str,
+    target: &Target,
     report: &mut Report,
 ) -> Result<()> {
     let key = container_key(format);
@@ -149,7 +150,7 @@ fn remove_json(
     if servers.is_empty() {
         map.remove(key);
     }
-    json::write_or_delete_when_empty(path, &root, label, report)
+    json::write_or_delete_when_empty(path, &root, target, label, report)
 }
 
 fn install_toml(
@@ -185,7 +186,13 @@ fn install_toml(
     Ok(())
 }
 
-fn remove_toml(path: &Path, label: &str, name: &str, report: &mut Report) -> Result<()> {
+fn remove_toml(
+    path: &Path,
+    label: &str,
+    name: &str,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
     let mut document = read_toml(path)?;
     let key = container_key(McpFormat::Codex);
     let Some(servers) = document.get_mut(key).and_then(Item::as_table_mut) else {
@@ -205,8 +212,7 @@ fn remove_toml(path: &Path, label: &str, name: &str, report: &mut Report) -> Res
         document.remove(key);
     }
     if document.to_string().trim().is_empty() {
-        std::fs::remove_file(path)
-            .with_context(|| format!("failed to remove {}", path.display()))?;
+        remove_file(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {
         write_toml(path, &document)?;
