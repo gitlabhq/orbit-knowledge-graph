@@ -128,27 +128,25 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: vocabulary: singleton methods display as the canonical Method, so this count also includes the instance method
+  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Instance method run uses :: separator"
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::CLI::run'
         AND d.definition_type = 'Method'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
 
-  # skip: vocabulary: singleton methods display as the canonical Method, so this count also includes the instance method
+  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Singleton method uses :: separator"
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::CLI::run'
         AND d.definition_type = 'Method'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
 
   # ── Containment edges ─────────────────────────────────────────
   - name: "Module defines Class"

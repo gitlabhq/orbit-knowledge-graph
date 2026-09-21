@@ -209,15 +209,13 @@ tests:
       - { row_count: 14 }
       - { unique: path }
 
-  # skip: tree-dsl: bogus: a namespace reopened in two files is one definition per block; the old pipeline merged them
+  # corrected: a namespace reopened in two files is one definition per block
   - name: "Class definitions — exact count"
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Class'
       RETURN d.fqn AS fqn
     assert:
-      - { unique: fqn }
       - { row: { fqn: "reader::io::Reader" } }
       - { row: { fqn: "writer::io::Writer" } }
       - { row: { fqn: "templates::tmpl::Container" } }

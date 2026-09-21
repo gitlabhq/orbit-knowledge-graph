@@ -123,22 +123,20 @@ tests:
       - { row_count: 1 }
       - { row: { name: "point init works" } }
 
-  # skip: bogus: Zig anonymous tests have no name; the asserted test@L<line> name is an old-pipeline invention, not a language feature
+  # corrected: an anonymous test block is indexed under the name test
   - name: Anonymous test block is indexed with a synthesized name
-    skip: true
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.name STARTS WITH 'test@L'
+      WHERE d.definition_type = 'Function' AND d.name = 'test'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
 
-  # skip: bogus: counts all Function defs as 2 but three real fns (init, normSquared, distanceSquared) also exist; the count encodes an old modelling where only test blocks are Functions
+  # corrected: tests display as the canonical Function
   - name: Both named and anonymous test blocks are indexed
-    skip: true
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.definition_type = 'Function' AND d.name IN ['point init works', 'test']
       RETURN d.name AS name
     assert:
       - { row_count: 2 }

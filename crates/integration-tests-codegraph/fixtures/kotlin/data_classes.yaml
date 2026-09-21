@@ -81,16 +81,15 @@ tests:
     assert:
       - { row: { fqn: "com.example.consumePair" } }
 
-  # skip: tree-dsl: bogus: Pair is only a parameter type; destructuring calls component functions, not the class
+  # corrected: destructuring invokes component functions, not the class
   - name: cross-file consumePair calls Pair
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'consumePair' AND e.edge_kind = 'Calls'
         AND callee.fqn = 'com.example.Pair'
       RETURN callee.fqn AS callee
     assert:
-      - { row: { callee: "com.example.Pair" } }
+      - { empty: true }
 
   - name: cross-file createAndDestructure calls User
     query: |

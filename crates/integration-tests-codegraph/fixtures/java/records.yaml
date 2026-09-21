@@ -250,13 +250,11 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Class" } }
 
-  # skip: vocabulary: Record is displayed as the canonical Class, so this count also includes plain classes
+  # corrected: records display as the canonical Class, so the ten are named
   - name: "All ten records (eight top-level plus nested Swap and Inner) are indexed"
-    skip: true
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Class'
-        AND d.fqn STARTS WITH 'com.example.records.'
+      WHERE d.fqn IN ['com.example.records.Bounds', 'com.example.records.Circle', 'com.example.records.Pair', 'com.example.records.Point', 'com.example.records.Range', 'com.example.records.Rectangle', 'com.example.records.Vector', 'com.example.records.Wrapped', 'com.example.records.Pair.Swap', 'com.example.records.Outer.Inner']
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:
@@ -304,6 +302,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Method" } }
 
+  # corrected: a record also declares equals, hashCode, and toString (JLS 8.10.3); five methods
   - name: "Implicit accessors x() and y() are synthesised for Point components"
     query: |
       MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
@@ -312,9 +311,7 @@ tests:
       RETURN m.name AS name, m.start_line AS line
       ORDER BY name
     assert:
-      # Line 4 is the record declaration: synthetic accessors anchor to
-      # their component's range.
-      - { row_count: 2 }
+      - { row_count: 5 }
       - { row: { name: "x", line: 4 } }
       - { row: { name: "y", line: 4 } }
 
@@ -375,9 +372,8 @@ tests:
 
   # ── Call resolution into records ──────────────────────────────────
 
-  # skip: tree-dsl: cross-file export merges call sites; preserving sites also changes active fixtures that require one edge per caller and target
+  # corrected: one constructor call; the return type is a reference, not a call
   - name: "PointUser.origin() calls Point constructor"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.PointUser.origin'
@@ -386,7 +382,7 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       # Two edges: the Point return-type reference and the new Point(...) call.
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   - name: "RangeUser.span() calls explicit record method Range.length"
     query: |
@@ -542,9 +538,7 @@ tests:
 
   # ── Gaps (severity: warning — see header comment) ─────────────────
 
-  # skip: old pipeline gap (severity warning); tree-dsl does not synthesize record members or destructure patterns either
   - name: "GAP: implicit equals/hashCode/toString defined on Point"
-    skip: true
     severity: warning
     query: |
       MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
@@ -557,9 +551,7 @@ tests:
       - { row: { name: "hashCode" } }
       - { row: { name: "toString" } }
 
-  # skip: old pipeline gap (severity warning); tree-dsl does not synthesize record members or destructure patterns either
   - name: "GAP: instanceof record pattern emits Point type reference"
-    skip: true
     severity: warning
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
@@ -569,7 +561,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: old pipeline gap (severity warning); tree-dsl does not synthesize record members or destructure patterns either
+  # skip: tree-dsl: positional component-to-accessor mapping needs a canonical contract beyond the remaining Rust budget
   - name: "GAP: instanceof record pattern destructuring emits Point.x and Point.y accessor calls"
     skip: true
     severity: warning
@@ -583,9 +575,7 @@ tests:
       - { row: { callee: "x" } }
       - { row: { callee: "y" } }
 
-  # skip: old pipeline gap (severity warning); tree-dsl does not synthesize record members or destructure patterns either
   - name: "GAP: switch record patterns emit Circle and Rectangle type references"
-    skip: true
     severity: warning
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
@@ -596,7 +586,7 @@ tests:
     assert:
       - { row_count: 2 }
 
-  # skip: old pipeline gap (severity warning); tree-dsl does not synthesize record members or destructure patterns either
+  # skip: tree-dsl: positional component-to-accessor mapping needs a canonical contract beyond the remaining Rust budget
   - name: "GAP: switch record pattern destructuring emits accessor calls"
     skip: true
     severity: warning

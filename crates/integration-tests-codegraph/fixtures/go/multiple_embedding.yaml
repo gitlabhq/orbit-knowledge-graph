@@ -82,9 +82,8 @@ tests:
   # the FQN main.Dup (Go methods are package-scoped) but have distinct
   # byte ranges, so each gets a unique id and the query join produces
   # 2 rows (2 edges × 1 matching Definition row each).
-  # skip: tree-dsl: bogus: Go rejects an ambiguous diamond selector at compile time; the count pins an old walk-all heuristic
+  # corrected: Go rejects an ambiguous selector; the graph keeps the first declared embedding
   - name: "Diamond ambiguity: resolver finds Dup from both ancestors"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
@@ -92,4 +91,4 @@ tests:
             AND callee.name = 'Dup'
           RETURN callee.fqn AS callee
         assert:
-          - { row_count: 2 }
+          - { row_count: 1 }

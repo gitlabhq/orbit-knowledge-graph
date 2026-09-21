@@ -177,7 +177,6 @@ tests:
 
   # ── Null-conditional ?.  ──────────────────────────────────────
   - name: "_cached?.Normalize() resolves despite ?."
-    skip: true  # ?. is conditional_access_expression, not member_access_expression
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'

@@ -14,9 +14,7 @@ tests:
     assert:
       - { row_count: 2 }
 
-  # skip: tree-dsl: bogus: Utils.kt imports com.example.extensions.ExtendMe, but the type is in com.example.extensions.entities; Kotlin imports do not re-export types
   - name: "callToImportedExtensions -> reverse (imported extension)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToImportedExtensions'

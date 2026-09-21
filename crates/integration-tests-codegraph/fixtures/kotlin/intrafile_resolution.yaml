@@ -42,13 +42,12 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "com.example.caller", callee: "com.example.topLevel" } }
 
-  # skip: tree-dsl: bogus: create nests under Companion, so the class has three direct members, not four
+  # corrected: create nests under Companion; the class has three direct members
   - name: "App methods have correct FQN"
-    skip: true
     query: |
       MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.name = 'App' AND cls.definition_type = 'Class'
       RETURN m.fqn AS fqn
     assert:
-      - { row_count: 4 }
+      - { row_count: 3 }
       - { match: { field: fqn, pattern: "com.example.App*" } }
