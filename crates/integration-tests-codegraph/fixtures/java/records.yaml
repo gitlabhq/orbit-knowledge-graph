@@ -388,9 +388,7 @@ tests:
       # Two edges: the Point return-type reference and the new Point(...) call.
       - { row_count: 2 }
 
-  # skip: tree-dsl: record members are synthesized per component; an explicit record method is shadowed by the synthesized accessors
   - name: "RangeUser.span() calls explicit record method Range.length"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.RangeUser.span'

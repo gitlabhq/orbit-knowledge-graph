@@ -111,9 +111,7 @@ tests:
       - { row: { child: "com.example.shapes.Rectangle", parent: "com.example.shapes.Shape", kind: Extends } }
       - { row: { child: "com.example.shapes.Triangle", parent: "com.example.shapes.Shape", kind: Extends } }
 
-  # skip: tree-dsl: the permits clause is dropped by the rules; permitted types need a reference node
   - name: "Permits-side references link the sealed parent to each permitted class"
-    skip: true
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE parent.fqn = 'com.example.shapes.Shape'
@@ -140,9 +138,7 @@ tests:
     assert:
       - { empty: true }
 
-  # skip: tree-dsl: the permits clause is dropped by the rules; permitted types need a reference node
   - name: "Malformed child: the permits-side reference is the only remaining link"
-    skip: true
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE parent.fqn = 'com.example.shapes.Quad'

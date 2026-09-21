@@ -374,9 +374,7 @@ tests:
   # (walks the enclosing FQN, hits the `nested` index, finds the
   # Constant Definition).
 
-  # skip: tree-dsl: the linker emits Calls edges only for callable definitions, so constant reads produce no edge
   - name: "bare constant ref in same class resolves via ImplicitMember"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Security::ProjectTrackedContext::allow?'
@@ -386,9 +384,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: Constant, kind: Calls } }
 
-  # skip: tree-dsl: the linker emits Calls edges only for callable definitions, so constant reads produce no edge
   - name: "bare constant ref to a string-valued constant in initialize"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Security::ProjectTrackedContext::initialize'

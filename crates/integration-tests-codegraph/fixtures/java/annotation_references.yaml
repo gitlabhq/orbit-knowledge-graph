@@ -25,9 +25,7 @@ fixtures:
       }
 
 tests:
-  # skip: tree-dsl: an annotation is a __decorator reference; the resolver binds only calls to package-visible names
   - name: Annotation ref attributed to the annotated method
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'annotatedMethod' AND e.edge_kind = 'Calls'
@@ -36,9 +34,7 @@ tests:
       - { row: { callee: "MyAnnotation" } }
       - { not: true, row: { callee: "OtherAnnotation" } }
 
-  # skip: tree-dsl: an annotation is a __decorator reference; the resolver binds only calls to package-visible names
   - name: Each method references its own annotation
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'otherMethod' AND e.edge_kind = 'Calls'
