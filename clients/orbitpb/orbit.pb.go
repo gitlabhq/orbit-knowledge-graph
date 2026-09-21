@@ -920,13 +920,14 @@ func (*GetGraphSchemaResponse_FormattedText) isGetGraphSchemaResponse_Content() 
 
 // Full structured schema with domains, nodes, and edges.
 type StructuredSchema struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SchemaVersion string                 `protobuf:"bytes,1,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
-	Domains       []*SchemaDomain        `protobuf:"bytes,2,rep,name=domains,proto3" json:"domains,omitempty"`
-	Nodes         []*SchemaNode          `protobuf:"bytes,3,rep,name=nodes,proto3" json:"nodes,omitempty"`
-	Edges         []*SchemaEdge          `protobuf:"bytes,4,rep,name=edges,proto3" json:"edges,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	SchemaVersion  string                 `protobuf:"bytes,1,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
+	Domains        []*SchemaDomain        `protobuf:"bytes,2,rep,name=domains,proto3" json:"domains,omitempty"`
+	Nodes          []*SchemaNode          `protobuf:"bytes,3,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	Edges          []*SchemaEdge          `protobuf:"bytes,4,rep,name=edges,proto3" json:"edges,omitempty"`
+	GraphSchemaApi string                 `protobuf:"bytes,5,opt,name=graph_schema_api,json=graphSchemaApi,proto3" json:"graph_schema_api,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *StructuredSchema) Reset() {
@@ -985,6 +986,13 @@ func (x *StructuredSchema) GetEdges() []*SchemaEdge {
 		return x.Edges
 	}
 	return nil
+}
+
+func (x *StructuredSchema) GetGraphSchemaApi() string {
+	if x != nil {
+		return x.GraphSchemaApi
+	}
+	return ""
 }
 
 // Logical grouping of related node types (e.g. "ci", "core", "plan").
@@ -1061,6 +1069,7 @@ type SchemaNode struct {
 	Style         *SchemaNodeStyle       `protobuf:"bytes,7,opt,name=style,proto3" json:"style,omitempty"`                                      // populated when expanded
 	OutgoingEdges []string               `protobuf:"bytes,8,rep,name=outgoing_edges,json=outgoingEdges,proto3" json:"outgoing_edges,omitempty"` // populated when expanded
 	IncomingEdges []string               `protobuf:"bytes,9,rep,name=incoming_edges,json=incomingEdges,proto3" json:"incoming_edges,omitempty"` // populated when expanded
+	IntroducedIn  string                 `protobuf:"bytes,10,opt,name=introduced_in,json=introducedIn,proto3" json:"introduced_in,omitempty"`   // graph schema API version where this node first appeared
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1158,14 +1167,22 @@ func (x *SchemaNode) GetIncomingEdges() []string {
 	return nil
 }
 
+func (x *SchemaNode) GetIntroducedIn() string {
+	if x != nil {
+		return x.IntroducedIn
+	}
+	return ""
+}
+
 // A single property on a node type.
 type SchemaProperty struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	DataType      string                 `protobuf:"bytes,2,opt,name=data_type,json=dataType,proto3" json:"data_type,omitempty"` // e.g. "int64", "string", "datetime"
 	Nullable      bool                   `protobuf:"varint,3,opt,name=nullable,proto3" json:"nullable,omitempty"`
-	EnumValues    []string               `protobuf:"bytes,4,rep,name=enum_values,json=enumValues,proto3" json:"enum_values,omitempty"` // allowed values for enum-typed properties
-	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`                 // human-readable description from the ontology
+	EnumValues    []string               `protobuf:"bytes,4,rep,name=enum_values,json=enumValues,proto3" json:"enum_values,omitempty"`       // allowed values for enum-typed properties
+	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`                       // human-readable description from the ontology
+	IntroducedIn  string                 `protobuf:"bytes,6,opt,name=introduced_in,json=introducedIn,proto3" json:"introduced_in,omitempty"` // graph schema API version where this property first appeared
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1231,6 +1248,13 @@ func (x *SchemaProperty) GetEnumValues() []string {
 func (x *SchemaProperty) GetDescription() string {
 	if x != nil {
 		return x.Description
+	}
+	return ""
+}
+
+func (x *SchemaProperty) GetIntroducedIn() string {
+	if x != nil {
+		return x.IntroducedIn
 	}
 	return ""
 }
@@ -3775,17 +3799,18 @@ const file_orbit_proto_rawDesc = "" +
 	"structured\x18\x01 \x01(\v2\x1a.orbit.v1.StructuredSchemaH\x00R\n" +
 	"structured\x12'\n" +
 	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedTextB\t\n" +
-	"\acontent\"\xc3\x01\n" +
+	"\acontent\"\xed\x01\n" +
 	"\x10StructuredSchema\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\tR\rschemaVersion\x120\n" +
 	"\adomains\x18\x02 \x03(\v2\x16.orbit.v1.SchemaDomainR\adomains\x12*\n" +
 	"\x05nodes\x18\x03 \x03(\v2\x14.orbit.v1.SchemaNodeR\x05nodes\x12*\n" +
-	"\x05edges\x18\x04 \x03(\v2\x14.orbit.v1.SchemaEdgeR\x05edges\"c\n" +
+	"\x05edges\x18\x04 \x03(\v2\x14.orbit.v1.SchemaEdgeR\x05edges\x12(\n" +
+	"\x10graph_schema_api\x18\x05 \x01(\tR\x0egraphSchemaApi\"c\n" +
 	"\fSchemaDomain\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1d\n" +
 	"\n" +
-	"node_names\x18\x03 \x03(\tR\tnodeNames\"\xd5\x02\n" +
+	"node_names\x18\x03 \x03(\tR\tnodeNames\"\xfa\x02\n" +
 	"\n" +
 	"SchemaNode\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
@@ -3800,14 +3825,17 @@ const file_orbit_proto_rawDesc = "" +
 	"properties\x12/\n" +
 	"\x05style\x18\a \x01(\v2\x19.orbit.v1.SchemaNodeStyleR\x05style\x12%\n" +
 	"\x0eoutgoing_edges\x18\b \x03(\tR\routgoingEdges\x12%\n" +
-	"\x0eincoming_edges\x18\t \x03(\tR\rincomingEdges\"\xa0\x01\n" +
+	"\x0eincoming_edges\x18\t \x03(\tR\rincomingEdges\x12#\n" +
+	"\rintroduced_in\x18\n" +
+	" \x01(\tR\fintroducedIn\"\xc5\x01\n" +
 	"\x0eSchemaProperty\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
 	"\tdata_type\x18\x02 \x01(\tR\bdataType\x12\x1a\n" +
 	"\bnullable\x18\x03 \x01(\bR\bnullable\x12\x1f\n" +
 	"\venum_values\x18\x04 \x03(\tR\n" +
 	"enumValues\x12 \n" +
-	"\vdescription\x18\x05 \x01(\tR\vdescription\"{\n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\x12#\n" +
+	"\rintroduced_in\x18\x06 \x01(\tR\fintroducedIn\"{\n" +
 	"\n" +
 	"SchemaEdge\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +

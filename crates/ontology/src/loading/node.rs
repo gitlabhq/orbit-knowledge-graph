@@ -1055,16 +1055,28 @@ mod tests {
 
     struct EmptyReader;
 
+    fn missing_file(path: &str) -> OntologyError {
+        OntologyError::Io {
+            path: path.to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, path.to_string()),
+        }
+    }
+
     impl ReadOntologyFile for EmptyReader {
         fn read(&self, path: &str) -> Result<String, OntologyError> {
-            Err(OntologyError::Io {
-                path: path.to_string(),
-                source: std::io::Error::new(std::io::ErrorKind::NotFound, path.to_string()),
-            })
+            Err(missing_file(path))
         }
 
         fn legacy_introduced_in(&self) -> Option<semver::Version> {
             Some(semver::Version::new(1, 0, 0))
+        }
+    }
+
+    struct StrictReader;
+
+    impl ReadOntologyFile for StrictReader {
+        fn read(&self, path: &str) -> Result<String, OntologyError> {
+            Err(missing_file(path))
         }
     }
 
@@ -1084,7 +1096,10 @@ mod tests {
         }
     }
 
-    fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
+    fn parse_test_node_with_reader(
+        yaml: &str,
+        reader: &impl ReadOntologyFile,
+    ) -> Result<NodeEntity, OntologyError> {
         let node: NodeYaml = orbit_utils::yaml::from_str(yaml).unwrap();
         node.into_entity(
             "TestNode".to_string(),
@@ -1092,8 +1107,55 @@ mod tests {
             &["id".to_string()],
             &test_etl_settings(),
             "_gkg_",
-            &EmptyReader,
+            reader,
         )
+    }
+
+    fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
+        parse_test_node_with_reader(yaml, &EmptyReader)
+    }
+
+    #[test]
+    fn strict_reader_rejects_missing_introduced_in() {
+        let missing_node_version = parse_test_node_with_reader(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                introduced_in: "1.0.0"
+                type: int64
+                source: id
+            "#,
+            &StrictReader,
+        )
+        .unwrap_err();
+        assert!(
+            missing_node_version
+                .to_string()
+                .contains("node 'TestNode' requires an introduced_in version")
+        );
+
+        let missing_property_version = parse_test_node_with_reader(
+            r#"
+            node_type: entity
+            introduced_in: "1.0.0"
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            "#,
+            &StrictReader,
+        )
+        .unwrap_err();
+        assert!(
+            missing_property_version
+                .to_string()
+                .contains("property 'id' on node 'TestNode' requires an introduced_in version")
+        );
     }
 
     #[test]

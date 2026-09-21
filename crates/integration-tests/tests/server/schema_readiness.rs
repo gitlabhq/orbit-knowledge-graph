@@ -462,13 +462,9 @@ impl Cluster {
             .flat_map(|domain| domain["nodes"].as_array().unwrap())
             .find(|node| node["name"] == "Project")
             .unwrap();
-        Some(
-            project["props"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|property| property.as_str().unwrap().starts_with("description:")),
-        )
+        Some(project["props"].as_array().unwrap().iter().any(|property| {
+            property["name"] == "description" && property["introduced_in"].as_str().is_some()
+        }))
     }
 
     async fn ready_status(&self) -> StatusCode {
