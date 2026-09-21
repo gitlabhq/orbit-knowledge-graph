@@ -11,8 +11,11 @@ use crate::client::GitlabClient;
 use crate::error::GitlabClientError;
 use crate::types::CloudConnectorToken;
 
-/// Refresh this many seconds before expiry, so an in-flight emission never
-/// presents a token that has already lapsed.
+/// Refresh this many seconds before `expires_at`, so an in-flight emission
+/// never presents a token that has already lapsed. `expires_at` itself is
+/// already buffered against the token's real `exp` (see
+/// `CC_TOKEN_EXPIRY_BUFFER_SECS` in `client.rs`), so the real lead time
+/// before `exp` is the sum of both buffers plus jitter.
 const REFRESH_BUFFER_SECS: i64 = 60;
 
 /// Extra random lead time on top of `REFRESH_BUFFER_SECS`, so a fleet with
@@ -143,6 +146,32 @@ mod tests {
             compute_refresh_at(1_000, 30),
             1_000 - REFRESH_BUFFER_SECS - 30
         );
+    }
+
+    #[test]
+    fn the_two_expiry_buffers_compose_to_120_150_seconds_of_lead_time() {
+        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+
+        let real_exp = Utc::now().timestamp() + 3_600;
+        let key = EncodingKey::from_secret(b"any-secret");
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &serde_json::json!({ "exp": real_exp }),
+            &key,
+        )
+        .unwrap();
+
+        let expires_at = crate::client::decode_token_expiry(&token).unwrap();
+        assert_eq!(expires_at, real_exp - 60);
+
+        for jitter in [0, REFRESH_JITTER_MAX_SECS] {
+            let refresh_at = compute_refresh_at(expires_at, jitter);
+            let lead_time = real_exp - refresh_at;
+            assert!(
+                (120..=150).contains(&lead_time),
+                "lead_time={lead_time} out of [120, 150] for jitter={jitter}"
+            );
+        }
     }
 
     #[test]

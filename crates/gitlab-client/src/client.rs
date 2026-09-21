@@ -426,10 +426,22 @@ impl GitlabClient {
     }
 }
 
-fn decode_token_expiry(token: &str) -> Result<i64, GitlabClientError> {
+/// Decodes `exp` and returns it minus [`CC_TOKEN_EXPIRY_BUFFER_SECS`] — a
+/// refresh deadline, not the literal claim.
+pub(crate) fn decode_token_expiry(token: &str) -> Result<i64, GitlabClientError> {
     let data = insecure_decode::<CloudConnectorTokenClaims>(token)
         .map_err(|e| GitlabClientError::JwtDecoding(e.to_string()))?;
-    Ok(data.claims.exp - CC_TOKEN_EXPIRY_BUFFER_SECS)
+    let expires_at = data.claims.exp - CC_TOKEN_EXPIRY_BUFFER_SECS;
+
+    let now = chrono::Utc::now().timestamp();
+    if expires_at <= now {
+        return Err(GitlabClientError::JwtDecoding(format!(
+            "token already within its expiry buffer: exp={}, buffered expires_at={expires_at}, now={now}",
+            data.claims.exp
+        )));
+    }
+
+    Ok(expires_at)
 }
 
 #[cfg(test)]
@@ -505,6 +517,39 @@ mod tests {
     fn decode_token_expiry_rejects_missing_exp_claim() {
         let key = EncodingKey::from_secret(b"any-secret");
         let token = encode(&Header::new(Algorithm::HS256), &serde_json::json!({}), &key).unwrap();
+
+        let err = decode_token_expiry(&token).unwrap_err();
+        assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
+    }
+
+    #[test]
+    fn decode_token_expiry_rejects_a_token_already_within_its_buffer() {
+        let key = EncodingKey::from_secret(b"any-secret");
+        let now = chrono::Utc::now().timestamp();
+
+        // exp is in the future, but not far enough to survive the buffer subtraction.
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &serde_json::json!({ "exp": now + 10 }),
+            &key,
+        )
+        .unwrap();
+
+        let err = decode_token_expiry(&token).unwrap_err();
+        assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
+    }
+
+    #[test]
+    fn decode_token_expiry_rejects_an_already_expired_token() {
+        let key = EncodingKey::from_secret(b"any-secret");
+        let now = chrono::Utc::now().timestamp();
+
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &serde_json::json!({ "exp": now - 3600 }),
+            &key,
+        )
+        .unwrap();
 
         let err = decode_token_expiry(&token).unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
@@ -600,9 +645,16 @@ mod tests {
 
         let now = chrono::Utc::now().timestamp();
         let key = EncodingKey::from_secret(b"any-secret");
+        let mut header = Header::new(Algorithm::HS256);
+        header.kid = Some("cloud-connector-2026".to_string());
         let cc_token = encode(
-            &Header::new(Algorithm::HS256),
-            &serde_json::json!({ "exp": now + 3600 }),
+            &header,
+            &serde_json::json!({
+                "iss": "gitlab-cloud-connector",
+                "aud": "gitlab-orbit",
+                "sub": "cloud_connector_token",
+                "exp": now + 3600,
+            }),
             &key,
         )
         .unwrap();
