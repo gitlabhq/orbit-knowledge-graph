@@ -124,9 +124,7 @@ tests:
       - { row_count: 1 }
       - { row: { kind: Extends } }
 
-  # skip: tree-dsl: an annotation is a __decorator reference; the resolver binds only calls to package-visible names
   - name: "Main.main -> Traceable annotation"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
