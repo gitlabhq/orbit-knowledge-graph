@@ -505,9 +505,7 @@ tests:
       - { row: { name: "equals" } }
       - { row: { name: "toString" } }
 
-  # skip: tree-dsl: record members are synthesized per component; an explicit override is shadowed by the synthesized accessor
   - name: "WrappedUser.read() calls explicitly overridden accessor Wrapped.raw"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.WrappedUser.read'

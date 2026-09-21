@@ -123,7 +123,7 @@ tests:
       - { row_count: 1 }
       - { row: { name: "point init works" } }
 
-  # skip: tree-dsl: test blocks display as the canonical Function; anonymous tests have no synthesized line-based name
+  # skip: bogus: Zig anonymous tests have no name; the asserted test@L<line> name is an old-pipeline invention, not a language feature
   - name: Anonymous test block is indexed with a synthesized name
     skip: true
     query: |
@@ -133,7 +133,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: test blocks display as the canonical Function; anonymous tests have no synthesized line-based name
+  # skip: bogus: counts all Function defs as 2 but three real fns (init, normSquared, distanceSquared) also exist; the count encodes an old modelling where only test blocks are Functions
   - name: Both named and anonymous test blocks are indexed
     skip: true
     query: |
