@@ -43,7 +43,12 @@ canonical nodes named here.
   field or local.
 - Wildcard binders. Every `__name` whose local name is `*` binds unbound bare
   calls in its lexical scope. A name whose SSA hint is `*` imports every visible
-  name unless it carries a namespace alias.
+  name unless it carries a namespace alias. A bare call name that no enclosing
+  class declares reads only the wildcard imports tagged `callable`: a C# static
+  using or a Java static import supplies callees, a type-only wildcard does not.
+- Extensions. A member visible from the caller whose `__impl` wrapper names the
+  receiver's class takes part in member lookup, so Kotlin, Swift, and Rust
+  extensions resolve in the caller's scope.
 - Builtins. A rule per language empties the callee of a predeclared function
   (`(identifier "/^(len|println|...)$/")` -> `(__callee)`), so it binds to
   nothing.
@@ -55,7 +60,8 @@ canonical nodes named here.
   call sites to a fixpoint. So `a.b().c().d()` resolves at any depth, in one
   file or across files.
 - Decorator references. A `__decorator` resolves like a call through the
-  file's visible names. Java `permits` clauses emit decorator references.
+  file's visible names, or binds to the wildcard imports when unbound. Java
+  `permits` clauses emit decorator references.
 - Unbound receivers. Take a member call whose receiver is not bound in the
   enclosing definition, not imported by name, and not a visible definition.
   That receiver binds to the file's wildcard imports, the same rule bare
@@ -70,16 +76,16 @@ canonical nodes named here.
 
 ## Gaps by count
 
-Nine skipped tests remain valid. Twenty-three carry a `bogus:` reason.
+Eleven skipped tests remain. Assertions that encoded old-pipeline artifacts
+are corrected to the language rule and carry a `corrected:` note.
 
 | Skipped tests | Gap | Where |
 | --- | --- | --- |
 | 4 | Qualified nested types as supertypes or constructors (`Child.GrandChild`, `Outer.Inner`). The qualifier's owner is lost when the type collapses to its last segment; member lookup needs owner identities and an explicit ambiguity rule. | `langs/java.yaml`, `langs/kotlin.yaml`, `resolver.rs` method_up |
 | 2 | Same-name nested and top-level types (`Filter` and `ServerFilter.Filter`). The visible names are flat, so the nested one replaces the package one. | `resolver.rs` gather_visible_one |
 | 1 | Kotlin extension property chain. The getter is a sibling of its property in the CST; the rule must attach it to the receiver-owned property and type flow must keep the getter result. | `langs/kotlin.yaml`, `resolver.rs` resolve_type_edges |
-| 1 | Kotlin `if` expression type. Expression-body returns and a common-supertype join are missing (`Admin` and `User` join to `Person`). | `linker.rs` walk_branch_binding |
-| 1 | Two call sites to one constructor from one method. The export merges cross-file rows per caller and target; other active fixtures require that contract. | `crates/tree-dsl-tests/src/export.rs` |
-| 23 | Bogus tests. Value reads asserted as calls, require-path attribution, generic stripping, diamond tie-break, companion counts, reopened namespaces, destructuring, the C# Console and static-using matrices, duplicate export rows, Zig synthesized names, Lua wrapper counts, interface call counts, an import of a package that does not declare the type. | fixtures |
+| 2 | Kotlin `if` and `try` expression types. Expression-body returns and a common-supertype join are missing (`Admin` and `User` join to `Person`). | `linker.rs` walk_branch_binding |
+| 2 | Java record pattern destructuring (`Point(int x, int y)`). The i-th component invokes the record's i-th accessor; positional destructuring has no canonical shape yet. | `langs/java.yaml`, `linker.rs` |
 
 ## DSL limits
 

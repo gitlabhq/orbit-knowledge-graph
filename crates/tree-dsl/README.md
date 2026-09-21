@@ -172,8 +172,10 @@ engine looks at the matched node's siblings. With `unique: <kind>`, a sibling
 `__def` whose `<kind>` child has the same symbol blocks the rule. With a
 pattern, `unique: '(__def (__method) (formal_parameters !(__binding)))'`, a
 sibling that matches the pattern and shares the `__defname` blocks it. First
-writer wins. Java record accessors use the pattern form, so only an explicit
-zero-argument method suppresses the synthesized accessor.
+writer wins, and a blocked rule ends matching for that node. Java record
+accessors use the pattern form, so only an explicit zero-argument method
+suppresses the synthesized accessor; the implicit `equals` uses a name-only
+pattern.
 
 Position columns in `config/export.yaml` accept `span:`. The default is the
 definition name range; `span: definition` selects the whole definition; `span:
