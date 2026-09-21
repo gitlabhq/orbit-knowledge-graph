@@ -185,8 +185,9 @@ It detects agents from their configuration directories, such as
 `~/.claude`, `~/.codex`, and `~/.config/opencode`, and lists every supported
 agent with the detected ones pre-selected. Enter applies and prints what
 each agent got. Each agent gets the instruction section, the skill files,
-and the nudge hooks. Supported agents are GitLab Duo, Claude Code, Codex,
-OpenCode, and Pi.
+and the nudge hooks. When you run it inside a Git repository, setup then
+indexes that repository so your agents have a graph to query right away.
+Supported agents are GitLab Duo, Claude Code, Codex, OpenCode, and Pi.
 
 To pre-select specific agents, name them:
 
@@ -200,6 +201,7 @@ Other options:
 - `--skip <component>` leaves a component out: `instructions`, `hooks`,
   `skill`, or `mcp`.
 - `--all` configures every supported agent, detected or not.
+- `--no-index` skips indexing the current repository.
 - `--yes` skips the picker. Required when there is no terminal,
   for example in scripts.
 - `--dry-run` prints the plan and every path and exits without writing.

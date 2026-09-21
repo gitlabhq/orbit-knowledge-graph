@@ -11,7 +11,8 @@ description: >-
   Orbit skill files, and nudge hooks where the agent supports them.
   Pass `--mcp` to also register the `orbit` MCP server. `--skip` leaves a
   component out. Name agents to pre-select only those, or pass `--all`
-  for every supported agent.
+  for every supported agent. Run inside a Git repository, setup then
+  indexes it so the agents have a graph to query; `--no-index` skips that.
   Targets user-global configuration by default, or the project with
   `--project` or `--dir`. Existing files get a one-time `.orbit-backup`
   sibling before the first change. Re-running updates everything in place.

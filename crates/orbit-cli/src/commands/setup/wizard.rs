@@ -50,11 +50,61 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     }
     applied?;
     show_plan(&plan, "Configured")?;
-    cliclack::outro(format!(
-        "Done. Open your agent and type /{} or just ask about your code.",
-        crate::skill::INSTALL_DIR_NAME
-    ))?;
+    let indexed = options.index && index_current_repository()?;
+    cliclack::outro(match indexed {
+        true => "Done. Ask your agent where a function is defined.",
+        false => {
+            "Done. Run orbit index in a repository, then ask your agent where a function is defined."
+        }
+    })?;
     Ok(())
+}
+
+fn index_current_repository() -> Result<bool> {
+    let cwd = std::env::current_dir()?;
+    let repos = crate::workspace::Workspace::open_default()?.resolve_repos(&cwd)?;
+    if repos.is_empty() {
+        return Ok(false);
+    }
+
+    let command = format!("{} index .", spec::launcher());
+    let spinner = cliclack::spinner();
+    spinner.start(&command);
+    let outputs = match crate::index_collect(cwd, 0, false, None) {
+        Ok(outputs) => outputs,
+        Err(error) => {
+            spinner.error(format!("{command}  skipped: {error}"));
+            return Ok(false);
+        }
+    };
+    spinner.clear();
+    let summaries = outputs
+        .iter()
+        .map(|output| {
+            format!(
+                "{}: {} files, {} definitions, {:.0}s",
+                output.repository,
+                with_thousands(output.graph.files),
+                with_thousands(output.graph.definitions),
+                output.time_seconds
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    cliclack::note(command, summaries)?;
+    Ok(true)
+}
+
+fn with_thousands(count: usize) -> String {
+    let digits = count.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
 }
 
 pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
