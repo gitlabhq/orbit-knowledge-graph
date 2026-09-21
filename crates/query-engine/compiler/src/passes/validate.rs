@@ -617,13 +617,13 @@ impl<'a> Validator<'a> {
             if let (Some(le), Some(re)) = (lhs_entity, rhs_entity) {
                 let lhs_type = self.ontology.get_field_type(le, &jp.lhs_prop);
                 let rhs_type = self.ontology.get_field_type(re, &jp.rhs_prop);
-                if let (Some(lt), Some(rt)) = (lhs_type, rhs_type) {
-                    if lt != rt {
-                        return Err(QueryError::Validation(format!(
-                            "type mismatch in join predicate: {}.{} is {lt:?} but {}.{} is {rt:?}",
-                            jp.lhs_node, jp.lhs_prop, jp.rhs_node, jp.rhs_prop
-                        )));
-                    }
+                if let (Some(lt), Some(rt)) = (lhs_type, rhs_type)
+                    && lt != rt
+                {
+                    return Err(QueryError::Validation(format!(
+                        "type mismatch in join predicate: {}.{} is {lt:?} but {}.{} is {rt:?}",
+                        jp.lhs_node, jp.lhs_prop, jp.rhs_node, jp.rhs_prop
+                    )));
                 }
             }
         }

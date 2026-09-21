@@ -345,19 +345,18 @@ pub fn restrict(
     }
 
     for node in &input.nodes {
-        let Some(entity) = node.entity.as_deref() else {
+        if node.entity.is_none() {
             continue;
-        };
+        }
         for filters in node.filters.values() {
             for filter in filters {
-                if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
-                    if let Some(rhs_entity) = entity_of(input, rhs_node) {
-                        if ontology.is_admin_only(rhs_entity, rhs_prop) {
-                            return Err(QueryError::Restrict(format!(
-                                "filter on \"{rhs_prop}\" for {rhs_entity}: field requires administrator access"
-                            )));
-                        }
-                    }
+                if let Some((rhs_node, rhs_prop)) = &filter.rhs_column
+                    && let Some(rhs_entity) = entity_of(input, rhs_node)
+                    && ontology.is_admin_only(rhs_entity, rhs_prop)
+                {
+                    return Err(QueryError::Restrict(format!(
+                        "filter on \"{rhs_prop}\" for {rhs_entity}: field requires administrator access"
+                    )));
                 }
             }
         }
@@ -365,12 +364,12 @@ pub fn restrict(
 
     for jp in &input.join_predicates {
         for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
-            if let Some(entity) = entity_of(input, node_id) {
-                if ontology.is_admin_only(entity, prop) {
-                    return Err(QueryError::Restrict(format!(
-                        "filter on \"{prop}\" for {entity}: field requires administrator access"
-                    )));
-                }
+            if let Some(entity) = entity_of(input, node_id)
+                && ontology.is_admin_only(entity, prop)
+            {
+                return Err(QueryError::Restrict(format!(
+                    "filter on \"{prop}\" for {entity}: field requires administrator access"
+                )));
             }
         }
     }
