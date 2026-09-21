@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{Installer, Report, backup_once, remove_file};
+use super::{Installer, Report, backup_once, drop_backup_when_restored, remove_file};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
 
@@ -101,6 +101,7 @@ fn strip_block_from_file(
         std::fs::write(path, remaining)
             .with_context(|| format!("failed to write {}", path.display()))?;
         report.note(label, "orbit section removed");
+        drop_backup_when_restored(path, label, report)?;
     }
     Ok(())
 }

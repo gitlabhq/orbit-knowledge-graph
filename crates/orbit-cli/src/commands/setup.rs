@@ -102,7 +102,7 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
     }
     removed?;
     tui::card("Removed", summary::plan_rows(&plan.only_reported(&report)))?;
-    tui::outro("Done. Backups (*.orbit-backup) were kept.")?;
+    tui::outro("Done. Backups stay only for files you edited after setup.")?;
     Ok(())
 }
 
@@ -401,6 +401,7 @@ mod tests {
             std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
             "# My rules\n"
         );
+        assert!(!dir.path().join("AGENTS.md.orbit-backup").exists());
         assert!(!dir.path().join(".opencode").exists());
         assert!(!dir.path().join("opencode.json").exists());
         assert!(!dir.path().join(".codex").exists());
@@ -595,6 +596,11 @@ mod tests {
         assert_eq!(
             read_json(&dir.path().join(".claude/settings.json")),
             json!({"permissions": {"allow": ["Bash"]}})
+        );
+        assert!(
+            dir.path()
+                .join(".claude/settings.json.orbit-backup")
+                .is_file()
         );
         assert!(!dir.path().join("CLAUDE.md").exists());
         assert!(!dir.path().join(".mcp.json").exists());
