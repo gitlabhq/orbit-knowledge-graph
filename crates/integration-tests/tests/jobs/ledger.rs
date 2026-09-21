@@ -17,15 +17,15 @@ const BACKFILL: CampaignKind = CampaignKind::new("test_backfill");
 const ROOT_NAMESPACE: i64 = 42;
 const ROOT_PATH: &str = "1/42/";
 
-fn generation(offset_hours: i64) -> DateTime<Utc> {
+fn generation_at_hour(offset_hours: i64) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 9, 21, 12, 0, 0).unwrap() + Duration::hours(offset_hours)
 }
 
-fn at(seconds: i64) -> DateTime<Utc> {
-    generation(1) + Duration::seconds(seconds)
+fn seconds_into_backfill(seconds: i64) -> DateTime<Utc> {
+    generation_at_hour(1) + Duration::seconds(seconds)
 }
 
-fn campaign_id(generation: DateTime<Utc>) -> CampaignId {
+fn backfill_campaign(generation: DateTime<Utc>) -> CampaignId {
     CampaignId {
         kind: BACKFILL,
         subject: ROOT_NAMESPACE.to_string(),
@@ -33,7 +33,7 @@ fn campaign_id(generation: DateTime<Utc>) -> CampaignId {
     }
 }
 
-fn phases() -> [PhaseSpec; 2] {
+fn backfill_phases() -> [PhaseSpec; 2] {
     [
         PhaseSpec {
             kind: CODE,
@@ -46,7 +46,7 @@ fn phases() -> [PhaseSpec; 2] {
     ]
 }
 
-fn code_job(campaign: Option<CampaignId>, key: &str) -> JobRef {
+fn code_job_for_project(campaign: Option<CampaignId>, key: &str) -> JobRef {
     JobRef {
         campaign,
         namespace_id: ROOT_NAMESPACE,
@@ -56,8 +56,8 @@ fn code_job(campaign: Option<CampaignId>, key: &str) -> JobRef {
     }
 }
 
-fn counts(summary: &CampaignSummary, kind: &JobKind, state: JobState) -> u64 {
-    summary
+fn count_in_phase(latest_summary: &CampaignSummary, kind: &JobKind, state: JobState) -> u64 {
+    latest_summary
         .phases
         .iter()
         .find(|phase| &phase.kind == kind)
@@ -73,7 +73,7 @@ impl Scenario {
     async fn new() -> Self {
         Self {
             context: TestContext::new(&[*GRAPH_SCHEMA_SQL, *PERSISTENT_SCHEMA_SQL]).await,
-            campaign: campaign_id(generation(0)),
+            campaign: backfill_campaign(generation_at_hour(0)),
         }
     }
 
@@ -81,16 +81,16 @@ impl Scenario {
         JobLedger::new(Arc::new(self.context.create_client()))
     }
 
-    async fn open_with_code_jobs(&self, keys: &[&str]) -> Vec<JobRef> {
+    async fn open_campaign_with_projects(&self, keys: &[&str]) -> Vec<JobRef> {
         let ledger = self.ledger();
         ledger
-            .open_campaign(&self.campaign, &phases())
+            .open_campaign(&self.campaign, &backfill_phases())
             .await
             .unwrap();
 
         let jobs: Vec<JobRef> = keys
             .iter()
-            .map(|key| code_job(Some(self.campaign.clone()), key))
+            .map(|key| code_job_for_project(Some(self.campaign.clone()), key))
             .collect();
         ledger
             .register(&jobs, JobState::Pending, None)
@@ -99,13 +99,13 @@ impl Scenario {
         jobs
     }
 
-    async fn record(
+    async fn record_transition(
         &self,
         job: &JobRef,
         dispatch: Uuid,
         attempt: u32,
         state: JobState,
-        at: DateTime<Utc>,
+        recorded_at: DateTime<Utc>,
     ) {
         let transition = JobTransition {
             job: job.clone(),
@@ -113,12 +113,12 @@ impl Scenario {
             attempt,
             state,
             reason: None,
-            recorded_at: at,
+            recorded_at,
         };
         self.ledger().record(&transition).await.unwrap();
     }
 
-    async fn summary(&self) -> CampaignSummary {
+    async fn latest_summary(&self) -> CampaignSummary {
         self.ledger()
             .latest_campaign(&BACKFILL, &self.campaign.subject)
             .await
@@ -126,7 +126,7 @@ impl Scenario {
             .expect("campaign should exist")
     }
 
-    async fn current_state(&self, job: &JobRef) -> JobState {
+    async fn current_state_of(&self, job: &JobRef) -> JobState {
         let mut filter = JobFilter::for_namespace(ROOT_NAMESPACE);
         filter.kind = Some(job.kind.clone());
 
@@ -142,22 +142,25 @@ impl Scenario {
 #[tokio::test]
 async fn opening_a_campaign_and_registering_jobs_reports_pending_counts() {
     let scenario = Scenario::new().await;
-    scenario.open_with_code_jobs(&["7", "8"]).await;
+    scenario.open_campaign_with_projects(&["7", "8"]).await;
 
-    let summary = scenario.summary().await;
+    let latest_summary = scenario.latest_summary().await;
 
-    assert_eq!(summary.id, scenario.campaign);
-    assert_eq!(summary.phases.len(), 2);
-    assert_eq!(counts(&summary, &CODE, JobState::Pending), 2);
-    assert_eq!(counts(&summary, &NAMESPACE_DATA, JobState::Pending), 0);
-    assert!(!summary.is_complete());
-    assert!(!summary.is_abandoned());
+    assert_eq!(latest_summary.id, scenario.campaign);
+    assert_eq!(latest_summary.phases.len(), 2);
+    assert_eq!(count_in_phase(&latest_summary, &CODE, JobState::Pending), 2);
+    assert_eq!(
+        count_in_phase(&latest_summary, &NAMESPACE_DATA, JobState::Pending),
+        0
+    );
+    assert!(!latest_summary.is_complete());
+    assert!(!latest_summary.is_abandoned());
 }
 
 #[tokio::test]
 async fn registering_the_same_jobs_twice_does_not_inflate_counts() {
     let scenario = Scenario::new().await;
-    let jobs = scenario.open_with_code_jobs(&["7", "8"]).await;
+    let jobs = scenario.open_campaign_with_projects(&["7", "8"]).await;
 
     scenario
         .ledger()
@@ -165,175 +168,270 @@ async fn registering_the_same_jobs_twice_does_not_inflate_counts() {
         .await
         .unwrap();
 
-    let summary = scenario.summary().await;
-    assert_eq!(counts(&summary, &CODE, JobState::Pending), 2);
+    let latest_summary = scenario.latest_summary().await;
+    assert_eq!(count_in_phase(&latest_summary, &CODE, JobState::Pending), 2);
 }
 
 #[tokio::test]
 async fn transitions_move_a_job_through_its_lifecycle() {
     let scenario = Scenario::new().await;
-    let jobs = scenario.open_with_code_jobs(&["7", "8"]).await;
+    let jobs = scenario.open_campaign_with_projects(&["7", "8"]).await;
     let dispatch = Uuid::new_v4();
 
     scenario
-        .record(&jobs[0], dispatch, 0, JobState::Queued, at(0))
+        .record_transition(
+            &jobs[0],
+            dispatch,
+            0,
+            JobState::Queued,
+            seconds_into_backfill(0),
+        )
         .await;
     scenario
-        .record(&jobs[0], dispatch, 1, JobState::Running, at(1))
+        .record_transition(
+            &jobs[0],
+            dispatch,
+            1,
+            JobState::Running,
+            seconds_into_backfill(1),
+        )
         .await;
     scenario
-        .record(&jobs[0], dispatch, 1, JobState::Succeeded, at(2))
+        .record_transition(
+            &jobs[0],
+            dispatch,
+            1,
+            JobState::Succeeded,
+            seconds_into_backfill(2),
+        )
         .await;
 
-    let summary = scenario.summary().await;
-    assert_eq!(counts(&summary, &CODE, JobState::Pending), 1);
-    assert_eq!(counts(&summary, &CODE, JobState::Succeeded), 1);
-    assert_eq!(scenario.current_state(&jobs[0]).await, JobState::Succeeded);
+    let latest_summary = scenario.latest_summary().await;
+    assert_eq!(count_in_phase(&latest_summary, &CODE, JobState::Pending), 1);
+    assert_eq!(
+        count_in_phase(&latest_summary, &CODE, JobState::Succeeded),
+        1
+    );
+    assert_eq!(
+        scenario.current_state_of(&jobs[0]).await,
+        JobState::Succeeded
+    );
 }
 
 #[tokio::test]
 async fn a_late_lower_ranked_row_cannot_regress_the_same_attempt() {
     let scenario = Scenario::new().await;
-    let jobs = scenario.open_with_code_jobs(&["7"]).await;
+    let jobs = scenario.open_campaign_with_projects(&["7"]).await;
     let dispatch = Uuid::new_v4();
 
     scenario
-        .record(&jobs[0], dispatch, 1, JobState::Succeeded, at(0))
+        .record_transition(
+            &jobs[0],
+            dispatch,
+            1,
+            JobState::Succeeded,
+            seconds_into_backfill(0),
+        )
         .await;
     scenario
-        .record(&jobs[0], dispatch, 1, JobState::Running, at(5))
+        .record_transition(
+            &jobs[0],
+            dispatch,
+            1,
+            JobState::Running,
+            seconds_into_backfill(5),
+        )
         .await;
 
-    assert_eq!(scenario.current_state(&jobs[0]).await, JobState::Succeeded);
+    assert_eq!(
+        scenario.current_state_of(&jobs[0]).await,
+        JobState::Succeeded
+    );
 }
 
 #[tokio::test]
 async fn a_late_row_from_an_older_attempt_cannot_change_the_newer_attempt() {
     let scenario = Scenario::new().await;
-    let jobs = scenario.open_with_code_jobs(&["7"]).await;
+    let jobs = scenario.open_campaign_with_projects(&["7"]).await;
     let dispatch = Uuid::new_v4();
 
     scenario
-        .record(&jobs[0], dispatch, 2, JobState::Succeeded, at(0))
+        .record_transition(
+            &jobs[0],
+            dispatch,
+            2,
+            JobState::Succeeded,
+            seconds_into_backfill(0),
+        )
         .await;
     scenario
-        .record(&jobs[0], dispatch, 1, JobState::Failed, at(5))
+        .record_transition(
+            &jobs[0],
+            dispatch,
+            1,
+            JobState::Failed,
+            seconds_into_backfill(5),
+        )
         .await;
 
-    assert_eq!(scenario.current_state(&jobs[0]).await, JobState::Succeeded);
+    assert_eq!(
+        scenario.current_state_of(&jobs[0]).await,
+        JobState::Succeeded
+    );
 }
 
 #[tokio::test]
 async fn a_newer_dispatch_supersedes_an_older_one() {
     let scenario = Scenario::new().await;
-    let jobs = scenario.open_with_code_jobs(&["7"]).await;
+    let jobs = scenario.open_campaign_with_projects(&["7"]).await;
 
     scenario
-        .record(&jobs[0], Uuid::new_v4(), 1, JobState::Failed, at(0))
+        .record_transition(
+            &jobs[0],
+            Uuid::new_v4(),
+            1,
+            JobState::Failed,
+            seconds_into_backfill(0),
+        )
         .await;
     scenario
-        .record(&jobs[0], Uuid::new_v4(), 1, JobState::Running, at(5))
+        .record_transition(
+            &jobs[0],
+            Uuid::new_v4(),
+            1,
+            JobState::Running,
+            seconds_into_backfill(5),
+        )
         .await;
 
-    assert_eq!(scenario.current_state(&jobs[0]).await, JobState::Running);
+    assert_eq!(scenario.current_state_of(&jobs[0]).await, JobState::Running);
 }
 
 #[tokio::test]
 async fn campaign_completes_when_discovery_is_closed_and_every_job_is_terminal() {
     let scenario = Scenario::new().await;
-    let jobs = scenario.open_with_code_jobs(&["7", "8"]).await;
+    let jobs = scenario.open_campaign_with_projects(&["7", "8"]).await;
     let ledger = scenario.ledger();
-    let [code, namespace_data] = phases();
+    let [code, namespace_data] = backfill_phases();
 
     scenario
-        .record(&jobs[0], Uuid::new_v4(), 1, JobState::Succeeded, at(0))
+        .record_transition(
+            &jobs[0],
+            Uuid::new_v4(),
+            1,
+            JobState::Succeeded,
+            seconds_into_backfill(0),
+        )
         .await;
     scenario
-        .record(&jobs[1], Uuid::new_v4(), 1, JobState::Failed, at(0))
+        .record_transition(
+            &jobs[1],
+            Uuid::new_v4(),
+            1,
+            JobState::Failed,
+            seconds_into_backfill(0),
+        )
         .await;
-    assert!(!scenario.summary().await.is_complete());
+    assert!(!scenario.latest_summary().await.is_complete());
 
     ledger
         .close_discovery(&scenario.campaign, &code)
         .await
         .unwrap();
-    assert!(!scenario.summary().await.is_complete());
+    assert!(!scenario.latest_summary().await.is_complete());
 
     ledger
         .close_discovery(&scenario.campaign, &namespace_data)
         .await
         .unwrap();
-    let summary = scenario.summary().await;
-    assert!(summary.is_complete());
-    assert!(summary.is_ready());
-    assert_eq!(summary.count(JobState::Failed), 1);
-    assert_eq!(summary.total(), 2);
+    let latest_summary = scenario.latest_summary().await;
+    assert!(latest_summary.is_complete());
+    assert!(latest_summary.is_ready());
+    assert_eq!(latest_summary.count(JobState::Failed), 1);
+    assert_eq!(latest_summary.total(), 2);
 }
 
 #[tokio::test]
 async fn abandoning_a_campaign_sticks_and_reopening_does_not_revive_it() {
     let scenario = Scenario::new().await;
-    scenario.open_with_code_jobs(&["7"]).await;
+    scenario.open_campaign_with_projects(&["7"]).await;
     let ledger = scenario.ledger();
 
     ledger
-        .abandon_campaign(&scenario.campaign, &phases())
+        .abandon_campaign(&scenario.campaign, &backfill_phases())
         .await
         .unwrap();
-    assert!(scenario.summary().await.is_abandoned());
+    assert!(scenario.latest_summary().await.is_abandoned());
 
     ledger
-        .open_campaign(&scenario.campaign, &phases())
+        .open_campaign(&scenario.campaign, &backfill_phases())
         .await
         .unwrap();
-    let summary = scenario.summary().await;
-    assert!(summary.is_abandoned());
-    assert!(!summary.is_complete());
+    let latest_summary = scenario.latest_summary().await;
+    assert!(latest_summary.is_abandoned());
+    assert!(!latest_summary.is_complete());
 }
 
 #[tokio::test]
 async fn latest_campaign_returns_the_newest_generation_only() {
     let scenario = Scenario::new().await;
-    scenario.open_with_code_jobs(&["7", "8", "9"]).await;
+    scenario.open_campaign_with_projects(&["7", "8", "9"]).await;
     let ledger = scenario.ledger();
 
-    let next = campaign_id(generation(1));
-    let next_jobs = [code_job(Some(next.clone()), "7")];
-    ledger.open_campaign(&next, &phases()).await.unwrap();
+    let next = backfill_campaign(generation_at_hour(1));
+    let next_jobs = [code_job_for_project(Some(next.clone()), "7")];
+    ledger
+        .open_campaign(&next, &backfill_phases())
+        .await
+        .unwrap();
     ledger
         .register(&next_jobs, JobState::Pending, None)
         .await
         .unwrap();
 
-    let summary = scenario.summary().await;
-    assert_eq!(summary.id, next);
-    assert_eq!(counts(&summary, &CODE, JobState::Pending), 1);
+    let latest_summary = scenario.latest_summary().await;
+    assert_eq!(latest_summary.id, next);
+    assert_eq!(count_in_phase(&latest_summary, &CODE, JobState::Pending), 1);
 }
 
 #[tokio::test]
 async fn latest_campaign_is_none_for_an_unknown_subject() {
     let scenario = Scenario::new().await;
 
-    let summary = scenario
+    let latest_summary = scenario
         .ledger()
         .latest_campaign(&BACKFILL, "unknown")
         .await
         .unwrap();
 
-    assert!(summary.is_none());
+    assert!(latest_summary.is_none());
 }
 
 #[tokio::test]
 async fn pending_jobs_returns_only_pending_jobs_up_to_the_limit() {
     let scenario = Scenario::new().await;
-    let jobs = scenario.open_with_code_jobs(&["1", "2", "3", "4"]).await;
+    let jobs = scenario
+        .open_campaign_with_projects(&["1", "2", "3", "4"])
+        .await;
     let ledger = scenario.ledger();
 
     scenario
-        .record(&jobs[0], Uuid::new_v4(), 0, JobState::Queued, at(0))
+        .record_transition(
+            &jobs[0],
+            Uuid::new_v4(),
+            0,
+            JobState::Queued,
+            seconds_into_backfill(0),
+        )
         .await;
     scenario
-        .record(&jobs[1], Uuid::new_v4(), 1, JobState::Succeeded, at(0))
+        .record_transition(
+            &jobs[1],
+            Uuid::new_v4(),
+            1,
+            JobState::Succeeded,
+            seconds_into_backfill(0),
+        )
         .await;
 
     let pending = ledger
@@ -352,7 +450,7 @@ async fn pending_jobs_returns_only_pending_jobs_up_to_the_limit() {
 #[tokio::test]
 async fn latest_success_at_scopes_by_namespace_and_path_prefix() {
     let scenario = Scenario::new().await;
-    let jobs = scenario.open_with_code_jobs(&["7", "8"]).await;
+    let jobs = scenario.open_campaign_with_projects(&["7", "8"]).await;
     let ledger = scenario.ledger();
     let root = TraversalPath::from(ROOT_PATH);
 
@@ -365,27 +463,45 @@ async fn latest_success_at_scopes_by_namespace_and_path_prefix() {
     );
 
     scenario
-        .record(&jobs[0], Uuid::new_v4(), 1, JobState::Succeeded, at(0))
+        .record_transition(
+            &jobs[0],
+            Uuid::new_v4(),
+            1,
+            JobState::Succeeded,
+            seconds_into_backfill(0),
+        )
         .await;
     scenario
-        .record(&jobs[1], Uuid::new_v4(), 1, JobState::Succeeded, at(60))
+        .record_transition(
+            &jobs[1],
+            Uuid::new_v4(),
+            1,
+            JobState::Succeeded,
+            seconds_into_backfill(60),
+        )
         .await;
-    let ordinary = code_job(None, "7");
+    let ordinary = code_job_for_project(None, "7");
     scenario
-        .record(&ordinary, Uuid::new_v4(), 1, JobState::Succeeded, at(120))
+        .record_transition(
+            &ordinary,
+            Uuid::new_v4(),
+            1,
+            JobState::Succeeded,
+            seconds_into_backfill(120),
+        )
         .await;
 
     let under_root = ledger
         .latest_success_at(ROOT_NAMESPACE, &root)
         .await
         .unwrap();
-    assert_eq!(under_root, Some(at(120)));
+    assert_eq!(under_root, Some(seconds_into_backfill(120)));
 
     let under_project = ledger
         .latest_success_at(ROOT_NAMESPACE, &jobs[1].traversal_path)
         .await
         .unwrap();
-    assert_eq!(under_project, Some(at(60)));
+    assert_eq!(under_project, Some(seconds_into_backfill(60)));
 
     let other_namespace = ledger.latest_success_at(99, &root).await.unwrap();
     assert_eq!(other_namespace, None);
@@ -394,12 +510,18 @@ async fn latest_success_at_scopes_by_namespace_and_path_prefix() {
 #[tokio::test]
 async fn jobs_filter_returns_one_snapshot_per_job_with_its_latest_transition() {
     let scenario = Scenario::new().await;
-    let jobs = scenario.open_with_code_jobs(&["7", "8"]).await;
+    let jobs = scenario.open_campaign_with_projects(&["7", "8"]).await;
     let ledger = scenario.ledger();
     let dispatch = Uuid::new_v4();
 
     scenario
-        .record(&jobs[0], dispatch, 1, JobState::Running, at(0))
+        .record_transition(
+            &jobs[0],
+            dispatch,
+            1,
+            JobState::Running,
+            seconds_into_backfill(0),
+        )
         .await;
     let failure = JobTransition {
         job: jobs[0].clone(),
@@ -407,7 +529,7 @@ async fn jobs_filter_returns_one_snapshot_per_job_with_its_latest_transition() {
         attempt: 1,
         state: JobState::Failed,
         reason: Some("boom".into()),
-        recorded_at: at(1),
+        recorded_at: seconds_into_backfill(1),
     };
     ledger.record(&failure).await.unwrap();
 

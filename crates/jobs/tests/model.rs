@@ -64,7 +64,7 @@ fn terminal_states_are_failed_skipped_and_succeeded() {
     );
 }
 
-fn open_phase(required: bool, counts: &[(JobState, u64)]) -> PhaseSummary {
+fn open_phase_with(required: bool, counts: &[(JobState, u64)]) -> PhaseSummary {
     PhaseSummary {
         kind: TEST_KIND,
         required,
@@ -74,21 +74,21 @@ fn open_phase(required: bool, counts: &[(JobState, u64)]) -> PhaseSummary {
     }
 }
 
-fn closed_phase(required: bool, counts: &[(JobState, u64)]) -> PhaseSummary {
+fn closed_phase_with(required: bool, counts: &[(JobState, u64)]) -> PhaseSummary {
     PhaseSummary {
         discovery_closed: true,
-        ..open_phase(required, counts)
+        ..open_phase_with(required, counts)
     }
 }
 
-fn abandoned_phase() -> PhaseSummary {
+fn abandoned_phase_without_jobs() -> PhaseSummary {
     PhaseSummary {
         abandoned: true,
-        ..open_phase(true, &[])
+        ..open_phase_with(true, &[])
     }
 }
 
-fn campaign(phases: Vec<PhaseSummary>) -> CampaignSummary {
+fn campaign_with_phases(phases: Vec<PhaseSummary>) -> CampaignSummary {
     CampaignSummary {
         id: CampaignId {
             kind: TEST_CAMPAIGN,
@@ -101,9 +101,9 @@ fn campaign(phases: Vec<PhaseSummary>) -> CampaignSummary {
 
 #[test]
 fn campaign_is_complete_when_every_phase_is_closed_and_terminal() {
-    let summary = campaign(vec![
-        closed_phase(true, &[(JobState::Succeeded, 3), (JobState::Failed, 1)]),
-        closed_phase(false, &[(JobState::Skipped, 2)]),
+    let summary = campaign_with_phases(vec![
+        closed_phase_with(true, &[(JobState::Succeeded, 3), (JobState::Failed, 1)]),
+        closed_phase_with(false, &[(JobState::Skipped, 2)]),
     ]);
 
     assert!(summary.is_complete());
@@ -115,7 +115,7 @@ fn campaign_is_complete_when_every_phase_is_closed_and_terminal() {
 
 #[test]
 fn campaign_with_open_discovery_is_not_complete_even_with_no_jobs() {
-    let summary = campaign(vec![open_phase(true, &[])]);
+    let summary = campaign_with_phases(vec![open_phase_with(true, &[])]);
 
     assert!(!summary.is_complete());
     assert!(!summary.is_ready());
@@ -123,9 +123,9 @@ fn campaign_with_open_discovery_is_not_complete_even_with_no_jobs() {
 
 #[test]
 fn campaign_is_ready_when_only_optional_phases_are_unfinished() {
-    let summary = campaign(vec![
-        closed_phase(true, &[(JobState::Succeeded, 5)]),
-        closed_phase(false, &[(JobState::Running, 1)]),
+    let summary = campaign_with_phases(vec![
+        closed_phase_with(true, &[(JobState::Succeeded, 5)]),
+        closed_phase_with(false, &[(JobState::Running, 1)]),
     ]);
 
     assert!(summary.is_ready());
@@ -134,7 +134,7 @@ fn campaign_is_ready_when_only_optional_phases_are_unfinished() {
 
 #[test]
 fn campaign_with_a_pending_job_in_a_closed_phase_is_not_complete() {
-    let summary = campaign(vec![closed_phase(
+    let summary = campaign_with_phases(vec![closed_phase_with(
         true,
         &[(JobState::Succeeded, 9), (JobState::Pending, 1)],
     )]);
@@ -144,9 +144,9 @@ fn campaign_with_a_pending_job_in_a_closed_phase_is_not_complete() {
 
 #[test]
 fn campaign_is_abandoned_when_any_phase_is_abandoned() {
-    let summary = campaign(vec![
-        closed_phase(true, &[(JobState::Succeeded, 1)]),
-        abandoned_phase(),
+    let summary = campaign_with_phases(vec![
+        closed_phase_with(true, &[(JobState::Succeeded, 1)]),
+        abandoned_phase_without_jobs(),
     ]);
 
     assert!(summary.is_abandoned());

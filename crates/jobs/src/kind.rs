@@ -5,7 +5,7 @@ use std::fmt;
 #[error("kind {0:?} must match ^[a-z][a-z0-9_]{{0,63}}$")]
 pub struct InvalidKind(pub String);
 
-const fn is_kind_name(name: &str) -> bool {
+const fn is_valid_kind_name(name: &str) -> bool {
     let bytes = name.as_bytes();
     if bytes.is_empty() || bytes.len() > 64 || !bytes[0].is_ascii_lowercase() {
         return false;
@@ -40,14 +40,14 @@ macro_rules! kind_newtype {
         impl $name {
             pub const fn new(name: &'static str) -> Self {
                 assert!(
-                    is_kind_name(name),
+                    is_valid_kind_name(name),
                     "kind must be 1 to 64 bytes of lowercase ascii, digits, or underscore, starting with a letter"
                 );
                 Self(Cow::Borrowed(name))
             }
 
             pub fn parse(name: &str) -> Result<Self, InvalidKind> {
-                if is_kind_name(name) {
+                if is_valid_kind_name(name) {
                     Ok(Self(Cow::Owned(name.to_owned())))
                 } else {
                     Err(InvalidKind(name.to_owned()))

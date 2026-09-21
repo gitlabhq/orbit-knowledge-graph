@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
+use arrow::array::UInt64Builder;
 use arrow::array::{
     Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Date32Array, Date64Array,
     Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray,
@@ -11,8 +12,9 @@ use arrow::array::{
     TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow::compute;
-use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema};
+use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema, TimestampMicrosecondType};
 use arrow::record_batch::RecordBatch;
+use chrono::{DateTime, TimeZone, Utc};
 
 #[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
 pub enum ColumnValue {
@@ -156,6 +158,23 @@ impl ArrowUtils {
         Some(arr.value(row).to_string())
     }
 
+    pub fn get_column_bool(batch: &RecordBatch, col_name: &str, row: usize) -> Option<bool> {
+        let column = Self::get_column_by_name::<BooleanArray>(batch, col_name)?;
+        if column.is_null(row) {
+            return None;
+        }
+        Some(column.value(row))
+    }
+
+    pub fn get_column_timestamp(
+        batch: &RecordBatch,
+        col_name: &str,
+        row: usize,
+    ) -> Option<DateTime<Utc>> {
+        let micros = Self::get_column::<TimestampMicrosecondType>(batch, col_name, row)?;
+        Utc.timestamp_micros(micros).single()
+    }
+
     /// Look up a `List<String>` column by name and collect its non-null elements
     /// at the given row. Returns an empty vec if the column is missing, not a
     /// `ListArray`, null at this row, or contains a non-`StringArray` inner type.
@@ -297,6 +316,7 @@ pub enum ColumnType {
     /// Dictionary-encoded string for low-cardinality columns (edge_kind, language).
     DictStr,
     Int,
+    UInt,
     Bool,
     /// Microsecond-precision UTC timestamp.
     TimestampMicros,
@@ -321,6 +341,7 @@ enum Col {
         bool,
     ),
     Int(Int64Builder, bool),
+    UInt(UInt64Builder, bool),
     Bool(BooleanBuilder, bool),
     Timestamp(TimestampMicrosecondBuilder, bool),
     StrList(arrow::array::ListBuilder<StringBuilder>, bool),
@@ -344,6 +365,7 @@ impl Col {
             Self::Str(b, _) => b.len(),
             Self::DictStr(b, _) => b.len(),
             Self::Int(b, _) => b.len(),
+            Self::UInt(b, _) => b.len(),
             Self::Bool(b, _) => b.len(),
             Self::Timestamp(b, _) => b.len(),
             Self::StrList(b, _) => b.len(),
@@ -356,6 +378,7 @@ impl Col {
             Self::Str(..) => "Str",
             Self::DictStr(..) => "DictStr",
             Self::Int(..) => "Int",
+            Self::UInt(..) => "UInt",
             Self::Bool(..) => "Bool",
             Self::Timestamp(..) => "Timestamp",
             Self::StrList(..) => "StrList",
@@ -372,6 +395,7 @@ impl Col {
                 Arc::new(b.finish()),
             ),
             Self::Int(mut b, nullable) => (DataType::Int64, nullable, Arc::new(b.finish())),
+            Self::UInt(mut b, nullable) => (DataType::UInt64, nullable, Arc::new(b.finish())),
             Self::Bool(mut b, nullable) => (DataType::Boolean, nullable, Arc::new(b.finish())),
             Self::Timestamp(mut b, nullable) => (
                 DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, Some("UTC".into())),
@@ -433,6 +457,20 @@ impl ColRef<'_> {
             }
             other => Err(batch_err(format!(
                 "push_int on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
+        }
+    }
+
+    pub fn push_uint(&mut self, v: u64) -> BatchResult<()> {
+        match &mut *self.col {
+            Col::UInt(b, _) => {
+                b.append_value(v);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_uint on {} column '{}'",
                 other.kind(),
                 self.name
             ))),
@@ -564,6 +602,7 @@ impl BatchBuilder {
             }
             let col = match spec.col_type {
                 ColumnType::Int => Col::Int(Int64Builder::with_capacity(cap), spec.nullable),
+                ColumnType::UInt => Col::UInt(UInt64Builder::with_capacity(cap), spec.nullable),
                 ColumnType::Str => {
                     Col::Str(StringBuilder::with_capacity(cap, cap * 8), spec.nullable)
                 }

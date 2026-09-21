@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use arrow::array::BooleanArray;
-use arrow::datatypes::{Int64Type, TimestampMicrosecondType};
+use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use clickhouse_client::{ArrowClickHouseClient, ArrowQuery};
 use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
@@ -15,13 +14,13 @@ use crate::model::{
     CampaignId, CampaignSummary, InvalidState, JobFilter, JobRef, JobSnapshot, JobState,
     JobTransition, PhaseSpec, PhaseState, PhaseSummary,
 };
-use crate::rows::{CAMPAIGN_TABLE, JOB_TABLE, campaign_batch, job_batch};
+use crate::rows::{CAMPAIGN_TABLE, JOB_TABLE, build_campaign_batch, build_job_batch};
 
 const INSERT_CHUNK_ROWS: usize = 65_536;
 const ASYNC_INSERT_OVERRIDES: &[(&str, &str)] =
     &[("async_insert", "1"), ("wait_for_async_insert", "1")];
 
-const CAMPAIGN_PREDICATE: &str = "campaign_kind = {campaign_kind:String} \
+const CAMPAIGN_MATCH_SQL: &str = "campaign_kind = {campaign_kind:String} \
      AND campaign_subject = {campaign_subject:String} \
      AND campaign_generation = fromUnixTimestamp64Micro({campaign_generation:Int64}, 'UTC')";
 
@@ -44,14 +43,14 @@ WHERE namespace_id = {namespace_id:Int64} \
   AND startsWith(traversal_path, {path:String}) \
   AND state = 'succeeded'";
 
-const COUNTS_SELECT: &str =
+const COUNT_BY_KIND_AND_STATE_SQL: &str =
     "SELECT kind, state, toInt64(count()) AS count FROM current_jobs GROUP BY kind, state";
 
-const PENDING_SELECT: &str = "\
+const PENDING_JOBS_SQL: &str = "\
 SELECT namespace_id, traversal_path, key FROM current_jobs \
 WHERE state = 'pending' ORDER BY key LIMIT {limit:UInt64}";
 
-const SNAPSHOT_COLUMNS: &str = "\
+const SNAPSHOT_COLUMNS_SQL: &str = "\
 campaign_kind, campaign_subject, campaign_generation, namespace_id, traversal_path, \
 kind, key, dispatch_id, attempt, state, reason, recorded_at";
 
@@ -86,7 +85,8 @@ impl JobLedger {
         campaign: &CampaignId,
         phases: &[PhaseSpec],
     ) -> Result<(), LedgerError> {
-        self.write_phases(campaign, phases, PhaseState::Open).await
+        self.write_phase_state(campaign, phases, PhaseState::Open)
+            .await
     }
 
     pub async fn close_discovery(
@@ -95,7 +95,7 @@ impl JobLedger {
         phase: &PhaseSpec,
     ) -> Result<(), LedgerError> {
         let phases = std::slice::from_ref(phase);
-        self.write_phases(campaign, phases, PhaseState::DiscoveryClosed)
+        self.write_phase_state(campaign, phases, PhaseState::DiscoveryClosed)
             .await
     }
 
@@ -104,7 +104,7 @@ impl JobLedger {
         campaign: &CampaignId,
         phases: &[PhaseSpec],
     ) -> Result<(), LedgerError> {
-        self.write_phases(campaign, phases, PhaseState::Abandoned)
+        self.write_phase_state(campaign, phases, PhaseState::Abandoned)
             .await
     }
 
@@ -118,7 +118,7 @@ impl JobLedger {
         for chunk in jobs.chunks(INSERT_CHUNK_ROWS) {
             let transitions: Vec<JobTransition> = chunk
                 .iter()
-                .map(|job| registration(job, initial, reason, now))
+                .map(|job| registration_transition(job, initial, reason, now))
                 .collect();
             self.record_many(&transitions).await?;
         }
@@ -131,7 +131,8 @@ impl JobLedger {
 
     pub async fn record_many(&self, transitions: &[JobTransition]) -> Result<(), LedgerError> {
         for chunk in transitions.chunks(INSERT_CHUNK_ROWS) {
-            self.insert(JOB_TABLE, job_batch(chunk)?).await?;
+            self.insert_batch(JOB_TABLE, build_job_batch(chunk)?)
+                .await?;
         }
         Ok(())
     }
@@ -144,23 +145,23 @@ impl JobLedger {
         limit: usize,
     ) -> Result<Vec<JobRef>, LedgerError> {
         let predicates = format!(
-            "{CAMPAIGN_PREDICATE} AND namespace_id = {{namespace_id:Int64}} AND kind = {{job_kind:String}}"
+            "{CAMPAIGN_MATCH_SQL} AND namespace_id = {{namespace_id:Int64}} AND kind = {{job_kind:String}}"
         );
-        let sql = with_current_jobs(&predicates, PENDING_SELECT);
-        let query = bind_campaign(self.client.query(&sql), campaign)
+        let sql = select_from_current_jobs(&predicates, PENDING_JOBS_SQL);
+        let query = bind_campaign_params(self.client.query(&sql), campaign)
             .param("namespace_id", namespace_id)
             .param("job_kind", kind.as_str())
             .param("limit", limit as u64);
         let batches = query.fetch_arrow().await?;
 
-        cells(&batches)
+        each_row(&batches)
             .map(|(batch, row)| {
                 Ok(JobRef {
                     campaign: Some(campaign.clone()),
-                    namespace_id: integer(batch, "namespace_id", row)?,
-                    traversal_path: text(batch, "traversal_path", row)?.into(),
+                    namespace_id: read_int64(batch, "namespace_id", row)?,
+                    traversal_path: read_string(batch, "traversal_path", row)?.into(),
                     kind: kind.clone(),
-                    key: text(batch, "key", row)?,
+                    key: read_string(batch, "key", row)?,
                 })
             })
             .collect()
@@ -178,18 +179,18 @@ impl JobLedger {
             .param("subject", subject);
         let batches = query.fetch_arrow().await?;
 
-        let Some((first, row)) = cells(&batches).next() else {
+        let Some((first, row)) = each_row(&batches).next() else {
             return Ok(None);
         };
         let id = CampaignId {
             kind: kind.clone(),
             subject: subject.to_owned(),
-            generation: timestamp(first, "latest_generation", row)?,
+            generation: read_timestamp(first, "latest_generation", row)?,
         };
 
-        let mut counts = self.counts_by_kind(&id).await?;
-        let phases = cells(&batches)
-            .map(|(batch, row)| phase_summary(batch, row, &mut counts))
+        let mut counts = self.count_jobs_by_kind_and_state(&id).await?;
+        let phases = each_row(&batches)
+            .map(|(batch, row)| read_phase_summary(batch, row, &mut counts))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Some(CampaignSummary { id, phases }))
@@ -207,34 +208,34 @@ impl JobLedger {
             .param("path", traversal_path.as_str());
         let batches = query.fetch_arrow().await?;
 
-        let Some((batch, row)) = cells(&batches).next() else {
+        let Some((batch, row)) = each_row(&batches).next() else {
             return Ok(None);
         };
-        let latest = timestamp(batch, "recorded_at", row)?;
+        let latest = read_timestamp(batch, "recorded_at", row)?;
         Ok(Some(latest).filter(|at| *at != DateTime::<Utc>::UNIX_EPOCH))
     }
 
     pub async fn jobs(&self, filter: &JobFilter) -> Result<Vec<JobSnapshot>, LedgerError> {
-        let sql = snapshot_sql(filter);
-        let query = bind_filter(self.client.query(&sql), filter);
+        let sql = build_snapshot_sql(filter);
+        let query = bind_filter_params(self.client.query(&sql), filter);
         let batches = query.fetch_arrow().await?;
 
-        cells(&batches)
-            .map(|(batch, row)| snapshot(batch, row))
+        each_row(&batches)
+            .map(|(batch, row)| read_snapshot(batch, row))
             .collect()
     }
 
-    async fn write_phases(
+    async fn write_phase_state(
         &self,
         campaign: &CampaignId,
         phases: &[PhaseSpec],
         state: PhaseState,
     ) -> Result<(), LedgerError> {
-        let batch = campaign_batch(campaign, phases, state, Utc::now())?;
-        self.insert(CAMPAIGN_TABLE, batch).await
+        let batch = build_campaign_batch(campaign, phases, state, Utc::now())?;
+        self.insert_batch(CAMPAIGN_TABLE, batch).await
     }
 
-    async fn insert(&self, table: &str, batch: RecordBatch) -> Result<(), LedgerError> {
+    async fn insert_batch(&self, table: &str, batch: RecordBatch) -> Result<(), LedgerError> {
         if batch.num_rows() == 0 {
             return Ok(());
         }
@@ -247,26 +248,26 @@ impl JobLedger {
         Ok(())
     }
 
-    async fn counts_by_kind(
+    async fn count_jobs_by_kind_and_state(
         &self,
         campaign: &CampaignId,
     ) -> Result<BTreeMap<String, BTreeMap<JobState, u64>>, LedgerError> {
-        let sql = with_current_jobs(CAMPAIGN_PREDICATE, COUNTS_SELECT);
-        let query = bind_campaign(self.client.query(&sql), campaign);
+        let sql = select_from_current_jobs(CAMPAIGN_MATCH_SQL, COUNT_BY_KIND_AND_STATE_SQL);
+        let query = bind_campaign_params(self.client.query(&sql), campaign);
         let batches = query.fetch_arrow().await?;
 
         let mut by_kind: BTreeMap<String, BTreeMap<JobState, u64>> = BTreeMap::new();
-        for (batch, row) in cells(&batches) {
-            let kind = text(batch, "kind", row)?;
-            let state = JobState::parse(&text(batch, "state", row)?)?;
-            let count = integer(batch, "count", row)?.unsigned_abs();
+        for (batch, row) in each_row(&batches) {
+            let kind = read_string(batch, "kind", row)?;
+            let state = JobState::parse(&read_string(batch, "state", row)?)?;
+            let count = read_int64(batch, "count", row)?.unsigned_abs();
             by_kind.entry(kind).or_default().insert(state, count);
         }
         Ok(by_kind)
     }
 }
 
-fn registration(
+fn registration_transition(
     job: &JobRef,
     initial: JobState,
     reason: Option<&str>,
@@ -286,7 +287,7 @@ fn registration(
     }
 }
 
-fn with_current_jobs(predicates: &str, select: &str) -> String {
+fn select_from_current_jobs(predicates: &str, select: &str) -> String {
     format!(
         "WITH per_dispatch AS ( \
            SELECT * FROM job WHERE {predicates} \
@@ -298,11 +299,11 @@ fn with_current_jobs(predicates: &str, select: &str) -> String {
     )
 }
 
-fn snapshot_sql(filter: &JobFilter) -> String {
+fn build_snapshot_sql(filter: &JobFilter) -> String {
     let mut predicates = String::from("namespace_id = {namespace_id:Int64}");
     if filter.campaign.is_some() {
         predicates.push_str(" AND ");
-        predicates.push_str(CAMPAIGN_PREDICATE);
+        predicates.push_str(CAMPAIGN_MATCH_SQL);
     }
     if filter.kind.is_some() {
         predicates.push_str(" AND kind = {job_kind:String}");
@@ -314,18 +315,18 @@ fn snapshot_sql(filter: &JobFilter) -> String {
         "WHERE state IN {states:Array(String)}"
     };
     let select = format!(
-        "SELECT {SNAPSHOT_COLUMNS} FROM current_jobs {state_filter} \
+        "SELECT {SNAPSHOT_COLUMNS_SQL} FROM current_jobs {state_filter} \
          ORDER BY recorded_at DESC, kind, key LIMIT {{limit:UInt64}}"
     );
-    with_current_jobs(&predicates, &select)
+    select_from_current_jobs(&predicates, &select)
 }
 
-fn bind_filter(query: ArrowQuery, filter: &JobFilter) -> ArrowQuery {
+fn bind_filter_params(query: ArrowQuery, filter: &JobFilter) -> ArrowQuery {
     let mut query = query
         .param("namespace_id", filter.namespace_id)
         .param("limit", filter.limit as u64);
     if let Some(campaign) = &filter.campaign {
-        query = bind_campaign(query, campaign);
+        query = bind_campaign_params(query, campaign);
     }
     if let Some(kind) = &filter.kind {
         query = query.param("job_kind", kind.as_str());
@@ -337,7 +338,7 @@ fn bind_filter(query: ArrowQuery, filter: &JobFilter) -> ArrowQuery {
     query
 }
 
-fn bind_campaign(query: ArrowQuery, campaign: &CampaignId) -> ArrowQuery {
+fn bind_campaign_params(query: ArrowQuery, campaign: &CampaignId) -> ArrowQuery {
     query
         .param("campaign_kind", campaign.kind.as_str())
         .param("campaign_subject", campaign.subject.as_str())
@@ -347,81 +348,75 @@ fn bind_campaign(query: ArrowQuery, campaign: &CampaignId) -> ArrowQuery {
         )
 }
 
-fn phase_summary(
+fn read_phase_summary(
     batch: &RecordBatch,
     row: usize,
     counts: &mut BTreeMap<String, BTreeMap<JobState, u64>>,
 ) -> Result<PhaseSummary, LedgerError> {
-    let kind = text(batch, "job_kind", row)?;
-    let state = PhaseState::parse(&text(batch, "state", row)?)?;
+    let kind = read_string(batch, "job_kind", row)?;
+    let state = PhaseState::parse(&read_string(batch, "state", row)?)?;
     Ok(PhaseSummary {
         counts_by_state: counts.remove(&kind).unwrap_or_default(),
         kind: JobKind::parse(&kind)?,
-        required: flag(batch, "required", row)?,
+        required: read_bool(batch, "required", row)?,
         discovery_closed: state == PhaseState::DiscoveryClosed,
         abandoned: state == PhaseState::Abandoned,
     })
 }
 
-fn snapshot(batch: &RecordBatch, row: usize) -> Result<JobSnapshot, LedgerError> {
-    let campaign_kind = text(batch, "campaign_kind", row)?;
+fn read_snapshot(batch: &RecordBatch, row: usize) -> Result<JobSnapshot, LedgerError> {
+    let campaign_kind = read_string(batch, "campaign_kind", row)?;
     let campaign = if campaign_kind.is_empty() {
         None
     } else {
         Some(CampaignId {
             kind: CampaignKind::parse(&campaign_kind)?,
-            subject: text(batch, "campaign_subject", row)?,
-            generation: timestamp(batch, "campaign_generation", row)?,
+            subject: read_string(batch, "campaign_subject", row)?,
+            generation: read_timestamp(batch, "campaign_generation", row)?,
         })
     };
 
     let job = JobRef {
         campaign,
-        namespace_id: integer(batch, "namespace_id", row)?,
-        traversal_path: text(batch, "traversal_path", row)?.into(),
-        kind: JobKind::parse(&text(batch, "kind", row)?)?,
-        key: text(batch, "key", row)?,
+        namespace_id: read_int64(batch, "namespace_id", row)?,
+        traversal_path: read_string(batch, "traversal_path", row)?.into(),
+        kind: JobKind::parse(&read_string(batch, "kind", row)?)?,
+        key: read_string(batch, "key", row)?,
     };
 
-    let reason = text(batch, "reason", row)?;
+    let reason = read_string(batch, "reason", row)?;
     Ok(JobSnapshot {
         job,
-        dispatch_id: text(batch, "dispatch_id", row)?.parse()?,
-        attempt: u32::try_from(integer(batch, "attempt", row)?).unwrap_or(u32::MAX),
-        state: JobState::parse(&text(batch, "state", row)?)?,
+        dispatch_id: read_string(batch, "dispatch_id", row)?.parse()?,
+        attempt: u32::try_from(read_int64(batch, "attempt", row)?).unwrap_or(u32::MAX),
+        state: JobState::parse(&read_string(batch, "state", row)?)?,
         reason: Some(reason).filter(|reason| !reason.is_empty()),
-        recorded_at: timestamp(batch, "recorded_at", row)?,
+        recorded_at: read_timestamp(batch, "recorded_at", row)?,
     })
 }
 
-fn cells(batches: &[RecordBatch]) -> impl Iterator<Item = (&RecordBatch, usize)> {
+fn each_row(batches: &[RecordBatch]) -> impl Iterator<Item = (&RecordBatch, usize)> {
     batches
         .iter()
         .flat_map(|batch| (0..batch.num_rows()).map(move |row| (batch, row)))
 }
 
-fn text(batch: &RecordBatch, name: &'static str, row: usize) -> Result<String, LedgerError> {
+fn read_string(batch: &RecordBatch, name: &'static str, row: usize) -> Result<String, LedgerError> {
     ArrowUtils::get_column_string(batch, name, row).ok_or(LedgerError::Column(name))
 }
 
-fn integer(batch: &RecordBatch, name: &'static str, row: usize) -> Result<i64, LedgerError> {
+fn read_int64(batch: &RecordBatch, name: &'static str, row: usize) -> Result<i64, LedgerError> {
     ArrowUtils::get_column::<Int64Type>(batch, name, row).ok_or(LedgerError::Column(name))
 }
 
-fn flag(batch: &RecordBatch, name: &'static str, row: usize) -> Result<bool, LedgerError> {
-    ArrowUtils::get_column_by_name::<BooleanArray>(batch, name)
-        .map(|column| column.value(row))
-        .ok_or(LedgerError::Column(name))
+fn read_bool(batch: &RecordBatch, name: &'static str, row: usize) -> Result<bool, LedgerError> {
+    ArrowUtils::get_column_bool(batch, name, row).ok_or(LedgerError::Column(name))
 }
 
-fn timestamp(
+fn read_timestamp(
     batch: &RecordBatch,
     name: &'static str,
     row: usize,
 ) -> Result<DateTime<Utc>, LedgerError> {
-    let micros = ArrowUtils::get_column::<TimestampMicrosecondType>(batch, name, row)
-        .ok_or(LedgerError::Column(name))?;
-    Utc.timestamp_micros(micros)
-        .single()
-        .ok_or(LedgerError::Column(name))
+    ArrowUtils::get_column_timestamp(batch, name, row).ok_or(LedgerError::Column(name))
 }

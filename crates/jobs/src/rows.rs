@@ -1,127 +1,111 @@
-use std::iter::repeat_n;
-use std::sync::Arc;
-
-use arrow::array::{
-    ArrayRef, BooleanArray, Int64Array, StringArray, TimestampMicrosecondArray, UInt64Array,
-};
-use arrow::datatypes::{Field, Schema};
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
+use orbit_utils::arrow::{BatchBuilder, ColumnSpec, ColumnType};
 
 use crate::model::{CampaignId, JobRef, JobTransition, PhaseSpec, PhaseState};
 
 pub(crate) const CAMPAIGN_TABLE: &str = "campaign";
 pub(crate) const JOB_TABLE: &str = "job";
 
-pub(crate) fn campaign_batch(
+pub(crate) fn build_campaign_batch(
     campaign: &CampaignId,
     phases: &[PhaseSpec],
     state: PhaseState,
     recorded_at: DateTime<Utc>,
 ) -> Result<RecordBatch, ArrowError> {
-    let count = phases.len();
+    let columns = [
+        column("kind", ColumnType::Str),
+        column("subject", ColumnType::Str),
+        column("generation", ColumnType::TimestampMicros),
+        column("job_kind", ColumnType::Str),
+        column("required", ColumnType::Bool),
+        column("state", ColumnType::Str),
+        column("recorded_at", ColumnType::TimestampMicros),
+        column("_version", ColumnType::UInt),
+    ];
 
-    let kind = strings(repeat_n(campaign.kind.as_str(), count));
-    let subject = strings(repeat_n(campaign.subject.as_str(), count));
-    let generation = timestamps(repeat_n(campaign.generation, count));
-    let job_kind = strings(phases.iter().map(|phase| phase.kind.as_str()));
-    let required = booleans(phases.iter().map(|phase| phase.required));
-    let phase_state = strings(repeat_n(state.as_str(), count));
-    let recorded = timestamps(repeat_n(recorded_at, count));
-    let version = unsigned(repeat_n(state.rank(), count));
-
-    batch(vec![
-        ("kind", kind),
-        ("subject", subject),
-        ("generation", generation),
-        ("job_kind", job_kind),
-        ("required", required),
-        ("state", phase_state),
-        ("recorded_at", recorded),
-        ("_version", version),
-    ])
+    BatchBuilder::new(&columns, phases.len())?.build(phases, |phase, row| {
+        row.col("kind")?.push_str(campaign.kind.as_str())?;
+        row.col("subject")?.push_str(&campaign.subject)?;
+        row.col("generation")?
+            .push_timestamp_micros(campaign.generation.timestamp_micros())?;
+        row.col("job_kind")?.push_str(phase.kind.as_str())?;
+        row.col("required")?.push_bool(phase.required)?;
+        row.col("state")?.push_str(state.as_str())?;
+        row.col("recorded_at")?
+            .push_timestamp_micros(recorded_at.timestamp_micros())?;
+        row.col("_version")?.push_uint(state.rank())?;
+        Ok(())
+    })
 }
 
-pub(crate) fn job_batch(transitions: &[JobTransition]) -> Result<RecordBatch, ArrowError> {
-    let jobs = || transitions.iter().map(|transition| &transition.job);
-    let each = || transitions.iter();
+pub(crate) fn build_job_batch(transitions: &[JobTransition]) -> Result<RecordBatch, ArrowError> {
+    let columns = [
+        column("campaign_kind", ColumnType::Str),
+        column("campaign_subject", ColumnType::Str),
+        column("campaign_generation", ColumnType::TimestampMicros),
+        column("namespace_id", ColumnType::Int),
+        column("traversal_path", ColumnType::Str),
+        column("kind", ColumnType::Str),
+        column("key", ColumnType::Str),
+        column("dispatch_id", ColumnType::Str),
+        column("attempt", ColumnType::Int),
+        column("state", ColumnType::Str),
+        column("reason", ColumnType::Str),
+        column("recorded_at", ColumnType::TimestampMicros),
+        column("_version", ColumnType::UInt),
+    ];
 
-    let campaign_kind = strings(jobs().map(campaign_kind));
-    let campaign_subject = strings(jobs().map(campaign_subject));
-    let campaign_generation = timestamps(jobs().map(campaign_generation));
-    let namespace_id = integers(jobs().map(|job| job.namespace_id));
-    let traversal_path = strings(jobs().map(|job| job.traversal_path.as_str()));
-    let kind = strings(jobs().map(|job| job.kind.as_str()));
-    let key = strings(jobs().map(|job| job.key.as_str()));
-    let dispatch_id = strings(each().map(|t| t.dispatch_id.to_string()));
-    let attempt = integers(each().map(|t| i64::from(t.attempt)));
-    let state = strings(each().map(|t| t.state.as_str()));
-    let reason = strings(each().map(|t| t.reason.as_deref().unwrap_or("")));
-    let recorded_at = timestamps(each().map(|t| t.recorded_at));
-    let version = unsigned(each().map(|t| t.state.rank()));
-
-    batch(vec![
-        ("campaign_kind", campaign_kind),
-        ("campaign_subject", campaign_subject),
-        ("campaign_generation", campaign_generation),
-        ("namespace_id", namespace_id),
-        ("traversal_path", traversal_path),
-        ("kind", kind),
-        ("key", key),
-        ("dispatch_id", dispatch_id),
-        ("attempt", attempt),
-        ("state", state),
-        ("reason", reason),
-        ("recorded_at", recorded_at),
-        ("_version", version),
-    ])
+    BatchBuilder::new(&columns, transitions.len())?.build(transitions, |transition, row| {
+        let job = &transition.job;
+        row.col("campaign_kind")?
+            .push_str(campaign_kind_or_empty(job))?;
+        row.col("campaign_subject")?
+            .push_str(campaign_subject_or_empty(job))?;
+        row.col("campaign_generation")?
+            .push_timestamp_micros(campaign_generation_or_epoch(job).timestamp_micros())?;
+        row.col("namespace_id")?.push_int(job.namespace_id)?;
+        row.col("traversal_path")?
+            .push_str(job.traversal_path.as_str())?;
+        row.col("kind")?.push_str(job.kind.as_str())?;
+        row.col("key")?.push_str(&job.key)?;
+        row.col("dispatch_id")?
+            .push_str(transition.dispatch_id.to_string())?;
+        row.col("attempt")?
+            .push_int(i64::from(transition.attempt))?;
+        row.col("state")?.push_str(transition.state.as_str())?;
+        row.col("reason")?
+            .push_str(transition.reason.as_deref().unwrap_or(""))?;
+        row.col("recorded_at")?
+            .push_timestamp_micros(transition.recorded_at.timestamp_micros())?;
+        row.col("_version")?.push_uint(transition.state.rank())?;
+        Ok(())
+    })
 }
 
-fn campaign_kind(job: &JobRef) -> &str {
+fn column(name: &str, col_type: ColumnType) -> ColumnSpec {
+    ColumnSpec {
+        name: name.to_owned(),
+        col_type,
+        nullable: false,
+    }
+}
+
+fn campaign_kind_or_empty(job: &JobRef) -> &str {
     job.campaign
         .as_ref()
         .map_or("", |campaign| campaign.kind.as_str())
 }
 
-fn campaign_subject(job: &JobRef) -> &str {
+fn campaign_subject_or_empty(job: &JobRef) -> &str {
     job.campaign
         .as_ref()
         .map_or("", |campaign| campaign.subject.as_str())
 }
 
-fn campaign_generation(job: &JobRef) -> DateTime<Utc> {
+fn campaign_generation_or_epoch(job: &JobRef) -> DateTime<Utc> {
     job.campaign
         .as_ref()
         .map_or(DateTime::<Utc>::UNIX_EPOCH, |campaign| campaign.generation)
-}
-
-fn strings<S: AsRef<str>>(values: impl Iterator<Item = S>) -> ArrayRef {
-    Arc::new(StringArray::from_iter_values(values))
-}
-
-fn integers(values: impl Iterator<Item = i64>) -> ArrayRef {
-    Arc::new(Int64Array::from_iter_values(values))
-}
-
-fn unsigned(values: impl Iterator<Item = u64>) -> ArrayRef {
-    Arc::new(UInt64Array::from_iter_values(values))
-}
-
-fn booleans(values: impl Iterator<Item = bool>) -> ArrayRef {
-    Arc::new(BooleanArray::from_iter(values.map(Some)))
-}
-
-fn timestamps(values: impl Iterator<Item = DateTime<Utc>>) -> ArrayRef {
-    let micros = values.map(|value| value.timestamp_micros());
-    Arc::new(TimestampMicrosecondArray::from_iter_values(micros).with_timezone("UTC"))
-}
-
-fn batch(columns: Vec<(&str, ArrayRef)>) -> Result<RecordBatch, ArrowError> {
-    let fields = columns
-        .iter()
-        .map(|(name, array)| Field::new(*name, array.data_type().clone(), false))
-        .collect::<Vec<_>>();
-    let arrays = columns.into_iter().map(|(_, array)| array).collect();
-    RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)
 }
