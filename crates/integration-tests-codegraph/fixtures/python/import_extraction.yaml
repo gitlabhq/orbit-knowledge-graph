@@ -6,7 +6,7 @@ fixtures:
       import numpy, torch.nn
       import xml.etree.ElementTree as ET
       import numpy as np, torch as pytorch
-      from os.import_path import join
+      from os.path import join
       from numpy import array, matrix
       from urllib.parse import quote as url_quote
       from typing import List as ListType, Dict as DictType
@@ -40,14 +40,14 @@ tests:
     assert:
       - { count_gte: { field: n, value: 3 } }
 
-  - name: "C5: from import has correct path for os.import_path"
+  - name: "C5: from import has correct path for os.path"
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.identifier_name = 'join'
       RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
-      - { row: { path: "os.import_path" } }
+      - { row: { path: "os.path" } }
 
   - name: "C6: wildcard import exists"
     query: |

@@ -4,12 +4,12 @@ fixtures:
     content: |
       import os
       import sys
-      import os.import_path
+      import os.path
       import numpy as np
       from pathlib import Path
       from collections import defaultdict, OrderedDict
       from typing import List as ListType, Dict as DictType
-      from os.import_path import join, exists
+      from os.path import join, exists
 
 tests:
   - name: Has multiple imports

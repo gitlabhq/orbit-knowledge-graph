@@ -337,7 +337,8 @@ tests:
   - name: External CommonJS duplicate aliases preserve exact imported symbols
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
-      WHERE caller.fqn = 'reportAliases'
+      WHERE caller.file_path = 'external/duplicate_aliases.js'
+        AND caller.fqn = 'reportAliases'
       RETURN caller.fqn AS caller, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY alias
     assert:

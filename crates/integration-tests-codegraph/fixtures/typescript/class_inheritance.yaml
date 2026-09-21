@@ -9,7 +9,7 @@ fixtures:
 
       class Animal {
           name: string = "";
-          greet(): string { return `I am ${this.identifier_name}`; }
+          greet(): string { return `I am ${this.name}`; }
       }
 
       class Dog extends Animal implements Speakable {

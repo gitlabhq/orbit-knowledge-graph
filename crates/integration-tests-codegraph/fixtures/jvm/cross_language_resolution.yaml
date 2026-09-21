@@ -7,7 +7,7 @@ fixtures:
 
       public class User {
           private String name;
-          public User(String name) { this.identifier_name = name; }
+          public User(String name) { this.name = name; }
           public static User create(String name) { return new User(name); }
           public String greet() { return "Hello " + name; }
       }
