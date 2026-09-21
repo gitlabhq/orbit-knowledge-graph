@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::Ontology;
 
 use crate::error::Result;
@@ -17,6 +18,11 @@ pub struct JoinPath {
     pub edge_table: String,
 }
 
+pub enum HopStrategy {
+    EdgeScan { table: String, dedup: bool },
+    FkJoin { fk_column: String },
+}
+
 impl JoinGraph {
     pub fn build(ontology: &Ontology) -> Self {
         let mut by_kind = HashMap::new();
@@ -28,6 +34,27 @@ impl JoinGraph {
             });
         }
         Self { by_kind }
+    }
+
+    pub fn resolve(&self, rel: &InputRelationship, default_table: &str, chain_len: usize) -> HopStrategy {
+        if rel.hops.max == 1
+            && !matches!(rel.direction, Direction::Both)
+            && rel.filters.is_empty()
+            && rel.scope_preserving
+            && rel.types.iter().all(|t| self.is_fk_eligible(t))
+        {
+            let fk = self.by_kind[&rel.types[0]].fk_column.as_ref().unwrap();
+            return HopStrategy::FkJoin { fk_column: fk.clone() };
+        }
+
+        HopStrategy::EdgeScan {
+            table: self.edge_table(&rel.types, default_table),
+            dedup: chain_len >= 2 && rel.hops.max == 1,
+        }
+    }
+
+    fn is_fk_eligible(&self, kind: &str) -> bool {
+        self.by_kind.get(kind).is_some_and(|jp| jp.fk_column.is_some() && jp.scope_preserving)
     }
 
     pub fn edge_table(&self, rel_types: &[String], default: &str) -> String {
@@ -82,7 +109,7 @@ pub fn plan(input: &mut Input, ontology: &Ontology) -> Result<(PlanMetadata, Phy
     };
 
     let meta = PlanMetadata {
-        node_edge_mappings: compute_node_edge_mappings(input),
+        node_edge_mappings: compute_node_edge_mappings(input, &graph),
         hop_count: input.relationships.len(),
         phys_op: None,
     };
@@ -90,13 +117,35 @@ pub fn plan(input: &mut Input, ontology: &Ontology) -> Result<(PlanMetadata, Phy
     Ok((meta, op))
 }
 
-fn compute_node_edge_mappings(input: &Input) -> HashMap<String, (String, String)> {
+fn compute_node_edge_mappings(input: &Input, graph: &JoinGraph) -> HashMap<String, (String, String)> {
     let mut m = HashMap::new();
+    let det = &input.compiler.default_edge_table;
+    let chain_len = input.relationships.len();
     for (i, rel) in input.relationships.iter().enumerate() {
-        let ea = format!("e{i}");
-        let (sc, ec) = rel.direction.edge_columns();
-        m.entry(rel.from.clone()).or_insert_with(|| (ea.clone(), sc.to_string()));
-        m.entry(rel.to.clone()).or_insert_with(|| (ea.clone(), ec.to_string()));
+        match graph.resolve(rel, det, chain_len) {
+            HopStrategy::FkJoin { fk_column } => {
+                let from_has_fk = input.nodes.iter()
+                    .find(|n| n.id == rel.from)
+                    .and_then(|n| n.table.as_deref())
+                    .and_then(|t| input.compiler.table_columns.get(t))
+                    .is_some_and(|cols| cols.contains(&fk_column));
+                let (fk_alias, target_alias) = if from_has_fk {
+                    (&rel.from, &rel.to)
+                } else {
+                    (&rel.to, &rel.from)
+                };
+                m.entry(fk_alias.clone())
+                    .or_insert_with(|| (fk_alias.clone(), DEFAULT_PRIMARY_KEY.to_string()));
+                m.entry(target_alias.clone())
+                    .or_insert_with(|| (fk_alias.clone(), fk_column.clone()));
+            }
+            HopStrategy::EdgeScan { .. } => {
+                let ea = format!("e{i}");
+                let (sc, ec) = rel.direction.edge_columns();
+                m.entry(rel.from.clone()).or_insert_with(|| (ea.clone(), sc.to_string()));
+                m.entry(rel.to.clone()).or_insert_with(|| (ea.clone(), ec.to_string()));
+            }
+        }
     }
     m
 }
@@ -113,33 +162,80 @@ fn plan_chain(input: &Input, graph: &JoinGraph) -> PhysOp {
 
     let mut tree: Option<PhysOp> = None;
     let det = &input.compiler.default_edge_table;
-    let dedup = input.relationships.len() >= 2;
+    let chain_len = input.relationships.len();
+    let mut fk_joined: HashSet<String> = HashSet::new();
 
     for (i, rel) in input.relationships.iter().enumerate() {
         let ea = format!("e{i}");
-        let (sc, _) = rel.direction.edge_columns();
+        let (sc, ec) = rel.direction.edge_columns();
 
-        let edge = PhysOp::Scan {
-            table: graph.edge_table(&rel.types, det),
-            alias: ea.clone(),
-            dedup,
-        };
+        match graph.resolve(rel, det, chain_len) {
+            HopStrategy::FkJoin { fk_column } => {
+                let from_node = input.nodes.iter().find(|n| n.id == rel.from);
+                let to_node = input.nodes.iter().find(|n| n.id == rel.to);
+                let (fk_alias, target_alias) = if from_node
+                    .and_then(|n| n.table.as_deref())
+                    .and_then(|t| input.compiler.table_columns.get(t))
+                    .is_some_and(|cols| cols.contains(&fk_column))
+                {
+                    (&rel.from, &rel.to)
+                } else {
+                    (&rel.to, &rel.from)
+                };
+                let fk_node = input.nodes.iter().find(|n| &n.id == fk_alias);
+                let tgt_node = input.nodes.iter().find(|n| &n.id == target_alias);
 
-        tree = Some(match tree {
-            None => edge,
-            Some(prev) => {
-                let (_, pe) = input.relationships[i - 1].direction.edge_columns();
-                PhysOp::Join {
-                    left: Box::new(prev),
-                    right: Box::new(edge),
-                    left_col: (format!("e{}", i - 1), pe.to_string()),
-                    right_col: (ea.clone(), sc.to_string()),
+                if tree.is_none() {
+                    if let Some(n) = fk_node {
+                        tree = Some(PhysOp::Scan {
+                            table: n.table.as_deref().unwrap_or("").to_string(),
+                            alias: fk_alias.clone(),
+                            dedup: true,
+                        });
+                        fk_joined.insert(fk_alias.clone());
+                    }
+                }
+                if let Some(n) = tgt_node {
+                    if !fk_joined.contains(target_alias) {
+                        tree = Some(PhysOp::Join {
+                            left: Box::new(tree.unwrap()),
+                            right: Box::new(PhysOp::Scan {
+                                table: n.table.as_deref().unwrap_or("").to_string(),
+                                alias: target_alias.clone(),
+                                dedup: true,
+                            }),
+                            left_col: (fk_alias.clone(), fk_column.clone()),
+                            right_col: (target_alias.clone(), DEFAULT_PRIMARY_KEY.to_string()),
+                        });
+                        fk_joined.insert(target_alias.clone());
+                    }
                 }
             }
-        });
+            HopStrategy::EdgeScan { table, dedup } => {
+                let edge = PhysOp::Scan { table, alias: ea.clone(), dedup };
+
+                tree = Some(match tree {
+                    None => edge,
+                    Some(prev) => {
+                        let prev_col = if i > 0 {
+                            let (_, pe) = input.relationships[i - 1].direction.edge_columns();
+                            (format!("e{}", i - 1), pe.to_string())
+                        } else {
+                            (ea.clone(), sc.to_string())
+                        };
+                        PhysOp::Join {
+                            left: Box::new(prev),
+                            right: Box::new(edge),
+                            left_col: prev_col,
+                            right_col: (ea.clone(), sc.to_string()),
+                        }
+                    }
+                });
+            }
+        }
     }
 
-    let mut hydrated: HashSet<String> = HashSet::new();
+    let mut hydrated = fk_joined;
     for (i, rel) in input.relationships.iter().enumerate() {
         let ea = format!("e{i}");
         let (sc, ec) = rel.direction.edge_columns();
