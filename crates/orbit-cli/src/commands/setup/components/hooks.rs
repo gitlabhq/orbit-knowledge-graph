@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use super::json;
-use super::{Installer, Report, backup_once};
+use super::{Installer, Report, backup_once, remove_file};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
 
@@ -92,7 +92,7 @@ fn remove_for(assistant: Agent, target: &Target, report: &mut Report) -> Result<
         }
         let mut root = json::read_object(&path)?;
         if json::remove_owned(&mut root, &merge.path, &merge.marker) {
-            json::write_or_delete_when_empty(&path, &root, &label, report)?;
+            json::write_or_delete_when_empty(&path, &root, target, &label, report)?;
         }
     }
 
@@ -107,8 +107,7 @@ fn remove_for(assistant: Agent, target: &Target, report: &mut Report) -> Result<
             report.note(&label, "kept (edited since install; delete it by hand)");
             continue;
         }
-        std::fs::remove_file(&path)
-            .with_context(|| format!("failed to remove {}", path.display()))?;
+        remove_file(&path, target)?;
         report.note(&label, "removed");
     }
 
@@ -120,7 +119,7 @@ fn remove_for(assistant: Agent, target: &Target, report: &mut Report) -> Result<
         let value = target.registration_value(&registration.value)?;
         let mut root = json::read_object(&path)?;
         if json::deregister(&mut root, &registration.path, &value) {
-            json::write_or_delete_when_empty(&path, &root, &label, report)?;
+            json::write_or_delete_when_empty(&path, &root, target, &label, report)?;
         }
     }
 

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{Installer, Report};
+use super::{Installer, Report, remove_empty_parents};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::Agent;
 use crate::skill::{INSTALL_DIR_NAME, embedded_files};
@@ -37,9 +37,9 @@ impl Installer for Skill {
     fn remove(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for skill in targets(assistants, target)? {
             if let Some((link_path, link_label)) = &skill.link {
-                unlink(link_path, link_label, report)?;
+                unlink(link_path, link_label, target, report)?;
             }
-            remove_files(&skill.root, &skill.label, report)?;
+            remove_files(&skill.root, &skill.label, target, report)?;
         }
         Ok(())
     }
@@ -130,7 +130,12 @@ fn link(
     }
 }
 
-fn remove_files(skill_root: &Path, label: &str, report: &mut Report) -> Result<()> {
+fn remove_files(
+    skill_root: &Path,
+    label: &str,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
     if !skill_root.exists() {
         return Ok(());
     }
@@ -160,7 +165,7 @@ fn remove_files(skill_root: &Path, label: &str, report: &mut Report) -> Result<(
     for directory in &deepest_first {
         let _ = std::fs::remove_dir(directory);
     }
-    remove_empty_skills_dirs(skill_root);
+    remove_empty_parents(skill_root, &target.root()?);
 
     if kept {
         report.note(label, "kept (edited since install; delete it by hand)");
@@ -170,24 +175,18 @@ fn remove_files(skill_root: &Path, label: &str, report: &mut Report) -> Result<(
     Ok(())
 }
 
-fn unlink(link_path: &Path, label: &str, report: &mut Report) -> Result<()> {
+fn unlink(link_path: &Path, label: &str, target: &Target, report: &mut Report) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(link_path) else {
         return Ok(());
     };
     if !metadata.is_symlink() {
-        return remove_files(link_path, label, report);
+        return remove_files(link_path, label, target, report);
     }
     remove_symlink(link_path)
         .with_context(|| format!("failed to remove {}", link_path.display()))?;
-    remove_empty_skills_dirs(link_path);
+    remove_empty_parents(link_path, &target.root()?);
     report.note(label, "link removed");
     Ok(())
-}
-
-fn remove_empty_skills_dirs(skill_root: &Path) {
-    for directory in skill_root.ancestors().skip(1).take(2) {
-        let _ = std::fs::remove_dir(directory);
-    }
 }
 
 fn relative_to(link_path: &Path, target: &Path) -> PathBuf {

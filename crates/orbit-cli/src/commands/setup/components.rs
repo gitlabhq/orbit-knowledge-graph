@@ -107,6 +107,24 @@ fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     Ok(())
 }
 
+fn remove_file(path: &Path, target: &Target) -> Result<()> {
+    std::fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
+    remove_empty_parents(path, &target.root()?);
+    Ok(())
+}
+
+fn remove_empty_parents(path: &Path, stop: &Path) {
+    let parents = path
+        .ancestors()
+        .skip(1)
+        .take_while(|directory| *directory != stop && directory.starts_with(stop));
+    for directory in parents {
+        if std::fs::remove_dir(directory).is_err() {
+            return;
+        }
+    }
+}
+
 fn backup_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".orbit-backup");

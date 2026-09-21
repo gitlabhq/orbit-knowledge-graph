@@ -3,7 +3,8 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use super::Report;
+use super::{Report, remove_file};
+use crate::commands::setup::Target;
 
 pub(super) fn read_object(path: &Path) -> Result<Value> {
     match std::fs::read_to_string(path) {
@@ -37,12 +38,12 @@ pub(super) fn write_object(path: &Path, value: &Value) -> Result<()> {
 pub(super) fn write_or_delete_when_empty(
     path: &Path,
     root: &Value,
+    target: &Target,
     label: &str,
     report: &mut Report,
 ) -> Result<()> {
     if root.as_object().is_some_and(|map| map.is_empty()) {
-        std::fs::remove_file(path)
-            .with_context(|| format!("failed to remove {}", path.display()))?;
+        remove_file(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {
         write_object(path, root)?;

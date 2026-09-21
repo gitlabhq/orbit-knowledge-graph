@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{Installer, Report, backup_once};
+use super::{Installer, Report, backup_once, remove_file};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
 
@@ -25,7 +25,7 @@ impl Installer for Instructions {
 
     fn remove(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for (path, label) in files(assistants, target)? {
-            strip_block_from_file(&path, &label, report)?;
+            strip_block_from_file(&path, target, &label, report)?;
         }
         Ok(())
     }
@@ -80,7 +80,12 @@ fn upsert_block_in_file(path: &Path, label: &str, report: &mut Report) -> Result
     Ok(())
 }
 
-fn strip_block_from_file(path: &Path, label: &str, report: &mut Report) -> Result<()> {
+fn strip_block_from_file(
+    path: &Path,
+    target: &Target,
+    label: &str,
+    report: &mut Report,
+) -> Result<()> {
     let existing = match std::fs::read_to_string(path) {
         Ok(existing) => existing,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -90,8 +95,7 @@ fn strip_block_from_file(path: &Path, label: &str, report: &mut Report) -> Resul
         return Ok(());
     };
     if remaining.trim().is_empty() {
-        std::fs::remove_file(path)
-            .with_context(|| format!("failed to remove {}", path.display()))?;
+        remove_file(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {
         std::fs::write(path, remaining)
@@ -232,7 +236,13 @@ mod tests {
         assert_eq!(written.matches(BLOCK_BEGIN).count(), 1);
         assert!(written.contains("# My rules"));
 
-        strip_block_from_file(&path, "AGENTS.md", &mut Report::default()).unwrap();
+        strip_block_from_file(
+            &path,
+            &project(dir.path()),
+            "AGENTS.md",
+            &mut Report::default(),
+        )
+        .unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# My rules\n");
     }
 
@@ -244,7 +254,13 @@ mod tests {
         upsert_block_in_file(&path, "CLAUDE.md", &mut Report::default()).unwrap();
         assert!(path.is_file());
 
-        strip_block_from_file(&path, "CLAUDE.md", &mut Report::default()).unwrap();
+        strip_block_from_file(
+            &path,
+            &project(dir.path()),
+            "CLAUDE.md",
+            &mut Report::default(),
+        )
+        .unwrap();
         assert!(!path.exists());
     }
 }
