@@ -80,6 +80,8 @@ impl Plan {
                 })
             });
         }
+        self.assistants
+            .retain(|assistant| !assistant.components.is_empty());
         self
     }
 }
