@@ -26,6 +26,7 @@ fn workspace_root() -> std::path::PathBuf {
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("git rev-parse failed");
+    assert!(out.status.success(), "git rev-parse --show-toplevel failed");
     std::path::PathBuf::from(String::from_utf8(out.stdout).unwrap().trim())
 }
 
