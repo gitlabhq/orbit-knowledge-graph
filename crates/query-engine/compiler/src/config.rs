@@ -78,7 +78,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [input, query_plan]
         }
         lower {
-            reads_env: [ontology]
             reads_state: [input]
             mutates: [query_plan, node]
         }
@@ -224,12 +223,11 @@ fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let input = require(ctx.input().clone(), "input")?;
-    let ontology = ctx.ontology().clone();
     let op = query_plan
         .phys_op
         .take()
         .ok_or_else(|| QueryError::PipelineInvariant("phys_op not set".into()))?;
-    let node = lower_v2::lower(op, &input, &ontology)?;
+    let node = lower_v2::lower(op, &input)?;
     ctx.set_query_plan(query_plan);
     ctx.set_node(node);
     Ok(())
