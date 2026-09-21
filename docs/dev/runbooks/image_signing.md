@@ -4,7 +4,7 @@
 
 ## Verify an image
 
-Use cosign 3. cosign 2.6.3 and later verify but return the annotations as null, 2.6.0 to 2.6.2 need `--new-bundle-format`, and 2.5 and earlier report no signatures. Use the exact identity. Replace `vX.Y.Z` with the Git tag and `X.Y.Z` with the image tag:
+Use cosign 3. cosign 2.6.3 and later verify but return the annotations as null. cosign 2.6.0 to 2.6.2 need `--new-bundle-format`. cosign 2.5 and earlier report no signatures. Use the exact identity. Replace `vX.Y.Z` with the Git tag and `X.Y.Z` with the image tag:
 
 ```shell
 cosign verify \
@@ -23,11 +23,11 @@ Each signature records the pipeline URL, job URL, commit SHA, and the tag the di
 cosign verify ... | jq '.[0].optional'
 ```
 
-Kyverno reads these signatures with `type: SigstoreBundle` in a `verifyImages` rule (Kyverno 1.13 or later, deprecated in 1.19) or through an `ImageValidatingPolicy` (v1 from 1.17). The default `type: Cosign` reports that no signatures exist. Under `SigstoreBundle`, `subject` is an exact match; put the anchored pattern in `subjectRegExp`. Kyverno and cosign fetch the Sigstore trust root from `tuf-repo-cdn.sigstore.dev`, so an air-gapped cluster needs a trusted-root file.
+Kyverno reads these signatures with `type: SigstoreBundle` in a `verifyImages` rule or through an `ImageValidatingPolicy` (v1 from 1.17). The `verifyImages` form needs Kyverno 1.13 or later and is deprecated in 1.19. The default `type: Cosign` reports that no signatures exist. Under `SigstoreBundle`, `subject` is an exact match; put the anchored pattern in `subjectRegExp`. Kyverno and cosign fetch the Sigstore trust root from `tuf-repo-cdn.sigstore.dev`, so an air-gapped cluster needs a trusted-root file.
 
 ## Mirror a signed image
 
-Signatures are OCI referring artifacts, not tags. `oras copy -r` copies the image and its referrers; a mirror on a registry without the referrers API also gains `sha256-` tags for the buildx attestations. `oras copy` without `-r`, `crane copy`, `skopeo copy`, `docker pull` and `docker push`, and `cosign copy` all produce an unsigned mirror and exit 0. Never run `cosign copy` into a repository that holds or will hold signatures, including the canonical one: it creates `sha256-<digest>` alias tags that occupy the referrers tag name.
+Signatures are OCI referring artifacts, not tags. `oras copy -r` copies the image and its referrers; a mirror on a registry without the referrers API also gains `sha256-` tags for the buildx attestations. `oras copy` without `-r`, `crane copy`, `skopeo copy`, `docker pull` and `docker push`, and `cosign copy` all produce an unsigned mirror and exit 0. Never run `cosign copy` into a repository that holds or will hold signatures, including the canonical one. It creates `sha256-<digest>` alias tags that occupy the referrers tag name.
 
 ## Keep signatures in the registry
 
@@ -39,9 +39,9 @@ The version and its `linux-amd64` SHA-256 are literals at the top of `scripts/si
 
 ## When signing fails
 
-`scripts/publish-manifest.sh` runs in `docker-manifest` and `release-manifest`. It creates the multi-arch index from the digests the build jobs stored as artifacts, publishes it under a `-candidate` tag, signs it and the per-arch digests, verifies each signature, and only then moves the final tags to that digest. A signing failure fails the job before any final tag moves, and on a Git tag it fails the release pipeline. A failure during the final retag can leave the version tag moved and `latest` not; the digest is already signed and a retry is idempotent. The `-candidate` tag is permanent and mutable: after success it points at the signed digest, after a failure at an unsigned one.
+`scripts/publish-manifest.sh` runs in `docker-manifest` and `release-manifest`. It creates the multi-arch index from the digests the build jobs stored as artifacts and publishes it under a `-candidate` tag. It signs the index and the per-arch digests and verifies each signature. Only then does it move the final tags to that digest. A signing failure fails the job before any final tag moves, and on a Git tag it fails the release pipeline. A failure during the final retag can leave the version tag moved and `latest` not; the digest is already signed and a retry is idempotent. The `-candidate` tag is permanent and mutable: after success it points at the signed digest, after a failure at an unsigned one.
 
-Retrying the manifest job within the 30-day artifact retention repeats the sequence on the same digest, appends a second signature, and moves `latest` or `dev` to it again. Retrying an old release pipeline therefore moves `latest` back to that release. After the build artifacts expire, the retry fails before any tag moves. Retrying a build job after the manifest job has run repoints that per-arch tag to a new, unsigned digest; the multi-arch tag is unaffected.
+Retrying the manifest job within the 30-day artifact retention repeats the sequence on the same digest. It appends a second signature and moves `latest` or `dev` to it again. Retrying an old release pipeline therefore moves `latest` back to that release. After the build artifacts expire, the retry fails before any tag moves. Retrying a build job after the manifest job has run repoints that per-arch tag to a new, unsigned digest; the multi-arch tag is unaffected.
 
 Common causes:
 
