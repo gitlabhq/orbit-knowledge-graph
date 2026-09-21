@@ -102,19 +102,11 @@ impl Lowering {
                     }
                     let variable = variable.value;
                     let columns: Vec<String> = properties.into_iter().map(|p| p.value).collect();
-                    if !selected.insert(variable.clone())
-                        || columns.iter().collect::<HashSet<_>>().len() != columns.len()
-                    {
+                    let property_set: HashSet<_> = columns.iter().collect();
+                    if property_set.len() != columns.len() {
                         return Err(invalid(span, "duplicate or overlapping node projection"));
                     }
-                    if aggregate {
-                        if !columns.iter().any(|c| c == "id") {
-                            return Err(invalid(
-                                span,
-                                "an aggregated node projection must include .id to preserve node identity; use a scalar property for property grouping",
-                            ));
-                        }
-                    } else if alias.is_some() {
+                    if !aggregate && alias.is_some() {
                         return Err(invalid(
                             span,
                             "traversal node projections cannot be renamed",
@@ -128,7 +120,13 @@ impl Lowering {
                         .ok_or_else(|| {
                             invalid(span, "node projection references an undefined variable")
                         })?;
-                    node.columns = Some(ColumnSelection::List(columns));
+                    if selected.insert(variable.clone()) {
+                        node.columns = Some(ColumnSelection::List(columns));
+                    } else if !aggregate
+                        || !matches!(&node.columns, Some(ColumnSelection::List(previous)) if previous.iter().collect::<HashSet<_>>() == property_set)
+                    {
+                        return Err(invalid(span, "duplicate or overlapping node projection"));
+                    }
                     if aggregate {
                         self.input.aggregation.group_by.push(InputGroupByKey::Node {
                             node: variable,
@@ -253,7 +251,13 @@ impl Lowering {
                     "line {line}, column {column}: projection references undefined node \"{variable}\""
                 ))
             })?;
-        if !selected.insert(variable.clone()) {
+        if !selected.insert(variable.clone())
+            && (!aggregate
+                || !matches!(
+                    (all, &node.columns),
+                    (false, None) | (true, Some(ColumnSelection::All))
+                ))
+        {
             return Err(invalid(span, "duplicate or overlapping node projection"));
         }
         if all {

@@ -100,8 +100,10 @@ RETURN projections
 [DEBUG]
 ```
 
-The pattern contains one node or one linear chain. Nodes need unique variables and one label.
-The far endpoint of a neighbors query is the exception: it has a variable but no label or predicate.
+The pattern can contain a node, a chain, or comma-separated parts that form one connected tree.
+Declare each node's label and inline properties on its first occurrence. Later parts can refer to that variable without declaring another node. A repeated label must match; repeated inline properties are rejected. Add further predicates with WHERE.
+The first relationship establishes the tree. Each later relationship must attach one new node to it. Disconnected hops and cycles between pattern variables are rejected. Nodes can be declared before their relationships, but every declared node must belong to the final connected pattern.
+The far endpoint of a neighbors query is the exception to the label requirement: it has a variable but no label or predicate.
 
 The frontend infers the query type:
 
@@ -132,11 +134,12 @@ The compiler still includes graph identity and relationship metadata.
 
 Aggregates support `count`, `sum`, `avg`, `min`, and `max`.
 Non-aggregate return items become group keys. Property groups and metrics can have aliases.
-An aggregated node projection must include `.id` so grouping preserves node identity; every listed property, including `.id`, becomes a requested column.
+An aggregated node projection selects the requested properties without requiring `.id`. The shared compiler still groups by node identity and returns its graph ID separately. Requesting `.id` also includes it as a property.
+The same node can appear under distinct aggregation aliases if every occurrence requests the same properties. Conflicting projections are rejected.
 
 ```plaintext
 MATCH (u:User)-[:AUTHORED]->(n:Note {id: 1})
-RETURN u{.id, .username}, count(n) AS notes
+RETURN u{.username}, count(n) AS notes
 ORDER BY notes DESC
 LIMIT 10
 ```
@@ -161,8 +164,8 @@ ID forms preserve the compiler's distinct selector and filter representations:
 
 ## Rejections and bounds
 
-The frontend rejects mutations, multiple statements, comma-separated patterns, WITH, OPTIONAL MATCH, UNION, UNWIND, and subqueries.
-It also rejects OR, general NOT, not-equal, DISTINCT, count(*), arbitrary expressions, and offset pagination.
+The frontend rejects mutations, multiple statements, disconnected patterns, cycles between pattern variables, WITH, OPTIONAL MATCH, UNION, UNWIND, and subqueries.
+It also rejects OR, general NOT, DISTINCT, count(*), arbitrary expressions, and offset pagination. Both `<>` and `!=` express not-equal.
 Unsupported syntax or lowering returns a client-safe error rather than dropping the unsupported part.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
@@ -203,10 +206,10 @@ Semantic checks remain in the JSON parity tests above, whose paired JSON and tex
 JSON syntax-error tests remain JSON-only.
 The existing `valid_identifiers_produce_renderable_sql` fixture also remains JSON-only:
 its relationship order reaches the planner's fallback join between unconnected aliases.
-A linear text pattern cannot reproduce that SQL without changing its meaning. The frontend does not repair that separate planner issue.
+GQL rejects that disconnected hop order. The frontend does not reproduce or repair the separate planner issue.
 
-These tests establish compiler parity for the paired cases, not full Query DSL coverage or agent evaluation results.
-JSON removal still requires the remaining coverage and the token-cost and malformed-query measurements.
+The data-correctness scenarios check both spellings against the same expected nodes, edges, groups, and values. Shared-node branches and repeated aggregation aliases have paired scenarios; GQL-only rejection scenarios cover ambiguous node declarations and invalid topology. SQL text need not be identical for results to be equivalent.
+These tests do not establish full Query DSL coverage or agent evaluation results. JSON removal still requires the remaining coverage and the token-cost and malformed-query measurements.
 
 ## References
 
