@@ -325,7 +325,7 @@ mod tests {
                 "FTS, not regex",
                 "Terms AND; `a|b` OR",
                 "Grep means `",
-                "grep returns IDs only",
+                "grep shows IDs and file:line",
                 "Do not reread unchanged files",
             ] {
                 assert!(rendered.contains(phrase), "{launcher}: {phrase}");

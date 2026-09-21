@@ -116,11 +116,25 @@ fn report_results(
         } else {
             "body-only"
         };
+        let body = hit
+            .body_offset
+            .filter(|_| !hit.exact_name && !hit.name_match)
+            .map(|offset| {
+                let text: String = hit.body_text.chars().take(BODY_PREVIEW_CHARS).collect();
+                (range.start + offset - 1, text)
+            });
+        let mentions = match body {
+            Some(_) => format!(" \u{d7}{}", hit.mentions),
+            None => String::new(),
+        };
         writeln!(
             out,
-            "  {}:{}  {}  [{}]  {label}",
-            node.entity_type, node.id, range.fqn, range.kind
+            "  {}:{}  {}  [{}]  {}:{}-{}  {label}{mentions}",
+            node.entity_type, node.id, range.fqn, range.kind, range.file, range.start, range.end
         )?;
+        if let Some((line, text)) = body {
+            writeln!(out, "      {line}| {text}")?;
+        }
     }
     let hidden = outcome.total.saturating_sub(outcome.matches.len());
     if hidden >= BROAD_HIDDEN_HITS {
@@ -157,6 +171,7 @@ fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
 }
 
 const BROAD_HIDDEN_HITS: usize = 100;
+const BODY_PREVIEW_CHARS: usize = 100;
 
 fn report_exact_query_note(
     out: &mut impl Write,
@@ -206,13 +221,16 @@ mod tests {
     }
 
     #[test]
-    fn results_print_definition_identity_without_location() {
+    fn results_print_definition_identity_and_range() {
         let mut result = outcome();
         result.matches.push(orbit_search::GrepMatch {
             id: 481,
             score: 1.0,
             exact_name: true,
             name_match: true,
+            body_offset: None,
+            body_text: String::new(),
+            mentions: 0,
         });
         result.total = 1;
         let node = NodeValue {
@@ -231,7 +249,43 @@ mod tests {
         report_results(&mut buf, &result, &[node]).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "  Definition:481  Repo::commit_hook  [Method]  exact-name\n"
+            "  Definition:481  Repo::commit_hook  [Method]  crates/repo/src/lib.rs:42-57  exact-name\n"
+        );
+    }
+
+    #[test]
+    fn body_only_results_print_the_first_matching_line() {
+        let mut result = outcome();
+        result.matches.push(orbit_search::GrepMatch {
+            id: 7,
+            score: 1.0,
+            exact_name: false,
+            name_match: false,
+            body_offset: Some(3),
+            body_text: "x".repeat(140),
+            mentions: 2,
+        });
+        result.total = 1;
+        let node = NodeValue {
+            entity_type: "Definition".to_string(),
+            id: 7,
+            properties: serde_json::from_value(serde_json::json!({
+                "fqn": "Repo::run",
+                "definition_type": "Method",
+                "file_path": "src/lib.rs",
+                "start_line": 10,
+                "end_line": 20
+            }))
+            .unwrap(),
+        };
+        let mut buf = Vec::new();
+        report_results(&mut buf, &result, &[node]).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            format!(
+                "  Definition:7  Repo::run  [Method]  src/lib.rs:10-20  body-only ×2\n      12| {}\n",
+                "x".repeat(100)
+            )
         );
     }
 

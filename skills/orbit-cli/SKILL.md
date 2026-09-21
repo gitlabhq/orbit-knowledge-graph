@@ -8,7 +8,7 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.14.0
+version: 0.15.0
 license: MIT
 metadata:
   audience: developers
@@ -46,11 +46,12 @@ Different questions need separate calls. DuckDB FTS requires all searchable term
 in each alternative. A single-token alternative such as `get_ia_record` must also
 appear literally, case-insensitively, in the definition's name, path, or body.
 Results list exact-name hits first, then name/path hits, then body-only mentions,
-ordered by BM25 within each group. Identifier alternatives report case-insensitive
-exact symbol-name hits and misses within the selected scope. Results contain IDs,
-names, kinds, and match labels, but no paths or source. The `next:` line, printed
-before the list, batches up to three exact-name or name/path IDs. Narrow with
-`--path`/`--kind` or raise `--limit`.
+ordered by BM25 within each group. Each row carries the definition's file range;
+body-only rows add a mention count and the first matching line.
+Identifier alternatives report case-insensitive exact symbol-name hits and misses
+within the selected scope. The `next:` line, printed before the list, batches up
+to three exact-name or name/path IDs. Narrow with `--path`/`--kind` or raise
+`--limit`.
 
 `grep` returns `Definition:<id>` references. Pass them to `context`, which
 also accepts exact FQNs but not short names or globs. A path is shorthand for

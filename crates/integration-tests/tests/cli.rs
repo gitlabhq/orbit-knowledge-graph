@@ -1286,9 +1286,8 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("Definition:")
-            && stdout.contains("body-only")
-            && !stdout.contains("src/utils.py")
-            && !stdout.contains("return open")
+            && stdout.contains("src/utils.py:3-4  body-only ×1")
+            && stdout.contains("4| return open(path).read()")
             && !stdout.contains("next: orbit context"),
         "{stdout}"
     );
@@ -1313,11 +1312,7 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
     assert!(out.contains("exact: App | read_file"), "{out}");
     assert!(out.contains("next: orbit context Definition:"), "{out}");
     assert!(
-        !out.contains("src/main.py") && !out.contains("src/utils.py"),
-        "{out}"
-    );
-    assert!(
-        !out.contains("class App") && !out.contains("return open(path).read()"),
+        out.contains("src/utils.py:3-4  exact-name") && !out.contains("return open(path).read()"),
         "{out}"
     );
     let (mixed, err, ok) = run_cmd(&["grep", "App|utils", "--repo", repo_arg], dd);
@@ -1374,7 +1369,7 @@ fn grep_recognizes_camel_case_exact_hits_and_deduplicates_case_variants() {
     assert!(!out.contains("exact-miss:"), "{out}");
     assert!(out.contains("next: orbit context Definition:"), "{out}");
     assert!(
-        !out.contains("src/sync.py") && !out.contains("return 'synchronized'"),
+        out.contains("src/sync.py:1-2  exact-name") && !out.contains("return 'synchronized'"),
         "{out}"
     );
 }
@@ -1426,7 +1421,8 @@ fn grep_orders_exact_names_first_and_requires_literal_identifiers() {
     let exact_id = lines[3].split_whitespace().next().unwrap();
     assert_eq!(lines[2], format!("next: orbit context {exact_id}"), "{out}");
     assert!(
-        out.contains("src.importer.show_ia  [Function]  body-only"),
+        out.contains("src.importer.show_ia  [Function]  src/importer.py:1-2  body-only ×1")
+            && out.contains("2| return get_ia_record()"),
         "{out}"
     );
     assert!(
@@ -1572,9 +1568,10 @@ fn grep_conjunction_mentions_and_explicit_context_preserve_source_comments() {
     }
     let (out, err, ok) = run_cmd(&["grep", "clone", "--repo", repo_arg], dd);
     assert!(ok && out.contains("src.models.copy"), "{err}\n{out}");
-    assert!(out.contains("body-only"), "{out}");
     assert!(
-        !out.contains("src/models.py") && !out.contains("# clone") && !out.contains("next:"),
+        out.contains("src/models.py:1-3  body-only ×1")
+            && out.contains("2| # clone this object without sharing state")
+            && !out.contains("next:"),
         "{out}"
     );
     let reference = out
@@ -1589,13 +1586,10 @@ fn grep_conjunction_mentions_and_explicit_context_preserve_source_comments() {
     let (out, err, ok) = run_cmd(&["grep", "models", "--repo", repo_arg], dd);
     assert!(ok && out.contains("src.models.copy"), "{err}\n{out}");
     assert!(
-        out.contains("name/path") && out.contains("next: orbit context"),
+        out.contains("src/models.py:1-3  name/path") && out.contains("next: orbit context"),
         "{out}"
     );
-    assert!(
-        !out.contains("src/models.py") && !out.contains("# clone"),
-        "{out}"
-    );
+    assert!(!out.contains("# clone"), "{out}");
     let (out, err, ok) = run_cmd(&["grep", "copy", "--limit", "0", "--repo", repo_arg], dd);
     assert!(!ok, "{err}\n{out}");
 }

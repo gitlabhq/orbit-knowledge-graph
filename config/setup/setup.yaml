@@ -11,7 +11,7 @@ instructions: |
   Prefer Orbit for code search and callers/callees. Grep means `{{orbit}} grep`.
 
   - Unknown code? `{{orbit}} grep 'words'`. FTS, not regex. Terms AND; `a|b` OR.
-  - grep returns IDs only. Run the printed `next: {{orbit}} context ...` for source and callers/callees.
+  - grep shows IDs and file:line. Run the printed `next: {{orbit}} context ...` for source and callers/callees.
   - Do not reread unchanged files. Reuse shown source.
   - Need file map? `{{orbit}} context path`.
   - Too broad? Add `--path`/`--kind`.

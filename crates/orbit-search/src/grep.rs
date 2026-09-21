@@ -12,6 +12,9 @@ pub struct GrepMatch {
     pub score: f64,
     pub exact_name: bool,
     pub name_match: bool,
+    pub body_offset: Option<usize>,
+    pub body_text: String,
+    pub mentions: usize,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

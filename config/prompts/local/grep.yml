@@ -1,5 +1,5 @@
 name: grep
-version: 1.10.0
+version: 1.11.0
 short: Search local definition names, paths, and bodies
 description: >-
   Search local definition names, paths, and bodies.
@@ -12,9 +12,10 @@ description: >-
   needs search terms.
 
 
-  Returns `Definition:<id>` references with names, kinds, and match labels; no
-  file paths or source. Exact-name hits list first, then name/path hits, then
-  body-only mentions, BM25 within each group. Identifier alternatives report
+  Returns `Definition:<id>` references with names, kinds, file ranges, and match
+  labels. Exact-name hits list first, then name/path hits, then body-only
+  mentions, BM25 within each group. Body-only rows add a mention count and
+  the first matching line. Identifier alternatives report
   case-insensitive exact symbol-name hits and misses within the selected scope.
   The `next:` line, printed before the list, batches up to three exact-name or
   name/path IDs for source and relationships. Narrow with --path/--kind or raise

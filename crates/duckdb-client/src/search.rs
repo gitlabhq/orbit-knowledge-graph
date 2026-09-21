@@ -336,12 +336,20 @@ impl DuckDbSearch {
         let scores = f64_column(&batches, "score");
         let exact_names = bool_column(&batches, "exact_name");
         let name_matches = bool_column(&batches, "name_match");
+        let body_offsets = i64_column(&batches, "body_offset");
+        let body_texts = string_column(&batches, "body_text");
+        let mentions = i64_column(&batches, "mentions");
         let matches = (0..if total == 0 { 0 } else { ids.len() })
             .map(|i| GrepMatch {
                 id: ids[i],
                 score: scores[i],
                 exact_name: exact_names[i],
                 name_match: name_matches[i],
+                body_offset: usize::try_from(body_offsets[i])
+                    .ok()
+                    .filter(|&offset| offset > 0),
+                body_text: body_texts[i].clone(),
+                mentions: usize::try_from(mentions[i]).unwrap_or(0),
             })
             .collect();
         let outcome = GrepOutcome {
@@ -447,21 +455,31 @@ fn recall_sql(
         let param = i + 1;
         let query = format!("array_to_string(list_filter(fts_main_{doc_table}.tokenize(?{param}), token -> token <> ''), ' ')");
         let phrase = format!("regexp_matches(?{param}, '\\s')");
+        let term = format!("lower(?{param})");
         format!(
-            "SELECT c.id, {i} AS alternative, lower(c.name) = lower(?{param}) AS exact_name,
-       CASE WHEN {phrase} OR contains(lower(d.context || ' ' || d.source), lower(?{param}))
+            "SELECT id, alternative, exact_name, score, name_match, body_offset, mentions,
+       trim(lines[body_offset]) AS body_text FROM (
+  SELECT c.id, {i} AS alternative, lower(c.name) = {term} AS exact_name,
+       CASE WHEN {phrase} OR contains(lower(d.context || ' ' || d.source), {term})
             THEN fts_main_{doc_table}.match_bm25(c.id, {query}, fields := 'name,context,source', conjunctive := true) END AS score,
-       ({phrase} OR contains(lower(d.context), lower(?{param})))
-       AND fts_main_{doc_table}.match_bm25(c.id, {query}, fields := 'name,context', conjunctive := true) IS NOT NULL AS name_match
-FROM search_corpus c JOIN {doc_table} d ON d.def_id = c.id AND d.commit_sha = {sha}
-WHERE TRUE
-{}", kind_scope("definition_type", &filter.kinds))
+       ({phrase} OR contains(lower(d.context), {term}))
+       AND fts_main_{doc_table}.match_bm25(c.id, {query}, fields := 'name,context', conjunctive := true) IS NOT NULL AS name_match,
+       string_split(d.source, chr(10)) AS lines,
+       CASE WHEN NOT {phrase} THEN CAST(list_position(
+            list_transform(string_split(d.source, chr(10)), line -> contains(lower(line), {term})), true) AS BIGINT) END AS body_offset,
+       CASE WHEN NOT {phrase} THEN CAST((length(lower(d.source)) - length(replace(lower(d.source), {term}, ''))) // length(?{param}) AS BIGINT) END AS mentions
+  FROM search_corpus c JOIN {doc_table} d ON d.def_id = c.id AND d.commit_sha = {sha}
+  WHERE TRUE
+{})", kind_scope("definition_type", &filter.kinds))
     }).collect::<Vec<_>>().join("\nUNION ALL\n");
     format!(
         "WITH scored AS ({scored}),
 hits AS (
   SELECT id, max(score) AS score, bool_or(exact_name) AS exact_name,
-         bool_or(name_match) AS name_match
+         bool_or(name_match) AS name_match,
+         arg_max(body_offset, COALESCE(score, -1e9)) AS body_offset,
+         arg_max(body_text, COALESCE(score, -1e9)) AS body_text,
+         arg_max(mentions, COALESCE(score, -1e9)) AS mentions
   FROM scored GROUP BY id HAVING count(score) > 0
 ),
 limited AS (
@@ -474,7 +492,8 @@ exact AS (
 )
 SELECT COALESCE(id, 0) AS id, COALESCE(score, 0.0) AS score,
        COALESCE(exact_name, false) AS exact_name, COALESCE(name_match, false) AS name_match,
-       total, exact_alternatives
+       COALESCE(body_offset, 0) AS body_offset, COALESCE(body_text, '') AS body_text,
+       COALESCE(mentions, 0) AS mentions, total, exact_alternatives
 FROM stats CROSS JOIN exact LEFT JOIN limited ON TRUE
 ORDER BY exact_name DESC, name_match DESC, score DESC, id"
     )

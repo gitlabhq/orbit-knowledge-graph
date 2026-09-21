@@ -176,8 +176,8 @@ result limit before Rust hydrates definitions. Exact status compares raw symbol 
 case-insensitively within scope before limiting. A second conjunctive FTS match
 restricted to name/path fields, with the same literal requirement, marks name/path
 hits and controls context-suggestion eligibility. Search output contains IDs,
-names, kinds, and match labels without file paths or source. Body-only mentions do
-not get automatic context suggestions. Explicit Definition context returns complete
+names, kinds, file ranges, and match labels. Body-only rows add a mention count and the
+first matching source line; they do not get automatic context suggestions. Explicit Definition context returns complete
 source.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
