@@ -45,5 +45,9 @@ pub fn reindex(
 pub fn parse_single(lang_id: SupportLang, path: &str, source: &str) -> (Env, Tree, Vec<Edge>) {
     let env = Env::for_lang(lang_id);
     let (tree, edges) = process_file(&env, path, source);
-    (env, tree, edges)
+    let mut state = State::new(&env);
+    state.trees.push(tree);
+    state.edges = edges;
+    resolve(&env, &mut state, FxHashSet::from_iter([0]), None);
+    (env, state.trees.remove(0), state.edges)
 }

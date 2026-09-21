@@ -29,6 +29,7 @@ pub enum EdgeKind {
     Defines = 2,
     Imports = 3,
     Extends = 4,
+    TypeFlow = 5,
 }
 
 impl EdgeKind {
@@ -59,6 +60,7 @@ pub struct Edge {
     pub to_tree: u32,
     pub to_node: u32,
     pub kind: EdgeKind,
+    pub site: Option<u32>,
 }
 
 impl Edge {
@@ -69,6 +71,7 @@ impl Edge {
             to_tree,
             to_node,
             kind,
+            site: None,
         }
     }
     pub fn from_fi(&self) -> usize {
@@ -86,6 +89,7 @@ impl Edge {
             to_tree: 0,
             to_node: to,
             kind,
+            site: None,
         }
     }
 }

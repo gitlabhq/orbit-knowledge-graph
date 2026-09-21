@@ -21,6 +21,7 @@ pub enum Value {
     LocalDef(u32),
     ImportRef(u32),
     Type(u32),
+    Call(u32),
     Alias(u32),
     Opaque,
     Marker,
@@ -32,6 +33,7 @@ pub enum ParseValue {
     LocalDef(u32),
     ImportRef(u32),
     Type(u32),
+    Call(u32),
     Opaque,
 }
 
@@ -41,6 +43,7 @@ impl Value {
             Value::LocalDef(i) => Some(ParseValue::LocalDef(*i)),
             Value::ImportRef(i) => Some(ParseValue::ImportRef(*i)),
             Value::Type(t) => Some(ParseValue::Type(*t)),
+            Value::Call(c) => Some(ParseValue::Call(*c)),
             Value::Opaque => Some(ParseValue::Opaque),
             Value::Alias(_) | Value::Marker | Value::Phi(_) => None,
         }
@@ -447,9 +450,11 @@ impl SsaEngine {
 
     fn resolve_value(&self, value: &Value) -> Vec<ParseValue> {
         match value {
-            Value::LocalDef(_) | Value::ImportRef(_) | Value::Type(_) | Value::Alias(_) => {
-                value.to_parse_value().into_iter().collect()
-            }
+            Value::LocalDef(_)
+            | Value::ImportRef(_)
+            | Value::Type(_)
+            | Value::Call(_)
+            | Value::Alias(_) => value.to_parse_value().into_iter().collect(),
             Value::Opaque | Value::Marker => vec![],
             Value::Phi(_) => {
                 let mut values = SmallVec::<[Value; 2]>::new();

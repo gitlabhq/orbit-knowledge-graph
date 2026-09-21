@@ -32,9 +32,7 @@ fixtures:
       }
 
 tests:
-  # skip: tree-dsl: a call receiver that is itself a call (NewBuilder().SetName) has no SSA value
   - name: "useBuilder calls NewBuilder, SetName, SetAge"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)

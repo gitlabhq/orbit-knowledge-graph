@@ -69,21 +69,19 @@ stages:
       - match: '(catch_block $N:simple_identifier $T:type_identifier $$$B)'
         replace: '(catch_block (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) $$$B)'
 
-  - name: retag-refs
+  - name: retag-expressions
     rules:
       - match: '(navigation_expression $O:__ivar (navigation_suffix $M:simple_identifier))'
         replace: '(__member @$M (__object $O))'
       - match: '(navigation_expression $O:__member (navigation_suffix $M:simple_identifier))'
         replace: '(__member @$M (__object $O))'
-      - match: '(navigation_expression $O:call_expression (navigation_suffix $M:simple_identifier))'
+      - match: '(navigation_expression $O:__call (navigation_suffix $M:simple_identifier))'
         replace: '(__member @$M (__object $O))'
       - match: '(navigation_expression (super_expression) (navigation_suffix $M:simple_identifier))'
         replace: '(__member @$M (__object (__ivar "super")))'
       - match: '(navigation_expression $O (navigation_suffix $M:simple_identifier))'
         replace: '(__member @$M (__object @$O))'
 
-  - name: retag-calls
-    rules:
       - match: '(call_expression $F:__ivar (call_suffix $$$A))'
         replace: '(__call (__callee $F) $$$A)'
       - match: '(call_expression $F:__member (call_suffix $$$A))'

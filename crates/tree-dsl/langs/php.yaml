@@ -101,7 +101,7 @@ stages:
       - match: '(binary_expression left: $L (instanceof) right: $T:name)'
         replace: '(binary_expression $L (__member (__object @$T)))'
 
-  - name: retag-refs
+  - name: retag-expressions
     rules:
       - match: '(member_access_expression object: $O:__ivar name: $M:name)'
         replace: '(__member @$M (__object $O))'
@@ -120,8 +120,6 @@ stages:
       - match: '(scoped_property_access_expression scope: $S:name name: $P:variable_name)'
         replace: '(__member @$P (__object @$S))'
 
-  - name: retag-calls
-    rules:
       # $this->m() / self::m() / static::m()
       - match: '(member_call_expression object: (variable_name (name "this")) name: $M:name arguments: $A)'
         replace: '(__call (__callee (__ivar @$M)) $A)'
@@ -226,9 +224,9 @@ stages:
 
       # Class-likes (after members)
       - match: '(class_declaration $$$PRE name: $N:name (base_clause $S:__supertype) $$$ANN body: (declaration_list $$$B))'
-        replace: '(__def (__defname @$N) (__class) (__alias "self") (__alias "static") $$$PRE $S $$$ANN (__binding "parent" (__rhs (__call (__callee @$S)))) (__binding (__ivar "parent") (__rhs (__call (__callee @$S)))) $$$B)'
+        replace: '(__def (__defname @$N) (__class @$N) (__alias "self") (__alias "static") $$$PRE $S $$$ANN (__binding "parent" (__rhs (__call (__callee @$S)))) (__binding (__ivar "parent") (__rhs (__call (__callee @$S)))) $$$B)'
       - match: '(class_declaration $$$PRE name: $N:name $$$ANN body: (declaration_list $$$B))'
-        replace: '(__def (__defname @$N) (__class) (__alias "self") (__alias "static") $$$PRE $$$ANN $$$B)'
+        replace: '(__def (__defname @$N) (__class @$N) (__alias "self") (__alias "static") $$$PRE $$$ANN $$$B)'
       - match: '(interface_declaration $$$PRE name: $N:name $$$ANN body: (declaration_list $$$B))'
         replace: '(__def (__defname @$N) (__interface) $$$PRE $$$ANN $$$B)'
       - match: '(trait_declaration $$$PRE name: $N:name body: (declaration_list $$$B))'
@@ -238,6 +236,8 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '$R:(__ssa_return_type "self")'
+        replace: '(__ssa_return_type @$R|ancestor_sym("__class"))'
       - match: '(__ssa_return $V:variable_name)'
         replace: '(__ssa_return (__rhs @$V))'
 
