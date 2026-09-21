@@ -15,6 +15,7 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::plan::{self, Plan, PlanBody, Strategy};
+use super::shared;
 
 impl Plan {
     pub fn emit_edge_chain(&self) -> Result<EmitOutput> {
@@ -101,20 +102,12 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
         && let Node::Query(q) = &mut node
     {
         for jp in &input.join_predicates {
-            let op = match jp.op {
-                FilterOp::Eq => Op::Eq,
-                FilterOp::Ne => Op::Ne,
-                FilterOp::Gt => Op::Gt,
-                FilterOp::Lt => Op::Lt,
-                FilterOp::Gte => Op::Ge,
-                FilterOp::Lte => Op::Le,
-                _ => unreachable!("lowering rejects unsupported ops for property-to-property"),
+            let filter = InputFilter {
+                op: Some(jp.op),
+                rhs_column: Some((jp.rhs_node.clone(), jp.rhs_prop.clone())),
+                ..Default::default()
             };
-            let pred = Expr::binary(
-                op,
-                Expr::col(&jp.lhs_node, &jp.lhs_prop),
-                Expr::col(&jp.rhs_node, &jp.rhs_prop),
-            );
+            let pred = shared::filter_to_expr(&jp.lhs_node, &jp.lhs_prop, &filter);
             q.where_clause = Some(match q.where_clause.take() {
                 Some(existing) => Expr::and(existing, pred),
                 None => pred,
