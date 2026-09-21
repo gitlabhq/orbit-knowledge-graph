@@ -178,9 +178,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: `use function` and `use const` resolve by path; helper files do not mirror the namespace
   - name: "Nested closure + arrow body calls attach to the outer function"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\nested_closures'
@@ -190,9 +188,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: `use function` and `use const` resolve by path; helper files do not mirror the namespace
   - name: "Local-variable closure body call resolves to add"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Closures\calls_via_local_closure'
