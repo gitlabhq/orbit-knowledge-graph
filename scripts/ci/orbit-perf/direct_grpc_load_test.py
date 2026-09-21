@@ -20,11 +20,6 @@ Usage:
 
 Environment variables:
   GKG_JWT_SECRET    Base64-encoded JWT signing secret (required)
-  STAGING_PAT       GitLab staging PAT to auto-fetch user info + traversal IDs
-
-Presets (--preset staging):
-  Uses michaelangeloio's staging identity with pre-computed traversal paths
-  so you don't need STAGING_PAT or --user-id/--username flags.
 
 Requires: pip install grpcio grpcio-tools protobuf
 """
@@ -41,48 +36,8 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from constants import API
-from utils import get_orbit_req_headers
-
 import grpc
 from grpc_tools import protoc
-
-# ---------------------------------------------------------------------------
-# Staging presets
-# ---------------------------------------------------------------------------
-
-STAGING_PRESETS = {
-    "staging": {
-        "user_id": 4040422,
-        "username": "michaelangeloio",
-        "org_id": 1,
-        # Trie-compacted traversal paths for michaelangeloio on staging.
-        # All 44 groups are under gitlab-org (9970), so "1/9970/" subsumes them.
-        # Full (uncompacted) paths kept in comment for reference.
-        "traversal_ids": [
-            "1/9970/",
-        ],
-        # Full 44 paths before trie compaction:
-        # "1/9970/", "1/9970/11570646/", "1/9970/12955768/",
-        # "1/9970/1540914/", "1/9970/1602322/", "1/9970/16841395/",
-        # "1/9970/16841395/2214172/", "1/9970/16841395/2214172/27137016/",
-        # "1/9970/16841395/22772484/", "1/9970/17454999/", "1/9970/1755573/",
-        # "1/9970/1761696/", "1/9970/1793858/", "1/9970/1819570/",
-        # "1/9970/1920469/", "1/9970/1920469/1920510/", "1/9970/2068794/",
-        # "1/9970/2072647/", "1/9970/2112424/", "1/9970/2112424/19421577/",
-        # "1/9970/2112424/19421577/19421578/", "1/9970/2112424/19443832/",
-        # "1/9970/22003264/", "1/9970/2255492/", "1/9970/2255492/2255494/",
-        # "1/9970/2255492/2255494/2255495/", "1/9970/2255492/2255499/",
-        # "1/9970/2255492/2256490/", "1/9970/2255492/2256490/2256491/",
-        # "1/9970/2255492/2256492/", "1/9970/2255492/2259127/",
-        # "1/9970/2255492/2259127/2259128/", "1/9970/2255492/2259127/2259129/",
-        # "1/9970/2255492/2259127/2259129/2259130/", "1/9970/2255492/2259137/",
-        # "1/9970/2255492/2259137/2259138/", "1/9970/2255492/2259137/2259139/",
-        # "1/9970/2255492/2259137/2259139/2259140/", "1/9970/23057292/",
-        # "1/9970/23081759/", "1/9970/23246561/", "1/9970/2462563/",
-        # "1/9970/25647603/", "1/9970/25647603/25647604/"
-    },
-}
 
 # ---------------------------------------------------------------------------
 # JWT (HS256)
@@ -119,32 +74,6 @@ def build_jwt(secret_b64: str, user_id: int, username: str, org_id: int,
     if not admin:
         payload["group_traversal_ids"] = traversal_ids
     return _jwt_encode(payload, base64.b64decode(secret_b64.strip()))
-
-# ---------------------------------------------------------------------------
-# Staging GitLab API helpers
-# ---------------------------------------------------------------------------
-
-import urllib.request
-
-def _api_get(path: str):
-    req = urllib.request.Request(f"{API}{path}", headers=get_orbit_req_headers())
-    with urllib.request.urlopen(req) as resp:
-        return json.load(resp)
-
-
-def fetch_user_info() -> dict:
-    return _api_get("/user")
-
-
-def fetch_groups() -> list[dict]:
-    groups, page = [], 1
-    while True:
-        batch = _api_get(f"/groups?min_access_level=20&per_page=100&page={page}")
-        if not batch:
-            break
-        groups.extend(batch)
-        page += 1
-    return groups
 
 # ---------------------------------------------------------------------------
 # Proto compilation
@@ -488,7 +417,6 @@ def main():
     parser.add_argument("--org-id", type=int, default=1, help="Organization ID (default: 1)")
     parser.add_argument("--admin", action="store_true", default=True, help="Set admin=true in JWT (default: true)")
     parser.add_argument("--no-admin", dest="admin", action="store_false", help="Use traversal IDs instead of admin")
-    parser.add_argument("--preset", choices=list(STAGING_PRESETS.keys()), help="Use a predefined user identity + traversal paths")
     parser.add_argument("--debug", action="store_true", help="Single-shot debug mode (1 req, verbose)")
     parser.add_argument("--query", help="Run only this query (use --list to see names)")
     parser.add_argument("--list", action="store_true", help="List available query names")
@@ -507,19 +435,6 @@ def main():
 
     traversal_ids = []
     user_id, username, org_id = args.user_id, args.username, args.org_id
-
-    if args.preset:
-        p = STAGING_PRESETS[args.preset]
-        user_id, username, org_id = p["user_id"], p["username"], p["org_id"]
-        traversal_ids = p["traversal_ids"]
-        print(f"  Preset: {args.preset} -> {username} (id={user_id}), {len(traversal_ids)} traversal paths")
-    elif os.environ.get("STAGING_PAT") and not args.admin:
-        print("Fetching user info from staging...")
-        info = fetch_user_info()
-        user_id, username = info["id"], info["username"]
-        groups = fetch_groups()
-        traversal_ids = [f"{org_id}/{g['id']}/" for g in groups]
-        print(f"  User: {username} (id={user_id}), {len(traversal_ids)} traversal paths")
 
     jwt_token = build_jwt(jwt_secret, user_id, username, org_id, traversal_ids, args.admin)
 
