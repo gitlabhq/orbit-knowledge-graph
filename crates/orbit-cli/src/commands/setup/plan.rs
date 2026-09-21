@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use super::components::{self, Report};
+use super::components;
 use super::spec::{self, Agent};
 use super::{Component, Options, Target};
 
@@ -66,24 +66,6 @@ fn named_specs(names: &[String]) -> Result<Vec<Agent>> {
 pub(super) struct Plan {
     pub(super) scope: String,
     pub(super) assistants: Vec<AssistantPlan>,
-}
-
-impl Plan {
-    pub(super) fn only_reported(mut self, report: &Report) -> Plan {
-        for assistant in &mut self.assistants {
-            assistant.components.retain(|(_, paths)| {
-                paths.iter().any(|path| {
-                    report
-                        .outcomes
-                        .iter()
-                        .any(|outcome| path.starts_with(&outcome.label))
-                })
-            });
-        }
-        self.assistants
-            .retain(|assistant| !assistant.components.is_empty());
-        self
-    }
 }
 
 pub(super) struct AssistantPlan {
