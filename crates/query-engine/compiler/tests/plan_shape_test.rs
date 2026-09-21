@@ -29,8 +29,14 @@ fn shape_matches(actual: &serde_json::Value, expected: &serde_json::Value) -> bo
             e.iter().all(|(k, v)| a.get(k).is_some_and(|av| shape_matches(av, v)))
         }
         (serde_json::Value::Array(a), serde_json::Value::Array(e)) => {
-            a.len() == e.len()
-                && a.iter().zip(e.iter()).all(|(av, ev)| shape_matches(av, ev))
+            // For arrays of objects (Union arms), check positional match.
+            // For arrays of strings (select), check subset inclusion.
+            if e.iter().all(|v| v.is_string()) {
+                e.iter().all(|ev| a.contains(ev))
+            } else {
+                a.len() == e.len()
+                    && a.iter().zip(e.iter()).all(|(av, ev)| shape_matches(av, ev))
+            }
         }
         _ => actual == expected,
     }
@@ -60,9 +66,17 @@ fn plan_shape_scenarios() {
     let ctx = security_ctx();
 
     for (name, doc) in load_scenarios() {
-        let json_str = doc["input"]["json"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{name}: missing input.json"));
+        let json_string;
+        let json_str = if let Some(s) = doc["input"]["json"].as_str() {
+            s
+        } else if doc["input"].is_object() {
+            json_string = serde_json::to_string(&doc["input"]).unwrap();
+            &json_string
+        } else if let Some(s) = doc["input"].as_str() {
+            s
+        } else {
+            panic!("{name}: missing input");
+        };
 
         // Compile fully to get the normalized Input, then re-run plan to get PhysOp.
         let compiled = compiler::compile(json_str, compiler::Frontend::JsonDsl, &ontology, &ctx)

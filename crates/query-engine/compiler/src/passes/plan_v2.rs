@@ -75,7 +75,7 @@ pub enum PhysOp {
     Scan { table: String, alias: String, dedup: bool, predicates: Vec<Expr>, select: Vec<SelectExpr> },
     Join { left: Box<PhysOp>, right: Box<PhysOp>, on: Expr },
     Union { arms: Vec<PhysOp>, alias: String },
-    UnionQueries { arms: Vec<Query>, alias: String, outer_predicates: Vec<Expr> },
+    Project { input: Box<PhysOp>, select: Vec<SelectExpr>, predicates: Vec<Expr> },
     Cte { name: String, body: Box<PhysOp>, consumer: Box<PhysOp> },
     TopN { input: Box<PhysOp>, select: Vec<SelectExpr>, order_by: Vec<OrderExpr>, limit: u32 },
     Aggregate { input: Box<PhysOp>, select: Vec<SelectExpr>, group_by: Vec<Expr>, order_by: Vec<OrderExpr>, limit: u32 },
@@ -85,11 +85,12 @@ impl PhysOp {
     pub fn shape(&self) -> serde_json::Value {
         use serde_json::json;
         match self {
-            PhysOp::Scan { table, alias, dedup, .. } => json!({
+            PhysOp::Scan { table, alias, dedup, select, .. } => json!({
                 "op": "Scan",
                 "table": table,
                 "alias": alias,
                 "dedup": dedup,
+                "select": select.iter().filter_map(|s| s.alias.as_deref()).collect::<Vec<_>>(),
             }),
             PhysOp::Join { left, right, .. } => json!({
                 "op": "Join",
@@ -101,10 +102,10 @@ impl PhysOp {
                 "alias": alias,
                 "arms": arms.iter().map(|a| a.shape()).collect::<Vec<_>>(),
             }),
-            PhysOp::UnionQueries { alias, arms, .. } => json!({
-                "op": "UnionQueries",
-                "alias": alias,
-                "arm_count": arms.len(),
+            PhysOp::Project { input, select, .. } => json!({
+                "op": "Project",
+                "input": input.shape(),
+                "select": select.iter().filter_map(|s| s.alias.as_deref()).collect::<Vec<_>>(),
             }),
             PhysOp::Cte { name, body, consumer } => json!({
                 "op": "Cte",
@@ -112,15 +113,17 @@ impl PhysOp {
                 "body": body.shape(),
                 "consumer": consumer.shape(),
             }),
-            PhysOp::TopN { input, limit, .. } => json!({
+            PhysOp::TopN { input, limit, select, .. } => json!({
                 "op": "TopN",
                 "limit": limit,
                 "input": input.shape(),
+                "select": select.iter().filter_map(|s| s.alias.as_deref()).collect::<Vec<_>>(),
             }),
-            PhysOp::Aggregate { input, limit, .. } => json!({
+            PhysOp::Aggregate { input, limit, select, .. } => json!({
                 "op": "Aggregate",
                 "limit": limit,
                 "input": input.shape(),
+                "select": select.iter().filter_map(|s| s.alias.as_deref()).collect::<Vec<_>>(),
             }),
         }
     }
@@ -549,18 +552,23 @@ impl<'a> PlanCtx<'a> {
 
     fn build_multi_hop_union(&self, rel: &InputRelationship, alias: &str, edge_table: &str) -> PhysOp {
         let (sc, ec) = rel.direction.edge_columns();
-        let etc = match rel.direction {
+        let end_type_col = match rel.direction {
             Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
             Direction::Incoming => SOURCE_KIND_COLUMN,
         };
-        let tf = rel_kind_filter_values(&rel.types);
-        let arms: Vec<Query> = (rel.hops.min.max(1)..=rel.hops.max)
-            .map(|d| crate::passes::lower::helpers::build_depth_arm(
-                d, edge_table, sc, ec, etc, rel.direction, &tf, rel.scope_prefix.as_ref(),
-            ))
+        let type_filter = rel_kind_filter_values(&rel.types);
+
+        let arms: Vec<PhysOp> = (rel.hops.min.max(1)..=rel.hops.max)
+            .map(|depth| self.build_depth_arm(depth, edge_table, sc, ec, end_type_col, rel, &type_filter))
             .collect();
 
-        let mut outer = Vec::new();
+        let inner = if arms.len() == 1 {
+            arms.into_iter().next().unwrap()
+        } else {
+            PhysOp::Union { arms, alias: format!("_{alias}_union") }
+        };
+
+        let mut outer_preds = Vec::new();
         let (fk, tk) = match rel.direction {
             Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
             Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
@@ -569,22 +577,127 @@ impl<'a> PlanCtx<'a> {
         for (na, kc, ic) in [(&rel.from, fk, from_id_col), (&rel.to, tk, to_id_col)] {
             if let Some(n) = self.input.nodes.iter().find(|n| &n.id == na) {
                 if let Some(ref e) = n.entity {
-                    outer.push(Expr::eq(Expr::col(alias, kc), Expr::string(e)));
+                    outer_preds.push(Expr::eq(Expr::col(alias, kc), Expr::string(e)));
                 }
                 if !n.node_ids.is_empty() {
-                    outer.push(id_list_predicate(alias, ic, &n.node_ids));
+                    outer_preds.push(id_list_predicate(alias, ic, &n.node_ids));
                 }
                 if let Some(ref r) = n.id_range {
-                    outer.push(Expr::and(
+                    outer_preds.push(Expr::and(
                         Expr::binary(Op::Ge, Expr::col(alias, ic), Expr::int(r.start)),
                         Expr::binary(Op::Le, Expr::col(alias, ic), Expr::int(r.end)),
                     ));
                 }
             }
         }
-        outer.push(deleted_false(alias));
+        outer_preds.push(deleted_false(alias));
 
-        PhysOp::UnionQueries { arms, alias: alias.to_string(), outer_predicates: outer }
+        PhysOp::Project {
+            input: Box::new(inner),
+            select: vec![], // outer query uses SELECT * from the union
+            predicates: outer_preds,
+        }
+    }
+
+    fn build_depth_arm(
+        &self,
+        depth: u32,
+        edge_table: &str,
+        start_col: &str,
+        end_col: &str,
+        end_type_col: &str,
+        rel: &InputRelationship,
+        type_filter: &Option<Vec<String>>,
+    ) -> PhysOp {
+        let scope_pred = |a: &str| -> Option<Expr> {
+            rel.scope_prefix.as_ref().map(|p| p.predicate(a))
+        };
+
+        let mut e1_preds = Vec::new();
+        if let Some(types) = type_filter {
+            if let Some(f) = Expr::col_in("e1", RELATIONSHIP_KIND_COLUMN, ChType::String,
+                types.iter().map(|t| serde_json::Value::String(t.clone())).collect()) {
+                e1_preds.push(f);
+            }
+        }
+        e1_preds.push(deleted_false("e1"));
+        e1_preds.extend(scope_pred("e1"));
+
+        let mut chain = PhysOp::Scan {
+            table: edge_table.to_string(),
+            alias: "e1".to_string(),
+            dedup: false,
+            predicates: e1_preds,
+            select: vec![],
+        };
+
+        for i in 2..=depth {
+            let prev = format!("e{}", i - 1);
+            let curr = format!("e{i}");
+            let mut join_preds = vec![deleted_false(&curr)];
+            if let Some(types) = type_filter {
+                if let Some(f) = Expr::col_in(&curr, RELATIONSHIP_KIND_COLUMN, ChType::String,
+                    types.iter().map(|t| serde_json::Value::String(t.clone())).collect()) {
+                    join_preds.push(f);
+                }
+            }
+            join_preds.extend(scope_pred(&curr));
+
+            chain = PhysOp::Join {
+                left: Box::new(chain),
+                right: Box::new(PhysOp::Scan {
+                    table: edge_table.to_string(),
+                    alias: curr.clone(),
+                    dedup: false,
+                    predicates: join_preds,
+                    select: vec![],
+                }),
+                on: Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col)),
+            };
+        }
+
+        let last = format!("e{depth}");
+        let (rel_kind, src_id, src_kind, src_tags, tgt_id, tgt_kind, tgt_tags) = match rel.direction {
+            Direction::Outgoing | Direction::Both => (
+                Expr::col("e1", RELATIONSHIP_KIND_COLUMN),
+                Expr::col("e1", SOURCE_ID_COLUMN), Expr::col("e1", SOURCE_KIND_COLUMN),
+                Expr::col("e1", SOURCE_TAGS_COLUMN),
+                Expr::col(&last, TARGET_ID_COLUMN), Expr::col(&last, TARGET_KIND_COLUMN),
+                Expr::col(&last, TARGET_TAGS_COLUMN),
+            ),
+            Direction::Incoming => (
+                Expr::col(&last, RELATIONSHIP_KIND_COLUMN),
+                Expr::col(&last, SOURCE_ID_COLUMN), Expr::col(&last, SOURCE_KIND_COLUMN),
+                Expr::col(&last, SOURCE_TAGS_COLUMN),
+                Expr::col("e1", TARGET_ID_COLUMN), Expr::col("e1", TARGET_KIND_COLUMN),
+                Expr::col("e1", TARGET_TAGS_COLUMN),
+            ),
+        };
+
+        let path_nodes = Expr::func("array",
+            (1..=depth).map(|i| {
+                let e = format!("e{i}");
+                Expr::func("tuple", vec![Expr::col(&e, end_col), Expr::col(&e, end_type_col)])
+            }).collect(),
+        );
+
+        let select = vec![
+            SelectExpr::col("e1", start_col),
+            SelectExpr::col(&last, end_col),
+            SelectExpr::new(rel_kind, RELATIONSHIP_KIND_COLUMN),
+            SelectExpr::new(src_id, SOURCE_ID_COLUMN),
+            SelectExpr::new(src_kind, SOURCE_KIND_COLUMN),
+            SelectExpr::new(src_tags, SOURCE_TAGS_COLUMN),
+            SelectExpr::new(tgt_id, TARGET_ID_COLUMN),
+            SelectExpr::new(tgt_kind, TARGET_KIND_COLUMN),
+            SelectExpr::new(tgt_tags, TARGET_TAGS_COLUMN),
+            SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
+            SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
+            SelectExpr::col("e1", DELETED_COLUMN),
+            SelectExpr::col("e1", TRAVERSAL_PATH_COLUMN),
+        ];
+
+        PhysOp::Project { input: Box::new(chain), select, predicates: vec![] }
     }
 }
 

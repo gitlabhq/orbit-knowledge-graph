@@ -1,16 +1,10 @@
-name: "FK aggregation — count target node IS joined"
-input:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"total_mrs"}],"limit":10}
+name: "FK aggregation — count target IS joined"
+input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"total_mrs"}],"limit":10}
 expected:
   op: Aggregate
+  select: [total_mrs]
   input:
     op: Join
-    left:
-      op: Scan
-      table: gl_merge_request
-    right:
-      op: Scan
-      table: gl_project
-absent:
-  - table: gl_edge
+    left: {op: Scan, table: gl_merge_request}
+    right: {op: Scan, table: gl_project}
+absent: [{table: gl_edge}]

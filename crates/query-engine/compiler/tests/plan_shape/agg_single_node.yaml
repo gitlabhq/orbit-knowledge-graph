@@ -1,10 +1,6 @@
 name: "Single-node aggregation"
-input:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
+input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
 expected:
   op: Aggregate
-  input:
-    op: Scan
-    table: gl_merge_request
-    dedup: true
+  select: [mr_state, 'n']
+  input: {op: Scan, table: gl_merge_request, dedup: true}

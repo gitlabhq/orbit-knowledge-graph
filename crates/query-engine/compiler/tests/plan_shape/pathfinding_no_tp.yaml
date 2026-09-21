@@ -1,12 +1,8 @@
-name: "User->Project pathfinding — User has no traversal_path"
-input:
-  json: |
-    {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}
+name: "User->Project — User has no traversal_path"
+input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}
 expected:
   op: TopN
   input:
     op: Cte
     name: _nf_start
-    body:
-      op: Scan
-      table: gl_user
+    body: {op: Scan, table: gl_user}

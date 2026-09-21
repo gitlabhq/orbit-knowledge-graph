@@ -1,10 +1,12 @@
 name: "Two FK hops — all nodes joined, no edge tables"
-input:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}
+input: {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}
 expected:
   op: TopN
   input:
     op: Join
-absent:
-  - table: gl_edge
+    left:
+      op: Join
+      left: {op: Scan, table: gl_job, dedup: true}
+      right: {op: Scan, table: gl_pipeline, dedup: true}
+    right: {op: Scan, table: gl_project, dedup: true}
+absent: [{table: gl_edge}]

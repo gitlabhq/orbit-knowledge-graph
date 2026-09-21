@@ -1,10 +1,6 @@
 name: "Three-node FK chain — no edge scans"
-input:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
+input: {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
 expected:
   op: TopN
-  input:
-    op: Join
-absent:
-  - table: gl_edge
+  input: {op: Join}
+absent: [{table: gl_edge}]

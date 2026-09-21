@@ -1,18 +1,10 @@
-name: "AUTHORED has FK — elides to node-to-node join"
-input:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
+name: "AUTHORED has FK — no edge table"
+input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
 expected:
   op: TopN
+  select: [mr_id, mr_title, u_id, u_username]
   input:
     op: Join
-    left:
-      op: Scan
-      table: gl_merge_request
-      dedup: true
-    right:
-      op: Scan
-      table: gl_user
-      dedup: true
-absent:
-  - table: gl_edge
+    left: {op: Scan, table: gl_merge_request, dedup: true}
+    right: {op: Scan, table: gl_user, dedup: true}
+absent: [{table: gl_edge}]

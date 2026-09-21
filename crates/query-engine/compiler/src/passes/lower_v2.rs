@@ -59,11 +59,21 @@ fn emit(op: PhysOp) -> Query {
             }
         }
 
-        PhysOp::UnionQueries { arms, alias, outer_predicates } => Query {
-            from: TableRef::union_all(arms, &alias),
-            where_clause: Expr::conjoin(outer_predicates),
-            ..Default::default()
-        },
+        PhysOp::Project { input, select, predicates } => {
+            let inner = emit(*input);
+            let alias = match &inner.from {
+                TableRef::Scan { alias, .. }
+                | TableRef::Subquery { alias, .. }
+                | TableRef::Union { alias, .. } => alias.clone(),
+                TableRef::Join { .. } => "_p".to_string(),
+            };
+            Query {
+                select,
+                from: TableRef::subquery(inner, &alias),
+                where_clause: Expr::conjoin(predicates),
+                ..Default::default()
+            }
+        }
 
         PhysOp::Cte { name, body, consumer } => {
             let body_q = emit(*body);

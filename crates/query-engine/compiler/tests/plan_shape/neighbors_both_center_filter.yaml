@@ -1,25 +1,13 @@
 name: "Both + center filter = Union of two Joins"
-input:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"both"},"limit":20}
+input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"both"},"limit":20}
 expected:
   op: TopN
   input:
     op: Union
     arms:
       - op: Join
-        left:
-          op: Scan
-          table: gl_edge
-        right:
-          op: Scan
-          table: gl_merge_request
-          dedup: true
+        left: {op: Scan, table: gl_edge}
+        right: {op: Scan, table: gl_merge_request, dedup: true}
       - op: Join
-        left:
-          op: Scan
-          table: gl_edge
-        right:
-          op: Scan
-          table: gl_merge_request
-          dedup: true
+        left: {op: Scan, table: gl_edge}
+        right: {op: Scan, table: gl_merge_request, dedup: true}

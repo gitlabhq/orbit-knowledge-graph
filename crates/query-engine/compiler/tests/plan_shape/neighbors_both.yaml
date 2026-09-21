@@ -1,15 +1,9 @@
 name: "Neighbors both — Union of two edge scans"
-input:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"both"},"limit":20}
+input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"both"},"limit":20}
 expected:
   op: TopN
   input:
     op: Union
     arms:
-      - op: Scan
-        table: gl_edge
-        dedup: false
-      - op: Scan
-        table: gl_edge
-        dedup: false
+      - {op: Scan, table: gl_edge, dedup: false, select: [_gkg_neighbor_id, _gkg_mr_id]}
+      - {op: Scan, table: gl_edge, dedup: false, select: [_gkg_neighbor_id, _gkg_mr_id]}

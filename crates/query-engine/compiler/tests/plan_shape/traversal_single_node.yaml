@@ -1,10 +1,6 @@
 name: "Single node scan uses FINAL"
-input:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"limit":10}
+input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"limit":10}
 expected:
   op: TopN
-  input:
-    op: Scan
-    table: gl_merge_request
-    dedup: true
+  select: [mr_id, mr_iid, mr_title, mr_state, mr_source_branch, mr_target_branch]
+  input: {op: Scan, table: gl_merge_request, dedup: true}

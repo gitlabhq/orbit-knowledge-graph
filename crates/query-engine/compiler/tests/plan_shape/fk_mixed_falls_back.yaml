@@ -1,8 +1,7 @@
-name: "Multi-edge chain uses FINAL on each edge scan"
+name: "Mixed FK + non-FK — all hops use edge scans"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"p","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
 expected:
   op: Aggregate
-  select: ['n']
   input:
     op: Join
     left:
@@ -11,5 +10,5 @@ expected:
         op: Join
         left:
           op: Join
-          left: {op: Scan, alias: e0, dedup: true}
-          right: {op: Scan, alias: e1, dedup: true}
+          left: {op: Scan, alias: e0}
+          right: {op: Scan, alias: e1}

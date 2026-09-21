@@ -1,7 +1,5 @@
-name: "Variable-length 1..3 produces 3 depth arms"
-input:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,3]}],"limit":10}
+name: "Variable-length 1..3 — 3 depth arms with frontier projections"
+input: {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,3]}],"limit":10}
 expected:
   op: TopN
   input:
@@ -9,5 +7,12 @@ expected:
     left:
       op: Join
       left:
-        op: UnionQueries
-        arm_count: 3
+        op: Project
+        input:
+          op: Union
+          arms:
+            - {op: Project, select: [source_id, target_id, path_nodes, depth]}
+            - {op: Project, select: [source_id, target_id, path_nodes, depth]}
+            - {op: Project, select: [source_id, target_id, path_nodes, depth]}
+      right: {op: Scan, table: gl_user, dedup: true}
+    right: {op: Scan, table: gl_project, dedup: true}

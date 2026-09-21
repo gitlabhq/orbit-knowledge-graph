@@ -1,7 +1,5 @@
-name: "Exact 2 hops produces 1 depth arm"
-input:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[2,2]}],"limit":10}
+name: "Exact 2 hops — 1 depth arm, e1 JOIN e2"
+input: {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[2,2]}],"limit":10}
 expected:
   op: TopN
   input:
@@ -9,5 +7,11 @@ expected:
     left:
       op: Join
       left:
-        op: UnionQueries
-        arm_count: 1
+        op: Project
+        input:
+          op: Project
+          select: [source_id, target_id, path_nodes, depth]
+          input:
+            op: Join
+            left: {op: Scan, alias: e1, table: gl_edge}
+            right: {op: Scan, alias: e2, table: gl_edge}
