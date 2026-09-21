@@ -112,7 +112,7 @@ tests:
   - name: All top-level types are in the same file
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Class', 'Class', 'Trait', 'Class']
+      WHERE d.definition_type IN ['Class', 'Trait']
       RETURN d.name AS name, d.file_path AS file
     assert:
       - { no_nulls: file }
