@@ -446,12 +446,12 @@ enum Commands {
     Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
     Setup {
-        /// Assistants to configure. Default: every assistant detected on this
+        /// Agents to configure. Default: every agent detected on this
         /// machine.
-        #[arg(value_name = "ASSISTANT", value_parser = commands::setup::assistant_value_parser())]
+        #[arg(value_name = "AGENT", value_parser = commands::setup::assistant_value_parser())]
         assistants: Vec<String>,
 
-        /// Configure every supported assistant, detected or not.
+        /// Configure every supported agent, detected or not.
         #[arg(long, conflicts_with = "assistants")]
         all: bool,
 
@@ -468,8 +468,8 @@ enum Commands {
     },
     #[command(about = descriptions::short("uninstall"), long_about = descriptions::long("uninstall"))]
     Uninstall {
-        /// Assistants to clean up. Default: all of them.
-        #[arg(value_name = "ASSISTANT", value_parser = commands::setup::assistant_value_parser())]
+        /// Agents to clean up. Default: all of them.
+        #[arg(value_name = "AGENT", value_parser = commands::setup::assistant_value_parser())]
         assistants: Vec<String>,
 
         #[command(flatten)]

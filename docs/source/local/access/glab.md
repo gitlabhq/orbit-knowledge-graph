@@ -82,7 +82,7 @@ glab orbit local setup
 ```
 
 `glab orbit local uninstall` reverts it. See
-[Set up your AI assistant](cli.md#set-up-your-ai-assistant) for what it
+[Set up your AI assistant](cli.md#set-up-your-ai-agent) for what it
 changes. To connect an MCP client by hand instead, see
 [Connect via MCP](mcp.md).
 

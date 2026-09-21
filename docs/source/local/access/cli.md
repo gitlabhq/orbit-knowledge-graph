@@ -171,24 +171,24 @@ orbit mcp serve
 It serves `run_sql`, `get_graph_schema`, and `index` against
 `~/.gitlab/orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
 
-## Set up your AI assistant
+## Set up your AI agent
 
-`orbit setup` configures your AI coding assistants to consult the graph before
-they reach for grep. Run it without arguments to configure every assistant
+`orbit setup` configures your AI coding agents to consult the graph before
+they reach for grep. Run it without arguments to configure every agent
 installed on your machine:
 
 ```shell
 orbit setup
 ```
 
-It detects assistants from their configuration directories, such as
+It detects agents from their configuration directories, such as
 `~/.claude`, `~/.codex`, and `~/.config/opencode`, and lists every supported
-assistant with the detected ones pre-selected. It then shows the files it
-will touch and asks once before writing. Each assistant gets the instruction
-section, the skill files, and the nudge hooks. Supported assistants are
+agent with the detected ones pre-selected. It then shows the files it
+will touch and asks once before writing. Each agent gets the instruction
+section, the skill files, and the nudge hooks. Supported agents are
 GitLab Duo, Claude Code, Codex, OpenCode, and Pi.
 
-To pre-select specific assistants, name them:
+To pre-select specific agents, name them:
 
 ```shell
 orbit setup claude codex
@@ -199,7 +199,7 @@ Other options:
 - `--mcp` also registers the `orbit` MCP server.
 - `--skip <component>` leaves a component out: `instructions`, `hooks`,
   `skill`, or `mcp`.
-- `--all` configures every supported assistant, detected or not.
+- `--all` configures every supported agent, detected or not.
 - `--yes` skips the picker and the prompt. Required when there is no terminal,
   for example in scripts.
 - `--dry-run` prints the plan and exits without writing.
@@ -209,15 +209,15 @@ Other options:
 This command modifies files that belong to you. It never runs on its own, only
 when you invoke it.
 
-For every assistant it configures, `orbit setup`:
+For every agent it configures, `orbit setup`:
 
-- Adds a block to that assistant's instruction file, such as `CLAUDE.md` or
+- Adds a block to that agent's instruction file, such as `CLAUDE.md` or
   `AGENTS.md`. The block sits between `<!-- orbit:setup:begin -->` and
   `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
   alone. Running the command again replaces the block in place instead of adding
   a second copy.
 - With `--mcp`, registers the `orbit` MCP server, which runs
-  `orbit mcp serve`, in the assistant's MCP configuration:
+  `orbit mcp serve`, in the agent's MCP configuration:
   `~/.claude.json` or `.mcp.json` for Claude Code, `config.toml` for Codex, and
   `opencode.json` for OpenCode. Existing servers, comments, and unrelated
   settings are preserved. If OpenCode uses `opencode.jsonc`, setup stops and
@@ -226,7 +226,7 @@ For every assistant it configures, `orbit setup`:
   OpenCode, Cursor, and Gemini CLI scan. Claude Code does not scan that
   directory, so it also gets a `.claude/skills/orbit-cli` link to the same
   files.
-- Adds entries to that assistant's JSON configuration, where the assistant
+- Adds entries to that agent's JSON configuration, where the agent
   supports it. For Claude Code this is a `PreToolUse` hook in
   `settings.json`; for OpenCode it is a plugin file and its registration.
   Entries carry an `orbit` marker, and only marked entries are ever replaced or
@@ -247,13 +247,13 @@ teammates. User-global scope, the default, affects only you.
 
 ### Remove it
 
-To undo the changes for every assistant, run:
+To undo the changes for every agent, run:
 
 ```shell
 orbit uninstall
 ```
 
-Name assistants to undo only those, for example `orbit uninstall claude`. Pass
+Name agents to undo only those, for example `orbit uninstall claude`. Pass
 `--project` or `--dir <path>` to target a project instead of your user-global
 configuration. `--yes` and `--dry-run` work as they do for `orbit setup`.
 

@@ -4,6 +4,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};
+use cliclack::{Theme, ThemeState};
 
 use super::changes::{self, Report};
 use super::detect::Machine;
@@ -22,14 +23,14 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 
     if interactive {
         selection.assistants = choose_assistants(
-            "Which assistants should use Orbit?",
+            "Which agents should use Orbit?",
             &selection.assistants,
             &detection_hints(&detected, machine),
         )?;
     }
     if selection.assistants.is_empty() {
         cliclack::outro_cancel(format!(
-            "No assistant selected. Name one to configure it: orbit setup <{}>",
+            "No agent selected. Name one to configure it: orbit setup <{}>",
             spec::names().join("|")
         ))?;
         return Ok(());
@@ -40,12 +41,7 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         cliclack::outro("Dry run: nothing written.")?;
         return Ok(());
     }
-    if interactive
-        && !confirm(format!(
-            "Apply to {} assistant(s)?",
-            selection.assistants.len()
-        ))?
-    {
+    if interactive && !confirm(format!("Apply to {} agent(s)?", selection.assistants.len()))? {
         cliclack::outro_cancel("Nothing written.")?;
         return Ok(());
     }
@@ -68,13 +64,13 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
 
     if interactive {
         selection.assistants = choose_assistants(
-            "Remove Orbit from which assistants?",
+            "Remove Orbit from which agents?",
             &selection.assistants,
             &BTreeMap::new(),
         )?;
     }
     if selection.assistants.is_empty() {
-        cliclack::outro_cancel("No assistant selected.")?;
+        cliclack::outro_cancel("No agent selected.")?;
         return Ok(());
     }
 
@@ -85,7 +81,7 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
     }
     if interactive
         && !confirm(format!(
-            "Remove Orbit from {} assistant(s)?",
+            "Remove Orbit from {} agent(s)?",
             selection.assistants.len()
         ))?
     {
@@ -147,8 +143,7 @@ fn choose_assistants(
     preselected: &[&'static AssistantSpec],
     hints: &BTreeMap<&str, String>,
 ) -> Result<Vec<&'static AssistantSpec>> {
-    let mut picker =
-        cliclack::multiselect(format!("{prompt}  (space toggles, enter confirms)")).required(false);
+    let mut picker = cliclack::multiselect(prompt).required(false);
     for assistant in spec::all() {
         let hint = hints
             .get(assistant.name.as_str())
@@ -156,19 +151,42 @@ fn choose_assistants(
             .unwrap_or_default();
         picker = picker.item(assistant.name.as_str(), &assistant.title, hint);
     }
-    let chosen = picker
-        .initial_values(preselected.iter().map(|a| a.name.as_str()).collect())
-        .interact()?;
+    picker = picker.initial_values(preselected.iter().map(|a| a.name.as_str()).collect());
+
+    cliclack::set_theme(PickerKeysFooter);
+    let chosen = picker.interact();
+    cliclack::reset_theme();
+    let chosen = chosen?;
     Ok(spec::all()
         .iter()
         .filter(|assistant| chosen.contains(&assistant.name.as_str()))
         .collect())
 }
 
+struct PickerKeysFooter;
+
+impl Theme for PickerKeysFooter {
+    fn format_footer_with_message(&self, state: &ThemeState, message: &str) -> String {
+        struct Stock;
+        impl Theme for Stock {}
+
+        let keys = match state {
+            ThemeState::Active => "space toggles, enter confirms",
+            _ => "",
+        };
+        let footer = [message, keys]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("  ");
+        Stock.format_footer_with_message(state, &footer)
+    }
+}
+
 fn show_plan(plan: &Plan) -> Result<()> {
     for assistant in &plan.assistants {
         let body = if assistant.changes.is_empty() {
-            "nothing selected applies to this assistant".to_string()
+            "nothing selected applies to this agent".to_string()
         } else {
             assistant
                 .changes

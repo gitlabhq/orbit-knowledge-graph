@@ -63,7 +63,7 @@ directory so it can find it:
 ln -s ../../.agents/skills/orbit ~/.claude/skills/orbit
 ```
 
-For the local `orbit-cli` skill, [`orbit setup`](local/access/cli.md#set-up-your-ai-assistant)
+For the local `orbit-cli` skill, [`orbit setup`](local/access/cli.md#set-up-your-ai-agent)
 writes the files and the Claude Code link for you.
 
 ## Update the GitLab Orbit skill

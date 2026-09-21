@@ -1,17 +1,17 @@
 name: setup
 version: 1.1.0
-short: Configure AI coding assistants to consult the graph
+short: Configure AI coding agents to consult the graph
 description: >-
-  Configure AI coding assistants to consult the graph
+  Configure AI coding agents to consult the graph
 
 
-  Detects the assistants installed on this machine from their configuration
+  Detects the agents installed on this machine from their configuration
   directories, pre-selects them in a short picker, shows what will change,
-  and asks once. Each assistant gets the managed instruction section, the
-  Orbit skill files, and nudge hooks where the assistant supports them.
+  and asks once. Each agent gets the managed instruction section, the
+  Orbit skill files, and nudge hooks where the agent supports them.
   Pass `--mcp` to also register the `orbit` MCP server. `--skip` leaves a
-  component out. Name assistants to pre-select only those, or pass `--all`
-  for every supported assistant.
+  component out. Name agents to pre-select only those, or pass `--all`
+  for every supported agent.
   Targets user-global configuration by default, or the project with
   `--project` or `--dir`. Existing files get a one-time `.orbit-backup`
   sibling before the first change. Re-running updates everything in place.

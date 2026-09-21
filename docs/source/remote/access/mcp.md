@@ -168,7 +168,7 @@ paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI,
 Antigravity.
 
 > [!note]
-> [`orbit setup --mcp`](../../local/access/cli.md#set-up-your-ai-assistant)
+> [`orbit setup --mcp`](../../local/access/cli.md#set-up-your-ai-agent)
 > registers the local `orbit mcp serve` server in Claude Code, Codex, and
 > OpenCode in one step. The hosted endpoint above still needs the manual
 > configuration shown.
