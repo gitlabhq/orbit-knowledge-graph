@@ -260,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn bm25_order_is_not_overridden_by_exact_names_or_graph_degree() {
+    fn exact_names_rank_first_then_bm25_and_graph_degree_is_ignored() {
         let g = TestGraph::new("grep-bm25-order");
         g.def(1, "Module::compile", "compile", "src/a.rs");
         g.def(2, "Module::compiled", "compiled", "src/a.rs");
@@ -275,30 +275,30 @@ mod tests {
             "SELECT def_id AS id, fts_main_gl_def_doc_7.match_bm25(def_id, ?1, fields := 'name,context,source', conjunctive := true) AS score
              FROM gl_def_doc_7 WHERE score IS NOT NULL ORDER BY score DESC, id",
             &[serde_json::json!("compile")]).unwrap();
-        let expected = duckdb_client::i64_column(&raw, "id");
-        assert_eq!(expected, [2, 1]);
+        assert_eq!(duckdb_client::i64_column(&raw, "id"), [2, 1]);
+        let raw_scores: std::collections::HashMap<i64, f64> = duckdb_client::i64_column(&raw, "id")
+            .into_iter()
+            .zip(duckdb_client::f64_column(&raw, "score"))
+            .collect();
         search.client().execute("DROP TABLE gl_edge", &[]).unwrap();
         let (outcome, nodes) = search.grep("compile", 2, &RecallFilter::default()).unwrap();
         assert_eq!(
             outcome.matches.iter().map(|hit| hit.id).collect::<Vec<_>>(),
-            expected
+            [1, 2]
         );
-        assert_eq!(
-            outcome
-                .matches
-                .iter()
-                .map(|hit| hit.score)
-                .collect::<Vec<_>>(),
-            duckdb_client::f64_column(&raw, "score")
-        );
-        assert!(!outcome.matches[0].exact_name);
-        assert!(outcome.matches[1].exact_name);
+        for hit in &outcome.matches {
+            assert_eq!(hit.score, raw_scores[&hit.id]);
+        }
+        assert!(outcome.matches[0].exact_name);
+        assert!(!outcome.matches[1].exact_name);
+        assert_eq!(outcome.matches[1].body_offset, Some(1));
+        assert_eq!(outcome.matches[1].mentions, 3);
         assert_eq!(nodes.len(), 2);
         let (limited, nodes) = search.grep("compile", 1, &RecallFilter::default()).unwrap();
         assert_eq!(limited.total, 2);
         assert_eq!(limited.exact_alternatives, ["compile"]);
         assert_eq!(nodes.len(), 1);
-        assert!(!limited.matches[0].exact_name);
+        assert!(limited.matches[0].exact_name);
     }
 
     #[test]
@@ -464,20 +464,14 @@ mod tests {
             }
             let raw = search.client().query_arrow_json(
                 "SELECT def_id AS id, fts_main_gl_def_doc_7.match_bm25(def_id, ?1, fields := 'name,context,source', conjunctive := true) AS score
-                 FROM gl_def_doc_7 WHERE score IS NOT NULL ORDER BY score DESC, id",
-                &[serde_json::json!(normalized)]).unwrap();
-            assert_eq!(
-                outcome.matches.iter().map(|hit| hit.id).collect::<Vec<_>>(),
-                duckdb_client::i64_column(&raw, "id")
-            );
-            assert_eq!(
-                outcome
-                    .matches
-                    .iter()
-                    .map(|hit| hit.score)
-                    .collect::<Vec<_>>(),
-                duckdb_client::f64_column(&raw, "score")
-            );
+                 FROM gl_def_doc_7 WHERE score IS NOT NULL AND contains(lower(context), lower(?2)) ORDER BY score DESC, id",
+                &[serde_json::json!(normalized), serde_json::json!(name)]).unwrap();
+            assert_eq!(outcome.matches[0].id, i as i64 + 1, "{name}");
+            let mut ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
+            ids.sort_unstable();
+            let mut literal = duckdb_client::i64_column(&raw, "id");
+            literal.sort_unstable();
+            assert_eq!(ids, literal, "{name}");
         }
         assert!(
             missing.is_empty(),
@@ -499,7 +493,7 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.alternatives, ["__init__", "save!"]);
         assert_eq!(outcome.exact_alternatives, ["__init__", "save!"]);
-        assert_eq!(outcome.total, 3);
+        assert_eq!(outcome.total, 2);
         assert_eq!(nodes.len(), 1);
     }
 

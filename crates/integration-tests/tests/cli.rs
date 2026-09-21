@@ -1287,8 +1287,7 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
     assert!(
         stdout.contains("Definition:")
             && stdout.contains("src/utils.py:3-4  body-only ×1")
-            && stdout.contains("4| return open(path).read()")
-            && !stdout.contains("next: orbit context"),
+            && stdout.contains("4| return open(path).read()"),
         "{stdout}"
     );
     let reference = stdout
@@ -1310,18 +1309,11 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
     let (out, err, ok) = run_cmd(&["grep", "App|read_file|read_file", "--repo", repo_arg], dd);
     assert!(ok && out.contains("src.main.App"), "{err}\n{out}");
     assert!(out.contains("exact: App | read_file"), "{out}");
-    assert!(out.contains("next: orbit context Definition:"), "{out}");
+    assert!(!out.contains("next:"), "{out}");
     assert!(
         out.contains("src/utils.py:3-4  exact-name") && !out.contains("return open(path).read()"),
         "{out}"
     );
-    let (mixed, err, ok) = run_cmd(&["grep", "App|utils", "--repo", repo_arg], dd);
-    assert!(ok, "{err}\n{mixed}");
-    let next = mixed
-        .lines()
-        .find(|line| line.starts_with("next:"))
-        .unwrap();
-    assert!(next.matches("Definition:").count() >= 2, "{mixed}");
     let (out, err, ok) = run_cmd(&["grep", "App|missing_symbol", "--repo", repo_arg], dd);
     assert!(ok, "{err}\n{out}");
     assert!(out.contains("exact: App"), "{out}");
@@ -1367,7 +1359,6 @@ fn grep_recognizes_camel_case_exact_hits_and_deduplicates_case_variants() {
     assert!(ok, "{err}\n{out}");
     assert!(out.contains("exact: markInSync"), "{out}");
     assert!(!out.contains("exact-miss:"), "{out}");
-    assert!(out.contains("next: orbit context Definition:"), "{out}");
     assert!(
         out.contains("src/sync.py:1-2  exact-name") && !out.contains("return 'synchronized'"),
         "{out}"
@@ -1411,15 +1402,9 @@ fn grep_orders_exact_names_first_and_requires_literal_identifiers() {
     let lines: Vec<_> = out.lines().collect();
     assert_eq!(lines[1], "exact: get_ia_record", "{out}");
     assert!(
-        lines[2].starts_with("next: orbit context Definition:"),
+        lines[2].contains("src.importer.get_ia_record") && lines[2].ends_with("exact-name"),
         "{out}"
     );
-    assert!(
-        lines[3].contains("src.importer.get_ia_record") && lines[3].ends_with("exact-name"),
-        "{out}"
-    );
-    let exact_id = lines[3].split_whitespace().next().unwrap();
-    assert_eq!(lines[2], format!("next: orbit context {exact_id}"), "{out}");
     assert!(
         out.contains("src.importer.show_ia  [Function]  src/importer.py:1-2  body-only ×1")
             && out.contains("2| return get_ia_record()"),
@@ -1440,6 +1425,65 @@ fn grep_orders_exact_names_first_and_requires_literal_identifiers() {
     assert!(
         out.rfind("name/path").unwrap() < out.find("body-only").unwrap(),
         "{out}"
+    );
+}
+
+#[test]
+fn context_accepts_line_ranges_and_directories() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+    let repo_arg = repo.path.to_str().unwrap();
+
+    let (out, err, ok) = run_cmd(&["context", "src/utils.py:3-4", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{out}");
+    let lines: Vec<_> = out.lines().collect();
+    assert!(
+        lines[0].starts_with("File:") && lines[0].ends_with("src/utils.py  [python]  L3-4"),
+        "{out}"
+    );
+    assert!(
+        lines[1].contains("src.utils.read_file  [Function]  L3-4"),
+        "{out}"
+    );
+    assert_eq!(
+        &lines[2..],
+        ["3|def read_file(path):", "4|    return open(path).read()"],
+        "{out}"
+    );
+    assert!(!out.contains("import os"), "{out}");
+
+    let (out, err, ok) = run_cmd(&["context", "src/utils.py:4", "--repo", repo_arg], dd);
+    assert!(
+        ok && out.ends_with("4|    return open(path).read()\n"),
+        "{err}\n{out}"
+    );
+    let (out, err, ok) = run_cmd(&["context", "src/utils.py:40-50", "--repo", repo_arg], dd);
+    assert!(!ok && err.contains("range starts at 40"), "{out}\n{err}");
+
+    let (out, err, ok) = run_cmd(&["context", "src", "--repo", repo_arg], dd);
+    assert!(ok, "{err}\n{out}");
+    assert!(out.starts_with("Dir:  src  (2 files, "), "{out}");
+    assert!(
+        out.contains("  src/main.py  [python]  ")
+            && out.contains("  src/utils.py  [python]  1 definitions"),
+        "{out}"
+    );
+    assert!(
+        out.matches("File:").count() == 2 && !out.contains("def "),
+        "{out}"
+    );
+
+    let (out, err, ok) = run_cmd(
+        &["context", "src", "src/utils.py:3-3", "--repo", repo_arg],
+        dd,
+    );
+    assert!(
+        ok && out.starts_with("Dir:  src")
+            && out.contains("\nFile:")
+            && out.ends_with("3|def read_file(path):\n"),
+        "{err}\n{out}"
     );
 }
 
@@ -1564,14 +1608,12 @@ fn grep_conjunction_mentions_and_explicit_context_preserve_source_comments() {
             "{query}: {err}\n{out}"
         );
         assert!(!out.contains("Definition:"), "{out}");
-        assert!(!out.contains("next:"), "{out}");
     }
     let (out, err, ok) = run_cmd(&["grep", "clone", "--repo", repo_arg], dd);
     assert!(ok && out.contains("src.models.copy"), "{err}\n{out}");
     assert!(
         out.contains("src/models.py:1-3  body-only ×1")
-            && out.contains("2| # clone this object without sharing state")
-            && !out.contains("next:"),
+            && out.contains("2| # clone this object without sharing state"),
         "{out}"
     );
     let reference = out
@@ -1585,10 +1627,7 @@ fn grep_conjunction_mentions_and_explicit_context_preserve_source_comments() {
     );
     let (out, err, ok) = run_cmd(&["grep", "models", "--repo", repo_arg], dd);
     assert!(ok && out.contains("src.models.copy"), "{err}\n{out}");
-    assert!(
-        out.contains("src/models.py:1-3  name/path") && out.contains("next: orbit context"),
-        "{out}"
-    );
+    assert!(out.contains("src/models.py:1-3  name/path"), "{out}");
     assert!(!out.contains("# clone"), "{out}");
     let (out, err, ok) = run_cmd(&["grep", "copy", "--limit", "0", "--repo", repo_arg], dd);
     assert!(!ok, "{err}\n{out}");
@@ -1655,7 +1694,6 @@ fn file_context_compacts_definition_locations_and_bounds_each_connection_section
         "{} lines\n{out}",
         out.lines().count()
     );
-    assert!(out.contains("next: orbit context Definition:"), "{out}");
     let reference = definitions[0].split_whitespace().next().unwrap();
     let (body, err, ok) = run_cmd(&["context", reference, "--repo", repo_arg], dd);
     assert!(

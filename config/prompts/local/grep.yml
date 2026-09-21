@@ -1,5 +1,5 @@
 name: grep
-version: 1.11.0
+version: 1.12.0
 short: Search local definition names, paths, and bodies
 description: >-
   Search local definition names, paths, and bodies.
@@ -17,6 +17,5 @@ description: >-
   mentions, BM25 within each group. Body-only rows add a mention count and
   the first matching line. Identifier alternatives report
   case-insensitive exact symbol-name hits and misses within the selected scope.
-  The `next:` line, printed before the list, batches up to three exact-name or
-  name/path IDs for source and relationships. Narrow with --path/--kind or raise
-  --limit.
+  Pass a `path:start-end` range or a Definition ID to `context` for source and
+  relationships. Narrow with --path/--kind or raise --limit.

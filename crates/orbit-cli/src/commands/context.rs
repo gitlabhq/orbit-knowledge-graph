@@ -46,7 +46,19 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
     let hydrator = NodeHydrator::embedded("Definition")?;
-    let (paths, file_ids, ids) = resolve_targets(&client, &git, &hydrator, &target.target)?;
+    let targets = resolve_targets(&client, &git, &hydrator, &target.target)?;
+    let mut out = String::new();
+    for dir in &targets.dirs {
+        render_dir(&mut out, &client, &git, dir)?;
+    }
+    for (path, start, end) in &targets.ranges {
+        render_range(&mut out, &client, &git, &hydrator, path, *start, *end)?;
+    }
+    if targets.files.is_empty() && targets.file_ids.is_empty() && targets.ids.is_empty() {
+        print!("{out}");
+        return Ok(());
+    }
+    let (paths, file_ids, ids) = (targets.files, targets.file_ids, targets.ids);
     let files = resolve_files(&client, &git, &paths, &file_ids)?;
     let mut nodes = definition::resolve_ids(&client, &git, &hydrator, &ids)?;
     let mut defs = nodes.iter().map(source_range).collect::<Result<Vec<_>>>()?;
@@ -65,7 +77,6 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         .iter()
         .map(source_range)
         .collect::<Result<Vec<_>>>()?;
-    let mut out = String::new();
     for (file, file_defs) in outline(&defs) {
         let path = repo_relative(&git.repo_path, &file)?;
         let content = std::fs::read_to_string(git.repo_path.join(path))
@@ -87,18 +98,52 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     Ok(())
 }
 
+#[derive(Default)]
+struct Targets {
+    files: Vec<String>,
+    file_ids: Vec<i64>,
+    ids: Vec<i64>,
+    ranges: Vec<(String, usize, usize)>,
+    dirs: Vec<String>,
+}
+
+pub(crate) fn split_line_range(target: &str) -> Option<(&str, usize, usize)> {
+    let (path, suffix) = target.rsplit_once(':')?;
+    let (start, end) = match suffix.split_once('-') {
+        Some((start, end)) => (start.parse().ok()?, end.parse().ok()?),
+        None => {
+            let line = suffix.parse().ok()?;
+            (line, line)
+        }
+    };
+    (!path.is_empty() && start >= 1 && start <= end).then_some((path, start, end))
+}
+
 fn resolve_targets(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
     hydrator: &NodeHydrator,
     targets: &[String],
-) -> Result<(Vec<String>, Vec<i64>, Vec<i64>)> {
-    let mut files = Vec::new();
-    let mut file_ids = Vec::new();
-    let mut ids = Vec::new();
+) -> Result<Targets> {
+    let mut resolved = Targets::default();
+    let Targets {
+        files,
+        file_ids,
+        ids,
+        ranges,
+        dirs,
+    } = &mut resolved;
     let mut seen = BTreeSet::new();
     for target in targets.iter().filter(|target| seen.insert(*target)) {
-        if let Some((kind, id)) = target.split_once(':')
+        if let Some((path, start, end)) = split_line_range(target)
+            && let Ok(path) = repo_relative(&git.repo_path, path)
+        {
+            ranges.push((path, start, end));
+        } else if let Ok(dir) = repo_relative_dir(&git.repo_path, target) {
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        } else if let Some((kind, id)) = target.split_once(':')
             && matches!(kind, "Definition" | "File")
             && !id.starts_with(':')
         {
@@ -108,9 +153,9 @@ fn resolve_targets(
                 .filter(|id| *id > 0)
                 .with_context(|| format!("{target:?} is not a valid {kind}:<id>"))?;
             let ids = if kind == "File" {
-                &mut file_ids
+                &mut *file_ids
             } else {
-                &mut ids
+                &mut *ids
             };
             if !ids.contains(&id) {
                 ids.push(id);
@@ -141,7 +186,145 @@ fn resolve_targets(
             }
         }
     }
-    Ok((files, file_ids, ids))
+    Ok(resolved)
+}
+
+fn repo_relative_dir(repo_path: &std::path::Path, path: &str) -> Result<String> {
+    let canonical = dunce::canonicalize(repo_path.join(path))
+        .with_context(|| format!("{path} does not exist"))?;
+    anyhow::ensure!(canonical.is_dir(), "{path} is not a directory");
+    let relative = canonical.strip_prefix(repo_path).with_context(|| {
+        format!(
+            "{path} is outside the indexed repository {}",
+            repo_path.display()
+        )
+    })?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+const DIR_FILE_LIMIT: usize = 50;
+
+fn render_dir(
+    out: &mut String,
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    dir: &str,
+) -> Result<()> {
+    let files = NodeHydrator::embedded("File")?;
+    let defs = NodeHydrator::embedded("Definition")?;
+    let prefix = if dir.is_empty() {
+        String::new()
+    } else {
+        format!("{dir}/")
+    };
+    let batches = client.query_arrow_json(
+        &format!(
+            "SELECT f.{fid} AS id, f.{fpath} AS path, f.{lang} AS language,
+                    CAST(count(d.{did}) AS BIGINT) AS definitions
+             FROM {ftable} f
+             LEFT JOIN {dtable} d ON d.{dproject} = f.{fproject} AND d.{dcommit} = f.{fcommit}
+                  AND d.{dpath} = f.{fpath} AND d.{dfqn} NOT LIKE '%@%'
+             WHERE f.{fproject} = ?1 AND f.{fcommit} = ?2 AND starts_with(f.{fpath}, ?3)
+             GROUP BY ALL ORDER BY path",
+            fid = files.column("id")?,
+            fpath = files.column("path")?,
+            lang = files.column("language")?,
+            ftable = files.table(),
+            fproject = files.column("project_id")?,
+            fcommit = files.column("commit_sha")?,
+            did = defs.column("id")?,
+            dtable = defs.table(),
+            dproject = defs.column("project_id")?,
+            dcommit = defs.column("commit_sha")?,
+            dpath = defs.column("file_path")?,
+            dfqn = defs.column("fqn")?,
+        ),
+        &[
+            git.project_id.into(),
+            git.commit_sha.clone().into(),
+            prefix.clone().into(),
+        ],
+    )?;
+    let ids = i64_column(&batches, "id");
+    let paths = string_column(&batches, "path");
+    let languages = string_column(&batches, "language");
+    let counts = i64_column(&batches, "definitions");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    let shown = if dir.is_empty() { "." } else { dir };
+    if ids.is_empty() {
+        writeln!(out, "Dir:  {shown}  (no indexed files)")?;
+        return Ok(());
+    }
+    writeln!(
+        out,
+        "Dir:  {shown}  ({} files, {} definitions)",
+        ids.len(),
+        counts.iter().sum::<i64>()
+    )?;
+    for index in 0..ids.len().min(DIR_FILE_LIMIT) {
+        writeln!(
+            out,
+            "  File:{}  {}  [{}]  {} definitions",
+            ids[index],
+            paths[index],
+            languages.get(index).map(String::as_str).unwrap_or(""),
+            counts[index]
+        )?;
+    }
+    if ids.len() > DIR_FILE_LIMIT {
+        writeln!(
+            out,
+            "  … {} more; name a subdirectory or file",
+            ids.len() - DIR_FILE_LIMIT
+        )?;
+    }
+    Ok(())
+}
+
+fn render_range(
+    out: &mut String,
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    hydrator: &NodeHydrator,
+    path: &str,
+    start: usize,
+    end: usize,
+) -> Result<()> {
+    let file = resolve_files(client, git, &[path.to_string()], &[])?;
+    let content = std::fs::read_to_string(git.repo_path.join(path))
+        .with_context(|| format!("failed to read {path}"))?;
+    let lines: Vec<&str> = content.lines().collect();
+    anyhow::ensure!(
+        start <= lines.len(),
+        "{path} has {} lines; range starts at {start}",
+        lines.len()
+    );
+    let end = end.min(lines.len());
+    let mut members = definitions_in_files(client, git, hydrator, &[path.to_string()])?
+        .iter()
+        .map(source_range)
+        .collect::<Result<Vec<_>>>()?;
+    members.retain(|def| def.start <= end && def.end >= start);
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    writeln!(
+        out,
+        "File:{}  {path}  [{}]  L{start}-{end}",
+        file[0].id,
+        file[0].properties["language"].as_str().unwrap_or("")
+    )?;
+    for def in &members {
+        writeln!(
+            out,
+            "  Definition:{}  {}  [{}]  L{}-{}",
+            def.id, def.fqn, def.kind, def.start, def.end
+        )?;
+    }
+    write_lines(out, &lines, start, end)?;
+    Ok(())
 }
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
@@ -349,6 +532,15 @@ mod tests {
             file: "src/lib.rs".to_string(),
             start,
             end,
+        }
+    }
+
+    #[test]
+    fn line_ranges_split_only_valid_suffixes() {
+        assert_eq!(split_line_range("src/a.py:3-9"), Some(("src/a.py", 3, 9)));
+        assert_eq!(split_line_range("src/a.py:7"), Some(("src/a.py", 7, 7)));
+        for invalid in ["src/a.py", "src/a.py:9-3", "src/a.py:0-3", ":3-4"] {
+            assert_eq!(split_line_range(invalid), None, "{invalid}");
         }
     }
 

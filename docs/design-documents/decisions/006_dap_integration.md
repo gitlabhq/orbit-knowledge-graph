@@ -194,13 +194,12 @@ order exact-name hits first, then name/path hits, then body-only mentions, BM25
 within each group. Case-insensitive exact symbol-name labels report hits and misses
 within scope before the limit. Results contain Definition IDs, names, kinds, file
 ranges, and match labels; body-only rows add a mention count and the first
-matching line. A follow-up command, printed before the list,
-batches up to three returned exact-name or name/path IDs for source and
-relationships. Body-only mentions remain listed without an
-automatic context suggestion. `context` returns compact file definition maps with
+matching line. `context` returns compact file definition maps with
 every ID and ten connections per section, with omitted counts, or complete
-definition source and connections. It accepts mixed file and definition targets
-and shows test connections in their own section.
+definition source and connections. It accepts mixed file, line-range, directory,
+and definition targets and shows test connections in their own section. Line
+ranges print numbered lines with the definitions they touch; directories list
+indexed files with definition counts.
 
 ### Caller identification
 

@@ -247,7 +247,7 @@ fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
 
 fn context_target_help() -> String {
     format!(
-        "File:<id>, Definition:<id> from `{} grep`, or paths for indexed File views. Mix or repeat targets; quote paths with spaces.",
+        "File:<id>, Definition:<id> from `{} grep`, file paths, path:start-end line ranges, or directories. Mix or repeat targets; quote paths with spaces.",
         commands::setup::spec::launcher()
     )
 }

@@ -11,8 +11,6 @@ use orbit_search::{RecallFilter, query_alternatives};
 use crate::commands::context;
 use local::LocalBackend;
 
-const CONTEXT_HINT_LIMIT: usize = 3;
-
 pub(crate) fn run(
     query: Option<String>,
     repo: Option<PathBuf>,
@@ -64,14 +62,6 @@ pub(crate) fn run(
         return Ok(());
     }
 
-    let defs: Vec<_> = nodes
-        .iter()
-        .zip(&outcome.matches)
-        .filter(|(_, hit)| hit.exact_name || hit.name_match)
-        .take(CONTEXT_HINT_LIMIT)
-        .map(|(node, _)| node.clone())
-        .collect();
-    report_context_hint(&mut out, &defs, launcher)?;
     report_results(&mut out, &outcome, &nodes)?;
     Ok(())
 }
@@ -145,18 +135,6 @@ fn report_results(
     } else if hidden > 0 {
         writeln!(out, "  … {hidden} more; add --path/--kind or --limit.")?;
     }
-    Ok(())
-}
-
-fn report_context_hint(out: &mut impl Write, nodes: &[NodeValue], launcher: &str) -> Result<()> {
-    if nodes.is_empty() {
-        return Ok(());
-    }
-    write!(out, "next: {launcher} context")?;
-    for node in nodes {
-        write!(out, " {}:{}", node.entity_type, node.id)?;
-    }
-    writeln!(out)?;
     Ok(())
 }
 
@@ -318,21 +296,6 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             "exact: present\nexact-miss: missing\n"
-        );
-    }
-
-    #[test]
-    fn context_hint_is_copyable_and_batched() {
-        let nodes = [481, 482].map(|id| NodeValue {
-            entity_type: "Definition".to_string(),
-            id,
-            properties: serde_json::Map::new(),
-        });
-        let mut buf = Vec::new();
-        report_context_hint(&mut buf, &nodes, "orbit").unwrap();
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            "next: orbit context Definition:481 Definition:482\n"
         );
     }
 }

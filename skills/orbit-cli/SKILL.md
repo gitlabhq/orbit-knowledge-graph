@@ -8,7 +8,7 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.15.0
+version: 0.17.0
 license: MIT
 metadata:
   audience: developers
@@ -39,6 +39,7 @@ orbit grep "rate limit" --path src --kind Method,Function
 orbit grep 'query_arrow|insert_batch|execute' --path crates/duckdb-client
 orbit context Definition:<id> [Definition:<id>...]
 orbit context src/lib.rs File:<id> Definition:<id>
+orbit context src/lib.rs:120-180 crates/duckdb-client
 ```
 
 One query per call. Quote `a|b|c` for OR alternatives with a shared result limit.
@@ -49,9 +50,7 @@ Results list exact-name hits first, then name/path hits, then body-only mentions
 ordered by BM25 within each group. Each row carries the definition's file range;
 body-only rows add a mention count and the first matching line.
 Identifier alternatives report case-insensitive exact symbol-name hits and misses
-within the selected scope. The `next:` line, printed before the list, batches up
-to three exact-name or name/path IDs. Narrow with `--path`/`--kind` or raise
-`--limit`.
+within the selected scope. Narrow with `--path`/`--kind` or raise `--limit`.
 
 `grep` returns `Definition:<id>` references. Pass them to `context`, which
 also accepts exact FQNs but not short names or globs. A path is shorthand for
@@ -59,7 +58,9 @@ its indexed `File:<id>`. File targets return a compact definition map with kinds
 line ranges, and every followable ID. Connections are bounded to ten per section
 with clear omitted counts; choose a Definition ID for complete source and its
 indexed connections. `<--` is a caller, `-->` is a callee. Connections from test,
-fixture, and generated files appear in their own section. Reuse the returned
+fixture, and generated files appear in their own section. `path:start-end`
+returns those numbered lines with the definitions they touch. A directory lists
+its indexed files with definition counts, fifty at a time. Reuse the returned
 source.
 
 <!-- orbit:section quick-start -->
