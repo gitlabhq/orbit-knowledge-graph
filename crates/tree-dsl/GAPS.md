@@ -60,6 +60,10 @@ canonical nodes named here.
   enclosing definition, not imported by name, and not a visible definition.
   That receiver binds to the file's wildcard imports, the same rule bare
   calls follow.
+- Imports tagged `non_shadowing` do not replace an existing local definition.
+  The import remains available for file resolution.
+- A call can declare its result type with `returns`. That name resolves in the
+  caller file during return-type resolution. The call still targets the method.
 - Constructors are never nameable, so they do not shadow their class in the
   visible names. Method lookup covers every same-named definition in the
   class's file, so impl wrappers count.
@@ -74,7 +78,6 @@ canonical nodes named here.
 | 4 | Static receivers under a namespace import that the resolver cannot see (C# partial classes, await, static using). | `resolver.rs` resolve_receivers |
 | 1 | Record constructor reference count. Cross-file export merges distinct call sites with the same caller and target. Other active fixtures require this merged count. | `tree-dsl-tests/src/export.rs` |
 | 4 | Nested types. `Parent.Child.GrandChild` collapses to its last segment; SSA lookup picks the nearest same-named definition. Needs a member-chain supertype and nested constructor typing. | `langs/java.yaml`, `langs/kotlin.yaml`, `linker.rs` |
-| 3 | Qualified constant reads across files. `A::B::C` is a member call whose object resolves to nothing, and a value use must stay inert for TypeScript. | `linker.rs`, `resolver.rs` |
 | 3 | Extension functions and interface members of imported types resolve only through same-file defs. | `linker.rs` find_method_in |
 | 2 | Inherited dispatch through a static factory chain or `new parent()` in PHP. | `resolver.rs` |
 | 1 each | Elixir bare call through `import`, flat visible map shadowing a same-file constant, Kotlin operator tokens, Kotlin path-based import, Go `Save` through embedding. | see the skip comment |

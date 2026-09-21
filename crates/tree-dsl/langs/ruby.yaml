@@ -6,12 +6,8 @@
 # synthetic definitions, self./@ivar calls, implicit-self calls, control flow.
 #
 # Known gaps (engine, not rules):
-# - Bare constant reads resolve to Constant definitions but the linker only
-#   emits Calls edges for callable definitions.
 # - Bare identifiers cannot be told apart from locals, so implicit-self
 #   calls without parentheses are modeled as this-calls and may over-link.
-# - A require has one wildcard slot per file, so unresolved constants fall
-#   back to the last require.
 
 stages:
   - name: imports
@@ -137,17 +133,8 @@ stages:
         replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
       - match: '(call receiver: $R:scope_resolution method: (identifier "new") arguments:? $A block:? $B)'
         replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R|split_last("::"))) (__call (__callee @$R|split_last("::")) $A $B))'
-      # Rails finders and builders return instances of the receiver constant
-      - match: '(call receiver: $R:constant method: (identifier "find") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
-      - match: '(call receiver: $R:constant method: (identifier "find_by") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
-      - match: '(call receiver: $R:constant method: (identifier "create") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
-      - match: '(call receiver: $R:constant method: (identifier "create!") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
-      - match: '(call receiver: $R:constant method: (identifier "build") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+      - match: '(call receiver: $R:constant method: $M:(identifier "/^(find|find_by|create|create!|build)$/") arguments:? $A block:? $B)'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee (__member @$M (__object @$R))) (__ssa_return_type @$R) $A $B))'
       # Const.m / Const::Nested.m → member call plus autoload import
       - match: '(call receiver: $R:constant method: $M:identifier arguments:? $A block:? $B)'
         replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee (__member @$M (__object @$R))) $A $B))'
@@ -169,6 +156,10 @@ stages:
   - name: classify
     rules:
       # Bindings
+      - match: '(assignment left: $L:instance_variable right: (rb_ref $I:__import $C:(__call $T:__ssa_return_type)))'
+        replace: '(__binding (__ivar @$L|strip=@) (__ssa_typed @$T) (__rhs $I $C))'
+      - match: '(assignment left: $L:identifier right: (rb_ref $I:__import $C:(__call $T:__ssa_return_type)))'
+        replace: '(__binding @$L (__ssa_typed @$T) (__rhs $I $C))'
       - match: '(assignment left: $L:instance_variable right: $R:__call)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
       - match: '(assignment left: $L:instance_variable right: $R:rb_ref)'
@@ -248,6 +239,10 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(__import (__import_kind "autoload"))'
+        tag: { non_shadowing: "true" }
+      - match: '(__call $T:__ssa_return_type)'
+        tag: { returns: '@$T' }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'

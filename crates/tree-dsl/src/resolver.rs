@@ -585,7 +585,23 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         .filter(|e| e.kind == EdgeKind::Imports && is_direct(nodes, e.to_node, import_node))
     {
         let caller = ctx.corpus.jump(fi as u32, edge.from_node);
+        let typed_results: FxHashSet<u32> = caller
+            .descendants()
+            .filter(|n| {
+                n.is(C::Binding)
+                    && n.has(C::SsaTyped)
+                    && n.child(C::Rhs)
+                        .and_then(|rhs| rhs.child(C::Call))
+                        .is_some_and(|call| call.has_tag(ctx.returns_key))
+            })
+            .filter_map(|n| n.sym_opt())
+            .collect();
         for (call, m) in caller.member_calls() {
+            if m.child(C::Object).is_some_and(|object| {
+                object.has(C::Call) || object.has(C::Ivar) || typed_results.contains(&object.sym())
+            }) {
+                continue;
+            }
             let Some(&loc) = target_files
                 .iter()
                 .find_map(|&t| ctx.visible[t].get(&m.sym()))
@@ -686,7 +702,11 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     else {
         return vec![];
     };
-    let target = ctx.corpus.follow(ce);
+    let target = ce
+        .site
+        .map(|site| ctx.corpus.jump(ce.from_tree, site))
+        .filter(|call| call.has_tag(ctx.returns_key))
+        .unwrap_or_else(|| ctx.corpus.follow(ce));
     let class = if target.has(C::Constructor) || CLASS_LIKE.iter().any(|&k| target.has(k)) {
         target
     } else {
@@ -696,10 +716,10 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
         else {
             return vec![];
         };
-        if ctx.ambiguous.contains(&(ce.to_fi(), ret_sym)) {
+        if ctx.ambiguous.contains(&(target.fi() as usize, ret_sym)) {
             return vec![];
         }
-        let Some(loc) = ctx.visible[ce.to_fi()].get(&ret_sym) else {
+        let Some(loc) = ctx.visible[target.fi() as usize].get(&ret_sym) else {
             return vec![];
         };
         ctx.corpus.jump(loc.fi as u32, loc.node)
@@ -851,13 +871,19 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
         };
         let Some(scope) = scope else { return };
         for (call, member) in scope.member_calls() {
-            let obj = member
-                .object_ivar()
-                .map_or(member.child_sym(C::Object), |iv| iv.sym_opt());
-            let Some(caller) = call
-                .enclosing(|c| c.is(C::Def))
-                .filter(|_| obj == Some(var))
-            else {
+            let object_ivar = member.object_ivar();
+            let obj = object_ivar.map_or(member.child_sym(C::Object), |iv| iv.sym_opt());
+            let Some(caller) = call.enclosing(|c| c.is(C::Def)).filter(|caller| {
+                obj == Some(var)
+                    && if object_ivar.is_some() {
+                        ivar.is_some()
+                    } else {
+                        ivar.is_none()
+                            || !caller.descendants().any(|binding| {
+                                binding.is(C::Binding) && binding.sym_opt() == Some(var)
+                            })
+                    }
+            }) else {
                 continue;
             };
             if let Some(m) = method_up(ctx, target, member.sym(), 0) {

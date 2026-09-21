@@ -309,13 +309,6 @@ tests:
   # ══════════════════════════════════════════════════════════════
   # REFERENCE RESOLUTION — qualified refs resolve to Constants
   # ══════════════════════════════════════════════════════════════
-  #
-  # `reference("scope_resolution")` extracts `Foo::Bar::MAX`-shaped
-  # refs verbatim. The linker now tries a direct by_fqn lookup for
-  # any ref name containing the separator, so absolute qualified
-  # references resolve to non-type-container Definitions (Constants,
-  # leaf Methods) — not just top-level type containers like Classes.
-
   - name: "ContextUser methods are indexed"
     query: |
       MATCH (d:Definition)
@@ -328,7 +321,7 @@ tests:
       - { row: { fqn: "ContextUser::default_label" } }
       - { row: { fqn: "ContextUser::deep_value" } }
 
-  # skip: tree-dsl: the linker emits Calls edges only for callable definitions, so constant reads produce no edge
+  # skip: tree-dsl: bogus: a constant value read is not a method invocation; Calls encodes invocations
   - name: "qualified constant reference resolves to the Constant Definition"
     skip: true
     query: |
@@ -340,7 +333,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: Constant, kind: Calls } }
 
-  # skip: tree-dsl: the linker emits Calls edges only for callable definitions, so constant reads produce no edge
+  # skip: tree-dsl: bogus: a constant value read is not a method invocation; Calls encodes invocations
   - name: "second qualified constant reference (string-valued) also resolves"
     skip: true
     query: |
@@ -352,7 +345,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: Constant, kind: Calls } }
 
-  # skip: tree-dsl: the linker emits Calls edges only for callable definitions, so constant reads produce no edge
+  # skip: tree-dsl: bogus: a constant value read is not a method invocation; Calls encodes invocations
   - name: "deeply nested constant reference resolves across module chain"
     skip: true
     query: |
@@ -367,14 +360,7 @@ tests:
   # ══════════════════════════════════════════════════════════════
   # BARE (UNQUALIFIED) CONSTANT REFERENCES
   # ══════════════════════════════════════════════════════════════
-  #
-  # The Ruby DSL now declares `reference("constant")` with field-aware
-  # exclusions, so a same-class bare ref like `MAX_TRACKED_REFS_PER_PROJECT`
-  # used inside `allow?` resolves via the linker's ImplicitMember stage
-  # (walks the enclosing FQN, hits the `nested` index, finds the
-  # Constant Definition).
-
-  # skip: tree-dsl: a constant read is a reference, not a call; the linker links call-shaped references to callable definitions only
+  # skip: tree-dsl: bogus: a constant value read is not a method invocation; Calls encodes invocations
   - name: "bare constant ref in same class resolves via ImplicitMember"
     skip: true
     query: |
@@ -386,7 +372,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: Constant, kind: Calls } }
 
-  # skip: tree-dsl: a constant read is a reference, not a call; the linker links call-shaped references to callable definitions only
+  # skip: tree-dsl: bogus: a constant value read is not a method invocation; Calls encodes invocations
   - name: "bare constant ref to a string-valued constant in initialize"
     skip: true
     query: |

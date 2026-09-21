@@ -61,6 +61,7 @@ struct Fold<'t> {
     imports: Vec<u32>,
     wildcards: Vec<u32>,
     callable_key: u32,
+    non_shadowing_key: u32,
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
     scoped_key: u32,
@@ -167,12 +168,20 @@ impl<'t> Fold<'t> {
     fn handle_import(&mut self, c: Cursor<'t>) {
         for n in c.names() {
             let sym = n.sym();
-            self.import_count += 1;
-            self.imports.push(n.index());
             let local = n
                 .child_sym(C::Alias)
                 .or(n.child_sym(C::SsaHint))
                 .unwrap_or(sym);
+            if c.has_tag(self.non_shadowing_key)
+                && self
+                    .lookup(local)
+                    .iter()
+                    .any(|r| matches!(r, Linked::Def(_)))
+            {
+                continue;
+            }
+            self.import_count += 1;
+            self.imports.push(n.index());
             self.wildcards
                 .extend((local == self.wildcard).then_some(n.index()));
             self.ssa
@@ -517,7 +526,7 @@ impl<'t> Fold<'t> {
         self.tree.cursor(class).descend(|n| {
             if n.is(C::Binding)
                 && n.child(C::Ivar).is_some_and(|iv| iv.sym() == attr)
-                && let Some(s) = n.rhs_callee()
+                && let Some(s) = n.child_sym(C::SsaTyped).or_else(|| n.rhs_callee())
             {
                 return Step::Out(s);
             }
@@ -574,6 +583,7 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         imports: Vec::new(),
         wildcards: Vec::new(),
         callable_key: lang.syms.intern("callable"),
+        non_shadowing_key: lang.syms.intern("non_shadowing"),
         def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern(WILDCARD),
         scoped_key: lang.syms.intern("scoped"),
