@@ -64,6 +64,7 @@ fn security_ctx() -> compiler::types::SecurityContext {
 fn plan_shape_scenarios() {
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology"));
     let ctx = security_ctx();
+    let mut failures = Vec::new();
 
     for (name, doc) in load_scenarios() {
         let json_string;
@@ -75,39 +76,54 @@ fn plan_shape_scenarios() {
         } else if let Some(s) = doc["input"].as_str() {
             s
         } else {
-            panic!("{name}: missing input");
+            failures.push(format!("{name}: missing input"));
+            continue;
         };
 
-        // Compile fully to get the normalized Input, then re-run plan to get PhysOp.
-        let compiled = compiler::compile(json_str, compiler::Frontend::JsonDsl, &ontology, &ctx)
-            .unwrap_or_else(|e| panic!("{name}: compile failed: {e}"));
+        let compiled = match compiler::compile(json_str, compiler::Frontend::JsonDsl, &ontology, &ctx) {
+            Ok(c) => c,
+            Err(e) => { failures.push(format!("{name}: compile failed: {e}")); continue; }
+        };
 
         let mut input = compiled.input.clone();
-        let (_, phys_op) = compiler::passes::plan_v2::plan(&mut input, &ontology)
-            .unwrap_or_else(|e| panic!("{name}: plan failed: {e}"));
+        let (_, phys_op) = match compiler::passes::plan_v2::plan(&mut input, &ontology) {
+            Ok(p) => p,
+            Err(e) => { failures.push(format!("{name}: plan failed: {e}")); continue; }
+        };
 
         let actual = phys_op.shape();
         let expected = &doc["expected"];
 
-        assert!(
-            shape_matches(&actual, expected),
-            "{name}: shape mismatch\nexpected:\n{}\nactual:\n{}",
-            serde_json::to_string_pretty(expected).unwrap(),
-            serde_json::to_string_pretty(&actual).unwrap(),
-        );
+        if !shape_matches(&actual, expected) {
+            failures.push(format!(
+                "{name}: shape mismatch\nexpected:\n{}\nactual:\n{}",
+                serde_json::to_string_pretty(expected).unwrap(),
+                serde_json::to_string_pretty(&actual).unwrap(),
+            ));
+            continue;
+        }
 
         if let Some(absent) = doc.get("absent").and_then(|a| a.as_array()) {
             let tables = collect_tables(&actual);
             for item in absent {
                 if let Some(t) = item.get("table").and_then(|t| t.as_str()) {
-                    assert!(
-                        !tables.contains(&t.to_string()),
-                        "{name}: table '{t}' should be absent\nactual:\n{}",
-                        serde_json::to_string_pretty(&actual).unwrap(),
-                    );
+                    if tables.contains(&t.to_string()) {
+                        failures.push(format!(
+                            "{name}: table '{t}' should be absent\nactual:\n{}",
+                            serde_json::to_string_pretty(&actual).unwrap(),
+                        ));
+                    }
                 }
             }
         }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "\n{} scenario(s) failed:\n\n{}",
+            failures.len(),
+            failures.join("\n\n")
+        );
     }
 }
 

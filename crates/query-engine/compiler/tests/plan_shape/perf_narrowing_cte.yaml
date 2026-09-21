@@ -1,0 +1,11 @@
+name: "Narrowing CTE — filtered node + MR both join through edge"
+input: {"query_type":"traversal","nodes":[{"id":"label","entity":"Label","filters":{"title":"bug"}},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
+expected:
+  op: TopN
+  input:
+    op: Join
+    left:
+      op: Join
+      left: {op: Scan, table: gl_edge, dedup: false}
+      right: {op: Scan, table: gl_merge_request, dedup: true}
+    right: {op: Scan, table: gl_label, dedup: true}

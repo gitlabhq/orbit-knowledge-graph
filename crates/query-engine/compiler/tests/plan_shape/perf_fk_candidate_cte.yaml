@@ -1,0 +1,7 @@
+name: "FK candidate CTE — selective center narrows FK target scan"
+input: {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed","source":"push"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}
+expected:
+  op: TopN
+  input:
+    op: Join
+absent: [{table: gl_edge}]
