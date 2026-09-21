@@ -3,7 +3,7 @@
 #
 # Brings up a real caproni + Orbit stack, seeds gkg's ClickHouse with an
 # xtask-generated synthetic graph (bulk Parquet load, bypassing siphon/seed/
-# indexing), and runs the direct gRPC load test against gkg.
+# indexing), and runs the gRPC load test (cargo xtask loadtest) against gkg.
 #
 # Env (from the CI job): SYNTH_CONFIG, CAPRONI_REF, ROUNDS, CONCURRENCY.
 set -euo pipefail
@@ -14,7 +14,6 @@ CAPRONI_REF="${CAPRONI_REF:-main}"
 ROUNDS="${ROUNDS:-5}"
 CONCURRENCY="${CONCURRENCY:-20}"
 CAPRONI_REPO="https://gitlab-ci-token:${CI_JOB_TOKEN:-}@gitlab.com/gitlab-org/gitlab-caproni.git"
-LOADTEST_REPO="https://gitlab.com/gitlab-org/orbit/experiments/load-testing.git"
 
 log() { echo "==> $*" >&2; }
 
@@ -73,7 +72,10 @@ chq() { bash -c "$CAP caproni kubectl -n gitlab-dev-stack exec -i gitlab-dev-sta
 # 3. Bulk-load the Parquet into gkg's versioned ClickHouse tables.
 # ---------------------------------------------------------------------------
 log "[3/4] loading synthetic graph into gkg ClickHouse"
-PFX="$(chq -q "SELECT name FROM system.tables WHERE database='gkg' AND name LIKE '%gl_file' ORDER BY name DESC LIMIT 1" | sed 's/_gl_file$//' | tr -d '[:space:]')"
+# Pick the newest schema version by NUMBER, not lexically: `ORDER BY name DESC`
+# would rank v9 above v10. Extract the digits after the leading `v` and sort
+# those numerically.
+PFX="$(chq -q "SELECT name FROM system.tables WHERE database='gkg' AND name LIKE '%gl_file' ORDER BY toInt32OrZero(extract(name, '^v([0-9]+)_')) DESC LIMIT 1" | sed 's/_gl_file$//' | tr -d '[:space:]')"
 [ -n "$PFX" ] || { echo "could not discover gkg table prefix" >&2; exit 1; }
 log "     discovered gkg table prefix: $PFX"
 
@@ -106,33 +108,48 @@ for t in gl_merge_request gl_note gl_edge gl_project gl_group gl_user; do
 done
 
 # ---------------------------------------------------------------------------
-# 4. Port-forward gkg gRPC + run the direct gRPC load test.
+# 4. Port-forward gkg gRPC + run the gRPC load test (cargo xtask loadtest).
 # ---------------------------------------------------------------------------
 log "[4/4] running gRPC load test (rounds=$ROUNDS concurrency=$CONCURRENCY)"
-rm -rf "$ROOT/_loadtest"
-git clone --depth 1 "$LOADTEST_REPO" "$ROOT/_loadtest"
-# Use the vendored 0.83.1-adapted test (kept in this repo so the PoC is
-# self-contained and doesn't depend on any unmerged caproni branch).
-cp "$ROOT/scripts/ci/orbit-perf/direct_grpc_load_test.py" "$ROOT/_loadtest/src/grpc/direct_grpc_load_test.py"
 
 bash -c "$CAP caproni kubectl -n gitlab port-forward svc/gkg-webserver 50054:50054" >/tmp/gkg-pf.log 2>&1 &
 PF_PID=$!
 trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
+
+# Wait for the tunnel, failing fast if the port-forward dies or never opens the
+# port. Without this the load test would run against a dead endpoint and the
+# failure would surface only as opaque gRPC connection errors.
+ready=0
 for _ in $(seq 1 30); do
-  (exec 3<>/dev/tcp/127.0.0.1/50054) 2>/dev/null && { exec 3>&-; break; }
+  if ! kill -0 "$PF_PID" 2>/dev/null; then
+    echo "port-forward exited early; log follows:" >&2
+    cat /tmp/gkg-pf.log >&2
+    exit 1
+  fi
+  if (exec 3<>/dev/tcp/127.0.0.1/50054) 2>/dev/null; then
+    exec 3>&-
+    ready=1
+    break
+  fi
   sleep 1
 done
+if [ "$ready" != 1 ]; then
+  echo "gRPC port 50054 never became reachable after 30s; log follows:" >&2
+  cat /tmp/gkg-pf.log >&2
+  exit 1
+fi
 
 export GKG_JWT_SECRET
 GKG_JWT_SECRET="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.gitlab-jwt-signing-key}' | base64 -d)"
 [ -n "$GKG_JWT_SECRET" ] || { echo "could not read gkg JWT signing key" >&2; exit 1; }
 
-(
-  cd "$ROOT/_loadtest"
-  mise trust
-  mise install
-  mise run install
-  mise run grpc:python -- --endpoint 127.0.0.1:50054 --rounds "$ROUNDS" --concurrency "$CONCURRENCY"
-) | tee "$ROOT/loadtest-results.md"
+# The load driver lives in this repo's xtask crate (built in stage 1). It reads
+# the performance scenario corpus, mints a JWT with the server's own claims, and
+# replays the queries over gRPC — no external repo, no vendored proto.
+mise exec -- cargo xtask loadtest \
+  --endpoint http://127.0.0.1:50054 \
+  --rounds "$ROUNDS" \
+  --concurrency "$CONCURRENCY" \
+  | tee "$ROOT/loadtest-results.md"
 
 log "done. results in loadtest-results.md"
