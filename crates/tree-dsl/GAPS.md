@@ -67,16 +67,16 @@ canonical nodes named here.
 
 | Skipped tests | Gap | Where |
 | --- | --- | --- |
-| 11 | Bogus tests. Generic stripping, diamond tie-break, companion counts, reopened namespaces, destructuring, the C# Console matrix, Zig synthesized names, Lua wrapper counts. | fixtures |
-| 5 | Same-package siblings that also need another gap (typed local through a supertype, embedding, nested types). | `resolver.rs` |
+| 13 | Bogus tests. Generic stripping, diamond tie-break, companion counts, reopened namespaces, destructuring, the C# Console matrix, Zig synthesized names, Lua wrapper counts, interface Calls counts, packaged inheritance call count. | fixtures |
+| 4 | Same-package siblings that also need another gap (embedding, nested types). | `resolver.rs` |
 | 4 | Require attribution. Ruby constants map to autoload paths, not to `require` lines. The fallback row is produced outside tree-dsl. | `langs/ruby.yaml`, code-graph hooks |
 | 4 | Static receivers under a namespace import that the resolver cannot see (C# partial classes, await, static using). | `resolver.rs` resolve_receivers |
-| 4 | Records. The matcher has no text backreference, so a synthesized accessor cannot be suppressed when the body declares it; line numbers follow the identifier, not the annotation. | `dsl/matching.rs`, `langs/java.yaml` |
+| 1 | Record constructor reference count. Cross-file export merges distinct call sites with the same caller and target. Other active fixtures require this merged count. | `tree-dsl-tests/src/export.rs` |
 | 4 | Nested types. `Parent.Child.GrandChild` collapses to its last segment; SSA lookup picks the nearest same-named definition. Needs a member-chain supertype and nested constructor typing. | `langs/java.yaml`, `langs/kotlin.yaml`, `linker.rs` |
 | 3 | Qualified constant reads across files. `A::B::C` is a member call whose object resolves to nothing, and a value use must stay inert for TypeScript. | `linker.rs`, `resolver.rs` |
 | 3 | Extension functions and interface members of imported types resolve only through same-file defs. | `linker.rs` find_method_in |
 | 2 | Inherited dispatch through a static factory chain or `new parent()` in PHP. | `resolver.rs` |
-| 1 each | Elixir bare call through `import`, flat visible map shadowing a same-file constant, Kotlin operator tokens, one target per method name, Kotlin path-based import, Go `Save` through embedding. | see the skip comment |
+| 1 each | Elixir bare call through `import`, flat visible map shadowing a same-file constant, Kotlin operator tokens, Kotlin path-based import, Go `Save` through embedding. | see the skip comment |
 
 ## DSL limits
 

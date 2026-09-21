@@ -1,0 +1,58 @@
+name: "Java record member identity"
+fixtures:
+  - path: Members.java
+    content: |
+      record Explicit(int first, int second) {
+          public int first() { return first; }
+          public int second() { return second; }
+          record Nested(int first) {}
+      }
+      record Overloaded(int value) {
+          public int value(int extra) { return value + extra; }
+      }
+      record Other(int first) {}
+      record Annotated(int value) {
+          @Deprecated
+          public int value() {
+              return value;
+          }
+      }
+tests:
+  - name: "Each explicit accessor replaces its implicit member"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Explicit.first', 'Explicit.second']
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Explicit.first" } }
+      - { row: { fqn: "Explicit.second" } }
+  - name: "Member keys stay inside their record owner"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Explicit.Nested.first', 'Other.first']
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Explicit.Nested.first" } }
+      - { row: { fqn: "Other.first" } }
+  - name: "An overload with parameters keeps the implicit accessor"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Overloaded.value' AND d.definition_type = 'Method'
+      RETURN d.start_line AS line
+    assert:
+      - { row_count: 2 }
+      - { row: { line: 6 } }
+      - { row: { line: 7 } }
+  - name: "An annotated accessor exports the full declaration range"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Annotated.value' AND d.definition_type = 'Method'
+      RETURN d.start_line AS start_line, d.end_line AS end_line,
+        d.start_char AS start_char, d.end_char AS end_char
+    assert:
+      - { row_count: 1 }
+      - { row: { start_line: 11, end_line: 14, start_char: 5, end_char: 6 } }

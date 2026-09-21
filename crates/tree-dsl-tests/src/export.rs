@@ -297,6 +297,13 @@ fn compute_val<'a>(
     expand: Option<Cursor<'a>>,
 ) -> Val<'a> {
     let import_type_key = lang.syms.intern("import_type");
+    let definition = || {
+        if c.tag(lang.syms.intern("definition_span")) == Some(lang.syms.intern("true")) {
+            c
+        } else {
+            c.child(C::DefName).unwrap_or(c)
+        }
+    };
     match compute {
         "import_type" => {
             if let Some(en) = expand
@@ -331,30 +338,12 @@ fn compute_val<'a>(
         "end_byte" => Val::I(c.end() as i64),
         "start_col" => Val::I(0),
         "end_col" => Val::I(0),
-        "defname_start_line" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.start_row() as i64 + 1)
-        }
-        "defname_end_line" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.end_row() as i64 + 1)
-        }
-        "defname_start_byte" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.start() as i64)
-        }
-        "defname_end_byte" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.end() as i64)
-        }
-        "defname_start_col" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.start_col() as i64 + 1)
-        }
-        "defname_end_col" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.end_col() as i64 + 1)
-        }
+        "defname_start_line" => Val::I(definition().start_row() as i64 + 1),
+        "defname_end_line" => Val::I(definition().end_row() as i64 + 1),
+        "defname_start_byte" => Val::I(definition().start() as i64),
+        "defname_end_byte" => Val::I(definition().end() as i64),
+        "defname_start_col" => Val::I(definition().start_col() as i64 + 1),
+        "defname_end_col" => Val::I(definition().end_col() as i64 + 1),
         _ => Val::Null,
     }
 }

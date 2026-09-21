@@ -375,7 +375,7 @@ tests:
 
   # ── Call resolution into records ──────────────────────────────────
 
-  # skip: tree-dsl: record members are synthesized per component; constructor and accessor edges on records count differently from the old pipeline
+  # skip: tree-dsl: cross-file export merges call sites; preserving sites also changes active fixtures that require one edge per caller and target
   - name: "PointUser.origin() calls Point constructor"
     skip: true
     query: |
@@ -481,9 +481,7 @@ tests:
 
   # ── Explicit overrides of implicit members ────────────────────────
 
-  # skip: tree-dsl: record accessors are synthesized per component; the DSL cannot see an explicit override in the body
   - name: "Explicit accessor override is a single Method definition"
-    skip: true
     query: |
       MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Wrapped' AND m.name = 'raw'
@@ -518,9 +516,7 @@ tests:
       # not an implicit definition, once implicit accessors are synthesised.
       - { row: { line: 5 } }
 
-  # skip: tree-dsl: record members are synthesized per component; an explicit override is shadowed by the synthesized accessor
   - name: "WrappedUser.print() calls explicitly overridden Wrapped.toString"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.WrappedUser.print'
@@ -533,9 +529,7 @@ tests:
       # at its annotation, not its signature.
       - { row: { line: 9 } }
 
-  # skip: tree-dsl: record members are synthesized per component; an explicit override is shadowed by the synthesized accessor
   - name: "WrappedUser.same() calls explicitly overridden Wrapped.equals"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.WrappedUser.same'

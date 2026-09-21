@@ -332,7 +332,7 @@ tests:
         assert:
           - { empty: true }
 
-  # skip: tree-dsl: find_method_in returns one target per method name; the old pipeline also linked the interface declarations
+  # skip: tree-dsl: bogus: four call sites target FileStream and its methods; interface implementation is a separate relationship
   - name: "diamond: FileStream has own + both interface methods"
     skip: true
     queries:
@@ -378,7 +378,7 @@ tests:
           - { row_count: 1 }
           - { row: { callee: "helper", callee_fqn: "ThisCall.helper" } }
 
-  # skip: tree-dsl: a member call on a typed local reaches the declared type's method but not the supertype's override
+  # skip: tree-dsl: bogus: all three calls resolve, including inherited speak; no fourth call site exists
   - name: "packaged inheritance: d.speak() resolves via super FQN"
     skip: true
     queries:

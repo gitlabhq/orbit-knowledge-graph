@@ -165,6 +165,17 @@ Because inner nodes are processed first:
 - Use `$$$ANN:__decorator|__supertype` to capture markers created by earlier rules in the SAME stage
 - Use `**/pattern` to detect descendants without capturing them (e.g., `__call__` method detection)
 
+### Member identity and source ranges
+
+The `dedup` tag declares a member key. After pruning, the engine keeps the first
+tagged node with that key under each parent. Rule files must order declarations
+by priority. Java puts explicit zero-argument methods before implicit record
+accessors. Methods with parameters do not share this key.
+
+The `definition_span: "true"` tag selects the full definition range for export.
+Without this tag, the exporter uses the definition name range. All line, byte,
+and column endpoints use the selected range. Java methods include annotations.
+
 ## Resolution
 
 After per-file rewriting and SSA linking, the resolver runs across all files to produce cross-file edges (Imports, Calls). Resolution runs in parallel. Return-type waves repeat until no new call edges appear.

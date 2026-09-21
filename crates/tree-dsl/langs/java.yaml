@@ -205,9 +205,14 @@ stages:
   - name: records
     rules:
       - match: '(record_component $T:__ssa_typed)'
-        replace: '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T))'
+        replace: '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T) (formal_parameters))'
       - match: '(record_component)'
-        replace: '(__def (__defname @$ROOT) (__method))'
+        replace: '(__def (__defname @$ROOT) (__method) (formal_parameters))'
+
+  - name: member-identity
+    rules:
+      - match: '(__def (__method) !(__constructor) (formal_parameters !(__binding)))'
+        tag: { dedup: '@$ROOT|child_sym("__defname")' }
 
   - name: ssa-cleanup
     rules:
@@ -219,7 +224,7 @@ stages:
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "true", definition_span: "true" }
       - match: '(__def (__class))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'
