@@ -53,11 +53,7 @@ pub(crate) fn matches(t: &Tree, lang: &Lang, id: NodeId, p: &Pat, caps: &mut [Ca
                         return false;
                     }
                 }
-                Text::Regex(re) => {
-                    if !re.is_match(lang.syms.resolve(n.sym)) {
-                        return false;
-                    }
-                }
+                Text::Regex(re) if !re.is_match(lang.syms.resolve(n.sym)) => return false,
                 _ => {}
             }
             let children: Vec<NodeId> = id.children(&t.arena).collect();
