@@ -5,13 +5,8 @@ description: >-
   Configure AI coding agents to consult the graph
 
 
-  Detects the agents installed on this machine from their configuration
-  directories and configures them. Each agent gets the managed instruction
-  section, the Orbit skill files, and nudge hooks where the agent supports
-  them. Pass `--mcp` to also register the `orbit` MCP server. `--skip` leaves
-  a component out. Name agents to configure only those, or pass `--all` for
-  every supported agent. Targets user-global configuration by default, or the
-  project with `--project` or `--dir`. Existing files get a one-time
-  `.orbit-backup` sibling before the first change. Re-running updates
-  everything in place. `--dry-run` lists the files and stops before writing.
-  `orbit uninstall` reverts it.
+  Detects the agents installed on this machine and gives each one the Orbit
+  instruction section, hooks, and skill. `--mcp` also registers the MCP
+  server. Writes user-global configuration unless `--project` or `--dir`
+  is given. Existing files get a one-time `.orbit-backup` sibling.
+  Re-running updates in place. `orbit uninstall` reverts it.
