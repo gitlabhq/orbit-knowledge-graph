@@ -165,10 +165,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Class'
-        AND (d.fqn = 'App\Zoo\Animal'
-          OR d.fqn = 'App\Zoo\Mammal'
-          OR d.fqn = 'App\Zoo\Canine'
-          OR d.fqn = 'App\Zoo\Dog')
+        AND d.fqn IN ['App\Zoo\Animal', 'App\Zoo\Mammal', 'App\Zoo\Canine', 'App\Zoo\Dog']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }
@@ -177,11 +174,8 @@ tests:
 
   - name: "Three-level Extends chain: Mammal->Animal, Canine->Mammal, Dog->Canine"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
-      WHERE e.edge_kind = 'Extends'
-        AND ((c.fqn = 'App\Zoo\Mammal' AND p.fqn = 'App\Zoo\Animal')
-          OR (c.fqn = 'App\Zoo\Canine' AND p.fqn = 'App\Zoo\Mammal')
-          OR (c.fqn = 'App\Zoo\Dog' AND p.fqn = 'App\Zoo\Canine'))
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      WHERE c.fqn IN ['App\Zoo\Mammal', 'App\Zoo\Canine', 'App\Zoo\Dog']
       RETURN c.fqn AS child, p.fqn AS parent
     assert:
       - { row_count: 3 }
@@ -193,20 +187,18 @@ tests:
 
   - name: "Grandparent call: Dog.describe -> Animal.kingdom via inherited \\$this"
     query: |
-      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Zoo\Dog\describe'
         AND b.fqn = 'App\Zoo\Animal\kingdom'
-        AND e.edge_kind = 'Calls'
       RETURN a.fqn AS caller, b.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Parent-level call: Dog.describe -> Canine.pack via inherited \\$this"
     query: |
-      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Zoo\Dog\describe'
         AND b.fqn = 'App\Zoo\Canine\pack'
-        AND e.edge_kind = 'Calls'
       RETURN a.fqn AS caller
     assert:
       - { row_count: 1 }
@@ -215,7 +207,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Method'
-        AND (d.fqn = 'App\Zoo\Animal\speak' OR d.fqn = 'App\Zoo\Dog\speak')
+        AND d.fqn IN ['App\Zoo\Animal\speak', 'App\Zoo\Dog\speak']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -223,10 +215,9 @@ tests:
 
   - name: "Interface-extends-interface chains (multi-iface): ReadWrite extends Readable AND Writable"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
-      WHERE e.edge_kind = 'Extends'
-        AND c.fqn = 'App\Io\ReadWrite'
-        AND (p.fqn = 'App\Io\Readable' OR p.fqn = 'App\Io\Writable')
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      WHERE c.fqn = 'App\Io\ReadWrite'
+        AND p.fqn IN ['App\Io\Readable', 'App\Io\Writable']
       RETURN p.fqn AS parent
     assert:
       - { row_count: 2 }
@@ -234,10 +225,9 @@ tests:
 
   - name: "Interface extends two interfaces (one transitive): Stream -> ReadWrite, Stream -> Closable"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
-      WHERE e.edge_kind = 'Extends'
-        AND c.fqn = 'App\Io\Stream'
-        AND (p.fqn = 'App\Io\ReadWrite' OR p.fqn = 'App\Io\Closable')
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      WHERE c.fqn = 'App\Io\Stream'
+        AND p.fqn IN ['App\Io\ReadWrite', 'App\Io\Closable']
       RETURN p.fqn AS parent
     assert:
       - { row_count: 2 }
@@ -245,9 +235,8 @@ tests:
 
   - name: "Class implements interface chain root: File -> Stream"
     query: |
-      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
-      WHERE e.edge_kind = 'Extends'
-        AND c.fqn = 'App\Io\File'
+      MATCH (c:Definition)-[e:EXTENDS]->(p:Definition)
+      WHERE c.fqn = 'App\Io\File'
         AND p.fqn = 'App\Io\Stream'
       RETURN p.fqn AS parent
     assert:
@@ -257,11 +246,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Interface'
-        AND (d.fqn = 'App\Io\Readable'
-          OR d.fqn = 'App\Io\Writable'
-          OR d.fqn = 'App\Io\Closable'
-          OR d.fqn = 'App\Io\ReadWrite'
-          OR d.fqn = 'App\Io\Stream')
+        AND d.fqn IN ['App\Io\Readable', 'App\Io\Writable', 'App\Io\Closable', 'App\Io\ReadWrite', 'App\Io\Stream']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -271,9 +256,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Constant'
-        AND (d.fqn = 'App\Conf\Config\VERSION'
-          OR d.fqn = 'App\Conf\Config\SECRET'
-          OR d.fqn = 'App\Conf\Config\KEY')
+        AND d.fqn IN ['App\Conf\Config\VERSION', 'App\Conf\Config\SECRET', 'App\Conf\Config\KEY']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -310,9 +293,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Method'
-        AND (d.fqn = 'App\Util\Counter\increment'
-          OR d.fqn = 'App\Util\Counter\reset'
-          OR d.fqn = 'App\Util\Counter\value')
+        AND d.fqn IN ['App\Util\Counter\increment', 'App\Util\Counter\reset', 'App\Util\Counter\value']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -320,30 +301,27 @@ tests:
 
   - name: "self:: static call resolves: Counter.bump -> Counter.increment"
     query: |
-      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Util\Counter\bump'
         AND b.fqn = 'App\Util\Counter\increment'
-        AND e.edge_kind = 'Calls'
       RETURN a.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "static:: late-static call resolves: Counter.bump -> Counter.reset"
     query: |
-      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Util\Counter\bump'
         AND b.fqn = 'App\Util\Counter\reset'
-        AND e.edge_kind = 'Calls'
       RETURN a.fqn AS caller
     assert:
       - { row_count: 1 }
 
   - name: "Final method on Base is callable through subclass \\$this: Sub.open -> Base.locked"
     query: |
-      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Locks\Sub\open'
         AND b.fqn = 'App\Locks\Base\locked'
-        AND e.edge_kind = 'Calls'
       RETURN a.fqn AS caller
     assert:
       - { row_count: 1 }

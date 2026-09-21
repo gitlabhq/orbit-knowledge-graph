@@ -31,7 +31,7 @@ tests:
 
   - name: "InnerInnerHelpers.innerInnerDoHelp -> InnerHelpers.innerDoHelp"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.helpers.Helpers.InnerInnerHelpers.innerInnerDoHelp'
         AND callee.fqn = 'com.example.helpers.Helpers.InnerHelpers.innerDoHelp'
       RETURN caller.fqn AS caller, callee.fqn AS callee
@@ -42,7 +42,7 @@ tests:
 
   - name: "GrandChild.greet -> Child.GrandChild.greet (nested type regression)"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.edgecases.ResolveTypeFailingOnNestedChild.GrandChild.greet'
         AND callee.fqn = 'com.example.edgecases.ResolveTypeFailingOnNestedChild.Child.GrandChild.greet'
       RETURN caller.fqn AS caller, callee.fqn AS callee

@@ -58,8 +58,8 @@ tests:
 
   - name: use_closure calls apply
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'use_closure' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use_closure'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
@@ -68,8 +68,8 @@ tests:
 
   - name: process calls double, area, and Circle
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'process' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'process'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
