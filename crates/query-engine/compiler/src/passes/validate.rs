@@ -173,7 +173,15 @@ fn path_endpoint_has_selectivity(node: &InputNode) -> bool {
 /// Whether a node has explicit selectivity (node_ids, filters, or a narrow id_range).
 /// Queries where no node is selective tend to produce full-table scans.
 fn node_has_selectivity(node: &InputNode) -> bool {
-    if !node.node_ids.is_empty() || !node.filters.is_empty() {
+    if !node.node_ids.is_empty() {
+        return true;
+    }
+    let has_literal_filter = node
+        .filters
+        .values()
+        .flatten()
+        .any(|f| f.rhs_column.is_none());
+    if has_literal_filter {
         return true;
     }
     if let Some(ref range) = node.id_range {
@@ -561,6 +569,11 @@ impl<'a> Validator<'a> {
     /// Unknown edge columns are rejected (fail closed) since they would
     /// produce broken SQL at runtime.
     fn check_join_predicates(&self, input: &Input) -> Result<()> {
+        if !input.join_predicates.is_empty() && !matches!(input.query_type, QueryType::Traversal) {
+            return Err(QueryError::Validation(
+                "cross-node property comparisons are only supported in traversal queries".into(),
+            ));
+        }
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
         for jp in &input.join_predicates {
             for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
@@ -582,6 +595,33 @@ impl<'a> Validator<'a> {
                     {
                         return Err(QueryError::AllowlistRejected(format!(
                             "join predicate on \"{prop}\" for {entity}: field is not filterable"
+                        )));
+                    }
+                    if self.virtual_source(entity, prop).is_some() {
+                        return Err(QueryError::Validation(format!(
+                            "property comparison cannot reference virtual column \"{prop}\" on {entity}"
+                        )));
+                    }
+                }
+            }
+            let lhs_entity = input
+                .nodes
+                .iter()
+                .find(|n| n.id == jp.lhs_node)
+                .and_then(|n| n.entity.as_deref());
+            let rhs_entity = input
+                .nodes
+                .iter()
+                .find(|n| n.id == jp.rhs_node)
+                .and_then(|n| n.entity.as_deref());
+            if let (Some(le), Some(re)) = (lhs_entity, rhs_entity) {
+                let lhs_type = self.ontology.get_field_type(le, &jp.lhs_prop);
+                let rhs_type = self.ontology.get_field_type(re, &jp.rhs_prop);
+                if let (Some(lt), Some(rt)) = (lhs_type, rhs_type) {
+                    if lt != rt {
+                        return Err(QueryError::Validation(format!(
+                            "type mismatch in join predicate: {}.{} is {lt:?} but {}.{} is {rt:?}",
+                            jp.lhs_node, jp.lhs_prop, jp.rhs_node, jp.rhs_prop
                         )));
                     }
                 }
@@ -664,6 +704,11 @@ impl<'a> Validator<'a> {
                             {
                                 return Err(QueryError::AllowlistRejected(format!(
                                     "filter on \"{rhs_prop}\" for {rhs_entity}: field is not filterable"
+                                )));
+                            }
+                            if self.virtual_source(rhs_entity, rhs_prop).is_some() {
+                                return Err(QueryError::Validation(format!(
+                                    "property comparison cannot reference virtual column \"{rhs_prop}\" on {rhs_entity}"
                                 )));
                             }
                         }
