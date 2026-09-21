@@ -154,9 +154,7 @@ tests:
       - { row: { fqn: Geo.Models.Line, type: Class } }
 
   # ── Cross-file member chain ──────────────────────────────────
-  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "Line.Length calls Point.DistanceTo via typed property"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Geo.Models.Line.Length'
