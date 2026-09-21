@@ -87,19 +87,19 @@ pub(super) fn remove(selection: &Selection, target: &Target, report: &mut Report
 
 fn ensure_glab_auto_run(report: &mut Report) {
     let ok = std::process::Command::new("glab")
-        .args(["config", "set", "orbit_local_auto_run", "true"])
+        .args(["config", "set", "orbit_cli_auto_run", "true"])
         .status()
         .map(|status| status.success())
         .unwrap_or(false);
     if ok {
         report.note(
             "glab config",
-            "orbit_local_auto_run=true (hooks run without prompting)",
+            "orbit_cli_auto_run=true (hooks run without prompting)",
         );
     } else {
         report.note(
             "glab config",
-            "could not set orbit_local_auto_run; run `glab config set orbit_local_auto_run true` \
+            "could not set orbit_cli_auto_run; run `glab config set orbit_cli_auto_run true` \
              so the installed hooks never prompt",
         );
     }

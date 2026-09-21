@@ -222,20 +222,18 @@ fn show_plan(plan: &Plan) -> Result<()> {
 }
 
 fn show_paths(plan: &Plan) -> Result<()> {
+    show_plan(plan)?;
+    let mut rows: Vec<String> = Vec::new();
     for assistant in &plan.assistants {
-        let body = if assistant.changes.is_empty() {
-            "nothing selected applies to this agent".to_string()
-        } else {
-            assistant
-                .changes
-                .iter()
-                .map(|(component, place)| format!("{:<13} {place}", component.label()))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        cliclack::note(&assistant.title, body)?;
+        for (component, place) in &assistant.changes {
+            let row = format!("{:<13} {place}", component.label());
+            if !rows.contains(&row) {
+                rows.push(row);
+            }
+        }
     }
-    Ok(cliclack::log::remark(format!("Scope: {}", plan.scope))?)
+    cliclack::note(format!("Files in {}", plan.scope), rows.join("\n"))?;
+    Ok(())
 }
 
 fn show_report(report: &Report) -> Result<()> {
