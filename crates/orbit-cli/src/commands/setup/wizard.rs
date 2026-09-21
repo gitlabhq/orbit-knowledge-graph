@@ -50,7 +50,10 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     }
     applied?;
     show_plan(&plan, "Configured")?;
-    cliclack::outro("Done. Ask your agent about your code.")?;
+    cliclack::outro(format!(
+        "Done. Open your agent and type /{} or just ask about your code.",
+        crate::skill::INSTALL_DIR_NAME
+    ))?;
     Ok(())
 }
 
