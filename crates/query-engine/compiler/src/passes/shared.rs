@@ -8,6 +8,21 @@ use crate::input::*;
 
 pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
     let col = Expr::col(alias, prop);
+
+    if let Some((rhs_alias, rhs_prop)) = &filter.rhs_column {
+        let rhs = Expr::col(rhs_alias, rhs_prop);
+        let op = match filter.op {
+            None | Some(FilterOp::Eq) => Op::Eq,
+            Some(FilterOp::Ne) => Op::Ne,
+            Some(FilterOp::Gt) => Op::Gt,
+            Some(FilterOp::Gte) => Op::Ge,
+            Some(FilterOp::Lt) => Op::Lt,
+            Some(FilterOp::Lte) => Op::Le,
+            Some(_) => unreachable!("lowering rejects unsupported ops for property-to-property"),
+        };
+        return Expr::binary(op, col, rhs);
+    }
+
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let str_val = || filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
     let typed = |v: serde_json::Value| -> Expr {
