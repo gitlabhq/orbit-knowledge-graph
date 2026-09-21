@@ -226,7 +226,7 @@ impl<'t> Fold<'t> {
             }
             self.def_stack.push((Some(idx), parent_block));
             stack.push(WorkItem::ExitScope(self.wildcards.len()));
-            stack.extend(c.children_rev().map(|ch| WorkItem::Visit(ch.index())));
+            Self::push_children(c, stack);
         }
     }
 
@@ -587,9 +587,7 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
 
     let root = tree.root();
     f.predeclare(root);
-    let mut stack = Vec::new();
-    Fold::push_children(root, &mut stack);
-    f.run(stack);
+    f.walk_children(root);
 
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
