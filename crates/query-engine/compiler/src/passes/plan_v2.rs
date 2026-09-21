@@ -289,6 +289,17 @@ impl<'a> PlanCtx<'a> {
         }
     }
 
+    fn needs_node_join_fk(&self, alias: &str) -> bool {
+        let Some(node) = self.input.nodes.iter().find(|n| n.id == alias) else { return false };
+        if self.input.query_type != QueryType::Aggregation {
+            return true;
+        }
+        if self.needs_node_join(node) {
+            return true;
+        }
+        self.input.aggregation.metrics.iter().any(|m| m.expr.node() == alias)
+    }
+
     fn order_by_exprs(&self) -> Vec<OrderExpr> {
         self.input.order_by.as_ref().map(|ob| vec![
             if matches!(ob.direction, OrderDirection::Desc) { OrderExpr::desc(Expr::col(&ob.node, &ob.property)) }
@@ -422,28 +433,26 @@ impl<'a> PlanCtx<'a> {
             match strategy {
                 HopStrategy::FkJoin { fk_column } => {
                     let (fk_alias, tgt_alias) = self.fk_sides(rel, &fk_column);
-                    if tree.is_none() {
+                    let needs_fk = self.needs_node_join_fk(fk_alias);
+                    let needs_tgt = self.needs_node_join_fk(tgt_alias);
+                    if tree.is_none() && needs_fk {
                         if let Some(n) = self.input.nodes.iter().find(|n| n.id == fk_alias) {
-                            if self.needs_node_join(n) {
-                                tree = Some(self.node_scan(n));
-                                fk_joined.insert(fk_alias.to_string());
-                            }
+                            tree = Some(self.node_scan(n));
+                            fk_joined.insert(fk_alias.to_string());
                         }
                     }
-                    if !fk_joined.contains(tgt_alias) {
+                    if !fk_joined.contains(tgt_alias) && needs_tgt {
                         if let Some(n) = self.input.nodes.iter().find(|n| n.id == tgt_alias) {
-                            if self.needs_node_join(n) {
-                                if tree.is_none() {
-                                    tree = Some(self.node_scan(n));
-                                } else {
-                                    tree = Some(PhysOp::Join {
-                                        left: Box::new(tree.unwrap()),
-                                        right: Box::new(self.node_scan(n)),
-                                        on: Expr::eq(Expr::col(fk_alias, &fk_column), Expr::col(tgt_alias, DEFAULT_PRIMARY_KEY)),
-                                    });
-                                }
-                                fk_joined.insert(tgt_alias.to_string());
+                            if tree.is_none() {
+                                tree = Some(self.node_scan(n));
+                            } else {
+                                tree = Some(PhysOp::Join {
+                                    left: Box::new(tree.unwrap()),
+                                    right: Box::new(self.node_scan(n)),
+                                    on: Expr::eq(Expr::col(fk_alias, &fk_column), Expr::col(tgt_alias, DEFAULT_PRIMARY_KEY)),
+                                });
                             }
+                            fk_joined.insert(tgt_alias.to_string());
                         }
                     }
                 }
