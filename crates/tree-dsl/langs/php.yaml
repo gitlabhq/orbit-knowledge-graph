@@ -58,6 +58,12 @@ stages:
         replace: '(named_type @$N)'
       - match: '(optional_type $T:named_type)'
         replace: '(named_type @$T)'
+      - match: '(union_type $T:named_type $$$R)'
+        replace: '(named_type @$T)'
+      - match: '(intersection_type $T:named_type $$$R)'
+        replace: '(named_type @$T)'
+      - match: '(disjunctive_normal_form_type $T:named_type $$$R)'
+        replace: '(named_type @$T)'
 
       # Attributes → decorators
       - match: '(attribute $N:name parameters:? $P)'

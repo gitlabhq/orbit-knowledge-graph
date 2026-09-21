@@ -250,7 +250,8 @@ impl Resolver {
             returns_key: lang.syms.intern("returns"),
         };
 
-        let inherit = |&fi: &usize| resolve_inheritance(&ctx, fi);
+        let inherit =
+            |&fi: &usize| [resolve_inheritance(&ctx, fi), resolve_receivers(&ctx, fi)].concat();
         let wave1: Vec<Edge> = active_reqs
             .par_iter()
             .flat_map(|req| resolve_one_import(&ctx, req))
@@ -643,7 +644,7 @@ fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
                         continue;
                     };
                     if find_method_in(child, name).is_none()
-                        && let Some(m) = find_method_in(parent, name)
+                        && let Some(m) = method_up(ctx, parent, name, 0)
                     {
                         out.push(from.edge_to(m, EdgeKind::Calls));
                     }
@@ -699,6 +700,44 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, imports_by_from: &[Vec<&Edge>
         .collect()
 }
 
+fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, depth: u8) -> Option<Cursor<'a>> {
+    find_method_in(cls, name).or_else(|| {
+        let supers = cls
+            .children_of(C::SuperType)
+            .filter_map(|s| ctx.visible[cls.fi() as usize].get(&s.sym()));
+        supers
+            .filter(|_| depth < 8)
+            .find_map(|l| method_up(ctx, ctx.corpus.jump(l.fi as u32, l.node), name, depth + 1))
+    })
+}
+
+fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
+    let mut out = Vec::new();
+    for (call, m) in ctx.trees[fi].root().member_calls() {
+        let loc = m
+            .child_sym(C::Object)
+            .and_then(|s| ctx.visible[fi].get(&s))
+            .filter(|l| l.fi != fi);
+        let Some(target) = loc.map(|l| ctx.corpus.jump(l.fi as u32, l.node)) else {
+            continue;
+        };
+        if !CLASS_LIKE.iter().any(|&k| target.has(k)) {
+            continue;
+        }
+        if let (Some(from), Some(method)) = (
+            call.enclosing(|c| c.is(C::Def)),
+            method_up(ctx, target, m.sym(), 0),
+        ) {
+            out.push(
+                ctx.corpus
+                    .jump(fi as u32, from.index())
+                    .edge_to(method, EdgeKind::Calls),
+            );
+        }
+    }
+    out
+}
+
 fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     let target = ctx.corpus.follow(ce);
     if !CLASS_LIKE.iter().any(|&k| target.has(k)) {
@@ -707,30 +746,37 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     let ft = &ctx.trees[ce.from_fi()];
     let resolved = |c: u32| ctx.visible[ce.from_fi()].get(&c).map(|l| (l.fi, l.node));
     ft.root().fold_tree(Vec::new(), |edges, n, _w| {
-        if !n.is(C::Binding) {
-            return;
-        }
-        let Some(ivar) = n.child(C::Ivar) else { return };
-        if n.rhs_callee().and_then(resolved) != Some((ce.to_fi(), ce.to_node)) {
-            return;
-        }
-        let Some(ivar_sym) = ivar.sym_opt() else {
+        let ivar = n.child(C::Ivar);
+        let Some(var) = ivar
+            .map_or(n.sym_opt(), |iv| iv.sym_opt())
+            .filter(|_| n.is(C::Binding))
+        else {
             return;
         };
-        let Some(cls) = n.enclosing_def(CLASS_LIKE) else {
+        let typed = n.child_sym(C::SsaTyped).or_else(|| n.rhs_callee());
+        if typed.and_then(resolved) != Some((ce.to_fi(), ce.to_node)) {
             return;
+        }
+        let scope = if ivar.is_some() {
+            n.enclosing_def(CLASS_LIKE)
+        } else {
+            n.enclosing(|c| c.is(C::Def))
         };
-        for (call, member) in cls.member_calls() {
-            if member.object_ivar().map(|iv| iv.sym()) != Some(ivar_sym) {
-                continue;
-            }
-            let Some(caller_def) = call.enclosing(|c| c.is(C::Def)) else {
+        let Some(scope) = scope else { return };
+        for (call, member) in scope.member_calls() {
+            let obj = member
+                .object_ivar()
+                .map_or(member.child_sym(C::Object), |iv| iv.sym_opt());
+            let Some(caller) = call
+                .enclosing(|c| c.is(C::Def))
+                .filter(|_| obj == Some(var))
+            else {
                 continue;
             };
-            if let Some(m) = find_method_in(target, member.sym()) {
+            if let Some(m) = method_up(ctx, target, member.sym(), 0) {
                 edges.push(
                     ctx.corpus
-                        .jump(ce.from_tree, caller_def.index())
+                        .jump(ce.from_tree, caller.index())
                         .edge_to(m, EdgeKind::Calls),
                 );
             }
