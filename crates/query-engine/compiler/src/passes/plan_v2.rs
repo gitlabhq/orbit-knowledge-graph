@@ -40,11 +40,9 @@ impl JoinGraph {
         if rel.hops.max == 1
             && !matches!(rel.direction, Direction::Both)
             && rel.filters.is_empty()
-            && rel.scope_preserving
-            && rel.types.iter().all(|t| self.is_fk_eligible(t))
+            && rel.fk_column.is_some()
         {
-            let fk = self.by_kind[&rel.types[0]].fk_column.as_ref().unwrap();
-            return HopStrategy::FkJoin { fk_column: fk.clone() };
+            return HopStrategy::FkJoin { fk_column: rel.fk_column.clone().unwrap() };
         }
 
         HopStrategy::EdgeScan {
