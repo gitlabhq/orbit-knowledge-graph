@@ -81,7 +81,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main.dotImportCall", path: "github.com/acme/dotpkg", name: "dotpkg", import_type: "Import" } }
 
-  # skip: tree-dsl: unresolved names fall back to the wildcard import; the engine has no builtin table (same as the Python matrix)
+  # skip: tree-dsl: unbound bare names bind to the wildcard import; the engine has no builtin table (same as the Python matrix)
   - name: "built-ins do not target dot imports"
     skip: true
     query: |

@@ -168,9 +168,7 @@ tests:
       - { row: { caller: Zoo.Models.Dog.Fetch, callee: Zoo.Models.Animal.Eat, kind: Calls } }
 
   # ── var type inference from constructor ───────────────────────
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
   - name: "var dog = new Dog() → dog.Fetch() in Kennel.Register"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Services.Kennel.Register'
@@ -180,9 +178,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Zoo.Services.Kennel.Register, callee: Zoo.Models.Dog.Fetch, kind: Calls } }
 
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
   - name: "var dog = new Dog() → dog.Speak() in Program.Run"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
@@ -192,9 +188,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Models.Dog.Speak, kind: Calls } }
 
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
   - name: "var dog = new Dog() → dog.Fetch() in Program.Run"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
@@ -205,7 +199,7 @@ tests:
       - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Models.Dog.Fetch, kind: Calls } }
 
   # ── Constructor CALLS edge ────────────────────────────────────
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
+  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "new Dog() in Program.Run produces CALLS to Dog class"
     skip: true
     query: |
@@ -229,9 +223,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Zoo.Services.Kennel.ProcessAll, callee: Zoo.Services.Kennel.Create, kind: Calls } }
 
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
   - name: "Helpers.Format() cross-namespace static call"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
@@ -241,9 +233,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Services.Helpers.Format, kind: Calls } }
 
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
   - name: "Helpers.Count() cross-namespace static call"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.App.Program.Run'
@@ -254,7 +244,7 @@ tests:
       - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Services.Helpers.Count, kind: Calls } }
 
   # ── Chained calls with var inference ──────────────────────────
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
+  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "var kennel = Kennel.Create() → kennel.Register()"
     skip: true
     query: |
@@ -266,7 +256,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Zoo.Services.Kennel.ProcessAll, callee: Zoo.Services.Kennel.Register, kind: Calls } }
 
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
+  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "Return type inference: dog = kennel.Register() → dog.Speak()"
     skip: true
     query: |

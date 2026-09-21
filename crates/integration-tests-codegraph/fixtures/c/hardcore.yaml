@@ -249,7 +249,7 @@ tests:
   # INCLUDE CHAIN RESOLUTION
   # ══════════════════════════════════════════════════════════════
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "copy_file calls reader_open (via io/reader.h → reader.c)"
     skip: true
     query: |
@@ -261,7 +261,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "app::copy_file", callee: "reader::reader_open", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "copy_file calls writer_write (via io/writer.h → writer.c)"
     skip: true
     query: |
@@ -283,7 +283,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Transitive include: main calls panic (app.c → reader.h → error.h → error.c)"
     skip: true
     query: |
@@ -450,7 +450,7 @@ tests:
   # CROSS-FILE CALLS
   # ══════════════════════════════════════════════════════════════
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: copy_file calls all 6 IO functions via include"
     skip: true
     query: |
@@ -468,7 +468,7 @@ tests:
       - { row: { callee: "writer::writer_write" } }
       - { row: { callee: "writer::writer_close" } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: main calls panic via transitive include chain"
     skip: true
     query: |
@@ -520,7 +520,7 @@ tests:
       - { row_count: 5 }
       - { unique: fqn }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: process_users calls list_init (user.c -> list.h -> list.c)"
     skip: true
     query: |
@@ -532,7 +532,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "user::process_users", callee: "list::list_init", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: process_users calls list_push"
     skip: true
     query: |
@@ -544,7 +544,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "user::process_users", callee: "list::list_push", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: process_users calls list_count"
     skip: true
     query: |
@@ -556,7 +556,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "user::process_users", callee: "list::list_count", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: process_users calls list_pop"
     skip: true
     query: |
@@ -568,7 +568,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "user::process_users", callee: "list::list_pop", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: process_users calls list_empty"
     skip: true
     query: |
@@ -580,7 +580,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "user::process_users", callee: "list::list_empty", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: process_users calls panic via transitive include"
     skip: true
     query: |
@@ -592,7 +592,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "user::process_users", callee: "error::panic", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "process_users total call count"
     skip: true
     query: |

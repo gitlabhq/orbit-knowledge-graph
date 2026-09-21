@@ -4,9 +4,7 @@ fixture_dir: "fixtures/code/kotlin/main/kotlin"
 tests:
   # ── K4: test_kotlin_type_inference_from_when_expression ──
 
-  # skip: tree-dsl: Admin and User live in Person.kt; import resolution is path-based
   - name: "whenTypeInference -> Person.getName (when expression)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'whenTypeInference'

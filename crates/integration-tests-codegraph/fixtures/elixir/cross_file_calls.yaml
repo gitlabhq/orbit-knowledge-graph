@@ -57,7 +57,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the module is defined in another file; alias and import paths follow lib/snake_case, and bare imported calls have no wildcard fallback
+  # skip: tree-dsl: the module is defined in another file; alias and import paths follow lib/snake_case and do not reach the fixture files
   - name: "Aliased call resolves across files: Foo.shout -> Helpers.Format.upcase"
     skip: true
     query: |
@@ -69,7 +69,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the module is defined in another file; alias and import paths follow lib/snake_case, and bare imported calls have no wildcard fallback
+  # skip: tree-dsl: the module is defined in another file; alias and import paths follow lib/snake_case and do not reach the fixture files
   - name: "Bare call through import resolves: Foo.doubled -> Util.dub"
     skip: true
     query: |
@@ -91,7 +91,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the module is defined in another file; alias and import paths follow lib/snake_case, and bare imported calls have no wildcard fallback
+  # skip: tree-dsl: the module is defined in another file; alias and import paths follow lib/snake_case and do not reach the fixture files
   - name: "Exactly 4 Calls edges total — no spurious edges"
     skip: true
     query: |

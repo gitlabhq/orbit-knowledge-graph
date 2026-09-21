@@ -154,7 +154,7 @@ tests:
       - { row: { fqn: Geo.Models.Line, type: Class } }
 
   # ── Cross-file member chain ──────────────────────────────────
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
+  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "Line.Length calls Point.DistanceTo via typed property"
     skip: true
     query: |
@@ -167,9 +167,7 @@ tests:
       - { row: { caller: Geo.Models.Line.Length, callee: Geo.Models.Point.DistanceTo, kind: Calls } }
 
   # ── var inference + chained call ──────────────────────────────
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
   - name: "var p1 = service.Create() → line = new Line(p1, p2) → line.Length()"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'
@@ -212,9 +210,7 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: Geo.Services.PointService.IsValid, type: Method } }
 
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
   - name: "Partial class Clamp calls Point.Normalize"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Geo.Services.PointService.Clamp'
@@ -224,7 +220,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: Geo.Services.PointService.Clamp, callee: Geo.Models.Point.Normalize, kind: Calls } }
 
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
+  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "Runner calls partial class methods from both files"
     skip: true
     query: |
@@ -250,7 +246,7 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: Geo.Services.PointService.CreateAsync, type: Method } }
 
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
+  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "Runner.RunAsync calls CreateAsync"
     skip: true
     query: |
@@ -263,9 +259,7 @@ tests:
       - { row: { caller: Geo.App.Runner.RunAsync, callee: Geo.Services.PointService.CreateAsync, kind: Calls } }
 
   # ── Runner calls PointService.Create via typed field ──────────
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
   - name: "Runner.Run calls PointService.Create"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Geo.App.Runner.Run'

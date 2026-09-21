@@ -199,9 +199,7 @@ tests:
       - { unique: fqn }
 
   # ── Extends ────────────────────────────────────────────────────
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "Backed enum implements interface (Extends edge)"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Domain\Status'
@@ -211,7 +209,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "ApiRouter extends Router (so parent:: resolves)"
     skip: true
     query: |
@@ -264,7 +262,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Match arm: parent::fallback() resolves to inherited Router.fallback"
     skip: true
     query: |

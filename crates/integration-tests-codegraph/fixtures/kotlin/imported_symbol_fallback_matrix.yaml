@@ -49,7 +49,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "com.example.wildcardImport", path: "external.factories", name: "*", import_type: "WildcardImport" } }
 
-  # skip: tree-dsl: unresolved names fall back to the wildcard import; the engine has no builtin table
+  # skip: tree-dsl: unbound bare names bind to the wildcard import; the engine has no builtin table
   - name: "println does not target wildcard imports"
     skip: true
     query: |

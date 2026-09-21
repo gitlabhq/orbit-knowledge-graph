@@ -197,7 +197,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Final readonly Vector extends readonly Point"
     skip: true
     query: |
@@ -209,7 +209,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Concrete extends abstract Base"
     skip: true
     query: |
@@ -331,7 +331,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Vector.__construct -> Point.__construct via parent::"
     skip: true
     query: |
@@ -343,7 +343,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Vector.magnitude -> Point.magnitude via parent::"
     skip: true
     query: |
@@ -355,7 +355,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Concrete.__construct -> Base.__construct via parent:: in promoted ctor"
     skip: true
     query: |

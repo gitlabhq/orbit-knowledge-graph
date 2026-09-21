@@ -65,9 +65,7 @@ tests:
       - { row_count: 1 }
       - { row: { src: "com/example/App.java", tgt: "com/example/service/UserService.java" } }
 
-  # skip: tree-dsl: a wildcard import names a directory; the resolver resolves only files and index files
   - name: "App.run → new User (wildcard import)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'User'
@@ -76,9 +74,7 @@ tests:
       - { row_count: 1 }
       - { row: { src: "com/example/App.java", tgt: "com/example/model/User.java" } }
 
-  # skip: tree-dsl: a wildcard import names a directory; the resolver resolves only files and index files
   - name: "App.run → new Project (wildcard import)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'Project'

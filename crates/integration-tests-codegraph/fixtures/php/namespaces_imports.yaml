@@ -359,9 +359,7 @@ tests:
       - { row_count: 1 }
 
   # ── Cross-file: deep-namespace inheritance + call ───────────────
-  # skip: tree-dsl: the namespace does not mirror the file path and there is no composer.json; resolution is path-based
   - name: "Deep-namespace child extends imported base across files"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'App\Consumer\Sub\Nested\DeepExtends'
@@ -371,9 +369,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the namespace does not mirror the file path and there is no composer.json; resolution is path-based
   - name: "Deep-namespace child resolves inherited \\$this->boot() to parent method"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\Sub\Nested\DeepExtends\start'
