@@ -70,17 +70,16 @@ canonical nodes named here.
 
 ## Gaps by count
 
+Nine skipped tests remain valid. Twenty-three carry a `bogus:` reason.
+
 | Skipped tests | Gap | Where |
 | --- | --- | --- |
-| 13 | Bogus tests. Generic stripping, diamond tie-break, companion counts, reopened namespaces, destructuring, the C# Console matrix, Zig synthesized names, Lua wrapper counts, interface Calls counts, packaged inheritance call count. | fixtures |
-| 4 | Same-package siblings that also need another gap (embedding, nested types). | `resolver.rs` |
-| 4 | Require attribution. Ruby constants map to autoload paths, not to `require` lines. The fallback row is produced outside tree-dsl. | `langs/ruby.yaml`, code-graph hooks |
-| 4 | Static receivers under a namespace import that the resolver cannot see (C# partial classes, await, static using). | `resolver.rs` resolve_receivers |
-| 1 | Record constructor reference count. Cross-file export merges distinct call sites with the same caller and target. Other active fixtures require this merged count. | `tree-dsl-tests/src/export.rs` |
-| 4 | Nested types. `Parent.Child.GrandChild` collapses to its last segment; SSA lookup picks the nearest same-named definition. Needs a member-chain supertype and nested constructor typing. | `langs/java.yaml`, `langs/kotlin.yaml`, `linker.rs` |
-| 3 | Extension functions and interface members of imported types resolve only through same-file defs. | `linker.rs` find_method_in |
-| 2 | Inherited dispatch through a static factory chain or `new parent()` in PHP. | `resolver.rs` |
-| 1 each | Elixir bare call through `import`, flat visible map shadowing a same-file constant, Kotlin operator tokens, Kotlin path-based import, Go `Save` through embedding. | see the skip comment |
+| 4 | Qualified nested types as supertypes or constructors (`Child.GrandChild`, `Outer.Inner`). The qualifier's owner is lost when the type collapses to its last segment; member lookup needs owner identities and an explicit ambiguity rule. | `langs/java.yaml`, `langs/kotlin.yaml`, `resolver.rs` method_up |
+| 2 | Same-name nested and top-level types (`Filter` and `ServerFilter.Filter`). The visible names are flat, so the nested one replaces the package one. | `resolver.rs` gather_visible_one |
+| 1 | Kotlin extension property chain. The getter is a sibling of its property in the CST; the rule must attach it to the receiver-owned property and type flow must keep the getter result. | `langs/kotlin.yaml`, `resolver.rs` resolve_type_edges |
+| 1 | Kotlin `if` expression type. Expression-body returns and a common-supertype join are missing (`Admin` and `User` join to `Person`). | `linker.rs` walk_branch_binding |
+| 1 | Two call sites to one constructor from one method. The export merges cross-file rows per caller and target; other active fixtures require that contract. | `crates/tree-dsl-tests/src/export.rs` |
+| 23 | Bogus tests. Value reads asserted as calls, require-path attribution, generic stripping, diamond tie-break, companion counts, reopened namespaces, destructuring, the C# Console and static-using matrices, duplicate export rows, Zig synthesized names, Lua wrapper counts, interface call counts, an import of a package that does not declare the type. | fixtures |
 
 ## DSL limits
 
