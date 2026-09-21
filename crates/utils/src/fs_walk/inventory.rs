@@ -216,7 +216,9 @@ mod tests {
     struct BatchUppercaseHooks;
     impl FileStreamHooks for BatchUppercaseHooks {
         fn on_header(&mut self, file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-            file.path.ends_with(".skip").then_some((Decision::ListOnly, file.label.clone()))
+            file.path
+                .ends_with(".skip")
+                .then_some((Decision::ListOnly, file.label.clone()))
         }
         fn on_contents(
             &mut self,
@@ -226,7 +228,10 @@ mod tests {
                 .iter()
                 .map(|(f, content)| {
                     let detail = std::str::from_utf8(content).ok().map(|s| s.to_uppercase());
-                    let label = FileLabel { detail, ..f.label.clone() };
+                    let label = FileLabel {
+                        detail,
+                        ..f.label.clone()
+                    };
                     (Decision::Parse, label)
                 })
                 .collect()
@@ -243,13 +248,21 @@ mod tests {
         let content_map: std::collections::HashMap<&str, &[u8]> =
             [("a.rs", b"hello" as &[u8]), ("c.rs", b"world")].into();
         let mut hooks = BatchUppercaseHooks;
-        let inv = inv.refine(&mut hooks, |p| content_map.get(p).map(|b| b.to_vec())).unwrap();
+        let inv = inv
+            .refine(&mut hooks, |p| content_map.get(p).map(|b| b.to_vec()))
+            .unwrap();
 
         assert_eq!(inv.find("a.rs").unwrap().decision, Decision::Parse);
-        assert_eq!(inv.find("a.rs").unwrap().label.detail.as_deref(), Some("HELLO"));
+        assert_eq!(
+            inv.find("a.rs").unwrap().label.detail.as_deref(),
+            Some("HELLO")
+        );
         assert_eq!(inv.find("b.skip").unwrap().decision, Decision::ListOnly);
         assert_eq!(inv.find("b.skip").unwrap().label.detail, None);
         assert_eq!(inv.find("c.rs").unwrap().decision, Decision::Parse);
-        assert_eq!(inv.find("c.rs").unwrap().label.detail.as_deref(), Some("WORLD"));
+        assert_eq!(
+            inv.find("c.rs").unwrap().label.detail.as_deref(),
+            Some("WORLD")
+        );
     }
 }

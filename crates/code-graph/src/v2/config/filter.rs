@@ -108,40 +108,46 @@ impl FileStreamHooks for CodeFilter {
         None
     }
 
-    fn on_contents(&mut self, items: &[(&FileInventoryEntry, &[u8])]) -> Vec<(Decision, FileLabel)> {
-        items.iter().map(|&(file, content)| {
-            if is_lfs_pointer(content) {
-                return self.record(file, SkipReason::LfsPointer, ContentClass::LfsPointer);
-            }
-            let sniff = &content[..content.len().min(BINARY_SNIFF_BYTES)];
-            if looks_binary(sniff) {
-                return self.record(file, SkipReason::Binary, ContentClass::Binary);
-            }
-            if std::str::from_utf8(content).is_err() {
-                return self.record(file, SkipReason::NotUtf8, ContentClass::Binary);
-            }
-            if let Some(reason) = minified_skip(content) {
-                return self.record(file, reason, ContentClass::MinifiedCode);
-            }
-            let ext = Self::extract_extension(&file.path);
-            let is_code = (self.detect_language)(&file.path).is_some();
-            let label = FileLabel {
-                skip: None,
-                content: if is_code {
-                    ContentClass::Code
+    fn on_contents(
+        &mut self,
+        items: &[(&FileInventoryEntry, &[u8])],
+    ) -> Vec<(Decision, FileLabel)> {
+        items
+            .iter()
+            .map(|&(file, content)| {
+                if is_lfs_pointer(content) {
+                    return self.record(file, SkipReason::LfsPointer, ContentClass::LfsPointer);
+                }
+                let sniff = &content[..content.len().min(BINARY_SNIFF_BYTES)];
+                if looks_binary(sniff) {
+                    return self.record(file, SkipReason::Binary, ContentClass::Binary);
+                }
+                if std::str::from_utf8(content).is_err() {
+                    return self.record(file, SkipReason::NotUtf8, ContentClass::Binary);
+                }
+                if let Some(reason) = minified_skip(content) {
+                    return self.record(file, reason, ContentClass::MinifiedCode);
+                }
+                let ext = Self::extract_extension(&file.path);
+                let is_code = (self.detect_language)(&file.path).is_some();
+                let label = FileLabel {
+                    skip: None,
+                    content: if is_code {
+                        ContentClass::Code
+                    } else {
+                        ContentClass::Text
+                    },
+                    detail: None,
+                    extension: ext,
+                };
+                let decision = if is_code {
+                    Decision::Parse
                 } else {
-                    ContentClass::Text
-                },
-                detail: None,
-                extension: ext,
-            };
-            let decision = if is_code {
-                Decision::Parse
-            } else {
-                Decision::Load
-            };
-            (decision, label)
-        }).collect()
+                    Decision::Load
+                };
+                (decision, label)
+            })
+            .collect()
     }
 
     fn on_non_regular(&mut self, file: &FileInventoryEntry) -> (Decision, FileLabel) {
@@ -279,7 +285,11 @@ mod tests {
         CodeFilter::new(None, None, detect_language_from_path)
     }
 
-    fn classify(f: &mut CodeFilter, e: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
+    fn classify(
+        f: &mut CodeFilter,
+        e: &FileInventoryEntry,
+        content: &[u8],
+    ) -> (Decision, FileLabel) {
         f.on_contents(&[(e, content)]).remove(0)
     }
 
@@ -320,7 +330,11 @@ mod tests {
         let mut f = filter();
         assert_eq!(hd(f.on_header(&entry("src/main.rs", 100))), None);
         assert_eq!(
-            d(classify(&mut f, &entry("src/main.rs", 100), b"fn main() {}\n")),
+            d(classify(
+                &mut f,
+                &entry("src/main.rs", 100),
+                b"fn main() {}\n"
+            )),
             Decision::Parse
         );
         assert_eq!(
@@ -416,8 +430,14 @@ mod tests {
         // (different module/FQN), so both parse; content is never deduped.
         let mut f = filter();
         let src = b"export const x = 1;\n";
-        assert_eq!(d(classify(&mut f, &entry("a/x.js", 19), src)), Decision::Parse);
-        assert_eq!(d(classify(&mut f, &entry("b/x.js", 19), src)), Decision::Parse);
+        assert_eq!(
+            d(classify(&mut f, &entry("a/x.js", 19), src)),
+            Decision::Parse
+        );
+        assert_eq!(
+            d(classify(&mut f, &entry("b/x.js", 19), src)),
+            Decision::Parse
+        );
     }
 
     #[test]

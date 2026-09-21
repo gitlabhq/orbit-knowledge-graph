@@ -168,7 +168,10 @@ pub trait FileStreamHooks {
         &mut self,
         _items: &[(&FileInventoryEntry, &[u8])],
     ) -> Vec<(Decision, FileLabel)> {
-        _items.iter().map(|_| (Decision::Parse, FileLabel::default())).collect()
+        _items
+            .iter()
+            .map(|_| (Decision::Parse, FileLabel::default()))
+            .collect()
     }
     /// Settle a non-regular entry (symlink, etc.) — no content to sniff, never a
     /// parse candidate. Routed here (instead of decided in the source) so the
@@ -191,7 +194,9 @@ pub fn step<H: FileStreamHooks>(
         return Ok(settled);
     }
     sniff(content)?;
-    Ok(hooks.on_contents(&[(file, content)]).pop()
+    Ok(hooks
+        .on_contents(&[(file, content)])
+        .pop()
         .unwrap_or((Decision::Parse, FileLabel::default())))
 }
 
