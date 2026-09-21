@@ -17,7 +17,7 @@ stages:
       - match: '(file_scoped_namespace_declaration name: $N)'
         replace: '(cs_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(using_directive (static) $Q:qualified_name)'
-        replace: '(__import (__import_kind "static") (__source @$Q) (__source_path @$Q|replace(".", "/")) (__name @$Q|split_last(".")))'
+        replace: '(__import (__import_kind "static") (__source @$Q) (__source_path @$Q|replace(".", "/")) (__name @$Q|split_last(".") (__ssa_hint "*")))'
       - match: '(using_directive (static) $Q:identifier)'
         replace: '(__import (__import_kind "static") (__source @$Q) (__source_path @$Q) (__name @$Q))'
       - match: '(using_directive name: $A:identifier $Q:qualified_name)'
@@ -80,6 +80,10 @@ stages:
         replace: '(__member @$M (__object $O))'
       - match: '(member_access_expression (base) name: $M:identifier)'
         replace: '(__member @$M (__object (__ivar "base")))'
+      - match: '(conditional_access_expression condition: $O:identifier (member_binding_expression name: $M:identifier))'
+        replace: '(__member @$M (__object @$O))'
+      - match: '(conditional_access_expression condition: $O (member_binding_expression name: $M:identifier))'
+        replace: '(__member @$M (__object $O))'
       - match: '(member_access_expression expression: $O:cs_qualified name: $M:identifier)'
         replace: '(__member @$M (__object @$O))'
       - match: '(member_access_expression expression: $O name: $M:identifier)'
@@ -195,6 +199,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(__import (__import_kind "static"))'
+        tag: { callable: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'

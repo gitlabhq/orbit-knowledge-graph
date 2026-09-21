@@ -304,7 +304,7 @@ fn apply_rewrites_inner(
                             built
                                 .into_iter()
                                 .for_each(|n| n.remove_subtree(&mut t.arena));
-                            continue;
+                            break;
                         }
                     }
                     t.replace(target, built);

@@ -59,6 +59,8 @@ stages:
         replace: '(instanceof_expression $L (__call (__callee @$T)) (__binding @$N (__ssa_typed @$T)))'
       - match: '(instanceof_expression left: $L right: $T:type_identifier)'
         replace: '(instanceof_expression $L (__call (__callee @$T)))'
+      - match: '(record_pattern $T:identifier $P:record_pattern_body)'
+        replace: '(record_pattern (__call (__callee @$T)) $P)'
 
       # this.x → __ivar
       - match: '(field_access object: (this) field: $F:identifier)'
@@ -194,7 +196,7 @@ stages:
         replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
       # Record components become implicit accessor methods (see the records stage)
       - match: '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))'
-        replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B $$$P->record_component)'
+        replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B $$$P->record_component (record_component "equals") (record_component "hashCode") (record_component "toString"))'
       - match: '(interface_declaration $M?:modifiers name: $N:identifier $$$ANN body: (interface_body $$$B))'
         replace: '(__def (__defname @$N) (__interface) $M $$$ANN $$$B)'
       - match: '(enum_declaration $M?:modifiers name: $N:identifier $$$ANN body: (enum_body $$$B))'
@@ -204,6 +206,9 @@ stages:
 
   - name: records
     rules:
+      - match: '(record_component "/^equals$/")'
+        replace: '(__def (__defname @$ROOT) (__method) (formal_parameters (__binding "o")))'
+        unique: '(__def (__method) !(__constructor))'
       - match: '(record_component $T:__ssa_typed)'
         replace: '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T) (formal_parameters))'
         unique: '(__def (__method) !(__constructor) (formal_parameters !(__binding)))'

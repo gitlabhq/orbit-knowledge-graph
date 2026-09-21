@@ -309,7 +309,13 @@ impl<'t> Fold<'t> {
         };
         let method = c.sym();
         let from = self.enclosing();
-        for r in self.lookup(obj) {
+        let bare_call = method == 0 && c.parent().is_some_and(|p| p.is(C::Call));
+        let targets = if bare_call {
+            self.lookup_or_wildcards(obj, true)
+        } else {
+            self.lookup(obj)
+        };
+        for r in targets {
             match r {
                 Linked::Type(ts) if method != 0 => self.resolve_method(ts, method, from),
                 Linked::Import(node) => self.edges.push(Edge::local(from, node, EdgeKind::Imports)),
@@ -472,12 +478,21 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn resolve_name(&mut self, sym: u32, from: u32) {
-        let mut targets = self.lookup(sym);
-        if targets.is_empty() {
-            targets = self.wildcards.iter().map(|&n| Linked::Import(n)).collect();
+    fn lookup_or_wildcards(&mut self, sym: u32, callable_only: bool) -> Vec<Linked> {
+        let targets = self.lookup(sym);
+        if !targets.is_empty() {
+            return targets;
         }
-        for r in &targets {
+        let supplies_callees = |n: &&u32| {
+            let import = self.tree.cursor(**n).parent();
+            !callable_only || import.is_some_and(|i| i.has_tag(self.callable_key))
+        };
+        let wild = self.wildcards.iter().filter(supplies_callees);
+        wild.map(|&n| Linked::Import(n)).collect()
+    }
+
+    fn resolve_name(&mut self, sym: u32, from: u32) {
+        for r in &self.lookup_or_wildcards(sym, false) {
             match r {
                 Linked::Type(ts) => {
                     for inner in self.lookup(*ts) {
