@@ -167,10 +167,7 @@ pub trait FileStreamHooks {
     fn on_content(&mut self, _file: &FileInventoryEntry, _content: &[u8]) -> (Decision, FileLabel) {
         (Decision::Parse, FileLabel::default())
     }
-    /// Classify a batch of entries from their content. Called by
-    /// `FileInventory::refine` with all unsettled entries at once so
-    /// implementors can amortise expensive work (e.g. one ONNX call).
-    /// Default loops `on_content`.
+    /// Batch variant of `on_content`; `refine` passes all unsettled entries at once.
     fn on_contents(
         &mut self,
         items: &[(&FileInventoryEntry, &[u8])],

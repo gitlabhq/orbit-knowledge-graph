@@ -70,12 +70,8 @@ impl FileInventory {
         groups
     }
 
-    /// Run a second [`FileStreamHooks`] pass. `read_content` provides bytes
-    /// on demand (`None` = header-only). Drops entries reclassified as `Drop`.
-    ///
-    /// Headers are settled per-item, then all unsettled entries are read and
-    /// classified in one [`FileStreamHooks::on_contents`] call so implementors
-    /// can amortise expensive work (e.g. a single ONNX inference).
+    /// Run a second [`FileStreamHooks`] pass over the inventory.
+    /// Unsettled entries are classified in one `on_contents` batch call.
     pub fn refine<H: FileStreamHooks>(
         self,
         hooks: &mut H,
