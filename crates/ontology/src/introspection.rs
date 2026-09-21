@@ -32,10 +32,7 @@ pub struct SchemaDomain {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum SchemaNode {
-    Summary {
-        name: String,
-        introduced_in: String,
-    },
+    Name(String),
     Expanded {
         name: String,
         introduced_in: String,
@@ -130,10 +127,7 @@ fn build_domains(
                 r#in: incoming,
             }
         } else {
-            SchemaNode::Summary {
-                name: node.name.clone(),
-                introduced_in: node.introduced_in.to_string(),
-            }
+            SchemaNode::Name(node.name.clone())
         };
 
         domain_map.entry(domain_name).or_default().push(node_info);
@@ -263,9 +257,7 @@ mod tests {
             .iter()
             .flat_map(|d| {
                 d.nodes.iter().map(|n| match n {
-                    SchemaNode::Summary { name, .. } | SchemaNode::Expanded { name, .. } => {
-                        name.clone()
-                    }
+                    SchemaNode::Name(name) | SchemaNode::Expanded { name, .. } => name.clone(),
                 })
             })
             .collect();
@@ -331,9 +323,7 @@ mod tests {
             .iter()
             .flat_map(|d| {
                 d.nodes.iter().map(|n| match n {
-                    SchemaNode::Summary { name, .. } | SchemaNode::Expanded { name, .. } => {
-                        name.clone()
-                    }
+                    SchemaNode::Name(name) | SchemaNode::Expanded { name, .. } => name.clone(),
                 })
             })
             .collect();
