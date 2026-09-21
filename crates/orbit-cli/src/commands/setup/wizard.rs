@@ -204,7 +204,18 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
         show_every_file(&report)?;
     }
     removed?;
-    show_plan(&plan, "Removed")?;
+    let mut removed_plan = plan;
+    for assistant in &mut removed_plan.assistants {
+        assistant.changes.retain(|(_, paths)| {
+            paths.iter().any(|path| {
+                report
+                    .outcomes
+                    .iter()
+                    .any(|outcome| path.starts_with(&outcome.label))
+            })
+        });
+    }
+    show_plan(&removed_plan, "Removed")?;
     cliclack::outro("Done. Backups (*.orbit-backup) were kept.")?;
     Ok(())
 }
