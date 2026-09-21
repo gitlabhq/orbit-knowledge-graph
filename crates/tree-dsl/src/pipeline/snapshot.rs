@@ -3,7 +3,7 @@ use std::path::Path;
 
 use smallvec::SmallVec;
 
-use lasso::{Key, Spur};
+use lasso::Key;
 
 use crate::intern::{Interner, Lang};
 use crate::resolver::{ImportReq, Loc, Resolver};
