@@ -58,13 +58,13 @@ To give agents access to your indexed graph:
 1. Select **Preferences**.
 1. Under **Behavior**, select the **Use Orbit in GitLab Duo** checkbox. **Agentic Chat**, **Orbit Agent**, **Other Foundational Agents**, and **Custom Agents** are selected by default.
 1. Select **Save changes**.
-1. Open the GitLab Duo Chat sidebar and confirm GitLab Orbit is turned on.
+1. Open the GitLab Duo Chat sidebar and confirm GitLab Orbit is turned on. If you do not see **Orbit** in the sidebar after saving, refresh the page.
 
 
 If GitLab Orbit doesn't appear, indexing might not be turned on for your group.
 For help, see [troubleshooting](troubleshooting.md#exit-code-2).
 
-### Use an external agent
+### Use your own coding agent
 
 To connect to an external agent:
 
@@ -97,7 +97,7 @@ To connect to an external agent:
 
 ## Step 2: Run your first query
 
-Check out an indexed project, or go to one in GitLab, and ask your agent:
+Check out an indexed project in your IDE or go to an indexed project in the GitLab UI. Then, ask your agent:
 
 ```plaintext
 Using Orbit, tell me what does this project do, and how is it structured?
