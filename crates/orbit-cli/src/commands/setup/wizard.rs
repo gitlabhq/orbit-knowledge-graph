@@ -42,7 +42,6 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         cliclack::outro("Dry run: nothing written.")?;
         return Ok(());
     }
-    show_plan(&plan)?;
     if interactive
         && !confirm(format!(
             "Apply to {} agent(s) in {}?",
@@ -88,7 +87,6 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
         cliclack::outro("Dry run: nothing removed.")?;
         return Ok(());
     }
-    show_plan(&plan)?;
     if interactive
         && !confirm(format!(
             "Remove Orbit from {} agent(s) in {}?",
