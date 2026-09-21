@@ -534,15 +534,6 @@ fn name_targets(ctx: &ResolveCtx, tfi: usize, c: Cursor) -> Vec<Loc> {
     .collect()
 }
 
-fn targets_import(nodes: &Tree, e: &Edge, import_node: u32) -> bool {
-    e.kind == EdgeKind::Imports
-        && (e.to_node == import_node
-            || nodes
-                .cursor(e.to_node)
-                .parent()
-                .is_some_and(|p| p.index() == import_node))
-}
-
 fn is_direct(ft: &Tree, ei: u32, import_name: u32) -> bool {
     let parent = |n: u32| ft.cursor(n).parent().map(|p| p.index());
     ei == import_name || parent(ei) == Some(import_name) || parent(import_name) == Some(ei)
@@ -574,7 +565,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     for edge in ctx
         .edges_for(fi)
         .iter()
-        .filter(|e| targets_import(nodes, e, import_node))
+        .filter(|e| e.kind == EdgeKind::Imports && is_direct(nodes, e.to_node, import_node))
     {
         let caller = ctx.corpus.jump(fi as u32, edge.from_node);
         for (_, m) in caller.member_calls() {
