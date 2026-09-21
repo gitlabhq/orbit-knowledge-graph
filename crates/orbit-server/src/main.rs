@@ -2,6 +2,7 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -17,6 +18,7 @@ use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::content;
 use orbit_server::grpc::GrpcServer;
 use orbit_server::health_check as health_check_mode;
+use orbit_server::probes;
 use orbit_server::shutdown;
 use orbit_server::webserver::Server as HttpServer;
 use orbit_server_config::AppConfig;
@@ -60,8 +62,16 @@ async fn main() -> anyhow::Result<()> {
     if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
     }
+    // The probe server always binds so `/-/liveness` and `/-/readiness` do not depend on
+    // metrics being scraped; `prometheus_metrics_port` only adds `/-/metrics` to it.
+    builder = builder.health_port(config.metrics.prometheus.port);
     if config.metrics.prometheus.enabled {
         builder = builder.prometheus_metrics_port(config.metrics.prometheus.port);
+    }
+    let active_schema = Arc::new(ActiveSchema::default());
+    let serving = Arc::new(AtomicBool::new(false));
+    for (name, check) in probes::readiness_checks(args.mode, &active_schema, &serving) {
+        builder = builder.add_readiness_check(name, check);
     }
     let _guard = builder.init().expect("labkit init");
 
@@ -86,20 +96,20 @@ async fn main() -> anyhow::Result<()> {
             schema::version::init(&graph).await?;
 
             let dispatcher_config = DispatcherConfig::from(&config);
-            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown)
+            indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, shutdown)
+            indexer::run(&indexer_config, ontology, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, shutdown.clone()).await
+            run_webserver(&config, active_schema, shutdown.clone()).await
         }
     };
 
@@ -108,7 +118,11 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyhow::Result<()> {
+async fn run_webserver(
+    config: &AppConfig,
+    active_schema: Arc<ActiveSchema>,
+    shutdown: CancellationToken,
+) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
         config.jwt_clock_skew_secs,
@@ -150,7 +164,8 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
         include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
     )?;
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
-    let active_schema = ActiveSchema::spawn(
+    ActiveSchema::spawn(
+        &active_schema,
         Arc::new(config.graph.build_client()),
         archive,
         catalog,

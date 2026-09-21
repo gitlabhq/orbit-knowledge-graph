@@ -37,8 +37,8 @@ start and passes it as the single `--config` file. The file is a `yq` deep merge
 2. Values read from the GDK checkout. These are ClickHouse URLs from `gdk.yml`, the GitLab base URL,
    and the Siphon stream name from GDK's Siphon config. They also include JWT keys and the ClickHouse
    password from the GitLab secret files.
-3. The mode's Prometheus port, so the processes `mise run dev` starts side by side do not collide once
-   metrics are enabled.
+3. The mode's probe server port, so the processes `mise run dev` starts side by side do not collide.
+   Every mode binds this port for `/-/liveness` and `/-/readiness`, with or without metrics.
 4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
 
 Passing `--config` disables the default `config/config.yaml` lookup.
@@ -391,8 +391,8 @@ Example: `info,orbit_server=debug,gkg_indexer=trace`
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `metrics.prometheus.enabled` | `false` | Expose the `/-/metrics` scrape endpoint |
-| `metrics.prometheus.port` | `9394` | Prometheus scrape port |
+| `metrics.prometheus.enabled` | `false` | Expose the `/-/metrics` scrape endpoint on the probe server |
+| `metrics.prometheus.port` | `9394` | Probe server port. Always serves `/-/liveness` and `/-/readiness`; serves `/-/metrics` when enabled |
 
 ## Webserver
 
@@ -570,8 +570,8 @@ cargo run -p orbit-object-storage --example roundtrip -- config.yaml [secrets-di
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `health_check.bind_address` | `0.0.0.0:4201` | HealthCheck mode bind address |
-| `indexer_health_bind_address` | `0.0.0.0:4202` | Health check server address for Indexer mode |
-| `dispatcher_health_bind_address` | `0.0.0.0:4203` | Health check server address for DispatchIndexing mode |
+| `indexer_health_bind_address` | `0.0.0.0:4202` | Legacy `/live` and `/ready` address for Indexer mode. Deprecated in favour of the probe server |
+| `dispatcher_health_bind_address` | `0.0.0.0:4203` | Legacy `/live` and `/ready` address for DispatchIndexing mode. Deprecated in favour of the probe server |
 
 ## Tuning guide
 

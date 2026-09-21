@@ -9,6 +9,19 @@ and GitLab diagnostics through the `GetClusterHealth` gRPC method.
 
 ## Pod probes
 
+Every mode runs the labkit probe server on `metrics.prometheus.port` (default `9394`). It serves
+`/-/liveness`, `/-/readiness`, and, when Prometheus metrics are enabled, `/-/metrics`. The probe
+server binds whether or not metrics are enabled. `/-/liveness` returns `200` while the process
+runs. `/-/readiness` returns `200` when every registered check passes and `503` otherwise, with a
+JSON body that names each check and its result. The Webserver registers a `schema` check that reads
+the active schema snapshot. The Indexer and Dispatcher register a `schema_gate` check that reads
+their in-memory serving flag. The HealthCheck runtime registers no check, so its readiness is
+always `200`.
+
+The `/live` and `/ready` endpoints below read the same state and stay available for charts that
+still point at them. They are deprecated. New deployments must probe `/-/liveness` and
+`/-/readiness` on the probe server port.
+
 ### `/live`
 
 The Webserver, Indexer, and Dispatcher return an immediate local response. The handler makes no
