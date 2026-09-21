@@ -3,14 +3,13 @@ use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::resolver::CLASS_LIKE;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{
-    Cursor, Edge, EdgeKind, Step, Tree, find_method_in, infer_return_type, reachable,
-};
+use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, reachable};
 
 enum Linked {
     Def(u32),
     Import(u32),
     Type(u32),
+    Call(u32),
 }
 
 enum WorkItem {
@@ -21,6 +20,7 @@ enum WorkItem {
 enum Receiver {
     Ivar(u32),
     Sym(u32),
+    Call(u32),
 }
 
 enum CalleeShape {
@@ -31,9 +31,12 @@ enum CalleeShape {
 
 fn callee_shape(callee: Cursor) -> Option<CalleeShape> {
     if let Some(m) = callee.child(C::Member) {
-        let recv = match m.object_ivar() {
-            Some(iv) => Receiver::Ivar(iv.sym()),
-            None => Receiver::Sym(root_object_sym(m)),
+        let recv = match m.child(C::Object).and_then(|o| o.child(C::Call)) {
+            Some(call) => Receiver::Call(call.index()),
+            None => match m.object_ivar() {
+                Some(iv) => Receiver::Ivar(iv.sym()),
+                None => Receiver::Sym(root_object_sym(m)),
+            },
         };
         return Some(CalleeShape::Method {
             recv,
@@ -237,7 +240,14 @@ impl<'t> Fold<'t> {
         let Some(shape) = callee_shape(callee) else {
             return;
         };
+        let first = self.edges.len();
         match shape {
+            CalleeShape::Method {
+                recv: Receiver::Call(call),
+                ..
+            } => {
+                self.edges.push(Edge::local(from, call, EdgeKind::TypeFlow));
+            }
             CalleeShape::Method {
                 recv: Receiver::Ivar(ivar_sym),
                 method,
@@ -264,6 +274,9 @@ impl<'t> Fold<'t> {
             CalleeShape::Name(sym) => {
                 self.resolve_name(sym, from);
             }
+        }
+        for edge in &mut self.edges[first..] {
+            edge.site = Some(c.index());
         }
     }
 
@@ -319,22 +332,14 @@ impl<'t> Fold<'t> {
             return Value::Type(ts);
         }
 
-        if let Some(callee) = rhs.child(C::Call).and_then(|call| call.child(C::Callee)) {
-            let Some(shape) = callee_shape(callee) else {
-                return Value::Opaque;
-            };
-            return match shape {
-                CalleeShape::Method {
-                    recv: Receiver::Ivar(ivar_sym),
-                    method,
-                } => self.value_from_method(ivar_sym, method, binding, true),
-                CalleeShape::Method {
-                    recv: Receiver::Sym(obj_sym),
-                    method,
-                } => self.value_from_method(obj_sym, method, binding, false),
-                CalleeShape::IvarCall(_) => Value::Opaque,
-                CalleeShape::Name(sym) => self.value_from_name(sym),
-            };
+        if let Some(call) = rhs.child(C::Call) {
+            if let Some(sym) = call.child_sym(C::Callee) {
+                let targets = self.lookup(sym);
+                if self.any_class(&targets) {
+                    return Value::Type(sym);
+                }
+            }
+            return Value::Call(call.index());
         }
 
         let sym = self.tail_sym(rhs);
@@ -387,6 +392,7 @@ impl<'t> Fold<'t> {
             ParseValue::LocalDef(di) => Some(Linked::Def(self.defs[*di as usize])),
             ParseValue::ImportRef(ii) => self.imports.get(*ii as usize).map(|&n| Linked::Import(n)),
             ParseValue::Type(ts) if *ts != 0 => Some(Linked::Type(*ts)),
+            ParseValue::Call(call) => Some(Linked::Call(*call)),
             _ => None,
         }
     }
@@ -406,6 +412,9 @@ impl<'t> Fold<'t> {
         match r {
             Linked::Def(node) => self.edges.push(Edge::local(from, *node, EdgeKind::Calls)),
             Linked::Import(node) => self.edges.push(Edge::local(from, *node, EdgeKind::Imports)),
+            Linked::Call(call) => self
+                .edges
+                .push(Edge::local(from, *call, EdgeKind::TypeFlow)),
             Linked::Type(_) => {}
         }
     }
@@ -509,59 +518,6 @@ impl<'t> Fold<'t> {
         };
         reachable(container, succ)
             .find_map(|dn| find_method_in(self.tree.cursor(dn), name).map(|m| m.index()))
-    }
-
-    fn value_from_name(&mut self, sym: u32) -> Value {
-        let resolved = self.lookup(sym);
-        if self.any_class(&resolved) {
-            return Value::Type(sym);
-        }
-        for r in &resolved {
-            if let Linked::Def(node) = r
-                && let Some(rt) = infer_return_type(self.tree.cursor(*node))
-            {
-                return self.classify_return(rt);
-            }
-        }
-        Value::Opaque
-    }
-
-    fn value_from_method(&mut self, obj: u32, method: u32, binding: u32, is_ivar: bool) -> Value {
-        let obj_type = if is_ivar {
-            self.enclosing_class(binding)
-                .and_then(|cls| self.ivar_type(cls, obj))
-        } else if obj != 0 {
-            self.lookup(obj).into_iter().find_map(|r| match r {
-                Linked::Type(ts) => Some(ts),
-                _ => None,
-            })
-        } else {
-            None
-        };
-        let Some(ts) = obj_type else {
-            return Value::Opaque;
-        };
-        for r in self.lookup(ts) {
-            if let Linked::Def(cls) = r
-                && let Some(m) = self.find_method_in(cls, method)
-                && let Some(rt) = infer_return_type(self.tree.cursor(m))
-            {
-                return Value::Type(rt);
-            }
-        }
-        Value::Opaque
-    }
-
-    fn classify_return(&self, rt_sym: u32) -> Value {
-        match self
-            .defs
-            .iter()
-            .position(|&dn| self.tree.cursor(dn).child_sym(C::DefName) == Some(rt_sym))
-        {
-            Some(di) if self.is_class(self.defs[di]) => Value::Type(rt_sym),
-            Some(di) => Value::LocalDef(di as u32),
-            None => Value::Type(rt_sym),
-        }
     }
 }
 

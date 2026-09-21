@@ -188,6 +188,42 @@ fixtures:
               d.fetch();
           }
       }
+  - path: ChainIsolation.java
+    content: |
+      class FirstResult {
+          public FirstResult() {}
+          int FirstResult;
+          public FirstResult next() { return this; }
+          public void finish() {}
+      }
+      class SecondResult {
+          public SecondResult() {}
+          int SecondResult;
+          public SecondResult next() { return this; }
+          public void finish() {}
+      }
+      class FirstFactory {
+          public FirstResult make() { return null; }
+      }
+      class SecondFactory {
+          public SecondResult make() { return null; }
+      }
+      class ChainIsolation {
+          public void first(FirstFactory a, SecondFactory b) {
+              b.make();
+              a.make().next().finish();
+          }
+          public void reassigned(FirstFactory a, SecondFactory b) {
+              var value = a.make();
+              value = b.make();
+              value.next().finish();
+          }
+          public void deep(FirstFactory a) {
+              a.make().next().next().next().next().next().next()
+                  .next().next().next().next().next().next().finish();
+          }
+      }
+
 
 tests:
   - name: "typed local: svc.query() resolves to UserService.query"
@@ -254,9 +290,7 @@ tests:
         assert:
           - { row: { callee: "baseMethod", callee_fqn: "Base.baseMethod" } }
 
-  # skip: tree-dsl: a call receiver that is itself a call has no SSA value
   - name: "chained call: getService().query() resolves via return type"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
@@ -275,9 +309,7 @@ tests:
         assert:
           - { empty: true }
 
-  # skip: tree-dsl: a call receiver that is itself a call has no SSA value
   - name: "deep chain: pool.getConnection().getDb().execute().fetchAll()"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
@@ -285,7 +317,7 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { row_count: 6 }
+          - { row_count: 5 }
           - { row: { callee: "Pool" } }
           - { row: { callee: "getConnection" } }
           - { row: { callee: "getDb" } }
@@ -368,3 +400,33 @@ tests:
           RETURN callee.name, callee.fqn
         assert:
           - { empty: true }
+
+  - name: "Same-name factories keep separate return types"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ChainIsolation.first' AND callee.name = 'finish'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: 'FirstResult.finish' } }
+
+  - name: "Reassignment replaces the producer call in SSA"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ChainIsolation.reassigned' AND callee.name = 'finish'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: 'SecondResult.finish' } }
+
+  - name: "Twelve receiver calls reach the final method"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ChainIsolation.deep' AND callee.name IN ['next', 'finish']
+        AND e.edge_kind = 'Calls'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 13 }
+      - { row: { target: 'finish' } }

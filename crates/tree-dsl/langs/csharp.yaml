@@ -68,13 +68,13 @@ stages:
       - match: '(catch_declaration type: $T:identifier name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
 
-  - name: retag-refs
+  - name: retag-expressions
     rules:
       - match: '(member_access_expression expression: $O:__ivar name: $M:identifier)'
         replace: '(__member @$M (__object $O))'
       - match: '(member_access_expression expression: $O:__member name: $M:identifier)'
         replace: '(__member @$M (__object $O))'
-      - match: '(member_access_expression expression: $O:invocation_expression name: $M:identifier)'
+      - match: '(member_access_expression expression: $O:__call name: $M:identifier)'
         replace: '(__member @$M (__object $O))'
       - match: '(member_access_expression (base) name: $M:identifier)'
         replace: '(__member @$M (__object (__ivar "base")))'
@@ -83,8 +83,6 @@ stages:
       - match: '(member_access_expression expression: $O name: $M:identifier)'
         replace: '(__member @$M (__object @$O))'
 
-  - name: retag-calls
-    rules:
       - match: '(invocation_expression function: $F:__ivar arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(invocation_expression function: $F:__member arguments: $A)'

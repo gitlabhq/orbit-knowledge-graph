@@ -52,7 +52,6 @@ canonical nodes named here.
 
 | Skipped tests | Gap | Where |
 | --- | --- | --- |
-| 9 | Chained receivers. `f().g()` has no SSA value for the receiver. Same-file needs a call receiver in the linker; cross-file needs the `returns` tag to flow through `resolve_type_edges` to a fixpoint. | `linker.rs` callee_shape, `resolver.rs` resolve_type_edges |
 | 7 | Builtin receivers. `LocalDate.now()` under `import java.time.*` should link, `Console.WriteLine` under `using System` should not. Only a builtin table separates them. | `linker.rs` resolve_obj |
 | 7 | Bogus tests. Generic stripping, diamond tie-break, companion counts, reopened namespaces, destructuring. | fixtures |
 | 6 | Records. Synthesized accessors shadow explicit members; the rules cannot see the body override. | `langs/java.yaml` |

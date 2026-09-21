@@ -167,7 +167,7 @@ Because inner nodes are processed first:
 
 ## Resolution
 
-After per-file rewriting and SSA linking, the resolver runs across all files to produce cross-file edges (Imports, Calls). Resolution runs in parallel using two waves.
+After per-file rewriting and SSA linking, the resolver runs across all files to produce cross-file edges (Imports, Calls). Resolution runs in parallel. Return-type waves repeat until no new call edges appear.
 
 ### Phase 1: File tree walk
 
@@ -228,13 +228,18 @@ Each import request independently:
 3. Scans callers for module-level method calls matching target definitions
 4. Promotes intra-file `Imports` edges to cross-file `Calls` edges
 
-#### Wave 2: Type and field edges (parallel per call edge)
+#### Type and field edges
 
-Each call edge from wave 1 independently:
-1. Infers the target's return type via `__ssa_return_type` or body scan
-2. Resolves the return type to a class definition
-3. Finds bindings that capture the call result, then resolves method calls on those bindings to the return type's methods
-4. Finds typed instance fields and resolves method calls through them
+Typed fields supply receiver call edges. Local and cross-file call edges then
+enter the same return-type waves. SSA records a TypeFlow dependency from each
+consumer call to the exact call that produces its receiver value.
+
+Each wave resolves the producer's return type and finds the consumer's method on
+that type. New call edges enter the next wave. The process stops when no new
+call-site and target pair remains. Class calls produce their class type.
+
+Edges retain call-site identities in saved snapshots. Rebuild snapshots saved
+with the earlier edge layout.
 
 ### Resolve config reference
 

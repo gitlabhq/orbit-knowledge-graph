@@ -315,9 +315,7 @@ tests:
   # to Builder.finish.
   # `step(): self` declared on Builder is rewritten to the declaring class, so
   # the chain `$this->step()->finish()` continues to Builder.finish.
-  # skip: tree-dsl: a call receiver that is itself a call has no SSA value
   - name: "self return-type chain FluentBuilder.go -> Builder.finish"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\FluentBuilder\go'

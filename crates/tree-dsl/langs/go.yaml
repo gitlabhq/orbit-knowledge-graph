@@ -42,15 +42,15 @@ stages:
       - match: '(variadic_parameter_declaration name: $N:identifier)'
         replace: '(__binding @$N)'
 
-  - name: retag-refs
+  - name: retag-expressions
     rules:
       - match: '(selector_expression operand: $O:__member field: $F)'
+        replace: '(__member @$F (__object $O))'
+      - match: '(selector_expression operand: $O:__call field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(selector_expression operand: $O field: $F)'
         replace: '(__member @$F (__object @$O))'
 
-  - name: retag-calls
-    rules:
       - match: '(call_expression function: (identifier "/^(append|cap|clear|close|complex|copy|delete|imag|len|make|max|min|new|panic|print|println|real|recover)$/") arguments: $A)'
         replace: '(__call (__callee) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'

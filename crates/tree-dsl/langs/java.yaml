@@ -84,7 +84,7 @@ stages:
       - match: '(catch_formal_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
 
-  - name: retag-refs
+  - name: retag-expressions
     rules:
       - match: '(field_access object: $O:__ivar field: $F:identifier)'
         replace: '(__member @$F (__object $O))'
@@ -93,8 +93,6 @@ stages:
       - match: '(field_access object: $O field: $F:identifier)'
         replace: '(__member @$F (__object @$O))'
 
-  - name: retag-calls
-    rules:
       # this.m() / m() — implicit this
       - match: '(method_invocation object: (this) name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__ivar @$N)) $A)'
