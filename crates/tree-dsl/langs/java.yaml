@@ -194,7 +194,7 @@ stages:
         replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
       # Record components become implicit accessor methods (see the records stage)
       - match: '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))'
-        replace: '(__def (__defname @$N) (__class) $M $$$ANN (record_components $$$P->record_component) $$$B)'
+        replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B (record_components $$$P->record_component))'
       - match: '(interface_declaration $M?:modifiers name: $N:identifier $$$ANN body: (interface_body $$$B))'
         replace: '(__def (__defname @$N) (__interface) $M $$$ANN $$$B)'
       - match: '(enum_declaration $M?:modifiers name: $N:identifier $$$ANN body: (enum_body $$$B))'

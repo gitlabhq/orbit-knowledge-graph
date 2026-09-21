@@ -67,7 +67,7 @@ tests:
     assert:
       - { row: { name: "outer" } }
 
-  # skip: tree-dsl: table-scoped functions live under an __impl wrapper and tables are class-like definitions, so this count includes them
+  # skip: bogus: the raw total-definition count depends on modelling; __impl wrappers for table functions (three M rows) and the nested local inner make the count modelling-dependent, not a language truth
   - name: "Total definitions from defs.lua"
     skip: true
     query: |
