@@ -1,6 +1,7 @@
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
 use crate::intern::Lang;
+use crate::resolver::CLASS_LIKE;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tree::{
     Cursor, Edge, EdgeKind, Step, Tree, find_method_in, infer_return_type, reachable,
@@ -49,11 +50,11 @@ struct Fold<'t> {
     tree: &'t Tree,
     ssa: SsaEngine,
     cur: BlockId,
-    def_count: u32,
+    root_seen: u32,
     import_count: u32,
     defs: Vec<u32>,
     imports: Vec<u32>,
-    import_names: Vec<u32>,
+    wildcards: Vec<u32>,
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
     callable_key: u32,
@@ -161,9 +162,12 @@ impl<'t> Fold<'t> {
             let sym = n.sym();
             self.import_count += 1;
             self.imports.push(n.index());
-            let hint = n.child_sym(C::SsaHint);
-            self.import_names
-                .push(n.child_sym(C::Alias).or(hint).unwrap_or(sym));
+            let local = n
+                .child_sym(C::Alias)
+                .or(n.child_sym(C::SsaHint))
+                .unwrap_or(sym);
+            self.wildcards
+                .extend((local == self.wildcard).then_some(n.index()));
             self.ssa
                 .write_variable(sym, self.cur, Value::ImportRef(self.import_count - 1));
             for kind in [C::Alias, C::SsaHint] {
@@ -185,17 +189,16 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
+        let def_idx = if self.defs.get(self.root_seen as usize) == Some(&idx) {
+            self.root_seen += 1;
+            self.root_seen - 1
+        } else {
+            self.defs.push(idx);
+            self.defs.len() as u32 - 1
+        };
+        self.declare(c, name, def_idx);
         let parent_block = self.cur;
         self.cur = self.ssa.add_sealed_successor(parent_block);
-        let def_idx = self.def_count;
-        self.def_count += 1;
-        self.defs.push(idx);
-        self.ssa
-            .write_variable(name, parent_block, Value::LocalDef(def_idx));
-        for alias in c.children_of(C::Alias) {
-            self.ssa
-                .write_variable(alias.sym(), parent_block, Value::LocalDef(def_idx));
-        }
         if let Some(&(Some(parent), _)) = self.def_stack.last() {
             self.edges.push(Edge::local(parent, idx, EdgeKind::Defines));
         }
@@ -210,6 +213,13 @@ impl<'t> Fold<'t> {
             self.def_stack.push((Some(idx), parent_block));
             stack.push(WorkItem::ExitScope);
             stack.extend(c.children_rev().map(|ch| WorkItem::Visit(ch.index())));
+        }
+    }
+
+    fn declare(&mut self, c: Cursor<'t>, name: u32, def_idx: u32) {
+        for sym in std::iter::once(name).chain(c.children_of(C::Alias).map(|a| a.sym())) {
+            self.ssa
+                .write_variable(sym, self.cur, Value::LocalDef(def_idx));
         }
     }
 
@@ -438,9 +448,7 @@ impl<'t> Fold<'t> {
     fn resolve_name(&mut self, sym: u32, from: u32) {
         let mut targets = self.lookup(sym);
         if targets.is_empty() {
-            let names = self.imports.iter().zip(&self.import_names);
-            let all = names.filter(|&(_, &s)| s == self.wildcard);
-            targets = all.map(|(&n, _)| Linked::Import(n)).collect();
+            targets = self.wildcards.iter().map(|&n| Linked::Import(n)).collect();
         }
         for r in &targets {
             match r {
@@ -475,13 +483,10 @@ impl<'t> Fold<'t> {
 
     fn enclosing_class(&self, node: u32) -> Option<u32> {
         let c = self.tree.cursor(node);
-        if c.children()
-            .any(|ch| ch.is(C::Class) || ch.is(C::ImplBlock) || ch.is(C::Trait))
-        {
+        if CLASS_LIKE.iter().any(|&k| c.has(k)) {
             Some(node)
         } else {
-            c.enclosing_def(&[C::Class, C::ImplBlock, C::Trait])
-                .map(|n| n.index())
+            c.enclosing_def(CLASS_LIKE).map(|n| n.index())
         }
     }
 
@@ -596,11 +601,11 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         tree,
         ssa,
         cur: entry,
-        def_count: 0,
+        root_seen: 0,
         import_count: 0,
         defs: Vec::new(),
         imports: Vec::new(),
-        import_names: Vec::new(),
+        wildcards: Vec::new(),
         def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern(WILDCARD),
         callable_key: lang.syms.intern("callable"),
@@ -609,6 +614,11 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
     };
 
     let root = tree.root();
+    let root_defs = root.children().filter(|d| d.is(C::Def));
+    for (d, name) in root_defs.filter_map(|d| Some((d, d.child_sym(C::DefName)?))) {
+        f.defs.push(d.index());
+        f.declare(d, name, f.defs.len() as u32 - 1);
+    }
     let mut stack = Vec::new();
     Fold::push_children(root, &mut stack);
     f.run(stack);

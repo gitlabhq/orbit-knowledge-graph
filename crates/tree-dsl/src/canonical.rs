@@ -205,6 +205,8 @@ pub enum Canonical {
     SsaHint,
     #[strum(serialize = "__import_kind")]
     ImportKind,
+    #[strum(serialize = "__decl")]
+    Decl,
     #[strum(serialize = "__constructor")]
     Constructor,
 }

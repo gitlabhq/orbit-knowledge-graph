@@ -49,6 +49,10 @@ stages:
 
   - name: classify
     rules:
+      - match: '(declaration declarator: (function_declarator declarator: $N:identifier))'
+        replace: '(__decl (__defname @$N))'
+      - match: '(declaration declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier)))'
+        replace: '(__decl (__defname @$N))'
       # Definitions (prototypes stay declarations)
       - match: '(function_definition declarator: (pointer_declarator declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier parameters: $P))) body: $B)'
         replace: '(__def (__defname @$N) (__function) $P $B)'

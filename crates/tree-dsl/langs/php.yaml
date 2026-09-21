@@ -20,9 +20,9 @@ stages:
     rules:
       # use A\B\C as D;  /  use function A\B\f;  /  use const A\B\K;
       - match: '(namespace_use_clause $Q:(qualified_name $N:name) alias: $A:name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^[^/]+/", "")) (__name @$N (__alias @$A)))'
+        replace: '(__import (__source @$Q) (__source_path @$Q|replace("\", "/")) (__name @$N (__alias @$A)))'
       - match: '(namespace_use_clause $Q:(qualified_name $N:name))'
-        replace: '(__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^[^/]+/", "")) (__name @$N))'
+        replace: '(__import (__source @$Q) (__source_path @$Q|replace("\", "/")) (__name @$N))'
 
       # Grouped clause entries: keep the name, carry the alias
       - match: '(namespace_use_clause $N:name alias: $A:name)'
@@ -32,22 +32,22 @@ stages:
 
       # use A\B\{C, D as E};
       - match: '(namespace_use_declaration $P:namespace_name body: (namespace_use_group $$$CLAUSES:namespace_use_clause))'
-        replace: '(__import (__source @$P) (__source_path @$P|replace("\", "/")|regex_replace("^[^/]+/", "")) $$$CLAUSES->__name)'
+        replace: '(__import (__source @$P) (__source_path @$P|replace("\", "/")) $$$CLAUSES->__name)'
 
       # \Vendor\X\Y::f() and new \Vendor\X\Y() — a fully qualified reference imports Y
       - match: '(scoped_call_expression scope: $Q:(qualified_name $N:name) name: $M arguments: $A)'
-        replace: '(php_fqn_ref (__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/?[^/]+/", "")) (__name @$N)) (scoped_call_expression scope: (name @$N) name: (name @$M) $A))'
+        replace: '(php_fqn_ref (__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/", "")) (__name @$N)) (scoped_call_expression scope: (name @$N) name: (name @$M) $A))'
       - match: '(object_creation_expression $Q:(qualified_name $N:name) $A:arguments)'
-        replace: '(php_fqn_ref (__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/?[^/]+/", "")) (__name @$N)) (object_creation_expression (name @$N) $A))'
+        replace: '(php_fqn_ref (__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/", "")) (__name @$N)) (object_creation_expression (name @$N) $A))'
 
   - name: normalize
     rules:
       - match: '(program $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(namespace_definition name: $N:namespace_name body: (compound_statement $$$B))'
-        replace: '(namespace_definition (__package @$N) $$$B)'
+        replace: '(namespace_definition (php_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace("\", "/")|regex_replace("$", "/*")) (__name "*")))) $$$B)'
       - match: '(namespace_definition name: $N:namespace_name)'
-        replace: '(__package @$N)'
+        replace: '(php_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace("\", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
 

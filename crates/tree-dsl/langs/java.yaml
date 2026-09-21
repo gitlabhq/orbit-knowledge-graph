@@ -30,9 +30,9 @@ stages:
       - match: '(program $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_declaration $S:scoped_identifier)'
-        replace: '(__package @$S)'
+        replace: '(java_pkg (__package @$S) (__module_export (__import (__source @$S) (__source_path @$S|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(package_declaration $S:identifier)'
-        replace: '(__package @$S)'
+        replace: '(java_pkg (__package @$S) (__module_export (__import (__source @$S) (__source_path @$S|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
 
