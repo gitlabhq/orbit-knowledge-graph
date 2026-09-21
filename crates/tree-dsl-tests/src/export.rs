@@ -361,7 +361,7 @@ fn compute_val<'a>(
 
 // ── Export ──
 
-static EXPORT_YAML: &str = include_str!("../../../config/export.yaml");
+static EXPORT_YAML: &str = include_str!("../../tree-dsl/config/export.yaml");
 
 pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Datasets> {
     let config: ExportConfig = serde_yaml::from_str(EXPORT_YAML)?;

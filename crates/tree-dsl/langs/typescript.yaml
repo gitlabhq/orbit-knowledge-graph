@@ -120,6 +120,8 @@ stages:
       # Bindings
       - match: '(variable_declarator name: $N value: $V:arrow_function)'
         replace: '(__def (__defname @$N) (__function) $V)'
+      - match: '(variable_declarator name: $N value: $V:identifier)'
+        replace: '(__binding @$N (__rhs @$V))'
       - match: '(variable_declarator name: $N value: $V)'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(variable_declarator name: $N)'
