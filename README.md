@@ -13,55 +13,40 @@
 [![license](https://img.shields.io/badge/license-GitLab%20EE-blue)](LICENSE.md)
 [![Community fork](https://img.shields.io/badge/Contribute-community%20fork-blue)](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph)
 
-[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Orbit Local](https://docs.gitlab.com/orbit/local/getting-started/) · [Orbit Remote](https://docs.gitlab.com/orbit/remote/getting-started/) · [AI coding agents](https://docs.gitlab.com/orbit/ai_coding_agents/)
+[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Getting started](https://docs.gitlab.com/orbit/local/getting-started/) · [AI coding agents](https://docs.gitlab.com/orbit/ai_coding_agents/)
 
 </div>
 
-Index your GitLab SDLC and source code as one property graph, then query it from the GitLab UI, a CLI, MCP, or REST. Orbit ships in two shapes: **Orbit Local**, a single-binary CLI that builds a code-only graph from any repository on your machine, and **Orbit Remote**, the hosted graph that spans a top-level GitLab.com group.
+Orbit indexes your GitLab SDLC and source code into one property graph, then lets you query it from the GitLab UI, a CLI, MCP, or REST. The graph can live on your machine — a single binary that builds a code-only graph from any repository, offline — or in the hosted service that spans a top-level GitLab.com group across SDLC and code. Same ontology, same query surface.
 
-> Beta. The Query DSL and ontology may change. Orbit Remote is gated by the `knowledge_graph` feature flag and must be enabled on a top-level group.
+> Beta. The Query DSL and ontology may change. The hosted graph is gated by the `knowledge_graph` feature flag and must be enabled on a top-level group.
 
 ## For contributors
 
 New here? Start with:
 
 - **[CONTRIBUTING.md](./CONTRIBUTING.md)** — build setup, test commands, MR conventions
-- **[Orbit Local quickstart](#quickstart-orbit-local)** — index a repo and run queries in minutes, no server needed
+- **[Quickstart](#quickstart)** — index a repo and run queries in minutes, no server needed
 - **[User docs](https://docs.gitlab.com/orbit/)** — understand what Orbit does before changing it
 - **[`orbit::hackathon` issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?label_name%5B%5D=orbit%3A%3Ahackathon)** — curated issues for new contributors
 
 Most contributions don't require Rust experience: ontology YAML, docs, cookbook recipes, and language parser stubs are all approachable without deep Rust knowledge.
 
-## Two ways to run Orbit
+## Using Orbit
 
-### Orbit Local
+The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only call graph to a single DuckDB file — no GitLab account is required at query time, and it runs offline after install. The hosted graph additionally indexes your SDLC (groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and default-branch source code across a top-level GitLab.com group, enforcing GitLab authorization on every query.
 
-Orbit Local runs on your machine. The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only call graph to a single DuckDB file. No GitLab account is required at query time. The install step downloads a release artifact over HTTPS.
-
-What it indexes: directories, files, function and class definitions, and cross-file import references. It indexes the same 11+ languages as Orbit Remote. Multiple checkouts share one database at `~/.gitlab/orbit/graph.duckdb`, each identified by its filesystem path. Reindexing after switching branches replaces that checkout's previous graph; use separate worktrees to retain multiple branches.
+Both cover the same 11+ languages: Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP, Bash/Shell, and Elixir. Local checkouts share one database at `~/.gitlab/orbit/graph.duckdb`, each identified by its filesystem path; reindexing after switching branches replaces that checkout's graph, so use separate worktrees to keep multiple branches.
 
 | Access method | Use for |
 |---|---|
-| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect the local graph |
-| [`glab orbit`](docs/source/local/access/glab.md) | Install and run Orbit Local through `glab` |
-| [MCP](docs/source/local/access/mcp.md) | Expose the local graph to AI coding agents over stdio |
-
-Start with [Orbit Local getting started](docs/source/local/getting-started.md).
-
-### Orbit Remote
-
-Enable Orbit on a top-level GitLab.com group. Orbit indexes your SDLC and source code into a managed property graph.
-
-What it indexes: SDLC objects (including groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and source code on the default branch across 11+ languages including Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP, Bash/Shell, and Elixir.
-
-| Access method | Use for |
-|---|---|
+| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect a graph directly |
+| [`glab orbit`](docs/source/local/access/glab.md) | Install and run Orbit through `glab` |
+| [MCP](docs/source/local/access/mcp.md) | Expose the graph to AI coding agents over stdio |
 | [GitLab Duo Agent Platform](docs/source/remote/access/duo.md) | Natural-language questions in the GitLab UI |
-| [MCP](docs/source/remote/access/mcp.md) | Claude Code, Codex, Cursor, opencode, Gemini CLI |
-| [`glab orbit`](docs/source/remote/access/glab.md) | Typed CLI subcommands for scripts and discovery |
 | [REST API](docs/source/remote/access/api.md) | Pipelines, custom tooling, scripts |
 
-Start with [Orbit Remote getting started](docs/source/remote/getting-started.md).
+Start with the [getting started guide](docs/source/local/getting-started.md).
 
 ```mermaid
 flowchart LR
@@ -82,7 +67,7 @@ flowchart LR
 
 ## Quickstart
 
-### Quickstart: Orbit Local
+### Index a local repository
 
 ```shell
 # Install (macOS, Linux glibc, Linux musl; --libc musl forces the static build)
@@ -93,7 +78,7 @@ orbit index .
 orbit sql 'SELECT count(*) FROM gl_definition'
 ```
 
-### Quickstart: Orbit Remote
+### Query the hosted graph
 
 ```shell
 # Requires glab 1.117+, authenticated (glab auth login), with Orbit enabled on your group.
@@ -127,18 +112,18 @@ The [cookbook](docs/source/remote/cookbook.md) has blast-radius, dependency, pip
 
 ## Features
 
-| Capability | Orbit Local | Orbit Remote |
+| Capability | Local graph | Hosted graph |
 |---|---|---|
 | Scope | Code only | SDLC and code |
 | Query interface | Raw DuckDB SQL | Query DSL compiled to ClickHouse SQL |
 | GitLab authorization | Filesystem permissions only | Enforced per query |
 | Runs offline | Yes (after install) | No |
 
-Orbit Local exposes raw SQL, so traversals are expressed as joins. Orbit Remote supports aggregations, traversals, neighbors, and pathfinding at multi-billion-edge scale.
+The local graph exposes raw SQL, so traversals are expressed as joins. The hosted graph adds the Query DSL — aggregations, traversals, neighbors, and pathfinding at multi-billion-edge scale.
 
 ## Architecture
 
-Orbit shares a Rust workspace and YAML ontology across two runtimes. Orbit Remote runs the `gkg-server` service modes against ClickHouse and serves HTTP, gRPC, REST, and MCP requests. Orbit Local runs the standalone `orbit` CLI against DuckDB and exposes direct commands plus a stdio MCP server. See the [design documents](docs/design-documents/) and the [data model](docs/design-documents/data_model.md) for the full picture.
+Orbit shares a Rust workspace and YAML ontology across two runtimes. The hosted service runs the `gkg-server` service modes against ClickHouse and serves HTTP, gRPC, REST, and MCP requests. The `orbit` CLI runs standalone against DuckDB and exposes direct commands plus a stdio MCP server. See the [design documents](docs/design-documents/) and the [data model](docs/design-documents/data_model.md) for the full picture.
 
 ## Documentation
 
