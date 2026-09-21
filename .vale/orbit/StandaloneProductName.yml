@@ -3,7 +3,12 @@ name: orbit.StandaloneProductName
 description: Requires the full GitLab Orbit product name in public documentation.
 extends: existence
 message: "Use 'GitLab Orbit' instead of standalone 'Orbit'."
-level: error
+# Advisory, not blocking. The GitLab Duo wordmark standards carve out an
+# exception for Orbit, and UI strings such as the "Use Orbit in GitLab Duo"
+# checkbox must be documented under the name shown on screen, or the
+# documentation breaks its accessibility contract with the product. Restore
+# `error` once gitlab-org/gitlab!245640 renames the UI strings upstream.
+level: warning
 scope: text
 raw:
   - '(?<!GitLab )\bOrbit\b(?! > Configuration)'

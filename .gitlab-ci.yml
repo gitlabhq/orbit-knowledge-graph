@@ -581,8 +581,10 @@ check_docs_markdown:
     - .mr-only-rules
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
   script:
-    # Lint prose
+    # Lint prose. Errors block the job; the second pass surfaces warnings
+    # (including orbit.StandaloneProductName) without ever failing it.
     - vale --minAlertLevel error docs/source
+    - vale --minAlertLevel warning docs/source || true
     # Lint Markdown. docs/source is user-facing; root and docs/dev are contributor
     # docs that previously reached CI unlinted (design-documents deferred: #981).
     - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'

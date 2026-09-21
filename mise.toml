@@ -487,6 +487,10 @@ description = "Run markdownlint on all markdown files"
 run = "vale --minAlertLevel error *.md docs docs-locale"
 description = "Run Vale prose linting on markdown files"
 
+[tasks."lint:vale:advisory"]
+run = "vale --minAlertLevel warning *.md docs docs-locale"
+description = "Report Vale warnings (advisory, never fails)"
+
 [tasks."lint:links"]
 run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode '**/*.md'"
 description = "Check for broken links in markdown files"
