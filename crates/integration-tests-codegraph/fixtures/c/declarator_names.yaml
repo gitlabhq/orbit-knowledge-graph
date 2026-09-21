@@ -56,9 +56,7 @@ tests:
       - { row_count: 1 }
       - { row: { name: "paren_decl", fqn: "funcs::paren_decl" } }
 
-  # skip: tree-dsl DSL: this declarator shape (function-pointer return, parenthesized, attribute, MSVC modifier, conversion operator) is not unwrapped by the rules
   - name: "Function-pointer-return extracts bare identifier"
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::fnptr_return'
