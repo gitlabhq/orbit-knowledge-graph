@@ -30,7 +30,7 @@ impl Change for Skill {
         for skill in targets(assistants, target)? {
             write_files(&skill.root, &skill.label, report)?;
             if let Some((link_path, link_label)) = &skill.link {
-                link(link_path, &skill.root, link_label, report)?;
+                link(link_path, &skill.root, &skill.label, link_label, report)?;
             }
         }
         Ok(())
@@ -107,7 +107,13 @@ fn write_files(skill_root: &Path, label: &str, report: &mut Report) -> Result<()
     Ok(())
 }
 
-fn link(link_path: &Path, skill_root: &Path, label: &str, report: &mut Report) -> Result<()> {
+fn link(
+    link_path: &Path,
+    skill_root: &Path,
+    skill_label: &str,
+    label: &str,
+    report: &mut Report,
+) -> Result<()> {
     if let Ok(metadata) = std::fs::symlink_metadata(link_path) {
         let state = if metadata.is_symlink() {
             "already linked"
@@ -124,7 +130,7 @@ fn link(link_path: &Path, skill_root: &Path, label: &str, report: &mut Report) -
 
     match symlink_dir(&relative_to(link_path, skill_root), link_path) {
         Ok(()) => {
-            report.note(label, format!("linked to {}", skill_root.display()));
+            report.note(label, format!("linked to {skill_label}"));
             Ok(())
         }
         Err(_) => write_files(link_path, label, report),

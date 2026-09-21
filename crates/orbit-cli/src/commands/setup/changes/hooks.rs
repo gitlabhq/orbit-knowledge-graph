@@ -87,7 +87,7 @@ fn install_for(assistant: &AssistantSpec, target: &Target, report: &mut Report) 
                 backup_once(&path, &label, report)?;
             }
             json::write_object(&path, &root)?;
-            report.note(&label, format!("{value} registered"));
+            report.note(&label, format!("{} registered", registration.value.project));
         }
     }
 
