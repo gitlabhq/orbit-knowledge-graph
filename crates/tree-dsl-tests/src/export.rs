@@ -263,10 +263,10 @@ fn resolve_column<'a>(
             c.sym()
         } else {
             let mut v = find_display_sym(tree, c, from, lang);
-            if v == 0 {
-                if let Some(en) = expand_node {
-                    v = find_display_sym(tree, en, from, lang);
-                }
+            if v == 0
+                && let Some(en) = expand_node
+            {
+                v = find_display_sym(tree, en, from, lang);
             }
             v
         };
@@ -299,19 +299,19 @@ fn compute_val<'a>(
     let import_type_key = lang.syms.intern("import_type");
     match compute {
         "import_type" => {
-            if let Some(en) = expand {
-                if let Some(v) = tree.get_tag(en.index(), import_type_key) {
-                    return Val::S(lang.syms.resolve(v));
-                }
+            if let Some(en) = expand
+                && let Some(v) = tree.get_tag(en.index(), import_type_key)
+            {
+                return Val::S(lang.syms.resolve(v));
             }
             if let Some(v) = tree.get_tag(c.index(), import_type_key) {
                 return Val::S(lang.syms.resolve(v));
             }
             let source_sym = c.child_sym(C::Source).unwrap_or(0);
-            if let Some(en) = expand {
-                if en.sym() == source_sym {
-                    return Val::S("Import");
-                }
+            if let Some(en) = expand
+                && en.sym() == source_sym
+            {
+                return Val::S("Import");
             }
             Val::S("NamedImport")
         }
@@ -392,10 +392,10 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
                 if !source_kinds.contains(&c.kind()) {
                     continue;
                 }
-                if let Some(ep) = exclude_parent {
-                    if c.parent().is_some_and(|p| p.kind() == ep) {
-                        continue;
-                    }
+                if let Some(ep) = exclude_parent
+                    && c.parent().is_some_and(|p| p.kind() == ep)
+                {
+                    continue;
                 }
 
                 if let Some(ek) = expand_kind {
@@ -485,10 +485,11 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
                     }
                 }
                 for edge in edges.iter().filter(|e| e.from_tree == fi as u32) {
-                    if edge.from_node == 0 && edge.kind == EdgeKind::Calls {
-                        if let Some(&tid) = tgt_ids.get(&(fi, edge.to_node)) {
-                            t.row(&[Val::I(root_id), Val::I(tid), Val::S("Calls")]);
-                        }
+                    if edge.from_node == 0
+                        && edge.kind == EdgeKind::Calls
+                        && let Some(&tid) = tgt_ids.get(&(fi, edge.to_node))
+                    {
+                        t.row(&[Val::I(root_id), Val::I(tid), Val::S("Calls")]);
                     }
                 }
             }

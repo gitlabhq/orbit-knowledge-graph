@@ -312,8 +312,7 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
 }
 
 fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> (u16, Tf) {
-    if val.starts_with("@$") {
-        let rest = &val[2..];
+    if let Some(rest) = val.strip_prefix("@$") {
         let (slot_name, pipeline) = match rest.find('|') {
             Some(i) => (&rest[..i], Some(&rest[i + 1..])),
             None => (rest, None),
@@ -367,7 +366,7 @@ stages:
       - match: '(attribute object: (identifier "self") attribute: $A)'
         replace: '(__ivar @$A)'
 "#;
-        let mut lang = Lang::new();
+        let lang = Lang::new();
         let stages = load_rules(yaml, &lang);
         assert_eq!(stages.len(), 1);
         assert_eq!(stages[0].len(), 1);
@@ -396,7 +395,7 @@ stages:
       - match: '(class_definition name: $N body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $B)'
 "#;
-        let mut lang = Lang::new();
+        let lang = Lang::new();
         let stages = load_rules(yaml, &lang);
         assert_eq!(stages.len(), 3);
     }

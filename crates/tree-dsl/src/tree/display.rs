@@ -55,7 +55,7 @@ pub fn pretty_print(tree: &super::Tree, lang: &Lang, color: bool) -> String {
         tt
     }
 
-    if tree.len() == 0 {
+    if tree.is_empty() {
         return String::from("(empty)");
     }
     build(tree.root(), lang, color).to_string()
