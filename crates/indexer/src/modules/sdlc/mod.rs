@@ -1,5 +1,6 @@
 mod datalake;
 mod handler;
+pub mod jobs;
 mod metrics;
 pub(crate) mod observer;
 mod paging;
@@ -24,6 +25,7 @@ use crate::topic::{
     GLOBAL_HANDLER_TOPIC, GlobalIndexingRequest, NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest,
 };
 use crate::types::Event;
+use ::jobs::JobLedger;
 use datalake::{Datalake, DatalakeQuery};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
@@ -57,6 +59,7 @@ pub async fn register_handlers(
     let graph_client = Arc::new(config.graph.build_client());
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(datalake_client));
+    let ledger = JobLedger::new(Arc::clone(&graph_client));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
     let metrics = SdlcMetrics::new();
@@ -118,6 +121,7 @@ pub async fn register_handlers(
             global_subscription.clone(),
             strategy,
             analytics.clone(),
+            ledger.clone(),
         )));
         global_count += 1;
     }
@@ -138,6 +142,7 @@ pub async fn register_handlers(
             namespace_subscription.clone(),
             strategy,
             analytics.clone(),
+            ledger.clone(),
         )));
         namespaced_count += 1;
     }

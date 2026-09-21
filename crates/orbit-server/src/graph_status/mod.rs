@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
-use indexer::indexing_status::IndexingStatusStore;
+use jobs::JobLedger;
 use ontology::Ontology;
 use orbit_server_config::QueryConfig;
 use orbit_utils::arrow::ArrowUtils;
@@ -26,7 +26,7 @@ use self::input::GraphStatusInput;
 
 pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
-    indexing_status: Option<IndexingStatusStore>,
+    ledger: JobLedger,
 }
 
 fn graph_status_query_config() -> QueryConfig {
@@ -39,14 +39,9 @@ fn graph_status_query_config() -> QueryConfig {
 impl GraphStatusService {
     pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
         Self {
+            ledger: JobLedger::new(Arc::clone(&client)),
             client,
-            indexing_status: None,
         }
-    }
-
-    pub fn with_indexing_status(mut self, store: IndexingStatusStore) -> Self {
-        self.indexing_status = Some(store);
-        self
     }
 
     pub async fn get_status(
@@ -77,8 +72,7 @@ impl GraphStatusService {
                 })
         };
         let code_future = code::get_code_indexing_state(&self.client, ontology, traversal_path);
-        let sdlc_future =
-            sdlc::get_sdlc_indexing_state(self.indexing_status.as_ref(), ontology, traversal_path);
+        let sdlc_future = sdlc::get_sdlc_indexing_state(&self.ledger, ontology, traversal_path);
 
         let (entity_counts, code, sdlc) =
             tokio::join!(entity_counts_future, code_future, sdlc_future);
@@ -87,7 +81,7 @@ impl GraphStatusService {
             entity_count = entity_counts.len(),
             projects_indexed = code.projects.indexed,
             projects_total = code.projects.total_known,
-            sdlc_state = ?sdlc.aggregate.as_ref().and_then(|s| IndexingState::try_from(s.state).ok()),
+            sdlc_state = ?IndexingState::try_from(sdlc.aggregate.state).ok(),
             code_state = ?code.aggregate.as_ref().and_then(|s| IndexingState::try_from(s.state).ok()),
             "Graph status fetched"
         );
@@ -99,16 +93,13 @@ impl GraphStatusService {
         let domains =
             present_domain_response(ontology, &entity_counts, &visible_nodes, &item_states);
 
-        let indexing = match &sdlc.aggregate {
-            Some(sdlc_status) => worst_indexing_status(Some(sdlc_status), code.aggregate.as_ref()),
-            None => None,
-        };
+        let indexing = worst_indexing_status(Some(&sdlc.aggregate), code.aggregate.as_ref());
 
         let structured = StructuredGraphStatus {
             projects: Some(code.projects),
             domains,
             indexing,
-            sdlc_indexing: sdlc.aggregate,
+            sdlc_indexing: Some(sdlc.aggregate),
             code_indexing: code.aggregate,
         };
 

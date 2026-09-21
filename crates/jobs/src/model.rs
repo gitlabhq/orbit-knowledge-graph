@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use chrono::{DateTime, Utc};
 use orbit_utils::traversal_path::TraversalPath;
 use uuid::Uuid;
@@ -11,12 +9,6 @@ pub struct CampaignId {
     pub kind: CampaignKind,
     pub subject: String,
     pub generation: DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PhaseSpec {
-    pub kind: JobKind,
-    pub required: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -88,38 +80,6 @@ impl JobState {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PhaseState {
-    Open = 1,
-    DiscoveryClosed = 2,
-    Abandoned = 3,
-}
-
-impl PhaseState {
-    pub(crate) fn rank(self) -> u64 {
-        self as u64
-    }
-
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            PhaseState::Open => "open",
-            PhaseState::DiscoveryClosed => "discovery_closed",
-            PhaseState::Abandoned => "abandoned",
-        }
-    }
-
-    pub(crate) fn parse(name: &str) -> Result<Self, InvalidState> {
-        [
-            PhaseState::Open,
-            PhaseState::DiscoveryClosed,
-            PhaseState::Abandoned,
-        ]
-        .into_iter()
-        .find(|state| state.as_str() == name)
-        .ok_or_else(|| InvalidState(name.to_owned()))
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JobTransition {
     pub job: JobRef,
@@ -127,93 +87,21 @@ pub struct JobTransition {
     pub attempt: u32,
     pub state: JobState,
     pub reason: Option<String>,
+    pub rows_read: u64,
+    pub rows_written: u64,
+    pub started_at: DateTime<Utc>,
     pub recorded_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PhaseSummary {
-    pub kind: JobKind,
-    pub required: bool,
-    pub discovery_closed: bool,
-    pub abandoned: bool,
-    pub counts_by_state: BTreeMap<JobState, u64>,
-}
-
-impl PhaseSummary {
-    pub fn is_complete(&self) -> bool {
-        self.discovery_closed
-            && self
-                .counts_by_state
-                .iter()
-                .all(|(state, count)| state.is_terminal() || *count == 0)
-    }
-
-    pub fn count(&self, state: JobState) -> u64 {
-        self.counts_by_state.get(&state).copied().unwrap_or(0)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CampaignSummary {
-    pub id: CampaignId,
-    pub phases: Vec<PhaseSummary>,
-}
-
-impl CampaignSummary {
-    pub fn is_complete(&self) -> bool {
-        self.phases.iter().all(PhaseSummary::is_complete)
-    }
-
-    pub fn is_ready(&self) -> bool {
-        self.phases
-            .iter()
-            .filter(|phase| phase.required)
-            .all(PhaseSummary::is_complete)
-    }
-
-    pub fn is_abandoned(&self) -> bool {
-        self.phases.iter().any(|phase| phase.abandoned)
-    }
-
-    pub fn count(&self, state: JobState) -> u64 {
-        self.phases.iter().map(|phase| phase.count(state)).sum()
-    }
-
-    pub fn total(&self) -> u64 {
-        self.phases
-            .iter()
-            .flat_map(|phase| phase.counts_by_state.values())
-            .sum()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JobFilter {
+pub struct JobRun {
     pub namespace_id: i64,
-    pub campaign: Option<CampaignId>,
-    pub kind: Option<JobKind>,
-    pub states: Vec<JobState>,
-    pub limit: usize,
-}
-
-impl JobFilter {
-    pub fn for_namespace(namespace_id: i64) -> Self {
-        Self {
-            namespace_id,
-            campaign: None,
-            kind: None,
-            states: Vec::new(),
-            limit: 1_000,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JobSnapshot {
-    pub job: JobRef,
-    pub dispatch_id: Uuid,
-    pub attempt: u32,
+    pub traversal_path: TraversalPath,
+    pub key: String,
     pub state: JobState,
     pub reason: Option<String>,
-    pub recorded_at: DateTime<Utc>,
+    pub rows_read: u64,
+    pub rows_written: u64,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
 }

@@ -112,16 +112,17 @@ The response includes a `projects` object with `indexed` (how many projects have
 
 The entity count and project count queries run concurrently.
 
-### Phase 2: Indexing progress via NATS KV
+### Phase 2: Indexing progress
 
-The indexer writes indexing metadata to a NATS KV bucket (`indexing_progress`) after each run completes. Each key maps to a project or namespace:
+Namespace-data (SDLC) run status comes from the job ledger, the unversioned
+ClickHouse table `job` described in [ADR 019](019_job_ledger.md). Each
+namespace-data pipeline records `running`, then `succeeded`, `failed`, or
+`deferred`, with row counts. The server reads the latest run per pipeline under
+the requested path in one query.
 
-- SDLC: keyed by top-level namespace ID (e.g., `sdlc.9970`)
-- Code: keyed by project ID (e.g., `code.278964`)
-
-The value is the same shape for both: `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error`. Overwritten on every run, so it always reflects the most recent attempt. A non-empty `last_error` means the last run failed.
-
-Reads are O(1) lookups, with no extra ClickHouse queries for indexing metadata. The `projects.indexed` / `projects.total_known` counts still come from ClickHouse since they require aggregation.
+Code indexing writes its run metadata to the NATS KV bucket
+`orbit_indexing_progress` keyed by project path. That path moves to the ledger
+next.
 
 Schema migrations trigger a full re-index, but the previous progress entry stays valid until the re-index completes. The data is stale but still accurate for the old schema version, so the endpoint keeps serving it rather than showing nothing.
 
@@ -281,7 +282,7 @@ For a subgroup, indexing metadata comes from the top-level group. Entity counts 
 
 | Response field | Source |
 |---|---|
-| `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error` | NATS KV `indexing_progress`, key `sdlc.{top_level_namespace_id}` (group) or `code.{project_id}` (project) |
+| `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error`, `last_rows_*` | Latest `namespace_data` job run per pipeline under the path, from the `job` table (ADR 019) |
 | `projects.total_known` | `uniq(id)` on `gl_project`, `startsWith(traversal_path, ...)` |
 | `projects.indexed` | `uniq(project_id)` on `code_indexing_checkpoint`, `startsWith(traversal_path, ...)` |
 | `stats[].items[].count` | `uniq(id)` per node table, `startsWith(traversal_path, ...)` |

@@ -32,6 +32,7 @@ orbit-versions = { path = "../orbit-versions" }
 health-check = { workspace = true }
 indexer = { path = "../indexer" }
 orbit-migrations = { path = "../orbit-migrations" }
+jobs = { path = "../jobs" }
 minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true }

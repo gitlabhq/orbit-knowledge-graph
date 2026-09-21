@@ -162,8 +162,9 @@ mod tests {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let tables = all_tables();
         for aux in ontology.auxiliary_tables() {
+            let prefixed = prefixed_table_name(&aux.name, *SCHEMA_VERSION);
             assert!(
-                !tables.iter().any(|t| t.ends_with(&aux.name)),
+                !tables.iter().any(|t| *t == aux.name || *t == prefixed),
                 "auxiliary table '{}' must not be swept",
                 aux.name
             );

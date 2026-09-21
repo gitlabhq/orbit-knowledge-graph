@@ -50,7 +50,7 @@ ClickHouse tables on the graph cluster, owned by the `jobs` crate.
 | `PhaseSpec` | One job kind plus `required`. A campaign is a list of phases. |
 | `JobRef` | Optional campaign, `namespace_id`, `traversal_path`, `kind`, opaque `key`. |
 | `JobState` | `pending, queued, running, retrying, deferred, failed, skipped, succeeded`. The only closed enum. |
-| `JobTransition` | `JobRef`, `dispatch_id`, `attempt`, `state`, optional `reason`, `recorded_at`. |
+| `JobTransition` | `JobRef`, `dispatch_id`, `attempt`, `state`, optional `reason`, row counts, `started_at`, `recorded_at`. |
 
 The ledger never matches on a kind. Integrations own their constants:
 
@@ -75,6 +75,8 @@ campaign expire after 30 days.
 
 Both tables use `ReplacingMergeTree(_version, _deleted)` with `_version` = state
 rank. A late or duplicate write cannot lower a state. `_deleted` is reserved.
+Each row carries the attempt's `started_at`, its `reason`, and its row counts, so a
+terminal row replaces the running row without losing the start time.
 
 | Job rank | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -95,8 +97,10 @@ Phase ranks: `open` 1, `discovery_closed` 2, `abandoned` 3.
 ### Writes
 
 Workers record outcomes at their durable commit points. Every write is one Arrow
-batch with `async_insert = 1` and `wait_for_async_insert = 1`. Registration is
-idempotent. Errors are errors; no store failure maps to a job state.
+batch with `async_insert = 1` and `wait_for_async_insert = 0`, so a status write
+never blocks the indexing run. ClickHouse flushes the buffer within its async
+insert timeout. Registration is idempotent. Errors are errors; no store failure
+maps to a job state. A ledger write failure is logged and does not fail the run.
 
 ### Policies
 
@@ -140,9 +144,19 @@ already takes checkpoint writes at a higher rate.
 - The KV progress bucket and `indexing_status.rs` are deleted.
 - A visualizer and admin retry can read `JobLedger::jobs`. Not in this series.
 
-Delivery: MR1 crate and tables. MR2 dispatcher opens campaigns and registers jobs.
-MR3 workers record outcomes. MR4 `graph_status` reads the ledger. MR5 schema
-migration as a campaign.
+Delivery is one user-visible outcome per MR. Each MR adds only the ledger
+surface it calls and deletes the code it replaces.
+
+| MR | Outcome | Ledger surface | Deleted |
+| --- | --- | --- | --- |
+| 1 | Namespace-data run status comes from the ledger. | `job` table, `record`, `latest_runs` | SDLC writes to the KV bucket; the KV read in `graph_status` |
+| 2 | Code outcomes, retries, and failures are recorded per project. | engine hook, `record_many`, `jobs` | Code writes to KV; the bucket; `indexing_status.rs` |
+| 3 | `graph_status` reports `INDEXED` or `BACKFILLING`. | `campaign` table, `open_campaign`, `close_discovery`, `abandon_campaign`, `register`, `latest_campaign` | coverage query in `graph_status/code.rs` |
+| 4 | Backfill publishing reads the ledger. | `pending_jobs` | checkpoint filter and in-memory set in `code_backfill.rs` |
+| 5 | Schema migration completion is a campaign. | `SCHEMA_MIGRATION` kind | `completion.rs` |
+
+The `job` table is created in MR1 with its final columns. Its sort key starts
+with the campaign columns, and a sort key cannot change later.
 
 ## Non-goals
 

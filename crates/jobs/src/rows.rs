@@ -3,42 +3,9 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use orbit_utils::arrow::{BatchBuilder, ColumnSpec, ColumnType};
 
-use crate::model::{CampaignId, JobRef, JobTransition, PhaseSpec, PhaseState};
+use crate::model::{JobRef, JobTransition};
 
-pub(crate) const CAMPAIGN_TABLE: &str = "campaign";
 pub(crate) const JOB_TABLE: &str = "job";
-
-pub(crate) fn build_campaign_batch(
-    campaign: &CampaignId,
-    phases: &[PhaseSpec],
-    state: PhaseState,
-    recorded_at: DateTime<Utc>,
-) -> Result<RecordBatch, ArrowError> {
-    let columns = [
-        column("kind", ColumnType::Str),
-        column("subject", ColumnType::Str),
-        column("generation", ColumnType::TimestampMicros),
-        column("job_kind", ColumnType::Str),
-        column("required", ColumnType::Bool),
-        column("state", ColumnType::Str),
-        column("recorded_at", ColumnType::TimestampMicros),
-        column("_version", ColumnType::UInt),
-    ];
-
-    BatchBuilder::new(&columns, phases.len())?.build(phases, |phase, row| {
-        row.col("kind")?.push_str(campaign.kind.as_str())?;
-        row.col("subject")?.push_str(&campaign.subject)?;
-        row.col("generation")?
-            .push_timestamp_micros(campaign.generation.timestamp_micros())?;
-        row.col("job_kind")?.push_str(phase.kind.as_str())?;
-        row.col("required")?.push_bool(phase.required)?;
-        row.col("state")?.push_str(state.as_str())?;
-        row.col("recorded_at")?
-            .push_timestamp_micros(recorded_at.timestamp_micros())?;
-        row.col("_version")?.push_uint(state.rank())?;
-        Ok(())
-    })
-}
 
 pub(crate) fn build_job_batch(transitions: &[JobTransition]) -> Result<RecordBatch, ArrowError> {
     let columns = [
@@ -53,6 +20,9 @@ pub(crate) fn build_job_batch(transitions: &[JobTransition]) -> Result<RecordBat
         column("attempt", ColumnType::Int),
         column("state", ColumnType::Str),
         column("reason", ColumnType::Str),
+        column("rows_read", ColumnType::Int),
+        column("rows_written", ColumnType::Int),
+        column("started_at", ColumnType::TimestampMicros),
         column("recorded_at", ColumnType::TimestampMicros),
         column("_version", ColumnType::UInt),
     ];
@@ -77,6 +47,12 @@ pub(crate) fn build_job_batch(transitions: &[JobTransition]) -> Result<RecordBat
         row.col("state")?.push_str(transition.state.as_str())?;
         row.col("reason")?
             .push_str(transition.reason.as_deref().unwrap_or(""))?;
+        row.col("rows_read")?
+            .push_int(count_as_int64(transition.rows_read))?;
+        row.col("rows_written")?
+            .push_int(count_as_int64(transition.rows_written))?;
+        row.col("started_at")?
+            .push_timestamp_micros(transition.started_at.timestamp_micros())?;
         row.col("recorded_at")?
             .push_timestamp_micros(transition.recorded_at.timestamp_micros())?;
         row.col("_version")?.push_uint(transition.state.rank())?;
@@ -90,6 +66,10 @@ fn column(name: &str, col_type: ColumnType) -> ColumnSpec {
         col_type,
         nullable: false,
     }
+}
+
+fn count_as_int64(count: u64) -> i64 {
+    i64::try_from(count).unwrap_or(i64::MAX)
 }
 
 fn campaign_kind_or_empty(job: &JobRef) -> &str {

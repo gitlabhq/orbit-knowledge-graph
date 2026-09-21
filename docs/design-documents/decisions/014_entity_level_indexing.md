@@ -171,7 +171,10 @@ inserts a completed row at the parent key and tombstones every row matching
 
 ### Indexing status tracking
 
-Today, one NATS KV key per namespace tracks indexing progress
+Superseded for namespace data by [ADR 019](019_job_ledger.md): each pipeline run
+is a job in the ClickHouse `job` table.
+
+At the time of this decision, one NATS KV key per namespace tracked indexing progress
 (`orbit_indexing_progress` bucket, consumed by `GraphStatusService`). With
 per-entity handlers, this breaks: Entity A completing and writing "Indexed"
 while Entity B is still running gives a wrong answer for the namespace.

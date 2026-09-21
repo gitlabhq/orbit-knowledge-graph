@@ -297,18 +297,6 @@ settings:
         - {name: compressed_bytes, type: int64}
       order_by: [logical_table, top_level_namespace, snapshot_date]
       ttl: snapshot_date + INTERVAL 400 DAY
-    - name: campaign
-      versioned: false
-      version_type: uint64
-      columns:
-        - {name: kind, type: string}
-        - {name: subject, type: string}
-        - {name: generation, type: timestamp}
-        - {name: job_kind, type: string}
-        - {name: required, type: boolean}
-        - {name: state, type: string}
-        - {name: recorded_at, type: timestamp}
-      order_by: [kind, subject, generation, job_kind]
     - name: job
       versioned: false
       version_type: uint64
@@ -324,6 +312,9 @@ settings:
         - {name: attempt, type: int64}
         - {name: state, type: string}
         - {name: reason, type: string, default: "''"}
+        - {name: rows_read, type: int64, default: "0"}
+        - {name: rows_written, type: int64, default: "0"}
+        - {name: started_at, type: timestamp, codec: ["Delta(8)", "ZSTD(1)"]}
         - {name: recorded_at, type: timestamp, codec: ["Delta(8)", "ZSTD(1)"]}
       order_by: [campaign_kind, campaign_subject, campaign_generation, namespace_id, kind, key, dispatch_id, attempt]
       projections:

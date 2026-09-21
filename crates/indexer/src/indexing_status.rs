@@ -101,60 +101,6 @@ impl IndexingStatusStore {
         self.read_key(&key).await
     }
 
-    pub async fn record_entity_start(
-        &self,
-        traversal_path: &TraversalPath,
-        entity_kind: &str,
-        started_at: DateTime<Utc>,
-    ) {
-        let previous = self.get_entity(traversal_path, entity_kind).await.unwrap_or_else(|error| {
-            warn!(%traversal_path, entity_kind, %error, "failed to read previous entity progress; starting from scratch");
-            None
-        });
-        let progress = match previous {
-            Some(mut prev) => {
-                prev.last_started_at = started_at;
-                prev
-            }
-            None => IndexingProgress {
-                last_started_at: started_at,
-                last_completed_at: None,
-                last_duration_ms: None,
-                last_error: None,
-                last_rows_read: None,
-                last_rows_written: None,
-            },
-        };
-        self.write_entity(traversal_path, entity_kind, progress)
-            .await;
-    }
-
-    pub async fn record_entity_completion(
-        &self,
-        traversal_path: &TraversalPath,
-        entity_kind: &str,
-        started_at: DateTime<Utc>,
-        completed_at: DateTime<Utc>,
-        error: Option<String>,
-        rows: RunRows,
-    ) {
-        self.write_entity(
-            traversal_path,
-            entity_kind,
-            completed_progress(started_at, completed_at, error, rows),
-        )
-        .await;
-    }
-
-    pub async fn get_entity(
-        &self,
-        traversal_path: &TraversalPath,
-        entity_kind: &str,
-    ) -> Result<Option<IndexingProgress>, Error> {
-        let key = entity_key(traversal_path, entity_kind)?;
-        self.read_key(&key).await
-    }
-
     async fn read_key(&self, key: &str) -> Result<Option<IndexingProgress>, Error> {
         let Some(entry) = self.kv.kv_get(INDEXING_PROGRESS_BUCKET, key).await? else {
             return Ok(None);
@@ -168,22 +114,6 @@ impl IndexingStatusStore {
             Ok(key) => key,
             Err(error) => {
                 warn!(%traversal_path, %error, "skipping indexing status record");
-                return;
-            }
-        };
-        self.write_raw(&key, progress).await;
-    }
-
-    async fn write_entity(
-        &self,
-        traversal_path: &TraversalPath,
-        entity_kind: &str,
-        progress: IndexingProgress,
-    ) {
-        let key = match entity_key(traversal_path, entity_kind) {
-            Ok(key) => key,
-            Err(error) => {
-                warn!(%traversal_path, entity_kind, %error, "skipping entity indexing status record");
                 return;
             }
         };
@@ -243,12 +173,6 @@ fn normalize_key(traversal_path: &TraversalPath) -> Result<String, Error> {
     Ok(format!("{KEY_PREFIX}.{dotted}"))
 }
 
-/// `("42/9970/", "MergeRequest")` → `"status.42.9970.MergeRequest"`.
-fn entity_key(traversal_path: &TraversalPath, entity_kind: &str) -> Result<String, Error> {
-    let base = normalize_key(traversal_path)?;
-    Ok(format!("{base}.{entity_kind}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,22 +202,6 @@ mod tests {
                 "input: {empty:?}"
             );
         }
-    }
-
-    #[test]
-    fn entity_key_appends_kind() {
-        assert_eq!(
-            entity_key(&TraversalPath::new_unchecked("42/9970/"), "MergeRequest").unwrap(),
-            "status.42.9970.MergeRequest"
-        );
-        assert_eq!(
-            entity_key(&TraversalPath::new_unchecked("42/9970/12345/"), "Issue").unwrap(),
-            "status.42.9970.12345.Issue"
-        );
-        assert!(matches!(
-            entity_key(&TraversalPath::new_unchecked(""), "MergeRequest"),
-            Err(Error::EmptyTraversalPath)
-        ));
     }
 
     #[test]

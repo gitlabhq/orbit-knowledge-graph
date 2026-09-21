@@ -122,14 +122,6 @@ impl OrbitServiceImpl {
         self.pipeline = self.pipeline.with_analytics(tracker);
         self
     }
-
-    pub fn with_indexing_status(
-        mut self,
-        store: indexer::indexing_status::IndexingStatusStore,
-    ) -> Self {
-        self.graph_status = self.graph_status.with_indexing_status(store);
-        self
-    }
 }
 
 type ExecuteQueryStream =

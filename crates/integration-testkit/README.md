@@ -11,6 +11,8 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
   generated from the embedded ontology. Pass the second one when a test needs the job ledger.
 - **`TestContext::fork()`** — Creates an isolated database per subtest so subtests can run
   in parallel against one container.
+- **`TestContext::flush_async_inserts()`** — Forces ClickHouse to flush its async insert
+  queue. Call after writes that use `wait_for_async_insert = 0`, such as the job ledger.
 - **`TestContext::optimize_all()`** — Queries `system.tables` for the current database and
   runs `OPTIMIZE TABLE … FINAL` concurrently on every table. Call after seeding data.
 - **`run_subtests_shared!`** — Macro that runs all subtests in parallel against the same

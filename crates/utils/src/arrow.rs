@@ -158,14 +158,6 @@ impl ArrowUtils {
         Some(arr.value(row).to_string())
     }
 
-    pub fn get_column_bool(batch: &RecordBatch, col_name: &str, row: usize) -> Option<bool> {
-        let column = Self::get_column_by_name::<BooleanArray>(batch, col_name)?;
-        if column.is_null(row) {
-            return None;
-        }
-        Some(column.value(row))
-    }
-
     pub fn get_column_timestamp(
         batch: &RecordBatch,
         col_name: &str,

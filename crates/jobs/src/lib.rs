@@ -5,7 +5,4 @@ mod rows;
 
 pub use kind::{CampaignKind, InvalidKind, JobKind};
 pub use ledger::{JobLedger, LedgerError};
-pub use model::{
-    CampaignId, CampaignSummary, InvalidState, JobFilter, JobRef, JobSnapshot, JobState,
-    JobTransition, PhaseSpec, PhaseSummary,
-};
+pub use model::{CampaignId, InvalidState, JobRef, JobRun, JobState, JobTransition};

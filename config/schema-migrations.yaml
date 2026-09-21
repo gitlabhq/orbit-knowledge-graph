@@ -18,7 +18,7 @@
 migrations:
 - version: 99
   scope: none
-  note: "Unversioned campaign and job ledger tables for #1281. No versioned table or produced row changes."
+  note: "Unversioned job ledger table for #1281. No versioned table or produced row changes."
 - version: 98
   scope: none
   note: >-

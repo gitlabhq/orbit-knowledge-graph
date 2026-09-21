@@ -34,6 +34,7 @@ moka = { workspace = true }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
 orbit-migrations = { path = "../orbit-migrations" }
+jobs = { path = "../jobs" }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }

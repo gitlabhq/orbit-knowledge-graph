@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
 use tokio::task::JoinSet;
-use tracing::{Instrument, debug, info, info_span};
+use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
@@ -12,8 +12,8 @@ use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
 
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::indexing_status::RunRows;
 use crate::modules::sdlc::datalake::DatalakeQuery;
+use crate::modules::sdlc::jobs::namespace_data_job;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
@@ -24,6 +24,7 @@ use crate::modules::sdlc::plan::{
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
+use ::jobs::{JobLedger, JobState, JobTransition};
 use orbit_utils::traversal_path::TraversalPath;
 
 pub struct EntityHandler {
@@ -38,6 +39,20 @@ pub struct EntityHandler {
     subscription: Subscription,
     partition_strategy: Option<PartitionStrategy>,
     analytics: IndexingAnalytics,
+    ledger: JobLedger,
+}
+
+enum Completion {
+    Finished(PipelineStats),
+    Deferred(PipelineStats),
+}
+
+impl Completion {
+    fn stats(&self) -> &PipelineStats {
+        match self {
+            Completion::Finished(stats) | Completion::Deferred(stats) => stats,
+        }
+    }
 }
 
 struct IndexingRequest {
@@ -72,6 +87,7 @@ impl EntityHandler {
         subscription: Subscription,
         partition_strategy: Option<PartitionStrategy>,
         analytics: IndexingAnalytics,
+        ledger: JobLedger,
     ) -> Self {
         let handler_name = format!("entity.{}", plan.name.to_lowercase());
         Self {
@@ -86,6 +102,7 @@ impl EntityHandler {
             subscription,
             partition_strategy,
             analytics,
+            ledger,
         }
     }
 
@@ -124,7 +141,7 @@ impl EntityHandler {
         &self,
         context: HandlerContext,
         request: IndexingRequest,
-    ) -> Result<PipelineStats, HandlerError> {
+    ) -> Result<Completion, HandlerError> {
         let mut observers: Vec<Box<dyn IndexingObserver>> =
             vec![Box::new(SdlcOtelObserver::new(self.metrics.clone()))];
         observers.extend(self.analytics.observer());
@@ -196,6 +213,7 @@ impl EntityHandler {
                     durability,
                 )
                 .await
+                .map(Completion::Finished)
         } else {
             info!(
                 entity = %self.plan.name,
@@ -230,7 +248,7 @@ impl EntityHandler {
                             .checkpoint_store
                             .consolidate(&checkpoint_key, &watermark)
                             .await
-                            .map(|()| stats)
+                            .map(|()| Completion::Finished(stats))
                             .map_err(|err| HandlerError::Processing(err.to_string())),
                         // Leaving the parent absent re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
                         Err(incomplete) => {
@@ -241,7 +259,7 @@ impl EntityHandler {
                                 partitions = %incomplete.join(", "),
                                 "partitions still in progress; deferring consolidation to next dispatch"
                             );
-                            Ok(stats)
+                            Ok(Completion::Deferred(stats))
                         }
                     }
                 }
@@ -250,7 +268,8 @@ impl EntityHandler {
         };
 
         match &result {
-            Ok(stats) => {
+            Ok(completion) => {
+                let stats = completion.stats();
                 debug!(
                     entity = %self.plan.name,
                     read_rows = stats.read_rows,
@@ -386,6 +405,19 @@ fn consolidated_watermark(
         .unwrap_or(fallback))
 }
 
+impl EntityHandler {
+    async fn record_transition(&self, transition: JobTransition) {
+        if let Err(error) = self.ledger.record(&transition).await {
+            warn!(
+                %error,
+                entity = %self.plan.name,
+                state = transition.state.as_str(),
+                "failed to record job transition"
+            );
+        }
+    }
+}
+
 fn serialization_error(error: SerializationError) -> HandlerError {
     match error {
         SerializationError::Json(err) => HandlerError::Deserialization(err),
@@ -403,6 +435,7 @@ impl Handler for EntityHandler {
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        let attempt = message.attempt;
         let request = self.deserialize(message)?;
 
         if !request.indexing_requested(&self.plan.target) {
@@ -431,14 +464,27 @@ impl Handler for EntityHandler {
                 campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
             ),
         };
-        let traversal_path = request.traversal_path.clone();
+        let job = request
+            .traversal_path
+            .as_ref()
+            .zip(request.namespace_id)
+            .map(|(path, namespace_id)| namespace_data_job(&self.plan.name, path, namespace_id));
+        let dispatch_id = request.dispatch_id;
 
         async {
-            if let Some(path) = traversal_path.as_ref() {
-                context
-                    .indexing_status
-                    .record_entity_start(path, &self.plan.name, started_at)
-                    .await;
+            if let Some(job) = &job {
+                self.record_transition(JobTransition {
+                    job: job.clone(),
+                    dispatch_id,
+                    attempt,
+                    state: JobState::Running,
+                    reason: None,
+                    rows_read: 0,
+                    rows_written: 0,
+                    started_at,
+                    recorded_at: started_at,
+                })
+                .await;
             }
 
             let result = self.execute(context.clone(), request).await;
@@ -454,25 +500,32 @@ impl Handler for EntityHandler {
                     .record_pipeline_error(&self.plan.name, err.error_kind());
             }
 
-            if let Some(path) = traversal_path.as_ref() {
-                let rows = result
-                    .as_ref()
-                    .map(|stats| RunRows {
-                        read: Some(stats.read_rows),
-                        written: Some(stats.written_rows),
-                    })
-                    .unwrap_or_default();
-                context
-                    .indexing_status
-                    .record_entity_completion(
-                        path,
-                        &self.plan.name,
-                        started_at,
-                        completed_at,
-                        result.as_ref().err().map(ToString::to_string),
-                        rows,
-                    )
-                    .await;
+            if let Some(job) = &job {
+                let (state, reason, rows) = match &result {
+                    Ok(Completion::Finished(stats)) => (
+                        JobState::Succeeded,
+                        None,
+                        (stats.read_rows, stats.written_rows),
+                    ),
+                    Ok(Completion::Deferred(stats)) => (
+                        JobState::Deferred,
+                        None,
+                        (stats.read_rows, stats.written_rows),
+                    ),
+                    Err(error) => (JobState::Failed, Some(error.to_string()), (0, 0)),
+                };
+                self.record_transition(JobTransition {
+                    job: job.clone(),
+                    dispatch_id,
+                    attempt,
+                    state,
+                    reason,
+                    rows_read: rows.0,
+                    rows_written: rows.1,
+                    started_at,
+                    recorded_at: completed_at,
+                })
+                .await;
             }
 
             result.map(|_| ())
@@ -549,7 +602,20 @@ mod tests {
             subscription,
             None,
             IndexingAnalytics::disabled(),
+            unreachable_ledger(),
         )
+    }
+
+    fn unreachable_ledger() -> JobLedger {
+        let client = crate::clickhouse::ArrowClickHouseClient::new(
+            "http://127.0.0.1:9",
+            "test",
+            "default",
+            None,
+            &Default::default(),
+            &Default::default(),
+        );
+        JobLedger::new(Arc::new(client))
     }
 
     #[tokio::test]
@@ -581,40 +647,6 @@ mod tests {
 
         let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn namespaced_entity_handler_records_run_rows() {
-        let handler = build_handler("MergeRequest", EtlScope::Namespaced);
-        let mock_nats = Arc::new(MockNatsServices::new());
-        let store = Arc::new(crate::indexing_status::IndexingStatusStore::new(
-            mock_nats.clone(),
-        ));
-        let context = HandlerContext::new(
-            mock_nats,
-            Arc::new(MockLockService::new()),
-            ProgressNotifier::noop(),
-            Arc::clone(&store),
-        );
-
-        let envelope = TestEnvelopeFactory::simple(
-            &serde_json::json!({
-                "namespace": 100,
-                "traversal_path": "42/100/",
-                "watermark": "2024-01-21T00:00:00Z"
-            })
-            .to_string(),
-        );
-
-        handler.handle(context, envelope).await.unwrap();
-
-        let progress = store
-            .get_entity(&TraversalPath::new_unchecked("42/100/"), "MergeRequest")
-            .await
-            .unwrap()
-            .expect("entity progress should be recorded");
-        assert_eq!(progress.last_rows_read, Some(0));
-        assert_eq!(progress.last_rows_written, Some(0));
     }
 
     #[test]

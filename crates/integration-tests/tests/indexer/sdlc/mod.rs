@@ -8,17 +8,19 @@
 //! subtests in parallel, forking an isolated database per subtest to avoid
 //! cross-test contamination while eliminating per-test container startup overhead.
 
+mod jobs;
 mod partitioning;
 
 use std::sync::Arc;
 
 use super::common::scenarios::SdlcScenarioHandlers;
 use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
-use integration_testkit::run_subtests;
+use integration_testkit::{PERSISTENT_SCHEMA_SQL, run_subtests};
 
 #[tokio::test]
 async fn scenario_indexing() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    let ctx =
+        TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL, *PERSISTENT_SCHEMA_SQL]).await;
     integration_testkit::scenario::run_dir(
         &ctx,
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/indexer/scenarios/sdlc"),
@@ -29,7 +31,8 @@ async fn scenario_indexing() {
 
 #[tokio::test]
 async fn global_indexing() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    let ctx =
+        TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL, *PERSISTENT_SCHEMA_SQL]).await;
     run_subtests!(
         &ctx,
         partitioning::partitioned_initial_load_indexes_all_rows_and_consolidates,
@@ -42,9 +45,11 @@ async fn global_indexing() {
 
 #[tokio::test]
 async fn namespace_indexing() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    let ctx =
+        TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL, *PERSISTENT_SCHEMA_SQL]).await;
     run_subtests!(
         &ctx,
         partitioning::namespaced_entities_partition_by_id_within_scope,
+        jobs::namespace_run_records_a_succeeded_job_per_pipeline,
     );
 }

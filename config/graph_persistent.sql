@@ -13,20 +13,6 @@ ORDER BY (logical_table, top_level_namespace, snapshot_date)
 TTL snapshot_date + INTERVAL 400 DAY
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1;
 
-CREATE TABLE IF NOT EXISTS campaign (
-    kind String,
-    subject String,
-    generation DateTime64(6, 'UTC'),
-    job_kind String,
-    required Bool,
-    state String,
-    recorded_at DateTime64(6, 'UTC'),
-    _version UInt64,
-    _deleted Bool DEFAULT false
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (kind, subject, generation, job_kind)
-SETTINGS allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1;
-
 CREATE TABLE IF NOT EXISTS job (
     campaign_kind String DEFAULT '',
     campaign_subject String DEFAULT '',
@@ -39,6 +25,9 @@ CREATE TABLE IF NOT EXISTS job (
     attempt Int64,
     state String,
     reason String DEFAULT '',
+    rows_read Int64 DEFAULT 0,
+    rows_written Int64 DEFAULT 0,
+    started_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
     recorded_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
     _version UInt64,
     _deleted Bool DEFAULT false,

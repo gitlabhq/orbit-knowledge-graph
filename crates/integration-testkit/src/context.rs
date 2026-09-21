@@ -124,6 +124,10 @@ impl TestContext {
 
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
     /// every inserted row.
+    pub async fn flush_async_inserts(&self) {
+        self.execute("SYSTEM FLUSH ASYNC INSERT QUEUE").await;
+    }
+
     pub async fn optimize_all(&self) {
         let t = std::time::Instant::now();
         let batches = self
