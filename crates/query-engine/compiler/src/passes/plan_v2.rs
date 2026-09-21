@@ -81,6 +81,51 @@ pub enum PhysOp {
     Aggregate { input: Box<PhysOp>, select: Vec<SelectExpr>, group_by: Vec<Expr>, order_by: Vec<OrderExpr>, limit: u32 },
 }
 
+impl PhysOp {
+    pub fn shape(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            PhysOp::Scan { table, alias, dedup, .. } => json!({
+                "op": "Scan",
+                "table": table,
+                "alias": alias,
+                "dedup": dedup,
+            }),
+            PhysOp::Join { left, right, .. } => json!({
+                "op": "Join",
+                "left": left.shape(),
+                "right": right.shape(),
+            }),
+            PhysOp::Union { arms, alias } => json!({
+                "op": "Union",
+                "alias": alias,
+                "arms": arms.iter().map(|a| a.shape()).collect::<Vec<_>>(),
+            }),
+            PhysOp::UnionQueries { alias, arms, .. } => json!({
+                "op": "UnionQueries",
+                "alias": alias,
+                "arm_count": arms.len(),
+            }),
+            PhysOp::Cte { name, body, consumer } => json!({
+                "op": "Cte",
+                "name": name,
+                "body": body.shape(),
+                "consumer": consumer.shape(),
+            }),
+            PhysOp::TopN { input, limit, .. } => json!({
+                "op": "TopN",
+                "limit": limit,
+                "input": input.shape(),
+            }),
+            PhysOp::Aggregate { input, limit, .. } => json!({
+                "op": "Aggregate",
+                "limit": limit,
+                "input": input.shape(),
+            }),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct PlanMetadata {
     pub node_edge_mappings: HashMap<String, (String, String)>,

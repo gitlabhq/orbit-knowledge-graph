@@ -22,6 +22,9 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true }
 
+[dev-dependencies]
+serde-saphyr = { workspace = true }
+
 [build-dependencies]
 serde_json = { workspace = true }
 

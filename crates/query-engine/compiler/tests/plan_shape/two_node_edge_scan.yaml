@@ -1,0 +1,24 @@
+name: "Two-node traversal via edge scan"
+input:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "node_ids": [1]},
+        {"id": "p", "entity": "Project"}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "limit": 10
+    }
+expected:
+  op: TopN
+  input:
+    op: Join
+    left:
+      op: Scan
+      table: gl_merge_request
+      dedup: true
+    right:
+      op: Scan
+      table: gl_project
+      dedup: true

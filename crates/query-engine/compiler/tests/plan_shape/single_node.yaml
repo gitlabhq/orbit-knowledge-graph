@@ -1,0 +1,14 @@
+name: "Single node traversal"
+input:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
+      "limit": 10
+    }
+expected:
+  op: TopN
+  input:
+    op: Scan
+    table: gl_merge_request
+    dedup: true
