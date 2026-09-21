@@ -375,7 +375,7 @@ tests:
 
   # ── Call resolution into records ──────────────────────────────────
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: record members are synthesized per component; constructor and accessor edges on records count differently from the old pipeline
   - name: "PointUser.origin() calls Point constructor"
     skip: true
     query: |
@@ -388,7 +388,7 @@ tests:
       # Two edges: the Point return-type reference and the new Point(...) call.
       - { row_count: 2 }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: record members are synthesized per component; an explicit record method is shadowed by the synthesized accessors
   - name: "RangeUser.span() calls explicit record method Range.length"
     skip: true
     query: |
@@ -400,9 +400,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "Records Circle and Rectangle extend sealed interface Shape"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE parent.fqn = 'com.example.records.Shape' AND e.edge_kind = 'Extends'
@@ -413,9 +411,7 @@ tests:
       - { row: { child: "com.example.records.Circle" } }
       - { row: { child: "com.example.records.Rectangle" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "ShapeUser.create() calls Circle and Rectangle constructors"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.create'
@@ -426,9 +422,7 @@ tests:
       - { row: { callee: "Circle" } }
       - { row: { callee: "Rectangle" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "ShapeUser.area() instanceof type patterns emit Circle and Rectangle type references"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.area'
@@ -460,9 +454,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "PointUser.describe() calls implicit accessors Point.x and Point.y"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.PointUser.describe'
@@ -475,9 +467,7 @@ tests:
       - { row: { callee: "com.example.records.Point.x" } }
       - { row: { callee: "com.example.records.Point.y" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "ShapeUser.area() implicit accessor calls on instanceof-bound variables"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.records.ShapeUser.area'
@@ -517,7 +507,7 @@ tests:
       - { row: { name: "equals" } }
       - { row: { name: "toString" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: record members are synthesized per component; an explicit override is shadowed by the synthesized accessor
   - name: "WrappedUser.read() calls explicitly overridden accessor Wrapped.raw"
     skip: true
     query: |
@@ -532,7 +522,7 @@ tests:
       # not an implicit definition, once implicit accessors are synthesised.
       - { row: { line: 5 } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: record members are synthesized per component; an explicit override is shadowed by the synthesized accessor
   - name: "WrappedUser.print() calls explicitly overridden Wrapped.toString"
     skip: true
     query: |
@@ -547,7 +537,7 @@ tests:
       # at its annotation, not its signature.
       - { row: { line: 9 } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: record members are synthesized per component; an explicit override is shadowed by the synthesized accessor
   - name: "WrappedUser.same() calls explicitly overridden Wrapped.equals"
     skip: true
     query: |

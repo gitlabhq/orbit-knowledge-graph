@@ -268,9 +268,7 @@ tests:
     assert:
       - { row: { fqn: 'App\Service\bootstrap' } }
 
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "Cross-file new-call from function: bootstrap -> OrderService.run"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\bootstrap'

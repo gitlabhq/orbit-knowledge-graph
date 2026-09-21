@@ -209,7 +209,7 @@ tests:
       - { row_count: 14 }
       - { unique: path }
 
-  # skip: tree-dsl: a reopened namespace yields one definition per block; the old pipeline merged them
+  # skip: tree-dsl: bogus: a namespace reopened in two files is one definition per block; the old pipeline merged them
   - name: "Class definitions — exact count"
     skip: true
     query: |
@@ -484,9 +484,7 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: "tmpl_usage::extra::use_templates", type: Function } }
 
-  # skip: tree-dsl: the callee lives in another file reached only through an include; see the header gap
   - name: "Template usage calls tmpl::swap via include"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'tmpl_usage::extra::use_templates'

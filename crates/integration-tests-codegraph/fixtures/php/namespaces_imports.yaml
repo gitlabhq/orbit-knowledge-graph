@@ -276,9 +276,7 @@ tests:
       - { row_count: 1 }
 
   # ── use function / use const ────────────────────────────────────
-  # skip: tree-dsl: `use function` and `use const` resolve by path; helper files do not mirror the namespace
   - name: "use function: bare call resolves to namespaced function"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
@@ -288,9 +286,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: `use function` and `use const` resolve by path; helper files do not mirror the namespace
   - name: "use function: aliased call resolves (h -> Vendor\\Util\\helper)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
@@ -380,9 +376,7 @@ tests:
       - { row_count: 1 }
 
   # ── Cross-file static call across deep namespaces via use ───────
-  # skip: tree-dsl: the namespace does not mirror the file path and there is no composer.json; resolution is path-based
   - name: "Deep-namespace static call via use: DeepCaller::go -> Thing::make"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\DeepCaller\go'
@@ -392,9 +386,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the namespace does not mirror the file path and there is no composer.json; resolution is path-based
   - name: "Deep-namespace instance call via use: DeepCaller::go -> Thing::ping"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\DeepCaller\go'

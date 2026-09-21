@@ -265,9 +265,7 @@ tests:
       - { row_count: 2 }
       - { unique: parent }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Trait composed of trait: Composer uses Base"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Concerns\Composer'
@@ -359,9 +357,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Trait-of-trait \\$this call: Composer.compose -> Base.ping"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Concerns\Composer\compose'

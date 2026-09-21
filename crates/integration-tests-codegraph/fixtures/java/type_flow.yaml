@@ -190,9 +190,7 @@ fixtures:
       }
 
 tests:
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "typed local: svc.query() resolves to UserService.query"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
@@ -210,9 +208,7 @@ tests:
         assert:
           - { empty: true }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "inherited method: d.speak() resolves to Animal.speak"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
@@ -223,9 +219,7 @@ tests:
           - { row: { callee: "fetch" } }
           - { row: { callee: "speak" } }
 
-  # skip: tree-dsl: a call receiver that is itself a call has no SSA value
   - name: "return type propagation: getService().query() resolves"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
@@ -251,9 +245,7 @@ tests:
           - { row_count: 1 }
           - { row: { callee: "helper", callee_fqn: "ImplicitThis.helper" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
   - name: "super.baseMethod() resolves to Base.baseMethod"
-    skip: true
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
@@ -354,7 +346,7 @@ tests:
           - { row_count: 1 }
           - { row: { callee: "helper", callee_fqn: "ThisCall.helper" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: a member call on a typed local reaches the declared type's method but not the supertype's override
   - name: "packaged inheritance: d.speak() resolves via super FQN"
     skip: true
     queries:

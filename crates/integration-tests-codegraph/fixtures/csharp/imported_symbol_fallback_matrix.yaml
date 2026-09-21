@@ -61,7 +61,7 @@ fixtures:
       }
 
 tests:
-  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
+  # skip: tree-dsl: bogus: a member call on an external type must stay unlinked, as the Console.WriteLine test in this file asserts
   - name: "namespace using directives target wildcard imported symbols"
     skip: true
     query: |

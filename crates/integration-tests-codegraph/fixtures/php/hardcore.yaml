@@ -155,9 +155,7 @@ tests:
       - { row_count: 1 }
 
   # ── Inheritance (extends + implements + trait use) ─────────────
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Product extends Entity"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Models\Entity'
@@ -208,9 +206,7 @@ tests:
       - { no_nulls: callee }
       - { row: { caller: 'App\Models\Product\rename', callee: 'App\Concerns\Loggable\log' } }
 
-  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Inherited method via subclass: Product.rename -> Entity.touch"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\rename'

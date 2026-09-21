@@ -5,9 +5,7 @@ trace: true
 tests:
   # ── K12: test_kotlin_reference_to_extensions ──
 
-  # skip: tree-dsl: extension functions and interface members of imported types resolve only through same-file defs
   - name: "callToExtensions -> printValue (local extension, direct + property chain)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToExtensions'
@@ -38,9 +36,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: extension functions and interface members of imported types resolve only through same-file defs
   - name: "callToImportedExtensions -> printValue (imported extension on reversed)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToImportedExtensions'
@@ -49,9 +45,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: extension functions and interface members of imported types resolve only through same-file defs
   - name: "callToImported -> print (imported extension)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToImported'

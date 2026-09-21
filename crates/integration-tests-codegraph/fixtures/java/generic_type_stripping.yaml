@@ -47,7 +47,7 @@ fixtures:
       }
 
 tests:
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: bogus: List<T>.m() -> T.m encodes a generic-stripping heuristic that contradicts Java typing
   - name: All call edges from useGenericReturn
     skip: true
     description: "getUsers() returns List<UserService> — inner() extracts UserService from type_arguments"
@@ -62,7 +62,7 @@ tests:
       - { not: true, row: { callee: "com.example.UserService.save" } }
       - { not: true, row: { callee: "com.example.OrderService.process" } }
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: bogus: List<T>.m() -> T.m encodes a generic-stripping heuristic that contradicts Java typing
   - name: All call edges from useGenericLocal
     skip: true
     query: |

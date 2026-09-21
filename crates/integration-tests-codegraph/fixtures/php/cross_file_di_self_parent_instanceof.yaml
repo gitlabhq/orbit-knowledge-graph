@@ -110,9 +110,7 @@ tests:
       - { row_count: 7 }
       - { unique: path }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Cross-file class extension: NotFoundException extends DomainException"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'App\Domain\NotFoundException'
@@ -122,9 +120,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Cross-file interface implementation: FileLogger implements LoggerInterface"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'App\Logging\FileLogger'
@@ -226,9 +222,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: same-namespace siblings without `use` need a namespace scope; the resolver is import-driven
   - name: "new parent() typing flows to method dispatch: NotFoundException.rebuild -> DomainException.describe"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Domain\NotFoundException\rebuild'
