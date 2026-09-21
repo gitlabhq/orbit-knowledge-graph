@@ -73,10 +73,10 @@ glab orbit setup
 Run `glab orbit setup --help` for the full option list, including supported
 agents and project or user scope.
 
-`glab orbit local setup` also installs the skill into every detected agent
-and, with `--mcp`, registers the MCP server. `glab orbit local uninstall`
-reverts it. See [Set up your AI agent](cli.md#set-up-your-ai-agent) for what
-it changes, or [connect via MCP](mcp.md) by hand.
+The binary's own [`orbit setup`](cli.md#set-up-your-ai-agent) also detects
+the installed agents, installs the skill, and registers the MCP server with
+`--mcp`. `orbit uninstall` reverts it. To connect an MCP client by hand, see
+[Connect via MCP](mcp.md).
 
 You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
 with `glab skills install --global orbit`.
