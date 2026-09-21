@@ -38,6 +38,24 @@ pub(crate) fn card(title: impl Display, body: impl Display) -> Result<()> {
     Ok(cliclack::note(title, body)?)
 }
 
+pub(crate) struct Spinner(cliclack::ProgressBar);
+
+pub(crate) fn spinner(label: impl Display) -> Spinner {
+    let bar = cliclack::spinner();
+    bar.start(label);
+    Spinner(bar)
+}
+
+impl Spinner {
+    pub(crate) fn stop(self, message: impl Display) {
+        self.0.stop(message);
+    }
+
+    pub(crate) fn error(self, message: impl Display) {
+        self.0.error(message);
+    }
+}
+
 pub(crate) fn multiselect(
     prompt: &str,
     choices: &[Choice],
