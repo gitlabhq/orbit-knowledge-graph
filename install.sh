@@ -201,9 +201,9 @@ install_orbit() {
     mkdir -p "$INSTALL_DIR"
 
     local project_id="77960826"
-    local artifact_name="orbit-local-${platform}-${arch}.tar.gz"
+    local artifact_name="orbit-cli-${platform}-${arch}.tar.gz"
     if [ "$platform" = "linux" ] && [ "$libc" = "musl" ]; then
-        artifact_name="orbit-local-${platform}-${libc}-${arch}.tar.gz"
+        artifact_name="orbit-cli-${platform}-${libc}-${arch}.tar.gz"
     fi
     local resolved_tag
 
@@ -223,9 +223,9 @@ install_orbit() {
     echo "Installing the Orbit local CLI ${VERSION}..."
 
     # Tarballs are published to the project's Generic Package Registry under
-    # 'orbit-local/<version>/<artifact>'. The version segment omits the leading 'v'.
+    # 'orbit-cli/<version>/<artifact>'. The version segment omits the leading 'v'.
     local pkg_version="${VERSION#v}"
-    local pkg_base="https://gitlab.com/api/v4/projects/${project_id}/packages/generic/orbit-local/${pkg_version}"
+    local pkg_base="https://gitlab.com/api/v4/projects/${project_id}/packages/generic/orbit-cli/${pkg_version}"
     local download_url="${pkg_base}/${artifact_name}"
     local checksum_url="${pkg_base}/${artifact_name}.sha256"
 

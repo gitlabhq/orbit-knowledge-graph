@@ -30,7 +30,7 @@
     - sccache --show-stats || true
   artifacts:
     paths:
-      - orbit-local-linux-*.tar.gz
+      - orbit-cli-linux-*.tar.gz
     expire_in: 7 days
 
 local-cli-build-linux-amd64:
@@ -86,7 +86,7 @@ local-cli-build-windows-amd64:
     RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
   artifacts:
     paths:
-      - orbit-local-windows-x86_64.zip
+      - orbit-cli-windows-x86_64.zip
     expire_in: 7 days
   before_script:
     - !reference [.sccache-template, before_script]
@@ -122,7 +122,7 @@ local-cli-build-windows-amd64:
     - ./scripts/build-local-cli.sh
   artifacts:
     paths:
-      - orbit-local-darwin-*.tar.gz
+      - orbit-cli-darwin-*.tar.gz
     expire_in: 7 days
 
 local-cli-build-darwin-amd64:
@@ -148,13 +148,13 @@ local-cli-code-sign:
     - local-cli-build-darwin-arm64
     - local-cli-build-windows-amd64
   script:
-    - ./scripts/sign-and-repackage.sh ./orbit-local-darwin-x86_64.tar.gz macos orbit
-    - ./scripts/sign-and-repackage.sh ./orbit-local-darwin-aarch64.tar.gz macos orbit
-    - ./scripts/sign-and-repackage.sh ./orbit-local-windows-x86_64.zip windows orbit.exe
+    - ./scripts/sign-and-repackage.sh ./orbit-cli-darwin-x86_64.tar.gz macos orbit
+    - ./scripts/sign-and-repackage.sh ./orbit-cli-darwin-aarch64.tar.gz macos orbit
+    - ./scripts/sign-and-repackage.sh ./orbit-cli-windows-x86_64.zip windows orbit.exe
   artifacts:
     paths:
-      - orbit-local-darwin-*.tar.gz
-      - orbit-local-windows-*.zip
+      - orbit-cli-darwin-*.tar.gz
+      - orbit-cli-windows-*.zip
     expire_in: 7 days
 
 local-cli-publish:
