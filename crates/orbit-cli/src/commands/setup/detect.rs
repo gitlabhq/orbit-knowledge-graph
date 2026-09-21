@@ -20,6 +20,13 @@ impl Machine {
         Machine { home, env }
     }
 
+    pub(super) fn abbreviate(&self, path: &Path) -> String {
+        match path.strip_prefix(&self.home) {
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => path.display().to_string(),
+        }
+    }
+
     pub(super) fn installed_assistants(&self) -> Vec<(Agent, PathBuf)> {
         spec::all()
             .filter_map(|assistant| {

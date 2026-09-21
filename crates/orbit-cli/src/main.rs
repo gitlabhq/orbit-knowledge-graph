@@ -11,6 +11,7 @@ mod skill;
 mod sql;
 mod sql_format;
 mod telemetry;
+mod tui;
 mod workspace;
 
 use anyhow::{Context, Result};
@@ -386,9 +387,17 @@ enum SkillsCommands {
 
 #[derive(Args, Debug, PartialEq)]
 struct SetupFlags {
+    /// Skip the agent picker and apply to the pre-selected agents.
+    #[arg(long, short = 'y')]
+    yes: bool,
+
     /// Print what would change and exit without writing.
     #[arg(long)]
     dry_run: bool,
+
+    /// List every file touched instead of a per-component summary.
+    #[arg(long, short = 'v')]
+    verbose: bool,
 
     /// Write into the current project instead of the user-global config
     /// files.
@@ -410,7 +419,9 @@ impl SetupFlags {
         commands::setup::Options {
             assistants,
             all,
+            yes: self.yes,
             dry_run: self.dry_run,
+            verbose: self.verbose,
             components,
         }
     }
@@ -441,8 +452,8 @@ enum Commands {
     Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
     Setup {
-        /// Agents to configure. Default: every agent detected on this
-        /// machine.
+        /// Agents to pre-select in the picker. Default: every agent detected
+        /// on this machine.
         #[arg(value_name = "AGENT", value_parser = commands::setup::assistant_value_parser())]
         assistants: Vec<String>,
 

@@ -1269,6 +1269,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cliclack"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "134778b6a125729ff495c23ba32f64e0c26d61edd52f1f6715a0d036785cf30b"
+dependencies = [
+ "console",
+ "indicatif",
+ "once_cell",
+ "strsim",
+ "textwrap",
+ "zeroize",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5321,6 +5335,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "clap",
+ "cliclack",
  "code-graph",
  "dirs",
  "duckdb-client",

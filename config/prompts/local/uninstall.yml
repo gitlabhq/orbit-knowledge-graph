@@ -1,5 +1,5 @@
 name: uninstall
-version: 1.0.0
+version: 1.1.0
 short: Remove what `orbit setup` wrote into AI coding agents
 description: >-
   Remove what `orbit setup` wrote into AI coding agents
@@ -10,5 +10,5 @@ description: >-
   agents you name. Files that held nothing but Orbit entries are deleted.
   Files you edited after setup are kept. `.orbit-backup` copies are never
   touched. Targets user-global configuration by default, or the project with
-  `--project` or `--dir`. `--dry-run` lists the files and stops before
-  removing.
+  `--project` or `--dir`. A picker selects the agents and enter applies;
+  `--yes` skips the picker and `--dry-run` stops after the plan.

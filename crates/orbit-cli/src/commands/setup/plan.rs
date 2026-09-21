@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use super::components;
+use super::components::{self, Report};
 use super::spec::{self, Agent};
 use super::{Component, Options, Target};
 
@@ -30,6 +30,18 @@ impl Selection {
         })
     }
 
+    pub(super) fn names(&self) -> Vec<String> {
+        self.assistants
+            .iter()
+            .map(|agent| agent.name.clone())
+            .collect()
+    }
+
+    pub(super) fn choose(&mut self, names: &[String]) -> Result<()> {
+        self.assistants = named_specs(names)?;
+        Ok(())
+    }
+
     pub(super) fn for_uninstall(options: &Options) -> Result<Selection> {
         let assistants = if options.assistants.is_empty() {
             spec::all().collect()
@@ -54,6 +66,22 @@ fn named_specs(names: &[String]) -> Result<Vec<Agent>> {
 pub(super) struct Plan {
     pub(super) scope: String,
     pub(super) assistants: Vec<AssistantPlan>,
+}
+
+impl Plan {
+    pub(super) fn only_reported(mut self, report: &Report) -> Plan {
+        for assistant in &mut self.assistants {
+            assistant.components.retain(|(_, paths)| {
+                paths.iter().any(|path| {
+                    report
+                        .outcomes
+                        .iter()
+                        .any(|outcome| path.starts_with(&outcome.label))
+                })
+            });
+        }
+        self
+    }
 }
 
 pub(super) struct AssistantPlan {

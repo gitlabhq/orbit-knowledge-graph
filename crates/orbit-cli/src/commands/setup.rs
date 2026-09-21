@@ -1,12 +1,14 @@
 //! `orbit setup` and `orbit uninstall`. `spec` declares each agent from `config/setup/agents/`,
 //! `detect` finds the installed ones, `plan` lists the files a selection touches, and
-//! `components` installs or removes one `Component` at a time into a `Report`. Any pre-existing
-//! file gets a one-time `.orbit-backup` sibling before its first modification.
+//! `components` installs or removes one `Component` at a time into a `Report`. `summary` turns
+//! those into text and `tui` draws it. Any pre-existing file gets a one-time `.orbit-backup`
+//! sibling before its first modification.
 
 mod components;
 pub(crate) mod detect;
 mod plan;
 pub(crate) mod spec;
+mod summary;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -18,71 +20,106 @@ use detect::Machine;
 use plan::{Plan, Selection};
 use spec::ScopedPath;
 
+use crate::tui;
+
 pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Result<()> {
+    let prompt = tui::can_prompt(options.yes)?;
     let detected = machine.installed_assistants();
-    let selection = Selection::for_install(&options, &detected)?;
+    let mut selection = Selection::for_install(&options, &detected)?;
+    tui::intro(format!(
+        "Orbit setup ({})",
+        summary::component_list(&selection.components)
+    ))?;
+
+    if prompt {
+        let hints = summary::detection_hints(&detected, machine);
+        let chosen = tui::multiselect(
+            "Which agents should use Orbit?",
+            &summary::agent_choices(&hints),
+            &selection.names(),
+        )?;
+        selection.choose(&chosen)?;
+    }
     if selection.assistants.is_empty() {
-        println!(
-            "No agent detected. Name one to configure it: orbit setup <{}>",
+        tui::outro_cancel(format!(
+            "No agent selected. Name one to configure it: orbit setup <{}>",
             spec::names().join("|")
-        );
+        ))?;
         return Ok(());
     }
 
     let plan = plan::build(&selection, &target)?;
     if options.dry_run {
-        print_plan(&plan, "Dry run: nothing written.");
+        show_dry_run(&plan, "Dry run: nothing written.")?;
         return Ok(());
     }
 
     let mut report = Report::default();
     let applied = components::install(&selection, &target, &mut report);
-    print_report(&report);
+    if options.verbose {
+        show_every_file(&report)?;
+    }
     applied?;
-    println!(
+    tui::card("Configured", summary::plan_rows(&plan))?;
+    tui::outro(format!(
         "Done. Run {} index in a repository, then ask your agent where a function is defined.",
         spec::launcher()
-    );
+    ))?;
     Ok(())
 }
 
 pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
-    let selection = Selection::for_uninstall(&options)?;
+    let prompt = tui::can_prompt(options.yes)?;
+    let mut selection = Selection::for_uninstall(&options)?;
+    tui::intro(format!(
+        "Orbit uninstall ({})",
+        summary::component_list(&selection.components)
+    ))?;
+
+    if prompt {
+        let chosen = tui::multiselect(
+            "Remove Orbit from which agents?",
+            &summary::agent_choices(&Default::default()),
+            &selection.names(),
+        )?;
+        selection.choose(&chosen)?;
+    }
+    if selection.assistants.is_empty() {
+        tui::outro_cancel("No agent selected.")?;
+        return Ok(());
+    }
 
     let plan = plan::build(&selection, &target)?;
     if options.dry_run {
-        print_plan(&plan, "Dry run: nothing removed.");
+        show_dry_run(&plan, "Dry run: nothing removed.")?;
         return Ok(());
     }
 
     let mut report = Report::default();
     let removed = components::remove(&selection, &target, &mut report);
-    print_report(&report);
+    if options.verbose {
+        show_every_file(&report)?;
+    }
     removed?;
-    println!("Done. Backups (*.orbit-backup) were kept.");
+    tui::card("Removed", summary::plan_rows(&plan.only_reported(&report)))?;
+    tui::outro("Done. Backups (*.orbit-backup) were kept.")?;
     Ok(())
 }
 
-fn print_plan(plan: &Plan, closing: &str) {
-    println!("Files in {}:", plan.scope);
-    for assistant in &plan.assistants {
-        println!("  {}", assistant.title);
-        for (component, paths) in &assistant.components {
-            for path in paths {
-                println!("    {:<12} {path}", component.label());
-            }
-        }
-    }
-    println!("{closing}");
+fn show_dry_run(plan: &Plan, closing: &str) -> Result<()> {
+    tui::card("Plan", summary::plan_rows(plan))?;
+    tui::card(
+        format!("Files in {}", plan.scope),
+        summary::paths_rows(plan),
+    )?;
+    tui::outro(closing)
 }
 
-fn print_report(report: &Report) {
-    for outcome in &report.outcomes {
-        println!(
-            "  {:<12} {}  ->  {}",
-            outcome.group, outcome.label, outcome.action
-        );
+fn show_every_file(report: &Report) -> Result<()> {
+    for (group, body) in summary::report_cards(report) {
+        tui::card(group, body)?;
     }
+    Ok(())
 }
 
 pub(crate) fn assistant_value_parser() -> clap::builder::PossibleValuesParser {
@@ -126,7 +163,9 @@ impl Component {
 pub(crate) struct Options {
     pub(crate) assistants: Vec<String>,
     pub(crate) all: bool,
+    pub(crate) yes: bool,
     pub(crate) dry_run: bool,
+    pub(crate) verbose: bool,
     pub(crate) components: BTreeSet<Component>,
 }
 
@@ -192,7 +231,9 @@ mod tests {
         Options {
             assistants: names.iter().map(|name| name.to_string()).collect(),
             all: false,
+            yes: true,
             dry_run: false,
+            verbose: false,
             components: Component::selection(false, &[]),
         }
     }

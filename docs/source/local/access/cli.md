@@ -182,11 +182,13 @@ orbit setup
 ```
 
 It detects agents from their configuration directories, such as
-`~/.claude`, `~/.codex`, and `~/.config/opencode`, and prints what each agent
-got. Each agent gets the instruction section, the skill files, and the nudge
-hooks. Supported agents are GitLab Duo, Claude Code, Codex, OpenCode, and Pi.
+`~/.claude`, `~/.codex`, and `~/.config/opencode`, and lists every supported
+agent with the detected ones pre-selected. Enter applies and prints what
+each agent got. Each agent gets the instruction section, the skill files,
+and the nudge hooks. Supported agents are GitLab Duo, Claude Code, Codex,
+OpenCode, and Pi.
 
-To configure specific agents, name them:
+To pre-select specific agents, name them:
 
 ```shell
 orbit setup claude codex
@@ -198,7 +200,11 @@ Other options:
 - `--skip <component>` leaves a component out: `instructions`, `hooks`,
   `skill`, or `mcp`.
 - `--all` configures every supported agent, detected or not.
-- `--dry-run` prints every path and exits without writing.
+- `--yes` skips the picker. Required when there is no terminal,
+  for example in scripts.
+- `--dry-run` prints the plan and every path and exits without writing.
+- `--verbose` lists every file touched after applying, instead of a count
+  per component.
 
 ### What it changes
 
@@ -251,7 +257,7 @@ orbit uninstall
 
 Name agents to undo only those, for example `orbit uninstall claude`. Pass
 `--project` or `--dir <path>` to target a project instead of your user-global
-configuration. `--dry-run` works as it does for `orbit setup`.
+configuration. `--yes` and `--dry-run` work as they do for `orbit setup`.
 
 This strips the marker-delimited block, the `orbit` MCP server entry, the
 marked JSON entries, and the installed skill files, and leaves the rest of each
