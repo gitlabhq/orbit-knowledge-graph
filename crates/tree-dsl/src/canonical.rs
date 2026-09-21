@@ -203,6 +203,10 @@ pub enum Canonical {
 
     #[strum(serialize = "__ssa_hint")]
     SsaHint,
+    #[strum(serialize = "__import_kind")]
+    ImportKind,
+    #[strum(serialize = "__constructor")]
+    Constructor,
 }
 
 impl From<Canonical> for u16 {

@@ -9,7 +9,7 @@ use crate::intern::Lang;
 use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type};
 use crate::treesitter::SupportLang;
 
-pub const CLASS_LIKE: &[C] = &[C::Class, C::Struct, C::ImplBlock];
+pub const CLASS_LIKE: &[C] = &[C::Class, C::Struct, C::ImplBlock, C::Interface, C::Trait];
 
 type VisibleMap = Vec<FxHashMap<u32, Loc>>;
 
@@ -144,8 +144,7 @@ impl Resolver {
         aliases: &[(String, String)],
     ) -> ResolveResult {
         let index_names = support_lang.index_names();
-        let labels: Vec<&str> = trees.iter().map(|t| t.label.as_str()).collect();
-        self.file_index = build_file_index(&labels, support_lang, index_names);
+        self.file_index = build_file_index(trees, lang, support_lang, index_names);
 
         self.visible.resize_with(trees.len(), Default::default);
         for &fi in dirty_fis {
@@ -229,9 +228,11 @@ impl Resolver {
             returns_key: lang.syms.intern("returns"),
         };
 
+        let inherit = |&fi: &usize| resolve_inheritance(&ctx, fi);
         let wave1: Vec<Edge> = active_reqs
             .par_iter()
             .flat_map(|req| resolve_one_import(&ctx, req))
+            .chain(active_fis.par_iter().flat_map(inherit))
             .collect();
         cross_edges.extend(&wave1);
 
@@ -343,11 +344,12 @@ fn gather_imports_for(
                         Some(tfi) => {
                             Either::Left(std::iter::once((tfi, target_path.clone(), false)))
                         }
-                        None => Either::Right(cur.names().filter_map(|c| {
+                        None => Either::Right(cur.names().flat_map(|c| {
                             let submod =
                                 format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
-                            resolve_path(&submod, file_index, lookup_prefixes)
-                                .map(|sub_fi| (sub_fi, submod, true))
+                            resolve_glob(&submod, file_index, lookup_prefixes)
+                                .into_iter()
+                                .map(move |sub_fi| (sub_fi, submod.clone(), true))
                         })),
                     };
                     for (tfi, path, is_sub) in candidates {
@@ -576,6 +578,34 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     edges
 }
 
+fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
+    let mut out = Vec::new();
+    for d in ctx.trees[fi].root().descendants().filter(|d| d.is(C::Def)) {
+        let child = ctx.corpus.jump(fi as u32, d.index());
+        let supers = d.children_of(C::SuperType).map(|s| s.sym());
+        for s in supers.filter(|&s| !ctx.ambiguous.contains(&(fi, s))) {
+            if let Some(loc) = ctx.visible[fi].get(&s).filter(|l| l.fi != fi) {
+                let parent = ctx.corpus.jump(loc.fi as u32, loc.node);
+                out.push(child.edge_to(parent, EdgeKind::Extends));
+                for call in child.calls() {
+                    let callee = call
+                        .child(C::Callee)
+                        .and_then(|k| k.child(C::Ivar)?.sym_opt());
+                    let Some((from, name)) = call.enclosing(|e| e.is(C::Def)).zip(callee) else {
+                        continue;
+                    };
+                    if find_method_in(child, name).is_none()
+                        && let Some(m) = find_method_in(parent, name)
+                    {
+                        out.push(from.edge_to(m, EdgeKind::Calls));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, imports_by_from: &[Vec<&Edge>]) -> Vec<Edge> {
     let target = ctx.corpus.follow(ce);
     let caller = ctx.corpus.jump(ce.from_tree, ce.from_node);
@@ -623,19 +653,17 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge, imports_by_from: &[Vec<&Edge>
 
 fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     let target = ctx.corpus.follow(ce);
-    if !target.children().any(|c| c.is(C::Class) || c.is(C::Struct)) {
+    if !CLASS_LIKE.iter().any(|&k| target.has(k)) {
         return vec![];
     }
-    let Some(target_name) = target.child_sym(C::DefName) else {
-        return vec![];
-    };
     let ft = &ctx.trees[ce.from_fi()];
+    let resolved = |c: u32| ctx.visible[ce.from_fi()].get(&c).map(|l| (l.fi, l.node));
     ft.root().fold_tree(Vec::new(), |edges, n, _w| {
         if !n.is(C::Binding) {
             return;
         }
         let Some(ivar) = n.child(C::Ivar) else { return };
-        if n.rhs_callee() != Some(target_name) {
+        if n.rhs_callee().and_then(resolved) != Some((ce.to_fi(), ce.to_node)) {
             return;
         }
         let Some(ivar_sym) = ivar.sym_opt() else {
@@ -684,13 +712,15 @@ fn resolve_type(
 }
 
 fn build_file_index(
-    labels: &[&str],
+    trees: &[Tree],
+    lang: &Lang,
     support_lang: SupportLang,
     index_names: &[String],
 ) -> FxHashMap<String, usize> {
     let mut idx: FxHashMap<String, usize> =
-        FxHashMap::with_capacity_and_hasher(labels.len() * 3, Default::default());
-    for (fi, &path) in labels.iter().enumerate() {
+        FxHashMap::with_capacity_and_hasher(trees.len() * 3, Default::default());
+    let sep = support_lang.fqn_separator();
+    for (fi, (tree, path)) in trees.iter().map(|t| (t, t.label.as_str())).enumerate() {
         let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
         let stem = file_lang.strip_extension(path);
         idx.insert(path.to_string(), fi);
@@ -707,8 +737,26 @@ fn build_file_index(
                 idx.insert(String::new(), fi);
             }
         }
+        let root = tree.root();
+        let pkg = root.child_sym(C::Package).map_or(String::new(), |s| {
+            lang.syms.resolve(s).replace(sep, PATH_SEP) + PATH_SEP
+        });
+        for name in root.children().filter_map(|d| d.child_sym(C::DefName)) {
+            let key = format!("{pkg}{}", lang.syms.resolve(name));
+            idx.entry(key).or_insert(fi);
+        }
     }
     idx
+}
+
+fn resolve_glob(target: &str, idx: &FxHashMap<String, usize>, prefixes: &[String]) -> Vec<usize> {
+    let Some(dir) = target.strip_suffix(&format!("{PATH_SEP}{WILDCARD}")) else {
+        return resolve_path(target, idx, prefixes).into_iter().collect();
+    };
+    let under = |d: &str| d == dir || prefixes.iter().any(|p| d == format!("{p}{PATH_SEP}{dir}"));
+    let in_dir = |k: &str| k.rsplit_once(PATH_SEP).is_some_and(|(d, _)| under(d));
+    let hits = idx.iter().filter(|(k, _)| in_dir(k));
+    hits.map(|(_, &fi)| fi).unique().collect()
 }
 
 fn is_external(source_str: &str, external: &[String]) -> bool {
