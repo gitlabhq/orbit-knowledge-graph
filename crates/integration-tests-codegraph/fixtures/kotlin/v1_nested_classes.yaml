@@ -4,7 +4,7 @@ fixture_dir: "fixtures/code/kotlin/main/kotlin"
 tests:
   # ── K8: test_kotlin_reference_resolution_to_nested_classes ──
 
-  # skip: tree-dsl: same-package siblings without an import need a package scope; the resolver is import-driven
+  # skip: tree-dsl: qualified supertype Child.GrandChild loses its owner; shared member lookup needs owner identities and explicit ambiguity
   - name: "Parent.GrandChild.greet -> Parent.Child.GrandChild.greet"
     skip: true
     query: |
@@ -15,7 +15,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: a constructor reached through a member chain (Parent.Child.GrandChild()) has no SSA type
+  # skip: tree-dsl: member-chain lookup drops the intermediate Child owner; constructor TypeFlow needs its exact nested definition
   - name: "main -> Parent.Child.GrandChild.greet (inferred nested type)"
     skip: true
     query: |

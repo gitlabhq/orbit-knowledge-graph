@@ -4,9 +4,7 @@ fixture_dir: "fixtures/code/kotlin/main/kotlin"
 tests:
   # ── K10: test_kotlin_reference_to_operator_functions ──
 
-  # skip: tree-dsl DSL: operator tokens are anonymous nodes and cannot be matched, so a + b is not rewritten to plus()
   - name: "AnimalList.Companion.of -> AnimalList.plus (operator)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.operator.AnimalList.Companion.of'
@@ -15,9 +13,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: a constructor reached through a member chain (Parent.Child.GrandChild()) has no SSA type
   - name: "AnimalList.Companion.of -> AnimalList.display"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.operator.AnimalList.Companion.of'

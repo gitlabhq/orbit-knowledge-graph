@@ -4,7 +4,7 @@ fixture_dir: "fixtures/code/kotlin/main/kotlin"
 tests:
   # ── K9: test_kotlin_reference_resolution_inheritance_of_class_of_same_name ──
 
-  # skip: tree-dsl: extension functions and interface members of imported types resolve only through same-file defs
+  # skip: tree-dsl: flat visible names replace package Filter with ServerFilter.Filter; inheritance needs distinct owner identities
   - name: "ServerFilter.filter -> Filter.filter (disambiguated)"
     skip: true
     query: |

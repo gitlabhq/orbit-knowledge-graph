@@ -71,6 +71,12 @@ stages:
 
   - name: retag-expressions
     rules:
+      - match: '(parenthesized_expression ("(") $E (")"))'
+        replace: '$E'
+      - match: '(additive_expression $L:simple_identifier ("+") $R)'
+        replace: '(__call (__callee (__member "plus" (__object @$L))) (__args $R))'
+      - match: '(additive_expression $L ("+") $R)'
+        replace: '(__call (__callee (__member "plus" (__object $L))) (__args $R))'
       - match: '(navigation_expression $O:__ivar (navigation_suffix $M:simple_identifier))'
         replace: '(__member @$M (__object $O))'
       - match: '(navigation_expression $O:__member (navigation_suffix $M:simple_identifier))'

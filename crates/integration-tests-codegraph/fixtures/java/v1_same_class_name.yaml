@@ -19,7 +19,7 @@ fixtures:
 tests:
   # ── J3: test_java_reference_resolution_same_class_name_in_same_package ──
 
-  # skip: tree-dsl: a nested type that shares a top-level type's name is picked by nearest name, not by qualification
+  # skip: tree-dsl: flat visible names replace package Filter with ServerFilter.Filter; inheritance needs distinct owner identities
   - name: "ServerFilter.Filter.apply -> Filter.apply (disambiguated)"
     skip: true
     query: |

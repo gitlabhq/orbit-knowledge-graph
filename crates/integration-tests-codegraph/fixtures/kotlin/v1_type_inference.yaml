@@ -15,7 +15,7 @@ tests:
 
   # ── K5: test_kotlin_type_inference_from_if_expression ──
 
-  # skip: tree-dsl: Admin and User live in Person.kt; import resolution is path-based
+  # skip: tree-dsl: expression-body return flow and a common-supertype join are missing; Admin and User must join to Person rather than two overrides
   - name: "usageOfIfTypeInference -> Person.getName (if expression)"
     skip: true
     query: |

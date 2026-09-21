@@ -14,7 +14,7 @@ tests:
     assert:
       - { row_count: 2 }
 
-  # skip: tree-dsl: extension functions and interface members of imported types resolve only through same-file defs
+  # skip: tree-dsl: bogus: Utils.kt imports com.example.extensions.ExtendMe, but the type is in com.example.extensions.entities; Kotlin imports do not re-export types
   - name: "callToImportedExtensions -> reverse (imported extension)"
     skip: true
     query: |
@@ -25,7 +25,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: extension functions and interface members of imported types resolve only through same-file defs
+  # skip: tree-dsl: getter is a sibling of its property in the CST; YAML must attach its body to the receiver-owned property and TypeFlow must retain that intermediate result
   - name: "callToExtensions -> ExtendMeFromProperty.printValue (extension property method)"
     skip: true
     query: |

@@ -224,7 +224,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.outerMethod, kind: Calls } }
 
-  # skip: tree-dsl: a constructor reached through a member chain (Outer.Inner()) has no SSA type
+  # skip: tree-dsl: qualified constructor Outer.Inner loses its owner; shared member lookup must resolve direct members before constructor TypeFlow
   - name: "Main.main -> Outer.Inner (nested class constructor)"
     skip: true
     query: |

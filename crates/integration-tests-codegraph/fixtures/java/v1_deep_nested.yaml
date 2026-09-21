@@ -40,7 +40,7 @@ tests:
 
   # ── J6: test_java_reference_resolve_type_failing_on_nested_type ──
 
-  # skip: tree-dsl: SSA name lookup finds the nearest definition named GrandChild (the subclass itself), not the nested Child.GrandChild
+  # skip: tree-dsl: qualified supertype Child.GrandChild loses its owner; shared member lookup needs owner identities and explicit ambiguity
   - name: "GrandChild.greet -> Child.GrandChild.greet (nested type regression)"
     skip: true
     query: |
