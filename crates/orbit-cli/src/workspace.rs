@@ -139,7 +139,7 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
             git.repo_path.display()
         );
         drop(client);
-        crate::index_collect(git.repo_path.clone(), 0, false, true, Some(db.clone()))
+        crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
             .context("failed to index the repository")?;
         client = crate::sql::open_graph(Some(db))?;
         if indexed_count(&client)? == 0 {

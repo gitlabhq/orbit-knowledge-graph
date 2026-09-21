@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
 use anyhow::{Result, bail};
 use arrow::array::{Array, StringArray};
 use cliclack::{Theme, ThemeState};
+use serde::Deserialize;
 
 use super::changes::{self, Report};
 use super::detect::Machine;
@@ -83,31 +85,55 @@ fn index_current_repository() -> Result<Option<NextStep>> {
     let command = format!("{} index .", spec::launcher());
     let spinner = cliclack::spinner();
     spinner.start(&command);
-    let outputs = match crate::index_collect(cwd.clone(), 0, false, false, None) {
-        Ok(outputs) => outputs,
-        Err(error) => {
-            spinner.error(format!("{command}  skipped: {error}"));
-            return Ok(None);
-        }
-    };
-    spinner.clear();
-    let summaries = outputs
-        .iter()
-        .map(|output| {
+    let output = launcher()?
+        .args(["index", "."])
+        .current_dir(&cwd)
+        .stderr(Stdio::null())
+        .output()?;
+    if !output.status.success() {
+        spinner.error(format!("{command}  failed with {}", output.status));
+        return Ok(None);
+    }
+    let summaries = serde_json::Deserializer::from_slice(&output.stdout)
+        .into_iter::<IndexSummary>()
+        .filter_map(Result::ok)
+        .map(|summary| {
             format!(
-                "{}: {} files, {} definitions, {:.0}s",
-                output.repository,
-                with_thousands(output.graph.files),
-                with_thousands(output.graph.definitions),
-                output.time_seconds
+                "{} files, {} definitions, {:.0}s",
+                with_thousands(summary.graph.files),
+                with_thousands(summary.graph.definitions),
+                summary.time_seconds
             )
         })
         .collect::<Vec<_>>()
-        .join("\n");
-    cliclack::note(command, summaries)?;
+        .join("; ");
+    spinner.stop(format!("{command}  {summaries}"));
     Ok(Some(
         most_referenced_definition(&cwd).map_or(NextStep::Ask, NextStep::Grep),
     ))
+}
+
+fn launcher() -> Result<Command> {
+    Ok(match spec::launcher() {
+        spec::GLAB_LAUNCHER => {
+            let mut glab = Command::new("glab");
+            glab.arg("orbit");
+            glab
+        }
+        _ => Command::new(std::env::current_exe()?),
+    })
+}
+
+#[derive(Deserialize)]
+struct IndexSummary {
+    time_seconds: f64,
+    graph: IndexedGraph,
+}
+
+#[derive(Deserialize)]
+struct IndexedGraph {
+    files: usize,
+    definitions: usize,
 }
 
 fn most_referenced_definition(repo: &std::path::Path) -> Option<String> {

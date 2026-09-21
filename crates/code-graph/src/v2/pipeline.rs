@@ -2,7 +2,7 @@ use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};
 use crate::v2::error::FileReason;
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
-use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle};
 use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -170,7 +170,7 @@ fn add_edge_if_missing(
 /// Per-file inferred return types keyed by the graph node indices of definitions.
 type InferredReturns = (Vec<petgraph::graph::NodeIndex>, Vec<(u32, String)>);
 
-fn progress_bar(len: u64, prefix: &str, visible: bool) -> ProgressBar {
+fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
     pb.set_style(
         ProgressStyle::with_template("{prefix} [{bar:40}] {pos}/{len} ({per_sec}, {eta})")
@@ -178,21 +178,14 @@ fn progress_bar(len: u64, prefix: &str, visible: bool) -> ProgressBar {
             .progress_chars("█▓░"),
     );
     pb.set_prefix(prefix.to_string());
-    if !visible {
-        pb.set_draw_target(ProgressDrawTarget::hidden());
-    }
     pb
 }
 
-fn spinner(msg: &str, visible: bool) -> ProgressBar {
+fn spinner(msg: &str) -> ProgressBar {
     let pb = ProgressBar::new_spinner();
     pb.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
     pb.set_message(msg.to_string());
-    if visible {
-        pb.enable_steady_tick(std::time::Duration::from_millis(100));
-    } else {
-        pb.set_draw_target(ProgressDrawTarget::hidden());
-    }
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
     pb
 }
 
@@ -552,8 +545,6 @@ pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
-    /// Draw the per-phase progress bars on stderr.
-    pub show_progress: bool,
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
     pub worker_threads: usize,
@@ -593,7 +584,6 @@ impl Default for PipelineConfig {
             max_files: 0,
             cancel: CancellationToken::new(),
             worker_threads: 0,
-            show_progress: true,
             max_concurrent_languages: 0,
             per_file_timeout: None,
             per_file_parse_timeout: None,
@@ -765,7 +755,7 @@ impl Pipeline {
         //    parser selection; the family determines which files share a
         //    CodeGraph for cross-language resolution.
         let t_discovery = std::time::Instant::now();
-        let pb_discover = spinner("Preparing file inventory...", config.show_progress);
+        let pb_discover = spinner("Preparing file inventory...");
         let (files_by_family, parsed_file_languages) =
             group_parseable_inventory(&file_inventory, config.max_files);
         let total_files = file_inventory.len();
@@ -1185,7 +1175,7 @@ impl FamilyPipeline {
                 })
                 .collect();
 
-        let pb = progress_bar(file_count as u64, "parse + graph", ctx.config.show_progress);
+        let pb = progress_bar(file_count as u64, "parse + graph");
 
         use crate::v2::dsl::engine::ParseFullResult;
         use crate::v2::error::{FaultedFile, FileFault, FileSkip, SkippedFile};
@@ -1463,7 +1453,7 @@ impl FamilyPipeline {
             .map(|build| Arc::new(build(&graph, expected_sep)));
 
         let t2 = std::time::Instant::now();
-        let pb2 = progress_bar(file_count as u64, "resolve", ctx.config.show_progress);
+        let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
 
         type Phase2Result = (
