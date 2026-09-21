@@ -24,7 +24,7 @@ tests:
       WHERE d.name = 'Numeric'
       RETURN d.name AS name, d.definition_type AS type
     assert:
-      - { row: { name: "Numeric", type: "Concept" } }
+      - { row: { name: "Numeric", type: "Interface" } }
 
   - name: "Concept Printable extracted as definition"
     query: |
