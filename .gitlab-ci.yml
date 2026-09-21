@@ -927,6 +927,13 @@ code-indexing-benchmark-v2-analyze:
 
 # Build Stage
 
+# Keyless signing needs a GitLab OIDC token with the sigstore audience; the
+# script itself skips signing outside the canonical project.
+.sign-image:
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+
 .docker-build:
   stage: build
   image: docker:29
@@ -938,6 +945,9 @@ code-indexing-benchmark-v2-analyze:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     IMAGE_NAME: gkg
+  artifacts:
+    paths:
+      - image-digests/
   rules:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -962,6 +972,7 @@ docker-build-arm64:
     ARCH: arm64
 
 docker-manifest:
+  extends: .sign-image
   stage: build
   image: docker:29
   tags:
@@ -976,11 +987,12 @@ docker-manifest:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - docker buildx imagetools create
-        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}"
-        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64"
+    - ./scripts/publish-manifest.sh
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}"
+        "--"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64@$(cat image-digests/amd64)"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64@$(cat image-digests/arm64)"
 
 docker-build-mr:
   stage: build
@@ -1145,6 +1157,9 @@ semantic-release:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     IMAGE_NAME: gkg
+  artifacts:
+    paths:
+      - image-digests/
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
   script:
@@ -1166,6 +1181,7 @@ release-build-arm64:
     ARCH: arm64
 
 release-manifest:
+  extends: .sign-image
   stage: build
   image: docker:29
   tags:
@@ -1180,11 +1196,12 @@ release-manifest:
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - VERSION="${CI_COMMIT_TAG#v}"
-    - docker buildx imagetools create
-        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
-        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
+    - ./scripts/publish-manifest.sh
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
+        "--"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64@$(cat image-digests/amd64)"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64@$(cat image-digests/arm64)"
 
 # Review stage
 
