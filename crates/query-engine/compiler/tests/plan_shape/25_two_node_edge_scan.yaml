@@ -1,0 +1,25 @@
+name: "Two-node traversal that does NOT FK-elide (HAS_LABEL has no FK)"
+input:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
+expected:
+  op: TopN
+  input:
+    op: Join
+    left:
+      op: Join
+      left:
+        op: Scan
+        table: gl_edge
+        alias: e0
+        dedup: false
+      right:
+        op: Scan
+        table: gl_merge_request
+        alias: mr
+        dedup: true
+    right:
+      op: Scan
+      table: gl_label
+      alias: label
+      dedup: true

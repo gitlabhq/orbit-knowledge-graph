@@ -1,0 +1,10 @@
+name: "Selectivity - pinned node present"
+input:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"limit":10}
+expected:
+  op: TopN
+  input:
+    op: Join
+absent:
+  - table: gl_edge

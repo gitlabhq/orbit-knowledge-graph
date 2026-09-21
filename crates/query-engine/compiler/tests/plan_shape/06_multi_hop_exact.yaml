@@ -1,0 +1,14 @@
+name: "Multi-hop exactly 2 hops"
+input:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[2,2]}],"limit":10}
+expected:
+  op: TopN
+  input:
+    op: Join
+    left:
+      op: Join
+      left:
+        op: UnionQueries
+        alias: e0
+        arm_count: 1

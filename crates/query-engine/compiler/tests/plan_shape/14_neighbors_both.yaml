@@ -1,0 +1,19 @@
+name: "Neighbors both direction is Union of two scans"
+input:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"both"},"limit":20}
+expected:
+  op: TopN
+  limit: 21
+  input:
+    op: Union
+    alias: _neighbors
+    arms:
+      - op: Scan
+        table: gl_edge
+        alias: e
+        dedup: false
+      - op: Scan
+        table: gl_edge
+        alias: e
+        dedup: false

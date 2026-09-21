@@ -1,0 +1,32 @@
+name: "Pathfinding depth 2 - forward + backward + intersection"
+input:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]},"limit":10}
+expected:
+  op: TopN
+  input:
+    op: Cte
+    name: _nf_start
+    consumer:
+      op: Cte
+      name: forward
+      consumer:
+        op: Cte
+        name: _nf_end
+        consumer:
+          op: Cte
+          name: backward
+          consumer:
+            op: Union
+            alias: paths
+            arms:
+              - op: Scan
+                table: forward
+                alias: f
+              - op: Join
+                left:
+                  op: Scan
+                  table: forward
+                right:
+                  op: Scan
+                  table: backward

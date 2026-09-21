@@ -1,0 +1,27 @@
+name: "Pathfinding depth 1 - no backward CTE"
+input:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":1,"rel_types":["IN_PROJECT"]},"limit":10}
+expected:
+  op: TopN
+  input:
+    op: Cte
+    name: _nf_start
+    body:
+      op: Scan
+      table: gl_merge_request
+      alias: start
+      dedup: true
+    consumer:
+      op: Cte
+      name: forward
+      body:
+        op: Scan
+        table: gl_edge
+        alias: e1
+        dedup: false
+      consumer:
+        op: Scan
+        table: forward
+        alias: f
+        dedup: false

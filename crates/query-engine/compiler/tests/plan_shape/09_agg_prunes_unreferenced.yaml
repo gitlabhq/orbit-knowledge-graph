@@ -1,0 +1,19 @@
+name: "Aggregation prunes unreferenced User node"
+input:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"merged_mrs"}],"limit":5}
+expected:
+  op: Aggregate
+  input:
+    op: Join
+    left:
+      op: Scan
+      table: gl_merge_request
+      alias: mr
+    right:
+      op: Scan
+      table: gl_project
+      alias: p
+absent:
+  - table: gl_user
+  - table: gl_edge

@@ -1,0 +1,24 @@
+name: "Multi-hop variable length 1..3"
+input:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,3]}],"limit":10}
+expected:
+  op: TopN
+  input:
+    op: Join
+    left:
+      op: Join
+      left:
+        op: UnionQueries
+        alias: e0
+        arm_count: 3
+      right:
+        op: Scan
+        table: gl_user
+        alias: u
+        dedup: true
+    right:
+      op: Scan
+      table: gl_project
+      alias: p
+      dedup: true

@@ -1,0 +1,28 @@
+name: "Pathfinding depth 3 - fwd Union of 2 arms, bwd 1 arm"
+input:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["IN_PROJECT","CONTAINS"]},"limit":10}
+expected:
+  op: TopN
+  input:
+    op: Cte
+    name: _nf_start
+    consumer:
+      op: Cte
+      name: forward
+      body:
+        op: Union
+        alias: _fwd_union
+        arms:
+          - op: Scan
+            alias: e1
+          - op: Join
+            left:
+              op: Scan
+              alias: e1
+            right:
+              op: Scan
+              alias: e2
+      consumer:
+        op: Cte
+        name: _nf_end

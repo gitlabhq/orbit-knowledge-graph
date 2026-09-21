@@ -96,3 +96,18 @@ fn plan_shape_scenarios() {
         }
     }
 }
+
+#[test]
+fn dump_all_shapes() {
+    let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology"));
+    let ctx = security_ctx();
+
+    for (name, doc) in load_scenarios() {
+        let json_str = doc["input"]["json"].as_str().unwrap();
+        let compiled = compiler::compile(json_str, compiler::Frontend::JsonDsl, &ontology, &ctx).unwrap();
+        let mut input = compiled.input.clone();
+        let (_, phys_op) = compiler::passes::plan_v2::plan(&mut input, &ontology).unwrap();
+        eprintln!("--- {name} ---");
+        eprintln!("{}", serde_json::to_string_pretty(&phys_op.shape()).unwrap());
+    }
+}

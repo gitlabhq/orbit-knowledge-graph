@@ -1,0 +1,21 @@
+name: "FK elision - no edge scan"
+input:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
+expected:
+  op: TopN
+  limit: 11
+  input:
+    op: Join
+    left:
+      op: Scan
+      table: gl_merge_request
+      alias: mr
+      dedup: true
+    right:
+      op: Scan
+      table: gl_user
+      alias: u
+      dedup: true
+absent:
+  - table: gl_edge
