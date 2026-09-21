@@ -56,7 +56,6 @@ struct Fold<'t> {
     ssa: SsaEngine,
     cur: BlockId,
     predeclared: FxHashMap<u32, u32>,
-    import_count: u32,
     defs: Vec<u32>,
     imports: Vec<u32>,
     wildcards: Vec<u32>,
@@ -180,21 +179,18 @@ impl<'t> Fold<'t> {
             {
                 continue;
             }
-            self.import_count += 1;
+            let import_idx = self.imports.len() as u32;
             self.imports.push(n.index());
             self.wildcards
                 .extend((local == self.wildcard).then_some(n.index()));
             self.ssa
-                .write_variable(sym, self.cur, Value::ImportRef(self.import_count - 1));
+                .write_variable(sym, self.cur, Value::ImportRef(import_idx));
             for kind in [C::Alias, C::SsaHint] {
                 if let Some(alias) = n.child_sym(kind)
                     && alias != sym
                 {
-                    self.ssa.write_variable(
-                        alias,
-                        self.cur,
-                        Value::ImportRef(self.import_count - 1),
-                    );
+                    self.ssa
+                        .write_variable(alias, self.cur, Value::ImportRef(import_idx));
                 }
             }
         }
@@ -407,7 +403,6 @@ impl<'t> Fold<'t> {
 
     fn tail_sym(&self, node: Cursor<'_>) -> u32 {
         match node.last_named() {
-            Some(c) if c.size() == 1 && c.sym_opt().is_some() => c.sym(),
             Some(c) if c.size() > 1 => self.tail_sym(c),
             Some(c) => c.sym(),
             None => node.sym(),
@@ -578,7 +573,6 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         ssa,
         cur: entry,
         predeclared: FxHashMap::default(),
-        import_count: 0,
         defs: Vec::new(),
         imports: Vec::new(),
         wildcards: Vec::new(),
