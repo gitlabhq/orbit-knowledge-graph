@@ -174,31 +174,16 @@ It serves `run_sql`, `get_graph_schema`, and `index` against
 ## Set up your AI agent
 
 `orbit setup` configures your AI coding agents to consult the graph before
-they reach for grep. Run it without arguments to configure every agent
-installed on your machine:
+they reach for grep. It detects the agents installed on your machine:
 
 ```shell
 orbit setup
 ```
 
-It detects agents from their configuration directories, such as
-`~/.claude`, `~/.codex`, and `~/.config/opencode`, and prints what each agent
-got. Each agent gets the instruction section, the skill files, and the nudge
-hooks. Supported agents are GitLab Duo, Claude Code, Codex, OpenCode, and Pi.
-
-To configure specific agents, name them:
-
-```shell
-orbit setup claude codex
-```
-
-Other options:
-
-- `--mcp` also registers the `orbit` MCP server.
-- `--skip <component>` leaves a component out: `instructions`, `hooks`,
-  `skill`, or `mcp`.
-- `--all` configures every supported agent, detected or not.
-- `--dry-run` prints every path and exits without writing.
+Name agents to configure only those, for example `orbit setup claude codex`.
+Add `--mcp` to also register the `orbit` MCP server. Run `orbit setup --help`
+for the other options. Supported agents are GitLab Duo, Claude Code, Codex,
+OpenCode, and Pi.
 
 ### What it changes
 
@@ -212,16 +197,10 @@ For every agent it configures, `orbit setup`:
   `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
   alone. Running the command again replaces the block in place instead of adding
   a second copy.
-- With `--mcp`, registers the `orbit` MCP server, which runs
-  `orbit mcp serve`, in the agent's MCP configuration:
-  `~/.claude.json` or `.mcp.json` for Claude Code, `config.toml` for Codex, and
-  `opencode.json` for OpenCode. Existing servers, comments, and unrelated
-  settings are preserved. If OpenCode uses `opencode.jsonc`, setup stops and
-  prints the entry for you to add by hand.
-- Installs the `orbit-cli` skill into `.agents/skills/`, the directory Codex,
-  OpenCode, Cursor, and Gemini CLI scan. Claude Code does not scan that
-  directory, so it also gets a `.claude/skills/orbit-cli` link to the same
-  files.
+- Installs the `orbit-cli` skill into `.agents/skills/`. Claude Code does not
+  scan that directory, so it also gets a `.claude/skills/orbit-cli` link.
+- With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
+  Existing servers and comments are preserved.
 - Adds entries to that agent's JSON configuration, where the agent
   supports it. For Claude Code this is a `PreToolUse` hook in
   `settings.json`; for OpenCode it is a plugin file and its registration.
@@ -243,20 +222,15 @@ teammates. User-global scope, the default, affects only you.
 
 ### Remove it
 
-To undo the changes for every agent, run:
+To undo the changes, run:
 
 ```shell
 orbit uninstall
 ```
 
-Name agents to undo only those, for example `orbit uninstall claude`. Pass
-`--project` or `--dir <path>` to target a project instead of your user-global
-configuration. `--dry-run` works as it does for `orbit setup`.
-
-This strips the marker-delimited block, the `orbit` MCP server entry, the
-marked JSON entries, and the installed skill files, and leaves the rest of each
-file untouched. If a file contained nothing but `orbit` entries, it is deleted.
-Files you edited after setup are kept. Backup files are not deleted.
+Name agents to undo only those. It removes what `orbit setup` wrote and leaves
+the rest of each file untouched. Files you edited after setup and backup files
+are kept. `--project` and `--dir` work as they do for `orbit setup`.
 
 If you would rather not have `orbit setup` touch your files, skip it and add the
 same instruction block, MCP entry, and hooks by hand.
