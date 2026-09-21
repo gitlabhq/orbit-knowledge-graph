@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -9,14 +9,17 @@ use super::changes::{self, Report};
 use super::detect::Machine;
 use super::plan::{self, Plan, Selection};
 use super::spec::{self, AssistantSpec};
-use super::{Options, Target};
+use super::{Component, Options, Target};
 
 pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Result<()> {
     let interactive = interactive(&options)?;
-    cliclack::intro("Orbit setup")?;
-
     let detected = machine.installed_assistants();
     let mut selection = Selection::for_install(&options, &detected)?;
+    cliclack::intro(format!(
+        "Orbit setup ({})",
+        component_list(&selection.components)
+    ))?;
+
     if interactive {
         selection.assistants = choose_assistants(
             "Which assistants should use Orbit?",
@@ -57,9 +60,12 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 
 pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
     let interactive = interactive(&options)?;
-    cliclack::intro("Orbit uninstall")?;
-
     let mut selection = Selection::for_uninstall(&options)?;
+    cliclack::intro(format!(
+        "Orbit uninstall ({})",
+        component_list(&selection.components)
+    ))?;
+
     if interactive {
         selection.assistants = choose_assistants(
             "Remove Orbit from which assistants?",
@@ -124,6 +130,14 @@ fn detection_hints(
         .collect()
 }
 
+fn component_list(components: &BTreeSet<Component>) -> String {
+    components
+        .iter()
+        .map(|component| component.label())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn confirm(question: impl Display) -> Result<bool> {
     Ok(cliclack::confirm(question).initial_value(true).interact()?)
 }
@@ -133,7 +147,8 @@ fn choose_assistants(
     preselected: &[&'static AssistantSpec],
     hints: &BTreeMap<&str, String>,
 ) -> Result<Vec<&'static AssistantSpec>> {
-    let mut picker = cliclack::multiselect(prompt).required(false);
+    let mut picker =
+        cliclack::multiselect(format!("{prompt}  (space toggles, enter confirms)")).required(false);
     for assistant in spec::all() {
         let hint = hints
             .get(assistant.name.as_str())
