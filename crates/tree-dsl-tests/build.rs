@@ -40,6 +40,7 @@ fn main() {
     )
     .unwrap();
     println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed={root}");
 }
 
 fn find_yaml(root: &str, dir: &str, out: &mut Vec<(String, String)>) {
