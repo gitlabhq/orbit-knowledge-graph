@@ -58,13 +58,11 @@ struct JwtClaims {
     exp: i64,
 }
 
-/// Rails no longer sends `expires_at`, just the raw token.
 #[derive(Deserialize)]
 struct CloudConnectorTokenResponse {
     token: String,
 }
 
-/// Decoded without verifying the signature — the collector does that, not gkg.
 #[derive(Deserialize)]
 struct CloudConnectorTokenClaims {
     exp: i64,
@@ -161,7 +159,7 @@ impl GitlabClient {
         Self::check_token_response_status(&response)?;
 
         let raw: CloudConnectorTokenResponse = response.json().await?;
-        let expires_at = decode_token_expiry(&raw.token)?;
+        let expires_at = decode_token_expiry_with_buffer(&raw.token)?;
         Ok(CloudConnectorToken {
             token: raw.token,
             expires_at,
@@ -426,9 +424,7 @@ impl GitlabClient {
     }
 }
 
-/// Decodes `exp` and returns it minus [`CC_TOKEN_EXPIRY_BUFFER_SECS`] — a
-/// refresh deadline, not the literal claim.
-pub(crate) fn decode_token_expiry(token: &str) -> Result<i64, GitlabClientError> {
+pub(crate) fn decode_token_expiry_with_buffer(token: &str) -> Result<i64, GitlabClientError> {
     let data = insecure_decode::<CloudConnectorTokenClaims>(token)
         .map_err(|e| GitlabClientError::JwtDecoding(e.to_string()))?;
     let expires_at = data.claims.exp - CC_TOKEN_EXPIRY_BUFFER_SECS;
@@ -488,13 +484,12 @@ mod tests {
         )
         .unwrap();
 
-        let expires_at = decode_token_expiry(&token).unwrap();
+        let expires_at = decode_token_expiry_with_buffer(&token).unwrap();
         assert_eq!(expires_at, now + 3600 - CC_TOKEN_EXPIRY_BUFFER_SECS);
     }
 
     #[test]
     fn decode_token_expiry_ignores_signature() {
-        // Different key than gkg would ever have — verification is the collector's job.
         let key = EncodingKey::from_secret(b"some-other-key-entirely");
         let now = chrono::Utc::now().timestamp();
         let token = encode(
@@ -504,12 +499,12 @@ mod tests {
         )
         .unwrap();
 
-        assert!(decode_token_expiry(&token).is_ok());
+        assert!(decode_token_expiry_with_buffer(&token).is_ok());
     }
 
     #[test]
     fn decode_token_expiry_rejects_malformed_token() {
-        let err = decode_token_expiry("not-a-jwt").unwrap_err();
+        let err = decode_token_expiry_with_buffer("not-a-jwt").unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 
@@ -518,7 +513,7 @@ mod tests {
         let key = EncodingKey::from_secret(b"any-secret");
         let token = encode(&Header::new(Algorithm::HS256), &serde_json::json!({}), &key).unwrap();
 
-        let err = decode_token_expiry(&token).unwrap_err();
+        let err = decode_token_expiry_with_buffer(&token).unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 
@@ -535,7 +530,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = decode_token_expiry(&token).unwrap_err();
+        let err = decode_token_expiry_with_buffer(&token).unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 
@@ -551,7 +546,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = decode_token_expiry(&token).unwrap_err();
+        let err = decode_token_expiry_with_buffer(&token).unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 

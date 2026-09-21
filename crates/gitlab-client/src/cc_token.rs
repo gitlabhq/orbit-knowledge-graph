@@ -149,7 +149,7 @@ mod tests {
         )
         .unwrap();
 
-        let expires_at = crate::client::decode_token_expiry(&token).unwrap();
+        let expires_at = crate::client::decode_token_expiry_with_buffer(&token).unwrap();
         assert_eq!(expires_at, real_exp - 60);
 
         for jitter in [0, REFRESH_JITTER_MAX_SECS] {
