@@ -59,17 +59,15 @@ sequenceDiagram
 
 ## Token Gateway: Fine-Grained Personal Access Tokens
 
-Fine-grained personal access tokens follow the Global Search pattern. Rails runs one token check before the route. The check answers one question: may this token call this route for this container? After that check the token is not read again. Results follow the token owner's access through Layers 1 to 3.
+Fine-grained personal access tokens follow the Global Search pattern. Rails runs one token check before the route. The check answers one question: may this token call this route? After that check the token is not read again. Results follow the token owner's access through Layers 1 to 3.
 
-- The Orbit **Read** permission (`read_orbit`) lists two scopes: group and user. Projects are not a scope, because Orbit authorizes at the group level with the Reporter role. The Orbit MCP tool **Execute** permission lists only the user scope, the same as the GitLab MCP server permission.
-- The query, named query, agent command, and graph status routes are mounted twice. `/orbit/*` checks the user boundary. `/groups/:id/orbit/*` checks the group in the path. This is the same shape as `/search` and `/groups/:id/search`. Schema, tools, templates, and status stay on the unscoped routes.
-- A user-scoped token calls the unscoped routes and gets `403` on the group routes, the same as search. A group-scoped token must call the route for its group. A call to the unscoped route, or to a group outside the token scope, returns `403`. A group the owner cannot read returns `404`.
-- MCP takes the group as the `namespace_id` argument on the `invoke_command` tool. Rails runs the same read check for that group on each call. The MCP URL and OAuth registration stay fixed.
-- When a request uses a group route, Rails keeps only the traversal paths inside that group before it signs the JWT. Layer 2 then filters to that subtree. Aggregations narrow the same way. This applies to every caller, not only fine-grained tokens. An admin who names a group gets the narrowed paths instead of the admin claim.
+- The Orbit **Read** permission (`read_orbit`) lists the user scope. The Orbit MCP tool **Execute** permission lists the user scope as well, the same as the GitLab MCP server permission.
+- Every Orbit route declares the user boundary, the same as `/search`. A token with the permission under the User tab passes. A token made only under group and project access gets `403`.
 - Orbit does not read the other permissions on the token. A token without the Work item **Read** permission still gets work items from Orbit when the owner can read them in GitLab.
 - Orbit adds no section or toggle of its own to the token UI, and does not parse queries for namespaces.
+- Group scoping is deferred. The design for group routes that narrow the JWT traversal paths lives in the follow-up issue linked from [issue 992](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/992).
 
-Prior art in Rails: the [Global Search manifest](https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/authz/permission_groups/assignable_permissions/search/global_search/use.yml) and [routes](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/search.rb), the [Markdown route](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/markdown.rb) with a parameter boundary, and the [MCP tool re-dispatch](https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/services/mcp/tools/base/api_tool.rb).
+Prior art in Rails: the [Global Search manifest](https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/authz/permission_groups/assignable_permissions/search/global_search/use.yml) and [routes](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/search.rb), and the [MCP server gateway](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/mcp/base.rb).
 
 ## Layer 1: Logical Tenant Segregation by Organization
 

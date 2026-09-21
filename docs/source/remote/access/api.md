@@ -41,10 +41,8 @@ Bearer token:
 
 Results are scoped to entities the token owner can access in GitLab.
 
-The query, named query, agent command, and graph status endpoints also exist under a group,
-for example `/api/v4/groups/:id/orbit/query`. Those routes narrow results to that group. A
-fine-grained token scoped to a group must use them. For more information, see
-[Fine-grained personal access tokens](../security.md#fine-grained-personal-access-tokens).
+A fine-grained token needs the GitLab Orbit **Read** permission under the **User** tab. For more
+information, see [Fine-grained personal access tokens](../security.md#fine-grained-personal-access-tokens).
 
 ## Billing
 

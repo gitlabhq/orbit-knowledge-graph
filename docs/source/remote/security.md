@@ -83,7 +83,7 @@ can see in GitLab.
   access token with the GitLab Orbit **Read** permission, sent as a Bearer token. For more information,
   see [REST API](access/api.md).
 - MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. A fine-grained personal
-  access token needs the GitLab Orbit MCP tool **Execute** permission and the GitLab Orbit **Read** permission.
+  access token needs the GitLab Orbit MCP tool **Execute** permission.
   For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
 
@@ -94,17 +94,11 @@ A fine-grained token works with GitLab Orbit the same way it works with
 The token check is a gateway: it decides whether the token may call the endpoint. The results
 follow the token owner's access in GitLab, not the other permissions on the token.
 
-- A token with the GitLab Orbit **Read** permission under **User** calls the unscoped endpoints and
-  sees everything the token owner can see. It gets `403` on the group routes, the same as
-  Global Search.
-- A token with the GitLab Orbit **Read** permission on a group must name that group in each
-  request. Use the group routes for queries, agent commands, and graph status, such as
-  `/api/v4/groups/:id/orbit/query`, or the `namespace_id` argument on the MCP `invoke_command`
-  tool. Calls to the unscoped routes, or to a group outside the token's scope, return `403`.
-- Only groups can scope a token. GitLab Orbit authorizes at the group level with the Reporter
-  role, so a token scoped to a single project cannot call GitLab Orbit.
-- When a request uses a group route, results narrow to that group for every caller, including
-  classic tokens and OAuth.
+- Add the GitLab Orbit **Read** permission under the **User** tab. The token can then call every
+  GitLab Orbit REST endpoint and sees everything the token owner can see.
+- For MCP, add the GitLab Orbit MCP tool **Execute** permission under the **User** tab.
+- GitLab Orbit does not offer group or project scopes yet. A token created only under
+  **Group and project access** gets `403` from GitLab Orbit.
 - Other permissions on the token have no effect on GitLab Orbit results. A token without the Work item
   **Read** permission still gets work items from GitLab Orbit when the owner can read them in GitLab.
 - The Reporter floor and the Security Manager rule in
