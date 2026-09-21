@@ -111,6 +111,7 @@ siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.g
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
 toml = "1.0.0"
+toml_edit = "0.25"
 toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
