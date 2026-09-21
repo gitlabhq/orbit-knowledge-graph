@@ -272,16 +272,20 @@ impl<'a> PlanCtx<'a> {
     fn needs_node_join(&self, node: &InputNode) -> bool {
         let a = &node.id;
         let input = self.input;
-        !node.filters.is_empty()
-            || !node.node_ids.is_empty()
-            || node.id_range.is_some()
-            || matches!(&node.columns, Some(ColumnSelection::List(c)) if !c.is_empty())
-            || input.order_by.as_ref().is_some_and(|ob| ob.node == *a)
-            || input.aggregation.group_by.iter().any(|g| g.node() == a.as_str())
-            || input.aggregation.metrics.iter().any(|m| {
-                m.expr.node() == a.as_str() && m.expr.property().is_some()
-                    && !matches!(m.expr.function(), AggFunction::Count)
-            })
+        let has_filters = !node.filters.is_empty() || !node.node_ids.is_empty() || node.id_range.is_some();
+        let in_group_by = input.aggregation.group_by.iter().any(|g| g.node() == a.as_str());
+        let in_agg_prop = input.aggregation.metrics.iter().any(|m| {
+            m.expr.node() == a.as_str() && m.expr.property().is_some()
+                && !matches!(m.expr.function(), AggFunction::Count)
+        });
+        let in_order_by = input.order_by.as_ref().is_some_and(|ob| ob.node == *a);
+        let has_columns = matches!(&node.columns, Some(ColumnSelection::List(c)) if !c.is_empty());
+
+        if input.query_type == QueryType::Aggregation {
+            has_filters || in_group_by || in_agg_prop || in_order_by
+        } else {
+            has_filters || has_columns || in_order_by || in_group_by || in_agg_prop
+        }
     }
 
     fn order_by_exprs(&self) -> Vec<OrderExpr> {
@@ -394,27 +398,51 @@ impl<'a> PlanCtx<'a> {
         let cl = self.input.relationships.len();
         let mut fk_joined: HashSet<String> = HashSet::new();
 
+        let all_fk = cl >= 1 && self.input.relationships.iter().all(|r| {
+            matches!(self.graph.resolve(r, det, cl), HopStrategy::FkJoin { .. })
+        });
+
         for (i, rel) in self.input.relationships.iter().enumerate() {
             let ea = format!("e{i}");
             let (sc, _) = rel.direction.edge_columns();
 
-            match self.graph.resolve(rel, det, cl) {
+            let strategy = if all_fk {
+                self.graph.resolve(rel, det, cl)
+            } else {
+                match self.graph.resolve(rel, det, cl) {
+                    HopStrategy::FkJoin { .. } => HopStrategy::EdgeScan {
+                        table: self.graph.edge_table(&rel.types, det),
+                        dedup: cl >= 2 && rel.hops.max == 1,
+                    },
+                    other => other,
+                }
+            };
+
+            match strategy {
                 HopStrategy::FkJoin { fk_column } => {
                     let (fk_alias, tgt_alias) = self.fk_sides(rel, &fk_column);
                     if tree.is_none() {
                         if let Some(n) = self.input.nodes.iter().find(|n| n.id == fk_alias) {
-                            tree = Some(self.node_scan(n));
-                            fk_joined.insert(fk_alias.to_string());
+                            if self.needs_node_join(n) {
+                                tree = Some(self.node_scan(n));
+                                fk_joined.insert(fk_alias.to_string());
+                            }
                         }
                     }
                     if !fk_joined.contains(tgt_alias) {
                         if let Some(n) = self.input.nodes.iter().find(|n| n.id == tgt_alias) {
-                            tree = Some(PhysOp::Join {
-                                left: Box::new(tree.unwrap()),
-                                right: Box::new(self.node_scan(n)),
-                                on: Expr::eq(Expr::col(fk_alias, &fk_column), Expr::col(tgt_alias, DEFAULT_PRIMARY_KEY)),
-                            });
-                            fk_joined.insert(tgt_alias.to_string());
+                            if self.needs_node_join(n) {
+                                if tree.is_none() {
+                                    tree = Some(self.node_scan(n));
+                                } else {
+                                    tree = Some(PhysOp::Join {
+                                        left: Box::new(tree.unwrap()),
+                                        right: Box::new(self.node_scan(n)),
+                                        on: Expr::eq(Expr::col(fk_alias, &fk_column), Expr::col(tgt_alias, DEFAULT_PRIMARY_KEY)),
+                                    });
+                                }
+                                fk_joined.insert(tgt_alias.to_string());
+                            }
                         }
                     }
                 }
@@ -503,7 +531,25 @@ impl<'a> PlanCtx<'a> {
                 SelectExpr::new(Expr::string(center_entity), redaction_type_column(&center.id)),
             ];
 
-            PhysOp::Scan { table: et.clone(), alias: ea.to_string(), dedup: false, predicates: preds, select }
+            let edge_scan = PhysOp::Scan { table: et.clone(), alias: ea.to_string(), dedup: false, predicates: preds, select };
+
+            let has_non_denorm = center.filters.iter().any(|(prop, _)| {
+                let src = self.input.compiler.denormalized_columns.contains_key(
+                    &(center_entity.to_string(), prop.clone(), "source".to_string()));
+                let tgt = self.input.compiler.denormalized_columns.contains_key(
+                    &(center_entity.to_string(), prop.clone(), "target".to_string()));
+                !src && !tgt
+            }) || center.id_range.is_some();
+
+            if has_non_denorm {
+                PhysOp::Join {
+                    left: Box::new(edge_scan),
+                    right: Box::new(self.node_scan(center)),
+                    on: Expr::eq(Expr::col(ea, center_col), Expr::col(&center.id, DEFAULT_PRIMARY_KEY)),
+                }
+            } else {
+                edge_scan
+            }
         };
 
         let body = match config.direction {
