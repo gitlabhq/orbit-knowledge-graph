@@ -96,7 +96,7 @@ tests:
     assert:
       - { row: { fqn: 'App\bootstrap' } }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "User extends Model"
     skip: true
     query: |
@@ -121,7 +121,7 @@ tests:
       - { no_nulls: callee }
       - { row: { caller: 'App\Models\Model\save', callee: 'App\Models\Model\persist' } }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Parent call: User.save -> Model.save via parent::"
     skip: true
     query: |

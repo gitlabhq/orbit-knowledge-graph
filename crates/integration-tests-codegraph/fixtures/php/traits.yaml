@@ -254,9 +254,7 @@ tests:
       - { row_count: 1 }
 
   # ── Inheritance via `use Trait;` (Extends edges) ──────────────────
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "Multiple traits in one use: Product uses both Loggable and Cacheable"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Models\Product'
@@ -267,7 +265,7 @@ tests:
       - { row_count: 2 }
       - { unique: parent }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Trait composed of trait: Composer uses Base"
     skip: true
     query: |
@@ -279,9 +277,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "Conflict-resolution use still emits Extends for both traits"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Models\Speaker'
@@ -293,9 +289,7 @@ tests:
       - { unique: parent }
 
   # ── Calls into trait-provided members ─────────────────────────────
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
   - name: "Trait method via \\$this: Product.persist -> Loggable.log"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\persist'
@@ -305,9 +299,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
   - name: "Second trait method via \\$this: Product.persist -> Cacheable.cache"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Product\persist'
@@ -327,9 +319,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
   - name: "Class invoking inherited trait method: Person.hello -> Greeter.greet"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Person\hello'
@@ -339,9 +329,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
   - name: "Static trait method via self::: Widget.bump -> Counter.tick"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Widget\bump'
@@ -351,9 +339,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
   - name: "Static trait method via static::: Widget.clear -> Counter.reset"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Widget\clear'
@@ -363,9 +349,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
   - name: "Transitive trait method through composing trait: Host.run -> Composer.compose"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\Host\run'
@@ -375,7 +359,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Trait-of-trait \\$this call: Composer.compose -> Base.ping"
     skip: true
     query: |
@@ -387,9 +371,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
   - name: "Trait-method-on-trait-method via class: App.show -> HasVersion.version"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Models\App\show'

@@ -185,9 +185,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "Model::update", callee: "Model::name", kind: Calls } }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "Model extends Base"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'Model'
@@ -197,9 +195,7 @@ tests:
       - { row_count: 1 }
       - { row: { child: "Model", parent: "Base" } }
 
-  # skip: tree-dsl: inherited method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
   - name: "Model.update calls save! (inherited from Base via Extends)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'

@@ -80,9 +80,7 @@ tests:
       - { row_count: 1 }
       - { row: { name: "Instrumentation", path: "" } }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "class links to superclass and composed modules"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'Report'

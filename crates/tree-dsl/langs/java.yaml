@@ -17,7 +17,7 @@ stages:
     rules:
       # import static a.b.C.m;
       - match: '(import_declaration (static) $S:scoped_identifier)'
-        replace: '(__import (__visibility "static") (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|regex_replace("\.[^.]+$", "")|replace(".", "/")) (__name @$S|split_last(".")))'
+        replace: '(__import (__import_kind "static") (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|regex_replace("\.[^.]+$", "")|replace(".", "/")) (__name @$S|split_last(".")))'
       # import a.b.*;
       - match: '(import_declaration $S:scoped_identifier (asterisk))'
         replace: '(__import (__source @$S) (__source_path @$S|replace(".", "/")) (__name "*"))'
@@ -181,9 +181,9 @@ stages:
       - match: '(method_declaration $M?:modifiers name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $M $P $B)'
       - match: '(constructor_declaration $M?:modifiers name: $N:identifier parameters: $P body: $B)'
-        replace: '(__def (__defname @$N) (__method) (__alias "<init>") $M $P $B)'
+        replace: '(__def (__defname @$N) (__method) (__constructor) $M $P $B)'
       - match: '(compact_constructor_declaration $M?:modifiers name: $N:identifier body: $B)'
-        replace: '(__def (__defname @$N) (__method) (__alias "<init>") $M $B)'
+        replace: '(__def (__defname @$N) (__method) (__constructor) $M $B)'
 
       # Types (after members)
       - match: '(class_declaration $M?:modifiers name: $N:identifier $$$PRE superclass: $S:__supertype $$$ANN body: (class_body $$$B))'
@@ -280,7 +280,7 @@ display:
         tag: { def_type: Function }
       - match: '(__def (__method))'
         tag: { def_type: Method }
-      - match: '(__def (__method) (__alias "<init>"))'
+      - match: '(__def (__method) (__constructor))'
         tag: { def_type: Constructor }
       - match: '(__def (__class))'
         tag: { def_type: Class }
@@ -317,7 +317,7 @@ display:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
-      - match: '(__import (__visibility "static"))'
+      - match: '(__import (__import_kind "static"))'
         tag:
           import_type: StaticImport
       - match: '(__name "*")'

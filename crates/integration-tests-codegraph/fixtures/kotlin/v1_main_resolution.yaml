@@ -31,7 +31,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: the receiver's type is an imported class; extension functions and inherited members resolve only through same-file defs
+  # skip: tree-dsl: extension functions and interface members of imported types resolve only through same-file defs
   - name: "main -> Baz.baz (interface through inheritance)"
     skip: true
     query: |

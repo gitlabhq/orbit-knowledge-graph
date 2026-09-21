@@ -33,7 +33,7 @@ tests:
       - { row: { fqn: "lib::compute" } }
       - { row: { fqn: "other::compute" } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Call resolves to the #include-reachable definition (lib.c via lib.h pairing)"
     skip: true
     query: |

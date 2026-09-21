@@ -26,9 +26,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: only the outer class is imported; the nested type is not visible by name
   - name: "main -> Parent.GrandChild.greet (typed nested type)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.main'

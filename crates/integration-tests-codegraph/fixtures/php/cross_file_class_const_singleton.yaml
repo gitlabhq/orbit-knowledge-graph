@@ -59,7 +59,7 @@ tests:
       - { row_count: 3 }
       - { unique: path }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Cross-file class extension: ScopedContainer extends Container"
     skip: true
     query: |
@@ -121,7 +121,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Inherited method dispatch via both static-factory chains: register -> Container.get (2 call sites)"
     skip: true
     query: |

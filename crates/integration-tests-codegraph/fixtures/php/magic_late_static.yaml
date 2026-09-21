@@ -220,7 +220,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "User extends Model — Extends edge present"
     skip: true
     query: |
@@ -231,7 +231,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Account extends Model — Extends edge present"
     skip: true
     query: |
@@ -242,7 +242,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Repo extends Query — Extends edge present"
     skip: true
     query: |
@@ -307,7 +307,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
+  # skip: tree-dsl: the parent class is a same-namespace sibling without an import; cross-file Extends reaches only parents in the file's visible names
   - name: "Subclass calling inherited static create() resolves via Extends to Model::create"
     skip: true
     query: |
@@ -319,7 +319,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Subclass calling inherited static find() resolves to Model::find"
     skip: true
     query: |
@@ -331,7 +331,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Different subclass also resolves inherited create() to Model::create"
     skip: true
     query: |
@@ -343,7 +343,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "static::from() inside Repo resolves to inherited Query::from"
     skip: true
     query: |
@@ -355,7 +355,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: inherited and trait method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "self::from() inside Repo also resolves to inherited Query::from"
     skip: true
     query: |

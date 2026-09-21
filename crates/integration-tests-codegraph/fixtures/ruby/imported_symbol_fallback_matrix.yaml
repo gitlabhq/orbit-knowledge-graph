@@ -57,7 +57,7 @@ fixtures:
       end
 
 tests:
-  # skip: tree-dsl: constant references resolve through autoload paths, not require statements; a file has one wildcard slot and no camelize transform
+  # skip: tree-dsl: constant references resolve through autoload paths, not require statements; the transforms cannot camel-case a path
   - name: "gem requires target side-effect imported symbols"
     skip: true
     query: |
@@ -69,7 +69,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "ApiRunner::fetch", path: "faraday", name: "*", import_type: "Require" } }
 
-  # skip: tree-dsl: constant references resolve through autoload paths, not require statements; a file has one wildcard slot and no camelize transform
+  # skip: tree-dsl: constant references resolve through autoload paths, not require statements; the transforms cannot camel-case a path
   - name: "underscored requires target side-effect imported symbols"
     skip: true
     query: |
@@ -81,7 +81,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "ApiRunner::connect", path: "external_client", name: "*", import_type: "Require" } }
 
-  # skip: tree-dsl: constant references resolve through autoload paths, not require statements; a file has one wildcard slot and no camelize transform
+  # skip: tree-dsl: constant references resolve through autoload paths, not require statements; the transforms cannot camel-case a path
   - name: "observed acronym constants match require paths without path-derived names"
     skip: true
     query: |
@@ -93,7 +93,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "ApiRunner::parse", path: "json", name: "*", import_type: "Require" } }
 
-  # skip: tree-dsl: constant references resolve through autoload paths, not require statements; a file has one wildcard slot and no camelize transform
+  # skip: tree-dsl: constant references resolve through autoload paths, not require statements; the transforms cannot camel-case a path
   - name: "require_relative target imported symbols"
     skip: true
     query: |

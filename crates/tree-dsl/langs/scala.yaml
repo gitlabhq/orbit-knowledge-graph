@@ -11,9 +11,9 @@ stages:
   - name: import-selectors
     rules:
       - match: '(import_declaration $$$P:identifier (namespace_selectors $$$S:identifier|arrow_renamed_identifier (namespace_wildcard)))'
-        replace: '(sc_imports (__import (__visibility "grouped") (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) $$$S->__name) (__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) (__name "*")))'
+        replace: '(sc_imports (__import (__import_kind "grouped") (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) $$$S->__name) (__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) (__name "*")))'
       - match: '(import_declaration $$$P:identifier (namespace_selectors $$$S:identifier|arrow_renamed_identifier))'
-        replace: '(__import (__visibility "grouped") (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) $$$S->__name)'
+        replace: '(__import (__import_kind "grouped") (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) $$$S->__name)'
   - name: import-wildcards
     rules:
       - match: '(import_declaration $$$P:identifier (namespace_wildcard))'
@@ -190,7 +190,7 @@ display:
         tag: { def_type: Function }
       - match: '(__def (__method))'
         tag: { def_type: Method }
-      - match: '(__def (__method) (__alias "<init>"))'
+      - match: '(__def (__method) (__constructor))'
         tag: { def_type: Constructor }
       - match: '(__def (__class))'
         tag: { def_type: Class }
@@ -228,7 +228,7 @@ display:
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
           import_type: Import
-      - match: '(__import (__visibility "grouped"))'
+      - match: '(__import (__import_kind "grouped"))'
         tag: { import_type: GroupedImport }
       - match: '(__name "*")'
         tag:

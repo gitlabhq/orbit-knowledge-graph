@@ -61,7 +61,7 @@ fixtures:
       }
 
 tests:
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
+  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "namespace using directives target wildcard imported symbols"
     skip: true
     query: |
@@ -73,7 +73,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "App.JsonRunner.Serialize", path: "Newtonsoft.Json", name: null, import_type: "WildcardImport" } }
 
-  # skip: tree-dsl: a namespace `using` names a directory, and member calls on unresolved names do not fall back to wildcard imports
+  # skip: tree-dsl: a member call or `new` on an unbound name does not bind to wildcard imports; the C# matrix asserts Console.WriteLine stays unlinked, so this needs a builtin table
   - name: "static using directives target wildcard imported symbols"
     skip: true
     query: |

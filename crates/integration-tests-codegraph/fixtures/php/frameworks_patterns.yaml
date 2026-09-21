@@ -146,9 +146,7 @@ tests:
       - { unique: fqn }
 
   # One class implementing one interface (FileLogger -> LoggerInterface).
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "FileLogger implements LoggerInterface produces Extends edge"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Support\Logger\FileLogger'
@@ -158,9 +156,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "EloquentUserRepository implements UserRepositoryInterface produces Extends edge"
-    skip: true
     query: |
       MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
       WHERE c.fqn = 'App\Repositories\EloquentUserRepository'
@@ -172,9 +168,7 @@ tests:
 
   # Interface-typed property dispatch: $this->users is typed as the interface,
   # so the call resolves to the INTERFACE method, not the concrete implementation.
-  # skip: tree-dsl: resolve_field_edges types properties only through Class or Struct targets, not Interface
   - name: "Controller.show -> UserRepositoryInterface.find via interface-typed property"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Controllers\UserController\show'
@@ -184,9 +178,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: resolve_field_edges types properties only through Class or Struct targets, not Interface
   - name: "Controller.index -> UserRepositoryInterface.all via interface-typed property"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Http\Controllers\UserController\index'
@@ -197,9 +189,7 @@ tests:
       - { row_count: 1 }
 
   # Repository's own injected interface property — same pattern at a deeper layer.
-  # skip: tree-dsl: resolve_field_edges types properties only through Class or Struct targets, not Interface
   - name: "Repository.find -> LoggerInterface.info via interface-typed property"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Repositories\EloquentUserRepository\find'

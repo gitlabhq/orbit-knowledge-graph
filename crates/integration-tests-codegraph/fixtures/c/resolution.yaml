@@ -141,7 +141,7 @@ tests:
   # CROSS-FILE CALLS (via #include)
   # ══════════════════════════════════════════════════════════════
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: main calls vec_add (main.c -> math.h -> math.c)"
     skip: true
     query: |
@@ -153,7 +153,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main::main", callee: "math::vec_add", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: main calls vec_normalize (main.c -> math.h -> math.c)"
     skip: true
     query: |
@@ -165,7 +165,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main::main", callee: "math::vec_normalize", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: main calls vec_length (main.c -> math.h -> math.c)"
     skip: true
     query: |
@@ -177,7 +177,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main::main", callee: "math::vec_length", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: main calls create_circle (main.c -> shapes.h -> shapes.c)"
     skip: true
     query: |
@@ -189,7 +189,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main::main", callee: "shapes::create_circle", kind: Calls } }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Cross-file: main calls get_area (main.c -> shapes.h -> shapes.c)"
     skip: true
     query: |
@@ -210,7 +210,7 @@ tests:
     assert:
       - { no_nulls: caller }
 
-  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing and a file has one wildcard slot
+  # skip: tree-dsl: a quoted #include resolves to the header, which holds no definitions; there is no header-to-source pairing
   - name: "Exact cross-file call count from main"
     skip: true
     query: |

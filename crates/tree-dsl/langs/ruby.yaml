@@ -17,7 +17,7 @@ stages:
   - name: imports
     rules:
       - match: '(call method: (identifier "require_relative") arguments: (argument_list (string $S:string_content)))'
-        replace: '(__import (__visibility "relative") (__source @$S) (__source_path @$S|prepend("./")) (__name "*"))'
+        replace: '(__import (__import_kind "relative") (__source @$S) (__source_path @$S|prepend("./")) (__name "*"))'
       - match: '(call method: (identifier "require") arguments: (argument_list (string $S:string_content)))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "*"))'
       # include/extend/prepend: each module argument becomes a supertype and an import
@@ -63,11 +63,11 @@ stages:
   - name: synth
     rules:
       - match: '(rb_include)'
-        replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__visibility "include") (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
+        replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__import_kind "include") (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
       - match: '(rb_extend)'
-        replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__visibility "extend") (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
+        replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__import_kind "extend") (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
       - match: '(rb_prepend)'
-        replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__visibility "prepend") (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
+        replace: '(rb_synth (__supertype @$ROOT|split_last("::")) (__import (__import_kind "prepend") (__source @$ROOT|regex_replace("(::)?[^:]+$", "")) (__source_path @$ROOT|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$ROOT|split_last("::"))))'
       - match: '(rb_attr)'
         replace: '(__def (__defname @$ROOT|strip=:) (__property))'
       - match: '(rb_method $$$B)'
@@ -98,9 +98,9 @@ stages:
       - match: '(return $$$V)'
         replace: '(__ssa_return $$$V)'
       - match: '(superclass $S:constant)'
-        replace: '(__supertype @$S)'
+        replace: '(rb_super (__supertype @$S) (__import (__import_kind "autoload") (__source @$S) (__source_path @$S|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$S)))'
       - match: '(superclass $S:scope_resolution)'
-        replace: '(__supertype @$S|strip=::|split_last("::"))'
+        replace: '(rb_super (__supertype @$S|strip=::|split_last("::")) (__import (__import_kind "autoload") (__source @$S|regex_replace("(::)?[^:]+$", "")) (__source_path @$S|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$S|strip=::|split_last("::"))))'
       # Parameters
       - match: '(optional_parameter name: $N:identifier)'
         replace: '(__binding @$N)'
@@ -131,25 +131,25 @@ stages:
         replace: '(__call (__callee (__member @$M (__object (__ivar @$R|strip=@)))) $A $B)'
       # Const.new / Const::Nested.new → constructor call plus autoload import
       - match: '(call receiver: $R:constant method: (identifier "new") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
       - match: '(call receiver: $R:scope_resolution method: (identifier "new") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R|split_last("::"))) (__call (__callee @$R|split_last("::")) $A $B))'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R|split_last("::"))) (__call (__callee @$R|split_last("::")) $A $B))'
       # Rails finders and builders return instances of the receiver constant
       - match: '(call receiver: $R:constant method: (identifier "find") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
       - match: '(call receiver: $R:constant method: (identifier "find_by") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
       - match: '(call receiver: $R:constant method: (identifier "create") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
       - match: '(call receiver: $R:constant method: (identifier "create!") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
       - match: '(call receiver: $R:constant method: (identifier "build") arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee @$R) $A $B))'
       # Const.m / Const::Nested.m → member call plus autoload import
       - match: '(call receiver: $R:constant method: $M:identifier arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee (__member @$M (__object @$R))) $A $B))'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R)) (__call (__callee (__member @$M (__object @$R))) $A $B))'
       - match: '(call receiver: $R:scope_resolution method: $M:identifier arguments:? $A block:? $B)'
-        replace: '(rb_ref (__import (__visibility "autoload") (__source @$R) (__source_path @$R|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R|split_last("::"))) (__call (__callee (__member @$M (__object @$R|split_last("::")))) $A $B))'
+        replace: '(rb_ref (__import (__import_kind "autoload") (__source @$R) (__source_path @$R|strip=::|replace("::", "/")|regex_replace("([a-z0-9])([A-Z])", "${1}_${2}")|lowercase) (__name @$R|split_last("::"))) (__call (__callee (__member @$M (__object @$R|split_last("::")))) $A $B))'
       # chained: f().m() and x.m()
       - match: '(call receiver: $R:__call method: $M:identifier arguments:? $A block:? $B)'
         replace: '(__call (__callee (__member @$M (__object $R))) $A $B)'
@@ -220,8 +220,8 @@ stages:
         replace: '(__def (__defname @$N) (__method) $P $B)'
       - match: '(singleton_class value: (self) body: $B)'
         replace: '(rb_singleton $B)'
-      - match: '(class name: $N superclass: $S:__supertype body:? $B)'
-        replace: '(__def (__defname @$N|strip=::) (__class) $S (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
+      - match: '(class name: $N superclass: (rb_super $S:__supertype $I:__import) body:? $B)'
+        replace: '(__def (__defname @$N|strip=::) (__class) $S $I (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $B)'
       - match: '(class name: $N body:? $B)'
         replace: '(__def (__defname @$N|strip=::) (__class) $B)'
       - match: '(module name: $N body:? $B)'
@@ -366,15 +366,15 @@ display:
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
           import_type: Require
-      - match: '(__import (__visibility "relative"))'
+      - match: '(__import (__import_kind "relative"))'
         tag: { import_type: RequireRelative }
-      - match: '(__import (__visibility "include"))'
+      - match: '(__import (__import_kind "include"))'
         tag: { import_type: Include }
-      - match: '(__import (__visibility "extend"))'
+      - match: '(__import (__import_kind "extend"))'
         tag: { import_type: Extend }
-      - match: '(__import (__visibility "prepend"))'
+      - match: '(__import (__import_kind "prepend"))'
         tag: { import_type: Prepend }
-      - match: '(__import (__visibility "autoload"))'
+      - match: '(__import (__import_kind "autoload"))'
         tag: { import_type: Autoload }
       - match: '(__name)'
         tag:

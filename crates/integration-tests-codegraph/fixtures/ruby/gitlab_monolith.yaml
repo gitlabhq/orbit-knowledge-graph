@@ -259,9 +259,7 @@ tests:
   # INHERITANCE CHAIN
   # ══════════════════════════════════════════════════════════════
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "MergeRequest extends ApplicationRecord"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'MergeRequest'
@@ -271,9 +269,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "MergeRequests::CreateService extends BaseService"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'MergeRequests::CreateService'
@@ -283,9 +279,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "Controller extends ApplicationController"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'Projects::MergeRequestsController'
@@ -299,9 +293,7 @@ tests:
   # MIXINS / INCLUDES
   # ══════════════════════════════════════════════════════════════
 
-  # skip: tree-dsl: Extends edges come from the linker only; the resolver emits no cross-file Extends
   - name: "MergeRequest includes Issuable and Noteable"
-    skip: true
     query: |
       MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
       WHERE child.fqn = 'MergeRequest'
@@ -444,9 +436,7 @@ tests:
     assert:
       - { row_count: 0 }
 
-  # skip: tree-dsl: inherited method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
   - name: "CreateService inherits project from BaseService"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'MergeRequests::CreateService::set_projects!'
@@ -460,7 +450,7 @@ tests:
   # WORKER → SERVICE CHAIN
   # ══════════════════════════════════════════════════════════════
 
-  # skip: tree-dsl: inherited method dispatch needs the supertype's defs in the same file; the resolver has no inheritance walk
+  # skip: tree-dsl: the supertype is a same-namespace sibling without an import; inherited dispatch reaches only parents in the file's visible names
   - name: "Worker calls MergeRequest.find (class method)"
     skip: true
     query: |
