@@ -1,15 +1,9 @@
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-
-    // Find fixtures from the worktree root
-    let toplevel = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(&manifest_dir)
-        .output()
-        .expect("git rev-parse failed")
-        .stdout;
-    let root = std::path::Path::new(String::from_utf8(toplevel).unwrap().trim())
-        .join("crates/integration-tests-codegraph/fixtures");
+    let root = std::path::Path::new(&manifest_dir)
+        .join("../integration-tests-codegraph/fixtures")
+        .canonicalize()
+        .unwrap();
     let root = root.to_str().unwrap();
 
     let mut tests = Vec::new();
