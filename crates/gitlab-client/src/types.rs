@@ -4,10 +4,14 @@ pub struct ProjectInfo {
     pub default_branch: String,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct CloudConnectorToken {
     pub token: String,
-    /// Unix epoch seconds (UTC) at which the token stops being valid.
+    /// Unix epoch seconds (UTC) at which gkg should treat the token as no
+    /// longer usable. Rails only returns the raw `token`; this is decoded
+    /// from the token's own `exp` claim and already has a safety buffer
+    /// subtracted (see `CC_TOKEN_EXPIRY_BUFFER_SECS` in `client.rs`), so it
+    /// is a refresh deadline, not the token's literal `exp`.
     pub expires_at: i64,
 }
 

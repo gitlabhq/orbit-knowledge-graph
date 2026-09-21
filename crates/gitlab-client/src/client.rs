@@ -5,9 +5,10 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use futures::{Stream, StreamExt};
+use jsonwebtoken::dangerous::insecure_decode;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::StatusCode;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use crate::error::GitlabClientError;
@@ -30,6 +31,13 @@ const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
 
 const JWT_EXPIRY_SECONDS: i64 = 300;
 
+/// Buffer subtracted from the Cloud Connector token's own `exp` claim, so a
+/// token cached as "valid" doesn't lapse in flight to the billing collector.
+/// Rails used to compute and apply this same buffer server-side before
+/// returning `expires_at`; it now returns only the raw token, so decoding
+/// `exp` and applying the buffer are gkg's responsibility.
+const CC_TOKEN_EXPIRY_BUFFER_SECS: i64 = 60;
+
 fn into_byte_stream(response: reqwest::Response) -> ByteStream {
     let stream = futures::stream::unfold(Some(response), |state| async {
         let mut resp = state?;
@@ -49,6 +57,22 @@ struct JwtClaims {
     sub: &'static str,
     aud: &'static str,
     iat: i64,
+    exp: i64,
+}
+
+/// Wire shape of the `cloud_connector_token` route's response — just the raw
+/// token; Rails no longer computes or sends an `expires_at`.
+#[derive(Deserialize)]
+struct CloudConnectorTokenResponse {
+    token: String,
+}
+
+/// Claims read from the Cloud Connector token itself. Decoded without
+/// signature verification — the party that presents the token elsewhere
+/// (the billing collector) is responsible for verifying it; gkg only needs
+/// `exp` to know when to refresh.
+#[derive(Deserialize)]
+struct CloudConnectorTokenClaims {
     exp: i64,
 }
 
@@ -141,7 +165,13 @@ impl GitlabClient {
 
         let response = self.authenticated_get(&url).await?;
         Self::check_token_response_status(&response)?;
-        Ok(response.json().await?)
+
+        let raw: CloudConnectorTokenResponse = response.json().await?;
+        let expires_at = decode_token_expiry(&raw.token)?;
+        Ok(CloudConnectorToken {
+            token: raw.token,
+            expires_at,
+        })
     }
 
     pub async fn download_archive(
@@ -402,6 +432,14 @@ impl GitlabClient {
     }
 }
 
+/// Reads the `exp` claim from a Cloud Connector token without verifying its
+/// signature, and subtracts [`CC_TOKEN_EXPIRY_BUFFER_SECS`].
+fn decode_token_expiry(token: &str) -> Result<i64, GitlabClientError> {
+    let data = insecure_decode::<CloudConnectorTokenClaims>(token)
+        .map_err(|e| GitlabClientError::JwtDecoding(e.to_string()))?;
+    Ok(data.claims.exp - CC_TOKEN_EXPIRY_BUFFER_SECS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,6 +471,52 @@ mod tests {
             jsonwebtoken::decode::<serde_json::Value>(&token, &decoding_key, &validation).unwrap();
         assert_eq!(decoded.claims["iss"], "gitlab");
         assert_eq!(decoded.claims["aud"], "gitlab-knowledge-graph");
+    }
+
+    #[test]
+    fn decode_token_expiry_subtracts_buffer() {
+        let key = EncodingKey::from_secret(b"any-secret");
+        let now = chrono::Utc::now().timestamp();
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &serde_json::json!({ "exp": now + 3600 }),
+            &key,
+        )
+        .unwrap();
+
+        let expires_at = decode_token_expiry(&token).unwrap();
+        assert_eq!(expires_at, now + 3600 - CC_TOKEN_EXPIRY_BUFFER_SECS);
+    }
+
+    #[test]
+    fn decode_token_expiry_ignores_signature() {
+        // Signed with a key gkg has no knowledge of — verification is the
+        // collector's job, not gkg's; insecure_decode must still read `exp`.
+        let key = EncodingKey::from_secret(b"some-other-key-entirely");
+        let now = chrono::Utc::now().timestamp();
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &serde_json::json!({ "exp": now + 100 }),
+            &key,
+        )
+        .unwrap();
+
+        assert!(decode_token_expiry(&token).is_ok());
+    }
+
+    #[test]
+    fn decode_token_expiry_rejects_malformed_token() {
+        let err = decode_token_expiry("not-a-jwt").unwrap_err();
+        assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
+    }
+
+    #[test]
+    fn decode_token_expiry_rejects_missing_exp_claim() {
+        let key = EncodingKey::from_secret(b"any-secret");
+        let token = encode(&Header::new(Algorithm::HS256), &serde_json::json!({}), &key).unwrap();
+
+        let err = decode_token_expiry(&token).unwrap_err();
+        assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 
     fn config_with_resolve(
@@ -516,5 +600,37 @@ mod tests {
         let _stream = client.download_archive(7, "abc123").await.unwrap();
 
         assert_eq!(*seen.lock().unwrap(), "ref=abc123&include_lfs_blobs=false");
+    }
+
+    #[tokio::test]
+    async fn cloud_connector_token_derives_expiry_from_the_response_token() {
+        use axum::Router;
+        use axum::routing::get;
+
+        let now = chrono::Utc::now().timestamp();
+        let key = EncodingKey::from_secret(b"any-secret");
+        let cc_token = encode(
+            &Header::new(Algorithm::HS256),
+            &serde_json::json!({ "exp": now + 3600 }),
+            &key,
+        )
+        .unwrap();
+
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/cloud_connector_token",
+            get(move || {
+                let cc_token = cc_token.clone();
+                async move { axum::Json(serde_json::json!({ "token": cc_token })) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client =
+            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+        let result = client.cloud_connector_token().await.unwrap();
+
+        assert_eq!(result.expires_at, now + 3600 - CC_TOKEN_EXPIRY_BUFFER_SECS);
     }
 }
