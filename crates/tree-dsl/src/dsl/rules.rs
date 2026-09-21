@@ -144,14 +144,15 @@ struct Rule {
 }
 
 fn unique_guard(lang: &Lang, spec: &str) -> (Pat, u16, usize) {
-    let (src, kind) = match spec.starts_with('(') {
-        true => (spec, lang.intern_kind("__defname")),
-        false => ("(__def)", lang.intern_kind(spec)),
-    };
+    let pattern = spec.starts_with('(');
+    let kind = lang.intern_kind(if pattern { "__defname" } else { spec });
     let mut ctx = Ctx::new(lang);
     ctx.slot("ROOT");
-    let pat = parse(&mut ctx, src);
-    (pat, kind, ctx.slots.len())
+    (
+        parse(&mut ctx, if pattern { spec } else { "(__def)" }),
+        kind,
+        ctx.slots.len(),
+    )
 }
 
 /// Compile a YAML rule file into stages of rewrites.

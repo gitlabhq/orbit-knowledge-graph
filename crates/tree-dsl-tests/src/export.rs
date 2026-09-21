@@ -29,7 +29,7 @@ struct EntityConfig {
     columns: Vec<ColumnConfig>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 struct ColumnConfig {
     name: String,
     #[serde(rename = "type")]
@@ -116,29 +116,17 @@ impl Table {
             ColumnConfig {
                 name: "source_id".into(),
                 dtype: "Int64".into(),
-                from: None,
-                compute: None,
-                nullable: false,
-                expand_sym: false,
-                span: None,
+                ..Default::default()
             },
             ColumnConfig {
                 name: "target_id".into(),
                 dtype: "Int64".into(),
-                from: None,
-                compute: None,
-                nullable: false,
-                expand_sym: false,
-                span: None,
+                ..Default::default()
             },
             ColumnConfig {
                 name: "edge_kind".into(),
                 dtype: "Utf8".into(),
-                from: None,
-                compute: None,
-                nullable: false,
-                expand_sym: false,
-                span: None,
+                ..Default::default()
             },
         ])
     }
@@ -303,13 +291,11 @@ fn compute_val<'a>(
     span: Option<&str>,
 ) -> Val<'a> {
     let import_type_key = lang.syms.intern("import_type");
-    let whole = match span {
-        Some("definition") => true,
-        Some(tag) => tag
-            .strip_prefix("tag:")
-            .is_some_and(|k| c.has_tag(lang.syms.intern(k))),
-        None => false,
+    let tagged = |s: &str| {
+        s.strip_prefix("tag:")
+            .is_some_and(|k| c.has_tag(lang.syms.intern(k)))
     };
+    let whole = span.is_some_and(|s| s == "definition" || tagged(s));
     let definition = || {
         if whole {
             c
