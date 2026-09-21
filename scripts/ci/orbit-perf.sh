@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PoC orchestrator for the orbit-perf-poc CI job (see .gitlab/ci/orbit-perf-poc.yml).
+# Orchestrator for the orbit-perf CI job (see .gitlab/ci/orbit-perf.yml).
 #
 # Brings up a real caproni + Orbit stack, seeds gkg's ClickHouse with an
 # xtask-generated synthetic graph (bulk Parquet load, bypassing siphon/seed/
