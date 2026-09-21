@@ -15,6 +15,9 @@
 stages:
   - name: imports
     rules:
+      # import static a.b.C.*;
+      - match: '(import_declaration (static) $S:scoped_identifier (asterisk))'
+        replace: '(__import (__import_kind "static") (__source @$S) (__source_path @$S|replace(".", "/")) (__name "*"))'
       # import static a.b.C.m;
       - match: '(import_declaration (static) $S:scoped_identifier)'
         replace: '(__import (__import_kind "static") (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|regex_replace("\.[^.]+$", "")|replace(".", "/")) (__name @$S|split_last(".")))'
@@ -254,6 +257,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(__import (__import_kind "static"))'
+        tag: { callable: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'
@@ -357,12 +362,14 @@ display:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__import (__name "*"))'
+        tag:
+          import_type: WildcardImport
       - match: '(__import (__import_kind "static"))'
         tag:
           import_type: StaticImport
       - match: '(__name "*")'
         tag:
-          import_type: WildcardImport
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:

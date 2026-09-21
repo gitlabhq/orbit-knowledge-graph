@@ -73,18 +73,30 @@ canonical nodes named here.
 - Constructors are never nameable, so they do not shadow their class in the
   visible names. Method lookup covers every same-named definition in the
   class's file, so impl wrappers count.
+- Supertypes are SSA reads. The linker resolves each `__supertype` at the
+  parent block before it enters the class and records the definition, so
+  method lookup and Extends edges follow identities, not names.
+- Qualified names are member chains. A supertype, a type annotation, or a
+  callee may carry `(__member Inner (__object Outer))` at any depth. The
+  linker and the resolver walk the chain by definition identity.
+- Member lookup respects nesting. `find_method_in` does not enter a nested
+  class-like definition unless it is an `__impl` block or carries
+  `(__companion)`. Nested class-like definitions are not file-level names; a
+  class wins over a same-named non-class in the visible names.
+- Branch results meet on the supertype graph. A producer whose return is an
+  `if` or `try` with several class results dispatches on the unique least
+  common supertype; without one it emits nothing.
+- A Kotlin property read in receiver position is a getter call, so the
+  property is tagged callable and its getter body attaches to the property.
 
 ## Gaps by count
 
-Eleven skipped tests remain. Assertions that encoded old-pipeline artifacts
+Three skipped tests remain. Assertions that encoded old-pipeline artifacts
 are corrected to the language rule and carry a `corrected:` note.
 
 | Skipped tests | Gap | Where |
 | --- | --- | --- |
-| 4 | Qualified nested types as supertypes or constructors (`Child.GrandChild`, `Outer.Inner`). The qualifier's owner is lost when the type collapses to its last segment; member lookup needs owner identities and an explicit ambiguity rule. | `langs/java.yaml`, `langs/kotlin.yaml`, `resolver.rs` method_up |
-| 2 | Same-name nested and top-level types (`Filter` and `ServerFilter.Filter`). The visible names are flat, so the nested one replaces the package one. | `resolver.rs` gather_visible_one |
-| 1 | Kotlin extension property chain. The getter is a sibling of its property in the CST; the rule must attach it to the receiver-owned property and type flow must keep the getter result. | `langs/kotlin.yaml`, `resolver.rs` resolve_type_edges |
-| 2 | Kotlin `if` and `try` expression types. Expression-body returns and a common-supertype join are missing (`Admin` and `User` join to `Person`). | `linker.rs` walk_branch_binding |
+| 1 | Invalid Go. A diamond embedding makes the selector ambiguous, so the language defines no call. | `fixtures/go/multiple_embedding.yaml` |
 | 2 | Java record pattern destructuring (`Point(int x, int y)`). The i-th component invokes the record's i-th accessor; positional destructuring has no canonical shape yet. | `langs/java.yaml`, `linker.rs` |
 
 ## DSL limits
@@ -117,6 +129,24 @@ are corrected to the language rule and carry a `corrected:` note.
   package key. Elixir modules carry an `exports` tag with their short name.
 - Typed parameters carry `(__binding $x (__ssa_typed T) (__rhs (__member
   (__object T))))`, a type reference that dispatches member calls on `$x`.
+- A bare call `N()` in Java, C#, Scala, and Ruby is `(__call (__callee (__ivar
+  N)) (__member (__object N)))`: the implicit-receiver leg finds a member of
+  the enclosing class; the name leg finds a named import or, when tagged
+  `callable`, a member wildcard such as `import static C.*` or `using static
+  T`. A type wildcard supplies no callees (JLS 15.12.1).
+- A static import is a member wildcard `(__name "*")` with `(__import_kind
+  "static")`, tagged `callable` in the tag-defs stage.
+- Java records declare `equals`, `hashCode`, and `toString` (JLS 8.10.3)
+  through `(record_component "<name>")` markers; an explicit method of the
+  same name suppresses the implicit one. The `equals` guard is name-only, so
+  an `equals(Point)` overload also suppresses it.
+- Ruby constant references are Zeitwerk-style autoload imports; the exporter
+  shows them as `Autoload`. Tests on constant reads follow the import chain.
+- Kotlin type paths of four or more segments stay unresolved: the CST stores
+  a flat list and the DSL has no list-to-chain reduction.
+- An extension found through the caller's visible names resolves only when
+  the name is unambiguous in that file; two extensions with one name on
+  different receivers resolve neither.
 
 ## Not covered
 

@@ -72,7 +72,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "App.JsonRunner.Serialize", path: "Newtonsoft.Json", name: "*", import_type: "WildcardImport" } }
 
-  # corrected: a static import keeps the imported type name and binds bare calls
+  # corrected: a static using imports the members of the type (C# spec 14.6.4), so the symbol is the member wildcard
   - name: "static using directives target wildcard imported symbols"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
@@ -81,7 +81,7 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "App.StaticRunner.Track", path: "External.Tools.Helpers", name: "Helpers", import_type: "StaticImport" } }
+      - { row: { caller: "App.StaticRunner.Track", path: "External.Tools.Helpers", name: "*", import_type: "StaticImport" } }
 
   - name: "alias using directives target aliased imported symbols"
     query: |
