@@ -54,7 +54,7 @@ tests:
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "CaseClass" } }
+      - { row: { type: "Class" } }
 
   - name: Drawable trait is indexed with Trait type
     query: |
@@ -81,7 +81,7 @@ tests:
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Object" } }
+      - { row: { type: "Class" } }
 
   - name: Animal.speak is scoped under Animal FQN
     query: |
@@ -112,7 +112,7 @@ tests:
   - name: All top-level types are in the same file
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Class', 'CaseClass', 'Trait', 'Object']
+      WHERE d.definition_type IN ['Class', 'Class', 'Trait', 'Class']
       RETURN d.name AS name, d.file_path AS file
     assert:
       - { no_nulls: file }

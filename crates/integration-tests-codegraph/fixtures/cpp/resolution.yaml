@@ -122,7 +122,7 @@ tests:
   - name: "Namespace definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Namespace'
+      WHERE d.definition_type = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "vec::math" } }
@@ -132,7 +132,7 @@ tests:
   - name: "Enum constants with full scope"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumConstant'
+      WHERE d.definition_type = 'EnumVariant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

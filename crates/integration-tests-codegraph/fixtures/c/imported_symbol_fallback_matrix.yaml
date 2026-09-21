@@ -34,9 +34,9 @@ tests:
       ORDER BY file, path
     assert:
       - { row_count: 3 }
-      - { row: { file: "app.c", path: "<stdio.h>", name: null } }
-      - { row: { file: "app.c", path: "<stdlib.h>", name: null } }
-      - { row: { file: "worker.c", path: "\"external_api.h\"", name: null } }
+      - { row: { file: "app.c", path: "<stdio.h>", name: "*" } }
+      - { row: { file: "app.c", path: "<stdlib.h>", name: "*" } }
+      - { row: { file: "worker.c", path: "\"external_api.h\"", name: "*" } }
 
   - name: "resolved same-file calls still target definitions"
     query: |
