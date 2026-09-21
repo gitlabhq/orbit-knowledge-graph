@@ -7,6 +7,7 @@ use crate::tree::{Node, Tree};
 use super::matching::matches;
 use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, Text};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn materialize(
     t: &Tree,
     lang: &Lang,

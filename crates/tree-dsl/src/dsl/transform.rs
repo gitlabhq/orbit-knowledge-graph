@@ -105,7 +105,7 @@ impl Tf {
                 Tf::HasEdge(ek, dir)
             }
             "concat" => {
-                let a = parse_nested_tf(args[1], ctx.as_mut().map(|c| &mut **c));
+                let a = parse_nested_tf(args[1], ctx.as_deref_mut());
                 let b = parse_nested_tf(args[2], ctx);
                 Tf::Concat(s(0), Box::new(a), Box::new(b))
             }

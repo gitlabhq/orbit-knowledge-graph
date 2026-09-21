@@ -131,6 +131,7 @@ impl Resolver {
             .collect();
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve(
         &mut self,
         trees: &[Tree],

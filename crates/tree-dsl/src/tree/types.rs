@@ -209,6 +209,10 @@ impl Tree {
         self.root.descendants(&self.arena).count() as u32
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn compact(&mut self) {
         let mut new_arena = Arena::with_capacity(self.root.descendants(&self.arena).count());
         let mut id_map = rustc_hash::FxHashMap::default();
