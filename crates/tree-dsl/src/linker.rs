@@ -416,7 +416,8 @@ impl<'t> Fold<'t> {
     }
 
     fn is_class(&self, node: u32) -> bool {
-        self.tree.cursor(node).children().any(|c| c.is(C::Class))
+        let c = self.tree.cursor(node);
+        CLASS_LIKE.iter().any(|&k| c.has(k))
     }
 
     fn any_class(&self, resolved: &[Linked]) -> bool {

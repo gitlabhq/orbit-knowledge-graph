@@ -47,9 +47,8 @@ pub struct FileIndex {
 
 impl FileIndex {
     fn insert(&mut self, key: String, fi: usize) {
-        if let Some((dir, _)) = key.rsplit_once(PATH_SEP) {
-            self.dirs.entry(dir.to_string()).or_default().push(fi);
-        }
+        let dir = key.rsplit_once(PATH_SEP).map_or("", |(d, _)| d);
+        self.dirs.entry(dir.to_string()).or_default().push(fi);
         self.keys.insert(key, fi);
     }
 }
@@ -503,9 +502,10 @@ fn propagate_reexports(
 }
 
 fn name_targets(ctx: &ResolveCtx, tfi: usize, c: Cursor) -> Vec<Loc> {
-    let ns = c.sym();
+    let hint = c.child_sym(C::SsaHint).filter(|&h| h == ctx.wildcard_sym);
+    let ns = hint.unwrap_or(c.sym());
     if ns == ctx.wildcard_sym {
-        return if c.child_sym(C::Alias).is_some() {
+        return if c.child_sym(C::Alias).is_some() || hint.is_some() {
             vec![Loc { fi: tfi, node: 0 }]
         } else {
             ctx.visible[tfi]
@@ -844,7 +844,10 @@ fn build_file_index(
 }
 
 fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<usize> {
-    let Some(dir) = target.strip_suffix(&format!("{PATH_SEP}{WILDCARD}")) else {
+    let Some(dir) = target
+        .strip_suffix(WILDCARD)
+        .map(|d| d.trim_end_matches(PATH_SEP))
+    else {
         return resolve_path(target, idx, prefixes).into_iter().collect();
     };
     let dirs = std::iter::once(dir.to_string())
