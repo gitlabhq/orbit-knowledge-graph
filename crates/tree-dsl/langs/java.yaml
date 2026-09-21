@@ -27,8 +27,10 @@ stages:
 
   - name: normalize
     rules:
+      - match: '(program $P:java_pkg $$$C)'
+        replace: '(__source_file @$ROOT $P $$$C)'
       - match: '(program $$$C)'
-        replace: '(__source_file @$ROOT $$$C)'
+        replace: '(__source_file @$ROOT (__module_export (__import (__source ".") (__source_path "./*") (__name "*"))) $$$C)'
       - match: '(package_declaration $S:scoped_identifier)'
         replace: '(java_pkg (__package @$S) (__module_export (__import (__source @$S) (__source_path @$S|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(package_declaration $S:identifier)'
