@@ -75,6 +75,7 @@ pub enum PhysOp {
     Scan { table: String, alias: String, dedup: bool, predicates: Vec<Expr>, select: Vec<SelectExpr> },
     Join { left: Box<PhysOp>, right: Box<PhysOp>, on: Expr },
     Union { arms: Vec<PhysOp>, alias: String },
+    UnionQueries { arms: Vec<Query>, alias: String, outer_predicates: Vec<Expr> },
     Cte { name: String, body: Box<PhysOp>, consumer: Box<PhysOp> },
     TopN { input: Box<PhysOp>, select: Vec<SelectExpr>, order_by: Vec<OrderExpr>, limit: u32 },
     Aggregate { input: Box<PhysOp>, select: Vec<SelectExpr>, group_by: Vec<Expr>, order_by: Vec<OrderExpr>, limit: u32 },
@@ -447,10 +448,14 @@ impl<'a> PlanCtx<'a> {
                     }
                 }
                 HopStrategy::EdgeScan { table, dedup } => {
-                    let edge = PhysOp::Scan {
-                        table, alias: ea.clone(), dedup,
-                        predicates: self.edge_predicates(&ea, rel),
-                        select: vec![],
+                    let edge = if rel.hops.max > 1 {
+                        self.build_multi_hop_union(rel, &ea, &table)
+                    } else {
+                        PhysOp::Scan {
+                            table, alias: ea.clone(), dedup,
+                            predicates: self.edge_predicates(&ea, rel),
+                            select: vec![],
+                        }
                     };
                     tree = Some(match tree {
                         None => edge,
@@ -486,6 +491,46 @@ impl<'a> PlanCtx<'a> {
         }
 
         tree.unwrap()
+    }
+
+    fn build_multi_hop_union(&self, rel: &InputRelationship, alias: &str, edge_table: &str) -> PhysOp {
+        let (sc, ec) = rel.direction.edge_columns();
+        let etc = match rel.direction {
+            Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
+            Direction::Incoming => SOURCE_KIND_COLUMN,
+        };
+        let tf = rel_kind_filter_values(&rel.types);
+        let arms: Vec<Query> = (rel.hops.min.max(1)..=rel.hops.max)
+            .map(|d| crate::passes::lower::helpers::build_depth_arm(
+                d, edge_table, sc, ec, etc, rel.direction, &tf, rel.scope_prefix.as_ref(),
+            ))
+            .collect();
+
+        let mut outer = Vec::new();
+        let (fk, tk) = match rel.direction {
+            Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
+            Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
+        };
+        let (from_id_col, to_id_col) = rel.direction.edge_columns();
+        for (na, kc, ic) in [(&rel.from, fk, from_id_col), (&rel.to, tk, to_id_col)] {
+            if let Some(n) = self.input.nodes.iter().find(|n| &n.id == na) {
+                if let Some(ref e) = n.entity {
+                    outer.push(Expr::eq(Expr::col(alias, kc), Expr::string(e)));
+                }
+                if !n.node_ids.is_empty() {
+                    outer.push(id_list_predicate(alias, ic, &n.node_ids));
+                }
+                if let Some(ref r) = n.id_range {
+                    outer.push(Expr::and(
+                        Expr::binary(Op::Ge, Expr::col(alias, ic), Expr::int(r.start)),
+                        Expr::binary(Op::Le, Expr::col(alias, ic), Expr::int(r.end)),
+                    ));
+                }
+            }
+        }
+        outer.push(deleted_false(alias));
+
+        PhysOp::UnionQueries { arms, alias: alias.to_string(), outer_predicates: outer }
     }
 }
 

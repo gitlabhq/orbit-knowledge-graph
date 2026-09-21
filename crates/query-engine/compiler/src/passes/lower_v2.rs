@@ -59,6 +59,12 @@ fn emit(op: PhysOp) -> Query {
             }
         }
 
+        PhysOp::UnionQueries { arms, alias, outer_predicates } => Query {
+            from: TableRef::union_all(arms, &alias),
+            where_clause: Expr::conjoin(outer_predicates),
+            ..Default::default()
+        },
+
         PhysOp::Cte { name, body, consumer } => {
             let body_q = emit(*body);
             let mut con_q = emit(*consumer);
