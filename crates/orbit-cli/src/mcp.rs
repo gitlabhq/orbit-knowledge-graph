@@ -12,7 +12,6 @@ use rmcp::{
 use serde::Deserialize;
 use std::path::PathBuf;
 
-use crate::commands::index::collect as index_collect;
 use crate::{descriptions, sql, sql_format};
 
 const MAX_RESULT_ARROW_BYTES: usize = 1_000_000;
@@ -108,7 +107,8 @@ impl OrbitLocalServer {
         Parameters(args): Parameters<IndexArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         blocking_tool(move || {
-            let outputs = index_collect(args.path, args.threads, args.stats, args.db)?;
+            let outputs =
+                crate::commands::index::collect(args.path, args.threads, args.stats, args.db)?;
             serde_json::to_string_pretty(&outputs).context("failed to serialise index output")
         })
         .await

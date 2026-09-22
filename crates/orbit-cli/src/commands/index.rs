@@ -150,9 +150,9 @@ pub(crate) fn run(
     }
 
     tui::intro("Orbit index")?;
-    let mut screen = Screen::new(indexer.db_path.clone());
-    match indexer.index_all(&mut screen) {
-        Ok(_) => tui::outro(screen.closing_line()),
+    let mut reporter = TuiReporter::new(indexer.db_path.clone());
+    match indexer.index_all(&mut reporter) {
+        Ok(_) => tui::outro(reporter.closing_line()),
         Err(error) => {
             tui::outro_cancel(&error)?;
             Err(error)
@@ -239,13 +239,13 @@ impl IndexReporter for LogReporter {
     }
 }
 
-struct Screen {
+struct TuiReporter {
     db_path: PathBuf,
     bars: Option<Arc<RepositoryBars>>,
     suggested_grep: Option<String>,
 }
 
-impl Screen {
+impl TuiReporter {
     fn new(db_path: PathBuf) -> Self {
         Self {
             db_path,
@@ -262,7 +262,7 @@ impl Screen {
     }
 }
 
-impl IndexReporter for Screen {
+impl IndexReporter for TuiReporter {
     fn repository_started(&mut self, git: &GitInfo) -> Arc<dyn ProgressObserver> {
         let title = format!(
             "{}  {} @ {}",
@@ -279,9 +279,11 @@ impl IndexReporter for Screen {
         if let Some(bars) = self.bars.take() {
             bars.close(output);
         }
+
         if let Some(detailed) = &output.detailed {
             let _ = tui::card("Timings", format_timings(detailed));
         }
+
         if self.suggested_grep.is_none() {
             self.suggested_grep =
                 most_referenced_definition(Path::new(&output.path), Some(self.db_path.clone()));
@@ -334,7 +336,7 @@ impl RepositoryBars {
 }
 
 impl ProgressObserver for RepositoryBars {
-    fn inventory_grouped(
+    fn discovery_finished(
         &self,
         total_files: usize,
         parseable_files: usize,
@@ -772,7 +774,7 @@ mod tests {
     use super::fatal_pipeline_reason;
     use code_graph::v2::pipeline::PipelineError;
 
-    fn err(stage: &'static str, msg: &str, fatal: bool) -> PipelineError {
+    fn pipeline_error(stage: &'static str, msg: &str, fatal: bool) -> PipelineError {
         PipelineError {
             file_path: String::new(),
             error: msg.to_string(),
@@ -789,8 +791,8 @@ mod tests {
     #[test]
     fn non_fatal_errors_do_not_bail() {
         let errors = [
-            err("parse", "bad syntax", false),
-            err("walk", "skip", false),
+            pipeline_error("parse", "bad syntax", false),
+            pipeline_error("walk", "skip", false),
         ];
         assert!(fatal_pipeline_reason(&errors).is_none());
     }
@@ -798,9 +800,9 @@ mod tests {
     #[test]
     fn a_fatal_error_bails_with_first_reason_and_count() {
         let errors = [
-            err("parse", "recoverable", false),
-            err("sink_write", "DuckDB write failed", true),
-            err("conversion", "arrow overflow", true),
+            pipeline_error("parse", "recoverable", false),
+            pipeline_error("sink_write", "DuckDB write failed", true),
+            pipeline_error("conversion", "arrow overflow", true),
         ];
         let reason = fatal_pipeline_reason(&errors).expect("fatal must bail");
         assert!(reason.contains("sink_write"), "{reason}");

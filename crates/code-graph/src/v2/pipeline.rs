@@ -127,16 +127,17 @@ pub enum ProgressPhase {
     Resolve,
 }
 
-/// Fires from parallel workers; implementations must be cheap and never block.
 pub trait ProgressObserver: Send + Sync {
-    fn inventory_grouped(
+    fn discovery_finished(
         &self,
         _total_files: usize,
         _parseable_files: usize,
         _files_per_family: &[(String, usize)],
     ) {
     }
+    /// Fires from parallel workers; implementations must be cheap and never block.
     fn files_advanced(&self, _phase: ProgressPhase, _count: usize) {}
+    /// Fires from parallel workers; implementations must be cheap and never block.
     fn family_finished(&self) {}
 }
 
@@ -766,7 +767,7 @@ impl Pipeline {
             .collect();
         config
             .progress
-            .inventory_grouped(total_files, parsable_files, &files_per_family);
+            .discovery_finished(total_files, parsable_files, &files_per_family);
 
         let ctx = Arc::new(PipelineContext {
             config,
@@ -2412,5 +2413,73 @@ namespace MyApp {
         assert_eq!(faults.len(), 1);
         assert_eq!(faults[0].kind, crate::v2::error::FileFault::OxcPanic);
         assert_eq!(faults[0].path, "src/bad.js");
+    }
+
+    #[derive(Default)]
+    struct RecordingProgress {
+        discoveries: std::sync::Mutex<Vec<(usize, usize)>>,
+        parsed: AtomicUsize,
+        resolved: AtomicUsize,
+    }
+
+    impl ProgressObserver for RecordingProgress {
+        fn discovery_finished(
+            &self,
+            total_files: usize,
+            parseable_files: usize,
+            _files_per_family: &[(String, usize)],
+        ) {
+            self.discoveries
+                .lock()
+                .unwrap()
+                .push((total_files, parseable_files));
+        }
+
+        fn files_advanced(&self, phase: ProgressPhase, count: usize) {
+            match phase {
+                ProgressPhase::Parse => self.parsed.fetch_add(count, Ordering::Relaxed),
+                ProgressPhase::Resolve => self.resolved.fetch_add(count, Ordering::Relaxed),
+            };
+        }
+    }
+
+    #[test]
+    fn progress_observer_sees_the_inventory_once_and_each_parseable_file_per_phase() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let sources = [
+            ("a.py", "def a():\n    pass\n"),
+            ("b.py", "from a import a\n\ndef b():\n    a()\n"),
+            ("notes.txt", "not code\n"),
+        ];
+        for (name, content) in sources {
+            std::fs::write(root.join(name), content).unwrap();
+        }
+        let inventory = sources
+            .iter()
+            .map(|(name, content)| FileInventoryEntry {
+                path: name.to_string(),
+                size: content.len() as u64,
+                decision: Decision::Parse,
+                label: Default::default(),
+            })
+            .collect();
+        let progress = Arc::new(RecordingProgress::default());
+
+        Pipeline::run_with_tracer(
+            root,
+            Arc::new(FileInventory::new(inventory)),
+            PipelineConfig {
+                progress: progress.clone(),
+                ..Default::default()
+            },
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
+        );
+
+        assert_eq!(*progress.discoveries.lock().unwrap(), vec![(3, 2)]);
+        assert_eq!(progress.parsed.load(Ordering::Relaxed), 2);
+        assert_eq!(progress.resolved.load(Ordering::Relaxed), 2);
     }
 }
