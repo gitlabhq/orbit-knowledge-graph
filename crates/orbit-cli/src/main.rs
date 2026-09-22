@@ -414,6 +414,7 @@ impl SetupFlags {
         &self,
         agents: Vec<String>,
         all: bool,
+        index: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
     ) -> commands::setup::Options {
         commands::setup::Options {
@@ -422,6 +423,7 @@ impl SetupFlags {
             yes: self.yes,
             dry_run: self.dry_run,
             verbose: self.verbose,
+            index,
             components,
         }
     }
@@ -468,6 +470,10 @@ enum Commands {
         /// Leave a component out (repeatable).
         #[arg(long, value_enum, value_name = "COMPONENT")]
         skip: Vec<commands::setup::Component>,
+
+        /// Do not index the current repository after configuring.
+        #[arg(long)]
+        no_index: bool,
 
         #[command(flatten)]
         flags: SetupFlags,
@@ -732,15 +738,16 @@ async fn dispatch(command: Commands) -> Result<()> {
             all,
             mcp,
             skip,
+            no_index,
             flags,
         } => {
             let components = commands::setup::Component::from_flags(mcp, &skip);
-            let options = flags.to_options(agents, all, components);
+            let options = flags.to_options(agents, all, !no_index, components);
             let machine = commands::setup::detect::Machine::current()?;
             commands::setup::install(options, flags.target()?, &machine)
         }
         Commands::Uninstall { agents, flags } => {
-            let options = flags.to_options(agents, false, Default::default());
+            let options = flags.to_options(agents, false, false, Default::default());
             let machine = commands::setup::detect::Machine::current()?;
             commands::setup::uninstall(options, flags.target()?, &machine)
         }

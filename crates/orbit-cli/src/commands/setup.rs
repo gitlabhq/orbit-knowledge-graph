@@ -1,11 +1,13 @@
 //! `orbit setup` and `orbit uninstall`. `spec` declares each agent from `config/setup/agents/`,
 //! `detect` finds the installed ones, `plan` lists the files a selection touches, and
-//! `components` installs or removes one `Component` at a time into a `Report`. `summary` turns
-//! those into text and `tui` draws it. Any pre-existing file gets a one-time `.orbit-backup`
-//! sibling before its first modification.
+//! `components` installs or removes one `Component` at a time into a `Report`. `index_repo`
+//! indexes the current repository afterwards. `summary` turns all of it into text and `tui`
+//! draws it. Any pre-existing file gets a one-time `.orbit-backup` sibling before its first
+//! modification.
 
 mod components;
 pub(crate) mod detect;
+mod index_repo;
 mod plan;
 pub(crate) mod spec;
 mod summary;
@@ -17,6 +19,7 @@ use anyhow::{Context, Result};
 
 use components::Report;
 use detect::Machine;
+use index_repo::Indexed;
 use plan::{Plan, Selection};
 use spec::ScopedPath;
 
@@ -52,11 +55,39 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         components::install(&selection, &target, report)
     })?;
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
-    tui::outro(format!(
-        "Done. Run {} index in a repository, then ask your agent where a function is defined.",
-        spec::launcher()
-    ))?;
+
+    let indexed = match options.index {
+        true => index_current_repository(),
+        false => None,
+    };
+    if let Some(command) = summary::format_try_it_command(indexed.as_ref()) {
+        tui::card("Try it", command)?;
+    }
+    tui::outro(summary::format_closing_line(indexed.as_ref()))?;
     Ok(())
+}
+
+fn index_current_repository() -> Option<Indexed> {
+    let command = index_repo::index_command_line();
+    let cwd = match index_repo::current_repository_dir() {
+        Ok(cwd) => cwd?,
+        Err(error) => {
+            tui::warn(format!("{command} skipped: {error}"));
+            return None;
+        }
+    };
+
+    let spinner = tui::spinner(&command);
+    match index_repo::index_repository(&cwd) {
+        Ok(indexed) => {
+            spinner.stop(format!("{command}  {}", indexed.summary));
+            Some(indexed)
+        }
+        Err(error) => {
+            spinner.error(format!("{command}  {error}"));
+            None
+        }
+    }
 }
 
 pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> Result<()> {
@@ -183,6 +214,7 @@ pub(crate) struct Options {
     pub(crate) yes: bool,
     pub(crate) dry_run: bool,
     pub(crate) verbose: bool,
+    pub(crate) index: bool,
     pub(crate) components: BTreeSet<Component>,
 }
 
@@ -257,6 +289,7 @@ mod tests {
             yes: true,
             dry_run: false,
             verbose: false,
+            index: false,
             components: Component::from_flags(false, &[]),
         }
     }
