@@ -267,8 +267,6 @@ display:
         tag: { def_type: Function }
       - match: '(__def (__method))'
         tag: { def_type: Method }
-      - match: '(__def (__method))'
-        tag: { def_type: Constructor }
       - match: '(__def (__class))'
         tag: { def_type: Class }
       - match: '(__def (__struct))'
