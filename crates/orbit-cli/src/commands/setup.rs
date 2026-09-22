@@ -60,6 +60,9 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         true => index_current_repository()?,
         false => None,
     };
+    if let Some(command) = summary::format_try_it_command(indexed.as_ref()) {
+        tui::card("Try it", command)?;
+    }
     tui::outro(summary::format_closing_line(indexed.as_ref()))?;
     Ok(())
 }

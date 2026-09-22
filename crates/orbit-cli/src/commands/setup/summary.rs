@@ -90,12 +90,22 @@ pub(super) fn format_files_per_component(plan: &Plan) -> String {
     rows.join("\n")
 }
 
+pub(super) fn format_try_it_command(indexed: Option<&Indexed>) -> Option<String> {
+    let name = indexed?.suggested_grep.as_deref()?;
+    let is_plain_word = name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    let argument = match is_plain_word {
+        true => name.to_string(),
+        false => format!("'{name}'"),
+    };
+    Some(format!("{} grep {argument}", spec::launcher()))
+}
+
 pub(super) fn format_closing_line(indexed: Option<&Indexed>) -> String {
     match indexed {
         Some(Indexed {
-            suggested_grep: Some(name),
+            suggested_grep: Some(_),
             ..
-        }) => format!("Done. Try: {} grep \"{name}\"", spec::launcher()),
+        }) => "Done.".to_string(),
         Some(_) => "Done. Ask your agent where a function is defined.".to_string(),
         None => format!(
             "Done. Run {} index in a repository, then ask your agent where a function is defined.",
