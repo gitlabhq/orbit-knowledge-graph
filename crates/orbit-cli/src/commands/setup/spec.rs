@@ -320,7 +320,20 @@ mod tests {
             let rendered = render_instructions(launcher);
             assert!(rendered.contains(expected), "{launcher}: {rendered}");
             assert!(!rendered.contains("{{orbit}}"), "{launcher}");
+            for phrase in [
+                "Prefer Orbit for code search and callers/callees",
+                "FTS, not regex",
+                "Terms AND; `a|b` OR",
+                "Grep means `",
+                "grep shows IDs and file:lines",
+                "Do not reread unchanged files",
+            ] {
+                assert!(rendered.contains(phrase), "{launcher}: {phrase}");
+            }
+            assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
         }
+        assert!(search_nudge_text().contains("FTS, not regex"));
+        assert!(read_nudge_text().contains("Do not reread unchanged files"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }

@@ -5435,9 +5435,6 @@ dependencies = [
 [[package]]
 name = "orbit-search"
 version = "0.1.0"
-dependencies = [
- "stop-words",
-]
 
 [[package]]
 name = "orbit-server"
@@ -8974,15 +8971,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "stop-words"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d68df56303396bcfb639455b3c166804aeb7994005010aab5e9e8a1277b8871d"
-dependencies = [
- "serde_json",
-]
 
 [[package]]
 name = "streaming-iterator"
