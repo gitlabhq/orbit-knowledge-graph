@@ -1,0 +1,88 @@
+{
+  "count": 11,
+  "input": {
+    "input": {
+      "group_by": [
+        {
+          "alias": "mr_state",
+          "node": "mr",
+          "property": "state"
+        }
+      ],
+      "input": {
+        "kind": "Inner",
+        "left": {
+          "input": {
+            "alias": "mr",
+            "dedup": true,
+            "op": "Scan",
+            "table": "gl_merge_request"
+          },
+          "op": "Filter",
+          "predicates": [
+            {
+              "kind": "NodeFilter",
+              "property": "state"
+            },
+            {
+              "column": "_deleted",
+              "kind": "Eq",
+              "value": {
+                "Bool": false
+              }
+            }
+          ]
+        },
+        "on": {
+          "left": [
+            "mr",
+            "project_id"
+          ],
+          "right": [
+            "p",
+            "id"
+          ]
+        },
+        "op": "Join",
+        "right": {
+          "input": {
+            "alias": "p",
+            "dedup": true,
+            "op": "Scan",
+            "table": "gl_project"
+          },
+          "op": "Filter",
+          "predicates": [
+            {
+              "column": "id",
+              "kind": "In",
+              "values": [
+                {
+                  "Int": 1
+                }
+              ]
+            },
+            {
+              "column": "_deleted",
+              "kind": "Eq",
+              "value": {
+                "Bool": false
+              }
+            }
+          ]
+        }
+      },
+      "metrics": [
+        {
+          "alias": "n",
+          "node": "mr",
+          "property": null
+        }
+      ],
+      "op": "Aggregate"
+    },
+    "keys": [],
+    "op": "Sort"
+  },
+  "op": "Limit"
+}

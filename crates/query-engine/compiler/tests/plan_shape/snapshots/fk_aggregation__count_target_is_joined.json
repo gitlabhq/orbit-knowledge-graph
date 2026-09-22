@@ -1,0 +1,99 @@
+{
+  "count": 11,
+  "input": {
+    "input": {
+      "group_by": [
+        {
+          "alias": "p",
+          "node": "p",
+          "property": "id"
+        },
+        {
+          "alias": "p",
+          "node": "p",
+          "property": "name"
+        },
+        {
+          "alias": "p",
+          "node": "p",
+          "property": "full_path"
+        },
+        {
+          "alias": "p",
+          "node": "p",
+          "property": "visibility_level"
+        }
+      ],
+      "input": {
+        "kind": "Inner",
+        "left": {
+          "input": {
+            "alias": "mr",
+            "dedup": true,
+            "op": "Scan",
+            "table": "gl_merge_request"
+          },
+          "op": "Filter",
+          "predicates": [
+            {
+              "column": "_deleted",
+              "kind": "Eq",
+              "value": {
+                "Bool": false
+              }
+            }
+          ]
+        },
+        "on": {
+          "left": [
+            "mr",
+            "project_id"
+          ],
+          "right": [
+            "p",
+            "id"
+          ]
+        },
+        "op": "Join",
+        "right": {
+          "input": {
+            "alias": "p",
+            "dedup": true,
+            "op": "Scan",
+            "table": "gl_project"
+          },
+          "op": "Filter",
+          "predicates": [
+            {
+              "column": "id",
+              "kind": "In",
+              "values": [
+                {
+                  "Int": 278964
+                }
+              ]
+            },
+            {
+              "column": "_deleted",
+              "kind": "Eq",
+              "value": {
+                "Bool": false
+              }
+            }
+          ]
+        }
+      },
+      "metrics": [
+        {
+          "alias": "total_mrs",
+          "node": "mr",
+          "property": null
+        }
+      ],
+      "op": "Aggregate"
+    },
+    "keys": [],
+    "op": "Sort"
+  },
+  "op": "Limit"
+}

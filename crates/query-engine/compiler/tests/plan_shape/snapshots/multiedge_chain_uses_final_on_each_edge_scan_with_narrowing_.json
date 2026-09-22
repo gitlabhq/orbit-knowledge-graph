@@ -1,0 +1,370 @@
+{
+  "count": 2,
+  "input": {
+    "input": {
+      "group_by": [],
+      "input": {
+        "kind": {
+          "Semi": {
+            "materialize": true
+          }
+        },
+        "left": {
+          "kind": {
+            "Semi": {
+              "materialize": true
+            }
+          },
+          "left": {
+            "kind": {
+              "Semi": {
+                "materialize": true
+              }
+            },
+            "left": {
+              "kind": "Inner",
+              "left": {
+                "kind": "Inner",
+                "left": {
+                  "kind": "Inner",
+                  "left": {
+                    "kind": "Inner",
+                    "left": {
+                      "input": {
+                        "alias": "e0",
+                        "dedup": true,
+                        "op": "Scan",
+                        "table": "gl_edge"
+                      },
+                      "op": "Filter",
+                      "predicates": [
+                        {
+                          "column": "relationship_kind",
+                          "kind": "Eq",
+                          "value": {
+                            "Str": "HAS_LABEL"
+                          }
+                        },
+                        {
+                          "column": "source_kind",
+                          "kind": "Eq",
+                          "value": {
+                            "Str": "MergeRequest"
+                          }
+                        },
+                        {
+                          "column": "target_kind",
+                          "kind": "Eq",
+                          "value": {
+                            "Str": "Label"
+                          }
+                        },
+                        {
+                          "column": "_deleted",
+                          "kind": "Eq",
+                          "value": {
+                            "Bool": false
+                          }
+                        },
+                        {
+                          "kind": "ScopePrefix"
+                        },
+                        {
+                          "column": "source_id",
+                          "kind": "In",
+                          "values": [
+                            {
+                              "Int": 1
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "on": {
+                      "left": [
+                        "e0",
+                        "target_id"
+                      ],
+                      "right": [
+                        "e1",
+                        "source_id"
+                      ]
+                    },
+                    "op": "Join",
+                    "right": {
+                      "input": {
+                        "alias": "e1",
+                        "dedup": true,
+                        "op": "Scan",
+                        "table": "gl_edge"
+                      },
+                      "op": "Filter",
+                      "predicates": [
+                        {
+                          "column": "relationship_kind",
+                          "kind": "Eq",
+                          "value": {
+                            "Str": "IN_PROJECT"
+                          }
+                        },
+                        {
+                          "column": "source_kind",
+                          "kind": "Eq",
+                          "value": {
+                            "Str": "MergeRequest"
+                          }
+                        },
+                        {
+                          "column": "target_kind",
+                          "kind": "Eq",
+                          "value": {
+                            "Str": "Project"
+                          }
+                        },
+                        {
+                          "column": "_deleted",
+                          "kind": "Eq",
+                          "value": {
+                            "Bool": false
+                          }
+                        },
+                        {
+                          "column": "source_id",
+                          "kind": "In",
+                          "values": [
+                            {
+                              "Int": 1
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "on": {
+                    "left": [
+                      "e0",
+                      "source_id"
+                    ],
+                    "right": [
+                      "mr",
+                      "id"
+                    ]
+                  },
+                  "op": "Join",
+                  "right": {
+                    "input": {
+                      "alias": "mr",
+                      "dedup": true,
+                      "op": "Scan",
+                      "table": "gl_merge_request"
+                    },
+                    "op": "Filter",
+                    "predicates": [
+                      {
+                        "column": "id",
+                        "kind": "In",
+                        "values": [
+                          {
+                            "Int": 1
+                          }
+                        ]
+                      },
+                      {
+                        "column": "_deleted",
+                        "kind": "Eq",
+                        "value": {
+                          "Bool": false
+                        }
+                      }
+                    ]
+                  }
+                },
+                "on": {
+                  "left": [
+                    "e0",
+                    "target_id"
+                  ],
+                  "right": [
+                    "label",
+                    "id"
+                  ]
+                },
+                "op": "Join",
+                "right": {
+                  "input": {
+                    "alias": "label",
+                    "dedup": true,
+                    "op": "Scan",
+                    "table": "gl_label"
+                  },
+                  "op": "Filter",
+                  "predicates": [
+                    {
+                      "kind": "NodeFilter",
+                      "property": "title"
+                    },
+                    {
+                      "column": "_deleted",
+                      "kind": "Eq",
+                      "value": {
+                        "Bool": false
+                      }
+                    }
+                  ]
+                }
+              },
+              "on": {
+                "left": [
+                  "e1",
+                  "target_id"
+                ],
+                "right": [
+                  "p",
+                  "id"
+                ]
+              },
+              "op": "Join",
+              "right": {
+                "input": {
+                  "alias": "p",
+                  "dedup": true,
+                  "op": "Scan",
+                  "table": "gl_project"
+                },
+                "op": "Filter",
+                "predicates": [
+                  {
+                    "kind": "NodeFilter",
+                    "property": "full_path"
+                  },
+                  {
+                    "column": "_deleted",
+                    "kind": "Eq",
+                    "value": {
+                      "Bool": false
+                    }
+                  }
+                ]
+              }
+            },
+            "on": {
+              "left": [
+                "",
+                ""
+              ],
+              "right": [
+                "_nf_p",
+                "id"
+              ]
+            },
+            "op": "Join",
+            "right": {
+              "input": {
+                "alias": "p",
+                "dedup": true,
+                "op": "Scan",
+                "table": "gl_project"
+              },
+              "op": "Filter",
+              "predicates": [
+                {
+                  "kind": "NodeFilter",
+                  "property": "full_path"
+                },
+                {
+                  "column": "_deleted",
+                  "kind": "Eq",
+                  "value": {
+                    "Bool": false
+                  }
+                }
+              ]
+            }
+          },
+          "on": {
+            "left": [
+              "",
+              ""
+            ],
+            "right": [
+              "_nf_label",
+              "id"
+            ]
+          },
+          "op": "Join",
+          "right": {
+            "input": {
+              "alias": "label",
+              "dedup": true,
+              "op": "Scan",
+              "table": "gl_label"
+            },
+            "op": "Filter",
+            "predicates": [
+              {
+                "kind": "NodeFilter",
+                "property": "title"
+              },
+              {
+                "column": "_deleted",
+                "kind": "Eq",
+                "value": {
+                  "Bool": false
+                }
+              }
+            ]
+          }
+        },
+        "on": {
+          "left": [
+            "",
+            ""
+          ],
+          "right": [
+            "_nf_mr",
+            "id"
+          ]
+        },
+        "op": "Join",
+        "right": {
+          "input": {
+            "alias": "mr",
+            "dedup": true,
+            "op": "Scan",
+            "table": "gl_merge_request"
+          },
+          "op": "Filter",
+          "predicates": [
+            {
+              "column": "id",
+              "kind": "In",
+              "values": [
+                {
+                  "Int": 1
+                }
+              ]
+            },
+            {
+              "column": "_deleted",
+              "kind": "Eq",
+              "value": {
+                "Bool": false
+              }
+            }
+          ]
+        }
+      },
+      "metrics": [
+        {
+          "alias": "n",
+          "node": "mr",
+          "property": null
+        }
+      ],
+      "op": "Aggregate"
+    },
+    "keys": [],
+    "op": "Sort"
+  },
+  "op": "Limit"
+}

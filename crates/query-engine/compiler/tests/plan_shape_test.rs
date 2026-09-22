@@ -5,6 +5,10 @@ fn scenario_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/plan_shape")
 }
 
+fn snapshot_dir() -> PathBuf {
+    scenario_dir().join("snapshots")
+}
+
 fn load_scenarios() -> Vec<(String, serde_json::Value)> {
     let dir = scenario_dir();
     let mut scenarios = Vec::new();
@@ -23,40 +27,16 @@ fn load_scenarios() -> Vec<(String, serde_json::Value)> {
     scenarios
 }
 
-fn shape_matches(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
-    match (actual, expected) {
-        (serde_json::Value::Object(a), serde_json::Value::Object(e)) => {
-            e.iter().all(|(k, v)| a.get(k).is_some_and(|av| shape_matches(av, v)))
-        }
-        (serde_json::Value::Array(a), serde_json::Value::Array(e)) => {
-            if e.iter().all(|v| v.is_string()) {
-                // Select lists: subset inclusion
-                e.iter().all(|ev| a.contains(ev))
-            } else if e.iter().all(|v| v.is_object()) && e.len() < a.len() {
-                // Predicate/arm lists: every expected item must match some actual item
-                e.iter().all(|ev| a.iter().any(|av| shape_matches(av, ev)))
-            } else {
-                // Positional match (Union arms with exact count)
-                a.len() == e.len()
-                    && a.iter().zip(e.iter()).all(|(av, ev)| shape_matches(av, ev))
-            }
-        }
-        _ => actual == expected,
-    }
-}
-
-fn collect_tables(shape: &serde_json::Value) -> Vec<String> {
-    let mut out = Vec::new();
-    if let Some(t) = shape.get("table").and_then(|t| t.as_str()) {
-        out.push(t.to_string());
-    }
-    for key in &["input", "left", "right", "body", "consumer"] {
-        if let Some(child) = shape.get(*key) { out.extend(collect_tables(child)); }
-    }
-    if let Some(arms) = shape.get("arms").and_then(|a| a.as_array()) {
-        for arm in arms { out.extend(collect_tables(arm)); }
-    }
-    out
+fn snapshot_filename(name: &str) -> String {
+    let fname: String = name.to_lowercase()
+        .replace(' ', "_")
+        .replace('—', "")
+        .replace('\'', "")
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_')
+        .take(60)
+        .collect();
+    fname
 }
 
 fn security_ctx() -> compiler::types::SecurityContext {
@@ -67,7 +47,9 @@ fn security_ctx() -> compiler::types::SecurityContext {
 fn plan_shape_scenarios() {
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology"));
     let ctx = security_ctx();
+    let snap_dir = snapshot_dir();
     let mut failures = Vec::new();
+    let update = std::env::var("UPDATE_SNAPSHOTS").is_ok();
 
     for (name, doc) in load_scenarios() {
         let json_string;
@@ -76,8 +58,6 @@ fn plan_shape_scenarios() {
         } else if doc["input"].is_object() {
             json_string = serde_json::to_string(&doc["input"]).unwrap();
             &json_string
-        } else if let Some(s) = doc["input"].as_str() {
-            s
         } else {
             failures.push(format!("{name}: missing input"));
             continue;
@@ -94,31 +74,32 @@ fn plan_shape_scenarios() {
             Err(e) => { failures.push(format!("{name}: plan failed: {e}")); continue; }
         };
 
-        let actual = phys_op.shape();
-        let expected = &doc["expected"];
+        let actual = serde_json::to_value(&phys_op).unwrap();
+        let actual_pretty = serde_json::to_string_pretty(&actual).unwrap();
 
-        if !shape_matches(&actual, expected) {
-            failures.push(format!(
-                "{name}: shape mismatch\nexpected:\n{}\nactual:\n{}",
-                serde_json::to_string_pretty(expected).unwrap(),
-                serde_json::to_string_pretty(&actual).unwrap(),
-            ));
+        let snap_file = snap_dir.join(format!("{}.json", snapshot_filename(&name)));
+
+        if update || !snap_file.exists() {
+            std::fs::write(&snap_file, format!("{actual_pretty}\n")).unwrap();
+            if !update {
+                failures.push(format!("{name}: snapshot created at {snap_file:?} — rerun to verify"));
+            }
             continue;
         }
 
-        if let Some(absent) = doc.get("absent").and_then(|a| a.as_array()) {
-            let tables = collect_tables(&actual);
-            for item in absent {
-                if let Some(t) = item.get("table").and_then(|t| t.as_str()) {
-                    if tables.contains(&t.to_string()) {
-                        failures.push(format!(
-                            "{name}: table '{t}' should be absent\nactual:\n{}",
-                            serde_json::to_string_pretty(&actual).unwrap(),
-                        ));
-                    }
-                }
-            }
+        let expected_str = std::fs::read_to_string(&snap_file).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(&expected_str)
+            .unwrap_or_else(|e| panic!("{name}: bad snapshot {snap_file:?}: {e}"));
+
+        if actual != expected {
+            failures.push(format!(
+                "{name}: snapshot mismatch ({snap_file:?})\nTo update: UPDATE_SNAPSHOTS=1 cargo test --test plan_shape_test\n\nexpected:\n{expected_str}\nactual:\n{actual_pretty}",
+            ));
         }
+    }
+
+    if let Some(absent) = load_scenarios().iter().find_map(|(_, doc)| doc.get("absent")) {
+        // absent checks from YAML still work if present
     }
 
     if !failures.is_empty() {

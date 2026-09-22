@@ -1,0 +1,79 @@
+{
+  "count": 11,
+  "input": {
+    "kind": {
+      "Semi": {
+        "materialize": true
+      }
+    },
+    "left": {
+      "kind": {
+        "Semi": {
+          "materialize": true
+        }
+      },
+      "left": {
+        "alias": "f",
+        "dedup": false,
+        "op": "Scan",
+        "table": "forward"
+      },
+      "on": {
+        "left": [
+          "forward",
+          ""
+        ],
+        "right": [
+          "",
+          ""
+        ]
+      },
+      "op": "Join",
+      "right": {
+        "alias": "e1",
+        "dedup": false,
+        "op": "Scan",
+        "table": "gl_edge"
+      }
+    },
+    "on": {
+      "left": [
+        "_nf_start",
+        ""
+      ],
+      "right": [
+        "",
+        ""
+      ]
+    },
+    "op": "Join",
+    "right": {
+      "input": {
+        "alias": "start",
+        "dedup": true,
+        "op": "Scan",
+        "table": "gl_merge_request"
+      },
+      "op": "Filter",
+      "predicates": [
+        {
+          "column": "id",
+          "kind": "In",
+          "values": [
+            {
+              "Int": 1
+            }
+          ]
+        },
+        {
+          "column": "_deleted",
+          "kind": "Eq",
+          "value": {
+            "Bool": false
+          }
+        }
+      ]
+    }
+  },
+  "op": "Limit"
+}

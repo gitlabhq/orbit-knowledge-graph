@@ -165,6 +165,11 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         }
     }
 
+    let excerpt_max_chars = {
+        let limit = input.fetch_limit();
+        (8 * 1024 * 1024u32 / 4 / limit.max(1)) as u32
+    };
+
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
             continue;
@@ -195,6 +200,26 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
 
         node.has_traversal_path = node_entity.has_traversal_path;
         node.is_global = node_entity.global;
+
+        {
+            let mut excerpt: std::collections::HashSet<String> = node_entity
+                .fields
+                .iter()
+                .filter(|f| {
+                    f.column_name().is_some() && f.data_type == ontology::DataType::String
+                })
+                .map(|f| f.name.clone())
+                .collect();
+            for f in &node_entity.fields {
+                if let ontology::FieldSource::Virtual(src) = &f.source {
+                    for dep in &src.depends_on {
+                        excerpt.remove(dep);
+                    }
+                }
+            }
+            node.excerpt_columns = excerpt;
+            node.excerpt_max_chars = excerpt_max_chars;
+        }
 
         // PathFinding/Neighbors handle virtuals in build_dynamic_specs.
         let strip_virtual = !matches!(

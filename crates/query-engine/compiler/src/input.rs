@@ -388,6 +388,10 @@ pub struct InputNode {
     /// Whether the entity is declared `global: true` in the ontology.
     #[serde(skip)]
     pub is_global: bool,
+    #[serde(skip)]
+    pub excerpt_columns: std::collections::HashSet<String>,
+    #[serde(skip)]
+    pub excerpt_max_chars: u32,
     /// Narrowed traversal paths extracted from base query results. Used by the
     /// hydration pipeline to inject `startsWith(traversal_path, tp)` into hydration
     /// queries, pruning granules through the primary key.
@@ -412,6 +416,8 @@ impl Default for InputNode {
             filter_injected_virtual_columns: Vec::new(),
             has_traversal_path: false,
             is_global: false,
+            excerpt_columns: std::collections::HashSet::new(),
+            excerpt_max_chars: 0,
             traversal_paths: Vec::new(),
         }
     }

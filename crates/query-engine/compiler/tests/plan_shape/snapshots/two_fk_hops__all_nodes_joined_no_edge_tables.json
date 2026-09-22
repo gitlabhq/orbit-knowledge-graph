@@ -1,0 +1,224 @@
+{
+  "count": 11,
+  "input": {
+    "columns": [
+      {
+        "alias": "e0_path",
+        "column": "traversal_path",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e0_type",
+        "column": "relationship_kind",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e0_src",
+        "column": "source_id",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e0_src_type",
+        "column": "source_kind",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e0_dst",
+        "column": "target_id",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e0_dst_type",
+        "column": "target_kind",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e1_path",
+        "column": "traversal_path",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e1_type",
+        "column": "relationship_kind",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e1_src",
+        "column": "source_id",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e1_src_type",
+        "column": "source_kind",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e1_dst",
+        "column": "target_id",
+        "kind": "Ref"
+      },
+      {
+        "alias": "e1_dst_type",
+        "column": "target_kind",
+        "kind": "Ref"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "id"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "iid"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "status"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "ref"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "source"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "id"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "name"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "status"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "ref"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "id"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "name"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "full_path"
+      },
+      {
+        "kind": "NodeProperty",
+        "property": "visibility_level"
+      }
+    ],
+    "input": {
+      "input": {
+        "kind": "Inner",
+        "left": {
+          "kind": "Inner",
+          "left": {
+            "input": {
+              "alias": "j",
+              "dedup": true,
+              "op": "Scan",
+              "table": "gl_job"
+            },
+            "op": "Filter",
+            "predicates": [
+              {
+                "kind": "NodeFilter",
+                "property": "status"
+              },
+              {
+                "column": "_deleted",
+                "kind": "Eq",
+                "value": {
+                  "Bool": false
+                }
+              }
+            ]
+          },
+          "on": {
+            "left": [
+              "j",
+              "pipeline_id"
+            ],
+            "right": [
+              "pipe",
+              "id"
+            ]
+          },
+          "op": "Join",
+          "right": {
+            "input": {
+              "alias": "pipe",
+              "dedup": true,
+              "op": "Scan",
+              "table": "gl_pipeline"
+            },
+            "op": "Filter",
+            "predicates": [
+              {
+                "kind": "NodeFilter",
+                "property": "status"
+              },
+              {
+                "column": "_deleted",
+                "kind": "Eq",
+                "value": {
+                  "Bool": false
+                }
+              }
+            ]
+          }
+        },
+        "on": {
+          "left": [
+            "pipe",
+            "project_id"
+          ],
+          "right": [
+            "p",
+            "id"
+          ]
+        },
+        "op": "Join",
+        "right": {
+          "input": {
+            "alias": "p",
+            "dedup": true,
+            "op": "Scan",
+            "table": "gl_project"
+          },
+          "op": "Filter",
+          "predicates": [
+            {
+              "column": "id",
+              "kind": "In",
+              "values": [
+                {
+                  "Int": 1
+                }
+              ]
+            },
+            {
+              "column": "_deleted",
+              "kind": "Eq",
+              "value": {
+                "Bool": false
+              }
+            }
+          ]
+        }
+      },
+      "keys": [],
+      "op": "Sort"
+    },
+    "op": "Project"
+  },
+  "op": "Limit"
+}

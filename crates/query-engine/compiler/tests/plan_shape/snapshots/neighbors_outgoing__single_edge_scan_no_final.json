@@ -1,0 +1,133 @@
+{
+  "count": 21,
+  "input": {
+    "input": {
+      "columns": [
+        {
+          "alias": "_gkg_neighbor_id",
+          "column": "target_id",
+          "kind": "Ref"
+        },
+        {
+          "alias": "_gkg_neighbor_type",
+          "column": "target_kind",
+          "kind": "Ref"
+        },
+        {
+          "alias": "_gkg_relationship_type",
+          "column": "relationship_kind",
+          "kind": "Ref"
+        },
+        {
+          "alias": "_gkg_neighbor_is_outgoing",
+          "expr": {
+            "Lit": {
+              "Int": 1
+            }
+          },
+          "kind": "Computed"
+        },
+        {
+          "alias": "_gkg_mr_id",
+          "column": "source_id",
+          "kind": "Ref"
+        },
+        {
+          "alias": "_gkg_mr_type",
+          "expr": {
+            "Lit": {
+              "Str": "MergeRequest"
+            }
+          },
+          "kind": "Computed"
+        }
+      ],
+      "input": {
+        "input": {
+          "alias": "e",
+          "dedup": false,
+          "op": "Scan",
+          "table": "gl_edge"
+        },
+        "op": "Filter",
+        "predicates": [
+          {
+            "column": "source_kind",
+            "kind": "Eq",
+            "value": {
+              "Str": "MergeRequest"
+            }
+          },
+          {
+            "column": "source_id",
+            "kind": "In",
+            "values": [
+              {
+                "Int": 1
+              }
+            ]
+          },
+          {
+            "column": "relationship_kind",
+            "kind": "In",
+            "values": [
+              {
+                "Str": "CLOSES"
+              },
+              {
+                "Str": "DEPLOYED_TO"
+              },
+              {
+                "Str": "FIXES"
+              },
+              {
+                "Str": "HAS_DIFF"
+              },
+              {
+                "Str": "HAS_HEAD_PIPELINE"
+              },
+              {
+                "Str": "HAS_LABEL"
+              },
+              {
+                "Str": "HAS_LATEST_DIFF"
+              },
+              {
+                "Str": "HAS_NOTE"
+              },
+              {
+                "Str": "IN_MILESTONE"
+              },
+              {
+                "Str": "IN_PROJECT"
+              },
+              {
+                "Str": "MENTIONS"
+              },
+              {
+                "Str": "MERGED_AT_COMMIT"
+              },
+              {
+                "Str": "SOURCE_PROJECT"
+              },
+              {
+                "Str": "TRIGGERED"
+              }
+            ]
+          },
+          {
+            "column": "_deleted",
+            "kind": "Eq",
+            "value": {
+              "Bool": false
+            }
+          }
+        ]
+      },
+      "op": "Project"
+    },
+    "keys": [],
+    "op": "Sort"
+  },
+  "op": "Limit"
+}

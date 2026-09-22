@@ -1,0 +1,377 @@
+{
+  "count": 21,
+  "input": {
+    "input": {
+      "arms": [
+        {
+          "columns": [
+            {
+              "alias": "_gkg_neighbor_id",
+              "column": "target_id",
+              "kind": "Ref"
+            },
+            {
+              "alias": "_gkg_neighbor_type",
+              "column": "target_kind",
+              "kind": "Ref"
+            },
+            {
+              "alias": "_gkg_relationship_type",
+              "column": "relationship_kind",
+              "kind": "Ref"
+            },
+            {
+              "alias": "_gkg_neighbor_is_outgoing",
+              "expr": {
+                "Lit": {
+                  "Int": 1
+                }
+              },
+              "kind": "Computed"
+            },
+            {
+              "alias": "_gkg_mr_id",
+              "column": "source_id",
+              "kind": "Ref"
+            },
+            {
+              "alias": "_gkg_mr_type",
+              "expr": {
+                "Lit": {
+                  "Str": "MergeRequest"
+                }
+              },
+              "kind": "Computed"
+            }
+          ],
+          "input": {
+            "kind": "Inner",
+            "left": {
+              "input": {
+                "alias": "e",
+                "dedup": false,
+                "op": "Scan",
+                "table": "gl_edge"
+              },
+              "op": "Filter",
+              "predicates": [
+                {
+                  "column": "source_kind",
+                  "kind": "Eq",
+                  "value": {
+                    "Str": "MergeRequest"
+                  }
+                },
+                {
+                  "column": "relationship_kind",
+                  "kind": "In",
+                  "values": [
+                    {
+                      "Str": "APPROVED"
+                    },
+                    {
+                      "Str": "ASSIGNED"
+                    },
+                    {
+                      "Str": "AUTHORED"
+                    },
+                    {
+                      "Str": "CLOSED"
+                    },
+                    {
+                      "Str": "CLOSES"
+                    },
+                    {
+                      "Str": "CREATED_FOR_MR"
+                    },
+                    {
+                      "Str": "DEPLOYED_TO"
+                    },
+                    {
+                      "Str": "FIXES"
+                    },
+                    {
+                      "Str": "HAS_DIFF"
+                    },
+                    {
+                      "Str": "HAS_HEAD_PIPELINE"
+                    },
+                    {
+                      "Str": "HAS_LABEL"
+                    },
+                    {
+                      "Str": "HAS_LATEST_DIFF"
+                    },
+                    {
+                      "Str": "HAS_NOTE"
+                    },
+                    {
+                      "Str": "IN_MILESTONE"
+                    },
+                    {
+                      "Str": "IN_PROJECT"
+                    },
+                    {
+                      "Str": "LAST_EDITED_BY"
+                    },
+                    {
+                      "Str": "MENTIONS"
+                    },
+                    {
+                      "Str": "MERGED"
+                    },
+                    {
+                      "Str": "MERGED_AT_COMMIT"
+                    },
+                    {
+                      "Str": "REOPENED"
+                    },
+                    {
+                      "Str": "REVIEWER"
+                    },
+                    {
+                      "Str": "SOURCE_PROJECT"
+                    },
+                    {
+                      "Str": "TRIGGERED"
+                    },
+                    {
+                      "Str": "UPDATED_BY"
+                    }
+                  ]
+                },
+                {
+                  "column": "_deleted",
+                  "kind": "Eq",
+                  "value": {
+                    "Bool": false
+                  }
+                }
+              ]
+            },
+            "on": {
+              "left": [
+                "e",
+                "source_id"
+              ],
+              "right": [
+                "mr",
+                "id"
+              ]
+            },
+            "op": "Join",
+            "right": {
+              "input": {
+                "alias": "mr",
+                "dedup": true,
+                "op": "Scan",
+                "table": "gl_merge_request"
+              },
+              "op": "Filter",
+              "predicates": [
+                {
+                  "kind": "NodeFilter",
+                  "property": "title"
+                },
+                {
+                  "column": "_deleted",
+                  "kind": "Eq",
+                  "value": {
+                    "Bool": false
+                  }
+                }
+              ]
+            }
+          },
+          "op": "Project"
+        },
+        {
+          "columns": [
+            {
+              "alias": "_gkg_neighbor_id",
+              "column": "source_id",
+              "kind": "Ref"
+            },
+            {
+              "alias": "_gkg_neighbor_type",
+              "column": "source_kind",
+              "kind": "Ref"
+            },
+            {
+              "alias": "_gkg_relationship_type",
+              "column": "relationship_kind",
+              "kind": "Ref"
+            },
+            {
+              "alias": "_gkg_neighbor_is_outgoing",
+              "expr": {
+                "Lit": {
+                  "Int": 0
+                }
+              },
+              "kind": "Computed"
+            },
+            {
+              "alias": "_gkg_mr_id",
+              "column": "target_id",
+              "kind": "Ref"
+            },
+            {
+              "alias": "_gkg_mr_type",
+              "expr": {
+                "Lit": {
+                  "Str": "MergeRequest"
+                }
+              },
+              "kind": "Computed"
+            }
+          ],
+          "input": {
+            "kind": "Inner",
+            "left": {
+              "input": {
+                "alias": "e",
+                "dedup": false,
+                "op": "Scan",
+                "table": "gl_edge"
+              },
+              "op": "Filter",
+              "predicates": [
+                {
+                  "column": "target_kind",
+                  "kind": "Eq",
+                  "value": {
+                    "Str": "MergeRequest"
+                  }
+                },
+                {
+                  "column": "relationship_kind",
+                  "kind": "In",
+                  "values": [
+                    {
+                      "Str": "APPROVED"
+                    },
+                    {
+                      "Str": "ASSIGNED"
+                    },
+                    {
+                      "Str": "AUTHORED"
+                    },
+                    {
+                      "Str": "CLOSED"
+                    },
+                    {
+                      "Str": "CLOSES"
+                    },
+                    {
+                      "Str": "CREATED_FOR_MR"
+                    },
+                    {
+                      "Str": "DEPLOYED_TO"
+                    },
+                    {
+                      "Str": "FIXES"
+                    },
+                    {
+                      "Str": "HAS_DIFF"
+                    },
+                    {
+                      "Str": "HAS_HEAD_PIPELINE"
+                    },
+                    {
+                      "Str": "HAS_LABEL"
+                    },
+                    {
+                      "Str": "HAS_LATEST_DIFF"
+                    },
+                    {
+                      "Str": "HAS_NOTE"
+                    },
+                    {
+                      "Str": "IN_MILESTONE"
+                    },
+                    {
+                      "Str": "IN_PROJECT"
+                    },
+                    {
+                      "Str": "LAST_EDITED_BY"
+                    },
+                    {
+                      "Str": "MENTIONS"
+                    },
+                    {
+                      "Str": "MERGED"
+                    },
+                    {
+                      "Str": "MERGED_AT_COMMIT"
+                    },
+                    {
+                      "Str": "REOPENED"
+                    },
+                    {
+                      "Str": "REVIEWER"
+                    },
+                    {
+                      "Str": "SOURCE_PROJECT"
+                    },
+                    {
+                      "Str": "TRIGGERED"
+                    },
+                    {
+                      "Str": "UPDATED_BY"
+                    }
+                  ]
+                },
+                {
+                  "column": "_deleted",
+                  "kind": "Eq",
+                  "value": {
+                    "Bool": false
+                  }
+                }
+              ]
+            },
+            "on": {
+              "left": [
+                "e",
+                "target_id"
+              ],
+              "right": [
+                "mr",
+                "id"
+              ]
+            },
+            "op": "Join",
+            "right": {
+              "input": {
+                "alias": "mr",
+                "dedup": true,
+                "op": "Scan",
+                "table": "gl_merge_request"
+              },
+              "op": "Filter",
+              "predicates": [
+                {
+                  "kind": "NodeFilter",
+                  "property": "title"
+                },
+                {
+                  "column": "_deleted",
+                  "kind": "Eq",
+                  "value": {
+                    "Bool": false
+                  }
+                }
+              ]
+            }
+          },
+          "op": "Project"
+        }
+      ],
+      "op": "Union"
+    },
+    "keys": [],
+    "op": "Sort"
+  },
+  "op": "Limit"
+}
