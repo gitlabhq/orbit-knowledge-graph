@@ -231,11 +231,18 @@ impl Resolver {
         let mut type_uses: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
         let mut producers: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
         let mut extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>> = FxHashMap::default();
-        let mut edges_by_tree: Vec<Vec<&Edge>> = vec![vec![]; trees.len()];
+        let mut imports_to: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
+        let mut call_at_site: FxHashMap<(u32, u32), &Edge> = FxHashMap::default();
         for e in edges {
-            edges_by_tree[e.from_fi()].push(e);
-            if e.kind == EdgeKind::Extends {
-                extends_of.entry(e.from()).or_default().push(e.to());
+            match e.kind {
+                EdgeKind::Extends => extends_of.entry(e.from()).or_default().push(e.to()),
+                EdgeKind::Imports => imports_to.entry(e.to()).or_default().push(e),
+                EdgeKind::Calls => {
+                    if let Some(site) = e.site {
+                        call_at_site.entry((e.from_tree, site)).or_insert(e);
+                    }
+                }
+                _ => {}
             }
             if e.kind == EdgeKind::TypeFlow {
                 type_uses.entry((e.to_tree, e.to_node)).or_default().push(e);
@@ -266,8 +273,9 @@ impl Resolver {
             .collect();
         let mut ctx = ResolveCtx {
             extends_of,
+            imports_to,
+            call_at_site,
             corpus: Cursor::new(trees, 0, 0),
-            edges_by_tree: &edges_by_tree,
             type_uses,
             producers,
             lang,
@@ -350,8 +358,9 @@ impl Resolver {
 
 struct ResolveCtx<'a> {
     extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
+    imports_to: FxHashMap<(u32, u32), Vec<&'a Edge>>,
+    call_at_site: FxHashMap<(u32, u32), &'a Edge>,
     corpus: Cursor<'a>,
-    edges_by_tree: &'a [Vec<&'a Edge>],
     type_uses: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     producers: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     lang: &'a Lang,
@@ -371,14 +380,16 @@ struct ResolveCtx<'a> {
 }
 
 impl ResolveCtx<'_> {
+    /// Import edges into `target`, its name children, or its parent import.
     fn imports_to(&self, fi: usize, target: u32) -> impl Iterator<Item = &Edge> {
-        let parent = move |n| self.corpus.jump(fi as u32, n).parent().map(|p| p.index());
-        self.edges_by_tree[fi].iter().copied().filter(move |e| {
-            e.kind == EdgeKind::Imports
-                && (e.to_node == target
-                    || parent(e.to_node) == Some(target)
-                    || parent(target) == Some(e.to_node))
-        })
+        let node = self.corpus.jump(fi as u32, target);
+        let related = std::iter::once(node)
+            .chain(node.children())
+            .chain(node.parent());
+        related
+            .flat_map(move |n| self.imports_to.get(&(fi as u32, n.index())))
+            .flatten()
+            .copied()
     }
 }
 
@@ -778,9 +789,9 @@ fn producer_class<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Curso
 }
 
 fn callee_of<'a>(ctx: &'a ResolveCtx, call: Cursor<'a>) -> Option<Cursor<'a>> {
-    let local = ctx.edges_by_tree[call.fi() as usize]
-        .iter()
-        .find(|e| e.kind == EdgeKind::Calls && e.site == Some(call.index()))
+    let local = ctx
+        .call_at_site
+        .get(&(call.fi(), call.index()))
         .map(|e| ctx.corpus.follow(e));
     local.or_else(|| resolve_chain(ctx, call.child(C::Callee)?))
 }
