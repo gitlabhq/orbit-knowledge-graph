@@ -182,15 +182,14 @@ pub(crate) fn grep_command_line(definition_name: &str) -> String {
     format!("{} grep {argument}", spec::launcher())
 }
 
-pub(crate) fn most_referenced_definition(repo: &Path, db: Option<PathBuf>) -> Option<String> {
-    let git = workspace::git_info(&workspace::git_toplevel(repo).ok()?).ok()?;
+pub(crate) fn most_referenced_definition(git: &GitInfo, db: Option<PathBuf>) -> Option<String> {
     let batches = crate::sql::open_graph(db)
         .ok()?
         .query_arrow_json(
             "SELECT d.name FROM gl_definition d JOIN gl_edge e ON e.target_id = d.id \
              WHERE d.project_id = ?1 AND d.commit_sha = ?2 AND length(d.name) > 3 \
              GROUP BY d.name ORDER BY count(*) DESC, d.name LIMIT 1",
-            &[git.project_id.into(), git.commit_sha.into()],
+            &[git.project_id.into(), git.commit_sha.clone().into()],
         )
         .ok()?;
     let names = batches
@@ -201,8 +200,8 @@ pub(crate) fn most_referenced_definition(repo: &Path, db: Option<PathBuf>) -> Op
     (!names.is_empty()).then(|| names.value(0).to_string())
 }
 
-fn install_tracing(verbose: bool, quiet: bool) {
-    let level = match (verbose, quiet) {
+fn install_tracing(verbose: bool, person_is_watching: bool) {
+    let level = match (verbose, person_is_watching) {
         (true, _) => Level::DEBUG,
         (false, true) => Level::ERROR,
         (false, false) => Level::WARN,
@@ -242,6 +241,7 @@ impl IndexReporter for LogReporter {
 struct TuiReporter {
     db_path: PathBuf,
     bars: Option<Arc<RepositoryBars>>,
+    git: Option<GitInfo>,
     suggested_grep: Option<String>,
 }
 
@@ -250,6 +250,7 @@ impl TuiReporter {
         Self {
             db_path,
             bars: None,
+            git: None,
             suggested_grep: None,
         }
     }
@@ -272,6 +273,7 @@ impl IndexReporter for TuiReporter {
         );
         let bars = Arc::new(RepositoryBars::open(title));
         self.bars = Some(bars.clone());
+        self.git = Some(git.clone());
         bars
     }
 
@@ -284,9 +286,10 @@ impl IndexReporter for TuiReporter {
             let _ = tui::card("Timings", format_timings(detailed));
         }
 
-        if self.suggested_grep.is_none() {
-            self.suggested_grep =
-                most_referenced_definition(Path::new(&output.path), Some(self.db_path.clone()));
+        if self.suggested_grep.is_none()
+            && let Some(git) = &self.git
+        {
+            self.suggested_grep = most_referenced_definition(git, Some(self.db_path.clone()));
         }
     }
 

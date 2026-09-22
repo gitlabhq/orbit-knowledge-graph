@@ -304,6 +304,7 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     }
 }
 
+#[derive(Clone)]
 pub struct GitInfo {
     pub repo_path: PathBuf,
     /// Deterministic project ID derived from `repo_path`.

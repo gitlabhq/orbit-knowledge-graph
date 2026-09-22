@@ -7,7 +7,7 @@ use serde::Deserialize;
 use super::spec;
 use crate::commands::index::most_referenced_definition;
 use crate::tui::format_with_thousands;
-use crate::workspace::Workspace;
+use crate::workspace::{Workspace, git_info, git_toplevel};
 
 pub(super) struct Indexed {
     pub(super) summary: String,
@@ -52,8 +52,13 @@ pub(super) fn index_repository(cwd: &Path) -> Result<Indexed> {
     };
     Ok(Indexed {
         summary,
-        suggested_grep: most_referenced_definition(cwd, None),
+        suggested_grep: suggest_grep(cwd),
     })
+}
+
+fn suggest_grep(cwd: &Path) -> Option<String> {
+    let git = git_info(&git_toplevel(cwd).ok()?).ok()?;
+    most_referenced_definition(&git, None)
 }
 
 fn launcher_command() -> Result<Command> {
