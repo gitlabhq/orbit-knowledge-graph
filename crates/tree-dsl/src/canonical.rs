@@ -217,6 +217,10 @@ pub enum Canonical {
     Companion,
     #[strum(serialize = "__partial")]
     Partial,
+    #[strum(serialize = "__destructure")]
+    Destructure,
+    #[strum(serialize = "__positional")]
+    Positional,
 }
 
 impl From<Canonical> for u16 {

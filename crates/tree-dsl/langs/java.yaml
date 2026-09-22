@@ -67,8 +67,16 @@ stages:
         replace: '(instanceof_expression $L (__call (__callee @$T)) (__binding @$N (__ssa_typed @$T)))'
       - match: '(instanceof_expression left: $L right: $T:type_identifier)'
         replace: '(instanceof_expression $L (__call (__callee @$T)))'
-      - match: '(record_pattern $T:identifier $P:record_pattern_body)'
-        replace: '(record_pattern (__call (__callee @$T)) $P)'
+      - match: '(record_pattern_component (type_identifier "var") $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(record_pattern_component $T:type_identifier $N:identifier)'
+        replace: '(__binding @$N (__ssa_typed @$T))'
+      - match: '(record_pattern_component $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(record_pattern_component $D:__destructure)'
+        replace: '$D'
+      - match: '(record_pattern $T:identifier (record_pattern_body $$$S))'
+        replace: '(__destructure (__call (__callee @$T)) $$$S)'
 
       # this.x → __ivar
       - match: '(field_access object: (this) field: $F:identifier)'
@@ -232,7 +240,7 @@ stages:
         replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B)'
       # Record components become implicit accessor methods (see the records stage)
       - match: '(record_declaration $M?:modifiers name: $N:identifier parameters: (formal_parameters $$$P:__binding) $$$ANN body: (class_body $$$B))'
-        replace: '(__def (__defname @$N) (__class) $M $$$ANN $$$B $$$P->record_component (record_component "equals") (record_component "hashCode") (record_component "toString"))'
+        replace: '(__def (__defname @$N) (__class) $M $$$ANN (__positional $$$P) $$$B $$$P->record_component (record_component "equals") (record_component "hashCode") (record_component "toString"))'
       - match: '(interface_declaration $M?:modifiers name: $N:identifier $$$ANN body: (interface_body $$$B))'
         replace: '(__def (__defname @$N) (__interface) $M $$$ANN $$$B)'
       - match: '(enum_declaration $M?:modifiers name: $N:identifier $$$ANN body: (enum_body $$$B))'

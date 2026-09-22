@@ -5,7 +5,7 @@ use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::resolver::CLASS_LIKE;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, reachable};
+use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, unique_by_level};
 
 enum Linked {
     Def(u32),
@@ -90,6 +90,16 @@ impl<'t> Fold<'t> {
             if !self.handle_binding(c) {
                 Self::push_children(c, stack);
             }
+        } else if k == C::Destructure {
+            for slot in c.children().filter(|s| s.is(C::Binding)) {
+                self.ssa
+                    .write_variable(slot.sym(), self.cur, Value::Call(slot.index()));
+            }
+            stack.extend(
+                c.children()
+                    .filter(|s| !s.is(C::Binding))
+                    .map(|s| WorkItem::Visit(s.index())),
+            );
         } else if k == C::SsaBranch {
             let sink = self.value_sink.remove(&c.index());
             self.handle_branch(c, sink);
@@ -530,7 +540,7 @@ impl<'t> Fold<'t> {
     }
 
     fn find_method_in(&self, container: u32, name: u32) -> Option<u32> {
-        let succ = |dn: u32| {
+        let wrappers = |dn: u32| {
             let c = self.tree.cursor(dn);
             let same_name = c
                 .child_sym(C::DefName)
@@ -539,11 +549,15 @@ impl<'t> Fold<'t> {
                 .filter(move |&d| {
                     d != dn && (c.has(C::ImplBlock) || self.tree.cursor(d).has(C::ImplBlock))
                 });
-            let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
-            same_name.chain(supers).collect::<Vec<_>>()
+            std::iter::once(dn).chain(same_name).collect::<Vec<_>>()
         };
-        reachable(container, succ)
-            .find_map(|dn| find_method_in(self.tree.cursor(dn), name).map(|m| m.index()))
+        let supers = |dn: u32| {
+            let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
+            supers.flat_map(wrappers).collect::<Vec<_>>()
+        };
+        unique_by_level(wrappers(container), supers, |dn| {
+            find_method_in(self.tree.cursor(dn), name).map(|m| m.index())
+        })
     }
 }
 

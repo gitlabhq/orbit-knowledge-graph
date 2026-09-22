@@ -53,6 +53,35 @@ impl<'a> Walk<'a> {
     }
 }
 
+pub fn unique_by_level<N, I, T>(
+    start: Vec<N>,
+    succ: impl Fn(N) -> I,
+    find: impl Fn(N) -> Option<T>,
+) -> Option<T>
+where
+    N: Copy + Eq + std::hash::Hash,
+    I: IntoIterator<Item = N>,
+    T: PartialEq,
+{
+    let mut seen: rustc_hash::FxHashSet<N> = start.iter().copied().collect();
+    let mut level = start;
+    while !level.is_empty() {
+        let found: Vec<T> = level.iter().filter_map(|&n| find(n)).collect();
+        if let Some(first) = found.first() {
+            return found
+                .iter()
+                .all(|t| t == first)
+                .then(|| found.into_iter().next().unwrap());
+        }
+        level = level
+            .iter()
+            .flat_map(|&n| succ(n))
+            .filter(|m| seen.insert(*m))
+            .collect();
+    }
+    None
+}
+
 pub fn reachable<N, I>(start: N, succ: impl Fn(N) -> I) -> impl Iterator<Item = N>
 where
     N: Copy + Eq,

@@ -6,7 +6,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
 use crate::intern::Lang;
-use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, reachable};
+use crate::tree::{
+    Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, reachable, unique_by_level,
+};
 use crate::treesitter::SupportLang;
 
 pub const CLASS_LIKE: &[C] = &[
@@ -668,7 +670,7 @@ fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
                         continue;
                     };
                     if find_method_in(child, name).is_none()
-                        && let Some(m) = method_up(ctx, parent, name, fi, 0)
+                        && let Some(m) = method_up(ctx, parent, name, fi)
                     {
                         out.push(call_edge(from, m, Some(call.index())));
                     }
@@ -705,7 +707,7 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
                 .map(|m| m.sym())
                 .or_else(|| class.child_sym(C::Callable));
             let target = match name {
-                Some(name) => method_up(ctx, class, name, usage.from_fi(), 0)?,
+                Some(name) => method_up(ctx, class, name, usage.from_fi())?,
                 None => class,
             };
             let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
@@ -775,7 +777,7 @@ fn chain<'a>(
         return root(c);
     };
     let receiver = chain(ctx, m.child(C::Object)?, root)?;
-    value_type(ctx, method_up(ctx, receiver, m.sym(), c.fi() as usize, 0)?)
+    value_type(ctx, method_up(ctx, receiver, m.sym(), c.fi() as usize)?)
 }
 
 fn value_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>) -> Option<Cursor<'a>> {
@@ -893,47 +895,44 @@ fn branch_type<'a>(ctx: &'a ResolveCtx, branch: Cursor<'a>) -> Option<Cursor<'a>
     lub(ctx, arms)
 }
 
-fn method_up<'a>(
-    ctx: &'a ResolveCtx,
-    cls: Cursor<'a>,
-    name: u32,
-    fi: usize,
-    depth: u8,
-) -> Option<Cursor<'a>> {
+fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, fi: usize) -> Option<Cursor<'a>> {
+    let jump = |(sf, n): (u32, u32)| ctx.corpus.jump(sf, n);
+    let inherited = unique_by_level(
+        vec![(cls.fi(), cls.index())],
+        |id| supertypes(ctx, jump(id)),
+        |id| declared_member(ctx, jump(id), name).map(|m| (m.fi(), m.index())),
+    );
+    if let Some(id) = inherited {
+        return Some(jump(id));
+    }
+    if ctx.ambiguous.contains(&(fi, name)) {
+        return None;
+    }
+    let loc = ctx.visible[fi].get(&name)?;
+    let method = ctx.corpus.jump(loc.fi as u32, loc.node);
+    let owner = method.enclosing_def(&[C::ImplBlock])?;
+    let receiver = owner.child_sym(C::DefName)?;
+    let target = ctx.visible[loc.fi].get(&receiver)?;
+    (target.fi == cls.fi() as usize
+        && target.node == cls.index()
+        && !ctx.ambiguous.contains(&(loc.fi, receiver)))
+    .then_some(method)
+}
+
+fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     let parts = partial_key(cls).and_then(|k| ctx.partials.get(&k));
     let parts = parts
         .into_iter()
         .flatten()
         .map(|l| cls.jump(l.fi as u32, l.node));
-    let mut bodies = std::iter::once(cls)
+    std::iter::once(cls)
         .chain(cls.jump(cls.fi(), 0).descendants().filter(|d| {
             d.is(C::Def)
                 && (d.has(C::ImplBlock) || cls.has(C::ImplBlock))
                 && d.child_sym(C::DefName) == cls.child_sym(C::DefName)
         }))
-        .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())));
-    bodies
+        .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())))
         .find_map(|b| find_method_in(b, name))
-        .or_else(|| {
-            supertypes(ctx, cls)
-                .into_iter()
-                .filter(|_| depth < 8)
-                .find_map(|(sf, n)| method_up(ctx, ctx.corpus.jump(sf, n), name, fi, depth + 1))
-        })
-        .or_else(|| {
-            if depth != 0 || ctx.ambiguous.contains(&(fi, name)) {
-                return None;
-            }
-            let loc = ctx.visible[fi].get(&name)?;
-            let method = ctx.corpus.jump(loc.fi as u32, loc.node);
-            let owner = method.enclosing_def(&[C::ImplBlock])?;
-            let receiver = owner.child_sym(C::DefName)?;
-            let target = ctx.visible[loc.fi].get(&receiver)?;
-            (target.fi == cls.fi() as usize
-                && target.node == cls.index()
-                && !ctx.ambiguous.contains(&(loc.fi, receiver)))
-            .then_some(method)
-        })
 }
 
 fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
@@ -966,6 +965,30 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
             }
         }
     }
+    for d in root.descendants().filter(|d| d.is(C::Destructure)) {
+        let class = d
+            .child(C::Call)
+            .and_then(|c| c.child(C::Callee))
+            .and_then(|k| resolve_chain(ctx, k));
+        let Some((from, class)) = d.enclosing(|e| e.is(C::Def)).zip(class) else {
+            continue;
+        };
+        let slots: Vec<Cursor> = d
+            .children()
+            .filter(|s| s.is(C::Binding) || s.is(C::Destructure))
+            .collect();
+        let Some(positional) = class
+            .child(C::Positional)
+            .filter(|p| p.children().count() == slots.len())
+        else {
+            continue;
+        };
+        for (slot, component) in slots.iter().zip(positional.children()) {
+            if let Some(m) = method_up(ctx, class, component.sym(), fi) {
+                out.push(call_edge(from, m, Some(slot.index())));
+            }
+        }
+    }
     for (call, m) in root.member_calls() {
         let Some(from) = call.enclosing(|c| c.is(C::Def)) else {
             continue;
@@ -983,7 +1006,7 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
         };
         match resolve_receiver(ctx, object) {
             Some(target) if target.fi() != fi as u32 && target.is_class() => {
-                if let Some(method) = method_up(ctx, target, m.sym(), fi, 0) {
+                if let Some(method) = method_up(ctx, target, m.sym(), fi) {
                     out.push(call_edge(from, method, Some(call.index())));
                 }
             }
@@ -1034,7 +1057,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
             }) else {
                 continue;
             };
-            if let Some(m) = method_up(ctx, target, member.sym(), ce.from_fi(), 0) {
+            if let Some(m) = method_up(ctx, target, member.sym(), ce.from_fi()) {
                 edges.push(call_edge(caller, m, Some(call.index())));
             }
         }
