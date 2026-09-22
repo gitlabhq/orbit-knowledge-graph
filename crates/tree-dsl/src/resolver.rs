@@ -598,16 +598,14 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         {
             continue;
         }
-        let Some(&loc) = target_files
+        let members = target_files
             .iter()
-            .find_map(|&t| ctx.visible[t].get(&m.sym()))
-        else {
-            continue;
-        };
-        let tgt = ctx.corpus.jump(loc.fi as u32, loc.node);
-        if tgt.has_tag(ctx.callable_key) {
-            edges.push(call_edge(caller, tgt, edge.site));
-        }
+            .filter_map(|&t| ctx.visible[t].get(&m.sym()))
+            .unique()
+            .map(|loc| ctx.corpus.jump(loc.fi as u32, loc.node))
+            .filter(|tgt| tgt.has_tag(ctx.callable_key))
+            .collect();
+        edges.extend(call_edges(caller, members, edge.site));
     }
 
     for ie in &import_edges {
