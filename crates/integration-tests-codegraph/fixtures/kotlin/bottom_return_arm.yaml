@@ -1,0 +1,26 @@
+name: "Kotlin: a return arm is bottom and does not take part in the join"
+fixtures:
+  - path: com/example/bottom/A.kt
+    content: |
+      package com.example.bottom
+      class A { fun n() {} }
+  - path: com/example/bottom/Use.kt
+    content: |
+      package com.example.bottom
+      fun use(x: Int) {
+          val p = when (x) {
+              1 -> A()
+              else -> return
+          }
+          p.n()
+      }
+
+tests:
+  - name: "p.n() dispatches on A after a when whose other arm returns"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use' AND e.edge_kind = 'Calls' AND callee.name = 'n'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "com.example.bottom.A.n" } }

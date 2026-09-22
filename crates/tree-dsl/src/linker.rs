@@ -425,8 +425,7 @@ impl<'t> Fold<'t> {
     }
 
     fn resolve_implicit(&mut self, sym: u32, from: u32, locals_first: bool) {
-        let local = |b: Cursor| b.is(C::Binding) && b.sym_opt() == Some(sym) && !b.has(C::Ivar);
-        if locals_first && self.tree.cursor(from).any_desc(local) {
+        if locals_first && self.ssa.is_defined(sym, self.cur) {
             let mut bound = self.lookup(sym);
             bound.retain(|r| matches!(r, Linked::Def(_) | Linked::Import(_)));
             for r in &bound {

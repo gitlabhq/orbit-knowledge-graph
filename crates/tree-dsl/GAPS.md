@@ -171,14 +171,31 @@ corrected to the language rule and carry a `corrected:` note.
 
 ## Follow-ups the audit found
 
+Open, ours:
+
 - Inherited-member pick. Every shallowest-level candidate gets an edge. The
   language rule differs: Python C3 leftmost, Ruby last include, Scala
   rightmost trait, Java superclass over interface default, Go and Kotlin
   reject. Declare it per class when a fixture needs the exact pick;
   prototyped as a `linearize` tag at 2f31390d2.
+- Receiver identity by SSA. The linker knows which binding a receiver reads;
+  the resolver re-derives it by name inside the enclosing definition
+  (`bindings_of`, `resolve_field_edges`) and rejects an ambiguous name. The
+  SSA-true form carries the binding identity on the call's TypeFlow edge so
+  the resolver never scans; sibling blocks that reuse a name are the case it
+  would fix.
+- Extension candidates. The caller-visible extension leg reads one flat name
+  entry; two extensions of one name on different receivers resolve neither.
+  Rank applicable candidates by receiver identity.
+- C# partial identity ignores generic arity: `partial class C<T>` and
+  `partial class C` in one namespace merge.
 - Ruby and Elixir `module` definitions carry `__class` and export as Class
-  because the definition vocabulary has no module kind. Adding one is an
-  export-vocabulary change, not a rule change.
+  because the definition vocabulary has no module kind.
+- Kotlin predeclared names are the default imports (`kotlin.*`,
+  `kotlin.collections.*`); the rule lists them by name. Rust `panic!` and
+  friends are bottom by macro name without a shadowing check.
+- Ruby constant references are Zeitwerk-style autoload imports by inflected
+  path; a configured loader root would replace the inflection rule.
 
 Handled: bottom-typed arms are declared in java.yaml (`throw_statement`),
 csharp.yaml (`throw_statement`, `throw_expression`), scala.yaml
@@ -186,9 +203,11 @@ csharp.yaml (`throw_statement`, `throw_expression`), scala.yaml
 `throw_keyword`), rust.yaml (`panic!`, `unreachable!`, `todo!`,
 `unimplemented!`) and kotlin.yaml (`throw`, `null`); a `return` arm is bottom
 in every language. A simple name in a unified namespace (C#, Scala, a Ruby
-bare identifier) is `(__callee N (__simple_name))`: a local binding in the
-enclosing definition shadows a member (C# spec 12.8.4); a method-namespace
-call (Java, Ruby `m(...)`) stays `(__implicit)`.
+bare identifier) is `(__callee N (__simple_name))`: a binding the SSA has
+defined on the path to the call shadows a member (C# spec 12.8.4); a
+method-namespace call (Java, Ruby `m(...)`) stays `(__implicit)`. A test
+suite that mixes languages declares `pipeline:`; the runner no longer picks
+by file count. Ruby attribute readers are callable.
 
 ## Base-branch behavior the reviews flagged
 

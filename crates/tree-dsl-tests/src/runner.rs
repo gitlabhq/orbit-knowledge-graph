@@ -12,17 +12,14 @@ fn detect_lang(suite: &TestSuite, fixtures: &[(String, String)]) -> SupportLang 
     {
         return lang;
     }
-    let langs = fixtures
+    let langs: std::collections::HashSet<_> = fixtures
         .iter()
-        .filter_map(|(path, _)| SupportLang::from_path(path));
-    let counts = langs.fold(std::collections::HashMap::new(), |mut m, l| {
-        *m.entry(l).or_insert(0usize) += 1;
-        m
-    });
-    let best = counts
-        .iter()
-        .max_by_key(|&(l, n)| (*n, std::cmp::Reverse(format!("{l:?}"))));
-    best.map_or(SupportLang::Python, |(&l, _)| l)
+        .filter_map(|(path, _)| SupportLang::from_path(path))
+        .collect();
+    match langs.len() {
+        1 => *langs.iter().next().unwrap(),
+        _ => panic!("suite mixes languages {langs:?}; declare `pipeline:`"),
+    }
 }
 
 fn workspace_root() -> std::path::PathBuf {
