@@ -1482,3 +1482,32 @@ fn file_context_bounds_connections_and_keeps_full_definition_followups() {
         assert_eq!(rows_where(&edges, "relationship_kind", "IMPORTS").len(), 50);
     }
 }
+
+#[test]
+fn piped_index_prints_one_json_document_per_repository() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+
+    let out = orbit_cmd()
+        .args(["index", repo.path.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let documents: Vec<Value> = serde_json::Deserializer::from_slice(&out.stdout)
+        .into_iter()
+        .collect::<Result<_, _>>()
+        .expect("stdout is a stream of JSON documents");
+    assert_eq!(documents.len(), 1);
+    let document = &documents[0];
+    let repository_name = repo.path.file_name().unwrap().to_str().unwrap();
+    assert_eq!(document["repository"], json!(repository_name));
+    assert!(document["graph"]["files"].as_u64().unwrap() >= 2);
+    assert!(document["graph"]["definitions"].as_u64().unwrap() >= 1);
+    assert!(document["processing"].is_object());
+}
