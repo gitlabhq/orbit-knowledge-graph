@@ -1,4 +1,4 @@
-# Orbit Local development quickstart
+# Orbit CLI development quickstart
 
 Build and test the `orbit` CLI and related crates without GDK, NATS, Siphon,
 ClickHouse, or PostgreSQL. Many contributions only need the tools on this
@@ -80,7 +80,7 @@ resulting DuckDB graph with SQL:
 ```
 
 Revision graphs and a separate manifest are written under `~/.gitlab/orbit/local/`. `orbit schema` lists every
-table and column in it. Orbit Local is queried with DuckDB SQL only; the JSON
+table and column in it. The local graph is queried with DuckDB SQL only; the JSON
 query DSL documented under `docs/source/remote/` applies to Orbit Remote.
 
 ## Run tests without infrastructure
@@ -96,6 +96,18 @@ mise run lint:docs                    # markdownlint + Vale + lychee
 
 For every test layer and where to add a test, see
 [Testing](../design-documents/testing.md).
+
+## Agent plugins
+
+Claude Code and Codex can install the same Orbit CLI plugin. The package
+reuses the skill embedded in the binary and needs no server services.
+See the [plugin guide](../../plugins/orbit/README.md) for installation, migration
+from `orbit setup`, and local validation.
+
+```shell
+mise test:plugins
+mise plugins:package
+```
 
 ## What needs GDK
 

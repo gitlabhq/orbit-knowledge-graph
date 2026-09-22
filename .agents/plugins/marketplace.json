@@ -1,0 +1,12 @@
+{
+  "name": "gitlab-orbit",
+  "interface": { "displayName": "GitLab Orbit" },
+  "plugins": [
+    {
+      "name": "orbit",
+      "source": { "source": "local", "path": "./plugins/orbit" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Developer tools"
+    }
+  ]
+}

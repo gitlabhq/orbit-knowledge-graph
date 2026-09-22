@@ -102,14 +102,12 @@ def get_changed_skills(changed_files: list[str]) -> dict[str, list[str]]:
     skills: dict[str, list[str]] = {}
 
     for filepath in changed_files:
-        if not filepath.startswith("skills/"):
-            continue
-
-        parts = filepath.split("/")
-        if len(parts) < 3:
-            continue
-
-        skills.setdefault(parts[1], []).append(filepath)
+        if filepath.startswith("plugins/orbit/"):
+            skills.setdefault("orbit-cli", []).append(filepath)
+        elif filepath.startswith("skills/"):
+            parts = filepath.split("/")
+            if len(parts) >= 3:
+                skills.setdefault(parts[1], []).append(filepath)
 
     log_debug(f"Changed skills: {list(skills)}")
     return skills
@@ -130,20 +128,22 @@ def parse_version_from_content(content: str) -> str | None:
     return None
 
 
-def get_version_at_ref(skill_name: str, ref: str) -> str | None:
-    skill_md_path = f"skills/{skill_name}/SKILL.md"
-    result = run_git(["show", f"{ref}:{skill_md_path}"], check=False)
-    if result.returncode != 0:
-        log_debug(f"Could not read {skill_md_path} at {ref} (new skill?)")
-        return None
+def skill_path(skill_name: str) -> str:
+    root = "plugins/orbit/skills" if skill_name == "orbit-cli" else "skills"
+    return f"{root}/{skill_name}/SKILL.md"
 
-    version = parse_version_from_content(result.stdout)
-    log_debug(f"Version for {skill_name} at {ref}: {version}")
-    return version
+
+def get_version_at_ref(skill_name: str, ref: str) -> str | None:
+    paths = dict.fromkeys([skill_path(skill_name), f"skills/{skill_name}/SKILL.md"])
+    for path in paths:
+        result = run_git(["show", f"{ref}:{path}"], check=False)
+        if result.returncode == 0:
+            return parse_version_from_content(result.stdout)
+    return None
 
 
 def parse_current_version(skill_name: str, staged: bool) -> str | None:
-    skill_md_path = f"skills/{skill_name}/SKILL.md"
+    skill_md_path = skill_path(skill_name)
 
     if staged:
         result = run_git(["show", f":{skill_md_path}"], check=False)
