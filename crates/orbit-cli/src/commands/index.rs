@@ -1,13 +1,20 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use arrow::array::{Array, StringArray};
+use code_graph::v2::{PipelineConfig, ProgressObserver, ProgressPhase, SilentProgress};
 use ontology::Ontology;
 use serde::Serialize;
-use tracing::info;
+use tracing::{Level, info};
+use tracing_subscriber::fmt::format::FmtSpan;
 
-use crate::workspace;
+use super::setup::spec;
+use crate::tui;
+use crate::workspace::{self, GitInfo};
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
@@ -124,16 +131,33 @@ struct ErroredFile {
     detail: String,
 }
 
-pub(crate) async fn run(
+pub(crate) fn run(
     path: PathBuf,
     threads: usize,
     show_stats: bool,
+    verbose: bool,
     db: Option<PathBuf>,
 ) -> Result<()> {
-    for output in collect(path, threads, show_stats, db)? {
-        println!("{}", serde_json::to_string_pretty(&output)?);
+    let person_is_watching = std::io::stdout().is_terminal();
+    install_tracing(verbose, person_is_watching);
+    let indexer = LocalIndexer::open(path, threads, show_stats, db)?;
+
+    if !person_is_watching {
+        for output in indexer.index_all(&mut LogReporter)? {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        return Ok(());
     }
-    Ok(())
+
+    tui::intro("Orbit index")?;
+    let mut screen = Screen::new(indexer.db_path.clone());
+    match indexer.index_all(&mut screen) {
+        Ok(_) => tui::outro(screen.closing_line()),
+        Err(error) => {
+            tui::outro_cancel(&error)?;
+            Err(error)
+        }
+    }
 }
 
 /// Synchronous (the pipeline and DuckDB driver both block), so async callers
@@ -144,101 +168,362 @@ pub(crate) fn collect(
     show_stats: bool,
     db: Option<PathBuf>,
 ) -> Result<Vec<IndexOutput>> {
-    let db_path = workspace::resolve_db_path(db)?;
-    let store = workspace::Workspace::open_default()?;
-    let repos = store.resolve_repos(&path)?;
+    LocalIndexer::open(path, threads, show_stats, db)?.index_all(&mut LogReporter)
+}
 
-    if repos.is_empty() {
-        anyhow::bail!(
-            "no git repository found in {}. Pass a repository path, or a directory containing one.",
-            path.display()
-        );
+pub(crate) fn grep_command_line(definition_name: &str) -> String {
+    let is_plain_word = definition_name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_');
+    let argument = match is_plain_word {
+        true => definition_name.to_string(),
+        false => format!("'{}'", definition_name.replace('\'', "'\\''")),
+    };
+    format!("{} grep {argument}", spec::launcher())
+}
+
+pub(crate) fn most_referenced_definition(repo: &Path, db: Option<PathBuf>) -> Option<String> {
+    let git = workspace::git_info(&workspace::git_toplevel(repo).ok()?).ok()?;
+    let batches = crate::sql::open_graph(db)
+        .ok()?
+        .query_arrow_json(
+            "SELECT d.name FROM gl_definition d JOIN gl_edge e ON e.target_id = d.id \
+             WHERE d.project_id = ?1 AND d.commit_sha = ?2 AND length(d.name) > 3 \
+             GROUP BY d.name ORDER BY count(*) DESC, d.name LIMIT 1",
+            &[git.project_id.into(), git.commit_sha.into()],
+        )
+        .ok()?;
+    let names = batches
+        .first()?
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()?;
+    (!names.is_empty()).then(|| names.value(0).to_string())
+}
+
+fn install_tracing(verbose: bool, quiet: bool) {
+    let level = match (verbose, quiet) {
+        (true, _) => Level::DEBUG,
+        (false, true) => Level::ERROR,
+        (false, false) => Level::WARN,
+    };
+    let span_events = match verbose {
+        true => FmtSpan::CLOSE,
+        false => FmtSpan::NONE,
+    };
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_target(verbose)
+        .with_level(verbose)
+        .with_ansi(true)
+        .without_time()
+        .with_span_events(span_events)
+        .with_writer(std::io::stderr)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+}
+
+pub(crate) trait IndexReporter {
+    fn repository_started(&mut self, _git: &GitInfo) -> Arc<dyn ProgressObserver> {
+        Arc::new(SilentProgress)
+    }
+    fn repository_indexed(&mut self, _output: &IndexOutput) {}
+    fn repository_failed(&mut self, repo_path: &Path, error: &anyhow::Error);
+}
+
+struct LogReporter;
+
+impl IndexReporter for LogReporter {
+    fn repository_failed(&mut self, repo_path: &Path, error: &anyhow::Error) {
+        tracing::error!("failed to index {}: {error:#}", repo_path.display());
+    }
+}
+
+struct Screen {
+    db_path: PathBuf,
+    bars: Option<Arc<RepositoryBars>>,
+    suggested_grep: Option<String>,
+}
+
+impl Screen {
+    fn new(db_path: PathBuf) -> Self {
+        Self {
+            db_path,
+            bars: None,
+            suggested_grep: None,
+        }
     }
 
-    let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
+    fn closing_line(&self) -> String {
+        match &self.suggested_grep {
+            Some(name) => format!("Try it:  {}", grep_command_line(name)),
+            None => "Done.".to_string(),
+        }
+    }
+}
 
-    workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
-
-    let pipeline_config = code_graph::v2::PipelineConfig {
-        worker_threads: threads,
-        per_file_timeout: Some(std::time::Duration::from_secs(2)),
-        per_file_parse_timeout: Some(std::time::Duration::from_millis(100)),
-        per_file_walk_timeout: Some(std::time::Duration::from_millis(100)),
-        per_file_ssa_timeout: Some(std::time::Duration::from_millis(100)),
-        cross_file_resolve_timeout: Some(std::time::Duration::from_secs(180)),
-        ..Default::default()
-    };
-
-    let mut failed = 0usize;
-    let mut outputs = Vec::with_capacity(repos.len());
-
-    for repo_path in &repos {
-        let git = match workspace::git_info(repo_path) {
-            Ok(g) => g,
-            Err(e) => {
-                tracing::error!("skipping {}: {e:#}", repo_path.display());
-                failed += 1;
-                workspace::record_git_info_failure(&db_path, repo_path, &e.to_string());
-                continue;
-            }
-        };
-        let key = git.repo_path.to_string_lossy().to_string();
-
-        info!(
-            "Indexing repository at: {} (branch: {}, commit: {})",
-            key,
+impl IndexReporter for Screen {
+    fn repository_started(&mut self, git: &GitInfo) -> Arc<dyn ProgressObserver> {
+        let title = format!(
+            "{}  {} @ {}",
+            repository_name(git),
             git.branch,
             git.short_sha()
         );
+        let bars = Arc::new(RepositoryBars::open(title));
+        self.bars = Some(bars.clone());
+        bars
+    }
 
-        {
-            let client =
-                duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
-            workspace::set_status(
-                &client,
-                &key,
-                git.project_id,
-                workspace::RepoStatus::Indexing,
-                None,
-                Some(&git),
-            )?;
+    fn repository_indexed(&mut self, output: &IndexOutput) {
+        if let Some(bars) = self.bars.take() {
+            bars.close(output);
+        }
+        if let Some(detailed) = &output.detailed {
+            let _ = tui::card("Timings", format_timings(detailed));
+        }
+        if self.suggested_grep.is_none() {
+            self.suggested_grep =
+                most_referenced_definition(Path::new(&output.path), Some(self.db_path.clone()));
+        }
+    }
+
+    fn repository_failed(&mut self, repo_path: &Path, error: &anyhow::Error) {
+        match self.bars.take() {
+            Some(bars) => bars.fail(error),
+            None => tui::error(format!("{}: {error:#}", repo_path.display())),
+        }
+    }
+}
+
+struct RepositoryBars {
+    group: tui::ProgressGroup,
+    phases: OnceLock<PhaseBars>,
+}
+
+struct PhaseBars {
+    parse: tui::Bar,
+    resolve: tui::Bar,
+}
+
+impl RepositoryBars {
+    fn open(title: String) -> Self {
+        Self {
+            group: tui::progress_group(title),
+            phases: OnceLock::new(),
+        }
+    }
+
+    fn close(&self, output: &IndexOutput) {
+        if let Some(phases) = self.phases.get() {
+            phases
+                .parse
+                .finish(count_noun(output.graph.definitions, "definition"));
+            phases.resolve.finish(format!(
+                "{} · {:.1} s",
+                count_noun(output.graph.relationships, "relationship"),
+                output.time_seconds
+            ));
+        }
+        self.group.close();
+    }
+
+    fn fail(&self, error: &anyhow::Error) {
+        self.group.fail(format!("{error:#}"));
+    }
+}
+
+impl ProgressObserver for RepositoryBars {
+    fn inventory_grouped(
+        &self,
+        total_files: usize,
+        parseable_files: usize,
+        files_per_family: &[(String, usize)],
+    ) {
+        self.group.note(format!(
+            "{} · {} parseable · {}",
+            count_noun(total_files, "file"),
+            tui::format_with_thousands(parseable_files),
+            count_noun(files_per_family.len(), "language")
+        ));
+        self.phases.get_or_init(|| PhaseBars {
+            parse: self.group.bar("Parse  ", parseable_files),
+            resolve: self.group.bar("Resolve", parseable_files),
+        });
+    }
+
+    fn files_advanced(&self, phase: ProgressPhase, count: usize) {
+        let Some(phases) = self.phases.get() else {
+            return;
+        };
+        match phase {
+            ProgressPhase::Parse => phases.parse.advance(count),
+            ProgressPhase::Resolve => phases.resolve.advance(count),
+        }
+    }
+}
+
+fn count_noun(count: usize, noun: &str) -> String {
+    let plural = match count {
+        1 => "",
+        _ => "s",
+    };
+    format!("{} {noun}{plural}", tui::format_with_thousands(count))
+}
+
+fn format_timings(detailed: &DetailedStats) -> String {
+    let phases = &detailed.phase_timings;
+    let mut rows = vec![format!(
+        "discovery {:.0} ms · structure {:.0} ms · languages {:.0} ms · total {:.0} ms",
+        phases.file_discovery_ms,
+        phases.structural_graph_ms,
+        phases.language_processing_ms,
+        phases.total_ms
+    )];
+    rows.extend(detailed.language_timings.iter().map(|timing| {
+        format!(
+            "{:<12} {:>6} files  parse {:>7.0} ms  resolve {:>7.0} ms",
+            timing.language, timing.file_count, timing.parse_ms, timing.resolve_ms
+        )
+    }));
+    rows.join("\n")
+}
+
+fn repository_name(git: &GitInfo) -> String {
+    git.repo_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "repository".to_string())
+}
+
+struct LocalIndexer {
+    db_path: PathBuf,
+    repos: Vec<PathBuf>,
+    ontology: Ontology,
+    pipeline_config: PipelineConfig,
+    show_stats: bool,
+}
+
+impl LocalIndexer {
+    fn open(path: PathBuf, threads: usize, show_stats: bool, db: Option<PathBuf>) -> Result<Self> {
+        let db_path = workspace::resolve_db_path(db)?;
+        let repos = workspace::Workspace::open_default()?.resolve_repos(&path)?;
+        if repos.is_empty() {
+            bail!(
+                "no git repository found in {}. Pass a repository path, or a directory containing one.",
+                path.display()
+            );
         }
 
-        let result = index_repo(&git, &db_path, &ontology, pipeline_config.clone());
-        match result {
-            Ok(result) => {
-                let repo_name = git
-                    .repo_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "repository".to_string());
-                let mut output = build_index_output(&repo_name, &key, &result, show_stats);
-                output.database_path = Some(db_path.display().to_string());
-                outputs.push(output);
-            }
-            Err(e) => {
-                tracing::error!("failed to index {key}: {e:#}");
-                failed += 1;
-                if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path)
-                    && let Err(manifest_err) = workspace::set_status(
-                        &client,
-                        &key,
-                        git.project_id,
-                        workspace::RepoStatus::Error,
-                        Some(&e.to_string()),
-                        None,
-                    )
-                {
-                    tracing::warn!("failed to record error status in manifest: {manifest_err}");
+        let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
+        workspace::ensure_graph_schema(&db_path, LOCAL_DDL)?;
+
+        let pipeline_config = PipelineConfig {
+            worker_threads: threads,
+            per_file_timeout: Some(Duration::from_secs(2)),
+            per_file_parse_timeout: Some(Duration::from_millis(100)),
+            per_file_walk_timeout: Some(Duration::from_millis(100)),
+            per_file_ssa_timeout: Some(Duration::from_millis(100)),
+            cross_file_resolve_timeout: Some(Duration::from_secs(180)),
+            ..Default::default()
+        };
+
+        Ok(Self {
+            db_path,
+            repos,
+            ontology,
+            pipeline_config,
+            show_stats,
+        })
+    }
+
+    fn index_all(&self, reporter: &mut dyn IndexReporter) -> Result<Vec<IndexOutput>> {
+        let mut outputs = Vec::with_capacity(self.repos.len());
+        for repo_path in &self.repos {
+            match self.index_repository(repo_path, reporter) {
+                Ok(output) => {
+                    reporter.repository_indexed(&output);
+                    outputs.push(output);
                 }
+                Err(error) => reporter.repository_failed(repo_path, &error),
             }
         }
+
+        let failed = self.repos.len() - outputs.len();
+        if failed > 0 {
+            bail!(
+                "{failed} of {} repositories failed to index",
+                self.repos.len()
+            );
+        }
+        Ok(outputs)
     }
 
-    if failed > 0 {
-        anyhow::bail!("{failed} of {} repositories failed to index", repos.len());
+    fn index_repository(
+        &self,
+        repo_path: &Path,
+        reporter: &mut dyn IndexReporter,
+    ) -> Result<IndexOutput> {
+        let git = workspace::git_info(repo_path).inspect_err(|error| {
+            workspace::record_git_info_failure(&self.db_path, repo_path, &error.to_string())
+        })?;
+        let key = git.repo_path.to_string_lossy().to_string();
+        info!(
+            "Indexing repository at: {key} (branch: {}, commit: {})",
+            git.branch,
+            git.short_sha()
+        );
+        self.record_status(
+            &key,
+            &git,
+            workspace::RepoStatus::Indexing,
+            None,
+            Some(&git),
+        )?;
+
+        let mut pipeline_config = self.pipeline_config.clone();
+        pipeline_config.progress = reporter.repository_started(&git);
+        let result = index_repo(&git, &self.db_path, &self.ontology, pipeline_config).inspect_err(
+            |error| {
+                let recorded = self.record_status(
+                    &key,
+                    &git,
+                    workspace::RepoStatus::Error,
+                    Some(&error.to_string()),
+                    None,
+                );
+                if let Err(manifest_error) = recorded {
+                    tracing::warn!("failed to record error status in manifest: {manifest_error}");
+                }
+            },
+        )?;
+        Ok(build_index_output(
+            &repository_name(&git),
+            &key,
+            &result,
+            self.show_stats,
+        ))
     }
-    Ok(outputs)
+
+    fn record_status(
+        &self,
+        key: &str,
+        git: &GitInfo,
+        status: workspace::RepoStatus,
+        error: Option<&str>,
+        git_for_manifest: Option<&GitInfo>,
+    ) -> Result<()> {
+        let client =
+            duckdb_client::DuckDbClient::open(&self.db_path).context("failed to open DuckDB")?;
+        workspace::set_status(
+            &client,
+            key,
+            git.project_id,
+            status,
+            error,
+            git_for_manifest,
+        )
+    }
 }
 
 fn fatal_pipeline_reason(errors: &[code_graph::v2::pipeline::PipelineError]) -> Option<String> {

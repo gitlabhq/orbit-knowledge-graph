@@ -19,7 +19,6 @@ use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{Level, debug};
-use tracing_subscriber::fmt::format::FmtSpan;
 
 /// Only bounds commands too fast to hide a round trip behind their own work.
 /// Raising it buys no extra delivery and lengthens exit against a dead collector.
@@ -538,26 +537,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             stats,
             verbose,
             db,
-        }) => {
-            let level = if verbose { Level::DEBUG } else { Level::WARN };
-            let subscriber = tracing_subscriber::fmt()
-                .with_max_level(level)
-                .with_target(verbose)
-                .with_level(verbose)
-                .with_ansi(true)
-                .without_time()
-                .with_span_events(if verbose {
-                    FmtSpan::CLOSE
-                } else {
-                    FmtSpan::NONE
-                })
-                .with_writer(std::io::stderr)
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("setting default subscriber failed");
-
-            commands::index::run(path, threads, stats, db).await
-        }
+        }) => commands::index::run(path, threads, stats, verbose, db),
         Commands::Grep(GrepArgs {
             query,
             repo,

@@ -42,6 +42,63 @@ pub(crate) fn warn(message: impl Display) {
     let _ = cliclack::log::warning(message);
 }
 
+pub(crate) fn error(message: impl Display) {
+    let _ = cliclack::log::error(message);
+}
+
+pub(crate) fn format_with_thousands(count: usize) -> String {
+    let digits = count.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
+pub(crate) struct ProgressGroup(cliclack::MultiProgress);
+
+pub(crate) fn progress_group(title: impl Display) -> ProgressGroup {
+    ProgressGroup(cliclack::multi_progress(title))
+}
+
+impl ProgressGroup {
+    pub(crate) fn bar(&self, label: &str, total: usize) -> Bar {
+        let bar = self.0.add(
+            cliclack::progress_bar(total as u64)
+                .with_template("{msg} {bar:30.magenta} {human_pos}/{human_len}"),
+        );
+        bar.start(label);
+        Bar(bar)
+    }
+
+    pub(crate) fn note(&self, line: impl Display) {
+        self.0.println(line);
+    }
+
+    pub(crate) fn close(&self) {
+        self.0.stop();
+    }
+
+    pub(crate) fn fail(&self, message: impl Display) {
+        self.0.error(message);
+    }
+}
+
+pub(crate) struct Bar(cliclack::ProgressBar);
+
+impl Bar {
+    pub(crate) fn advance(&self, count: usize) {
+        self.0.inc(count as u64);
+    }
+
+    pub(crate) fn finish(&self, message: impl Display) {
+        self.0.stop(message);
+    }
+}
+
 pub(crate) struct Spinner(cliclack::ProgressBar);
 
 pub(crate) fn spinner(label: impl Display) -> Spinner {
