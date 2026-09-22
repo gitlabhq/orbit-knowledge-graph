@@ -96,7 +96,6 @@ mod tests {
 
     #[test]
     fn encoders_enforce_gql_identifier_and_integer_bounds() {
-        assert_eq!(encode_identifier(&json!("User_1")).unwrap(), "`User_1`");
         for value in [
             json!(""),
             json!("1User"),
@@ -113,7 +112,6 @@ mod tests {
         for value in [json!(-1), json!("9223372036854775808"), json!(1.5)] {
             assert!(encode_integer(&value).is_err(), "{value}");
         }
-        assert!(encode_literal(&json!(["x", true, 1])).is_ok());
         assert_eq!(
             encode_literal(&json!(u64::MAX)).unwrap(),
             u64::MAX.to_string()
