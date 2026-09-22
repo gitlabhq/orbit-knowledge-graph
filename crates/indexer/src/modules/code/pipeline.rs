@@ -48,7 +48,7 @@ impl ProgressObserver for NatsHeartbeat {
 
 pub enum IndexOutcome {
     /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
-    Indexed { rows_written: u64 },
+    Indexed,
     /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
     EmptyRepository,
 }
@@ -56,7 +56,7 @@ pub enum IndexOutcome {
 impl IndexOutcome {
     pub fn metric_label(&self) -> &'static str {
         match self {
-            IndexOutcome::Indexed { .. } => "indexed",
+            IndexOutcome::Indexed => "indexed",
             IndexOutcome::EmptyRepository => "empty_repository",
         }
     }
@@ -176,11 +176,6 @@ impl Drop for ProjectCommit {
     fn drop(&mut self) {
         self.inflight.fetch_sub(1, Ordering::AcqRel);
     }
-}
-
-struct IndexedRun {
-    commit: Arc<ProjectCommit>,
-    rows_written: u64,
 }
 
 pub struct CodeIndexer {
@@ -453,21 +448,15 @@ impl CodeIndexer {
         // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
         // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
         self.metrics.record_cleanup("success");
-        let run = indexing_result?;
+        let commit = indexing_result?;
 
         // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
         // is the decrement that finalizes; otherwise the writer's last flush will.
-        run.commit.release();
+        commit.release();
 
-        Ok(IndexOutcome::Indexed {
-            rows_written: run.rows_written,
-        })
+        Ok(IndexOutcome::Indexed)
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "indexing stage threads its collaborators explicitly; a params struct would just move the arity"
-    )]
     async fn run_indexing(
         &self,
         context: &HandlerContext,
@@ -476,7 +465,7 @@ impl CodeIndexer {
         indexed_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-    ) -> Result<IndexedRun, HandlerError> {
+    ) -> Result<Arc<ProjectCommit>, HandlerError> {
         let indexing_start = Instant::now();
         let config = self.build_pipeline_config(context, cancel.clone());
         let (result, commit, metered_bytes) = self
@@ -496,7 +485,7 @@ impl CodeIndexer {
         self.metrics
             .record_indexing_duration(indexing_start.elapsed());
 
-        let rows_written = self.record_indexing_results(
+        self.record_indexing_results(
             &result,
             observer,
             request,
@@ -516,10 +505,7 @@ impl CodeIndexer {
         }
 
         context.progress.notify_in_progress().await;
-        Ok(IndexedRun {
-            commit,
-            rows_written,
-        })
+        Ok(commit)
     }
 
     fn build_pipeline_config(
@@ -687,7 +673,7 @@ impl CodeIndexer {
         request: &IndexingRequest,
         indexing_start: Instant,
         written_bytes: u64,
-    ) -> u64 {
+    ) {
         let parsed_count = result
             .stats
             .files_parsed
@@ -774,8 +760,6 @@ impl CodeIndexer {
         for error in &result.errors {
             self.metrics.record_stage_error(error.stage);
         }
-
-        rows_written
     }
 }
 

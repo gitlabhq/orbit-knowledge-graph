@@ -77,14 +77,6 @@ impl GrpcServer {
         self
     }
 
-    pub fn with_indexing_status(
-        mut self,
-        store: indexer::indexing_status::IndexingStatusStore,
-    ) -> Self {
-        self.service = self.service.with_indexing_status(store);
-        self
-    }
-
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }

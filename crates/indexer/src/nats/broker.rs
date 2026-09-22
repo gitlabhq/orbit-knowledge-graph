@@ -57,15 +57,6 @@ impl NatsBroker {
         })
     }
 
-    pub fn from_client(client: Arc<NatsClient>, config: &NatsConfiguration) -> Self {
-        Self {
-            inner: client,
-            config: config.clone(),
-            subscription_handles: Mutex::new(Vec::new()),
-            cancellation_token: CancellationToken::new(),
-        }
-    }
-
     pub fn client(&self) -> &Arc<NatsClient> {
         &self.inner
     }

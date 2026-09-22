@@ -469,10 +469,10 @@ pub struct ReplicaStatus {
     #[prost(int32, tag = "2")]
     pub desired: i32,
 }
-/// Request for graph entity counts scoped by traversal_path prefix.
+/// Request for graph status scoped by traversal_path prefix.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetGraphStatusRequest {
-    /// traversal_path prefix to scope counts (e.g. "1/2/")
+    /// traversal_path prefix to scope the status (e.g. "1/2/")
     #[prost(string, tag = "1")]
     pub traversal_path: ::prost::alloc::string::String,
     #[prost(enumeration = "SourceType", tag = "2")]
@@ -481,7 +481,14 @@ pub struct GetGraphStatusRequest {
     #[prost(enumeration = "ResponseFormat", tag = "3")]
     pub format: i32,
 }
-/// Indexing progress metadata from the most recent indexing run.
+/// First-sync progress for the top-level namespace that owns the request scope.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IndexingProgress {
+    #[prost(enumeration = "IndexingPhase", tag = "1")]
+    pub phase: i32,
+}
+/// Indexing state of one surface. Fields 2 to 7 are deprecated and never set:
+/// per-run detail left with the NATS KV progress store.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct IndexingStatus {
     #[prost(enumeration = "IndexingState", tag = "1")]
@@ -499,7 +506,7 @@ pub struct IndexingStatus {
     #[prost(uint64, optional, tag = "7")]
     pub last_rows_written: ::core::option::Option<u64>,
 }
-/// Response containing project coverage and entity counts grouped by domain.
+/// Response containing indexing phase, project coverage, and per-domain readiness.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetGraphStatusResponse {
     #[prost(oneof = "get_graph_status_response::Content", tags = "1, 2")]
@@ -517,21 +524,24 @@ pub mod get_graph_status_response {
         FormattedText(::prost::alloc::string::String),
     }
 }
-/// Structured graph status with project coverage, entity counts, and indexing state.
+/// Structured graph status with indexing phase, project coverage, and per-domain readiness.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StructuredGraphStatus {
     #[prost(message, optional, tag = "1")]
     pub projects: ::core::option::Option<ProjectsStatus>,
     #[prost(message, repeated, tag = "2")]
     pub domains: ::prost::alloc::vec::Vec<GraphStatusDomain>,
-    /// worst of sdlc_indexing and code_indexing
+    /// state derived from progress.phase
     #[prost(message, optional, tag = "3")]
     pub indexing: ::core::option::Option<IndexingStatus>,
+    /// deprecated: mirrors indexing; read progress instead
     #[prost(message, optional, tag = "4")]
     pub sdlc_indexing: ::core::option::Option<IndexingStatus>,
     /// derived from project coverage, not a recorded run
     #[prost(message, optional, tag = "5")]
     pub code_indexing: ::core::option::Option<IndexingStatus>,
+    #[prost(message, optional, tag = "6")]
+    pub progress: ::core::option::Option<IndexingProgress>,
 }
 /// How many projects under this scope have been code-indexed.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -541,21 +551,25 @@ pub struct ProjectsStatus {
     #[prost(int64, tag = "2")]
     pub total_known: i64,
 }
-/// Entity counts for a single domain (e.g. "ci", "core", "plan").
+/// Readiness of a single domain (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GraphStatusDomain {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
     pub items: ::prost::alloc::vec::Vec<GraphStatusItem>,
+    /// READY once every data plan feeding this domain finished its first pass; domains with code-graph entities also need full code coverage
+    #[prost(enumeration = "IndexingPhase", tag = "3")]
+    pub phase: i32,
 }
-/// Count for a single entity type (e.g. "Project": 42).
+/// One entity type visible to the caller (e.g. "Project").
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GraphStatusItem {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(int64, tag = "2")]
-    pub count: i64,
+    /// deprecated: never set; entity counts were removed
+    #[prost(int64, optional, tag = "2")]
+    pub count: ::core::option::Option<i64>,
     /// absent for entities with no per-entity signal
     #[prost(enumeration = "IndexingState", optional, tag = "3")]
     pub state: ::core::option::Option<i32>,
@@ -742,6 +756,44 @@ impl IndexingState {
             "INDEXING_STATE_ERROR" => Some(Self::Error),
             "INDEXING_STATE_UNKNOWN" => Some(Self::Unknown),
             "INDEXING_STATE_INDEXING" => Some(Self::Indexing),
+            _ => None,
+        }
+    }
+}
+/// Where a top-level namespace is in its first Orbit sync. Enablement is not
+/// known here: Rails gates disabled namespaces before it calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum IndexingPhase {
+    /// the checkpoints could not be read, or the scope has no top-level namespace
+    Unknown = 0,
+    /// no data plan has run yet
+    NotStarted = 1,
+    /// some data plans have not finished their first pass
+    Syncing = 2,
+    /// every data plan finished its first pass
+    Ready = 3,
+}
+impl IndexingPhase {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unknown => "INDEXING_PHASE_UNKNOWN",
+            Self::NotStarted => "INDEXING_PHASE_NOT_STARTED",
+            Self::Syncing => "INDEXING_PHASE_SYNCING",
+            Self::Ready => "INDEXING_PHASE_READY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "INDEXING_PHASE_UNKNOWN" => Some(Self::Unknown),
+            "INDEXING_PHASE_NOT_STARTED" => Some(Self::NotStarted),
+            "INDEXING_PHASE_SYNCING" => Some(Self::Syncing),
+            "INDEXING_PHASE_READY" => Some(Self::Ready),
             _ => None,
         }
     }
@@ -1087,8 +1139,8 @@ pub mod orbit_service_client {
                 .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetClusterHealth"));
             self.inner.unary(req, path, codec).await
         }
-        /// Returns entity counts per domain, scoped by traversal_path prefix.
-        /// Used by admin dashboards to inspect graph coverage.
+        /// Returns the indexing phase, project coverage, and per-domain readiness,
+        /// scoped by traversal_path prefix. Used by GET /api/v4/orbit/graph_status.
         pub async fn get_graph_status(
             &mut self,
             request: impl tonic::IntoRequest<super::GetGraphStatusRequest>,
@@ -1224,8 +1276,8 @@ pub mod orbit_service_server {
             tonic::Response<super::GetClusterHealthResponse>,
             tonic::Status,
         >;
-        /// Returns entity counts per domain, scoped by traversal_path prefix.
-        /// Used by admin dashboards to inspect graph coverage.
+        /// Returns the indexing phase, project coverage, and per-domain readiness,
+        /// scoped by traversal_path prefix. Used by GET /api/v4/orbit/graph_status.
         async fn get_graph_status(
             &self,
             request: tonic::Request<super::GetGraphStatusRequest>,

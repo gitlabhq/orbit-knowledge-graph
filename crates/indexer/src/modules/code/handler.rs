@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use code_graph::v2::CancellationToken;
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
@@ -10,12 +10,11 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexer, IndexError, IndexOutcome, IndexingRequest};
+use super::pipeline::{CodeIndexer, IndexError, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::indexing_status::RunRows;
 use crate::locking::{LockError, LockGuard};
 use crate::nats::ProgressNotifier;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
@@ -267,7 +266,6 @@ impl CodeIndexingTaskHandler {
                 request,
                 &branch,
                 had_prior_checkpoint,
-                started_at,
                 attempt,
                 &mut observer,
             )
@@ -295,10 +293,6 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
-    )]
     #[tracing::instrument(
         name = "code_indexing_project",
         skip_all,
@@ -315,7 +309,6 @@ impl CodeIndexingTaskHandler {
         request: &CodeIndexingTaskRequest,
         branch: &str,
         had_prior_checkpoint: bool,
-        started_at: DateTime<Utc>,
         attempt: u32,
         observer: &mut dyn IndexingObserver,
     ) -> Result<Option<&'static str>, HandlerError> {
@@ -347,11 +340,6 @@ impl CodeIndexingTaskHandler {
             }
         };
 
-        context
-            .indexing_status
-            .record_start(&request.traversal_path, started_at)
-            .await;
-
         let indexing_request = IndexingRequest {
             project_id,
             branch: branch.to_string(),
@@ -379,7 +367,7 @@ impl CodeIndexingTaskHandler {
         )
         .await
         {
-            Ok(outcome) => Ok(outcome),
+            Ok(outcome) => Ok(outcome.metric_label()),
             Err(IndexError::BudgetExceeded { budget }) => {
                 warn!(
                     project_id,
@@ -401,30 +389,6 @@ impl CodeIndexingTaskHandler {
             ))),
             Err(IndexError::Failed(e)) => Err(e),
         };
-
-        let rows = match &result {
-            Ok(IndexOutcome::Indexed { rows_written }) => RunRows {
-                read: None,
-                written: Some(*rows_written),
-            },
-            Ok(IndexOutcome::EmptyRepository) => RunRows {
-                read: None,
-                written: Some(0),
-            },
-            Err(_) => RunRows::default(),
-        };
-        let result = result.map(|outcome| outcome.metric_label());
-
-        context
-            .indexing_status
-            .record_completion(
-                &request.traversal_path,
-                started_at,
-                Utc::now(),
-                result.as_ref().err().map(ToString::to_string),
-                rows,
-            )
-            .await;
 
         if let Err(e) = &result {
             warn!(project_id, branch = %branch, error = %e, "failed to index code");
@@ -543,9 +507,6 @@ mod tests {
                 self.mock_nats.clone(),
                 self.mock_locks.clone(),
                 ProgressNotifier::noop(),
-                Arc::new(crate::indexing_status::IndexingStatusStore::new(
-                    self.mock_nats.clone(),
-                )),
             )
         }
 
@@ -746,14 +707,6 @@ mod tests {
             .expect("checkpoint should be set for empty repo");
         assert_eq!(checkpoint.last_task_id, 42);
         assert!(checkpoint.last_commit.is_none());
-
-        let progress = crate::indexing_status::IndexingStatusStore::new(ctx.mock_nats.clone())
-            .get(&TraversalPath::new_unchecked("1/123/"))
-            .await
-            .unwrap()
-            .expect("progress should be recorded for empty repo");
-        assert_eq!(progress.last_rows_written, Some(0));
-        assert_eq!(progress.last_rows_read, None);
     }
 
     #[tokio::test]

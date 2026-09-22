@@ -385,14 +385,10 @@ pub fn handler_context() -> HandlerContext {
 }
 
 pub fn handler_context_with_lock_service(lock_service: Arc<MockLockService>) -> HandlerContext {
-    let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(
-        mock_nats.clone(),
+        Arc::new(MockNatsServices::new()),
         lock_service,
         ProgressNotifier::noop(),
-        Arc::new(indexer::indexing_status::IndexingStatusStore::new(
-            mock_nats,
-        )),
     )
 }
 

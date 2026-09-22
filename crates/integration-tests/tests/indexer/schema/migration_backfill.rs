@@ -37,6 +37,8 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use tokio_util::sync::CancellationToken;
 
+use integration_testkit::{FINISHED_CURSOR, INCREMENTAL_CURSOR};
+
 use super::super::common;
 use super::super::common::dispatch::serving_flag;
 use common::TestContext as ClickHouseContext;
@@ -121,7 +123,7 @@ impl TestContext {
             .set(campaign_id_for_version(migrating_version));
     }
 
-    async fn complete_required_pipelines(&self, namespace_ids: &[i64]) {
+    async fn checkpoint_required_pipelines(&self, namespace_ids: &[i64], cursor_values: &str) {
         let invalidated = orbit_migrations::scope::find_invalidated_pipelines(
             &self.ontology,
             &orbit_migrations::scope::MigrationScope::Full,
@@ -136,9 +138,10 @@ impl TestContext {
                 .iter()
                 .map(move |pipeline_name| format!("ns.{namespace_id}.{pipeline_name}"))
         });
-        self.insert_completed_checkpoints(
+        self.insert_checkpoints(
             &prefixed_table_name("checkpoint", *SCHEMA_VERSION),
             global_keys.chain(namespace_keys),
+            cursor_values,
         )
         .await;
     }
@@ -234,16 +237,17 @@ impl TestContext {
         results
     }
 
-    async fn insert_completed_checkpoints(
+    async fn insert_checkpoints(
         &self,
         checkpoint_table: &str,
         checkpoint_keys: impl IntoIterator<Item = String>,
+        cursor_values: &str,
     ) {
         for checkpoint_key in checkpoint_keys {
             self.clickhouse
                 .execute(&format!(
                     "INSERT INTO {checkpoint_table} (key, watermark, cursor_values) \
-                     VALUES ('{checkpoint_key}', now(), 'null')"
+                     VALUES ('{checkpoint_key}', now(), '{cursor_values}')"
                 ))
                 .await;
         }
@@ -467,6 +471,15 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
 
 #[tokio::test]
 async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
+    assert_rollback_promoted_with_checkpoints(FINISHED_CURSOR).await;
+}
+
+#[tokio::test]
+async fn migration_completion_checker_promotes_when_plans_are_mid_incremental() {
+    assert_rollback_promoted_with_checkpoints(INCREMENTAL_CURSOR).await;
+}
+
+async fn assert_rollback_promoted_with_checkpoints(cursor_values: &str) {
     let context = TestContext::new().await;
 
     common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
@@ -476,7 +489,9 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
     context
         .given_migration(*SCHEMA_VERSION + 1, *SCHEMA_VERSION)
         .await;
-    context.complete_required_pipelines(&[100]).await;
+    context
+        .checkpoint_required_pipelines(&[100], cursor_values)
+        .await;
     context
         .catalog
         .publish(&embedded_archive(*SCHEMA_VERSION))
@@ -502,7 +517,9 @@ async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() 
 
     let graph = context.clickhouse.create_client();
     context.given_migration(0, *SCHEMA_VERSION).await;
-    context.complete_required_pipelines(&[]).await;
+    context
+        .checkpoint_required_pipelines(&[], FINISHED_CURSOR)
+        .await;
     context
         .catalog
         .publish(&embedded_archive(*SCHEMA_VERSION))
@@ -539,9 +556,10 @@ async fn migration_completion_checker_does_not_promote_version_it_does_not_embed
             .await;
     }
     context
-        .insert_completed_checkpoints(
+        .insert_checkpoints(
             &prefixed_table_name("checkpoint", *SCHEMA_VERSION + 1),
             ["ns.100.sdlc".to_owned()],
+            FINISHED_CURSOR,
         )
         .await;
     let checker = context.completion_checker();
@@ -577,9 +595,10 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
         ))
         .await;
     context
-        .insert_completed_checkpoints(
+        .insert_checkpoints(
             &prefixed_table_name("checkpoint", *SCHEMA_VERSION),
             ["ns.100.sdlc".to_owned()],
+            FINISHED_CURSOR,
         )
         .await;
     context
@@ -607,7 +626,9 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
 async fn migration_completion_preserves_state_until_target_archive_is_usable() {
     let context = TestContext::new().await;
     context.given_migration(0, *SCHEMA_VERSION).await;
-    context.complete_required_pipelines(&[]).await;
+    context
+        .checkpoint_required_pipelines(&[], FINISHED_CURSOR)
+        .await;
     context.remove_target_view().await;
     let checker = context.completion_checker();
 

@@ -3,10 +3,10 @@
 //! # Example
 //!
 //! ```ignore
-//! use etl_engine::engine::EngineBuilder;
-//! use etl_engine::engine::handler::HandlerRegistry;
-//! use etl_engine::nats::{NatsBroker, NatsConfiguration, NatsServicesImpl};
-//! use etl_engine::configuration::EngineConfiguration;
+//! use indexer::engine::EngineBuilder;
+//! use indexer::engine::handler::HandlerRegistry;
+//! use indexer::nats::{NatsBroker, NatsConfiguration, NatsServicesImpl};
+//! use indexer::configuration::EngineConfiguration;
 //! use std::sync::Arc;
 //!
 //! let app_config = AppConfig::load(None)?;
@@ -44,7 +44,6 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, warn};
 
-use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
 use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
 
@@ -74,7 +73,7 @@ pub enum EngineError {
 /// # Example
 ///
 /// ```ignore
-/// use etl_engine::engine::EngineBuilder;
+/// use indexer::engine::EngineBuilder;
 /// use std::sync::Arc;
 ///
 /// let engine = EngineBuilder::new(broker, registry).build();
@@ -82,21 +81,15 @@ pub enum EngineError {
 pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
     registry: Arc<HandlerRegistry>,
-    indexing_status: Arc<IndexingStatusStore>,
     metrics: Option<Arc<EngineMetrics>>,
     nats_services: Option<Arc<dyn NatsServices>>,
 }
 
 impl EngineBuilder {
-    pub fn new(
-        broker: Arc<NatsBroker>,
-        registry: Arc<HandlerRegistry>,
-        indexing_status: Arc<IndexingStatusStore>,
-    ) -> Self {
+    pub fn new(broker: Arc<NatsBroker>, registry: Arc<HandlerRegistry>) -> Self {
         Self {
             broker,
             registry,
-            indexing_status,
             metrics: None,
             nats_services: None,
         }
@@ -130,7 +123,6 @@ impl EngineBuilder {
             metrics,
             nats_services,
             lock_service,
-            indexing_status: self.indexing_status,
             cancel: CancellationToken::new(),
         }
     }
@@ -161,7 +153,6 @@ pub struct Engine {
     metrics: Arc<EngineMetrics>,
     nats_services: Arc<dyn NatsServices>,
     lock_service: Arc<dyn LockService>,
-    indexing_status: Arc<IndexingStatusStore>,
     cancel: CancellationToken,
 }
 
@@ -226,7 +217,7 @@ impl Engine {
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&subscription),
-                        HandlerContext::new(self.nats_services.clone(), self.lock_service.clone(), progress, self.indexing_status.clone()),
+                        HandlerContext::new(self.nats_services.clone(), self.lock_service.clone(), progress),
                         self.broker.clone(),
                         runtime.clone(),
                         subscription.clone(),
@@ -565,12 +556,10 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn test_context() -> HandlerContext {
-        let mock = Arc::new(MockNatsServices::new());
         HandlerContext::new(
-            mock.clone(),
+            Arc::new(MockNatsServices::new()),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
-            Arc::new(IndexingStatusStore::new(mock)),
         )
     }
 

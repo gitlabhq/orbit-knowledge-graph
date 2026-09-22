@@ -8,7 +8,6 @@ use futures::TryStreamExt;
 use tracing::{debug, info, warn};
 
 use crate::dead_letter::DEAD_LETTER_STREAM;
-use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
 use crate::locking::INDEXING_LOCKS_BUCKET;
 use crate::topic::INDEXER_STREAM;
 use crate::types::Subscription;
@@ -16,7 +15,7 @@ use orbit_migrations::version::SCHEMA_VERSION;
 
 pub const MANAGED_STREAMS: &[&str] = &[INDEXER_STREAM, DEAD_LETTER_STREAM];
 
-pub const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, INDEXING_PROGRESS_BUCKET];
+pub const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET];
 
 pub static NATS_VERSIONER: LazyLock<NatsVersioner> =
     LazyLock::new(|| NatsVersioner::new(release_segment(), *SCHEMA_VERSION));
@@ -269,7 +268,6 @@ mod tests {
         let names = schema_bucket_stream_names(62);
 
         assert!(names.contains(&"KV_indexing_locks_v62".to_string()));
-        assert!(names.contains(&"KV_orbit_indexing_progress_v62".to_string()));
         assert_eq!(names.len(), MANAGED_BUCKETS.len());
     }
 

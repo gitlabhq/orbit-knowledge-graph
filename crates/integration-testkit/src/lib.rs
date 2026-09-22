@@ -57,6 +57,9 @@ pub fn t(table: &str) -> String {
     format!("{}{}", *TABLE_PREFIX, table)
 }
 
+pub const FINISHED_CURSOR: &str = "null";
+pub const INCREMENTAL_CURSOR: &str = r#"{"c":["1/100/","42"],"f":"2026-09-22T00:00:00Z"}"#;
+
 /// Generated from the ontology so integration tests create the same prefixed
 /// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {

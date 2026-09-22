@@ -9,10 +9,18 @@ use crate::etl::EtlScope;
 pub struct PipelineDescriptor {
     pub name: String,
     pub scope: EtlScope,
+    pub entity: String,
     pub reindex_targets: BTreeSet<String>,
 }
 
 impl Ontology {
+    pub fn namespaced_pipeline_descriptors(&self) -> Vec<PipelineDescriptor> {
+        self.pipeline_descriptors()
+            .into_iter()
+            .filter(|descriptor| descriptor.scope == EtlScope::Namespaced)
+            .collect()
+    }
+
     pub fn pipeline_descriptors(&self) -> Vec<PipelineDescriptor> {
         let mut descriptors = Vec::new();
         for node in self.nodes() {
@@ -50,6 +58,7 @@ impl Ontology {
         PipelineDescriptor {
             name,
             scope,
+            entity: entity.to_string(),
             reindex_targets,
         }
     }

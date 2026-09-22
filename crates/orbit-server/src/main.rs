@@ -193,19 +193,6 @@ async fn run_webserver(
     )
     .with_resolver_registry(Arc::new(resolver_registry));
 
-    let broker = Arc::new(indexer::nats::NatsBroker::from_client(
-        nats.clone(),
-        &config.nats,
-    ));
-    broker
-        .ensure_kv_bucket_exists(
-            indexer::indexing_status::INDEXING_PROGRESS_BUCKET,
-            nats_client::KvBucketConfig::default(),
-        )
-        .await?;
-    let indexing_status_store = indexer::indexing_status::IndexingStatusStore::new(broker);
-    grpc_server = grpc_server.with_indexing_status(indexing_status_store);
-
     if config.query.default.graph_query_cache_enabled == Some(true) {
         info!("graph query cache enabled");
         grpc_server = grpc_server.with_cache_broker(nats);

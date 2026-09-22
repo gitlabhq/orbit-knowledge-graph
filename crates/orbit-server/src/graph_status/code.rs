@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
@@ -8,16 +6,15 @@ use orbit_utils::traversal_path::TraversalPath;
 use tonic::Status;
 use tracing::warn;
 
-use super::{execute_query, status_with_state, unknown_status};
-use crate::proto::{IndexingState, IndexingStatus, ProjectsStatus};
+use super::execute_query;
+use crate::proto::{IndexingState, ProjectsStatus};
 
 const PROJECT_NODE: &str = "Project";
 const CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 
 pub struct CodeIndexingState {
     pub projects: ProjectsStatus,
-    pub aggregate: Option<IndexingStatus>,
-    pub node_states: HashMap<String, IndexingState>,
+    pub state: Option<IndexingState>,
 }
 
 pub async fn get_code_indexing_state(
@@ -25,24 +22,18 @@ pub async fn get_code_indexing_state(
     ontology: &Ontology,
     traversal_path: &TraversalPath,
 ) -> CodeIndexingState {
-    let projects = match fetch_project_coverage(client, ontology, traversal_path).await {
-        Ok(projects) => projects,
+    match fetch_project_coverage(client, ontology, traversal_path).await {
+        Ok(projects) => CodeIndexingState {
+            state: derive_state(&projects),
+            projects,
+        },
         Err(error) => {
             warn!(%traversal_path, %error, "Graph status branch failed");
-            return CodeIndexingState {
+            CodeIndexingState {
                 projects: ProjectsStatus::default(),
-                aggregate: Some(unknown_status()),
-                node_states: HashMap::new(),
-            };
+                state: Some(IndexingState::Unknown),
+            }
         }
-    };
-
-    let state = derive_state(&projects);
-
-    CodeIndexingState {
-        projects,
-        aggregate: state.map(status_with_state),
-        node_states: resolve_node_states(ontology, state),
     }
 }
 
@@ -59,20 +50,6 @@ fn derive_state(projects: &ProjectsStatus) -> Option<IndexingState> {
     })
 }
 
-pub(super) fn resolve_node_states(
-    ontology: &Ontology,
-    state: Option<IndexingState>,
-) -> HashMap<String, IndexingState> {
-    let Some(state) = state else {
-        return HashMap::new();
-    };
-    ontology
-        .nodes()
-        .filter(|node| node.pipelines.is_empty())
-        .map(|node| (node.name.clone(), state))
-        .collect()
-}
-
 async fn fetch_project_coverage(
     client: &ArrowClickHouseClient,
     ontology: &Ontology,
@@ -80,7 +57,8 @@ async fn fetch_project_coverage(
 ) -> Result<ProjectsStatus, Status> {
     let tables = project_tables(ontology)?;
     let sql = projects_sql(&tables.project, &tables.code_checkpoint);
-    let batches = execute_query(client, &sql, traversal_path, "projects").await?;
+    let params = [("path", traversal_path.as_str())];
+    let batches = execute_query(client, &sql, &params, "projects").await?;
 
     let mut projects = ProjectsStatus::default();
     for batch in &batches {
@@ -152,11 +130,6 @@ fn projects_sql(project_table: &str, code_checkpoint_table: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-
-    fn test_ontology() -> Arc<Ontology> {
-        Arc::new(Ontology::load_embedded().expect("ontology must load"))
-    }
 
     fn projects(indexed: i64, total_known: i64) -> ProjectsStatus {
         ProjectsStatus {
@@ -189,29 +162,6 @@ mod tests {
     #[test]
     fn code_state_indexed_when_complete() {
         assert_eq!(derive_state(&projects(4, 4)), Some(IndexingState::Indexed));
-    }
-
-    #[test]
-    fn resolve_node_states_assigns_code_state_to_pipelineless_nodes() {
-        let ontology = test_ontology();
-
-        let states = resolve_node_states(&ontology, Some(IndexingState::Backfilling));
-        assert_eq!(states.get("Definition"), Some(&IndexingState::Backfilling));
-        assert_eq!(states.get("File"), Some(&IndexingState::Backfilling));
-        assert!(
-            !states.contains_key("MergeRequest"),
-            "MergeRequest declares pipelines and belongs to the SDLC surface"
-        );
-        assert!(
-            !states.contains_key("User"),
-            "User declares global pipelines and belongs to the SDLC surface"
-        );
-    }
-
-    #[test]
-    fn resolve_node_states_empty_when_no_code_state() {
-        let ontology = test_ontology();
-        assert!(resolve_node_states(&ontology, None).is_empty());
     }
 
     fn test_projects_sql() -> String {

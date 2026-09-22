@@ -30,7 +30,6 @@ pub mod clickhouse;
 pub mod config;
 pub mod engine;
 pub mod health;
-pub mod indexing_status;
 pub mod locking;
 pub mod modules;
 pub mod nats;
@@ -60,7 +59,6 @@ use clickhouse::ClickHouseWriter;
 use engine::EngineBuilder;
 use engine::handler::HandlerRegistry;
 use health::run_health_server;
-use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
@@ -105,15 +103,10 @@ pub async fn run(
     broker
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await?;
-    broker
-        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
-        .await?;
 
     broker
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
-
-    let indexing_status = Arc::new(IndexingStatusStore::new(broker.clone()));
 
     // Start the health server before waiting for schema readiness so that the
     // Kubernetes liveness probe is answered during the (potentially long) schema
@@ -205,7 +198,7 @@ pub async fn run(
     );
 
     let engine = Arc::new(
-        EngineBuilder::new(broker, registry, indexing_status)
+        EngineBuilder::new(broker, registry)
             .metrics(metrics)
             .build(),
     );

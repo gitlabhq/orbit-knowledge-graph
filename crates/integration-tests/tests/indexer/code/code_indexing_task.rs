@@ -4,13 +4,11 @@ use std::sync::Arc;
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
-use indexer::handler::{Handler, HandlerContext};
-use indexer::indexing_status::IndexingStatusStore;
+use indexer::handler::Handler;
 use indexer::modules::code::{
     ClickHouseStaleDataCleaner, StaleDataCleaner, config::CodeTableNames,
 };
-use indexer::nats::ProgressNotifier;
-use indexer::testkit::{MockLockService, MockNatsServices};
+use indexer::testkit::MockLockService;
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
@@ -823,7 +821,7 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
         )],
     );
     let failing_handler = deps.code_indexing_task_handler_with_writer(failing_writer());
-    let (context, _indexing_status) = handler_context_with_status();
+    let context = handler_context();
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
     // Writes are buffered, so the handler acks; the deferred flush fails, the project's commit is
     // marked failed (never checkpointed), and the backfill sweep re-indexes it.
@@ -1352,18 +1350,6 @@ async fn insert_stale_canary_file(
         t("gl_file")
     );
     clickhouse.execute(&sql).await;
-}
-
-fn handler_context_with_status() -> (HandlerContext, Arc<IndexingStatusStore>) {
-    let mock_nats = Arc::new(MockNatsServices::new());
-    let indexing_status = Arc::new(IndexingStatusStore::new(mock_nats.clone()));
-    let context = HandlerContext::new(
-        mock_nats.clone(),
-        Arc::new(MockLockService::new()),
-        ProgressNotifier::noop(),
-        indexing_status.clone(),
-    );
-    (context, indexing_status)
 }
 
 fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {

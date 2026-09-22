@@ -171,8 +171,9 @@ inserts a completed row at the parent key and tombstones every row matching
 
 ### Indexing status tracking
 
-Today, one NATS KV key per namespace tracks indexing progress
-(`orbit_indexing_progress` bucket, consumed by `GraphStatusService`). With
+At the time of writing, one NATS KV key per namespace tracked indexing progress
+(`orbit_indexing_progress` bucket, consumed by `GraphStatusService`). That bucket was
+removed on 2026-09-22 in favor of checkpoint-derived phases, see ADR 010. With
 per-entity handlers, this breaks: Entity A completing and writing "Indexed"
 while Entity B is still running gives a wrong answer for the namespace.
 

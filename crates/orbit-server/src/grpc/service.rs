@@ -122,14 +122,6 @@ impl OrbitServiceImpl {
         self.pipeline = self.pipeline.with_analytics(tracker);
         self
     }
-
-    pub fn with_indexing_status(
-        mut self,
-        store: indexer::indexing_status::IndexingStatusStore,
-    ) -> Self {
-        self.graph_status = self.graph_status.with_indexing_status(store);
-        self
-    }
 }
 
 type ExecuteQueryStream =
@@ -565,12 +557,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let response = self
             .graph_status
-            .get_status(
-                &schema.ontology,
-                &traversal_path,
-                req.format,
-                &security_context,
-            )
+            .get_status(&schema, &traversal_path, req.format, &security_context)
             .await?;
         Ok(Response::new(response))
     }

@@ -5,7 +5,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
-use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
+use indexer::locking::INDEXING_LOCKS_BUCKET;
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::nats::versioning::{
@@ -738,7 +738,7 @@ async fn release_gc_and_schema_cleanup_delete_their_own_entities() {
     let v = NatsVersioner::new(release, schema_version);
 
     let stream_names = ["GKG_INDEXER", "GKG_DEAD_LETTERS"].map(|s| v.stream(s));
-    let bucket_names = ["indexing_locks", "orbit_indexing_progress"].map(|b| v.bucket(b));
+    let bucket_names: Vec<_> = MANAGED_BUCKETS.iter().map(|b| v.bucket(b)).collect();
 
     for name in &stream_names {
         jetstream
@@ -808,13 +808,13 @@ async fn broker_kv_path_targets_versioned_bucket() {
     let broker = connect_broker(&default_config(&url)).await;
 
     broker
-        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
+        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await
         .expect("ensure bucket");
     broker
         .kv_put(
-            INDEXING_PROGRESS_BUCKET,
-            "status.1.100",
+            INDEXING_LOCKS_BUCKET,
+            "project.100.main",
             Bytes::from_static(b"payload"),
             KvPutOptions::default(),
         )
@@ -822,7 +822,7 @@ async fn broker_kv_path_targets_versioned_bucket() {
         .expect("kv_put");
 
     let round_trip = broker
-        .kv_get(INDEXING_PROGRESS_BUCKET, "status.1.100")
+        .kv_get(INDEXING_LOCKS_BUCKET, "project.100.main")
         .await
         .expect("kv_get")
         .expect("entry present");
@@ -830,11 +830,11 @@ async fn broker_kv_path_targets_versioned_bucket() {
 
     let jetstream = jetstream_client(&url).await;
     let versioned = jetstream
-        .get_key_value(&NATS_VERSIONER.bucket(INDEXING_PROGRESS_BUCKET))
+        .get_key_value(&NATS_VERSIONER.bucket(INDEXING_LOCKS_BUCKET))
         .await
         .expect("versioned bucket should exist");
     let entry = versioned
-        .get("status.1.100")
+        .get("project.100.main")
         .await
         .expect("get from versioned bucket")
         .expect("value present in versioned bucket");
@@ -842,7 +842,7 @@ async fn broker_kv_path_targets_versioned_bucket() {
 
     assert!(
         jetstream
-            .get_key_value(INDEXING_PROGRESS_BUCKET)
+            .get_key_value(INDEXING_LOCKS_BUCKET)
             .await
             .is_err(),
         "broker must not create the unversioned bucket",

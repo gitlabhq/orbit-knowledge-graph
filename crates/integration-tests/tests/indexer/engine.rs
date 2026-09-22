@@ -303,10 +303,7 @@ async fn run_engine_for(engine: Arc<Engine>, duration: Duration) {
 fn create_engine(broker: Arc<NatsBroker>, handler: Box<dyn Handler>) -> Arc<Engine> {
     let registry = Arc::new(HandlerRegistry::default());
     registry.register_handler(handler);
-    let indexing_status = Arc::new(indexer::indexing_status::IndexingStatusStore::new(
-        Arc::new(nats_client::KvServicesImpl::new(broker.client().clone())),
-    ));
-    Arc::new(EngineBuilder::new(broker, registry, indexing_status).build())
+    Arc::new(EngineBuilder::new(broker, registry).build())
 }
 
 #[tokio::test]
@@ -352,10 +349,7 @@ async fn multiple_handlers_receive_same_message() {
     }));
     registry.register_handler(Box::new(TestHandler { writer }));
 
-    let indexing_status = Arc::new(indexer::indexing_status::IndexingStatusStore::new(
-        Arc::new(nats_client::KvServicesImpl::new(broker.client().clone())),
-    ));
-    let engine = Arc::new(EngineBuilder::new(broker.clone(), registry, indexing_status).build());
+    let engine = Arc::new(EngineBuilder::new(broker.clone(), registry).build());
 
     context.publish_event(&broker, 100, "shared").await;
     run_engine_for(engine, Duration::from_secs(2)).await;

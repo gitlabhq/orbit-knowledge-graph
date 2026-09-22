@@ -83,8 +83,8 @@ type OrbitServiceClient interface {
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error)
-	// Returns entity counts per domain, scoped by traversal_path prefix.
-	// Used by admin dashboards to inspect graph coverage.
+	// Returns the indexing phase, project coverage, and per-domain readiness,
+	// scoped by traversal_path prefix. Used by GET /api/v4/orbit/graph_status.
 	GetGraphStatus(ctx context.Context, in *GetGraphStatusRequest, opts ...grpc.CallOption) (*GetGraphStatusResponse, error)
 }
 
@@ -245,8 +245,8 @@ type OrbitServiceServer interface {
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error)
-	// Returns entity counts per domain, scoped by traversal_path prefix.
-	// Used by admin dashboards to inspect graph coverage.
+	// Returns the indexing phase, project coverage, and per-domain readiness,
+	// scoped by traversal_path prefix. Used by GET /api/v4/orbit/graph_status.
 	GetGraphStatus(context.Context, *GetGraphStatusRequest) (*GetGraphStatusResponse, error)
 	mustEmbedUnimplementedOrbitServiceServer()
 }

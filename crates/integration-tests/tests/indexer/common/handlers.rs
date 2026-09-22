@@ -16,14 +16,10 @@ use indexer::types::{Envelope, Event, Subscription};
 use integration_testkit::TestContext;
 
 pub fn handler_context() -> HandlerContext {
-    let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(
-        mock_nats.clone(),
+        Arc::new(MockNatsServices::new()),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),
-        Arc::new(indexer::indexing_status::IndexingStatusStore::new(
-            mock_nats,
-        )),
     )
 }
 

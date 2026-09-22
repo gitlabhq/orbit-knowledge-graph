@@ -77,8 +77,8 @@ service OrbitService {
   // Used by GET /api/v4/orbit/status.
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
 
-  // Returns entity counts per domain, scoped by traversal_path prefix.
-  // Used by admin dashboards to inspect graph coverage.
+  // Returns the indexing phase, project coverage, and per-domain readiness,
+  // scoped by traversal_path prefix. Used by GET /api/v4/orbit/graph_status.
   rpc GetGraphStatus(GetGraphStatusRequest) returns (GetGraphStatusResponse);
 }
 
@@ -400,7 +400,7 @@ message ReplicaStatus {
 }
 
 // ---------------------------------------------------------------------------
-// GetGraphStatus — unary, returns entity counts grouped by domain
+// GetGraphStatus — unary, returns indexing phase and per-domain readiness
 // ---------------------------------------------------------------------------
 
 enum SourceType {
@@ -408,9 +408,9 @@ enum SourceType {
   SOURCE_TYPE_PROJECT = 1;
 }
 
-// Request for graph entity counts scoped by traversal_path prefix.
+// Request for graph status scoped by traversal_path prefix.
 message GetGraphStatusRequest {
-  string traversal_path = 1;  // traversal_path prefix to scope counts (e.g. "1/2/")
+  string traversal_path = 1;  // traversal_path prefix to scope the status (e.g. "1/2/")
   SourceType source_type = 2;
   ResponseFormat format = 3;  // RAW: structured JSON; LLM: TOON text
 }
@@ -425,7 +425,22 @@ enum IndexingState {
   INDEXING_STATE_INDEXING = 5;
 }
 
-// Indexing progress metadata from the most recent indexing run.
+// Where a top-level namespace is in its first Orbit sync. Enablement is not
+// known here: Rails gates disabled namespaces before it calls.
+enum IndexingPhase {
+  INDEXING_PHASE_UNKNOWN = 0;      // the checkpoints could not be read, or the scope has no top-level namespace
+  INDEXING_PHASE_NOT_STARTED = 1;  // no data plan has run yet
+  INDEXING_PHASE_SYNCING = 2;      // some data plans have not finished their first pass
+  INDEXING_PHASE_READY = 3;        // every data plan finished its first pass
+}
+
+// First-sync progress for the top-level namespace that owns the request scope.
+message IndexingProgress {
+  IndexingPhase phase = 1;
+}
+
+// Indexing state of one surface. Fields 2 to 7 are deprecated and never set:
+// per-run detail left with the NATS KV progress store.
 message IndexingStatus {
   IndexingState state = 1;
   optional string last_started_at = 2;
@@ -436,7 +451,7 @@ message IndexingStatus {
   optional uint64 last_rows_written = 7;
 }
 
-// Response containing project coverage and entity counts grouped by domain.
+// Response containing indexing phase, project coverage, and per-domain readiness.
 message GetGraphStatusResponse {
   oneof content {
     StructuredGraphStatus structured = 1;  // format = RAW
@@ -444,13 +459,14 @@ message GetGraphStatusResponse {
   }
 }
 
-// Structured graph status with project coverage, entity counts, and indexing state.
+// Structured graph status with indexing phase, project coverage, and per-domain readiness.
 message StructuredGraphStatus {
   ProjectsStatus projects = 1;
   repeated GraphStatusDomain domains = 2;
-  IndexingStatus indexing = 3;  // worst of sdlc_indexing and code_indexing
-  IndexingStatus sdlc_indexing = 4;
+  IndexingStatus indexing = 3;  // state derived from progress.phase
+  IndexingStatus sdlc_indexing = 4;  // deprecated: mirrors indexing; read progress instead
   IndexingStatus code_indexing = 5;  // derived from project coverage, not a recorded run
+  IndexingProgress progress = 6;
 }
 
 // How many projects under this scope have been code-indexed.
@@ -459,15 +475,16 @@ message ProjectsStatus {
   int64 total_known = 2;
 }
 
-// Entity counts for a single domain (e.g. "ci", "core", "plan").
+// Readiness of a single domain (e.g. "ci", "core", "plan").
 message GraphStatusDomain {
   string name = 1;
   repeated GraphStatusItem items = 2;
+  IndexingPhase phase = 3;  // READY once every data plan feeding this domain finished its first pass; domains with code-graph entities also need full code coverage
 }
 
-// Count for a single entity type (e.g. "Project": 42).
+// One entity type visible to the caller (e.g. "Project").
 message GraphStatusItem {
   string name = 1;
-  int64 count = 2;
+  optional int64 count = 2;  // deprecated: never set; entity counts were removed
   optional IndexingState state = 3;  // absent for entities with no per-entity signal
 }

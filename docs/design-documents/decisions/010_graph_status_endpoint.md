@@ -11,7 +11,46 @@ Accepted
 
 ## Date
 
-2026-04-21 (state semantics updated 2026-08-10, see "Update: honest indexing state")
+2026-04-21 (state semantics updated 2026-08-10 and 2026-09-22, see the updates below)
+
+## Update: phases from checkpoints, counts removed (2026-09-22)
+
+The user's question is "can I use it yet", and neither the per-run KV progress nor the
+entity counts answered it. The response now carries a `progress.phase` for the top-level
+namespace that owns the request scope, and a `phase` per domain:
+
+- `NOT_STARTED`: no namespaced data plan has a checkpoint row for the root.
+- `SYNCING`: some plan still has a first-pass cursor.
+- `READY`: every namespaced plan finished its first pass. A plan has finished when its
+  `ns.<root>.<plan>` checkpoint row has an empty `cursor_values`, or a cursor with the
+  resume floor `f`. The indexer writes `f` only for incremental runs. Partition keys
+  (`ns.<root>.Job.p1of5`) are ignored; the parent row appears only after every partition
+  finished. The predicate is `orbit_migrations::completion::FINISHED_FIRST_PASS`, shared
+  with the migration completion gate.
+- `UNKNOWN`: the checkpoint table could not be read, or the path has no top-level
+  namespace (`1/`).
+
+A plan feeds the domain of the entity it indexes. A join-table edge plan or a derived plan
+indexes no node. Such a plan feeds every domain that holds a source or target of its edges.
+A domain is READY when every plan feeding it finished. A domain with code-graph nodes
+(`source_code`) also folds in the code coverage ratio. When both sides agree, the domain
+takes that phase. Either side UNKNOWN gives UNKNOWN. Anything else is SYNCING.
+
+Removed with this change:
+
+- The NATS KV `orbit_indexing_progress` bucket, its indexer writers, and the server reader.
+  `IndexingStatus` fields 2 to 7 are never set. `indexing.state` is derived from the phase
+  (READY → INDEXED, SYNCING → BACKFILLING, NOT_STARTED → NOT_INDEXED) and
+  `sdlc_indexing` mirrors it until Rails reads `progress`.
+- The per-entity `uniqIf` counts. The `tp_count` projection they relied on no longer
+  exists, so every call scanned every node table. One week of production traffic showed
+  p95 1.8 s and up to 27 GiB read per call. `GraphStatusItem.count` is optional and never
+  set.
+
+Enablement is not read here: the webserver cannot reach the datalake. Rails owns
+`knowledge_graph_enabled_namespaces`, gates disabled and transferred roots before it
+calls, and keeps `started_at` on its side from that table's `created_at`. A disabled root
+with leftover checkpoints reads READY from GKG; the Rails gate keeps that from users.
 
 ## Update: honest indexing state (2026-08-10)
 

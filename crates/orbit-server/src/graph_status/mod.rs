@@ -1,57 +1,40 @@
 mod code;
-mod input;
-mod sdlc;
+mod phase;
 mod toon;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
-use indexer::indexing_status::IndexingStatusStore;
-use ontology::Ontology;
+use ontology::{DomainInfo, Ontology};
 use orbit_server_config::QueryConfig;
-use orbit_utils::arrow::ArrowUtils;
 use orbit_utils::traversal_path::TraversalPath;
-use query_engine::compiler::SecurityContext;
+use query_engine::compiler::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 use tonic::Status;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
+use crate::active_schema::SchemaSnapshot;
 use crate::proto::{
-    GetGraphStatusResponse, GraphStatusDomain, GraphStatusItem, IndexingState, IndexingStatus,
-    ResponseFormat, StructuredGraphStatus, get_graph_status_response,
+    GetGraphStatusResponse, GraphStatusDomain, GraphStatusItem, IndexingPhase, IndexingProgress,
+    IndexingState, IndexingStatus, ResponseFormat, StructuredGraphStatus,
+    get_graph_status_response,
 };
 
-use self::input::GraphStatusInput;
+use self::code::CodeIndexingState;
+use self::phase::FirstSync;
 
 pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
-    indexing_status: Option<IndexingStatusStore>,
-}
-
-fn graph_status_query_config() -> QueryConfig {
-    QueryConfig {
-        use_query_cache: Some(true),
-        ..orbit_server_config::query::default_config()
-    }
 }
 
 impl GraphStatusService {
     pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self {
-            client,
-            indexing_status: None,
-        }
-    }
-
-    pub fn with_indexing_status(mut self, store: IndexingStatusStore) -> Self {
-        self.indexing_status = Some(store);
-        self
+        Self { client }
     }
 
     pub async fn get_status(
         &self,
-        ontology: &Ontology,
+        schema: &SchemaSnapshot,
         traversal_path: &TraversalPath,
         format: i32,
         security_context: &SecurityContext,
@@ -62,54 +45,32 @@ impl GraphStatusService {
 
         info!(%traversal_path, "Graph status fetching");
 
-        let input = GraphStatusInput::from_ontology(ontology, security_context);
-
-        let entity_counts_future = async {
-            if input.nodes.is_empty() {
-                return HashMap::new();
-            }
-            let sql = entity_counts_sql(&input);
-            execute_count_query(&self.client, &sql, traversal_path)
-                .await
-                .unwrap_or_else(|error| {
-                    warn!(%traversal_path, label = "entity counts", %error, "Graph status branch failed");
-                    HashMap::new()
-                })
-        };
-        let code_future = code::get_code_indexing_state(&self.client, ontology, traversal_path);
-        let sdlc_future =
-            sdlc::get_sdlc_indexing_state(self.indexing_status.as_ref(), ontology, traversal_path);
-
-        let (entity_counts, code, sdlc) =
-            tokio::join!(entity_counts_future, code_future, sdlc_future);
+        let ontology = &schema.ontology;
+        let visible_nodes = visible_node_names(ontology, security_context);
+        let (code, first_sync) = tokio::join!(
+            code::get_code_indexing_state(&self.client, ontology, traversal_path),
+            phase::read_first_sync(&self.client, schema, traversal_path),
+        );
 
         info!(
-            entity_count = entity_counts.len(),
+            phase = ?first_sync.phase,
             projects_indexed = code.projects.indexed,
             projects_total = code.projects.total_known,
-            sdlc_state = ?sdlc.aggregate.as_ref().and_then(|s| IndexingState::try_from(s.state).ok()),
-            code_state = ?code.aggregate.as_ref().and_then(|s| IndexingState::try_from(s.state).ok()),
             "Graph status fetched"
         );
 
-        let mut item_states = code.node_states;
-        item_states.extend(sdlc.node_states);
-
-        let visible_nodes: HashSet<&str> = input.nodes.iter().map(|n| n.name.as_str()).collect();
-        let domains =
-            present_domain_response(ontology, &entity_counts, &visible_nodes, &item_states);
-
-        let indexing = match &sdlc.aggregate {
-            Some(sdlc_status) => worst_indexing_status(Some(sdlc_status), code.aggregate.as_ref()),
-            None => None,
-        };
-
+        let indexing = Some(status_with_state(phase::indexing_state_for(
+            first_sync.phase,
+        )));
         let structured = StructuredGraphStatus {
+            domains: visible_domains(ontology, &visible_nodes, &first_sync, &code),
             projects: Some(code.projects),
-            domains,
-            indexing,
-            sdlc_indexing: sdlc.aggregate,
-            code_indexing: code.aggregate,
+            indexing: indexing.clone(),
+            sdlc_indexing: indexing,
+            code_indexing: code.state.map(status_with_state),
+            progress: Some(IndexingProgress {
+                phase: first_sync.phase.into(),
+            }),
         };
 
         let content = if format == ResponseFormat::Llm as i32 {
@@ -126,53 +87,109 @@ impl GraphStatusService {
     }
 }
 
-fn entity_counts_sql(input: &GraphStatusInput) -> String {
-    input
-        .nodes
-        .iter()
-        .map(|node| {
-            format!(
-                "SELECT '{name}' AS entity, uniqIf(d.id, d._deleted = 0) AS cnt \
-                   FROM {table} AS d \
-                  WHERE startsWith(d.traversal_path, {{path:String}})",
-                name = node.name,
-                table = node.table,
-            )
+fn visible_node_names(ontology: &Ontology, security_context: &SecurityContext) -> HashSet<String> {
+    ontology
+        .nodes()
+        .filter(|node| node.has_traversal_path)
+        .filter(|node| {
+            let min_role = node
+                .redaction
+                .as_ref()
+                .map(|r| r.required_role.as_access_level())
+                .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
+            !security_context.paths_at_least(min_role).is_empty()
         })
-        .collect::<Vec<_>>()
-        .join(" UNION ALL ")
+        .map(|node| node.name.clone())
+        .collect()
 }
 
-async fn execute_count_query(
-    client: &ArrowClickHouseClient,
-    sql: &str,
-    traversal_path: &TraversalPath,
-) -> Result<HashMap<String, i64>, Status> {
-    let batches = execute_query(client, sql, traversal_path, "entity counts").await?;
-
-    let mut counts: HashMap<String, i64> = HashMap::new();
-    for batch in &batches {
-        let Some(labels) = ArrowUtils::get_column_by_name::<StringArray>(batch, "entity") else {
-            continue;
-        };
-        let Some(values) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
-            continue;
-        };
-        for row in 0..batch.num_rows() {
-            if labels.is_null(row) || values.is_null(row) {
-                continue;
+fn visible_domains(
+    ontology: &Ontology,
+    visible_nodes: &HashSet<String>,
+    first_sync: &FirstSync,
+    code: &CodeIndexingState,
+) -> Vec<GraphStatusDomain> {
+    ontology
+        .domains()
+        .filter_map(|domain| {
+            let items = visible_items(ontology, domain, visible_nodes, first_sync, code);
+            if items.is_empty() {
+                return None;
             }
-            *counts.entry(labels.value(row).to_string()).or_default() += values.value(row) as i64;
-        }
-    }
 
-    Ok(counts)
+            Some(GraphStatusDomain {
+                name: domain.name.clone(),
+                items,
+                phase: phase_from_sdlc_plans_and_code_coverage(ontology, domain, first_sync, code)
+                    .into(),
+            })
+        })
+        .collect()
 }
 
-pub(super) async fn execute_query(
+fn visible_items(
+    ontology: &Ontology,
+    domain: &DomainInfo,
+    visible_nodes: &HashSet<String>,
+    first_sync: &FirstSync,
+    code: &CodeIndexingState,
+) -> Vec<GraphStatusItem> {
+    domain
+        .node_names
+        .iter()
+        .filter(|name| visible_nodes.contains(*name))
+        .filter_map(|name| ontology.get_node(name))
+        .map(|node| {
+            let state = first_sync
+                .node_state(node)
+                .or_else(|| node.pipelines.is_empty().then_some(code.state).flatten());
+            GraphStatusItem {
+                name: node.name.clone(),
+                count: None,
+                state: state.map(|state| state as i32),
+            }
+        })
+        .collect()
+}
+
+fn phase_from_sdlc_plans_and_code_coverage(
+    ontology: &Ontology,
+    domain: &DomainInfo,
+    first_sync: &FirstSync,
+    code: &CodeIndexingState,
+) -> IndexingPhase {
+    let has_code_nodes = domain
+        .node_names
+        .iter()
+        .filter_map(|name| ontology.get_node(name))
+        .any(|node| node.pipelines.is_empty());
+
+    let sdlc_phase = first_sync.phase_of_plans_feeding(ontology, domain);
+    let code_phase = has_code_nodes.then(|| phase_from_code_coverage(code));
+    match (sdlc_phase, code_phase) {
+        (Some(sdlc), Some(code)) if sdlc == code => sdlc,
+        (Some(IndexingPhase::Unknown), Some(_)) | (Some(_), Some(IndexingPhase::Unknown)) => {
+            IndexingPhase::Unknown
+        }
+        (Some(_), Some(_)) => IndexingPhase::Syncing,
+        (Some(phase), None) | (None, Some(phase)) => phase,
+        (None, None) => IndexingPhase::Unknown,
+    }
+}
+
+fn phase_from_code_coverage(code: &CodeIndexingState) -> IndexingPhase {
+    match code.state {
+        Some(IndexingState::Indexed) => IndexingPhase::Ready,
+        Some(IndexingState::Backfilling) => IndexingPhase::Syncing,
+        Some(IndexingState::NotIndexed) => IndexingPhase::NotStarted,
+        _ => IndexingPhase::Unknown,
+    }
+}
+
+async fn execute_query(
     client: &ArrowClickHouseClient,
     sql: &str,
-    traversal_path: &TraversalPath,
+    params: &[(&str, &str)],
     label: &str,
 ) -> Result<Vec<arrow::record_batch::RecordBatch>, Status> {
     let sql = append_query_settings(sql)
@@ -180,16 +197,22 @@ pub(super) async fn execute_query(
 
     debug!(sql, label, "Graph status query");
 
-    client
-        .query(&sql)
-        .param("path", traversal_path.as_str())
+    let mut query = client.query(&sql);
+    for (name, value) in params {
+        query = query.param(name, value);
+    }
+    query
         .fetch_arrow()
         .await
         .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
 }
 
 fn append_query_settings(sql: &str) -> Result<String, String> {
-    let settings = graph_status_query_config().to_clickhouse_settings()?;
+    let settings = QueryConfig {
+        use_query_cache: Some(true),
+        ..orbit_server_config::query::default_config()
+    }
+    .to_clickhouse_settings()?;
     if settings.is_empty() {
         return Ok(sql.to_string());
     }
@@ -201,339 +224,9 @@ fn append_query_settings(sql: &str) -> Result<String, String> {
     Ok(format!("{sql} SETTINGS {clause}"))
 }
 
-pub(super) fn status_with_state(state: IndexingState) -> IndexingStatus {
+fn status_with_state(state: IndexingState) -> IndexingStatus {
     IndexingStatus {
         state: state.into(),
         ..Default::default()
-    }
-}
-
-pub(super) fn unknown_status() -> IndexingStatus {
-    status_with_state(IndexingState::Unknown)
-}
-
-fn worst_indexing_status(
-    a: Option<&IndexingStatus>,
-    b: Option<&IndexingStatus>,
-) -> Option<IndexingStatus> {
-    let priority = |status: &IndexingStatus| {
-        state_priority(IndexingState::try_from(status.state).unwrap_or(IndexingState::Unknown))
-    };
-    match (a, b) {
-        (Some(a), Some(b)) if priority(b) > priority(a) => Some(b.clone()),
-        (Some(a), Some(_)) => Some(a.clone()),
-        (Some(a), None) => Some(a.clone()),
-        (None, Some(b)) => Some(b.clone()),
-        (None, None) => None,
-    }
-}
-
-// Higher = worse, so the "worst" state wins. NotIndexed dominates a missing
-// key because not-yet-started is a strictly less-known state than failing.
-pub(super) fn state_priority(state: IndexingState) -> u8 {
-    match state {
-        IndexingState::Indexed => 0,
-        IndexingState::Indexing => 1,
-        IndexingState::Error => 2,
-        IndexingState::Backfilling => 3,
-        IndexingState::NotIndexed => 4,
-        IndexingState::Unknown => 5,
-    }
-}
-
-fn present_domain_response(
-    ontology: &Ontology,
-    entity_counts: &HashMap<String, i64>,
-    visible_nodes: &HashSet<&str>,
-    item_states: &HashMap<String, IndexingState>,
-) -> Vec<GraphStatusDomain> {
-    ontology
-        .domains()
-        .filter_map(|domain| {
-            let items: Vec<_> = domain
-                .node_names
-                .iter()
-                .filter(|node_name| visible_nodes.contains(node_name.as_str()))
-                .map(|node_name| GraphStatusItem {
-                    name: node_name.clone(),
-                    count: entity_counts.get(node_name).copied().unwrap_or(0),
-                    state: item_states.get(node_name).map(|state| *state as i32),
-                })
-                .collect();
-
-            if items.is_empty() {
-                return None;
-            }
-
-            Some(GraphStatusDomain {
-                name: domain.name.clone(),
-                items,
-            })
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::input::NodeTable;
-    use super::*;
-    use clickhouse_client::ClickHouseConfigurationExt;
-    use query_engine::compiler::AuthorizedPath;
-
-    fn admin_context() -> SecurityContext {
-        SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 50)])
-            .unwrap()
-            .with_role(true, Some(50))
-    }
-
-    fn test_ontology() -> Arc<Ontology> {
-        Arc::new(Ontology::load_embedded().expect("ontology must load"))
-    }
-
-    fn all_node_names(ontology: &Ontology) -> HashSet<&str> {
-        ontology.nodes().map(|n| n.name.as_str()).collect()
-    }
-
-    #[test]
-    fn presents_domain_response_groups_by_domain() {
-        let ontology = test_ontology();
-        let visible = all_node_names(&ontology);
-        let mut entity_counts = HashMap::new();
-        entity_counts.insert("Project".to_string(), 42);
-        entity_counts.insert("User".to_string(), 10);
-
-        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
-
-        assert!(!domains.is_empty());
-
-        let core_domain = domains.iter().find(|d| d.name == "core");
-        assert!(core_domain.is_some(), "should have core domain");
-
-        let core = core_domain.unwrap();
-        let project_item = core.items.iter().find(|i| i.name == "Project");
-        assert!(project_item.is_some());
-        assert_eq!(project_item.unwrap().count, 42);
-
-        let user_item = core.items.iter().find(|i| i.name == "User");
-        assert!(user_item.is_some());
-        assert_eq!(user_item.unwrap().count, 10);
-    }
-
-    #[test]
-    fn presents_domain_response_missing_entity_defaults_to_zero() {
-        let ontology = test_ontology();
-        let visible = all_node_names(&ontology);
-        let entity_counts = HashMap::new();
-
-        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
-
-        for domain in &domains {
-            for item in &domain.items {
-                assert_eq!(
-                    item.count, 0,
-                    "missing entity {} should default to 0",
-                    item.name
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn presents_domain_response_covers_all_domains() {
-        let ontology = test_ontology();
-        let visible = all_node_names(&ontology);
-        let entity_counts = HashMap::new();
-
-        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
-        let domain_count = ontology.domains().count();
-
-        assert_eq!(domains.len(), domain_count);
-    }
-
-    #[test]
-    fn presents_domain_response_excludes_invisible_entities() {
-        let ontology = test_ontology();
-        let visible: HashSet<&str> = ["Project", "User", "MergeRequest"].into_iter().collect();
-        let mut entity_counts = HashMap::new();
-        entity_counts.insert("Project".to_string(), 5);
-
-        let domains = present_domain_response(&ontology, &entity_counts, &visible, &HashMap::new());
-
-        let security = domains.iter().find(|d| d.name == "security");
-        assert!(
-            security.is_none(),
-            "security domain should be excluded when no security nodes visible"
-        );
-
-        let core = domains.iter().find(|d| d.name == "core").unwrap();
-        assert!(core.items.iter().any(|i| i.name == "Project"));
-        assert!(core.items.iter().any(|i| i.name == "User"));
-        assert!(
-            !core.items.iter().any(|i| i.name == "Group"),
-            "Group not in visible set"
-        );
-    }
-
-    #[tokio::test]
-    async fn empty_traversal_path_rejected() {
-        let client = Arc::new(
-            orbit_server_config::AppConfig::embedded_defaults()
-                .graph
-                .build_client(),
-        );
-        let service = GraphStatusService::new(client);
-
-        let result = service
-            .get_status(
-                &test_ontology(),
-                &TraversalPath::new_unchecked(""),
-                ResponseFormat::Raw as i32,
-                &admin_context(),
-            )
-            .await;
-
-        assert!(result.is_err());
-        let status = result.unwrap_err();
-        assert_eq!(status.code(), tonic::Code::InvalidArgument);
-        assert!(status.message().contains("traversal_path"));
-    }
-
-    fn dated_status(state: IndexingState) -> IndexingStatus {
-        IndexingStatus {
-            state: state.into(),
-            last_started_at: Some("2020-01-01T00:00:00Z".to_string()),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn worst_indexing_status_picks_worse_surface() {
-        let sdlc = dated_status(IndexingState::Indexed);
-        let code = status_with_state(IndexingState::NotIndexed);
-
-        let worst = worst_indexing_status(Some(&sdlc), Some(&code)).unwrap();
-
-        assert_eq!(worst.state, IndexingState::NotIndexed as i32);
-        assert!(worst.last_started_at.is_none());
-    }
-
-    #[test]
-    fn worst_indexing_status_keeps_timestamps_of_winning_surface() {
-        let sdlc = dated_status(IndexingState::Error);
-        let code = status_with_state(IndexingState::Indexed);
-
-        let worst = worst_indexing_status(Some(&sdlc), Some(&code)).unwrap();
-
-        assert_eq!(worst.state, IndexingState::Error as i32);
-        assert!(worst.last_started_at.is_some());
-
-        let tie = dated_status(IndexingState::Indexed);
-        let worst =
-            worst_indexing_status(Some(&tie), Some(&status_with_state(IndexingState::Indexed)))
-                .unwrap();
-        assert!(worst.last_started_at.is_some());
-    }
-
-    #[test]
-    fn worst_indexing_status_folds_absent_surfaces() {
-        let status = dated_status(IndexingState::Indexed);
-
-        assert_eq!(
-            worst_indexing_status(Some(&status), None).unwrap().state,
-            IndexingState::Indexed as i32
-        );
-        assert_eq!(
-            worst_indexing_status(None, Some(&status)).unwrap().state,
-            IndexingState::Indexed as i32
-        );
-        assert!(worst_indexing_status(None, None).is_none());
-    }
-
-    #[test]
-    fn code_and_sdlc_cover_disjoint_nodes() {
-        let ontology = test_ontology();
-
-        let code_nodes = code::resolve_node_states(&ontology, Some(IndexingState::Indexed));
-        let pipeline_states: HashMap<String, IndexingState> =
-            sdlc::namespaced_pipeline_names(&ontology)
-                .into_iter()
-                .map(|name| (name, IndexingState::Indexed))
-                .collect();
-        let sdlc_nodes = sdlc::resolve_node_states(&ontology, &pipeline_states);
-
-        for node_name in code_nodes.keys() {
-            assert!(
-                !sdlc_nodes.contains_key(node_name),
-                "node {node_name} is claimed by both the code and SDLC surfaces"
-            );
-        }
-    }
-
-    fn counts_input() -> GraphStatusInput {
-        GraphStatusInput {
-            nodes: vec![
-                NodeTable {
-                    name: "Project".to_string(),
-                    table: "v1_gl_project".to_string(),
-                },
-                NodeTable {
-                    name: "Group".to_string(),
-                    table: "v1_gl_group".to_string(),
-                },
-                NodeTable {
-                    name: "MergeRequest".to_string(),
-                    table: "v1_gl_merge_request".to_string(),
-                },
-                NodeTable {
-                    name: "Definition".to_string(),
-                    table: "v1_gl_definition".to_string(),
-                },
-            ],
-        }
-    }
-
-    #[test]
-    fn entity_counts_produces_union_all() {
-        let sql = entity_counts_sql(&counts_input());
-
-        assert!(sql.contains("UNION ALL"), "SQL: {sql}");
-        assert!(sql.contains("v1_gl_project"), "SQL: {sql}");
-        assert!(sql.contains("v1_gl_group"), "SQL: {sql}");
-        assert!(sql.contains("v1_gl_merge_request"), "SQL: {sql}");
-        assert!(sql.contains("v1_gl_definition"), "SQL: {sql}");
-    }
-
-    #[test]
-    fn entity_counts_binds_traversal_path_per_subquery() {
-        let input = counts_input();
-        let sql = entity_counts_sql(&input);
-
-        assert_eq!(
-            sql.matches("startsWith").count(),
-            input.nodes.len(),
-            "each subquery filters on the bound traversal_path. SQL: {sql}"
-        );
-        assert!(sql.contains("{path:String}"), "SQL: {sql}");
-    }
-
-    #[test]
-    fn entity_counts_deduplicates_by_id() {
-        let sql = entity_counts_sql(&counts_input());
-
-        assert!(!sql.contains("argMax("), "SQL: {sql}");
-        assert!(!sql.contains("GROUP BY"), "SQL: {sql}");
-    }
-
-    #[test]
-    fn entity_counts_exclude_deleted_uniformly_without_final() {
-        let input = counts_input();
-        let sql = entity_counts_sql(&input);
-
-        assert_eq!(
-            sql.matches("uniqIf(d.id, d._deleted = 0)").count(),
-            input.nodes.len(),
-            "every node counts live ids the same way. SQL: {sql}"
-        );
-        assert!(!sql.contains("FINAL"), "SQL: {sql}");
     }
 }

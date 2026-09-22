@@ -12,7 +12,6 @@ use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
 
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::indexing_status::RunRows;
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
@@ -124,7 +123,7 @@ impl EntityHandler {
         &self,
         context: HandlerContext,
         request: IndexingRequest,
-    ) -> Result<PipelineStats, HandlerError> {
+    ) -> Result<(), HandlerError> {
         let mut observers: Vec<Box<dyn IndexingObserver>> =
             vec![Box::new(SdlcOtelObserver::new(self.metrics.clone()))];
         observers.extend(self.analytics.observer());
@@ -269,7 +268,7 @@ impl EntityHandler {
             }
         }
 
-        result
+        result.map(|_| ())
     }
 
     async fn run_partitions(
@@ -431,19 +430,10 @@ impl Handler for EntityHandler {
                 campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
             ),
         };
-        let traversal_path = request.traversal_path.clone();
 
         async {
-            if let Some(path) = traversal_path.as_ref() {
-                context
-                    .indexing_status
-                    .record_entity_start(path, &self.plan.name, started_at)
-                    .await;
-            }
-
-            let result = self.execute(context.clone(), request).await;
-            let completed_at = Utc::now();
-            let elapsed = completed_at
+            let result = self.execute(context, request).await;
+            let elapsed = Utc::now()
                 .signed_duration_since(started_at)
                 .to_std()
                 .unwrap_or_default();
@@ -454,28 +444,7 @@ impl Handler for EntityHandler {
                     .record_pipeline_error(&self.plan.name, err.error_kind());
             }
 
-            if let Some(path) = traversal_path.as_ref() {
-                let rows = result
-                    .as_ref()
-                    .map(|stats| RunRows {
-                        read: Some(stats.read_rows),
-                        written: Some(stats.written_rows),
-                    })
-                    .unwrap_or_default();
-                context
-                    .indexing_status
-                    .record_entity_completion(
-                        path,
-                        &self.plan.name,
-                        started_at,
-                        completed_at,
-                        result.as_ref().err().map(ToString::to_string),
-                        rows,
-                    )
-                    .await;
-            }
-
-            result.map(|_| ())
+            result
         }
         .instrument(span)
         .await
@@ -495,12 +464,10 @@ mod tests {
     use orbit_server_config::AppConfig;
 
     fn handler_context() -> HandlerContext {
-        let mock_nats = Arc::new(MockNatsServices::new());
         HandlerContext::new(
-            mock_nats.clone(),
+            Arc::new(MockNatsServices::new()),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
-            Arc::new(crate::indexing_status::IndexingStatusStore::new(mock_nats)),
         )
     }
 
@@ -581,40 +548,6 @@ mod tests {
 
         let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn namespaced_entity_handler_records_run_rows() {
-        let handler = build_handler("MergeRequest", EtlScope::Namespaced);
-        let mock_nats = Arc::new(MockNatsServices::new());
-        let store = Arc::new(crate::indexing_status::IndexingStatusStore::new(
-            mock_nats.clone(),
-        ));
-        let context = HandlerContext::new(
-            mock_nats,
-            Arc::new(MockLockService::new()),
-            ProgressNotifier::noop(),
-            Arc::clone(&store),
-        );
-
-        let envelope = TestEnvelopeFactory::simple(
-            &serde_json::json!({
-                "namespace": 100,
-                "traversal_path": "42/100/",
-                "watermark": "2024-01-21T00:00:00Z"
-            })
-            .to_string(),
-        );
-
-        handler.handle(context, envelope).await.unwrap();
-
-        let progress = store
-            .get_entity(&TraversalPath::new_unchecked("42/100/"), "MergeRequest")
-            .await
-            .unwrap()
-            .expect("entity progress should be recorded");
-        assert_eq!(progress.last_rows_read, Some(0));
-        assert_eq!(progress.last_rows_written, Some(0));
     }
 
     #[test]
