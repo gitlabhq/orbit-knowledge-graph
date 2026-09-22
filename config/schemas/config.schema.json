@@ -733,6 +733,31 @@
       },
       "additionalProperties": false
     },
+    "ListenerTlsConfig": {
+      "description": "TLS for a group of listeners.",
+      "type": "object",
+      "properties": {
+        "cert_path": {
+          "description": "Overrides `tls.cert_path` for this group. Must be set with `key_path`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "key_path": {
+          "description": "Overrides `tls.key_path` for this group. Must be set with `cert_path`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "MetricsConfig": {
       "type": "object",
       "properties": {
@@ -1509,6 +1534,15 @@
             "string",
             "null"
           ]
+        },
+        "internal": {
+          "description": "The internal listeners: the probe server in every mode and the\nhealth-check API.",
+          "$ref": "#/$defs/ListenerTlsConfig",
+          "default": {
+            "cert_path": null,
+            "enabled": false,
+            "key_path": null
+          }
         },
         "key_path": {
           "type": [

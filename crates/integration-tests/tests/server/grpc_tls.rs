@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use orbit_server::active_schema::ActiveSchema;
@@ -10,24 +10,7 @@ use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use tonic::transport::server::ServerTlsConfig;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 
-fn init_crypto_provider() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-}
-
-fn generate_test_certs() -> (String, String, String) {
-    let key_pair = rcgen::KeyPair::generate().expect("failed to generate key pair");
-    let mut params = rcgen::CertificateParams::new(vec!["localhost".to_string()])
-        .expect("failed to create cert params");
-    params
-        .subject_alt_names
-        .push(rcgen::SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-    let cert = params
-        .self_signed(&key_pair)
-        .expect("failed to self-sign certificate");
-    let key_pem = key_pair.serialize_pem();
-    let cert_pem = cert.pem();
-    (cert_pem.clone(), key_pem, cert_pem)
-}
+use super::tls_fixtures::{generate_test_certs, init_crypto_provider};
 
 fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> GrpcServer {
     let validator =
@@ -75,7 +58,8 @@ fn tls_endpoint(port: u16, ca_pem: &str) -> Endpoint {
 async fn grpc_tls_handshake_succeeds() {
     init_crypto_provider();
 
-    let (cert_pem, key_pem, ca_pem) = generate_test_certs();
+    let (cert_pem, key_pem) = generate_test_certs();
+    let ca_pem = cert_pem.clone();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
@@ -105,7 +89,8 @@ async fn grpc_tls_handshake_succeeds() {
 async fn grpc_plaintext_client_rejected_by_tls_server() {
     init_crypto_provider();
 
-    let (cert_pem, key_pem, ca_pem) = generate_test_certs();
+    let (cert_pem, key_pem) = generate_test_certs();
+    let ca_pem = cert_pem.clone();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let bound_addr = listener.local_addr().unwrap();

@@ -133,6 +133,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "arraydeque"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -638,6 +647,28 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "axum-server"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
+dependencies = [
+ "arc-swap",
+ "bytes",
+ "either",
+ "fs-err",
+ "http",
+ "http-body",
+ "hyper",
+ "hyper-util",
+ "pin-project-lite",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+ "tower-service",
 ]
 
 [[package]]
@@ -3032,6 +3063,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs-err"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91aa448ca50d7e79433bdf3ee8d99215430d2ec02ade5aefab2a073a1822e8a"
+dependencies = [
+ "autocfg",
+ "tokio",
+]
+
+[[package]]
 name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3410,6 +3451,7 @@ dependencies = [
  "clickhouse-client",
  "k8s-openapi",
  "kube",
+ "labkit",
  "nats-client",
  "orbit-server-config",
  "serde",
@@ -3563,7 +3605,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -3946,6 +3987,7 @@ dependencies = [
  "futures",
  "gitaly-protos",
  "gitlab-client",
+ "health-check",
  "indexer",
  "integration-testkit",
  "jsonschema",
@@ -4438,9 +4480,10 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?tag=v0.4.0#54940f413244a679f333bbf76fc79234cb0826e5"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
 dependencies = [
  "axum",
+ "axum-server",
  "futures-util",
  "http",
  "http-body",
@@ -4453,6 +4496,7 @@ dependencies = [
  "opentelemetry_sdk",
  "pin-project-lite",
  "prometheus",
+ "rustls",
  "tokio",
  "tonic",
  "tower",
@@ -4469,7 +4513,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?tag=v0.4.0#54940f413244a679f333bbf76fc79234cb0826e5"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4487,7 +4531,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?tag=v0.4.0#54940f413244a679f333bbf76fc79234cb0826e5"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
 
 [[package]]
 name = "language-tags"
@@ -7967,7 +8011,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams 0.4.2",
  "web-sys",
- "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -8512,7 +8555,7 @@ checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
 dependencies = [
  "ahash",
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "getrandom 0.3.4",
  "granit-parser 0.0.7",
@@ -8530,7 +8573,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1ec1f5cac0eb96063c64b28705255a7ed6e7d77f95c1d25e9f8b8c928006ce1"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "granit-parser 1.1.0",
  "nohash-hasher",
@@ -9586,6 +9629,7 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
+ "rustls-native-certs",
  "socket2",
  "sync_wrapper",
  "tokio",
