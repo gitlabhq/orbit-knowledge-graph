@@ -1,0 +1,30 @@
+name: "Rust: a panic! arm is bottom and does not take part in the join"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_bottom_macro_fixture"
+      version = "0.1.0"
+      edition = "2021"
+  - path: src/lib.rs
+    content: |
+      pub struct A(i32);
+      impl A {
+          pub fn n(&self) {}
+      }
+      pub fn use_it(flag: bool) {
+          let p = match flag {
+              true => A(1),
+              false => panic!("no"),
+          };
+          p.n();
+      }
+
+tests:
+  - name: "p.n() dispatches on A after a match whose other arm panics"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_it' AND e.edge_kind = 'Calls' AND callee.name = 'n'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

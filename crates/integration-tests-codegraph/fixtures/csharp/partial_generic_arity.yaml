@@ -1,0 +1,46 @@
+name: "C#: partial parts merge only with the same generic arity"
+fixtures:
+  - path: Geo/C.cs
+    content: |
+      namespace Geo
+      {
+          public partial class C
+          {
+              public void M2() {}
+          }
+          public partial class C<T>
+          {
+              public void M1() {}
+          }
+          public partial class C
+          {
+              public void M3() {}
+          }
+      }
+  - path: App/Runner.cs
+    content: |
+      using Geo;
+      namespace App
+      {
+          public class Runner
+          {
+              private C c;
+              public void Run()
+              {
+                  c.M2();
+                  c.M3();
+                  c.M1();
+              }
+          }
+      }
+
+tests:
+  - name: "Run reaches both parts of C and not the method of C<T>"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App.Runner.Run' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: Geo.C.M2 } }
+      - { row: { callee: Geo.C.M3 } }

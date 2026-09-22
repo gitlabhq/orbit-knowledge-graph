@@ -1,0 +1,28 @@
+name: "Kotlin: same-named extensions resolve by receiver identity"
+fixtures:
+  - path: src/main/kotlin/com/ex/ext/Ext.kt
+    content: |
+      package com.ex.ext
+      class A
+      class B
+      fun A.show() {}
+      fun B.show() {}
+  - path: src/main/kotlin/com/ex/Main.kt
+    content: |
+      package com.ex
+      import com.ex.ext.*
+      fun main() {
+          A().show()
+          B().show()
+      }
+
+tests:
+  - name: "A().show() resolves to the extension on A only"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.ex.main' AND e.edge_kind = 'Calls' AND callee.name = 'show'
+      RETURN callee.fqn AS callee, callee.start_line AS line
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: com.ex.ext.show, line: 4 } }
+      - { row: { callee: com.ex.ext.show, line: 5 } }

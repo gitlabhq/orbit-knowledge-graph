@@ -145,6 +145,15 @@ corrected to the language rule and carry a `corrected:` note.
   package key. Elixir modules carry an `exports` tag with their short name.
 - Typed parameters carry `(__binding $x (__ssa_typed T) (__rhs (__member
   (__object T))))`, a type reference that dispatches member calls on `$x`.
+- Receivers are SSA values. A typed local, parameter, or field is a producer
+  by identity: the linker emits `TypeFlow` from the call to the binding when
+  the declared type applies, or to the right-hand call when the value is a
+  method call. A constructor call keeps its call identity. An extension
+  wrapper (`__impl`) never declares its receiver's name, so it cannot shadow a
+  class or an import; the resolver decides member versus extension, and a
+  member declared by the class wins (Kotlin spec, extensions). A receiver
+  whose type is imported from outside the corpus matches extensions whose
+  wrapper receiver binds to the same import source.
 - A bare call is `(__call (__callee N (__implicit)))` in a method namespace
   (Java, Ruby `m(...)`): the linker looks the name up as a member of the
   enclosing class, then a lexical binding or named import, then a wildcard
@@ -178,22 +187,19 @@ Open, ours:
   rightmost trait, Java superclass over interface default, Go and Kotlin
   reject. Declare it per class when a fixture needs the exact pick;
   prototyped as a `linearize` tag at 2f31390d2.
-- Receiver identity by SSA. The linker knows which binding a receiver reads;
-  the resolver re-derives it by name inside the enclosing definition
-  (`bindings_of`, `resolve_field_edges`) and rejects an ambiguous name. The
-  SSA-true form carries the binding identity on the call's TypeFlow edge so
-  the resolver never scans; sibling blocks that reuse a name are the case it
-  would fix.
-- Extension candidates. The caller-visible extension leg reads one flat name
-  entry; two extensions of one name on different receivers resolve neither.
-  Rank applicable candidates by receiver identity.
-- C# partial identity ignores generic arity: `partial class C<T>` and
-  `partial class C` in one namespace merge.
+- Receiver identity by SSA: handled. A typed binding, a field, or a
+  constructor call is the SSA value of its receiver; the linker emits a
+  TypeFlow edge from the call to that producer (a call, or the binding whose
+  declared type applies), and the resolver dispatches on the producer's class.
+  A member chain rooted at a binding flows its root; the resolver walks the
+  remaining segments from the root's class. No name scan remains.
 - Ruby and Elixir `module` definitions carry `__class` and export as Class
   because the definition vocabulary has no module kind.
 - Kotlin predeclared names are the default imports (`kotlin.*`,
   `kotlin.collections.*`); the rule lists them by name. Rust `panic!` and
-  friends are bottom by macro name without a shadowing check.
+  friends are bottom by macro name; rust.yaml has no macro definition rule,
+  so a user `macro_rules! panic` is not a definition and cannot shadow the
+  bottom rule until macro identity is modeled.
 - Ruby constant references are Zeitwerk-style autoload imports by inflected
   path; a configured loader root would replace the inflection rule.
 
@@ -202,7 +208,14 @@ csharp.yaml (`throw_statement`, `throw_expression`), scala.yaml
 (`throw_expression`), swift.yaml (`control_transfer_statement` with
 `throw_keyword`), rust.yaml (`panic!`, `unreachable!`, `todo!`,
 `unimplemented!`) and kotlin.yaml (`throw`, `null`); a `return` arm is bottom
-in every language. A simple name in a unified namespace (C#, Scala, a Ruby
+in every language. Extension members are collected per name across the
+corpus; a candidate applies when its `__impl` receiver resolves to the call's
+receiver type by identity and its file exports to the caller, so two
+extensions of one name on different receivers each resolve. C# partial parts
+share a package, a name, and a type-parameter count carried as `__binding`
+children of `__partial`. A predeclared callee (`__predeclared`) resolves a
+lexical definition first, so a file's own `listOf` shadows the default import.
+A simple name in a unified namespace (C#, Scala, a Ruby
 bare identifier) is `(__callee N (__simple_name))`: a binding the SSA has
 defined on the path to the call shadows a member (C# spec 12.8.4); a
 method-namespace call (Java, Ruby `m(...)`) stays `(__implicit)`. A test
