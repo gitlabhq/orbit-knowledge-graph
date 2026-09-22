@@ -561,9 +561,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # skip: tree-dsl: positional component-to-accessor mapping needs a canonical contract beyond the remaining Rust budget
   - name: "GAP: instanceof record pattern destructuring emits Point.x and Point.y accessor calls"
-    skip: true
     severity: warning
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
@@ -586,9 +584,7 @@ tests:
     assert:
       - { row_count: 2 }
 
-  # skip: tree-dsl: positional component-to-accessor mapping needs a canonical contract beyond the remaining Rust budget
   - name: "GAP: switch record pattern destructuring emits accessor calls"
-    skip: true
     severity: warning
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
