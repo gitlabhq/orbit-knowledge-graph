@@ -9,16 +9,11 @@ use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 use serde_json::{Map, Value};
 
-use crate::{DuckDbClient, f64_column, i64_column, scalar_i64, sql_lit, string_column};
-use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
-use orbit_search::grep::{GrepError, GrepSource, grep};
-use orbit_search::{
-    ANCHOR_SIM, EXACT_NAME_SIM, GrepOutcome, RecallFilter, SearchCandidate, SearchVocab, TermRecall,
+use crate::{
+    DuckDbClient, bool_column, f64_column, i64_column, scalar_i64, sql_lit, string_column,
 };
-
-pub const CONTEXT_SIM_CAP: f64 = 0.99;
-pub const NAME_SIM_FLOOR: f64 = ANCHOR_SIM;
-pub const NAME_SIM_CEIL: f64 = 0.9999;
+use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
+use orbit_search::{GrepMatch, GrepOutcome, RecallFilter, query_alternatives};
 
 pub const FTS_STEMMER: &str = "english";
 
@@ -325,13 +320,47 @@ impl DuckDbSearch {
         &self,
         query: &str,
         limit: usize,
-        vocab: &SearchVocab,
         filter: &RecallFilter,
     ) -> Result<(GrepOutcome, Vec<NodeValue>)> {
-        let outcome = grep(self, query, limit, vocab, filter).map_err(|e| match e {
-            GrepError::Source(e) => e,
-            e => anyhow::anyhow!("{e}"),
-        })?;
+        anyhow::ensure!(limit > 0, "search limit must be positive");
+        let alternatives = query_alternatives(query).map_err(anyhow::Error::msg)?;
+        let params: Vec<Value> = alternatives.iter().cloned().map(Value::String).collect();
+        let batches = self.client.query_arrow_json(
+            &recall_sql(self.pid, &self.sha, &alternatives, limit, filter),
+            &params,
+        )?;
+        let total = i64_column(&batches, "total")[0] as usize;
+        let exact_indices: Vec<usize> =
+            serde_json::from_str(&string_column(&batches, "exact_alternatives")[0])?;
+        let ids = i64_column(&batches, "id");
+        let scores = f64_column(&batches, "score");
+        let exact_names = bool_column(&batches, "exact_name");
+        let name_matches = bool_column(&batches, "name_match");
+        let body_offsets = i64_column(&batches, "body_offset");
+        let body_texts = string_column(&batches, "body_text");
+        let mentions = i64_column(&batches, "mentions");
+        let matches = (0..if total == 0 { 0 } else { ids.len() })
+            .map(|i| GrepMatch {
+                id: ids[i],
+                score: scores[i],
+                exact_name: exact_names[i],
+                name_match: name_matches[i],
+                body_offset: usize::try_from(body_offsets[i])
+                    .ok()
+                    .filter(|&offset| offset > 0),
+                body_text: body_texts[i].clone(),
+                mentions: usize::try_from(mentions[i]).unwrap_or(0),
+            })
+            .collect();
+        let outcome = GrepOutcome {
+            exact_alternatives: exact_indices
+                .iter()
+                .map(|&i| alternatives[i].clone())
+                .collect(),
+            alternatives,
+            matches,
+            total,
+        };
         let ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
         let nodes = self.node.query(
             &self.client,
@@ -365,86 +394,6 @@ ORDER BY file_path, start_line, end_line DESC, fqn",
             ],
             Some(&ids),
         )
-    }
-}
-
-impl GrepSource for DuckDbSearch {
-    type Error = anyhow::Error;
-
-    fn stem(&self, words: &[String]) -> Result<Vec<String>> {
-        if words.is_empty() {
-            return Ok(Vec::new());
-        }
-        let values = words
-            .iter()
-            .enumerate()
-            .map(|(i, w)| format!("({i}, {})", sql_lit(&w.to_lowercase())))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let batches = query(
-            &self.client,
-            &format!(
-                "SELECT stem(w, '{FTS_STEMMER}') AS s FROM (VALUES {values}) t(i, w) ORDER BY i"
-            ),
-        )?;
-        Ok(string_column(&batches, "s"))
-    }
-
-    fn recall(&self, terms: &[String], filter: &RecallFilter) -> Result<Vec<TermRecall>> {
-        let sql = recall_sql(self.pid, &sql_lit(&self.sha), filter);
-        terms
-            .iter()
-            .map(|term| {
-                let batches = self
-                    .client
-                    .query_arrow_json(&sql, &[serde_json::Value::String(term.clone())])
-                    .with_context(|| format!("fts recall failed for term {term:?}"))?;
-                let ids = i64_column(&batches, "id");
-                let sims = f64_column(&batches, "sim");
-                let dfs = i64_column(&batches, "df");
-                let totals = i64_column(&batches, "total");
-                let mut recall = TermRecall {
-                    hits: Vec::new(),
-                    matched: 0,
-                    corpus: 0,
-                };
-                for i in 0..ids.len() {
-                    recall.matched = dfs[i] as u64;
-                    recall.corpus = totals[i] as u64;
-                    if ids[i] != 0 {
-                        recall.hits.push((ids[i], sims[i]));
-                    }
-                }
-                Ok(recall)
-            })
-            .collect()
-    }
-
-    fn rows_by_ids(&self, ids: &[i64]) -> Result<Vec<SearchCandidate>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let sql = corpus_rows_sql(
-            &format!(
-                "cand AS (
-  SELECT d.{id} AS id, d.{fqn} AS fqn, d.{file_path} AS file_path
-  FROM {table} d
-  WHERE d.{project_id} = {pid} AND d.{commit_sha} = {sha} AND d.{id} IN ({list})
-)",
-                id = self.node.column("id")?,
-                fqn = self.node.column("fqn")?,
-                file_path = self.node.column("file_path")?,
-                table = self.node.table,
-                project_id = self.node.column("project_id")?,
-                pid = self.pid,
-                commit_sha = self.node.column("commit_sha")?,
-                sha = sql_lit(&self.sha),
-                list = id_list(ids),
-            ),
-            self.pid,
-            &sql_lit(&self.sha),
-        );
-        Ok(rows_from_batches(&query(&self.client, &sql)?))
     }
 }
 
@@ -493,45 +442,60 @@ fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Res
     Ok(())
 }
 
-fn recall_sql(pid: i64, sha: &str, filter: &RecallFilter) -> String {
+fn recall_sql(
+    pid: i64,
+    sha: &str,
+    alternatives: &[String],
+    limit: usize,
+    filter: &RecallFilter,
+) -> String {
     let doc_table = def_doc_table(pid);
-    let corpus = format!(
-        "SELECT id FROM search_corpus WHERE TRUE\n{}",
-        kind_scope("definition_type", &filter.kinds)
-    );
+    let sha = sql_lit(sha);
+    let scored = alternatives.iter().enumerate().map(|(i, _)| {
+        let param = i + 1;
+        let query = format!("array_to_string(list_filter(fts_main_{doc_table}.tokenize(?{param}), token -> token <> ''), ' ')");
+        let phrase = format!("regexp_matches(?{param}, '\\s')");
+        let term = format!("lower(?{param})");
+        format!(
+            "SELECT id, alternative, exact_name, score, name_match, body_offset, mentions,
+       trim(lines[body_offset]) AS body_text FROM (
+  SELECT c.id, {i} AS alternative, lower(c.name) = {term} AS exact_name,
+       CASE WHEN {phrase} OR contains(lower(d.context || ' ' || d.source), {term})
+            THEN fts_main_{doc_table}.match_bm25(c.id, {query}, fields := 'name,context,source', conjunctive := true) END AS score,
+       ({phrase} OR contains(lower(d.context), {term}))
+       AND fts_main_{doc_table}.match_bm25(c.id, {query}, fields := 'name,context', conjunctive := true) IS NOT NULL AS name_match,
+       string_split(d.source, chr(10)) AS lines,
+       CASE WHEN NOT {phrase} THEN CAST(list_position(
+            list_transform(string_split(d.source, chr(10)), line -> contains(lower(line), {term})), true) AS BIGINT) END AS body_offset,
+       CASE WHEN NOT {phrase} THEN CAST((length(lower(d.source)) - length(replace(lower(d.source), {term}, ''))) // length(?{param}) AS BIGINT) END AS mentions
+  FROM search_corpus c JOIN {doc_table} d ON d.def_id = c.id AND d.commit_sha = {sha}
+  WHERE TRUE
+{})", kind_scope("definition_type", &filter.kinds))
+    }).collect::<Vec<_>>().join("\nUNION ALL\n");
     format!(
-        "WITH scored AS (
-  SELECT def_id AS id,
-         fts_main_{doc_table}.match_bm25(def_id, ?1, fields := 'name,context,source') AS score
-  FROM {doc_table}
-  WHERE commit_sha = {sha}
-    AND def_id IN ({corpus})
-),
+        "WITH scored AS ({scored}),
 hits AS (
-  SELECT s.id, s.score,
-         regexp_replace(lower(d.name), '[^0-9a-z]+', ' ', 'g') = regexp_replace(lower(?1), '[^0-9a-z]+', ' ', 'g') AS exact_hit,
-         list_contains(
-           list_transform(string_split_regex(lower(d.name), '[^0-9a-z]+'), t -> stem(t, '{FTS_STEMMER}')),
-           stem(lower(?1), '{FTS_STEMMER}')) AS token_hit
-  FROM scored s
-  JOIN {doc_table} d ON d.def_id = s.id AND d.commit_sha = {sha}
-  WHERE s.score IS NOT NULL
-  ORDER BY s.score DESC, s.id
+  SELECT id, max(score) AS score, bool_or(exact_name) AS exact_name,
+         bool_or(name_match) AS name_match,
+         arg_max(body_offset, COALESCE(score, -1e9)) AS body_offset,
+         arg_max(body_text, COALESCE(score, -1e9)) AS body_text,
+         arg_max(mentions, COALESCE(score, -1e9)) AS mentions
+  FROM scored GROUP BY id HAVING count(score) > 0
 ),
-df AS (SELECT COUNT(*) AS df FROM scored WHERE score IS NOT NULL),
-mx AS (SELECT MAX(score) AS m FROM hits),
-corpus_n AS (SELECT GREATEST(COUNT(*), 1) AS total FROM ({corpus}))
-SELECT COALESCE(h.id, 0) AS id,
-       COALESCE(CASE WHEN h.exact_hit THEN {EXACT_NAME_SIM}
-                     WHEN h.token_hit THEN {NAME_SIM_FLOOR} + ({NAME_SIM_CEIL} - {NAME_SIM_FLOOR}) * h.score / mx.m
-                     ELSE LEAST(h.score / mx.m, {CONTEXT_SIM_CAP}) END, 0.0) AS sim,
-       CAST(df.df AS BIGINT) AS df,
-       CAST(corpus_n.total AS BIGINT) AS total
-FROM df
-CROSS JOIN corpus_n
-CROSS JOIN mx
-LEFT JOIN hits h ON TRUE
-ORDER BY sim DESC, id"
+limited AS (
+  SELECT * FROM hits ORDER BY exact_name DESC, name_match DESC, score DESC, id LIMIT {limit}
+),
+stats AS (SELECT count(*) AS total FROM hits),
+exact AS (
+  SELECT COALESCE(to_json(list(DISTINCT alternative ORDER BY alternative)
+         FILTER (WHERE exact_name)), '[]') AS exact_alternatives FROM scored
+)
+SELECT COALESCE(id, 0) AS id, COALESCE(score, 0.0) AS score,
+       COALESCE(exact_name, false) AS exact_name, COALESCE(name_match, false) AS name_match,
+       COALESCE(body_offset, 0) AS body_offset, COALESCE(body_text, '') AS body_text,
+       COALESCE(mentions, 0) AS mentions, total, exact_alternatives
+FROM stats CROSS JOIN exact LEFT JOIN limited ON TRUE
+ORDER BY exact_name DESC, name_match DESC, score DESC, id"
     )
 }
 
@@ -544,7 +508,7 @@ fn corpus_table_sql(pid: i64, sha: &str, paths: &[String], node: &NodeHydrator) 
     let end = node.column("end_line")?;
     Ok(format!(
         "CREATE OR REPLACE TEMP TABLE search_corpus AS
-SELECT d.{id} AS id, d.{fqn} AS fqn, d.{kind} AS definition_type,
+SELECT d.{id} AS id, d.{name} AS name, d.{fqn} AS fqn, d.{kind} AS definition_type,
        d.{file} AS file_path, d.{start} AS start_line, d.{end} AS end_line
 FROM {table} d
 WHERE d.{project_id} = {pid} AND d.{commit_sha} = {sha}
@@ -628,54 +592,4 @@ pub fn excluded_path_predicate(col: &str) -> String {
         "({})",
         likes.chain(regexes).collect::<Vec<_>>().join(" OR ")
     )
-}
-
-fn corpus_rows_sql(cand_ctes: &str, pid: i64, sha: &str) -> String {
-    let doc_table = def_doc_table(pid);
-    format!(
-        "WITH {cand_ctes},
-deg AS (
-  SELECT id, COUNT(*) AS degree FROM (
-    SELECT source_id AS id FROM gl_edge WHERE source_id IN (SELECT id FROM cand)
-    UNION ALL
-    SELECT target_id FROM gl_edge WHERE target_id IN (SELECT id FROM cand)
-  ) GROUP BY 1
-),
-lens AS (
-  SELECT def_id, CAST(len(string_split(context, ' ')) AS BIGINT) AS grams
-  FROM {doc_table}
-  WHERE commit_sha = {sha}
-    AND def_id IN (SELECT id FROM cand)
-)
-SELECT c.id, c.fqn, c.file_path, COALESCE(deg.degree, 0) AS degree,
-       COALESCE(lens.grams, 0) AS grams
-FROM cand c
-LEFT JOIN deg ON deg.id = c.id
-LEFT JOIN lens ON lens.def_id = c.id"
-    )
-}
-
-fn rows_from_batches(batches: &[RecordBatch]) -> Vec<SearchCandidate> {
-    let ids = i64_column(batches, "id");
-    let fqns = string_column(batches, "fqn");
-    let files = string_column(batches, "file_path");
-    let degrees = i64_column(batches, "degree");
-    let grams = i64_column(batches, "grams");
-    (0..ids.len())
-        .map(|i| SearchCandidate {
-            id: ids[i],
-            label: fqns[i].clone(),
-            parent_group: definition_parent(&fqns[i]),
-            diversity_group: files[i].clone(),
-            degree: degrees[i] as u64,
-            document_length: grams[i] as u64,
-        })
-        .collect()
-}
-
-fn definition_parent(fqn: &str) -> String {
-    fqn.rfind("::")
-        .or_else(|| fqn.rfind('.'))
-        .map_or(fqn, |index| &fqn[..index])
-        .to_string()
 }
