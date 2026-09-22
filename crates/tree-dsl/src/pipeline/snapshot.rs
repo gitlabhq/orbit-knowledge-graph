@@ -97,7 +97,6 @@ pub struct SnapshotNode {
 pub struct TreeSnapshot {
     pub nodes: Vec<SnapshotNode>,
     pub label: String,
-    pub source: String,
     pub tags: Vec<(u32, Vec<Tag>)>,
 }
 
@@ -138,7 +137,6 @@ impl From<&Tree> for TreeSnapshot {
         Self {
             nodes,
             label: tree.label.clone(),
-            source: tree.source.to_string(),
             tags,
         }
     }
@@ -188,7 +186,6 @@ impl From<TreeSnapshot> for Tree {
             id_map.push(id);
         }
         tree.label = snap.label;
-        tree.source = std::sync::Arc::from(snap.source);
         for (node, tags) in snap.tags {
             tree.tags.insert(node, SmallVec::from_vec(tags));
         }
@@ -246,14 +243,17 @@ impl State {
             resolver: self.resolver.to_snapshot(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::BoxedError>(&snap).map_err(io::Error::other)?;
-        let mut f = std::fs::File::create(path)?;
-        f.write_all(&bytes)
+        // rkyv output is highly regular and carries each file's source text;
+        // level 3 gives about 4x for less time than the serialisation itself.
+        let mut enc = zstd::Encoder::new(std::fs::File::create(path)?, 3)?;
+        enc.write_all(&bytes)?;
+        enc.finish()?;
+        Ok(())
     }
 
     pub fn load(path: &Path, lang_id: SupportLang) -> io::Result<(Env, Self)> {
-        let mut f = std::fs::File::open(path)?;
         let mut bytes = Vec::new();
-        f.read_to_end(&mut bytes)?;
+        zstd::Decoder::new(std::fs::File::open(path)?)?.read_to_end(&mut bytes)?;
         let snap: FullSnapshot = rkyv::from_bytes::<FullSnapshot, rkyv::rancor::BoxedError>(&bytes)
             .map_err(io::Error::other)?;
         let mut env = Env::for_lang(lang_id);

@@ -108,8 +108,9 @@ pub struct Tree {
     pub(crate) root: NodeId,
     pub label: String,
     pub tags: FxHashMap<u32, SmallVec<[Tag; 2]>>,
-    /// The file text. Nodes with named children carry no interned sym; their
-    /// text is sliced from here when a rule asks for it.
+    /// The file text, present only between parse and the end of the rewrite
+    /// stages. Nodes with named children carry no interned sym until a rule
+    /// reads them, and the text is sliced from here when one does.
     pub source: std::sync::Arc<str>,
 }
 

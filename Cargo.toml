@@ -106,6 +106,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 tokio-util = { version = "0.7.18", features = ["io-util"] }
 ignore = "0.4.25"
 rayon = "1.11.0"
+zstd = "0.13.3"
 walkdir = "2.5.0"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }

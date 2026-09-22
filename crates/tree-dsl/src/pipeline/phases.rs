@@ -19,6 +19,9 @@ pub fn process_file(env: &Env, path: &str, source: &str) -> (Tree, Vec<Edge>) {
     }
     tree.prune();
     tree.compact();
+    // Only canonical nodes survive prune, and each carries its sym; the source
+    // is not needed again and is never persisted.
+    tree.source = std::sync::Arc::from("");
     let edges = linker::link(&tree, &env.lang, &env.config.link);
     (tree, edges)
 }
