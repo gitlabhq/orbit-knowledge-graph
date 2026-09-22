@@ -1,27 +1,96 @@
 name: "Neighbors both — Union of two edge scans"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"both"},"limit":20}
 expected: |
-  (Limit 21
-    (Union _union
-      (Project [e.target_id:_gkg_neighbor_id e.target_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type 1:_gkg_neighbor_is_outgoing e.source_id:_gkg_mr_id "MergeRequest":_gkg_mr_type e.traversal_path:_gkg_mr_tp]
-        (Union e
-          (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
-            (Filter [_e.source_kind="MergeRequest" _e.source_id=1 _e.relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !_e.deleted]
-              (Scan gl_ci_edge _e)))
-          (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
-            (Filter [_e.source_kind="MergeRequest" _e.source_id=1 _e.relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !_e.deleted]
-              (Scan gl_diff_edge _e)))
-          (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
-            (Filter [_e.source_kind="MergeRequest" _e.source_id=1 _e.relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !_e.deleted]
-              (Scan gl_edge _e)))))
-      (Project [e.source_id:_gkg_neighbor_id e.source_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type 0:_gkg_neighbor_is_outgoing e.target_id:_gkg_mr_id "MergeRequest":_gkg_mr_type e.traversal_path:_gkg_mr_tp]
-        (Join Semi (e.traversal_path = _tpd.traversal_path)
-          (Union e
-            (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
-              (Filter [_e.target_kind="MergeRequest" _e.target_id=1 _e.relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !_e.deleted]
-                (Scan gl_ci_edge _e)))
-            (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
-              (Filter [_e.target_kind="MergeRequest" _e.target_id=1 _e.relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !_e.deleted]
-                (Scan gl_edge _e))))
-          (Filter [_tpd.id=1 !_tpd.deleted]
-            (Scan gl_merge_request _tpd))))))
+  Limit 21
+    Union AS _union
+      Project
+          e.target_id AS _gkg_neighbor_id
+          e.target_kind AS _gkg_neighbor_type
+          e.relationship_kind AS _gkg_relationship_type
+          1 AS _gkg_neighbor_is_outgoing
+          e.source_id AS _gkg_mr_id
+          'MergeRequest' AS _gkg_mr_type
+          e.traversal_path AS _gkg_mr_tp
+        Union AS e
+          Project
+              _e.traversal_path AS traversal_path
+              _e.relationship_kind AS relationship_kind
+              _e.source_id AS source_id
+              _e.source_kind AS source_kind
+              _e.target_id AS target_id
+              _e.target_kind AS target_kind
+              _e._deleted AS _deleted
+            Filter
+                _e.source_kind = 'MergeRequest'
+                _e.source_id = 1
+                _e.relationship_kind IN ('APPROVED', 'ASSIGNED', 'AUTHORED', 'CLOSED', 'CLOSES', … 19 more)
+                !deleted(_e)
+              Scan gl_ci_edge AS _e
+          Project
+              _e.traversal_path AS traversal_path
+              _e.relationship_kind AS relationship_kind
+              _e.source_id AS source_id
+              _e.source_kind AS source_kind
+              _e.target_id AS target_id
+              _e.target_kind AS target_kind
+              _e._deleted AS _deleted
+            Filter
+                _e.source_kind = 'MergeRequest'
+                _e.source_id = 1
+                _e.relationship_kind IN ('APPROVED', 'ASSIGNED', 'AUTHORED', 'CLOSED', 'CLOSES', … 19 more)
+                !deleted(_e)
+              Scan gl_diff_edge AS _e
+          Project
+              _e.traversal_path AS traversal_path
+              _e.relationship_kind AS relationship_kind
+              _e.source_id AS source_id
+              _e.source_kind AS source_kind
+              _e.target_id AS target_id
+              _e.target_kind AS target_kind
+              _e._deleted AS _deleted
+            Filter
+                _e.source_kind = 'MergeRequest'
+                _e.source_id = 1
+                _e.relationship_kind IN ('APPROVED', 'ASSIGNED', 'AUTHORED', 'CLOSED', 'CLOSES', … 19 more)
+                !deleted(_e)
+              Scan gl_edge AS _e
+      Project
+          e.source_id AS _gkg_neighbor_id
+          e.source_kind AS _gkg_neighbor_type
+          e.relationship_kind AS _gkg_relationship_type
+          0 AS _gkg_neighbor_is_outgoing
+          e.target_id AS _gkg_mr_id
+          'MergeRequest' AS _gkg_mr_type
+          e.traversal_path AS _gkg_mr_tp
+        SemiJoin e.traversal_path IN _tpd.traversal_path
+          Union AS e
+            Project
+                _e.traversal_path AS traversal_path
+                _e.relationship_kind AS relationship_kind
+                _e.source_id AS source_id
+                _e.source_kind AS source_kind
+                _e.target_id AS target_id
+                _e.target_kind AS target_kind
+                _e._deleted AS _deleted
+              Filter
+                  _e.target_kind = 'MergeRequest'
+                  _e.target_id = 1
+                  _e.relationship_kind IN ('APPROVED', 'ASSIGNED', 'AUTHORED', 'CLOSED', 'CLOSES', … 19 more)
+                  !deleted(_e)
+                Scan gl_ci_edge AS _e
+            Project
+                _e.traversal_path AS traversal_path
+                _e.relationship_kind AS relationship_kind
+                _e.source_id AS source_id
+                _e.source_kind AS source_kind
+                _e.target_id AS target_id
+                _e.target_kind AS target_kind
+                _e._deleted AS _deleted
+              Filter
+                  _e.target_kind = 'MergeRequest'
+                  _e.target_id = 1
+                  _e.relationship_kind IN ('APPROVED', 'ASSIGNED', 'AUTHORED', 'CLOSED', 'CLOSES', … 19 more)
+                  !deleted(_e)
+                Scan gl_edge AS _e
+          Filter _tpd.id = 1, !deleted(_tpd)
+            Scan gl_merge_request AS _tpd

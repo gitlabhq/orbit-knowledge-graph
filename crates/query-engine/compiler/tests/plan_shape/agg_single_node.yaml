@@ -1,7 +1,7 @@
 name: "Single-node aggregation"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
 expected: |
-  (Limit 11
-    (Agg [group: mr.state:mr_state] [metrics: COUNT():n]
-      (Filter [mr.state:eq !mr.deleted]
-        (Scan gl_merge_request mr FINAL))))
+  Limit 11
+    Aggregate group mr.state AS mr_state, COUNT() AS n
+      Filter mr.state = ?, !deleted(mr)
+        Scan gl_merge_request AS mr FINAL

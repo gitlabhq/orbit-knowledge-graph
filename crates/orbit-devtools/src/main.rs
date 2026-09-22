@@ -94,7 +94,7 @@ fn main() {
                 match compiler::passes::plan_v2::plan(&mut input, &ontology) {
                     Ok((_, op)) => {
                         println!("--- plan ---");
-                        println!("{}", op.to_sexpr());
+                        println!("{}", op.explain());
                         println!();
                     }
                     Err(e) => eprintln!("plan error: {e}"),
@@ -166,7 +166,7 @@ fn main() {
             if show_plan {
                 let mut planned = input.clone();
                 match compiler::passes::plan_v2::plan(&mut planned, &ontology) {
-                    Ok((_, op)) => println!("--- plan ---\n{}\n", op.to_sexpr()),
+                    Ok((_, op)) => println!("--- plan ---\n{}\n", op.explain()),
                     Err(e) => eprintln!("plan error: {e}"),
                 }
             }

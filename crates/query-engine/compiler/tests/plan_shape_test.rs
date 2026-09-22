@@ -64,7 +64,7 @@ fn plan_shape_scenarios() {
             }
         };
 
-        let actual = phys_op.to_sexpr();
+        let actual = phys_op.explain();
 
         if update {
             eprintln!("=== {name} ===\n{actual}\n");

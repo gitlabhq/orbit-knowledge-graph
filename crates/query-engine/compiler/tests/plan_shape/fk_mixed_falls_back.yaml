@@ -1,20 +1,37 @@
 name: "Mixed FK + non-FK — all hops use edge scans with narrowing"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"p","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
 expected: |
-  (Limit 2
-    (Agg [group: ] [metrics: COUNT():n]
-      (Join Semi (e1.source_id = _sip_e0.source_id)
-        (Join Semi (e1.target_id = p.id)
-          (Join Semi (e0.target_id = label.id)
-            (Join Inner (e0.source_id = e1.source_id)
-              (Filter [e0.relationship_kind="HAS_LABEL" e0.source_kind="MergeRequest" e0.target_kind="Label" !e0.deleted scope(e0) e0.source_id=1]
-                (Scan gl_edge e0 FINAL))
-              (Filter [e1.relationship_kind="IN_PROJECT" e1.source_kind="MergeRequest" e1.target_kind="Project" !e1.deleted e1.source_id=1]
-                (Scan gl_edge e1 FINAL)))
-            (Filter [label.title:eq !label.deleted]
-              (Scan gl_label label FINAL)))
-          (Filter [p.full_path:eq !p.deleted]
-            (Scan gl_project p FINAL)))
-        (Project [_sip_e0.source_id:source_id]
-          (Filter [_sip_e0.relationship_kind="HAS_LABEL" _sip_e0.source_kind="MergeRequest" _sip_e0.target_kind="Label" !_sip_e0.deleted scope(_sip_e0) _sip_e0.source_id=1]
-            (Scan gl_edge _sip_e0 FINAL))))))
+  Limit 2
+    Aggregate COUNT() AS n
+      SemiJoin e1.source_id IN _sip_e0.source_id
+        SemiJoin e1.target_id IN p.id
+          SemiJoin e0.target_id IN label.id
+            Join ON e0.source_id = e1.source_id
+              Filter
+                  e0.relationship_kind = 'HAS_LABEL'
+                  e0.source_kind = 'MergeRequest'
+                  e0.target_kind = 'Label'
+                  !deleted(e0)
+                  scope(e0)
+                  e0.source_id = 1
+                Scan gl_edge AS e0 FINAL
+              Filter
+                  e1.relationship_kind = 'IN_PROJECT'
+                  e1.source_kind = 'MergeRequest'
+                  e1.target_kind = 'Project'
+                  !deleted(e1)
+                  e1.source_id = 1
+                Scan gl_edge AS e1 FINAL
+            Filter label.title = ?, !deleted(label)
+              Scan gl_label AS label FINAL
+          Filter p.full_path = ?, !deleted(p)
+            Scan gl_project AS p FINAL
+        Project _sip_e0.source_id AS source_id
+          Filter
+              _sip_e0.relationship_kind = 'HAS_LABEL'
+              _sip_e0.source_kind = 'MergeRequest'
+              _sip_e0.target_kind = 'Label'
+              !deleted(_sip_e0)
+              scope(_sip_e0)
+              _sip_e0.source_id = 1
+            Scan gl_edge AS _sip_e0 FINAL

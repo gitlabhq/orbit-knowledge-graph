@@ -1,10 +1,22 @@
 name: "Narrowing CTE — selective Label wrapped in Cte, edge has IN-subquery"
 input: {"query_type":"traversal","nodes":[{"id":"label","entity":"Label","filters":{"title":"bug"}},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
 expected: |
-  (Limit 11
-    (Project [e0.relationship_kind:e0_type e0.source_id:e0_src e0.source_kind:e0_src_type e0.target_id:e0_dst e0.target_kind:e0_dst_type label.id:label_id concat(substringUTF8(label.title 1 190650) if(length(label.title)>length(substringUTF8(label.title 1 190650)) " [truncated]" "")):label_title concat(substringUTF8(label.color 1 190650) if(length(label.color)>length(substringUTF8(label.color 1 190650)) " [truncated]" "")):label_color]
-      (Join Inner (e0.target_id = label.id)
-        (Filter [e0.relationship_kind="HAS_LABEL" e0.source_kind="MergeRequest" e0.target_kind="Label" !e0.deleted]
-          (Scan gl_edge e0))
-        (Filter [label.title:eq !label.deleted]
-          (Scan gl_label label FINAL)))))
+  Limit 11
+    Project
+        e0.relationship_kind AS e0_type
+        e0.source_id AS e0_src
+        e0.source_kind AS e0_src_type
+        e0.target_id AS e0_dst
+        e0.target_kind AS e0_dst_type
+        label.id AS label_id
+        excerpt(label.title) AS label_title
+        excerpt(label.color) AS label_color
+      Join ON e0.target_id = label.id
+        Filter
+            e0.relationship_kind = 'HAS_LABEL'
+            e0.source_kind = 'MergeRequest'
+            e0.target_kind = 'Label'
+            !deleted(e0)
+          Scan gl_edge AS e0
+        Filter label.title = ?, !deleted(label)
+          Scan gl_label AS label FINAL

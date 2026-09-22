@@ -25,10 +25,11 @@
 //! - `hops.rs`: an `e1 -> e2 -> ... -> eN` edge chain, for variable-length
 //!   hops and pathfinding frontiers.
 //! - `join_graph.rs`: what the planner needs to know from the ontology.
-//! - `sexpr.rs`: the plan as an S-expression, for fixtures and devtools.
+//! - `explain.rs`: the plan as indented text, for fixtures and devtools.
 
 mod chain;
 mod ctx;
+mod explain;
 mod expr;
 mod hops;
 mod hydration;
@@ -37,7 +38,6 @@ mod neighbors;
 mod op;
 pub mod parse;
 mod pathfinding;
-mod sexpr;
 
 pub(crate) use ctx::PlanCtx;
 pub use expr::*;

@@ -102,7 +102,7 @@ pub fn named(expr: PExpr, alias: impl Into<String>) -> Named {
 
 impl PhysOp {
     /// The predicate list is a conjunction; top-level ANDs are flattened
-    /// into it so rules see one predicate per conjunct.
+    /// into it and stacked filters merge, so rules see one flat list.
     pub fn filter(self, predicates: Vec<PExpr>) -> PhysOp {
         let predicates: Vec<PExpr> = predicates
             .into_iter()
@@ -113,6 +113,18 @@ impl PhysOp {
             .collect();
         if predicates.is_empty() {
             return self;
+        }
+        // A filter over a filter is one filter.
+        if let PhysOp::Filter {
+            input,
+            predicates: mut existing,
+        } = self
+        {
+            existing.extend(predicates);
+            return PhysOp::Filter {
+                input,
+                predicates: existing,
+            };
         }
         PhysOp::Filter {
             input: Box::new(self),

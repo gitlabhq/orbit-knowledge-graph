@@ -1,13 +1,34 @@
 name: "Exact 2 hops — 1 depth arm with narrowing CTE"
 input: {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[2,2]}],"limit":10}
 expected: |
-  (Limit 11
-    (Project [e0.relationship_kind:hop_e0_type e0.source_id:hop_e0_src e0.source_kind:hop_e0_src_type e0.target_id:hop_e0_dst e0.target_kind:hop_e0_dst_type e0.path_nodes:hop_e0_path_nodes]
-      (Filter [e0.source_kind="Group" e0.source_id=1 e0.target_kind="Project" !e0.deleted]
-        (Union e0
-          (Project [e1.traversal_path:traversal_path e1.relationship_kind:relationship_kind e1.source_id:source_id e1.source_kind:source_kind e2.target_id:target_id e2.target_kind:target_kind e1.source_tags:source_tags e2.target_tags:target_tags array(tuple(e1.target_id e1.target_kind) tuple(e2.target_id e2.target_kind)):path_nodes 2:depth e1._deleted:_deleted]
-            (Join Inner (e1.target_id = e2.source_id)
-              (Filter [e1.relationship_kind="CONTAINS" !e1.deleted scope(e1)]
-                (Scan gl_edge e1))
-              (Filter [e2.relationship_kind="CONTAINS" !e2.deleted]
-                (Scan gl_edge e2))))))))
+  Limit 11
+    Project
+        e0.relationship_kind AS hop_e0_type
+        e0.source_id AS hop_e0_src
+        e0.source_kind AS hop_e0_src_type
+        e0.target_id AS hop_e0_dst
+        e0.target_kind AS hop_e0_dst_type
+        e0.path_nodes AS hop_e0_path_nodes
+      Filter
+          e0.source_kind = 'Group'
+          e0.source_id = 1
+          e0.target_kind = 'Project'
+          !deleted(e0)
+        Union AS e0
+          Project
+              e1.traversal_path AS traversal_path
+              e1.relationship_kind AS relationship_kind
+              e1.source_id AS source_id
+              e1.source_kind AS source_kind
+              e2.target_id AS target_id
+              e2.target_kind AS target_kind
+              e1.source_tags AS source_tags
+              e2.target_tags AS target_tags
+              [tuple(e1.target_id, e1.target_kind), tuple(e2.target_id, e2.target_kind)] AS path_nodes
+              2 AS depth
+              e1._deleted AS _deleted
+            Join ON e1.target_id = e2.source_id
+              Filter e1.relationship_kind = 'CONTAINS', !deleted(e1), scope(e1)
+                Scan gl_edge AS e1
+              Filter e2.relationship_kind = 'CONTAINS', !deleted(e2)
+                Scan gl_edge AS e2

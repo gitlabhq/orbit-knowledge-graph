@@ -1,17 +1,48 @@
 name: "Cascade SIP — e1 gets IN-subquery anchored to e0"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}},{"id":"p","entity":"Project"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"limit":10}
 expected: |
-  (Limit 11
-    (Project [e0.relationship_kind:e0_type e0.source_id:e0_src e0.source_kind:e0_src_type e0.target_id:e0_dst e0.target_kind:e0_dst_type e1.relationship_kind:e1_type e1.source_id:e1_src e1.source_kind:e1_src_type e1.target_id:e1_dst e1.target_kind:e1_dst_type label.id:label_id concat(substringUTF8(label.title 1 190650) if(length(label.title)>length(substringUTF8(label.title 1 190650)) " [truncated]" "")):label_title concat(substringUTF8(label.color 1 190650) if(length(label.color)>length(substringUTF8(label.color 1 190650)) " [truncated]" "")):label_color]
-      (Join Semi (e1.source_id = _sip_e0.source_id)
-        (Join Inner (e0.target_id = label.id)
-          (Join Inner (e0.source_id = e1.source_id)
-            (Filter [e0.relationship_kind="HAS_LABEL" e0.source_kind="MergeRequest" e0.target_kind="Label" !e0.deleted scope(e0) e0.source_id=1]
-              (Scan gl_edge e0 FINAL))
-            (Filter [e1.relationship_kind="IN_PROJECT" e1.source_kind="MergeRequest" e1.target_kind="Project" !e1.deleted scope(e1) e1.source_id=1]
-              (Scan gl_edge e1 FINAL)))
-          (Filter [label.title:eq !label.deleted]
-            (Scan gl_label label FINAL)))
-        (Project [_sip_e0.source_id:source_id]
-          (Filter [_sip_e0.relationship_kind="HAS_LABEL" _sip_e0.source_kind="MergeRequest" _sip_e0.target_kind="Label" !_sip_e0.deleted scope(_sip_e0) _sip_e0.source_id=1]
-            (Scan gl_edge _sip_e0 FINAL))))))
+  Limit 11
+    Project
+        e0.relationship_kind AS e0_type
+        e0.source_id AS e0_src
+        e0.source_kind AS e0_src_type
+        e0.target_id AS e0_dst
+        e0.target_kind AS e0_dst_type
+        e1.relationship_kind AS e1_type
+        e1.source_id AS e1_src
+        e1.source_kind AS e1_src_type
+        e1.target_id AS e1_dst
+        e1.target_kind AS e1_dst_type
+        label.id AS label_id
+        excerpt(label.title) AS label_title
+        excerpt(label.color) AS label_color
+      SemiJoin e1.source_id IN _sip_e0.source_id
+        Join ON e0.target_id = label.id
+          Join ON e0.source_id = e1.source_id
+            Filter
+                e0.relationship_kind = 'HAS_LABEL'
+                e0.source_kind = 'MergeRequest'
+                e0.target_kind = 'Label'
+                !deleted(e0)
+                scope(e0)
+                e0.source_id = 1
+              Scan gl_edge AS e0 FINAL
+            Filter
+                e1.relationship_kind = 'IN_PROJECT'
+                e1.source_kind = 'MergeRequest'
+                e1.target_kind = 'Project'
+                !deleted(e1)
+                scope(e1)
+                e1.source_id = 1
+              Scan gl_edge AS e1 FINAL
+          Filter label.title = ?, !deleted(label)
+            Scan gl_label AS label FINAL
+        Project _sip_e0.source_id AS source_id
+          Filter
+              _sip_e0.relationship_kind = 'HAS_LABEL'
+              _sip_e0.source_kind = 'MergeRequest'
+              _sip_e0.target_kind = 'Label'
+              !deleted(_sip_e0)
+              scope(_sip_e0)
+              _sip_e0.source_id = 1
+            Scan gl_edge AS _sip_e0 FINAL
