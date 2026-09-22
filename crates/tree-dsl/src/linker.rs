@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
@@ -9,6 +9,7 @@ use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tags::ReservedTags;
 use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, members_by_level};
 
+#[derive(Clone)]
 enum Linked {
     Def(u32),
     Import(u32),
@@ -41,6 +42,9 @@ struct Fold<'t> {
     tags: ReservedTags,
     config: &'t LinkConfig,
     def_stack: Vec<(Option<u32>, BlockId)>,
+    chain_seen: FxHashSet<u32>,
+    obj_seen: FxHashSet<u32>,
+    chain_memo: FxHashMap<u32, Vec<Linked>>,
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
@@ -80,6 +84,7 @@ impl<'t> Fold<'t> {
     }
 
     fn dispatch(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) {
+        self.chain_memo.clear();
         let k = c.kind();
         if k == C::Import || k == C::ImportType {
             self.handle_import(c);
@@ -390,6 +395,15 @@ impl<'t> Fold<'t> {
     }
 
     fn resolve_obj(&mut self, obj: Cursor, method: u32, from: u32) {
+        // step = step() types the binding by a call whose receiver is the binding.
+        if !self.obj_seen.insert(obj.index()) {
+            return;
+        }
+        self.resolve_obj_inner(obj, method, from);
+        self.obj_seen.remove(&obj.index());
+    }
+
+    fn resolve_obj_inner(&mut self, obj: Cursor, method: u32, from: u32) {
         for r in self.lookup_chain(obj) {
             match r {
                 Linked::Type(ts) => self.resolve_method(ts, method, from),
@@ -530,7 +544,23 @@ impl<'t> Fold<'t> {
         self.any_class(&targets)
     }
 
+    // x = x.foo() makes x's type depend on a chain rooted at x, and a phi with
+    // many reaching values fans out at every level, so in-progress nodes yield
+    // nothing and finished nodes are memoised for the current dispatch.
     fn lookup_chain(&mut self, c: Cursor) -> Vec<Linked> {
+        if let Some(done) = self.chain_memo.get(&c.index()) {
+            return done.clone();
+        }
+        if !self.chain_seen.insert(c.index()) {
+            return vec![];
+        }
+        let out = self.lookup_chain_inner(c);
+        self.chain_seen.remove(&c.index());
+        self.chain_memo.insert(c.index(), out.clone());
+        out
+    }
+
+    fn lookup_chain_inner(&mut self, c: Cursor) -> Vec<Linked> {
         if let Some(call) = c.child(C::Call)
             && !(call.has(C::Property) && self.chain_is_class(c.reference()))
         {
@@ -631,6 +661,9 @@ pub fn link(tree: &Tree, lang: &Lang, config: &LinkConfig) -> Vec<Edge> {
         tags: ReservedTags::new(lang),
         config,
         def_stack: vec![(None, entry)],
+        chain_seen: FxHashSet::default(),
+        obj_seen: FxHashSet::default(),
+        chain_memo: FxHashMap::default(),
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
