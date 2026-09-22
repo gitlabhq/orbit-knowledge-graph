@@ -146,24 +146,20 @@ pub enum StreamError {
     Empty,
 }
 
-/// Filtering policy for a file stream. Each method defaults to a pass-through.
-/// Returns `(Decision, FileLabel)` so the source stamps both on the entry.
+/// Filtering policy for a file stream. Both methods are batch-native:
+/// `step` passes one-element slices, `refine` passes the full set.
 pub trait FileStreamHooks {
     /// Charge aggregate counters; called for every entry (so excluded blobs
     /// still count toward a total-bytes cap). `Err` aborts the stream.
     fn admit(&mut self, _file: &FileInventoryEntry) -> Result<(), CapExceeded> {
         Ok(())
     }
-    /// Settle from path + size alone, before any bytes are read. `Some` is
-    /// final; `None` reads the content. On a first pass over raw files,
-    /// `Parse` should only come from `on_contents` (it needs bytes). On a
-    /// refinement pass (`FileInventory::refine`) the entry already carries a
-    /// prior label, so returning `Parse` from `on_header` is valid.
-    fn on_header(&mut self, _file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-        None
+    /// Settle entries from path + size alone. `Some` is final; `None` reads
+    /// the content.
+    fn on_headers(&mut self, files: &[&FileInventoryEntry]) -> Vec<Option<(Decision, FileLabel)>> {
+        files.iter().map(|_| None).collect()
     }
-    /// Classify entries from their content. The single content classification
-    /// path for both streaming sources (batch of one) and `refine` (full batch).
+    /// Classify entries from their content.
     fn on_contents(
         &mut self,
         _items: &[(&FileInventoryEntry, &[u8])],
@@ -173,9 +169,7 @@ pub trait FileStreamHooks {
             .map(|_| (Decision::Parse, FileLabel::default()))
             .collect()
     }
-    /// Settle a non-regular entry (symlink, etc.) — no content to sniff, never a
-    /// parse candidate. Routed here (instead of decided in the source) so the
-    /// filter stays the single decision point. Defaults to a bare node.
+    /// Settle a non-regular entry (symlink, etc.).
     fn on_non_regular(&mut self, _file: &FileInventoryEntry) -> (Decision, FileLabel) {
         (Decision::ListOnly, FileLabel::default())
     }
@@ -190,7 +184,7 @@ pub fn step<H: FileStreamHooks>(
 ) -> Result<(Decision, FileLabel), StreamError> {
     hooks.admit(file)?;
     content.clear();
-    if let Some(settled) = hooks.on_header(file) {
+    if let Some(settled) = hooks.on_headers(&[file]).pop().flatten() {
         return Ok(settled);
     }
     sniff(content)?;
@@ -260,10 +254,18 @@ mod tests {
     }
 
     impl FileStreamHooks for TestHooks {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-            f.path
-                .ends_with(".png")
-                .then_some((Decision::Drop, FileLabel::default()))
+        fn on_headers(
+            &mut self,
+            files: &[&FileInventoryEntry],
+        ) -> Vec<Option<(Decision, FileLabel)>> {
+            files
+                .iter()
+                .map(|f| {
+                    f.path
+                        .ends_with(".png")
+                        .then_some((Decision::Drop, FileLabel::default()))
+                })
+                .collect()
         }
         fn admit(&mut self, f: &FileInventoryEntry) -> Result<(), CapExceeded> {
             self.bytes.add(f.size)

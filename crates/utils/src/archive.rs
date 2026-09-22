@@ -225,9 +225,17 @@ mod tests {
     /// shape of the production `CodeFilter` without depending on code-graph.
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-            (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
-                .then_some((Decision::ListOnly, FileLabel::default()))
+        fn on_headers(
+            &mut self,
+            files: &[&FileInventoryEntry],
+        ) -> Vec<Option<(Decision, FileLabel)>> {
+            files
+                .iter()
+                .map(|f| {
+                    (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
+                        .then_some((Decision::ListOnly, FileLabel::default()))
+                })
+                .collect()
         }
         fn on_contents(
             &mut self,
@@ -510,8 +518,14 @@ mod tests {
     /// guard was handed.
     struct MaxSize(u64);
     impl FileStreamHooks for MaxSize {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-            (f.size > self.0).then_some((Decision::ListOnly, FileLabel::default()))
+        fn on_headers(
+            &mut self,
+            files: &[&FileInventoryEntry],
+        ) -> Vec<Option<(Decision, FileLabel)>> {
+            files
+                .iter()
+                .map(|f| (f.size > self.0).then_some((Decision::ListOnly, FileLabel::default())))
+                .collect()
         }
     }
 

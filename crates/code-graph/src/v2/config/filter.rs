@@ -98,14 +98,23 @@ impl FileStreamHooks for CodeFilter {
         self.total_bytes.add(file.size)
     }
 
-    fn on_header(&mut self, file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-        if self.max_file_size.is_some_and(|cap| file.size > cap) {
-            return Some(self.record(file, SkipReason::Oversize, ContentClass::Unknown));
-        }
-        if is_excluded_from_indexing(Path::new(&file.path)) {
-            return Some(self.record(file, SkipReason::ExcludedExtension, ContentClass::Unknown));
-        }
-        None
+    fn on_headers(&mut self, files: &[&FileInventoryEntry]) -> Vec<Option<(Decision, FileLabel)>> {
+        files
+            .iter()
+            .map(|file| {
+                if self.max_file_size.is_some_and(|cap| file.size > cap) {
+                    return Some(self.record(file, SkipReason::Oversize, ContentClass::Unknown));
+                }
+                if is_excluded_from_indexing(Path::new(&file.path)) {
+                    return Some(self.record(
+                        file,
+                        SkipReason::ExcludedExtension,
+                        ContentClass::Unknown,
+                    ));
+                }
+                None
+            })
+            .collect()
     }
 
     fn on_contents(
@@ -285,6 +294,10 @@ mod tests {
         CodeFilter::new(None, None, detect_language_from_path)
     }
 
+    fn header(f: &mut CodeFilter, e: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
+        f.on_headers(&[e]).remove(0)
+    }
+
     fn classify(
         f: &mut CodeFilter,
         e: &FileInventoryEntry,
@@ -301,7 +314,7 @@ mod tests {
     fn returns_label_on_settled_files() {
         let mut f = filter();
 
-        let (_, label) = f.on_header(&entry("logo.png", 10)).unwrap();
+        let (_, label) = header(&mut f, &entry("logo.png", 10)).unwrap();
         assert_eq!(label.skip, Some(SkipReason::ExcludedExtension));
 
         let (_, label) = classify(&mut f, &entry("x.bin", 10), b"a\x00b");
@@ -328,7 +341,7 @@ mod tests {
     #[test]
     fn parses_source_and_loads_resolver_inputs() {
         let mut f = filter();
-        assert_eq!(hd(f.on_header(&entry("src/main.rs", 100))), None);
+        assert_eq!(hd(header(&mut f, &entry("src/main.rs", 100))), None);
         assert_eq!(
             d(classify(
                 &mut f,
@@ -351,11 +364,11 @@ mod tests {
     fn list_only_for_excluded_oversize_binary_minified() {
         let mut f = CodeFilter::new(Some(50), None, detect_language_from_path);
         assert_eq!(
-            hd(f.on_header(&entry("logo.png", 10))),
+            hd(header(&mut f, &entry("logo.png", 10))),
             Some(Decision::ListOnly)
         );
         assert_eq!(
-            hd(f.on_header(&entry("big.rs", 999))),
+            hd(header(&mut f, &entry("big.rs", 999))),
             Some(Decision::ListOnly)
         );
         assert_eq!(
@@ -413,14 +426,14 @@ mod tests {
         let mut f = filter();
         for path in ["vendor/jquery.min.js", "a/b.min.mjs", "c.min.cjs"] {
             assert_eq!(
-                hd(f.on_header(&entry(path, 200))),
+                hd(header(&mut f, &entry(path, 200))),
                 Some(Decision::ListOnly),
                 "{path}"
             );
         }
         // The leading dot must be literal — these are real source, not bundles.
         for path in ["src/admin.js", "src/examine.js"] {
-            assert_eq!(hd(f.on_header(&entry(path, 200))), None, "{path}");
+            assert_eq!(hd(header(&mut f, &entry(path, 200))), None, "{path}");
         }
     }
 

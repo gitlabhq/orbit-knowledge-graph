@@ -176,12 +176,20 @@ mod tests {
 
     struct UpgradeTextToParseHooks;
     impl FileStreamHooks for UpgradeTextToParseHooks {
-        fn on_header(&mut self, file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-            if file.label.content == ContentClass::Text && file.decision == Decision::Load {
-                Some((Decision::Parse, file.label.clone()))
-            } else {
-                Some((file.decision, file.label.clone()))
-            }
+        fn on_headers(
+            &mut self,
+            files: &[&FileInventoryEntry],
+        ) -> Vec<Option<(Decision, FileLabel)>> {
+            files
+                .iter()
+                .map(|file| {
+                    if file.label.content == ContentClass::Text && file.decision == Decision::Load {
+                        Some((Decision::Parse, file.label.clone()))
+                    } else {
+                        Some((file.decision, file.label.clone()))
+                    }
+                })
+                .collect()
         }
     }
 
@@ -215,10 +223,18 @@ mod tests {
 
     struct BatchUppercaseHooks;
     impl FileStreamHooks for BatchUppercaseHooks {
-        fn on_header(&mut self, file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-            file.path
-                .ends_with(".skip")
-                .then_some((Decision::ListOnly, file.label.clone()))
+        fn on_headers(
+            &mut self,
+            files: &[&FileInventoryEntry],
+        ) -> Vec<Option<(Decision, FileLabel)>> {
+            files
+                .iter()
+                .map(|file| {
+                    file.path
+                        .ends_with(".skip")
+                        .then_some((Decision::ListOnly, file.label.clone()))
+                })
+                .collect()
         }
         fn on_contents(
             &mut self,
