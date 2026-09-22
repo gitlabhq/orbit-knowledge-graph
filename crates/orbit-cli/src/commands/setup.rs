@@ -61,7 +61,7 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 
 pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
     let interactive = tui::can_prompt(options.yes)?;
-    let mut selection = Selection::from_uninstall_options(&options)?;
+    let mut selection = Selection::from_uninstall_options(&options, &target)?;
     tui::intro(format!(
         "Orbit uninstall ({})",
         summary::join_component_labels(&selection.components)
@@ -102,7 +102,7 @@ fn ask_which_agents(
 ) -> Result<Selection> {
     let chosen_agents = tui::multiselect(
         question,
-        &summary::agent_picker_choices(location_hints),
+        &summary::agent_picker_choices(&selection.agents, location_hints),
         &selection.selected_agent_names(),
     )?;
     selection.with_agents_named(&chosen_agents)
@@ -353,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn bare_uninstall_removes_every_agent() {
+    fn bare_uninstall_covers_the_installed_agents() {
         let dir = tempfile::tempdir().unwrap();
         install_with_mcp(&["opencode"], dir.path());
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());

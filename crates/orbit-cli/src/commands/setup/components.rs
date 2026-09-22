@@ -4,6 +4,7 @@ pub(super) mod json;
 mod mcp;
 mod skill;
 
+use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +20,22 @@ pub(super) trait Installer {
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()>;
 
     fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()>;
+
+    fn is_installed(&self, agent: Agent, target: &Target) -> bool;
+}
+
+pub(super) fn installed_agents(components: &BTreeSet<Component>, target: &Target) -> Vec<Agent> {
+    spec::agents()
+        .filter(|agent| {
+            components
+                .iter()
+                .any(|component| installer_for(*component).is_installed(*agent, target))
+        })
+        .collect()
+}
+
+fn file_mentions(path: &Path, marker: &str) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|text| text.contains(marker))
 }
 
 pub(super) fn installer_for(component: Component) -> &'static dyn Installer {

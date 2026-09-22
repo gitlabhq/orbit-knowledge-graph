@@ -6,8 +6,8 @@ use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 use super::json;
 use super::{
-    Installer, Report, backup_once, drop_backup_when_restored, remove_file_and_empty_parents,
-    write_file,
+    Installer, Report, backup_once, drop_backup_when_restored, file_mentions,
+    remove_file_and_empty_parents, write_file,
 };
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent, DIRECT_LAUNCHER, McpFormat};
@@ -52,6 +52,15 @@ impl Installer for McpServer {
             }
         }
         Ok(())
+    }
+
+    fn is_installed(&self, agent: Agent, target: &Target) -> bool {
+        let server = spec::mcp_server();
+        agent.mcp.as_ref().is_some_and(|entry| {
+            target.resolve(&entry.file).is_ok_and(|(path, _)| {
+                file_mentions(&path, server.name) && file_mentions(&path, DIRECT_LAUNCHER)
+            })
+        })
     }
 }
 

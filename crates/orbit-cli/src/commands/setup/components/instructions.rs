@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::{
-    Installer, Report, backup_once, drop_backup_when_restored, remove_file_and_empty_parents,
-    write_file,
+    Installer, Report, backup_once, drop_backup_when_restored, file_mentions,
+    remove_file_and_empty_parents, write_file,
 };
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
@@ -31,6 +31,12 @@ impl Installer for Instructions {
             strip_block_from_file(&path, target, &label, report)?;
         }
         Ok(())
+    }
+
+    fn is_installed(&self, agent: Agent, target: &Target) -> bool {
+        target
+            .resolve(&agent.instruction_file)
+            .is_ok_and(|(path, _)| file_mentions(&path, BLOCK_BEGIN))
     }
 }
 

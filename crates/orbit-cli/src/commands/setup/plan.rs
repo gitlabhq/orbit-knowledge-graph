@@ -30,16 +30,14 @@ impl Selection {
         })
     }
 
-    pub(super) fn from_uninstall_options(options: &Options) -> Result<Selection> {
+    pub(super) fn from_uninstall_options(options: &Options, target: &Target) -> Result<Selection> {
+        let components: BTreeSet<Component> = Component::ALL.into_iter().collect();
         let agents = if options.agents.is_empty() {
-            spec::agents().collect()
+            components::installed_agents(&components, target)
         } else {
             agents_named(&options.agents)?
         };
-        Ok(Selection {
-            agents,
-            components: Component::ALL.into_iter().collect(),
-        })
+        Ok(Selection { agents, components })
     }
 
     pub(super) fn selected_agent_names(&self) -> Vec<String> {

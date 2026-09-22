@@ -4,7 +4,9 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use super::json;
-use super::{Installer, Report, backup_once, remove_file_and_empty_parents, write_file};
+use super::{
+    Installer, Report, backup_once, file_mentions, remove_file_and_empty_parents, write_file,
+};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
 
@@ -35,6 +37,20 @@ impl Installer for Hooks {
             remove_for_agent(*agent, target, report)?;
         }
         Ok(())
+    }
+
+    fn is_installed(&self, agent: Agent, target: &Target) -> bool {
+        let merged = agent.json_merges.iter().any(|merge| {
+            target
+                .resolve(&merge.file)
+                .is_ok_and(|(path, _)| file_mentions(&path, &merge.marker))
+        });
+        let templated = agent.template_files.iter().any(|template_file| {
+            target
+                .resolve(&template_file.path)
+                .is_ok_and(|(path, _)| path.exists())
+        });
+        merged || templated
     }
 }
 

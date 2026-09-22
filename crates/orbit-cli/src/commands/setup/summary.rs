@@ -32,8 +32,12 @@ pub(super) fn detected_location_hints(
         .collect()
 }
 
-pub(super) fn agent_picker_choices(location_hints: &BTreeMap<String, String>) -> Vec<Choice> {
-    spec::agents()
+pub(super) fn agent_picker_choices(
+    agents: &[Agent],
+    location_hints: &BTreeMap<String, String>,
+) -> Vec<Choice> {
+    agents
+        .iter()
         .map(|agent| Choice {
             key: agent.name.clone(),
             label: agent.title.clone(),

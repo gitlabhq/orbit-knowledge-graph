@@ -39,6 +39,14 @@ impl Installer for Skill {
         }
         Ok(())
     }
+
+    fn is_installed(&self, agent: Agent, target: &Target) -> bool {
+        skill_targets(&[agent], target).is_ok_and(|targets| {
+            targets
+                .iter()
+                .any(|skill| skill.root.join("SKILL.md").exists())
+        })
+    }
 }
 
 struct SkillTarget {
