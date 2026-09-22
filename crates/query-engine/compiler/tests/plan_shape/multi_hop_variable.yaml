@@ -3,32 +3,29 @@ input: {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[
 expected: |
   (Limit 11
     (Project [e0_traversal_path:hop_e0_path e0_relationship_kind:hop_e0_type e0_source_id:hop_e0_src e0_source_kind:hop_e0_src_type e0_target_id:hop_e0_dst e0_target_kind:hop_e0_dst_type e0_path_nodes:hop_e0_path_nodes @id @username @name @state @id @name @full_path @visibility_level]
-      (Join Semi/mat (. = _nf_u.id)
-        (Join Inner (e0.target_id = p.id)
-          (Join Inner (e0.source_id = u.id)
-            (Filter [source_kind="User" source_id∈[1] target_kind="Project" !deleted]
-              (Union
-                (Project [source_id target_id relationship_kind ([(e1.target_id e1.target_kind)]):path_nodes 1:depth _deleted traversal_path]
+      (Join Inner (e0.target_id = p.id)
+        (Join Inner (e0.source_id = u.id)
+          (Filter [source_kind="User" source_id∈[1] target_kind="Project" !deleted]
+            (Union
+              (Project [source_id target_id relationship_kind ([(e1.target_id e1.target_kind)]):path_nodes 1:depth _deleted traversal_path]
+                (Filter [relationship_kind="MEMBER_OF" !deleted]
+                  (Scan gl_edge e1)))
+              (Project [source_id target_id relationship_kind ([(e1.target_id e1.target_kind) (e2.target_id e2.target_kind)]):path_nodes 2:depth _deleted traversal_path]
+                (Join Inner (e1.target_id = e2.source_id)
                   (Filter [relationship_kind="MEMBER_OF" !deleted]
-                    (Scan gl_edge e1)))
-                (Project [source_id target_id relationship_kind ([(e1.target_id e1.target_kind) (e2.target_id e2.target_kind)]):path_nodes 2:depth _deleted traversal_path]
+                    (Scan gl_edge e1))
+                  (Filter [!deleted relationship_kind="MEMBER_OF"]
+                    (Scan gl_edge e2))))
+              (Project [source_id target_id relationship_kind ([(e1.target_id e1.target_kind) (e2.target_id e2.target_kind) (e3.target_id e3.target_kind)]):path_nodes 3:depth _deleted traversal_path]
+                (Join Inner (e2.target_id = e3.source_id)
                   (Join Inner (e1.target_id = e2.source_id)
                     (Filter [relationship_kind="MEMBER_OF" !deleted]
                       (Scan gl_edge e1))
                     (Filter [!deleted relationship_kind="MEMBER_OF"]
-                      (Scan gl_edge e2))))
-                (Project [source_id target_id relationship_kind ([(e1.target_id e1.target_kind) (e2.target_id e2.target_kind) (e3.target_id e3.target_kind)]):path_nodes 3:depth _deleted traversal_path]
-                  (Join Inner (e2.target_id = e3.source_id)
-                    (Join Inner (e1.target_id = e2.source_id)
-                      (Filter [relationship_kind="MEMBER_OF" !deleted]
-                        (Scan gl_edge e1))
-                      (Filter [!deleted relationship_kind="MEMBER_OF"]
-                        (Scan gl_edge e2)))
-                    (Filter [!deleted relationship_kind="MEMBER_OF"]
-                      (Scan gl_edge e3))))))
-            (Filter [id∈[1] !deleted]
-              (Scan gl_user u FINAL)))
-          (Filter [!deleted]
-            (Scan gl_project p FINAL)))
-        (Filter [id∈[1] !deleted]
-          (Scan gl_user u FINAL)))))
+                      (Scan gl_edge e2)))
+                  (Filter [!deleted relationship_kind="MEMBER_OF"]
+                    (Scan gl_edge e3))))))
+          (Filter [id∈[1] !deleted]
+            (Scan gl_user u FINAL)))
+        (Filter [!deleted]
+          (Scan gl_project p FINAL)))))

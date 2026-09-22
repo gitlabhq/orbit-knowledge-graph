@@ -942,6 +942,7 @@ impl<'a> PlanCtx<'a> {
         let cl = self.input.relationships.len();
         let mut fk_joined: HashSet<String> = HashSet::new();
         let mut narrowing_joins: Vec<(String, PhysOp)> = Vec::new();
+        let narrowing_disabled = true; // TODO: narrowing CTEs cause correctness issues
 
         let all_fk = cl >= 1
             && self
@@ -1019,6 +1020,9 @@ impl<'a> PlanCtx<'a> {
 
                     // Narrowing: selective endpoints → semi-join (materialized as CTE)
                     for (na, _edge_col) in [(&rel.from, from_col), (&rel.to, to_col)] {
+                        if narrowing_disabled {
+                            continue;
+                        }
                         if let Some(n) = self.input.nodes.iter().find(|n| &n.id == na) {
                             if self.is_selective(n) && n.table.is_some() {
                                 let cte_name = format!("_nf_{na}");
