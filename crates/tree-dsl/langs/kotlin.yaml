@@ -277,7 +277,7 @@ display:
           fqn: '@$M|child_sym("__package")'
           file_path: '@$M'
           language: '@$M|split_last(".")|map("kt:kotlin", "kts:kotlin")'
-      - match: '(__def !(__class) (__impl))'
+      - match: '(__def (__impl) !(__class))'
         tag:
           entity: Definition
           file_path: '@$ROOT|ancestor_tag("file_path")'
@@ -309,7 +309,7 @@ display:
         tag: { def_type: EnumVariant }
       - match: '(__def (__trait))'
         tag: { def_type: Trait }
-      - match: '(__def !(__class) (__impl))'
+      - match: '(__def (__impl) !(__class))'
         tag: { def_type: Impl }
       - match: '(__def (__variable))'
         tag: { def_type: Variable }

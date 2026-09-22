@@ -82,7 +82,7 @@ pub(crate) fn matches(t: &Tree, lang: &Lang, id: NodeId, p: &Pat, caps: &mut [Ca
                         }
                     }
                     Pat::Not(inner) => {
-                        for &child in &children[ci..] {
+                        for &child in &children {
                             if matches(t, lang, child, inner, caps) {
                                 return false;
                             }
