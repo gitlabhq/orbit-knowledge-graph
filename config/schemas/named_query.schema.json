@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "NamedQuery",
-  "description": "A server-defined graph query in config/named_queries/. The query DSL may reference server-side bindings via {$binding: <name>} placeholders and client-supplied parameters via {$param: <name>} placeholders, rendered server-side and compiled by the query compiler. Each file's name field must match its file stem.",
+  "description": "A server-defined query in config/named_queries/ with one JSON DSL and one GQL spelling. The server renders the spelling the request selects and compiles it with the matching frontend. Each file name must match its name field.",
   "type": "object",
   "required": ["name", "description", "query"],
   "additionalProperties": false,
@@ -27,7 +27,7 @@
       "items": {
         "enum": ["current_user_id"]
       },
-      "description": "Server-side values substituted at render time via {$binding: <name>}. Never client-supplied."
+      "description": "Trusted server values, never client-supplied. JSON uses {$binding: name}; GQL uses binding(\"name\")."
     },
     "parameters": {
       "type": "object",
@@ -48,12 +48,25 @@
           }
         }
       },
-      "description": "Client-supplied values substituted at render time via {$param: <name>} (whole value) or a \"$param:<name>\" object key (string parameters only), validated against each parameter's JSON Schema."
+      "description": "Client values validated against JSON Schema. JSON uses {$param: name} for whole values and a \"$param:name\" object key for string parameters. GQL uses param(\"name\") for encoded literals, identifier(\"name\") for validated identifiers, and integer(\"name\") for decimal Int64 IDs."
     },
     "query": {
       "type": "object",
-      "required": ["query_type"],
-      "description": "Graph query DSL object. {$binding: <name>} and {$param: <name>} placeholders are replaced whole-value at render time; a \"$param:<name>\" object key is replaced by the parameter's string value."
+      "required": ["json", "gql"],
+      "additionalProperties": false,
+      "properties": {
+        "json": {
+          "type": "object",
+          "required": ["query_type"],
+          "description": "Query DSL object with {$binding: name}, {$param: name}, and \"$param:name\" placeholders replaced at render time."
+        },
+        "gql": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Trusted GQL text with MiniJinja lookup expressions. Authors must place each lookup at a complete literal or identifier position outside quotes, backticks, and comments, without removing its encoding."
+        }
+      },
+      "description": "Both spellings must select the same graph shape. The parity test in crates/integration-tests compiles them to identical SQL."
     }
   }
 }

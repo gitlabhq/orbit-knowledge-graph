@@ -5,16 +5,21 @@ parameters:
     schema: { type: string, pattern: "^[1-9][0-9]{0,18}$" }
     example: "1"
 query:
-  query_type: traversal
-  nodes:
-    - id: caller
-      entity: Definition
-      columns: [start_line, file_path, name, fqn, definition_type]
-    - id: def
-      entity: Definition
-      node_ids: [{ $param: node_id }]
-  relationships:
-    - type: CALLS
-      from: caller
-      to: def
-  limit: 100
+  json:
+    query_type: traversal
+    nodes:
+      - id: caller
+        entity: Definition
+        columns: [start_line, file_path, name, fqn, definition_type]
+      - id: def
+        entity: Definition
+        node_ids: [{ $param: node_id }]
+    relationships:
+      - type: CALLS
+        from: caller
+        to: def
+    limit: 100
+  gql: |
+    MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: {{ integer("node_id") }}})
+    RETURN caller.start_line, caller.file_path, caller.name, caller.fqn, caller.definition_type, def
+    LIMIT 100

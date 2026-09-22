@@ -160,6 +160,20 @@ pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<
         .count_err()
 }
 
+pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
+    let mut ctx = config::ValidateNormalizeGqlCtx::new(Arc::clone(ontology));
+    ctx.set_raw(raw.to_string());
+    config::run_validate_normalize_gql(&mut ctx)
+        .and_then(|()| {
+            ctx.take_input().ok_or_else(|| {
+                error::QueryError::PipelineInvariant(
+                    "validate_normalize_gql produced no input".into(),
+                )
+            })
+        })
+        .count_err()
+}
+
 /// Compile a pre-built hydration `Input` into ClickHouse SQL.
 ///
 /// Runs the hydration pipeline: Restrict → Plan → Lower → Enforce → Settings → Codegen.
