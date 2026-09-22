@@ -12,17 +12,58 @@ fn detect_lang(suite: &TestSuite, fixtures: &[(String, String)]) -> SupportLang 
     {
         return lang;
     }
-    let counts = fixtures
+    let langs: std::collections::HashSet<_> = fixtures
         .iter()
         .filter_map(|(path, _)| SupportLang::from_path(path))
-        .fold(std::collections::HashMap::new(), |mut m, l| {
-            *m.entry(l).or_insert(0usize) += 1;
-            m
-        });
-    counts
-        .iter()
-        .max_by_key(|&(l, n)| (*n, std::cmp::Reverse(format!("{l:?}"))))
-        .map_or(SupportLang::Python, |(&l, _)| l)
+        .collect();
+    match langs.len() {
+        1 => *langs.iter().next().unwrap(),
+        _ => panic!("suite mixes languages {langs:?}; declare `pipeline:`"),
+    }
+}
+
+fn workspace_root() -> std::path::PathBuf {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("git rev-parse failed");
+    assert!(out.status.success(), "git rev-parse --show-toplevel failed");
+    std::path::PathBuf::from(String::from_utf8(out.stdout).unwrap().trim())
+}
+
+fn load_fixture_dir(dir: &str) -> Vec<(String, String)> {
+    let src = workspace_root().join(dir);
+    assert!(src.is_dir(), "fixture_dir not found: {}", src.display());
+    let mut files: Vec<(String, String)> = walkdir::WalkDir::new(&src)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| {
+            let rel = e
+                .path()
+                .strip_prefix(&src)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
+            let content = std::fs::read_to_string(e.path()).ok()?;
+            Some((rel, content))
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+fn suite_fixtures(suite: &TestSuite) -> Vec<(String, String)> {
+    let mut files = match &suite.fixture_dir {
+        Some(dir) => load_fixture_dir(dir),
+        None => Vec::new(),
+    };
+    for f in &suite.fixtures {
+        files.retain(|(p, _)| p != &f.path);
+        files.push((f.path.clone(), f.content.clone()));
+    }
+    files
 }
 
 async fn build_and_check(env: &Env, state: &mut State, suite: &TestSuite) -> Vec<Failure> {
@@ -44,11 +85,7 @@ pub async fn run_yaml_suite(yaml: &str) {
         return;
     }
 
-    let fixtures: Vec<(String, String)> = suite
-        .fixtures
-        .iter()
-        .map(|f| (f.path.clone(), f.content.clone()))
-        .collect();
+    let fixtures = suite_fixtures(&suite);
     let lang_id = detect_lang(&suite, &fixtures);
 
     let (env, mut state) = tree_dsl::index(lang_id, &fixtures);
@@ -82,7 +119,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                 name: step.name.clone(),
                 pipeline: suite.pipeline.clone(),
                 fixtures: Vec::new(),
-                _fixture_dir: None,
+                fixture_dir: None,
                 _trace: false,
                 tests: step.tests.clone(),
                 steps: Vec::new(),

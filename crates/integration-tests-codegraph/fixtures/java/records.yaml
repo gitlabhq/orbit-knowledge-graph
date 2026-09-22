@@ -267,7 +267,7 @@ tests:
     query: |
       MATCH (r:Definition)-[:DefinitionToDefinition]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.definition_type = 'Method'
+        AND c.definition_type = 'Constructor'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
@@ -277,7 +277,7 @@ tests:
     query: |
       MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
       WHERE cls.fqn = 'com.example.records.Bounds' AND m.name = 'Bounds'
-        AND m.definition_type = 'Method'
+        AND m.definition_type = 'Constructor'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -321,7 +321,7 @@ tests:
     query: |
       MATCH (r:Definition)-[e:DefinitionToDefinition]->(c:Definition)
       WHERE r.fqn = 'com.example.records.Range'
-        AND c.definition_type = 'Method'
+        AND c.definition_type = 'Constructor'
         AND e.edge_kind = 'Defines'
       RETURN c.fqn AS fqn
     assert:

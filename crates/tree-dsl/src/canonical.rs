@@ -203,6 +203,26 @@ pub enum Canonical {
 
     #[strum(serialize = "__ssa_hint")]
     SsaHint,
+    #[strum(serialize = "__import_kind")]
+    ImportKind,
+    #[strum(serialize = "__decl")]
+    Decl,
+    #[strum(serialize = "__constructor")]
+    Constructor,
+    #[strum(serialize = "__implicit")]
+    Implicit,
+    #[strum(serialize = "__simple_name")]
+    SimpleName,
+    #[strum(serialize = "__predeclared")]
+    Predeclared,
+    #[strum(serialize = "__companion")]
+    Companion,
+    #[strum(serialize = "__partial")]
+    Partial,
+    #[strum(serialize = "__destructure")]
+    Destructure,
+    #[strum(serialize = "__positional")]
+    Positional,
 }
 
 impl From<Canonical> for u16 {

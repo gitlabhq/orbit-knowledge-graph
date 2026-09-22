@@ -1,6 +1,7 @@
 use std::ops::ControlFlow;
 
 use crate::canonical::Canonical as C;
+use crate::resolver::CLASS_LIKE;
 
 use super::types::{Edge, EdgeKind, Node, Tree};
 
@@ -52,6 +53,37 @@ impl<'a> Walk<'a> {
     }
 }
 
+pub fn members_by_level<N, I, T>(
+    start: Vec<N>,
+    succ: impl Fn(N) -> I,
+    find: impl Fn(N) -> Option<T>,
+) -> Vec<T>
+where
+    N: Copy + Eq + std::hash::Hash,
+    I: IntoIterator<Item = N>,
+    T: PartialEq,
+{
+    let mut seen: rustc_hash::FxHashSet<N> = start.iter().copied().collect();
+    let mut level = start;
+    while !level.is_empty() {
+        let mut found: Vec<T> = Vec::new();
+        for t in level.iter().filter_map(|&n| find(n)) {
+            if !found.contains(&t) {
+                found.push(t);
+            }
+        }
+        if !found.is_empty() {
+            return found;
+        }
+        level = level
+            .iter()
+            .flat_map(|&n| succ(n))
+            .filter(|m| seen.insert(*m))
+            .collect();
+    }
+    Vec::new()
+}
+
 pub fn reachable<N, I>(start: N, succ: impl Fn(N) -> I) -> impl Iterator<Item = N>
 where
     N: Copy + Eq,
@@ -71,87 +103,6 @@ where
         }));
         Some(n)
     })
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum Linearize {
-    Reject,
-    Left,
-    Right,
-    Class,
-}
-
-pub struct LinearizeKeys {
-    key: u32,
-    modes: [u32; 3],
-}
-
-impl LinearizeKeys {
-    pub fn new(lang: &crate::intern::Lang) -> Self {
-        Self {
-            key: lang.syms.intern("linearize"),
-            modes: ["left", "right", "class"].map(|m| lang.syms.intern(m)),
-        }
-    }
-
-    pub fn of(&self, class: Cursor) -> Linearize {
-        match class.tag(self.key) {
-            Some(m) if m == self.modes[0] => Linearize::Left,
-            Some(m) if m == self.modes[1] => Linearize::Right,
-            Some(m) if m == self.modes[2] => Linearize::Class,
-            _ => Linearize::Reject,
-        }
-    }
-}
-
-pub fn pick_member<N: Copy, T: PartialEq>(
-    mode: Linearize,
-    is_class: impl Fn(N) -> bool,
-    mut found: Vec<(N, T)>,
-) -> Option<T> {
-    if found.is_empty() {
-        return None;
-    }
-    if found.iter().all(|(_, t)| *t == found[0].1) {
-        return Some(found.swap_remove(0).1);
-    }
-    match mode {
-        Linearize::Reject => None,
-        Linearize::Left => Some(found.swap_remove(0).1),
-        Linearize::Right => found.pop().map(|(_, t)| t),
-        Linearize::Class => {
-            let mut classes = found.into_iter().filter(|&(n, _)| is_class(n));
-            let first = classes.next()?;
-            classes.next().is_none().then_some(first.1)
-        }
-    }
-}
-
-pub fn unique_by_level<N, I, T>(
-    start: Vec<N>,
-    succ: impl Fn(N) -> I,
-    find: impl Fn(N) -> Option<T>,
-    pick: impl Fn(Vec<(N, T)>) -> Option<T>,
-) -> Option<T>
-where
-    N: Copy + Eq + std::hash::Hash,
-    I: IntoIterator<Item = N>,
-    T: PartialEq,
-{
-    let mut seen: rustc_hash::FxHashSet<N> = start.iter().copied().collect();
-    let mut level = start;
-    while !level.is_empty() {
-        let found: Vec<(N, T)> = level.iter().filter_map(|&n| Some((n, find(n)?))).collect();
-        if !found.is_empty() {
-            return pick(found);
-        }
-        level = level
-            .iter()
-            .flat_map(|&n| succ(n))
-            .filter(|m| seen.insert(*m))
-            .collect();
-    }
-    None
 }
 
 #[derive(Clone, Copy)]
@@ -192,12 +143,6 @@ impl<'a> Cursor<'a> {
         self.fi
     }
 
-    pub fn child_sym_of_kind(self, kind: u16) -> Option<u32> {
-        self.children()
-            .find(|c| c.kind() == kind)
-            .and_then(|c| c.sym_opt())
-    }
-
     #[inline]
     pub fn tag(self, key: u32) -> Option<u32> {
         self.tree().get_tag(self.id, key)
@@ -226,6 +171,12 @@ impl<'a> Cursor<'a> {
     #[inline]
     pub fn is(self, ck: C) -> bool {
         self.kind() == ck
+    }
+
+    pub fn child_sym_of_kind(self, kind: u16) -> Option<u32> {
+        self.children()
+            .find(|c| c.kind() == kind)
+            .and_then(|c| c.sym_opt())
     }
 
     #[inline]
@@ -270,10 +221,6 @@ impl<'a> Cursor<'a> {
 
     pub fn size(self) -> u32 {
         self.nid().descendants(&self.tree().arena).count() as u32
-    }
-
-    pub fn is_synth(self) -> bool {
-        self.tree().node(self.nid()).synth
     }
 
     pub fn parent(self) -> Option<Self> {
@@ -332,8 +279,35 @@ impl<'a> Cursor<'a> {
             .filter(|(_, m)| m.sym_opt().is_some())
     }
 
+    pub fn is_class(self) -> bool {
+        CLASS_LIKE.iter().any(|&k| self.has(k))
+    }
+
+    pub fn reference(self) -> Self {
+        self.child(C::Call)
+            .filter(|c| c.has(C::Property))
+            .and_then(|c| c.child(C::Callee))
+            .unwrap_or(self)
+    }
+
     pub fn member(self) -> Option<Self> {
         self.child(C::Callee)?.child(C::Member)
+    }
+
+    pub fn chain_root(self) -> Self {
+        let inner = |r: &Self| r.child(C::Member)?.child(C::Object);
+        std::iter::successors(Some(self), inner)
+            .last()
+            .unwrap_or(self)
+    }
+
+    pub fn tail_expr(self) -> Self {
+        let stop =
+            |c: &Self| c.is(C::Call) || c.is(C::SsaBranch) || c.is(C::SsaReturn) || c.is(C::Member);
+        let next = |c: &Self| (!stop(c)).then(|| c.last_named()).flatten();
+        std::iter::successors(Some(self), next)
+            .last()
+            .unwrap_or(self)
     }
 
     pub fn object_ivar(self) -> Option<Self> {
@@ -342,6 +316,14 @@ impl<'a> Cursor<'a> {
 
     pub fn rhs_callee(self) -> Option<u32> {
         self.child(C::Rhs)?.child(C::Call)?.child_sym(C::Callee)
+    }
+
+    pub fn typed(self) -> Option<Self> {
+        self.child(C::SsaTyped).or_else(|| {
+            let rhs = self.child(C::Rhs)?;
+            let callee = rhs.child(C::Call).and_then(|c| c.child(C::Callee));
+            callee.or_else(|| rhs.child(C::Member))
+        })
     }
 
     pub fn enclosing_def(self, kinds: &'a [C]) -> Option<Self> {
@@ -429,16 +411,11 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn names(self) -> impl Iterator<Item = Self> + 'a {
-        self.children()
-            .filter(|c| c.is(C::Name) && c.sym_opt().is_some())
-    }
-
-    pub fn find_desc(self, pred: impl Fn(Self) -> bool) -> Option<Self> {
-        self.descend(|n| if pred(n) { Step::Out(n) } else { Step::Into })
+        self.children_of(C::Name)
     }
 
     pub fn any_desc(self, pred: impl Fn(Self) -> bool) -> bool {
-        self.find_desc(pred).is_some()
+        self.descendants().any(pred)
     }
 
     pub fn enclosing(self, pred: impl Fn(Self) -> bool) -> Option<Self> {
@@ -489,6 +466,9 @@ pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     class.descend(|n| {
         if n.is(C::Def) && n.index() != class.index() && n.child_sym(C::DefName) == Some(name) {
             return Step::Out(n);
+        }
+        if n.is_class() && !n.has(C::ImplBlock) && !n.has(C::Companion) {
+            return Step::Over;
         }
         Step::Into
     })

@@ -55,6 +55,10 @@ impl Interner {
     pub fn len(&self) -> u32 {
         self.rodeo.len() as u32
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[derive(Default, Clone)]

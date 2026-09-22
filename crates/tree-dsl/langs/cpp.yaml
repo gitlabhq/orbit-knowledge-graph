@@ -87,11 +87,9 @@ stages:
       - match: '(function_definition declarator: $C:operator_cast body: $B)'
         replace: '(__def (__defname @$C|regex_replace("\s*\(\s*\)\s*(const)?\s*$", "")|regex_replace("\s*/\*[^*]*\*/\s*$", "")) (__function) $B)'
       - match: '(declaration declarator: (function_declarator declarator: $N:identifier))'
-        replace: '(__def (__defname @$N) (__function))'
-        tag: { decl: "true", callable: "true" }
+        replace: '(__decl (__defname @$N))'
       - match: '(declaration declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier)))'
-        replace: '(__def (__defname @$N) (__function))'
-        tag: { decl: "true", callable: "true" }
+        replace: '(__decl (__defname @$N))'
       # Method declarations and definitions inside a class body
       - match: '(field_declaration type:? $RT:type_identifier declarator: (function_declarator declarator: $N:field_identifier parameters: $P))'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
@@ -267,6 +265,8 @@ display:
         tag: { def_type: Function }
       - match: '(__def (__method))'
         tag: { def_type: Method }
+      - match: '(__def (__method) (__constructor))'
+        tag: { def_type: Constructor }
       - match: '(__def (__class))'
         tag: { def_type: Class }
       - match: '(__def (__struct))'

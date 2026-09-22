@@ -75,7 +75,7 @@ tests:
     query: |
       MATCH (e:Definition)-[:DefinitionToDefinition]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.definition_type = 'Method'
+        AND c.definition_type = 'Constructor'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }

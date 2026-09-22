@@ -29,7 +29,7 @@ struct EntityConfig {
     columns: Vec<ColumnConfig>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 struct ColumnConfig {
     name: String,
     #[serde(rename = "type")]
@@ -42,6 +42,8 @@ struct ColumnConfig {
     nullable: bool,
     #[serde(default)]
     expand_sym: bool,
+    #[serde(default)]
+    span: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -114,26 +116,17 @@ impl Table {
             ColumnConfig {
                 name: "source_id".into(),
                 dtype: "Int64".into(),
-                from: None,
-                compute: None,
-                nullable: false,
-                expand_sym: false,
+                ..Default::default()
             },
             ColumnConfig {
                 name: "target_id".into(),
                 dtype: "Int64".into(),
-                from: None,
-                compute: None,
-                nullable: false,
-                expand_sym: false,
+                ..Default::default()
             },
             ColumnConfig {
                 name: "edge_kind".into(),
                 dtype: "Utf8".into(),
-                from: None,
-                compute: None,
-                nullable: false,
-                expand_sym: false,
+                ..Default::default()
             },
         ])
     }
@@ -245,7 +238,7 @@ fn resolve_column<'a>(
         return Val::I(id);
     }
     if let Some(ref compute) = col.compute {
-        return compute_val(tree, c, compute, lang, expand_node);
+        return compute_val(tree, c, compute, lang, expand_node, col.span.as_deref());
     }
     if col.expand_sym {
         if let Some(en) = expand_node {
@@ -263,10 +256,10 @@ fn resolve_column<'a>(
             c.sym()
         } else {
             let mut v = find_display_sym(tree, c, from, lang);
-            if v == 0 {
-                if let Some(en) = expand_node {
-                    v = find_display_sym(tree, en, from, lang);
-                }
+            if v == 0
+                && let Some(en) = expand_node
+            {
+                v = find_display_sym(tree, en, from, lang);
             }
             v
         };
@@ -295,23 +288,36 @@ fn compute_val<'a>(
     compute: &str,
     lang: &'a Lang,
     expand: Option<Cursor<'a>>,
+    span: Option<&str>,
 ) -> Val<'a> {
     let import_type_key = lang.syms.intern("import_type");
+    let tagged = |s: &str| {
+        s.strip_prefix("tag:")
+            .is_some_and(|k| c.has_tag(lang.syms.intern(k)))
+    };
+    let whole = span.is_some_and(|s| s == "definition" || tagged(s));
+    let definition = || {
+        if whole {
+            c
+        } else {
+            c.child(C::DefName).unwrap_or(c)
+        }
+    };
     match compute {
         "import_type" => {
-            if let Some(en) = expand {
-                if let Some(v) = tree.get_tag(en.index(), import_type_key) {
-                    return Val::S(lang.syms.resolve(v));
-                }
+            if let Some(en) = expand
+                && let Some(v) = tree.get_tag(en.index(), import_type_key)
+            {
+                return Val::S(lang.syms.resolve(v));
             }
             if let Some(v) = tree.get_tag(c.index(), import_type_key) {
                 return Val::S(lang.syms.resolve(v));
             }
             let source_sym = c.child_sym(C::Source).unwrap_or(0);
-            if let Some(en) = expand {
-                if en.sym() == source_sym {
-                    return Val::S("Import");
-                }
+            if let Some(en) = expand
+                && en.sym() == source_sym
+            {
+                return Val::S("Import");
             }
             Val::S("NamedImport")
         }
@@ -331,30 +337,12 @@ fn compute_val<'a>(
         "end_byte" => Val::I(c.end() as i64),
         "start_col" => Val::I(0),
         "end_col" => Val::I(0),
-        "defname_start_line" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.start_row() as i64 + 1)
-        }
-        "defname_end_line" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.end_row() as i64 + 1)
-        }
-        "defname_start_byte" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.start() as i64)
-        }
-        "defname_end_byte" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.end() as i64)
-        }
-        "defname_start_col" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.start_col() as i64 + 1)
-        }
-        "defname_end_col" => {
-            let loc = c.child(C::DefName).unwrap_or(c);
-            Val::I(loc.end_col() as i64 + 1)
-        }
+        "defname_start_line" => Val::I(definition().start_row() as i64 + 1),
+        "defname_end_line" => Val::I(definition().end_row() as i64 + 1),
+        "defname_start_byte" => Val::I(definition().start() as i64),
+        "defname_end_byte" => Val::I(definition().end() as i64),
+        "defname_start_col" => Val::I(definition().start_col() as i64 + 1),
+        "defname_end_col" => Val::I(definition().end_col() as i64 + 1),
         _ => Val::Null,
     }
 }
@@ -392,10 +380,10 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
                 if !source_kinds.contains(&c.kind()) {
                     continue;
                 }
-                if let Some(ep) = exclude_parent {
-                    if c.parent().is_some_and(|p| p.kind() == ep) {
-                        continue;
-                    }
+                if let Some(ep) = exclude_parent
+                    && c.parent().is_some_and(|p| p.kind() == ep)
+                {
+                    continue;
                 }
 
                 if let Some(ek) = expand_kind {
@@ -485,10 +473,11 @@ pub fn export(trees: &[Tree], edges: &[Edge], lang: &Lang) -> anyhow::Result<Dat
                     }
                 }
                 for edge in edges.iter().filter(|e| e.from_tree == fi as u32) {
-                    if edge.from_node == 0 && edge.kind == EdgeKind::Calls {
-                        if let Some(&tid) = tgt_ids.get(&(fi, edge.to_node)) {
-                            t.row(&[Val::I(root_id), Val::I(tid), Val::S("Calls")]);
-                        }
+                    if edge.from_node == 0
+                        && edge.kind == EdgeKind::Calls
+                        && let Some(&tid) = tgt_ids.get(&(fi, edge.to_node))
+                    {
+                        t.row(&[Val::I(root_id), Val::I(tid), Val::S("Calls")]);
                     }
                 }
             }

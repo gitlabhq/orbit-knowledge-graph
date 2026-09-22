@@ -1,6 +1,6 @@
 package com.example.extensions.utils
 
-import com.example.extensions.ExtendMe
+import com.example.extensions.entities.ExtendMe
 
 fun ExtendMe.reverse() = ExtendMe(value.reversed())
 

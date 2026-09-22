@@ -190,7 +190,7 @@ stages:
           resolved_source: '@$ROOT|tag("source_rel")'
       - match: '(__import (__source_path "^."))'
         tag:
-          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "tag:source_rel")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")'
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "tag:source_rel")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
   display_source: resolved

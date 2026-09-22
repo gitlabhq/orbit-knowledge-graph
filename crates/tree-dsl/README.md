@@ -165,9 +165,37 @@ Because inner nodes are processed first:
 - Use `$$$ANN:__decorator|__supertype` to capture markers created by earlier rules in the SAME stage
 - Use `**/pattern` to detect descendants without capturing them (e.g., `__call__` method detection)
 
+### Member identity and source ranges
+
+A `replace:` rule can carry `unique:`. Before the rule writes its node, the
+engine looks at the matched node's siblings. With `unique: <kind>`, a sibling
+`__def` whose `<kind>` child has the same symbol blocks the rule. With a
+pattern, `unique: '(__def (__method) (formal_parameters !(__binding)))'`, a
+sibling that matches the pattern and shares the `__defname` blocks it. First
+writer wins, and a blocked rule ends matching for that node. Java record
+accessors use the pattern form, so only an explicit zero-argument method
+suppresses the synthesized accessor; the implicit `equals` uses a name-only
+pattern.
+
+Position columns in `config/export.yaml` accept `span:`. The default is the
+definition name range; `span: definition` selects the whole definition; `span:
+tag:<key>` selects the whole definition for nodes carrying that user tag. Java
+methods carry `definition_span`, so annotated methods start at the annotation.
+
 ## Resolution
 
-After per-file rewriting and SSA linking, the resolver runs across all files to produce cross-file edges (Imports, Calls). Resolution runs in parallel using two waves.
+After per-file rewriting and SSA linking, the resolver runs across all files to produce cross-file edges (Imports, Calls). Resolution runs in parallel. Return-type waves repeat until no new call edges appear.
+
+Internal call edges retain their call sites. The exported table has one
+cross-file row per caller, target, and edge kind.
+
+### Lexical declarations
+
+The reserved `hoisted` tag predeclares the direct definitions in a scope before
+its body runs. Elixir modules use this tag so plain callees reach local functions
+regardless of definition order. Wildcard imports bind unbound names only while
+their lexical scope is active. An `__ssa_hint "*"` imports the target's visible
+names; an alias keeps a namespace binding.
 
 ### Phase 1: File tree walk
 
@@ -228,13 +256,18 @@ Each import request independently:
 3. Scans callers for module-level method calls matching target definitions
 4. Promotes intra-file `Imports` edges to cross-file `Calls` edges
 
-#### Wave 2: Type and field edges (parallel per call edge)
+#### Type and field edges
 
-Each call edge from wave 1 independently:
-1. Infers the target's return type via `__ssa_return_type` or body scan
-2. Resolves the return type to a class definition
-3. Finds bindings that capture the call result, then resolves method calls on those bindings to the return type's methods
-4. Finds typed instance fields and resolves method calls through them
+Typed fields supply receiver call edges. Local and cross-file call edges then
+enter the same return-type waves. SSA records a TypeFlow dependency from each
+consumer call to the exact call that produces its receiver value.
+
+Each wave resolves the producer's return type and finds the consumer's method on
+that type. New call edges enter the next wave. The process stops when no new
+call-site and target pair remains. Class calls produce their class type.
+
+Edges retain call-site identities in saved snapshots. Rebuild snapshots saved
+with the earlier edge layout.
 
 ### Resolve config reference
 

@@ -29,7 +29,7 @@ pub enum EdgeKind {
     Defines = 2,
     Imports = 3,
     Extends = 4,
-    Dispatch = 5,
+    TypeFlow = 5,
 }
 
 impl EdgeKind {
@@ -211,6 +211,10 @@ impl Tree {
 
     pub fn len(&self) -> u32 {
         self.root.descendants(&self.arena).count() as u32
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn compact(&mut self) {

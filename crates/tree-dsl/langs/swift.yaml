@@ -91,7 +91,7 @@ stages:
       - match: '(protocol_function_declaration name: $N:simple_identifier $$$P:__binding $RT?:type_identifier)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $$$P)'
       - match: '(init_declaration $$$P:__binding body: $B:function_body)'
-        replace: '(__def (__defname "init") (__method) $$$P $B)'
+        replace: '(__def (__defname "init") (__method) (__constructor) $$$P $B)'
       - match: '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding $RT:type_identifier body: $B:function_body)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $M $$$P $B)'
       - match: '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding body: $B:function_body)'
@@ -185,6 +185,8 @@ display:
         tag: { def_type: Function }
       - match: '(__def (__method))'
         tag: { def_type: Method }
+      - match: '(__def (__method) (__constructor))'
+        tag: { def_type: Constructor }
       - match: '(__def (__class))'
         tag: { def_type: Class }
       - match: '(__def (__struct))'

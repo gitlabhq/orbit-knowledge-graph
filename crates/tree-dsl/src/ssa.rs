@@ -148,6 +148,23 @@ impl SsaEngine {
             .is_some_and(|blocks| blocks.contains_key(&block))
     }
 
+    pub fn is_defined(&self, variable: u32, block: BlockId) -> bool {
+        let Some(defs) = self.current_def.get(&variable) else {
+            return false;
+        };
+        let mut seen = FxHashSet::default();
+        let mut stack = vec![block];
+        while let Some(b) = stack.pop() {
+            if defs.contains_key(&b) {
+                return true;
+            }
+            if seen.insert(b) {
+                stack.extend(self.blocks[b.0].predecessors.iter().copied());
+            }
+        }
+        false
+    }
+
     pub fn write_variable(&mut self, variable: u32, block: BlockId, value: Value) {
         let resolved = if let Value::Alias(alias_name) = value {
             let alias_val = self.read_variable_internal(alias_name, block);
@@ -509,6 +526,7 @@ fn tarjan_scc(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
     let mut lowlinks = vec![0usize; n];
     let mut result = Vec::new();
 
+    #[allow(clippy::too_many_arguments)]
     fn strongconnect(
         v: usize,
         adj: &[Vec<usize>],

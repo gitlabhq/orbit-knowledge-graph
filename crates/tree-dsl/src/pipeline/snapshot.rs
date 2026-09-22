@@ -206,11 +206,7 @@ impl Resolver {
         let visible = self
             .visible()
             .iter()
-            .map(|map| {
-                map.iter()
-                    .flat_map(|(&sym, locs)| locs.iter().map(move |&loc| (sym, loc)))
-                    .collect()
-            })
+            .map(|map| map.iter().map(|(&sym, &loc)| (sym, loc)).collect())
             .collect();
         ResolverSnapshot {
             visible,
@@ -222,16 +218,7 @@ impl Resolver {
         let visible = snap
             .visible
             .into_iter()
-            .map(|entries| {
-                let mut map: rustc_hash::FxHashMap<
-                    u32,
-                    smallvec::SmallVec<[crate::resolver::Loc; 1]>,
-                > = rustc_hash::FxHashMap::default();
-                for (sym, loc) in entries {
-                    map.entry(sym).or_default().push(loc);
-                }
-                map
-            })
+            .map(|entries| entries.into_iter().collect())
             .collect();
         Self::from_parts(visible, snap.reqs, lang)
     }

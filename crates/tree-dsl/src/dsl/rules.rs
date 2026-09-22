@@ -22,10 +22,10 @@
 use std::collections::HashMap;
 
 use crate::intern::Lang;
-use crate::pattern::{Out, Pat, Rewrite, TagEntry, Tf};
+use crate::pattern::{Out, Rewrite, TagEntry, Tf};
 
 use super::parser::parse;
-use super::types::Ctx;
+use super::types::{Ctx, Pat};
 
 pub enum ResolveStage {
     Rules(Vec<Rewrite>),
@@ -141,6 +141,18 @@ struct Rule {
     where_clause: Option<String>,
     #[serde(default)]
     unique: Option<String>,
+}
+
+fn unique_guard(lang: &Lang, spec: &str) -> (Pat, u16, usize) {
+    let pattern = spec.starts_with('(');
+    let kind = lang.intern_kind(if pattern { "__defname" } else { spec });
+    let mut ctx = Ctx::new(lang);
+    ctx.slot("ROOT");
+    (
+        parse(&mut ctx, if pattern { spec } else { "(__def)" }),
+        kind,
+        ctx.slots.len(),
+    )
 }
 
 /// Compile a YAML rule file into stages of rewrites.
@@ -276,13 +288,6 @@ fn compile_tags(tag_map: &HashMap<String, String>, ctx: &mut crate::pattern::Ctx
         .collect()
 }
 
-fn unique_guard(lang: &Lang, spec: &str) -> (Pat, u16, usize) {
-    let kind = lang.intern_kind(spec);
-    let mut ctx = Ctx::new(lang);
-    ctx.slot("ROOT");
-    (parse(&mut ctx, "(__def)"), kind, ctx.slots.len())
-}
-
 fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
     let pat = &rule.pattern;
 
@@ -325,8 +330,7 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
 }
 
 fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> (u16, Tf) {
-    if val.starts_with("@$") {
-        let rest = &val[2..];
+    if let Some(rest) = val.strip_prefix("@$") {
         let (slot_name, pipeline) = match rest.find('|') {
             Some(i) => (&rest[..i], Some(&rest[i + 1..])),
             None => (rest, None),
@@ -380,7 +384,7 @@ stages:
       - match: '(attribute object: (identifier "self") attribute: $A)'
         replace: '(__ivar @$A)'
 "#;
-        let mut lang = Lang::new();
+        let lang = Lang::new();
         let stages = load_rules(yaml, &lang);
         assert_eq!(stages.len(), 1);
         assert_eq!(stages[0].len(), 1);
@@ -409,7 +413,7 @@ stages:
       - match: '(class_definition name: $N body: $B)'
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $B)'
 "#;
-        let mut lang = Lang::new();
+        let lang = Lang::new();
         let stages = load_rules(yaml, &lang);
         assert_eq!(stages.len(), 3);
     }
