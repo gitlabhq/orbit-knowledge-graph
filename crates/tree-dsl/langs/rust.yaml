@@ -3,12 +3,13 @@
 # method calls, field access, self.x, control flow, bindings.
 
 config:
-  parse_files:
-    - name: "Cargo.toml"
-      format: toml
-  lookup_from:
-    - __source_root
-    - __crate_root
+  resolve:
+    parse_files:
+      - name: "Cargo.toml"
+        format: toml
+    lookup_from:
+      - __source_root
+      - __crate_root
 
 stages:
   - name: normalize

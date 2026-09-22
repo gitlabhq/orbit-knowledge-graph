@@ -3,16 +3,17 @@
 # member access, calls, this.x, control flow, bindings.
 
 config:
-  parse_files:
-    - name: "tsconfig.json"
-      format: json
-    - name: "package.json"
-      format: json
-    - name: "webpack.config.js"
-      format: raw
-      extract: "['\"]([^'\"]+)['\"]\\s*:\\s*path\\.\\w+\\([^,]+,\\s*['\"]([^'\"]+)['\"]"
-  lookup_from:
-    - __source_root
+  resolve:
+    parse_files:
+      - name: "tsconfig.json"
+        format: json
+      - name: "package.json"
+        format: json
+      - name: "webpack.config.js"
+        format: raw
+        extract: "['\"]([^'\"]+)['\"]\\s*:\\s*path\\.\\w+\\([^,]+,\\s*['\"]([^'\"]+)['\"]"
+    lookup_from:
+      - __source_root
 
 stages:
   - name: normalize

@@ -11,10 +11,11 @@
 #   __def plus an SSA __binding.
 
 config:
-  builtins: [
-    append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
-    new, panic, print, println, real, recover
-  ]
+  link:
+    builtins: [
+      append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
+      new, panic, print, println, real, recover
+    ]
 
 stages:
   - name: normalize

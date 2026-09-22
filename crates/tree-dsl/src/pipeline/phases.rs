@@ -16,7 +16,7 @@ pub fn process_file(env: &Env, path: &str, source: &str) -> (Tree, Vec<Edge>) {
     }
     tree.prune();
     tree.compact();
-    let edges = linker::link(&tree, &env.lang, &env.config);
+    let edges = linker::link(&tree, &env.lang, &env.config.link);
     (tree, edges)
 }
 
@@ -45,7 +45,13 @@ pub fn resolve(
     files: Option<&[(String, String)]>,
 ) {
     let paths: Vec<&str> = state.trees.iter().map(|t| t.label.as_str()).collect();
-    let walk = ProjectTree::build(&env.lang, &env.config, &env.resolve_stages, &paths, files);
+    let walk = ProjectTree::build(
+        &env.lang,
+        &env.config.resolve,
+        &env.resolve_stages,
+        &paths,
+        files,
+    );
     let result = state.resolver.resolve(
         &state.trees,
         &state.edges,
@@ -53,7 +59,7 @@ pub fn resolve(
         &dirty_fis,
         env.lang_id,
         &walk.prefixes,
-        &env.config.external,
+        &env.config.resolve.external,
         &walk.aliases,
     );
     for rsp in &result.resolved_source_paths {

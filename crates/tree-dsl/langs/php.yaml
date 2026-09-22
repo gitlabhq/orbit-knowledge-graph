@@ -16,8 +16,9 @@
 #   file; functions and constants usually live in helper files.
 
 config:
-  lookup_from:
-    - __source_root
+  resolve:
+    lookup_from:
+      - __source_root
 
 stages:
   - name: imports

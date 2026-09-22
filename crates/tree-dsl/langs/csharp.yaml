@@ -9,8 +9,9 @@
 # - Same-namespace siblings without a using need a namespace scope.
 
 config:
-  lookup_from:
-    - __source_root
+  resolve:
+    lookup_from:
+      - __source_root
 
 stages:
   - name: imports

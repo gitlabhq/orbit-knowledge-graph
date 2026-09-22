@@ -4,7 +4,7 @@ use crate::canonical::Canonical as C;
 use crate::constants::PATH_SEP;
 use crate::intern::Lang;
 use crate::pattern;
-use crate::rules::{Config, ParseFormat, ResolveStage};
+use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tree};
 
 pub struct WalkResult {
@@ -14,7 +14,7 @@ pub struct WalkResult {
 
 pub struct ProjectTree<'a> {
     lang: &'a Lang,
-    config: &'a Config,
+    config: &'a ResolveConfig,
     stages: &'a [ResolveStage],
     paths: &'a [&'a str],
     files: Option<&'a [(String, String)]>,
@@ -26,7 +26,7 @@ pub struct ProjectTree<'a> {
 impl<'a> ProjectTree<'a> {
     pub fn build(
         lang: &'a Lang,
-        config: &'a Config,
+        config: &'a ResolveConfig,
         stages: &'a [ResolveStage],
         paths: &'a [&'a str],
         files: Option<&'a [(String, String)]>,

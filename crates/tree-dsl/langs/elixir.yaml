@@ -4,8 +4,9 @@
 # Module.fun calls, implicit-module calls, if/case/cond/for.
 
 config:
-  lookup_from:
-    - __source_root
+  resolve:
+    lookup_from:
+      - __source_root
 
 stages:
   - name: imports

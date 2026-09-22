@@ -45,14 +45,34 @@ pub enum ParseFormat {
     Raw(regex::Regex),
 }
 
-/// Whole-language settings from the YAML `config:` section.
+/// Whole-language settings from the YAML `config:` section, grouped by the
+/// phase that reads them. Settings read by more than one phase go in `global`.
+#[derive(Default)]
 pub struct Config {
+    pub link: LinkConfig,
+    pub resolve: ResolveConfig,
+}
+
+pub struct LinkConfig {
     /// Names the language defines everywhere without an import. An unresolved
     /// call to one does not fall back to wildcard imports.
     pub builtins: rustc_hash::FxHashSet<u32>,
     /// Whether an import may rebind a name already defined in the same scope.
     /// Ruby autoloads must not; a local class always wins.
     pub imports_shadow_locals: bool,
+}
+
+impl Default for LinkConfig {
+    fn default() -> Self {
+        Self {
+            builtins: Default::default(),
+            imports_shadow_locals: true,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct ResolveConfig {
     /// Module roots that never resolve to project files (a stdlib list).
     pub external: Vec<String>,
     /// Directory-tree marker kinds that import paths are looked up from.
@@ -61,24 +81,24 @@ pub struct Config {
     pub parse_files: Vec<ParseFileSpec>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            builtins: Default::default(),
-            imports_shadow_locals: true,
-            external: vec![],
-            lookup_from: vec![],
-            parse_files: vec![],
-        }
-    }
+#[derive(serde::Deserialize, Default)]
+struct ConfigSection {
+    #[serde(default)]
+    link: Option<LinkSection>,
+    #[serde(default)]
+    resolve: Option<ResolveSettingsSection>,
 }
 
 #[derive(serde::Deserialize)]
-struct ConfigSection {
+struct LinkSection {
     #[serde(default)]
     builtins: Vec<String>,
     #[serde(default = "default_true")]
     imports_shadow_locals: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct ResolveSettingsSection {
     #[serde(default)]
     external: Vec<String>,
     #[serde(default)]
@@ -95,40 +115,46 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Config {
     let Some(section) = section else {
         return Config::default();
     };
-    let parse_files = section
-        .parse_files
-        .iter()
-        .map(|pf| ParseFileSpec {
-            name: pf.name.clone(),
-            format: match pf.format.as_str() {
-                "json" => ParseFormat::Json,
-                "toml" => ParseFormat::Toml,
-                "raw" => {
-                    let pattern = pf
-                        .extract
-                        .as_deref()
-                        .expect("raw format requires extract pattern");
-                    ParseFormat::Raw(regex::Regex::new(pattern).expect("invalid extract regex"))
-                }
-                other => panic!("unknown parse_files format: {other}"),
-            },
-        })
-        .collect();
-    Config {
-        builtins: section
-            .builtins
-            .iter()
-            .map(|b| lang.syms.intern(b))
-            .collect(),
-        imports_shadow_locals: section.imports_shadow_locals,
-        external: section.external.clone(),
-        lookup_from: section
-            .lookup_from
-            .iter()
-            .map(|name| lang.intern_kind(name))
-            .collect(),
-        parse_files,
-    }
+    let link = section
+        .link
+        .as_ref()
+        .map_or_else(LinkConfig::default, |l| LinkConfig {
+            builtins: l.builtins.iter().map(|b| lang.syms.intern(b)).collect(),
+            imports_shadow_locals: l.imports_shadow_locals,
+        });
+    let resolve = section
+        .resolve
+        .as_ref()
+        .map_or_else(ResolveConfig::default, |r| ResolveConfig {
+            external: r.external.clone(),
+            lookup_from: r
+                .lookup_from
+                .iter()
+                .map(|name| lang.intern_kind(name))
+                .collect(),
+            parse_files: r
+                .parse_files
+                .iter()
+                .map(|pf| ParseFileSpec {
+                    name: pf.name.clone(),
+                    format: match pf.format.as_str() {
+                        "json" => ParseFormat::Json,
+                        "toml" => ParseFormat::Toml,
+                        "raw" => {
+                            let pattern = pf
+                                .extract
+                                .as_deref()
+                                .expect("raw format requires extract pattern");
+                            ParseFormat::Raw(
+                                regex::Regex::new(pattern).expect("invalid extract regex"),
+                            )
+                        }
+                        other => panic!("unknown parse_files format: {other}"),
+                    },
+                })
+                .collect(),
+        });
+    Config { link, resolve }
 }
 
 #[derive(serde::Deserialize)]

@@ -133,8 +133,9 @@ stages:
         replace: '(template)'
 
 config:
-  lookup_from:
-    - __source_root
+  resolve:
+    lookup_from:
+      - __source_root
 
 resolve:
   stages:
@@ -274,19 +275,23 @@ with the earlier edge layout.
 ### Language config reference
 
 `config:` holds every whole-language setting. It applies to the language as a
-whole, not to a rule, a stage, or an indexed file. `resolve:` holds only the
-file-tree rewrite stages.
+whole, not to a rule, a stage, or an indexed file. Settings are grouped under
+the phase that reads them (`link`, `resolve`); a setting read by more than one
+phase goes under `global`. Every group is optional. The top-level `resolve:`
+holds only the file-tree rewrite stages.
 
 ```yaml
 config:
-  builtins: [println, listOf]  # Names defined everywhere without an import
-  imports_shadow_locals: false # Default true; Ruby autoloads never rebind a local
-  external:
-    - flask                     # Module names that never resolve to local files
-  lookup_from:
-    - __source_root             # Synthetic kinds marking resolution prefixes
-  parse_files:
-    - { name: Cargo.toml, format: toml }
+  link:
+    builtins: [println, listOf]  # Names defined everywhere without an import
+    imports_shadow_locals: false # Default true; Ruby autoloads never rebind a local
+  resolve:
+    external:
+      - flask                     # Module names that never resolve to local files
+    lookup_from:
+      - __source_root             # Synthetic kinds marking resolution prefixes
+    parse_files:
+      - { name: Cargo.toml, format: toml }
 
 resolve:
   stages:
@@ -302,11 +307,11 @@ resolve:
 
 | Field | Purpose |
 |-------|---------|
-| `builtins` | Callee names the linker never falls back to wildcard imports for. A local definition still shadows them. |
-| `imports_shadow_locals` | Whether an import may rebind a name already defined in the same scope. |
-| `external` | Root module names to skip (stdlib, third-party). Imports to these never resolve. |
-| `lookup_from` | Synthetic marker kinds whose directories become import resolution prefixes. |
-| `parse_files` | Manifest files parsed into the directory tree before resolve stages run. Formats: `json`, `toml`, `raw` with `extract`. |
+| `link.builtins` | Callee names the linker never falls back to wildcard imports for. A local definition still shadows them. |
+| `link.imports_shadow_locals` | Whether an import may rebind a name already defined in the same scope. |
+| `resolve.external` | Root module names to skip (stdlib, third-party). Imports to these never resolve. |
+| `resolve.lookup_from` | Synthetic marker kinds whose directories become import resolution prefixes. |
+| `resolve.parse_files` | Manifest files parsed into the directory tree before resolve stages run. Formats: `json`, `toml`, `raw` with `extract`. |
 | `resolve.stages` | Ordered list of file-tree rewrite stages. Each is either `rules:` or `climb:`. |
 
 ## Canonical Alphabet

@@ -13,8 +13,9 @@
 #   only files and index files.
 
 config:
-  lookup_from:
-    - __source_root
+  resolve:
+    lookup_from:
+      - __source_root
 
 stages:
   - name: imports

@@ -11,13 +11,15 @@
 #   get the same treatment as properties: a __def plus SSA bindings.
 
 config:
-  builtins: [
-    println, print, readLine, require, requireNotNull, check, checkNotNull, error,
-    TODO, lazy, run, with, repeat, arrayOf, listOf, setOf, mapOf, mutableListOf,
-    mutableSetOf, mutableMapOf, emptyList, emptySet, emptyMap
-  ]
-  lookup_from:
-    - __source_root
+  link:
+    builtins: [
+      println, print, readLine, require, requireNotNull, check, checkNotNull, error,
+      TODO, lazy, run, with, repeat, arrayOf, listOf, setOf, mapOf, mutableListOf,
+      mutableSetOf, mutableMapOf, emptyList, emptySet, emptyMap
+    ]
+  resolve:
+    lookup_from:
+      - __source_root
 
 stages:
   - name: imports

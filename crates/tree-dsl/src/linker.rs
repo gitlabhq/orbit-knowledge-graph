@@ -4,7 +4,7 @@ use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::resolver::CLASS_LIKE;
-use crate::rules::Config;
+use crate::rules::LinkConfig;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tags::ReservedTags;
 use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, members_by_level};
@@ -31,7 +31,7 @@ struct Fold<'t> {
     imports: Vec<u32>,
     wildcards: Vec<u32>,
     tags: ReservedTags,
-    config: &'t Config,
+    config: &'t LinkConfig,
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
     edges: Vec<Edge>,
@@ -629,7 +629,7 @@ impl<'t> Fold<'t> {
     }
 }
 
-pub fn link(tree: &Tree, lang: &Lang, config: &Config) -> Vec<Edge> {
+pub fn link(tree: &Tree, lang: &Lang, config: &LinkConfig) -> Vec<Edge> {
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
     ssa.seal_block(entry);

@@ -10,9 +10,11 @@
 #   calls without parentheses are modeled as this-calls and may over-link.
 
 config:
-  imports_shadow_locals: false
-  lookup_from:
-    - __source_root
+  link:
+    imports_shadow_locals: false
+  resolve:
+    lookup_from:
+      - __source_root
 
 stages:
   - name: imports

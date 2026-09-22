@@ -2,21 +2,22 @@
 # Stamps all synthetics needed by SSA and resolver.
 
 config:
-  external: [
-    abc, argparse, ast, asyncio, base64, bisect, builtins, calendar, collections,
-    concurrent, configparser, contextlib, contextvars, copy, csv, ctypes, dataclasses,
-    datetime, decimal, difflib, email, enum, errno, fnmatch, fractions, ftplib,
-    functools, gc, glob, gzip, hashlib, heapq, hmac, html, http, importlib, inspect,
-    io, ipaddress, itertools, json, logging, math, mimetypes, multiprocessing,
-    numbers, operator, os, pathlib, pdb, pickle, pkgutil, platform, pprint, queue,
-    random, re, secrets, select, selectors, shelve, shlex, shutil, signal, socket,
-    socketserver, sqlite3, ssl, stat, statistics, string, struct, subprocess, sys,
-    sysconfig, tarfile, tempfile, textwrap, threading, time, timeit, tkinter, tomllib,
-    traceback, types, typing, unicodedata, unittest, urllib, uuid, venv, warnings,
-    weakref, xml, xmlrpc, zipfile, zlib, zoneinfo
-  ]
-  lookup_from:
-    - __source_root
+  resolve:
+    external: [
+      abc, argparse, ast, asyncio, base64, bisect, builtins, calendar, collections,
+      concurrent, configparser, contextlib, contextvars, copy, csv, ctypes, dataclasses,
+      datetime, decimal, difflib, email, enum, errno, fnmatch, fractions, ftplib,
+      functools, gc, glob, gzip, hashlib, heapq, hmac, html, http, importlib, inspect,
+      io, ipaddress, itertools, json, logging, math, mimetypes, multiprocessing,
+      numbers, operator, os, pathlib, pdb, pickle, pkgutil, platform, pprint, queue,
+      random, re, secrets, select, selectors, shelve, shlex, shutil, signal, socket,
+      socketserver, sqlite3, ssl, stat, statistics, string, struct, subprocess, sys,
+      sysconfig, tarfile, tempfile, textwrap, threading, time, timeit, tkinter, tomllib,
+      traceback, types, typing, unicodedata, unittest, urllib, uuid, venv, warnings,
+      weakref, xml, xmlrpc, zipfile, zlib, zoneinfo
+    ]
+    lookup_from:
+      - __source_root
 
 stages:
   - name: normalize
