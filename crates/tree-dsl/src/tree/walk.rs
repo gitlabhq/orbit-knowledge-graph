@@ -192,10 +192,6 @@ impl<'a> Cursor<'a> {
         self.nid().descendants(&self.tree().arena).count() as u32
     }
 
-    pub fn is_synth(self) -> bool {
-        self.tree().node(self.nid()).synth
-    }
-
     pub fn parent(self) -> Option<Self> {
         self.nid().parent(&self.tree().arena).map(|p| self.at(p))
     }
@@ -379,10 +375,6 @@ impl<'a> Cursor<'a> {
 
     pub fn names(self) -> impl Iterator<Item = Self> + 'a {
         self.children_of(C::Name)
-    }
-
-    pub fn find_desc(self, pred: impl Fn(Self) -> bool) -> Option<Self> {
-        self.descend(|n| if pred(n) { Step::Out(n) } else { Step::Into })
     }
 
     pub fn any_desc(self, pred: impl Fn(Self) -> bool) -> bool {

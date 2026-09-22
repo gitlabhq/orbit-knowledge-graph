@@ -312,35 +312,21 @@ impl<'t> Fold<'t> {
             self.cur = self.ssa.add_sealed_successor(self.cur);
         }
 
-        if let Some(rhs) = c.child(C::Rhs) {
-            if let Some(branch) = rhs.child(C::SsaBranch) {
-                self.handle_branch(branch, Some(lhs));
-                return true;
-            }
-
-            self.walk_children(rhs);
-
-            let val = self.classify_rhs_value(rhs, c.index());
-            self.ssa.write_variable(lhs, self.cur, val);
+        let rhs = c.child(C::Rhs);
+        if let Some(branch) = rhs.and_then(|r| r.child(C::SsaBranch)) {
+            self.handle_branch(branch, Some(lhs));
             return true;
         }
-
-        let val = if let Some(ts) = c.child_sym(C::SsaTyped) {
-            Value::Type(ts)
-        } else {
-            Value::Opaque
+        if let Some(rhs) = rhs {
+            self.walk_children(rhs);
+        }
+        let val = match (c.child_sym(C::SsaTyped), rhs) {
+            (Some(ts), _) => Value::Type(ts),
+            (None, Some(rhs)) => self.classify_tail(rhs.tail_expr()),
+            (None, None) => Value::Opaque,
         };
-
         self.ssa.write_variable(lhs, self.cur, val);
         true
-    }
-
-    fn classify_rhs_value(&mut self, rhs: Cursor<'_>, binding: u32) -> Value {
-        if let Some(ts) = self.tree.cursor(binding).child_sym(C::SsaTyped) {
-            return Value::Type(ts);
-        }
-
-        self.classify_tail(rhs.tail_expr())
     }
 
     fn classify_tail(&mut self, tail: Cursor<'_>) -> Value {
@@ -354,14 +340,9 @@ impl<'t> Fold<'t> {
             return Value::Call(tail.index());
         }
         let sym = self.tail_sym(tail);
-        if sym != 0 {
-            self.tail_value(sym)
-        } else {
-            Value::Opaque
+        if sym == 0 {
+            return Value::Opaque;
         }
-    }
-
-    fn tail_value(&mut self, sym: u32) -> Value {
         let r = self.lookup(sym);
         if self.any_class(&r) {
             Value::Type(sym)
@@ -445,27 +426,18 @@ impl<'t> Fold<'t> {
             self.edges.push(Edge::local(from, m, EdgeKind::Calls));
             return;
         }
-        let targets = self.lookup(sym);
-        if !targets.is_empty() {
-            for r in &targets {
-                if matches!(r, Linked::Def(_) | Linked::Import(_)) {
-                    self.emit(r, from);
-                }
-            }
-            return;
-        }
+        let mut targets = self.lookup(sym);
+        targets.retain(|r| matches!(r, Linked::Def(_) | Linked::Import(_)));
         let supplies_callees = |&n: &u32| {
             let import = self.tree.cursor(n).parent();
             import.is_some_and(|i| i.has_tag(self.callable_key))
         };
-        for n in self
-            .wildcards
-            .iter()
-            .copied()
-            .filter(supplies_callees)
-            .collect::<Vec<_>>()
-        {
-            self.edges.push(Edge::local(from, n, EdgeKind::Imports));
+        if targets.is_empty() {
+            let wild = self.wildcards.iter().copied().filter(supplies_callees);
+            targets = wild.map(Linked::Import).collect();
+        }
+        for r in &targets {
+            self.emit(r, from);
         }
     }
 
