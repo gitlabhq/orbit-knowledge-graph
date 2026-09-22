@@ -360,11 +360,8 @@ fn rule_denorm_tag_pushdown(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
 
         for (prop, fs) in &node.filters {
             let key = (entity.to_string(), prop.clone(), dir.to_string());
-            if !meta
-                .denorm_rel_kinds
-                .get(&key)
-                .is_some_and(|ks| rel.types.iter().any(|t| ks.contains(t)))
-            {
+            let denorm_kinds = meta.denorm_rel_kinds.get(&key);
+            if !denorm_kinds.is_some_and(|ks| rel.types.iter().any(|t| ks.contains(t))) {
                 continue;
             }
             let Some((tc, tk)) = meta.denormalized_columns.get(&key) else {
