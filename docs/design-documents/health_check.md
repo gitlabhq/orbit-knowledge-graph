@@ -9,7 +9,7 @@ and GitLab diagnostics through the `GetClusterHealth` gRPC method.
 
 ## Pod probes
 
-Every mode runs the labkit probe server on `metrics.prometheus.port` (default `9394`). It serves
+Every mode runs the labkit probe server on `probe_server.bind_address` (default `0.0.0.0:9394`). It serves
 `/-/liveness`, `/-/readiness`, and, when Prometheus metrics are enabled, `/-/metrics`. The probe
 server binds whether or not metrics are enabled. `/-/liveness` returns `200` while the process
 runs. `/-/readiness` returns `200` when every registered check passes and `503` otherwise, with a

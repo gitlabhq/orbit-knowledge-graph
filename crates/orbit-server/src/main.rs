@@ -25,7 +25,7 @@ use orbit_server_config::AppConfig;
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -62,9 +62,10 @@ async fn main() -> anyhow::Result<()> {
     if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
     }
-    builder = builder.health_port(config.metrics.prometheus.port);
+    let probe_bind_address = config.probe_server_bind_address()?;
+    builder = builder.health_bind(probe_bind_address);
     if config.metrics.prometheus.enabled {
-        builder = builder.prometheus_metrics_port(config.metrics.prometheus.port);
+        builder = builder.prometheus_metrics(probe_bind_address);
     }
     let active_schema = Arc::new(ActiveSchema::default());
     let serving = Arc::new(AtomicBool::new(false));
@@ -72,6 +73,10 @@ async fn main() -> anyhow::Result<()> {
         builder = builder.add_readiness_check(name, check);
     }
     let _guard = builder.init().expect("labkit init");
+
+    if config.metrics.prometheus.port.is_some() {
+        warn!("metrics.prometheus.port is deprecated, use probe_server.bind_address");
+    }
 
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     ontology::constants::validate_ontology_constants(&ontology);

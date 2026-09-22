@@ -391,8 +391,20 @@ Example: `info,orbit_server=debug,gkg_indexer=trace`
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `metrics.prometheus.enabled` | `false` | Expose the `/-/metrics` scrape endpoint on the probe server |
-| `metrics.prometheus.port` | `9394` | Probe server port. Always serves `/-/liveness` and `/-/readiness`; serves `/-/metrics` when enabled |
+| `metrics.prometheus.enabled` | `false` | Add the `/-/metrics` scrape endpoint to the probe server |
+| `metrics.prometheus.port` | unset | Deprecated. Use `probe_server.bind_address`. When set alone it gives the probe server address as `0.0.0.0:<port>` |
+
+### Probe server
+
+One internal listener serves `/-/liveness`, `/-/readiness` and, when
+`metrics.prometheus.enabled` is true, `/-/metrics`. It binds in every mode.
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `probe_server.bind_address` | `0.0.0.0:9394` | Probe server listen address |
+
+When both `probe_server.bind_address` and `metrics.prometheus.port` are set and they name a
+different address, startup fails. Set `probe_server.bind_address` alone.
 
 ## Webserver
 

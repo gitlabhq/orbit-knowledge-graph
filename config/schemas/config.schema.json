@@ -62,6 +62,12 @@
     "object_storage": {
       "$ref": "#/$defs/ObjectStorageConfig"
     },
+    "probe_server": {
+      "$ref": "#/$defs/ProbeServerConfig",
+      "default": {
+        "bind_address": null
+      }
+    },
     "query": {
       "$ref": "#/$defs/QuerySettings"
     },
@@ -1087,6 +1093,19 @@
         "endpoint"
       ]
     },
+    "ProbeServerConfig": {
+      "type": "object",
+      "properties": {
+        "bind_address": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
     "ProfilingConfig": {
       "type": "object",
       "properties": {
@@ -1122,16 +1141,19 @@
           "type": "boolean"
         },
         "port": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint16",
+          "default": null,
           "maximum": 65535,
           "minimum": 0
         }
       },
       "additionalProperties": false,
       "required": [
-        "enabled",
-        "port"
+        "enabled"
       ]
     },
     "QueryConfig": {
