@@ -16,12 +16,12 @@ metadata:
   keywords: orbit, orbit-cli, orbit-local, knowledge-graph, code-graph, duckdb, sql, repo-map
   workflow: ai
   source-project: gitlab-org/orbit/knowledge-graph
-  source-path: skills/orbit-cli
+  source-path: plugins/orbit/skills/orbit-cli
 ---
 
-# Orbit local CLI skill
+# Orbit CLI skill
 
-The local CLI parses a checkout into a DuckDB property graph. `grep` finds
+Orbit CLI parses a checkout into a DuckDB property graph. `grep` finds
 definitions. `context` reads their source and relationships. `sql` runs
 read-only aggregations. `repo-map` orients you at the directory level. For
 production data, use the `orbit` skill.
@@ -40,14 +40,28 @@ If guidance is wrong or outdated (command, flag, or behavior), tell the user.
 With their confirmation, open a focused MR against `metadata.source-project` fixing `metadata.source-path` (one fix per MR, Conventional Commits).
 If they decline, note the discrepancy in one line and continue with the corrected command.
 
+## Before the first query
+
+Check `command -v orbit` and `orbit --version`. If Orbit is missing, explain
+how to install it from <https://docs.gitlab.com/orbit/local/access/cli/>.
+Do not download a binary or run `glab orbit` to bootstrap one without permission.
+If the user already uses `glab orbit`, use that launcher for the commands below.
+
+Run `orbit list` to check whether the current repository has an index.
+If it does not, ask before running `orbit index .`. Do not index on session start.
+If the index is stale or lacks a language, say so and use source files to verify
+critical findings. An empty graph result does not prove that code is absent.
+
 ## Find, then read
 
 ```shell
-orbit index .
 orbit grep "rate limit" --path src --kind Method,Function
 orbit grep 'query_arrow|insert_batch|execute' --path crates/duckdb-client
 orbit context Definition:<id> src/lib.rs:120-180 crates/duckdb-client
 ```
+
+Use ordinary text tools for literal text, regex, configuration, and unsupported
+files. Orbit FTS is not a regex replacement.
 
 Quote `a|b|c` for OR alternatives. Each alternative uses conjunctive FTS, and a
 single token must also match literally, ignoring case. Results rank exact names,

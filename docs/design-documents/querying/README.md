@@ -38,9 +38,22 @@ Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents 
 
 ### Agent Skill Source Trees
 
-Orbit maintains two independently usable agent skill trees. `skills/orbit/` documents Orbit Remote, while `skills/orbit-cli/` documents the local capabilities embedded in the `orbit` binary. Local reference files use the `references/local/` namespace so the two trees can form a collision-free path union. With no arguments, the embedded-only `orbit skills` command prints the default `orbit-cli` skill. It appends a list of other available skills when that list is non-empty. `orbit skills get <name> [path]` prints a file from a named skill, and the path defaults to `SKILL.md`. The previous `orbit skills <name> [path]` form and path shorthand remain as hidden compatibility aliases. The singular `skill` spelling is also a hidden compatibility alias.
+Orbit maintains two independently usable agent skill trees. `skills/orbit/` documents Orbit Remote, while `plugins/orbit/skills/orbit-cli/` documents the local capabilities embedded in the `orbit` binary. Local reference files use the `references/local/` namespace so the two trees can form a collision-free path union. With no arguments, the embedded-only `orbit skills` command prints the default `orbit-cli` skill. It appends a list of other available skills when that list is non-empty. `orbit skills get <name> [path]` prints a file from a named skill, and the path defaults to `SKILL.md`. The previous `orbit skills <name> [path]` form and path shorthand remain as hidden compatibility aliases. The singular `skill` spelling is also a hidden compatibility alias.
 
 The remote manifest uses line-oriented HTML placeholders to show where the local manifest's sections belong. Both consumer build scripts call the shared validator in `orbit-prompts`. It requires every placeholder to have one matching local section and prevents duplicate paths across the combined trees. It also resolves relative Markdown links and checks documented remote commands against the clap command inventory. General Markdown checks remain responsible for prose, external URLs, and fragments.
+
+### Agent plugin distribution
+
+The `plugins/orbit/` directory is a self-contained package for Claude Code and
+Codex. The portable `plugin.json` serves Codex; `.claude-plugin/plugin.json`
+adds Claude's hook configuration. Both load the canonical local skill that the
+Orbit binary embeds. Neither installs a binary, starts indexing, or registers
+MCP. Claude's hooks call the existing `orbit hook-guard` command and fail open.
+
+The repository holds a marketplace catalog for each host. Tag releases also
+publish a deterministic ZIP with both catalogs and the plugin. Package tests
+check paths after extraction, version agreement, and hook behavior. See the
+[plugin guide](../../../plugins/orbit/README.md) for installation and migration.
 
 ### Named Queries
 

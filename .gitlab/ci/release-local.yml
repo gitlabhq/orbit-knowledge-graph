@@ -157,6 +157,22 @@ local-cli-code-sign:
       - orbit-cli-windows-*.zip
     expire_in: 7 days
 
+agent-plugin-build:
+  extends:
+    - .local-cli-release-rules
+  stage: build
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  needs: []
+  script:
+    - python3 -m unittest discover -s scripts -p test_agent_plugin.py -v
+    - python3 scripts/package-agent-plugin.py
+  artifacts:
+    paths:
+      - orbit-agent-plugin.zip
+    expire_in: 7 days
+
 local-cli-publish:
   extends:
     - .local-cli-release-rules
@@ -170,6 +186,7 @@ local-cli-publish:
     - local-cli-build-linux-musl-amd64
     - local-cli-build-linux-musl-arm64
     - local-cli-code-sign
+    - agent-plugin-build
   before_script:
     - apk add --no-cache bash curl coreutils
   script:

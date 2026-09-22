@@ -109,6 +109,14 @@ description = "Fuzz indexer message deserialization"
 run = "cargo build --release --workspace --exclude orbit-cli && cargo build --release -p orbit-cli"
 description = "Build the crates"
 
+[tasks."plugins:package"]
+run = "python3 scripts/package-agent-plugin.py"
+description = "Package the Orbit agent plugin and both marketplace catalogs"
+
+[tasks."test:plugins"]
+run = "python3 -m unittest discover -s scripts -p test_agent_plugin.py -v"
+description = "Test agent plugin packaging and hooks"
+
 [tasks."build:cli"]
 run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled"
 description = "Build the CLI"

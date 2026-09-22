@@ -31,6 +31,7 @@ List these directories and read the relevant owner before you act:
 
 - `docs/design-documents/` for architecture, security, schema, querying, and indexing.
 - `docs/dev/` for runbooks, the crate map, and the reference index.
+- `plugins/orbit/README.md` for agent plugin installation and packaging.
 - Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
 
 Do not create a GitLab issue or epic until the author approves the draft.
