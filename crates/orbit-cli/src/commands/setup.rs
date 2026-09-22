@@ -116,7 +116,7 @@ fn apply_and_report(
 ) -> Result<Report> {
     let mut report = Report::default();
     let outcome = apply(&mut report);
-    if options.verbose {
+    if options.verbose || outcome.is_err() {
         show_outcomes_per_component(&report)?;
     }
     outcome?;

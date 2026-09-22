@@ -105,7 +105,7 @@ pub(super) fn format_outcomes_per_component(report: &Report) -> Vec<(String, Str
 pub(super) fn format_removed_files_per_component(report: &Report) -> String {
     let groups = group_outcomes_by_component(report);
     if groups.is_empty() {
-        return "nothing was installed".to_string();
+        return "nothing to remove".to_string();
     }
     let width = groups
         .iter()
@@ -115,10 +115,10 @@ pub(super) fn format_removed_files_per_component(report: &Report) -> String {
     groups
         .iter()
         .map(|(component, outcomes)| {
+            let mut listed: BTreeSet<&str> = BTreeSet::new();
             let mut files: Vec<String> = Vec::new();
             for outcome in outcomes {
-                let already_listed = files.iter().any(|file| file.starts_with(&outcome.label));
-                if already_listed {
+                if !listed.insert(outcome.label.as_str()) {
                     continue;
                 }
                 files.push(match outcome.action.starts_with("kept") {
