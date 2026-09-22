@@ -2,9 +2,9 @@ name: "AUTHORED has FK — no edge table"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
 expected: |
   (Limit 11
-    (Project ["AUTHORED":e0_type (u.id):e0_src "User":e0_src_type (mr.id):e0_dst "MergeRequest":e0_dst_type @mr.id @mr.iid @mr.title @mr.state @mr.source_branch @mr.target_branch @u.id @u.username @u.name @u.state]
+    (Project ["AUTHORED":e0_type u.id:e0_src "User":e0_src_type mr.id:e0_dst "MergeRequest":e0_dst_type mr.id:mr_id mr.iid:mr_iid concat(substringUTF8(mr.title 1 190650) if(length(mr.title)>length(substringUTF8(mr.title 1 190650)) " [truncated]" "")):mr_title mr.state:mr_state concat(substringUTF8(mr.source_branch 1 190650) if(length(mr.source_branch)>length(substringUTF8(mr.source_branch 1 190650)) " [truncated]" "")):mr_source_branch concat(substringUTF8(mr.target_branch 1 190650) if(length(mr.target_branch)>length(substringUTF8(mr.target_branch 1 190650)) " [truncated]" "")):mr_target_branch u.id:u_id concat(substringUTF8(u.username 1 190650) if(length(u.username)>length(substringUTF8(u.username 1 190650)) " [truncated]" "")):u_username concat(substringUTF8(u.name 1 190650) if(length(u.name)>length(substringUTF8(u.name 1 190650)) " [truncated]" "")):u_name u.state:u_state]
       (Join Inner (mr.author_id = u.id)
-        (Filter [id∈[1] !deleted]
+        (Filter [u.id=1 !u.deleted]
           (Scan gl_user u FINAL))
-        (Filter [!deleted]
+        (Filter [!mr.deleted]
           (Scan gl_merge_request mr FINAL)))))

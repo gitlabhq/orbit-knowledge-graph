@@ -5,16 +5,16 @@ expected: |
     (_nf_start =
       (Limit 500
         (Project [start.id:id start.traversal_path:traversal_path]
-          (Filter [!deleted]
+          (Filter [!start.deleted]
             (Project [start.id:id start.traversal_path:traversal_path start._deleted:_deleted]
-              (Filter [id∈[1]]
+              (Filter [start.id=1]
                 (Scan gl_merge_request start FINAL)))))))
     (_nf_end =
       (Limit 500
         (Project [end.id:id end.traversal_path:traversal_path]
-          (Filter [!deleted]
+          (Filter [!end.deleted]
             (Project [end.id:id end.traversal_path:traversal_path end._deleted:_deleted]
-              (Filter [id∈[100]]
+              (Filter [end.id=100]
                 (Scan gl_project end FINAL)))))))
     (_path_scope_traversal_paths =
       (Union _path_scope
@@ -24,28 +24,45 @@ expected: |
           (Scan _nf_end _path_scope_end))))
     (forward =
       (Union _frontier
-        (Project [e1.source_id:anchor_id e1.target_id:end_id e1.target_kind:end_kind expr(…):path_nodes expr(…):edge_kinds expr(…):depth e1.traversal_path:traversal_path]
-          (Filter [expr(…) relationship_kind∈["IN_PROJECT","CONTAINS"] source_kind="MergeRequest" expr(…) !deleted]
-            (Scan gl_edge e1)))
-        (Project [e1.source_id:anchor_id e2.target_id:end_id e2.target_kind:end_kind expr(…):path_nodes expr(…):edge_kinds expr(…):depth e1.traversal_path:traversal_path]
+        (Project [e1.source_id:anchor_id e1.target_id:end_id e1.target_kind:end_kind array(tuple(e1.target_id e1.target_kind)):path_nodes array(e1.relationship_kind):edge_kinds 1:depth e1.traversal_path:traversal_path]
+          (Filter [e1.relationship_kind∈["IN_PROJECT","CONTAINS"] e1.source_kind="MergeRequest" !e1.deleted]
+            (Join Semi (e1.traversal_path = _path_scope_traversal_paths.traversal_path)
+              (Join Semi (e1.source_id = _nf_start.id)
+                (Scan gl_edge e1)
+                (Scan _nf_start _nf_start))
+              (Scan _path_scope_traversal_paths _path_scope_traversal_paths))))
+        (Project [e1.source_id:anchor_id e2.target_id:end_id e2.target_kind:end_kind array(tuple(e1.target_id e1.target_kind) tuple(e2.target_id e2.target_kind)):path_nodes array(e1.relationship_kind e2.relationship_kind):edge_kinds 2:depth e1.traversal_path:traversal_path]
           (Join Inner (e1.target_id = e2.source_id ∧ e1.traversal_path = e2.traversal_path)
-            (Filter [expr(…) relationship_kind∈["IN_PROJECT","CONTAINS"] source_kind="MergeRequest" expr(…) !deleted]
-              (Scan gl_edge e1))
-            (Filter [relationship_kind∈["IN_PROJECT","CONTAINS"] expr(…) !deleted]
-              (Scan gl_edge e2))))))
+            (Filter [e1.relationship_kind∈["IN_PROJECT","CONTAINS"] e1.source_kind="MergeRequest" !e1.deleted]
+              (Join Semi (e1.traversal_path = _path_scope_traversal_paths.traversal_path)
+                (Join Semi (e1.source_id = _nf_start.id)
+                  (Scan gl_edge e1)
+                  (Scan _nf_start _nf_start))
+                (Scan _path_scope_traversal_paths _path_scope_traversal_paths)))
+            (Filter [e2.relationship_kind∈["IN_PROJECT","CONTAINS"] !e2.deleted]
+              (Join Semi (e2.traversal_path = _path_scope_traversal_paths.traversal_path)
+                (Scan gl_edge e2)
+                (Scan _path_scope_traversal_paths _path_scope_traversal_paths)))))))
     (backward =
-      (Project [e1.target_id:anchor_id e1.source_id:end_id e1.source_kind:end_kind expr(…):path_nodes expr(…):edge_kinds expr(…):depth e1.traversal_path:traversal_path]
-        (Filter [expr(…) relationship_kind∈["IN_PROJECT","CONTAINS"] target_kind="Project" expr(…) !deleted]
-          (Scan gl_edge e1))))
+      (Union _frontier
+        (Project [e1.target_id:anchor_id e1.source_id:end_id e1.source_kind:end_kind arrayResize(array(tuple(0 "")) 0):path_nodes array(e1.relationship_kind):edge_kinds 1:depth e1.traversal_path:traversal_path]
+          (Filter [e1.relationship_kind∈["IN_PROJECT","CONTAINS"] e1.target_kind="Project" !e1.deleted]
+            (Join Semi (e1.traversal_path = _path_scope_traversal_paths.traversal_path)
+              (Join Semi (e1.target_id = _nf_end.id)
+                (Scan gl_edge e1)
+                (Scan _nf_end _nf_end))
+              (Scan _path_scope_traversal_paths _path_scope_traversal_paths))))))
     (Limit 11
       (Sort [paths.depth↑]
         (Project [paths._gkg_path:_gkg_path paths._gkg_edge_kinds:_gkg_edge_kinds paths.depth:depth]
           (Union paths
-            (Project [f.depth:depth expr(…):_gkg_path f.edge_kinds:_gkg_edge_kinds]
-              (Filter [depth=1 end_kind="Project" end_id∈[100]]
-                (Scan forward f)))
-            (Project [expr(…):depth expr(…):_gkg_path expr(…):_gkg_edge_kinds]
-              (Filter [expr(…)]
+            (Project [f.depth:depth arrayConcat(array(tuple(f.anchor_id "MergeRequest")) f.path_nodes):_gkg_path f.edge_kinds:_gkg_edge_kinds]
+              (Join Semi (f.end_id = _nf_end.id)
+                (Filter [f.depth=1 f.end_kind="Project"]
+                  (Scan forward f))
+                (Scan _nf_end _nf_end)))
+            (Project [plus(f.depth b.depth):depth arrayConcat(array(tuple(f.anchor_id "MergeRequest")) f.path_nodes arrayReverse(b.path_nodes) array(tuple(b.anchor_id "Project"))):_gkg_path arrayConcat(f.edge_kinds arrayReverse(b.edge_kinds)):_gkg_edge_kinds]
+              (Filter [plus(f.depth b.depth)≤3]
                 (Join Inner (f.end_id = b.end_id ∧ f.traversal_path = b.traversal_path)
                   (Scan forward f)
                   (Scan backward b)))))))))

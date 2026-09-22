@@ -1,7 +1,7 @@
 //! `PhysOp` → SQL AST. One `Query` block accumulates operators until an
 //! operator would conflict with what the block already holds (a second
 //! projection, a filter after a projection or dedup, a sort after a limit);
-//! then the block is closed as a derived table and a fresh one continues.
+//! then the block closes as a derived table and a fresh one continues.
 
 use crate::ast::*;
 use crate::error::Result;
@@ -49,26 +49,23 @@ fn and_where(q: &mut Query, pred: Expr) {
     });
 }
 
-/// The block already projects, groups, sorts, or limits: further filters or
-/// projections must apply to its result.
-fn is_closed(q: &Query) -> bool {
-    !q.select.is_empty()
-        || !q.group_by.is_empty()
-        || q.limit.is_some()
-        || (!q.order_by.is_empty() && q.limit_by.is_none())
-}
-
-fn alias_of(q: &Query) -> Option<&str> {
+fn alias_of(q: &Query) -> &str {
     match &q.from {
         TableRef::Scan { alias, .. }
         | TableRef::Subquery { alias, .. }
-        | TableRef::Union { alias, .. } => Some(alias),
-        TableRef::Join { .. } => None,
+        | TableRef::Union { alias, .. } => alias,
+        TableRef::Join { .. } => "_q",
     }
 }
 
+/// The block already projects, groups, or limits: further filters and
+/// projections apply to its result.
+fn is_closed(q: &Query) -> bool {
+    !q.select.is_empty() || !q.group_by.is_empty() || q.limit.is_some()
+}
+
 fn close(q: Query) -> Query {
-    let alias = alias_of(&q).unwrap_or("_q").to_string();
+    let alias = alias_of(&q).to_string();
     Query {
         from: as_table(q, &alias),
         ..Default::default()
@@ -82,23 +79,23 @@ fn as_table(mut q: Query, alias: &str) -> TableRef {
     TableRef::subquery(q, alias)
 }
 
-/// A plain `FROM table AS alias` block with nothing else set can be used as a
-/// join operand directly; anything richer becomes a derived table.
-fn join_operand(q: Query) -> (TableRef, Vec<Cte>) {
-    let bare = q.select.is_empty()
-        && q.where_clause.is_none()
+/// A block that is only `FROM` (+ `WHERE` when `keep_where`) can be a join
+/// operand directly; anything richer becomes a derived table. Returns the
+/// operand, a `WHERE` to hoist, and CTEs to hoist.
+fn join_operand(q: Query, keep_where: bool) -> (TableRef, Option<Expr>, Vec<Cte>) {
+    let simple = q.select.is_empty()
         && q.group_by.is_empty()
         && q.order_by.is_empty()
         && q.limit_by.is_none()
         && q.limit.is_none()
-        && matches!(q.from, TableRef::Scan { .. });
-    if bare {
-        (q.from, q.ctes)
+        && (keep_where || q.where_clause.is_none() && matches!(q.from, TableRef::Scan { .. }));
+    if simple {
+        (q.from, q.where_clause, q.ctes)
     } else {
-        let alias = alias_of(&q).unwrap_or("_q").to_string();
+        let alias = alias_of(&q).to_string();
         let mut q = q;
         let ctes = std::mem::take(&mut q.ctes);
-        (as_table(q, &alias), ctes)
+        (as_table(q, &alias), None, ctes)
     }
 }
 
@@ -124,15 +121,14 @@ fn emit(op: PhysOp, input: &Input) -> Query {
                     .get(&table)
                     .cloned()
                     .unwrap_or_else(|| vec![DEFAULT_PRIMARY_KEY.to_string()]);
-                let mut order_by: Vec<OrderExpr> = sort_key
-                    .iter()
-                    .map(|c| OrderExpr::asc(Expr::col(&alias, c)))
-                    .collect();
+                let key: Vec<Expr> = sort_key.iter().map(|c| Expr::col(&alias, c)).collect();
+                let mut order_by: Vec<OrderExpr> =
+                    key.iter().cloned().map(OrderExpr::asc).collect();
                 order_by.push(OrderExpr::desc(Expr::col(&alias, VERSION_COLUMN)));
                 Query {
                     from: TableRef::scan(&table, &alias),
                     order_by,
-                    limit_by: Some((1, sort_key.iter().map(|c| Expr::col(&alias, c)).collect())),
+                    limit_by: Some((1, key)),
                     ..Default::default()
                 }
             }
@@ -146,9 +142,8 @@ fn emit(op: PhysOp, input: &Input) -> Query {
             if is_closed(&q) {
                 q = close(q);
             }
-            let alias = alias_of(&q).map(str::to_string);
             for p in predicates {
-                and_where(&mut q, emit_predicate(alias.as_deref(), &p));
+                and_where(&mut q, expr(&p));
             }
             q
         }
@@ -158,13 +153,12 @@ fn emit(op: PhysOp, input: &Input) -> Query {
             columns,
         } => {
             let mut q = emit(*child, input);
-            if !q.select.is_empty() || !q.group_by.is_empty() || q.limit.is_some() {
+            if is_closed(&q) {
                 q = close(q);
             }
-            let alias = alias_of(&q).map(str::to_string);
             q.select = columns
                 .into_iter()
-                .map(|c| emit_column(alias.as_deref(), c, input))
+                .map(|(e, a)| SelectExpr::new(expr(&e), a))
                 .collect();
             q
         }
@@ -175,10 +169,9 @@ fn emit(op: PhysOp, input: &Input) -> Query {
             on,
             kind: JoinKind::Inner,
         } => {
-            let (lhs, mut ctes) = join_operand_keep_where(emit(*left, input));
-            let (rhs, rctes) = join_operand(emit(*right, input));
+            let (lhs, where_clause, mut ctes) = join_operand(emit(*left, input), true);
+            let (rhs, _, rctes) = join_operand(emit(*right, input), false);
             ctes.extend(rctes);
-            let (from, where_clause) = lhs;
             let cond = on
                 .iter()
                 .map(|(x, y)| Expr::eq(Expr::col(&x.0, &x.1), Expr::col(&y.0, &y.1)))
@@ -189,7 +182,7 @@ fn emit(op: PhysOp, input: &Input) -> Query {
                 JoinType::Cross
             };
             Query {
-                from: TableRef::join(join_type, from, rhs, cond.unwrap_or_else(|| Expr::lit(1))),
+                from: TableRef::join(join_type, lhs, rhs, cond.unwrap_or_else(|| Expr::lit(1))),
                 where_clause,
                 ctes,
                 ..Default::default()
@@ -208,10 +201,10 @@ fn emit(op: PhysOp, input: &Input) -> Query {
             }
             let (consumer, producer) = on.into_iter().next().expect("semi join equality");
             let rq = emit(*right, input);
-            let bare_cte_ref = rq.select.is_empty()
+            let bare_ref = rq.select.is_empty()
                 && rq.where_clause.is_none()
                 && matches!(rq.from, TableRef::Scan { .. });
-            let pred = if let (true, TableRef::Scan { table, .. }) = (bare_cte_ref, &rq.from) {
+            let pred = if let (true, TableRef::Scan { table, .. }) = (bare_ref, &rq.from) {
                 Expr::InSubquery {
                     expr: Box::new(Expr::col(&consumer.0, &consumer.1)),
                     cte_name: table.clone(),
@@ -241,28 +234,20 @@ fn emit(op: PhysOp, input: &Input) -> Query {
             if is_closed(&q) {
                 q = close(q);
             }
-            for gk in &group_by {
-                let expr = emit_column_expr(&gk.expr());
-                q.select.push(SelectExpr::new(expr.clone(), &gk.alias));
-                if !q.group_by.contains(&expr) {
-                    q.group_by.push(expr);
+            for (e, a) in &group_by {
+                let e = expr(e);
+                q.select.push(SelectExpr::new(e.clone(), a));
+                if !q.group_by.contains(&e) {
+                    q.group_by.push(e);
                 }
             }
-            for m in &metrics {
-                let expr = match (&m.function, m.property.as_deref()) {
-                    (AggFunction::Count, None) | (_, None) => Expr::func("COUNT", vec![]),
-                    (AggFunction::Count, Some(p)) => {
-                        Expr::func("COUNT", vec![Expr::col(&m.node, p)])
-                    }
-                    (f, Some(p)) => Expr::func(f.as_sql(), vec![Expr::col(&m.node, p)]),
-                };
-                q.select.push(SelectExpr::new(expr, &m.alias));
-            }
+            q.select
+                .extend(metrics.iter().map(|(e, a)| SelectExpr::new(expr(e), a)));
             q
         }
 
         PhysOp::Union { arms, alias } => {
-            let queries: Vec<Query> = arms
+            let queries = arms
                 .into_iter()
                 .map(|a| {
                     let mut q = emit(a, input);
@@ -283,14 +268,13 @@ fn emit(op: PhysOp, input: &Input) -> Query {
             if q.limit.is_some() || q.limit_by.is_some() {
                 q = close(q);
             }
-            for sk in &keys {
-                let expr = emit_column_expr(&sk.expr);
-                q.order_by.push(if sk.desc {
-                    OrderExpr::desc(expr)
+            q.order_by.extend(keys.iter().map(|(e, desc)| {
+                if *desc {
+                    OrderExpr::desc(expr(e))
                 } else {
-                    OrderExpr::asc(expr)
-                });
-            }
+                    OrderExpr::asc(expr(e))
+                }
+            }));
             q
         }
 
@@ -325,153 +309,69 @@ fn emit(op: PhysOp, input: &Input) -> Query {
     }
 }
 
-/// Left join operand: a block with only a `FROM` and `WHERE` keeps its
-/// `WHERE` on the enclosing query (the join is still one SQL block).
-fn join_operand_keep_where(q: Query) -> ((TableRef, Option<Expr>), Vec<Cte>) {
-    let simple = q.select.is_empty()
-        && q.group_by.is_empty()
-        && q.order_by.is_empty()
-        && q.limit_by.is_none()
-        && q.limit.is_none();
-    if simple {
-        ((q.from, q.where_clause), q.ctes)
-    } else {
-        let alias = alias_of(&q).unwrap_or("_q").to_string();
-        let mut q = q;
-        let ctes = std::mem::take(&mut q.ctes);
-        ((as_table(q, &alias), None), ctes)
-    }
-}
-
-fn emit_predicate(alias: Option<&str>, pred: &Predicate) -> Expr {
-    if let Predicate::Expr(e) = pred {
-        return e.clone();
-    }
-    let alias = alias.expect("alias-relative predicate over an aliased relation");
-    match pred {
-        Predicate::Eq { column, value } => Expr::eq(Expr::col(alias, column), emit_value(value)),
-        Predicate::In { column, values } => Expr::col_in(
+fn expr(e: &PExpr) -> Expr {
+    match e {
+        PExpr::Col(a, c) => Expr::col(a, c),
+        PExpr::Ident(name) => Expr::ident(name),
+        PExpr::Lit(Lit::Int(i)) => Expr::int(*i),
+        PExpr::Lit(Lit::Str(s)) => Expr::string(s),
+        PExpr::Lit(Lit::Bool(b)) => Expr::param(ChType::Bool, *b),
+        PExpr::Func(name, args) => Expr::func(name, args.iter().map(expr).collect()),
+        PExpr::Cmp(op, l, r) => {
+            let op = match op {
+                CmpOp::Eq => Op::Eq,
+                CmpOp::Ne => Op::Ne,
+                CmpOp::Lt => Op::Lt,
+                CmpOp::Le => Op::Le,
+                CmpOp::Gt => Op::Gt,
+                CmpOp::Ge => Op::Ge,
+            };
+            Expr::binary(op, expr(l), expr(r))
+        }
+        PExpr::And(xs) => xs
+            .iter()
+            .map(expr)
+            .reduce(Expr::and)
+            .unwrap_or_else(|| Expr::lit(1)),
+        // Balanced so hundreds of alternatives stay within parser depth.
+        PExpr::Or(xs) => or_balanced(xs.iter().map(expr).collect()),
+        PExpr::In(x, vs) => {
+            let PExpr::Col(a, c) = x.as_ref() else {
+                panic!("IN over a non-column expression");
+            };
+            let ch_type = match vs.first() {
+                Some(Lit::Int(_)) => ChType::Int64,
+                Some(Lit::Bool(_)) => ChType::Bool,
+                _ => ChType::String,
+            };
+            let values = vs
+                .iter()
+                .map(|v| match v {
+                    Lit::Int(i) => serde_json::Value::from(*i),
+                    Lit::Str(s) => serde_json::Value::from(s.as_str()),
+                    Lit::Bool(b) => serde_json::Value::from(*b),
+                })
+                .collect();
+            Expr::col_in(a, c, ch_type, values).unwrap_or_else(|| Expr::param(ChType::Bool, false))
+        }
+        PExpr::Lambda(param, body) => Expr::lambda(param, expr(body)),
+        PExpr::NodeFilter {
             alias,
-            column,
-            value_ch_type(values),
-            values.iter().map(value_to_json).collect(),
-        )
-        .unwrap_or_else(|| Expr::param(ChType::Bool, false)),
-        Predicate::Range { column, start, end } => Expr::and(
-            Expr::binary(Op::Ge, Expr::col(alias, column), Expr::int(*start)),
-            Expr::binary(Op::Le, Expr::col(alias, column), Expr::int(*end)),
-        ),
-        Predicate::NodeFilter { property, filter } => filter_to_expr(alias, property, filter),
-        Predicate::Func {
-            name,
-            column,
-            value,
-        } => match value {
-            Value::Strs(strs) => Expr::func(
-                name,
-                vec![
-                    Expr::col(alias, column),
-                    Expr::func("array", strs.iter().map(Expr::string).collect()),
-                ],
-            ),
-            _ => Expr::func(name, vec![Expr::col(alias, column), emit_value(value)]),
-        },
-        Predicate::ScopePrefix(sp) => sp.predicate(alias),
-        Predicate::Expr(_) => unreachable!(),
+            property,
+            filter,
+        } => filter_to_expr(alias, property, filter),
+        PExpr::Scope(alias, prefix) => prefix.predicate(alias),
+        PExpr::ScopeResolved(prefix) => prefix.resolved(),
     }
 }
 
-fn emit_value(v: &Value) -> Expr {
-    match v {
-        Value::Int(i) => Expr::int(*i),
-        Value::Str(s) => Expr::string(s),
-        Value::Bool(b) => Expr::param(ChType::Bool, *b),
-        Value::Strs(ss) => Expr::func("array", ss.iter().map(Expr::string).collect()),
-    }
-}
-
-fn value_to_json(v: &Value) -> serde_json::Value {
-    match v {
-        Value::Int(i) => serde_json::Value::Number((*i).into()),
-        Value::Str(s) => serde_json::Value::String(s.clone()),
-        Value::Bool(b) => serde_json::Value::Bool(*b),
-        Value::Strs(ss) => serde_json::Value::Array(
-            ss.iter()
-                .map(|s| serde_json::Value::String(s.clone()))
-                .collect(),
-        ),
-    }
-}
-
-fn value_ch_type(values: &[Value]) -> ChType {
-    match values.first() {
-        Some(Value::Int(_)) => ChType::Int64,
-        Some(Value::Bool(_)) => ChType::Bool,
-        _ => ChType::String,
-    }
-}
-
-fn emit_column(alias: Option<&str>, col: ProjectedColumn, input: &Input) -> SelectExpr {
-    match col {
-        ProjectedColumn::Ref {
-            table,
-            column,
-            alias: a,
-        } => {
-            let tbl = if table.is_empty() {
-                alias.expect("unqualified column over an aliased relation")
-            } else {
-                table.as_str()
-            };
-            SelectExpr::new(Expr::col(tbl, &column), a)
-        }
-        ProjectedColumn::NodeProperty { node, property } => {
-            let n = input.nodes.iter().find(|n| n.id == node);
-            let value = Expr::col(&node, &property);
-            let expr = match n {
-                Some(n) if n.excerpt_columns.contains(&property) && n.excerpt_max_chars > 0 => {
-                    let excerpt = Expr::func(
-                        "substringUTF8",
-                        vec![value.clone(), Expr::lit(1), Expr::lit(n.excerpt_max_chars)],
-                    );
-                    let shortened = Expr::binary(
-                        Op::Gt,
-                        Expr::func("length", vec![value]),
-                        Expr::func("length", vec![excerpt.clone()]),
-                    );
-                    Expr::func(
-                        "concat",
-                        vec![
-                            excerpt,
-                            Expr::func(
-                                "if",
-                                vec![shortened, Expr::string(" [truncated]"), Expr::string("")],
-                            ),
-                        ],
-                    )
-                }
-                _ => value,
-            };
-            SelectExpr::new(expr, format!("{node}_{property}"))
-        }
-        ProjectedColumn::Computed { expr, alias: a } => SelectExpr::new(emit_column_expr(&expr), a),
-        ProjectedColumn::Expr { expr, alias: a } => SelectExpr::new(expr, a),
-    }
-}
-
-fn emit_column_expr(ce: &ColumnExpr) -> Expr {
-    match ce {
-        ColumnExpr::Col(table, col) => Expr::col(table, col),
-        ColumnExpr::Ident(name) => Expr::ident(name),
-        ColumnExpr::Lit(v) => emit_value(v),
-        ColumnExpr::Func(name, args) => {
-            Expr::func(name, args.iter().map(emit_column_expr).collect())
-        }
-        ColumnExpr::Array(items) => {
-            Expr::func("array", items.iter().map(emit_column_expr).collect())
-        }
-        ColumnExpr::Tuple(items) => {
-            Expr::func("tuple", items.iter().map(emit_column_expr).collect())
+fn or_balanced(mut xs: Vec<Expr>) -> Expr {
+    match xs.len() {
+        0 => Expr::lit(0),
+        1 => xs.pop().unwrap(),
+        n => {
+            let right = xs.split_off(n / 2);
+            Expr::binary(Op::Or, or_balanced(xs), or_balanced(right))
         }
     }
 }

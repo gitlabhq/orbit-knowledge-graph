@@ -2,12 +2,12 @@ name: "Three-node FK chain — no edge scans"
 input: {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
 expected: |
   (Limit 11
-    (Project ["IN_PROJECT":e0_type (mr.id):e0_src "MergeRequest":e0_src_type (p.id):e0_dst "Project":e0_dst_type "AUTHORED":e1_type (u.id):e1_src "User":e1_src_type (mr.id):e1_dst "MergeRequest":e1_dst_type @p.id @p.name @p.full_path @p.visibility_level @mr.id @mr.iid @mr.title @mr.state @mr.source_branch @mr.target_branch @u.id @u.username @u.name @u.state]
+    (Project ["IN_PROJECT":e0_type mr.id:e0_src "MergeRequest":e0_src_type p.id:e0_dst "Project":e0_dst_type "AUTHORED":e1_type u.id:e1_src "User":e1_src_type mr.id:e1_dst "MergeRequest":e1_dst_type p.id:p_id concat(substringUTF8(p.name 1 190650) if(length(p.name)>length(substringUTF8(p.name 1 190650)) " [truncated]" "")):p_name concat(substringUTF8(p.full_path 1 190650) if(length(p.full_path)>length(substringUTF8(p.full_path 1 190650)) " [truncated]" "")):p_full_path p.visibility_level:p_visibility_level mr.id:mr_id mr.iid:mr_iid concat(substringUTF8(mr.title 1 190650) if(length(mr.title)>length(substringUTF8(mr.title 1 190650)) " [truncated]" "")):mr_title mr.state:mr_state concat(substringUTF8(mr.source_branch 1 190650) if(length(mr.source_branch)>length(substringUTF8(mr.source_branch 1 190650)) " [truncated]" "")):mr_source_branch concat(substringUTF8(mr.target_branch 1 190650) if(length(mr.target_branch)>length(substringUTF8(mr.target_branch 1 190650)) " [truncated]" "")):mr_target_branch u.id:u_id concat(substringUTF8(u.username 1 190650) if(length(u.username)>length(substringUTF8(u.username 1 190650)) " [truncated]" "")):u_username concat(substringUTF8(u.name 1 190650) if(length(u.name)>length(substringUTF8(u.name 1 190650)) " [truncated]" "")):u_name u.state:u_state]
       (Join Inner (mr.author_id = u.id)
         (Join Inner (mr.project_id = p.id)
-          (Filter [!deleted]
+          (Filter [!mr.deleted]
             (Scan gl_merge_request mr FINAL))
-          (Filter [id∈[1] !deleted]
+          (Filter [p.id=1 !p.deleted]
             (Scan gl_project p FINAL)))
-        (Filter [!deleted]
+        (Filter [!u.deleted]
           (Scan gl_user u FINAL)))))

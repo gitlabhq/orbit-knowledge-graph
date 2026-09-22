@@ -2,9 +2,9 @@ name: "Aggregation prunes unreferenced User"
 input: {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"merged_mrs"}],"limit":5}
 expected: |
   (Limit 6
-    (Agg [group: p.id:p_id p.name:p_name p.full_path:p_full_path p.visibility_level:p_visibility_level] [metrics: COUNT(mr.*):merged_mrs]
+    (Agg [group: p.id:p_id concat(substringUTF8(p.name 1 349525) if(length(p.name)>length(substringUTF8(p.name 1 349525)) " [truncated]" "")):p_name concat(substringUTF8(p.full_path 1 349525) if(length(p.full_path)>length(substringUTF8(p.full_path 1 349525)) " [truncated]" "")):p_full_path p.visibility_level:p_visibility_level] [metrics: COUNT():merged_mrs]
       (Join Inner (mr.project_id = p.id)
-        (Filter [!deleted]
+        (Filter [!p.deleted]
           (Scan gl_project p FINAL))
-        (Filter [state:eq !deleted]
+        (Filter [mr.state:eq !mr.deleted]
           (Scan gl_merge_request mr FINAL)))))

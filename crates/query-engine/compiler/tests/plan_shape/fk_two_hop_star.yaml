@@ -2,12 +2,12 @@ name: "Two FK hops — all nodes joined, no edge tables"
 input: {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}
 expected: |
   (Limit 11
-    (Project ["HAS_JOB":e0_type (pipe.id):e0_src "Pipeline":e0_src_type (j.id):e0_dst "Job":e0_dst_type "IN_PROJECT":e1_type (pipe.id):e1_src "Pipeline":e1_src_type (p.id):e1_dst "Project":e1_dst_type @pipe.id @pipe.iid @pipe.status @pipe.ref @pipe.source @j.id @j.name @j.status @j.ref @p.id @p.name @p.full_path @p.visibility_level]
+    (Project ["HAS_JOB":e0_type pipe.id:e0_src "Pipeline":e0_src_type j.id:e0_dst "Job":e0_dst_type "IN_PROJECT":e1_type pipe.id:e1_src "Pipeline":e1_src_type p.id:e1_dst "Project":e1_dst_type pipe.id:pipe_id pipe.iid:pipe_iid pipe.status:pipe_status concat(substringUTF8(pipe.ref 1 190650) if(length(pipe.ref)>length(substringUTF8(pipe.ref 1 190650)) " [truncated]" "")):pipe_ref pipe.source:pipe_source j.id:j_id concat(substringUTF8(j.name 1 190650) if(length(j.name)>length(substringUTF8(j.name 1 190650)) " [truncated]" "")):j_name j.status:j_status concat(substringUTF8(j.ref 1 190650) if(length(j.ref)>length(substringUTF8(j.ref 1 190650)) " [truncated]" "")):j_ref p.id:p_id concat(substringUTF8(p.name 1 190650) if(length(p.name)>length(substringUTF8(p.name 1 190650)) " [truncated]" "")):p_name concat(substringUTF8(p.full_path 1 190650) if(length(p.full_path)>length(substringUTF8(p.full_path 1 190650)) " [truncated]" "")):p_full_path p.visibility_level:p_visibility_level]
       (Join Inner (pipe.project_id = p.id)
         (Join Inner (j.pipeline_id = pipe.id)
-          (Filter [status:eq !deleted]
+          (Filter [pipe.status:eq !pipe.deleted]
             (Scan gl_pipeline pipe FINAL))
-          (Filter [status:eq !deleted]
+          (Filter [j.status:eq !j.deleted]
             (Scan gl_job j FINAL)))
-        (Filter [id∈[1] !deleted]
+        (Filter [p.id=1 !p.deleted]
           (Scan gl_project p FINAL)))))

@@ -2,19 +2,19 @@ name: "Multi-edge chain uses FINAL on each edge scan with narrowing CTEs"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"p","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
 expected: |
   (Limit 2
-    (Agg [group: ] [metrics: COUNT(mr.*):n]
+    (Agg [group: ] [metrics: COUNT():n]
       (Join Semi (e1.source_id = _sip_e0.source_id)
         (Join Semi (e1.target_id = p.id)
           (Join Semi (e0.target_id = label.id)
             (Join Inner (e0.source_id = e1.source_id)
-              (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" !deleted scope(…) source_id∈[1]]
+              (Filter [e0.relationship_kind="HAS_LABEL" e0.source_kind="MergeRequest" e0.target_kind="Label" !e0.deleted scope(e0) e0.source_id=1]
                 (Scan gl_edge e0 FINAL))
-              (Filter [relationship_kind="IN_PROJECT" source_kind="MergeRequest" target_kind="Project" !deleted source_id∈[1]]
+              (Filter [e1.relationship_kind="IN_PROJECT" e1.source_kind="MergeRequest" e1.target_kind="Project" !e1.deleted e1.source_id=1]
                 (Scan gl_edge e1 FINAL)))
-            (Filter [title:eq !deleted]
+            (Filter [label.title:eq !label.deleted]
               (Scan gl_label label FINAL)))
-          (Filter [full_path:eq !deleted]
+          (Filter [p.full_path:eq !p.deleted]
             (Scan gl_project p FINAL)))
         (Project [_sip_e0.source_id:source_id]
-          (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" !deleted scope(…) source_id∈[1]]
+          (Filter [_sip_e0.relationship_kind="HAS_LABEL" _sip_e0.source_kind="MergeRequest" _sip_e0.target_kind="Label" !_sip_e0.deleted scope(_sip_e0) _sip_e0.source_id=1]
             (Scan gl_edge _sip_e0 FINAL))))))

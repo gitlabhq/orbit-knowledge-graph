@@ -2,6 +2,6 @@ name: "Single node scan uses FINAL"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"limit":10}
 expected: |
   (Limit 11
-    (Project [@mr.id @mr.iid @mr.title @mr.state @mr.source_branch @mr.target_branch]
-      (Filter [state:eq !deleted]
+    (Project [mr.id:mr_id mr.iid:mr_iid concat(substringUTF8(mr.title 1 190650) if(length(mr.title)>length(substringUTF8(mr.title 1 190650)) " [truncated]" "")):mr_title mr.state:mr_state concat(substringUTF8(mr.source_branch 1 190650) if(length(mr.source_branch)>length(substringUTF8(mr.source_branch 1 190650)) " [truncated]" "")):mr_source_branch concat(substringUTF8(mr.target_branch 1 190650) if(length(mr.target_branch)>length(substringUTF8(mr.target_branch 1 190650)) " [truncated]" "")):mr_target_branch]
+      (Filter [mr.state:eq !mr.deleted]
         (Scan gl_merge_request mr FINAL))))

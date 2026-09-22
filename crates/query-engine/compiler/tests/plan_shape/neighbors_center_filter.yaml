@@ -2,17 +2,17 @@ name: "Non-denorm center filter joins node table with FINAL"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"outgoing"},"limit":20}
 expected: |
   (Limit 21
-    (Project [e.target_id:_gkg_neighbor_id e.target_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type expr(…):_gkg_neighbor_is_outgoing e.source_id:_gkg_mr_id expr(…):_gkg_mr_type e.traversal_path:_gkg_mr_tp]
+    (Project [e.target_id:_gkg_neighbor_id e.target_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type 1:_gkg_neighbor_is_outgoing e.source_id:_gkg_mr_id "MergeRequest":_gkg_mr_type e.traversal_path:_gkg_mr_tp]
       (Join Inner (e.source_id = mr.id)
         (Union e
           (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
-            (Filter [source_kind="MergeRequest" relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES",…+11] !deleted]
+            (Filter [_e.source_kind="MergeRequest" _e.relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES",…+11] !_e.deleted]
               (Scan gl_ci_edge _e)))
           (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
-            (Filter [source_kind="MergeRequest" relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES",…+11] !deleted]
+            (Filter [_e.source_kind="MergeRequest" _e.relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES",…+11] !_e.deleted]
               (Scan gl_diff_edge _e)))
           (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
-            (Filter [source_kind="MergeRequest" relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES",…+11] !deleted]
+            (Filter [_e.source_kind="MergeRequest" _e.relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES",…+11] !_e.deleted]
               (Scan gl_edge _e))))
-        (Filter [title:contains !deleted]
+        (Filter [mr.title:contains !mr.deleted]
           (Scan gl_merge_request mr FINAL)))))

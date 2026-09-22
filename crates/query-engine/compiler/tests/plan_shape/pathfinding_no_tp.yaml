@@ -4,28 +4,33 @@ expected: |
   (With
     (forward =
       (Union _frontier
-        (Project [e1.source_id:anchor_id e1.target_id:end_id e1.target_kind:end_kind expr(…):path_nodes expr(…):edge_kinds expr(…):depth]
-          (Filter [source_id∈[1] relationship_kind∈["MEMBER_OF","CONTAINS"] source_kind="User" !deleted]
-            (Scan gl_edge e1)))
-        (Project [e1.source_id:anchor_id e2.target_id:end_id e2.target_kind:end_kind expr(…):path_nodes expr(…):edge_kinds expr(…):depth]
+        (Project [e1.source_id:anchor_id e1.target_id:end_id e1.target_kind:end_kind array(tuple(e1.target_id e1.target_kind)):path_nodes array(e1.relationship_kind):edge_kinds 1:depth]
+          (Filter [e1.relationship_kind∈["MEMBER_OF","CONTAINS"] e1.source_kind="User" !e1.deleted]
+            (Filter [e1.source_id=1]
+              (Scan gl_edge e1))))
+        (Project [e1.source_id:anchor_id e2.target_id:end_id e2.target_kind:end_kind array(tuple(e1.target_id e1.target_kind) tuple(e2.target_id e2.target_kind)):path_nodes array(e1.relationship_kind e2.relationship_kind):edge_kinds 2:depth]
           (Join Inner (e1.target_id = e2.source_id)
-            (Filter [source_id∈[1] relationship_kind∈["MEMBER_OF","CONTAINS"] source_kind="User" !deleted]
-              (Scan gl_edge e1))
-            (Filter [relationship_kind∈["MEMBER_OF","CONTAINS"] !deleted]
+            (Filter [e1.relationship_kind∈["MEMBER_OF","CONTAINS"] e1.source_kind="User" !e1.deleted]
+              (Filter [e1.source_id=1]
+                (Scan gl_edge e1)))
+            (Filter [e2.relationship_kind∈["MEMBER_OF","CONTAINS"] !e2.deleted]
               (Scan gl_edge e2))))))
     (backward =
-      (Project [e1.target_id:anchor_id e1.source_id:end_id e1.source_kind:end_kind expr(…):path_nodes expr(…):edge_kinds expr(…):depth]
-        (Filter [target_id∈[100] relationship_kind∈["MEMBER_OF","CONTAINS"] target_kind="Project" !deleted]
-          (Scan gl_edge e1))))
+      (Union _frontier
+        (Project [e1.target_id:anchor_id e1.source_id:end_id e1.source_kind:end_kind arrayResize(array(tuple(0 "")) 0):path_nodes array(e1.relationship_kind):edge_kinds 1:depth]
+          (Filter [e1.relationship_kind∈["MEMBER_OF","CONTAINS"] e1.target_kind="Project" !e1.deleted]
+            (Filter [e1.target_id=100]
+              (Scan gl_edge e1))))))
     (Limit 11
       (Sort [paths.depth↑]
         (Project [paths._gkg_path:_gkg_path paths._gkg_edge_kinds:_gkg_edge_kinds paths.depth:depth]
           (Union paths
-            (Project [f.depth:depth expr(…):_gkg_path f.edge_kinds:_gkg_edge_kinds]
-              (Filter [depth=1 end_kind="Project" end_id∈[100]]
-                (Scan forward f)))
-            (Project [expr(…):depth expr(…):_gkg_path expr(…):_gkg_edge_kinds]
-              (Filter [expr(…)]
+            (Project [f.depth:depth arrayConcat(array(tuple(f.anchor_id "User")) f.path_nodes):_gkg_path f.edge_kinds:_gkg_edge_kinds]
+              (Filter [f.end_id=100]
+                (Filter [f.depth=1 f.end_kind="Project"]
+                  (Scan forward f))))
+            (Project [plus(f.depth b.depth):depth arrayConcat(array(tuple(f.anchor_id "User")) f.path_nodes arrayReverse(b.path_nodes) array(tuple(b.anchor_id "Project"))):_gkg_path arrayConcat(f.edge_kinds arrayReverse(b.edge_kinds)):_gkg_edge_kinds]
+              (Filter [plus(f.depth b.depth)≤3]
                 (Join Inner (f.end_id = b.end_id)
                   (Scan forward f)
                   (Scan backward b)))))))))
