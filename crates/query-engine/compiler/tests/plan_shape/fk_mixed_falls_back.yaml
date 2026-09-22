@@ -3,26 +3,17 @@ input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","
 expected: |
   (Limit 2
     (Agg [group: ] [metrics: COUNT(mr.*):n]
-      (Join Semi/mat (e0.source_id = _nf_mr.id)
-        (Join Semi/mat (e0.target_id = _nf_label.id)
-          (Join Semi/mat (e1.target_id = _nf_p.id)
-            (Join Inner (e1.target_id = p.id)
-              (Join Inner (e0.target_id = label.id)
-                (Join Inner (e0.source_id = mr.id)
-                  (Join Inner (e0.target_id = e1.source_id)
-                    (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" !deleted scope(…) source_id∈[1]]
-                      (Scan gl_edge e0 FINAL))
-                    (Filter [relationship_kind="IN_PROJECT" source_kind="MergeRequest" target_kind="Project" !deleted source_id∈[1]]
-                      (Scan gl_edge e1 FINAL)))
-                  (Filter [id∈[1] !deleted]
-                    (Scan gl_merge_request mr FINAL)))
-                (Filter [title:eq !deleted]
-                  (Scan gl_label label FINAL)))
-              (Filter [full_path:eq !deleted]
-                (Scan gl_project p FINAL)))
-            (Filter [full_path:eq !deleted]
-              (Scan gl_project p FINAL)))
+      (Join Inner (e1.target_id = p.id)
+        (Join Inner (e0.target_id = label.id)
+          (Join Inner (e0.source_id = mr.id)
+            (Join Inner (e0.target_id = e1.source_id)
+              (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" !deleted scope(…) source_id∈[1]]
+                (Scan gl_edge e0 FINAL))
+              (Filter [relationship_kind="IN_PROJECT" source_kind="MergeRequest" target_kind="Project" !deleted source_id∈[1]]
+                (Scan gl_edge e1 FINAL)))
+            (Filter [id∈[1] !deleted]
+              (Scan gl_merge_request mr FINAL)))
           (Filter [title:eq !deleted]
             (Scan gl_label label FINAL)))
-        (Filter [id∈[1] !deleted]
-          (Scan gl_merge_request mr FINAL)))))
+        (Filter [full_path:eq !deleted]
+          (Scan gl_project p FINAL)))))

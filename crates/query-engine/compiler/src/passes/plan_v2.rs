@@ -767,15 +767,6 @@ impl<'a> PlanCtx<'a> {
         p
     }
 
-    fn is_selective(&self, node: &InputNode) -> bool {
-        !node.node_ids.is_empty()
-            || node.id_range.is_some()
-            || node.filters.iter().any(|(_, fs)| {
-                fs.iter()
-                    .any(|f| f.selectivity == ontology::FieldSelectivity::High)
-            })
-    }
-
     fn needs_node_join(&self, node: &InputNode) -> bool {
         let a = &node.id;
         let input = self.input;
@@ -798,23 +789,6 @@ impl<'a> PlanCtx<'a> {
         } else {
             has_filters || has_columns || in_order_by || in_group_by || in_agg_prop
         }
-    }
-
-    fn needs_node_join_fk(&self, alias: &str) -> bool {
-        let Some(node) = self.input.nodes.iter().find(|n| n.id == alias) else {
-            return false;
-        };
-        if self.input.query_type != QueryType::Aggregation {
-            return true;
-        }
-        if self.needs_node_join(node) {
-            return true;
-        }
-        self.input
-            .aggregation
-            .metrics
-            .iter()
-            .any(|m| m.expr.node() == alias)
     }
 }
 
@@ -953,164 +927,53 @@ impl<'a> PlanCtx<'a> {
     fn plan_chain(&self) -> PhysOp {
         if self.input.relationships.is_empty() {
             let n = &self.input.nodes[0];
-            return PhysOp::Filter {
-                input: Box::new(PhysOp::Scan {
-                    table: n.table.as_deref().unwrap_or("").to_string(),
-                    alias: n.id.clone(),
-                    dedup: true,
-                }),
-                predicates: self.node_predicates(n),
-            };
+            return self.filtered_node_scan(n);
         }
 
-        let mut tree: Option<PhysOp> = None;
         let det = &self.input.compiler.default_edge_table;
-        let cl = self.input.relationships.len();
-        let mut fk_joined: HashSet<String> = HashSet::new();
-        // (cte_name, edge_alias, edge_column, body)
-        let mut narrowing_joins: Vec<(String, String, String, PhysOp)> = Vec::new();
-
-        let all_fk = cl >= 1
-            && self
-                .input
-                .relationships
-                .iter()
-                .all(|r| matches!(self.graph.resolve(r, det, cl), HopStrategy::FkJoin { .. }));
+        let mut tree: Option<PhysOp> = None;
 
         for (i, rel) in self.input.relationships.iter().enumerate() {
             let ea = format!("e{i}");
             let (sc, _) = rel.direction.edge_columns();
+            let et = self.graph.edge_table(&rel.types, det);
 
-            let strategy = if all_fk {
-                self.graph.resolve(rel, det, cl)
+            let edge = if rel.hops.max > 1 {
+                self.build_multi_hop(rel, &ea, &et)
             } else {
-                match self.graph.resolve(rel, det, cl) {
-                    HopStrategy::FkJoin { .. } => HopStrategy::EdgeScan {
-                        table: self.graph.edge_table(&rel.types, det),
-                        dedup: cl >= 2 && rel.hops.max == 1,
-                    },
-                    other => other,
+                PhysOp::Filter {
+                    input: Box::new(PhysOp::Scan {
+                        table: et,
+                        alias: ea.clone(),
+                        dedup: false,
+                    }),
+                    predicates: self.edge_predicates(rel),
                 }
             };
 
-            match strategy {
-                HopStrategy::FkJoin { fk_column } => {
-                    let (fk_a, tgt_a) = self.fk_sides(rel, &fk_column);
-                    let needs_fk = self.needs_node_join_fk(fk_a);
-                    let needs_tgt = self.needs_node_join_fk(tgt_a);
-                    if tree.is_none() && needs_fk {
-                        if let Some(n) = self.input.nodes.iter().find(|n| n.id == fk_a) {
-                            tree = Some(PhysOp::Filter {
-                                input: Box::new(PhysOp::Scan {
-                                    table: n.table.as_deref().unwrap_or("").to_string(),
-                                    alias: fk_a.to_string(),
-                                    dedup: true,
-                                }),
-                                predicates: self.node_predicates(n),
-                            });
-                            fk_joined.insert(fk_a.to_string());
-                        }
-                    }
-                    if !fk_joined.contains(tgt_a) && needs_tgt {
-                        if let Some(n) = self.input.nodes.iter().find(|n| n.id == tgt_a) {
-                            let rhs = PhysOp::Filter {
-                                input: Box::new(PhysOp::Scan {
-                                    table: n.table.as_deref().unwrap_or("").to_string(),
-                                    alias: tgt_a.to_string(),
-                                    dedup: true,
-                                }),
-                                predicates: self.node_predicates(n),
-                            };
-                            if tree.is_none() {
-                                tree = Some(rhs);
-                            } else {
-                                tree = Some(PhysOp::Join {
-                                    left: Box::new(tree.unwrap()),
-                                    right: Box::new(rhs),
-                                    on: JoinOn {
-                                        left: (fk_a.to_string(), fk_column.clone()),
-                                        right: (
-                                            tgt_a.to_string(),
-                                            ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
-                                        ),
-                                    },
-                                    kind: JoinKind::Inner,
-                                });
-                            }
-                            fk_joined.insert(tgt_a.to_string());
-                        }
-                    }
-                }
-                HopStrategy::EdgeScan { table, dedup } => {
-                    let (from_col, to_col) = rel.direction.edge_columns();
-
-                    // Narrowing: selective endpoints → semi-join (materialized as CTE)
-                    for (na, edge_col) in [(&rel.from, from_col), (&rel.to, to_col)] {
-                        if let Some(n) = self.input.nodes.iter().find(|n| &n.id == na) {
-                            if self.is_selective(n) && n.table.is_some() {
-                                let cte_name = format!("_nf_{na}");
-                                if !narrowing_joins
-                                    .iter()
-                                    .any(|(name, _, _, _)| name == &cte_name)
-                                {
-                                    narrowing_joins.push((
-                                        cte_name,
-                                        ea.clone(),
-                                        edge_col.to_string(),
-                                        PhysOp::Filter {
-                                            input: Box::new(PhysOp::Scan {
-                                                table: n.table.as_deref().unwrap_or("").to_string(),
-                                                alias: na.clone(),
-                                                dedup: true,
-                                            }),
-                                            predicates: self.node_predicates(n),
-                                        },
-                                    ));
-                                }
-                            }
-                        }
-                    }
-
-                    let edge = if rel.hops.max > 1 {
-                        self.build_multi_hop(rel, &ea, &table)
+            tree = Some(match tree {
+                None => edge,
+                Some(prev) => {
+                    let prev_col = if i > 0 {
+                        let (_, pe) = self.input.relationships[i - 1].direction.edge_columns();
+                        (format!("e{}", i - 1), pe.to_string())
                     } else {
-                        PhysOp::Filter {
-                            input: Box::new(PhysOp::Scan {
-                                table,
-                                alias: ea.clone(),
-                                dedup,
-                            }),
-                            predicates: self.edge_predicates(rel),
-                        }
+                        (ea.clone(), sc.to_string())
                     };
-
-                    tree = Some(match tree {
-                        None => edge,
-                        Some(prev) => {
-                            let prev_col = if i > 0 {
-                                let (_, pe) =
-                                    self.input.relationships[i - 1].direction.edge_columns();
-                                (format!("e{}", i - 1), pe.to_string())
-                            } else {
-                                (ea.clone(), sc.to_string())
-                            };
-                            PhysOp::Join {
-                                left: Box::new(prev),
-                                right: Box::new(edge),
-                                on: JoinOn {
-                                    left: prev_col,
-                                    right: (ea.clone(), sc.to_string()),
-                                },
-                                kind: JoinKind::Inner,
-                            }
-                        }
-                    });
+                    PhysOp::Join {
+                        left: Box::new(prev),
+                        right: Box::new(edge),
+                        on: JoinOn {
+                            left: prev_col,
+                            right: (ea.clone(), sc.to_string()),
+                        },
+                        kind: JoinKind::Inner,
+                    }
                 }
-            }
+            });
         }
 
-        // Node joins for non-FK, non-narrowed nodes
-        let mut hydrated = fk_joined;
+        let mut hydrated: HashSet<String> = HashSet::new();
         for (i, rel) in self.input.relationships.iter().enumerate() {
             let ea = format!("e{i}");
             let (sc, ec) = rel.direction.edge_columns();
@@ -1126,14 +989,7 @@ impl<'a> PlanCtx<'a> {
                 }
                 tree = Some(PhysOp::Join {
                     left: Box::new(tree.unwrap()),
-                    right: Box::new(PhysOp::Filter {
-                        input: Box::new(PhysOp::Scan {
-                            table: n.table.as_deref().unwrap_or("").to_string(),
-                            alias: na.clone(),
-                            dedup: true,
-                        }),
-                        predicates: self.node_predicates(n),
-                    }),
+                    right: Box::new(self.filtered_node_scan(n)),
                     on: JoinOn {
                         left: (ea.clone(), col.to_string()),
                         right: (
@@ -1146,23 +1002,18 @@ impl<'a> PlanCtx<'a> {
             }
         }
 
-        // Wrap in narrowing semi-joins (materialized as CTEs)
-        let mut result = tree.unwrap();
-        for (cte_name, edge_alias, edge_col, body) in narrowing_joins.into_iter().rev() {
-            result = PhysOp::Join {
-                left: Box::new(result),
-                right: Box::new(body),
-                on: JoinOn {
-                    left: (edge_alias, edge_col),
-                    right: (
-                        cte_name,
-                        ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
-                    ),
-                },
-                kind: JoinKind::Semi { materialize: true },
-            };
+        tree.unwrap()
+    }
+
+    fn filtered_node_scan(&self, n: &InputNode) -> PhysOp {
+        PhysOp::Filter {
+            input: Box::new(PhysOp::Scan {
+                table: n.table.as_deref().unwrap_or("").to_string(),
+                alias: n.id.clone(),
+                dedup: true,
+            }),
+            predicates: self.node_predicates(n),
         }
-        result
     }
 
     fn build_multi_hop(&self, rel: &InputRelationship, _alias: &str, edge_table: &str) -> PhysOp {

@@ -3,11 +3,17 @@ input: {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filt
 expected: |
   (Limit 11
     (Project [e0.traversal_path:e0_path e0.relationship_kind:e0_type e0.source_id:e0_src e0.source_kind:e0_src_type e0.target_id:e0_dst e0.target_kind:e0_dst_type e1.traversal_path:e1_path e1.relationship_kind:e1_type e1.source_id:e1_src e1.source_kind:e1_src_type e1.target_id:e1_dst e1.target_kind:e1_dst_type @id @iid @status @ref @source @id @name @status @ref @id @name @full_path @visibility_level]
-      (Join Inner (pipe.project_id = p.id)
-        (Join Inner (j.pipeline_id = pipe.id)
+      (Join Inner (e1.target_id = p.id)
+        (Join Inner (e0.target_id = j.id)
+          (Join Inner (e0.source_id = pipe.id)
+            (Join Inner (e0.target_id = e1.source_id)
+              (Filter [relationship_kind="HAS_JOB" source_kind="Pipeline" target_kind="Job" !deleted scope(…) has(target_tags,"status:failed")]
+                (Scan gl_ci_edge e0 FINAL))
+              (Filter [relationship_kind="IN_PROJECT" source_kind="Pipeline" target_kind="Project" !deleted scope(…) target_id∈[1] has(source_tags,"status:failed")]
+                (Scan gl_edge e1 FINAL)))
+            (Filter [status:eq !deleted]
+              (Scan gl_pipeline pipe FINAL)))
           (Filter [status:eq !deleted]
-            (Scan gl_job j FINAL))
-          (Filter [status:eq !deleted]
-            (Scan gl_pipeline pipe FINAL)))
+            (Scan gl_job j FINAL)))
         (Filter [id∈[1] !deleted]
           (Scan gl_project p FINAL)))))
