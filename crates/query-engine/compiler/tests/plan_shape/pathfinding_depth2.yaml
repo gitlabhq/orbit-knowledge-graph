@@ -12,8 +12,8 @@ expected: |
                 (Scan forward f)
                 (Scan backward b)))
             (Scan gl_edge e1))
-          (Filter [id∈[100] _deleted=false]
+          (Filter [id∈[100] !deleted]
             (Scan gl_project end FINAL)))
         (Scan gl_edge e1))
-      (Filter [id∈[1] _deleted=false]
+      (Filter [id∈[1] !deleted]
         (Scan gl_merge_request start FINAL))))

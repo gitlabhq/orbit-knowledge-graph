@@ -298,6 +298,9 @@ impl PhysOp {
                 format!("{pad}(Union\n{})", arm_strs.join("\n"))
             }
             PhysOp::Sort { input, keys } => {
+                if keys.is_empty() {
+                    return input.fmt_sexpr(indent);
+                }
                 let ks = keys
                     .iter()
                     .map(|k| k.to_sexpr())
@@ -315,14 +318,28 @@ impl PhysOp {
 impl Predicate {
     fn to_sexpr(&self) -> String {
         match self {
-            Predicate::Eq { column, value } => format!("{column}={}", value.to_sexpr()),
+            Predicate::Eq { column, value } => {
+                if column == "_deleted" && matches!(value, Value::Bool(false)) {
+                    return "!deleted".to_string();
+                }
+                format!("{column}={}", value.to_sexpr())
+            }
             Predicate::In { column, values } => {
-                let vs = values
-                    .iter()
-                    .map(|v| v.to_sexpr())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!("{column}∈[{vs}]")
+                if values.len() > 5 {
+                    let first3 = values[..3]
+                        .iter()
+                        .map(|v| v.to_sexpr())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!("{column}∈[{first3},…+{}]", values.len() - 3)
+                } else {
+                    let vs = values
+                        .iter()
+                        .map(|v| v.to_sexpr())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!("{column}∈[{vs}]")
+                }
             }
             Predicate::Range { column, start, end } => format!("{column}∈{start}..{end}"),
             Predicate::NodeFilter { property, filter } => {
@@ -368,7 +385,10 @@ impl ProjectedColumn {
                 }
             }
             ProjectedColumn::NodeProperty { property } => format!("@{property}"),
-            ProjectedColumn::Computed { expr, alias } => format!("({}):{alias}", expr.to_sexpr()),
+            ProjectedColumn::Computed { expr, alias } => match expr {
+                ColumnExpr::Lit(v) => format!("{}:{alias}", v.to_sexpr()),
+                _ => format!("({}):{alias}", expr.to_sexpr()),
+            },
         }
     }
 }

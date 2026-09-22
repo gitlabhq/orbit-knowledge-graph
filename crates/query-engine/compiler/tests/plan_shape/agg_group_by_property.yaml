@@ -2,10 +2,9 @@ name: "Group-by property"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
 expected: |
   (Limit 11
-    (Sort []
-      (Agg [group: mr.state:mr_state] [metrics: COUNT(mr.*):n]
-        (Join Inner (mr.project_id = p.id)
-          (Filter [state:eq _deleted=false]
-            (Scan gl_merge_request mr FINAL))
-          (Filter [id∈[1] _deleted=false]
-            (Scan gl_project p FINAL))))))
+    (Agg [group: mr.state:mr_state] [metrics: COUNT(mr.*):n]
+      (Join Inner (mr.project_id = p.id)
+        (Filter [state:eq !deleted]
+          (Scan gl_merge_request mr FINAL))
+        (Filter [id∈[1] !deleted]
+          (Scan gl_project p FINAL)))))

@@ -12,12 +12,12 @@ expected: |
                 (Scan forward f)
                 (Scan backward b)))
             (Scan gl_edge e1))
-          (Filter [id∈[100] _deleted=false]
+          (Filter [id∈[100] !deleted]
             (Scan gl_project end FINAL)))
         (Union
           (Scan gl_edge e1)
           (Join Inner (e1.target_id = e2.source_id)
             (Scan gl_edge e1)
             (Scan gl_edge e2))))
-      (Filter [id∈[1] _deleted=false]
+      (Filter [id∈[1] !deleted]
         (Scan gl_merge_request start FINAL))))

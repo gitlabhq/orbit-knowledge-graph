@@ -3,12 +3,11 @@ input: {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids
 expected: |
   (Limit 11
     (Project [traversal_path:e0_path relationship_kind:e0_type source_id:e0_src source_kind:e0_src_type target_id:e0_dst target_kind:e0_dst_type traversal_path:e1_path relationship_kind:e1_type source_id:e1_src source_kind:e1_src_type target_id:e1_dst target_kind:e1_dst_type @id @name @full_path @visibility_level @id @iid @title @state @source_branch @target_branch @id @username @name @state]
-      (Sort []
-        (Join Inner (mr.author_id = u.id)
-          (Join Inner (mr.project_id = p.id)
-            (Filter [_deleted=false]
-              (Scan gl_merge_request mr FINAL))
-            (Filter [id∈[1] _deleted=false]
-              (Scan gl_project p FINAL)))
-          (Filter [_deleted=false]
-            (Scan gl_user u FINAL))))))
+      (Join Inner (mr.author_id = u.id)
+        (Join Inner (mr.project_id = p.id)
+          (Filter [!deleted]
+            (Scan gl_merge_request mr FINAL))
+          (Filter [id∈[1] !deleted]
+            (Scan gl_project p FINAL)))
+        (Filter [!deleted]
+          (Scan gl_user u FINAL)))))

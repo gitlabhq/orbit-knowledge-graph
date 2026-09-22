@@ -6,5 +6,5 @@ expected: |
       (Join Semi/mat (forward)
         (Scan forward f)
         (Scan gl_edge e1))
-      (Filter [id∈[1] _deleted=false]
+      (Filter [id∈[1] !deleted]
         (Scan gl_merge_request start FINAL))))

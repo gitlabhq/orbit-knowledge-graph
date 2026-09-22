@@ -3,20 +3,19 @@ input: {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":
 expected: |
   (Limit 11
     (Project [e0_traversal_path:hop_e0_path e0_relationship_kind:hop_e0_type e0_source_id:hop_e0_src e0_source_kind:hop_e0_src_type e0_target_id:hop_e0_dst e0_target_kind:hop_e0_dst_type e0_path_nodes:hop_e0_path_nodes @id @name @full_path @visibility_level @id @name @full_path @visibility_level]
-      (Sort []
-        (Join Semi/mat (. = _nf_g.id)
-          (Join Inner (e0.target_id = p.id)
-            (Join Inner (e0.source_id = g.id)
-              (Filter [source_kind="Group" source_id∈[1] target_kind="Project" _deleted=false]
-                (Project [source_id target_id relationship_kind ([(e1.target_id e1.target_kind) (e2.target_id e2.target_kind)]):path_nodes (2):depth _deleted traversal_path]
-                  (Join Inner (e1.target_id = e2.source_id)
-                    (Filter [relationship_kind="CONTAINS" _deleted=false scope(…)]
-                      (Scan gl_edge e1))
-                    (Filter [_deleted=false relationship_kind="CONTAINS"]
-                      (Scan gl_edge e2)))))
-              (Filter [id∈[1] _deleted=false]
-                (Scan gl_group g FINAL)))
-            (Filter [_deleted=false]
-              (Scan gl_project p FINAL)))
-          (Filter [id∈[1] _deleted=false]
-            (Scan gl_group g FINAL))))))
+      (Join Semi/mat (. = _nf_g.id)
+        (Join Inner (e0.target_id = p.id)
+          (Join Inner (e0.source_id = g.id)
+            (Filter [source_kind="Group" source_id∈[1] target_kind="Project" !deleted]
+              (Project [source_id target_id relationship_kind ([(e1.target_id e1.target_kind) (e2.target_id e2.target_kind)]):path_nodes 2:depth _deleted traversal_path]
+                (Join Inner (e1.target_id = e2.source_id)
+                  (Filter [relationship_kind="CONTAINS" !deleted scope(…)]
+                    (Scan gl_edge e1))
+                  (Filter [!deleted relationship_kind="CONTAINS"]
+                    (Scan gl_edge e2)))))
+            (Filter [id∈[1] !deleted]
+              (Scan gl_group g FINAL)))
+          (Filter [!deleted]
+            (Scan gl_project p FINAL)))
+        (Filter [id∈[1] !deleted]
+          (Scan gl_group g FINAL)))))

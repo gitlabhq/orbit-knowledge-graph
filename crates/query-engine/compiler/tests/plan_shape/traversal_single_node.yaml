@@ -3,6 +3,5 @@ input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","fi
 expected: |
   (Limit 11
     (Project [@id @iid @title @state @source_branch @target_branch]
-      (Sort []
-        (Filter [state:eq _deleted=false]
-          (Scan gl_merge_request mr FINAL)))))
+      (Filter [state:eq !deleted]
+        (Scan gl_merge_request mr FINAL))))

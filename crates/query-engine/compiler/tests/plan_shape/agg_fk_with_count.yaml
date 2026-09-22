@@ -2,10 +2,9 @@ name: "FK aggregation — count target IS joined"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"total_mrs"}],"limit":10}
 expected: |
   (Limit 11
-    (Sort []
-      (Agg [group: p.id:p p.name:p p.full_path:p p.visibility_level:p] [metrics: COUNT(mr.*):total_mrs]
-        (Join Inner (mr.project_id = p.id)
-          (Filter [_deleted=false]
-            (Scan gl_merge_request mr FINAL))
-          (Filter [id∈[278964] _deleted=false]
-            (Scan gl_project p FINAL))))))
+    (Agg [group: p.id:p p.name:p p.full_path:p p.visibility_level:p] [metrics: COUNT(mr.*):total_mrs]
+      (Join Inner (mr.project_id = p.id)
+        (Filter [!deleted]
+          (Scan gl_merge_request mr FINAL))
+        (Filter [id∈[278964] !deleted]
+          (Scan gl_project p FINAL)))))

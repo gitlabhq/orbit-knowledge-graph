@@ -2,10 +2,9 @@ name: "Non-denorm center filter joins node table with FINAL"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"outgoing"},"limit":20}
 expected: |
   (Limit 21
-    (Sort []
-      (Project [target_id:_gkg_neighbor_id target_kind:_gkg_neighbor_type relationship_kind:_gkg_relationship_type (1):_gkg_neighbor_is_outgoing source_id:_gkg_mr_id ("MergeRequest"):_gkg_mr_type]
-        (Join Inner (e.source_id = mr.id)
-          (Filter [source_kind="MergeRequest" relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES","HAS_DIFF","HAS_HEAD_PIPELINE","HAS_LABEL","HAS_LATEST_DIFF","HAS_NOTE","IN_MILESTONE","IN_PROJECT","MENTIONS","MERGED_AT_COMMIT","SOURCE_PROJECT","TRIGGERED"] _deleted=false]
-            (Scan gl_edge e))
-          (Filter [title:contains _deleted=false]
-            (Scan gl_merge_request mr FINAL))))))
+    (Project [target_id:_gkg_neighbor_id target_kind:_gkg_neighbor_type relationship_kind:_gkg_relationship_type 1:_gkg_neighbor_is_outgoing source_id:_gkg_mr_id "MergeRequest":_gkg_mr_type]
+      (Join Inner (e.source_id = mr.id)
+        (Filter [source_kind="MergeRequest" relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES",…+11] !deleted]
+          (Scan gl_edge e))
+        (Filter [title:contains !deleted]
+          (Scan gl_merge_request mr FINAL)))))
