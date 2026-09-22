@@ -13,7 +13,9 @@ fn prompt(key: &str) -> &'static orbit_prompts::Prompt {
 mod registry;
 mod schema;
 mod service;
+mod skills;
 
 pub use registry::{CommandRegistry, ToolDefinition, ToolRegistry};
 pub(crate) use service::AgentCommand;
 pub use service::{ExecutorError, OutputFormat, ToolService};
+pub use skills::{SkillNotFound, get_skill, list_skills};

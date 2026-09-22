@@ -60,12 +60,16 @@ client, stub-cached):
      - Return the query DSL definition
    * - ``GetResponseFormat``
      - Return the response format/version
+   * - ``ListSkills``
+     - List embedded Orbit Remote skills with cache metadata
+   * - ``GetSkill``
+     - Return one embedded skill tree or metadata only
    * - ``GetClusterHealth``
      - Cluster health
    * - ``GetGraphStatus``
      - Indexing / graph status
 
-Nine RPCs in total.  ``gkg-server`` health is served over HTTP as ``GET /live``
+Eleven RPCs in total.  ``gkg-server`` health is served over HTTP as ``GET /live``
 and ``GET /ready``; there is no ``/health`` route.  Metrics are exported via
 OpenTelemetry (labkit), not a ``/metrics`` HTTP route.
 
@@ -94,6 +98,12 @@ proxying to the gRPC service):
    * - ``GET /api/v4/orbit/tools``
      - List available tools
      - ``ListTools``
+   * - ``GET /api/v4/orbit/skills``
+     - List embedded Orbit Remote skills
+     - ``ListSkills``
+   * - ``HEAD|GET /api/v4/orbit/skills/:name``
+     - Revalidate metadata or return a complete skill tree
+     - ``GetSkill``
 
 **MCP:** MCP for the cloud service is exposed by **Rails** (``tools/list`` /
 ``tools/call``), which proxies to the gRPC service --- ``gkg-server`` itself

@@ -45,7 +45,7 @@ nats -right-> sdlc_idx : NATS JetStream (subscribe)
 gitaly -right-> code_idx : gRPC (streaming archive)
 
 ' Rails integration (bidirectional)
-rails --> http_srv : HTTP+JWT via DAP,\ngRPC (9 RPCs)
+rails --> http_srv : HTTP+JWT via DAP,\ngRPC (11 RPCs)
 query_eng --> rails : gRPC stream (batch redaction,\nAbility.allowed?)
 
 ' Internal routing

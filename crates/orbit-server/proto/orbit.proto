@@ -26,7 +26,7 @@ enum FormatName {
   FORMAT_NAME_GOON = 1;
 }
 
-// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
+// Core service API. Gated behind the :knowledge_graph feature flag
 // in Rails. JWT auth carries user identity and traversal IDs for authorization.
 // Renamed from gkg.v1.KnowledgeGraphService (knowledge-graph#1152, chain
 // T10). The server keeps answering the old request paths through a legacy
@@ -59,6 +59,14 @@ service OrbitService {
   // Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
   // command catalog and InvokeAgentCommand instead.
   rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
+
+  // Lists the standalone Orbit Remote skills embedded in this deployment.
+  // Used by Rails to build GET /api/v4/orbit/skills.
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+
+  // Returns one complete, versioned skill tree or its cache metadata.
+  // Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
+  rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
 
   // Lists the server-defined named queries with their DSL rendered for the
   // caller (bindings resolved from JWT claims, parameters filled with their
@@ -224,6 +232,47 @@ message GetQueryDslResponse {
     string raw_json_schema = 1;  // format = RAW: full JSON Schema as a JSON string
     string formatted_text = 2;   // format = LLM: condensed TOON
   }
+}
+
+// ---------------------------------------------------------------------------
+// Skills — unary, returns embedded Orbit Remote skill artifacts
+// ---------------------------------------------------------------------------
+
+// Request for the embedded skill catalog.
+message ListSkillsRequest {}
+
+// Response listing every skill embedded in the deployed server.
+message ListSkillsResponse {
+  repeated SkillSummary skills = 1;
+}
+
+// Identity and cache metadata for an embedded skill.
+message SkillSummary {
+  string name = 1;
+  string version = 2;
+  string tree_sha256 = 3;
+  string description = 4;
+}
+
+// Request for one embedded skill by name.
+message GetSkillRequest {
+  string name = 1;
+  bool metadata_only = 2;  // true omits files for a cheap cache revalidation
+}
+
+// Complete identity, cache metadata, and optionally the files for one skill.
+message GetSkillResponse {
+  string name = 1;
+  string version = 2;
+  string tree_sha256 = 3;
+  repeated SkillFile files = 4;  // empty when metadata_only is true
+}
+
+// One UTF-8 file in an embedded skill tree.
+message SkillFile {
+  string path = 1;
+  string sha256 = 2;
+  string content = 3;
 }
 
 // ---------------------------------------------------------------------------

@@ -26,16 +26,19 @@ use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
-    GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
-    InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
-    ListAgentCommandsResponse, ListNamedQueriesRequest, ListNamedQueriesResponse, ListToolsRequest,
+    GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse, GetSkillRequest,
+    GetSkillResponse, InvokeAgentCommandRequest, InvokeAgentCommandResponse,
+    ListAgentCommandsRequest, ListAgentCommandsResponse, ListNamedQueriesRequest,
+    ListNamedQueriesResponse, ListSkillsRequest, ListSkillsResponse, ListToolsRequest,
     ListToolsResponse, NamedQueryDefinition, QueryMetadata, QueryType, ResponseFormat,
     ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
-    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
-    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
-    invoke_agent_command_response,
+    SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary, StructuredSchema,
+    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
+    get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
 };
-use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
+use crate::tools::{
+    AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService, get_skill, list_skills,
+};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
@@ -505,6 +508,66 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         skip(self, request),
         fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
+    async fn list_skills(
+        &self,
+        request: Request<ListSkillsRequest>,
+    ) -> Result<Response<ListSkillsResponse>, Status> {
+        let ctx = extract_request_context(&request, &self.validator)?;
+        ctx.record_in_current_span();
+
+        let skills: Vec<SkillSummary> = list_skills()
+            .into_iter()
+            .map(|skill| SkillSummary {
+                name: skill.name,
+                version: skill.version,
+                tree_sha256: skill.tree_sha256,
+                description: skill.description,
+            })
+            .collect();
+
+        info!(count = skills.len(), "Listing embedded skills");
+        Ok(Response::new(ListSkillsResponse { skills }))
+    }
+
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
+    )]
+    async fn get_skill(
+        &self,
+        request: Request<GetSkillRequest>,
+    ) -> Result<Response<GetSkillResponse>, Status> {
+        let ctx = extract_request_context(&request, &self.validator)?;
+        ctx.record_in_current_span();
+
+        let req = request.get_ref();
+        info!(skill_name = %req.name, metadata_only = req.metadata_only, "Fetching embedded skill");
+
+        let skill = get_skill(&req.name, req.metadata_only)
+            .map_err(|error| Status::not_found(error.to_string()))?;
+        let files = skill
+            .files
+            .unwrap_or_default()
+            .into_iter()
+            .map(|file| ProtoSkillFile {
+                path: file.path,
+                sha256: file.sha256,
+                content: file.content,
+            })
+            .collect();
+
+        Ok(Response::new(GetSkillResponse {
+            name: skill.metadata.name,
+            version: skill.metadata.version,
+            tree_sha256: skill.metadata.tree_sha256,
+            files,
+        }))
+    }
+
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
+    )]
     async fn list_named_queries(
         &self,
         request: Request<ListNamedQueriesRequest>,
@@ -761,6 +824,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 #[cfg(test)]
 mod tests {
     mod commands;
+    mod skills;
 
     use super::*;
     use crate::proto::orbit_service_server::OrbitService;

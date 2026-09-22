@@ -59,7 +59,7 @@ code_idx --> ch : TCP native (write)
 query_eng --> ch : TCP native (read, parameterized SQL)
 
 ' Rails integration (bidirectional)
-rails --> http_srv : HTTP+JWT via DAP,\ngRPC (9 RPCs)
+rails --> http_srv : HTTP+JWT via DAP,\ngRPC (11 RPCs)
 query_eng --> rails : gRPC stream (batch redaction,\nAbility.allowed?)
 
 ' Internal routing
