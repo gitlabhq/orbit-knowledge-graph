@@ -1,8 +1,3 @@
-//! Readiness checks registered on the labkit probe server (`/-/readiness`).
-//!
-//! The checks read the same in-process state as the legacy `/ready` handlers, so both
-//! surfaces answer identically while charts migrate. They make no network calls.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

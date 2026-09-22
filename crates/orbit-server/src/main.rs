@@ -62,8 +62,6 @@ async fn main() -> anyhow::Result<()> {
     if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
     }
-    // The probe server always binds so `/-/liveness` and `/-/readiness` do not depend on
-    // metrics being scraped; `prometheus_metrics_port` only adds `/-/metrics` to it.
     builder = builder.health_port(config.metrics.prometheus.port);
     if config.metrics.prometheus.enabled {
         builder = builder.prometheus_metrics_port(config.metrics.prometheus.port);
