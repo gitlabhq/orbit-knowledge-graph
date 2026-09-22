@@ -273,8 +273,8 @@ Services are instrumented with OpenTelemetry for distributed tracing. A single r
 ### Health Checks
 
 Every service serves `/-/liveness` and `/-/readiness` on the probe server port (default 9394), the
-same port that serves `/-/metrics`. The Webserver, Indexer, and Dispatcher also keep the deprecated
-`/live` and `/ready` endpoints. The Indexer and Dispatcher serve those on dedicated health ports
+same port that serves `/-/metrics`. The Webserver, Indexer, and Dispatcher also keep the `/live` and
+`/ready` endpoints that the Helm chart probes today. The Indexer and Dispatcher serve those on dedicated health ports
 (default 4202 and 4203 respectively). These pod-level probes report local serving state only.
 Liveness confirms that the process can answer HTTP. Readiness keeps a pod out of rotation until its
 schema gate has cleared. The HealthCheck service's `/health`

@@ -404,7 +404,7 @@ One internal listener serves `/-/liveness`, `/-/readiness` and, when
 | `probe_server.bind_address` | `0.0.0.0:9394` | Probe server listen address |
 
 When both `probe_server.bind_address` and `metrics.prometheus.port` are set and they name a
-different address, startup fails. Set `probe_server.bind_address` alone.
+different port, startup fails. Set `probe_server.bind_address` alone.
 
 ## Webserver
 
@@ -582,8 +582,8 @@ cargo run -p orbit-object-storage --example roundtrip -- config.yaml [secrets-di
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `health_check.bind_address` | `0.0.0.0:4201` | HealthCheck mode bind address |
-| `indexer_health_bind_address` | `0.0.0.0:4202` | Legacy `/live` and `/ready` address for Indexer mode. Deprecated in favour of the probe server |
-| `dispatcher_health_bind_address` | `0.0.0.0:4203` | Legacy `/live` and `/ready` address for DispatchIndexing mode. Deprecated in favour of the probe server |
+| `indexer_health_bind_address` | `0.0.0.0:4202` | `/live` and `/ready` address for Indexer mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
+| `dispatcher_health_bind_address` | `0.0.0.0:4203` | `/live` and `/ready` address for DispatchIndexing mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
 
 ## Tuning guide
 
@@ -794,5 +794,7 @@ metrics:
   log_level: info,orbit_server=debug
   prometheus:
     enabled: true
-    port: 9394
+
+probe_server:
+  bind_address: "0.0.0.0:9394"
 ```
