@@ -128,18 +128,18 @@ func (FormatName) EnumDescriptor() ([]byte, []int) {
 type QueryType int32
 
 const (
-	QueryType_QUERY_TYPE_RAW   QueryType = 0
+	QueryType_QUERY_TYPE_JSON  QueryType = 0
 	QueryType_QUERY_TYPE_NAMED QueryType = 1 // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
 )
 
 // Enum value maps for QueryType.
 var (
 	QueryType_name = map[int32]string{
-		0: "QUERY_TYPE_RAW",
+		0: "QUERY_TYPE_JSON",
 		1: "QUERY_TYPE_NAMED",
 	}
 	QueryType_value = map[string]int32{
-		"QUERY_TYPE_RAW":   0,
+		"QUERY_TYPE_JSON":  0,
 		"QUERY_TYPE_NAMED": 1,
 	}
 )
@@ -552,7 +552,7 @@ func (x *ExecuteQueryRequest) GetQueryType() QueryType {
 	if x != nil {
 		return x.QueryType
 	}
-	return QueryType_QUERY_TYPE_RAW
+	return QueryType_QUERY_TYPE_JSON
 }
 
 func (x *ExecuteQueryRequest) GetLanguage() QueryLanguage {
@@ -3992,9 +3992,9 @@ const file_orbit_proto_rawDesc = "" +
 	"\n" +
 	"FormatName\x12\x13\n" +
 	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x14\n" +
-	"\x10FORMAT_NAME_GOON\x10\x01*5\n" +
-	"\tQueryType\x12\x12\n" +
-	"\x0eQUERY_TYPE_RAW\x10\x00\x12\x14\n" +
+	"\x10FORMAT_NAME_GOON\x10\x01*6\n" +
+	"\tQueryType\x12\x13\n" +
+	"\x0fQUERY_TYPE_JSON\x10\x00\x12\x14\n" +
 	"\x10QUERY_TYPE_NAMED\x10\x01*@\n" +
 	"\rQueryLanguage\x12\x17\n" +
 	"\x13QUERY_LANGUAGE_JSON\x10\x00\x12\x16\n" +

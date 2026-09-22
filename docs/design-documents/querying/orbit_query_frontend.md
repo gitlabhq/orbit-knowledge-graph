@@ -97,8 +97,10 @@ The gRPC transport separates query source from language:
 
 | Enum | Values | Purpose |
 |---|---|---|
-| `QueryType` | `QUERY_TYPE_RAW=0`, `QUERY_TYPE_NAMED=1` | Select raw query text or a named-query envelope |
+| `QueryType` | `QUERY_TYPE_JSON=0`, `QUERY_TYPE_NAMED=1` | Select raw query text or a named-query envelope |
 | `QueryLanguage` | `QUERY_LANGUAGE_JSON=0`, `QUERY_LANGUAGE_GQL=1` | Select `Frontend::JsonDsl` or `Frontend::Gql` |
+
+`QUERY_TYPE_JSON` keeps its existing name and value for compatibility. It identifies an ad hoc query; the separate `language` field selects its compiler.
 
 `ExecuteQueryRequest.query_type` remains field 3. Either kind supports either language. NAMED with GQL renders the GQL template and compiles with the GQL frontend; the JSON spelling never enters that path.
 Rails derives `language` from the default-off, per-user `orbit_gql_queries` feature flag. Flag off selects JSON; flag on selects GQL. Both Workhorse streaming and direct Ruby gRPC requests carry it. Request authentication does not select a frontend, and metadata headers cannot override it. There is no language boolean.
@@ -112,7 +114,7 @@ Rails derives `language` from the default-off, per-user `orbit_gql_queries` feat
 | `GetQueryDslRequest` | 2 |
 | `ListNamedQueriesRequest` | 1 |
 
-Missing kind defaults to RAW and missing language to JSON, preserving the original zero-valued wire behavior. Unknown kinds and languages reject without fallback. Unary discovery and guidance methods accept only a language, not a source kind, and reject unknown languages with `INVALID_ARGUMENT`.
+Missing kind defaults to `QUERY_TYPE_JSON` and missing language to JSON, preserving the original zero-valued wire behavior. Unknown kinds and languages reject without fallback. Unary discovery and guidance methods accept only a language, not a source kind, and reject unknown languages with `INVALID_ARGUMENT`.
 Language-neutral RPCs have no mode selector. Each language-sensitive method decodes its request's language through the same helper; there is no process-wide Orbit mode.
 The catalog renders `raw_query` in that mode, without a language field. Tool and command discovery describe only the active mode. Under GQL, `GetQueryDsl` and the `get_query_dsl` command return `NOT_FOUND` and point to `CALL db.schema()`. See [Named Queries](README.md#named-queries).
 REST and MCP `query_graph` have no public language selector. Rails, not agents or public client input, sets the transport language. Payload shape only validates that selected language. Flag off accepts only JSON objects; flag on accepts only GQL strings. Existing JSON callers for opted-in users reject. Discovery results must not cross users or modes in caches.

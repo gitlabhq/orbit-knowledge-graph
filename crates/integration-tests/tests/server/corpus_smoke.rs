@@ -210,7 +210,7 @@ fn load_named_queries() -> Vec<SmokeCase> {
             spellings.map(|(language, frontend)| SmokeCase {
                 key: format!("named_query::{}::{language:?}", query.name),
                 query: query
-                    .render(language, &values, &query.example_parameters())
+                    .render_language(language, &values, &query.example_parameters())
                     .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
                 expects_error: false,
                 frontend,

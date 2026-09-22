@@ -102,7 +102,7 @@ message ExecuteQueryMessage {
 }
 
 enum QueryType {
-  QUERY_TYPE_RAW = 0;
+  QUERY_TYPE_JSON = 0;
   QUERY_TYPE_NAMED = 1;  // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
 }
 

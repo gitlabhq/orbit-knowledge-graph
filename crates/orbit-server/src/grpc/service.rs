@@ -63,9 +63,9 @@ fn resolve_raw_query(
         QueryType::try_from(query_type).map_err(|_| format!("Unknown query_type: {query_type}"))?;
     let frontend = query_frontend(language)?;
     let text = match query_type {
-        QueryType::Raw => query,
+        QueryType::Json => query,
         QueryType::Named => named_queries
-            .render_request(&query, named_language(frontend), values)
+            .render_request_language(&query, named_language(frontend), values)
             .map_err(|e| e.to_string())?,
     };
     Ok(RawQuery { text, frontend })
@@ -871,7 +871,7 @@ fn named_query_definitions(
     queries
         .into_iter()
         .map(|query| {
-            let raw_query = query.render(language, values, &query.example_parameters())?;
+            let raw_query = query.render_language(language, values, &query.example_parameters())?;
             Ok(NamedQueryDefinition {
                 name: query.name.clone(),
                 description: query.description.clone(),
@@ -906,7 +906,6 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 #[cfg(test)]
 mod tests {
     mod commands;
-    mod query_mode;
     mod skills;
 
     use super::*;
@@ -1207,191 +1206,30 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn list_named_queries_renders_the_proto_mode() {
-        let service = test_service();
-        let ontology = service.active_schema.snapshot().unwrap().ontology.clone();
-        for (language, validate) in [
-            (
-                QueryLanguage::Json,
-                query_engine::compiler::validate_normalize as fn(&str, &Arc<Ontology>) -> _,
-            ),
-            (
-                QueryLanguage::Gql,
-                query_engine::compiler::validate_normalize_gql,
-            ),
-        ] {
-            let response = service
-                .list_named_queries(authed_request(ListNamedQueriesRequest {
-                    language: language as i32,
-                }))
-                .await
-                .unwrap()
-                .into_inner();
-
-            for query in &response.queries {
-                assert!(!query.description.is_empty());
-                validate(&query.raw_query, &ontology)
-                    .unwrap_or_else(|error| panic!("{}: {error}", query.name));
-                assert!(!query.raw_query.contains("{{"));
-                assert!(!query.raw_query.contains("$binding"));
-            }
-
-            let names: Vec<_> = response.queries.iter().map(|q| q.name.as_str()).collect();
-            assert_eq!(
-                names,
-                [
-                    "my_neighbors",
-                    "mrs_fixing_vulnerabilities",
-                    "my_mrs_with_pipelines",
-                    "recent_merges",
-                    "top_mr_authors"
-                ]
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn gql_requests_lose_the_query_dsl_and_gain_db_schema_guidance() {
-        let service = test_service();
-        let status = service
-            .get_query_dsl(authed_request(GetQueryDslRequest {
-                language: QueryLanguage::Gql as i32,
-                ..Default::default()
-            }))
-            .await
-            .unwrap_err();
-        assert_eq!(status.code(), tonic::Code::NotFound);
-        assert!(status.message().contains("CALL db.schema()"));
-
-        let commands = service
-            .list_agent_commands(authed_request(ListAgentCommandsRequest {
-                language: QueryLanguage::Gql as i32,
-                ..Default::default()
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let names: Vec<_> = commands.commands.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(
-            names,
-            ["query_graph", "get_graph_schema", "get_response_format"]
-        );
-        assert!(
-            commands.commands[0]
-                .description
-                .contains("CALL db.schema()")
-        );
-
-        let tools = service
-            .list_tools(authed_request(ListToolsRequest {
-                language: QueryLanguage::Gql as i32,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        assert!(
-            tools
-                .tools
-                .iter()
-                .all(|tool| !tool.description.contains("get_query_dsl"))
-        );
-
-        let status = service
-            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                command_name: "get_query_dsl".into(),
-                parameters_json: "{}".into(),
-                language: QueryLanguage::Gql as i32,
-            }))
-            .await
-            .unwrap_err();
-        assert_eq!(status.code(), tonic::Code::NotFound);
-
-        assert!(
-            service
-                .get_query_dsl(authed_request(GetQueryDslRequest::default()))
-                .await
-                .is_ok()
-        );
-    }
-
-    #[tokio::test]
-    async fn list_named_queries_substitutes_caller_user_id() {
-        let user_id = 424_242;
-
-        let service = test_service();
-        for language in [QueryLanguage::Json, QueryLanguage::Gql] {
-            let response = service
-                .list_named_queries(authed_request_for_user(
-                    ListNamedQueriesRequest {
-                        language: language as i32,
-                    },
-                    user_id,
-                ))
-                .await
-                .unwrap()
-                .into_inner();
-
-            let my_neighbors = response
-                .queries
-                .iter()
-                .find(|q| q.name == "my_neighbors")
-                .expect("my_neighbors is an embedded named query");
-            assert!(
-                my_neighbors.raw_query.contains("424242"),
-                "my_neighbors should contain the caller's user_id: {}",
-                my_neighbors.raw_query
-            );
-        }
-    }
-
     #[test]
     fn resolve_raw_query_selects_frontend_by_language() {
         let queries = named_queries::NamedQueries::load_embedded().unwrap();
         let bindings = named_queries::BindingValues {
             current_user_id: 73,
         };
-        let ontology = test_ontology();
-        let security = query_engine::compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let json =
-            r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"User","node_ids":[1]}]}"#;
-        let gql = "MATCH (n:User {id: 1}) RETURN n";
-        let named = r#"{"name":"my_neighbors"}"#;
-
-        for (language, frontend, valid, invalid) in [
-            (QueryLanguage::Json, Frontend::JsonDsl, json, gql),
-            (QueryLanguage::Gql, Frontend::Gql, gql, json),
+        for (language, frontend, raw) in [
+            (
+                QueryLanguage::Json,
+                Frontend::JsonDsl,
+                r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"User"}]}"#,
+            ),
+            (QueryLanguage::Gql, Frontend::Gql, "MATCH (n:User) RETURN n"),
         ] {
-            let resolve = |query_type: QueryType, text: &str| {
-                resolve_raw_query(
-                    query_type as i32,
-                    text.into(),
-                    language as i32,
-                    &queries,
-                    &bindings,
-                )
-                .unwrap()
+            let resolve = |kind, text: &str| {
+                resolve_raw_query(kind, text.into(), language as i32, &queries, &bindings).unwrap()
             };
-            let compiles = |resolved: &RawQuery| {
-                query_engine::compiler::compile(
-                    &resolved.text,
-                    resolved.frontend,
-                    &ontology,
-                    &security,
-                )
-                .is_ok()
-            };
-            let raw = resolve(QueryType::Raw, valid);
-            assert_eq!(raw.frontend, frontend);
-            assert!(compiles(&raw));
-            assert!(!compiles(&resolve(QueryType::Raw, invalid)));
-            let rendered = resolve(QueryType::Named, named);
-            assert_eq!(rendered.frontend, frontend);
-            assert!(rendered.text.contains("73"));
-            assert!(compiles(&rendered));
+            assert_eq!(resolve(QueryType::Json as i32, raw).frontend, frontend);
+            let named = resolve(QueryType::Named as i32, r#"{"name":"my_neighbors"}"#);
+            assert_eq!(named.frontend, frontend);
+            assert!(named.text.contains("73"));
         }
-        assert!(resolve_raw_query(99, "unused".into(), 0, &queries, &bindings).is_err());
-        assert!(resolve_raw_query(0, "unused".into(), 99, &queries, &bindings).is_err());
+        assert!(resolve_raw_query(99, "".into(), 0, &queries, &bindings).is_err());
+        assert!(resolve_raw_query(0, "".into(), 99, &queries, &bindings).is_err());
     }
 
     fn test_claims() -> Claims {

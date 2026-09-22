@@ -49,7 +49,7 @@ edge DDL does not define source- or target-ordered projections.
 The compiler supports two query frontends:
 
 1. The JSON Query DSL describes traversal, neighbors, path-finding, and aggregation queries. Remote requests through MCP, HTTP, and gRPC default to this frontend for compatibility.
-2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. Rails selects its compiler preset per user with the default-off `orbit_gql_queries` feature flag and sets the protobuf `QueryLanguage` enum, independently of the raw or named query kind. JSON and GQL modes use the same endpoint and authorization pipeline, but accept only their own query shape. It is not a Neo4j-compatible driver.
+2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. Rails selects the compiler preset with the default-off `orbit_gql_queries` feature flag. The protobuf `QueryLanguage` enum is independent of the raw or named query kind. Both modes use the same endpoint and authorization pipeline, but each accepts only its own query shape. This is not a Neo4j-compatible driver.
 
 ### Compiler pass pipeline
 

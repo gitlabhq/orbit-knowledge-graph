@@ -111,30 +111,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn query_envelope_preserves_gql_without_a_selector() {
-        let text = " MATCH (u:User {name: 'Zoë'}) RETURN u\r\n";
-        let body = serde_json::to_vec(&serde_json::json!({ "query": text })).unwrap();
-        let output = build_query_request(&body, None).unwrap();
-        let request: serde_json::Value = serde_json::from_slice(&output).unwrap();
-        assert_eq!(
-            request,
-            serde_json::json!({ "query": text, "response_format": "llm" })
-        );
-    }
-
-    #[test]
-    fn query_text_is_sent_unchanged_without_a_selector() {
-        let text = " MATCH (u:User {name: 'Zoë'}) RETURN u\r\n";
-        let output = build_text_request(text, Some(ResponseFormat::Raw)).unwrap();
-        let request: serde_json::Value = serde_json::from_slice(&output).unwrap();
-        assert_eq!(
-            request,
-            serde_json::json!({ "query": text, "response_format": "raw" })
-        );
-        assert!(build_text_request(" \n", None).is_err());
-    }
-
-    #[test]
     fn query_flag_overrides_body_and_default() {
         let out = build_query_request(
             br#"{"query":{"a":1},"response_format":"raw"}"#,

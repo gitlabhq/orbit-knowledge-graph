@@ -685,7 +685,7 @@ impl FormatName {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum QueryType {
-    Raw = 0,
+    Json = 0,
     /// `query` is a named-query envelope: {"name": ..., "parameters": {...}}
     Named = 1,
 }
@@ -696,14 +696,14 @@ impl QueryType {
     /// (if the ProtoBuf definition does not change) and safe for programmatic use.
     pub fn as_str_name(&self) -> &'static str {
         match self {
-            Self::Raw => "QUERY_TYPE_RAW",
+            Self::Json => "QUERY_TYPE_JSON",
             Self::Named => "QUERY_TYPE_NAMED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
-            "QUERY_TYPE_RAW" => Some(Self::Raw),
+            "QUERY_TYPE_JSON" => Some(Self::Json),
             "QUERY_TYPE_NAMED" => Some(Self::Named),
             _ => None,
         }

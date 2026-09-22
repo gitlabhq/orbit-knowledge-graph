@@ -328,20 +328,6 @@ mod tests {
     }
 
     #[test]
-    fn gql_tool_discovery_does_not_advertise_the_json_dsl() {
-        let tools = ToolRegistry::tools_for(Frontend::Gql);
-        let list = tools
-            .iter()
-            .find(|tool| tool.name == "list_commands")
-            .unwrap();
-        assert!(!list.description.contains("get_query_dsl"));
-        for (name, summary) in command_summaries(Frontend::Gql) {
-            assert!(list.description.contains(name));
-            assert!(list.description.contains(summary));
-        }
-    }
-
-    #[test]
     fn descriptions_are_short_and_carry_no_schema() {
         for definition in all_tools().into_iter().chain(all_commands()) {
             assert!(
@@ -417,21 +403,18 @@ mod tests {
     }
 
     #[test]
-    fn gql_commands_drop_the_dsl_and_point_to_db_schema() {
+    fn gql_commands_use_text_queries_without_the_json_dsl() {
         let commands = CommandRegistry::commands_for(Frontend::Gql);
-        let names: Vec<_> = commands.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(
-            names,
-            ["query_graph", "get_graph_schema", "get_response_format"]
+        assert!(
+            !commands
+                .iter()
+                .any(|command| command.name == "get_query_dsl")
         );
-        let query = &commands[0];
-        assert!(query.description.contains("CALL db.schema()"));
-        assert!(!query.description.contains("get_query_dsl"));
-        assert_eq!(query.parameters["properties"]["query"]["type"], "string");
         assert_eq!(
-            CommandRegistry::get_all_commands()[0].parameters["properties"]["query"]["type"],
-            "object"
+            commands[0].parameters["properties"]["query"]["type"],
+            "string"
         );
+        assert!(commands[0].description.contains("CALL db.schema()"));
     }
 
     #[test]

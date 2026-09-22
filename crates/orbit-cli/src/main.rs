@@ -866,9 +866,6 @@ mod tests {
         };
         assert_eq!(source.as_deref(), Some("-"));
         assert_eq!(response_format, Some(super::remote::ResponseFormat::Raw));
-        assert!(
-            Cli::try_parse_from(["orbit", "query", "--language", "gql", "query.json"]).is_err()
-        );
         assert!(matches!(
             Cli::parse_from(["orbit", "status"]).command,
             Commands::Status
@@ -899,6 +896,14 @@ mod tests {
                 "{argv:?} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn query_has_no_language_flag() {
+        let err = Cli::try_parse_from(["orbit", "query", "--language", "gql", "CALL db.schema()"])
+            .err()
+            .expect("--language must not be accepted");
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]
