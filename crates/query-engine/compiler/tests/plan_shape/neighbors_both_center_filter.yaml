@@ -6,12 +6,12 @@ expected: |
       (Project [e.target_id:_gkg_neighbor_id e.target_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type 1:_gkg_neighbor_is_outgoing e.source_id:_gkg_mr_id "MergeRequest":_gkg_mr_type]
         (Join Inner (e.source_id = mr.id)
           (Filter [source_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !deleted]
-            (Scan gl_edge e))
+            (Scan gl_edge e FINAL))
           (Filter [title:contains !deleted]
             (Scan gl_merge_request mr FINAL))))
       (Project [e.source_id:_gkg_neighbor_id e.source_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type 0:_gkg_neighbor_is_outgoing e.target_id:_gkg_mr_id "MergeRequest":_gkg_mr_type]
         (Join Inner (e.target_id = mr.id)
           (Filter [target_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !deleted]
-            (Scan gl_edge e))
+            (Scan gl_edge e FINAL))
           (Filter [title:contains !deleted]
             (Scan gl_merge_request mr FINAL))))))

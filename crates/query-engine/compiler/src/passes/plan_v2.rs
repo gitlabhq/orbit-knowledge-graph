@@ -69,7 +69,7 @@ impl JoinGraph {
 
 // ── PhysOp ──────────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 #[serde(tag = "op")]
 pub enum PhysOp {
     Scan {
@@ -109,13 +109,13 @@ pub enum PhysOp {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 pub enum JoinKind {
     Inner,
     Semi { materialize: bool },
 }
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 pub struct JoinOn {
     pub left: (String, String),
     pub right: (String, String),
@@ -123,7 +123,7 @@ pub struct JoinOn {
 
 // ── Predicates ──────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 pub enum Predicate {
     Eq {
@@ -152,7 +152,7 @@ pub enum Predicate {
     ScopePrefix(#[serde(skip)] crate::scope::ScopePrefix),
 }
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 pub enum Value {
     Int(i64),
     Str(String),
@@ -162,7 +162,7 @@ pub enum Value {
 
 // ── Projections ─────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 pub enum ProjectedColumn {
     Ref {
@@ -179,7 +179,7 @@ pub enum ProjectedColumn {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 pub enum ColumnExpr {
     Col(String, String),
     Lit(Value),
@@ -189,7 +189,7 @@ pub enum ColumnExpr {
 
 // ── Aggregation / Sort ──────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 pub struct GroupKey {
     pub node: String,
     pub property: String,
@@ -198,7 +198,7 @@ pub struct GroupKey {
     pub alias: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 pub struct Metric {
     #[serde(skip)]
     pub function: AggFunction,
@@ -207,7 +207,7 @@ pub struct Metric {
     pub alias: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 pub struct SortKey {
     pub column: String,
     pub desc: bool,
@@ -489,6 +489,12 @@ pub fn plan(
         QueryType::PathFinding => ctx.plan_pathfinding(limit),
         QueryType::Hydration => ctx.plan_hydration(limit),
     };
+
+    let rule_ctx = super::optimize::RuleCtx {
+        input,
+        graph: &graph,
+    };
+    let op = super::optimize::optimize(op, &rule_ctx);
 
     let mut nem = ctx.compute_node_edge_mappings();
     if input.query_type == QueryType::Neighbors {

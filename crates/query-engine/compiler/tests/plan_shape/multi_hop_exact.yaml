@@ -10,9 +10,9 @@ expected: |
               (Project [e1.source_id:source_id e2.target_id:target_id e1.relationship_kind:relationship_kind ([(e1.target_id e1.target_kind) (e2.target_id e2.target_kind)]):path_nodes 2:depth e1._deleted:_deleted e1.traversal_path:traversal_path]
                 (Join Inner (e1.target_id = e2.source_id)
                   (Filter [relationship_kind="CONTAINS" !deleted scope(…)]
-                    (Scan gl_edge e1))
+                    (Scan gl_edge e1 FINAL))
                   (Filter [!deleted relationship_kind="CONTAINS"]
-                    (Scan gl_edge e2)))))
+                    (Scan gl_edge e2 FINAL)))))
             (Filter [id∈[1] !deleted]
               (Scan gl_group g FINAL)))
           (Filter [!deleted]

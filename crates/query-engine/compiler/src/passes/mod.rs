@@ -11,6 +11,7 @@ pub mod hydrate;
 pub mod lower;
 pub mod lower_v2;
 pub mod normalize;
+pub mod optimize;
 pub mod plan;
 pub mod plan_v2;
 pub mod restrict;

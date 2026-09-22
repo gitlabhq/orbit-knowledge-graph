@@ -11,13 +11,13 @@ expected: |
               (Join Inner (f.end_id = b.end_id)
                 (Scan forward f)
                 (Scan backward b)))
-            (Scan gl_edge e1))
+            (Scan gl_edge e1 FINAL))
           (Filter [id∈[100] !deleted]
             (Scan gl_project end FINAL)))
         (Union
-          (Scan gl_edge e1)
+          (Scan gl_edge e1 FINAL)
           (Join Inner (e1.target_id = e2.source_id)
-            (Scan gl_edge e1)
-            (Scan gl_edge e2))))
+            (Scan gl_edge e1 FINAL)
+            (Scan gl_edge e2 FINAL))))
       (Filter [id∈[1] !deleted]
         (Scan gl_merge_request start FINAL))))
