@@ -1,13 +1,23 @@
-//! `PhysOp` → SQL AST. One `Query` block accumulates operators until an
-//! operator would conflict with what the block already holds (a second
-//! projection, a filter after a projection or dedup, a sort after a limit);
-//! then the block closes as a derived table and a fresh one continues.
+//! `PhysOp` → SQL AST.
+//!
+//! One `Query` block accumulates operators bottom-up until an operator would
+//! conflict with what the block already holds (a second projection, a filter
+//! after a projection or dedup, a sort after a limit). Then the block closes
+//! as a derived table and a fresh block continues:
+//!
+//! ```text
+//!   Filter(Project(Filter(Scan)))
+//!   ⇒ SELECT * FROM (SELECT cols FROM t WHERE p1) AS t WHERE p2
+//! ```
+
+mod expr;
 
 use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 use crate::passes::plan_v2::*;
 use crate::passes::shared::filter_to_expr;
+use expr::expr;
 use ontology::constants::*;
 
 pub fn lower(op: PhysOp, input: &Input) -> Result<Node> {
@@ -24,79 +34,6 @@ pub fn lower(op: PhysOp, input: &Input) -> Result<Node> {
         and_where(&mut q, filter_to_expr(&jp.lhs_node, &jp.lhs_prop, &filter));
     }
     Ok(Node::Query(Box::new(q)))
-}
-
-/// A union's output columns are named after its first arm's aliases; project
-/// them explicitly so later passes can see which aliases the query returns.
-fn default_select(from: &TableRef) -> Vec<SelectExpr> {
-    if let TableRef::Union { queries, alias } = from
-        && let Some(first) = queries.first()
-        && first.select.iter().all(|s| s.alias.is_some())
-    {
-        return first
-            .select
-            .iter()
-            .map(|s| SelectExpr::col(alias.as_str(), s.alias.as_deref().unwrap()))
-            .collect();
-    }
-    vec![SelectExpr::star()]
-}
-
-fn and_where(q: &mut Query, pred: Expr) {
-    q.where_clause = Some(match q.where_clause.take() {
-        Some(existing) => Expr::and(existing, pred),
-        None => pred,
-    });
-}
-
-fn alias_of(q: &Query) -> &str {
-    match &q.from {
-        TableRef::Scan { alias, .. }
-        | TableRef::Subquery { alias, .. }
-        | TableRef::Union { alias, .. } => alias,
-        TableRef::Join { .. } => "_q",
-    }
-}
-
-/// The block already projects, groups, or limits: further filters and
-/// projections apply to its result.
-fn is_closed(q: &Query) -> bool {
-    !q.select.is_empty() || !q.group_by.is_empty() || q.limit.is_some()
-}
-
-fn close(q: Query) -> Query {
-    let alias = alias_of(&q).to_string();
-    Query {
-        from: as_table(q, &alias),
-        ..Default::default()
-    }
-}
-
-fn as_table(mut q: Query, alias: &str) -> TableRef {
-    if q.select.is_empty() {
-        q.select.push(SelectExpr::star());
-    }
-    TableRef::subquery(q, alias)
-}
-
-/// A block that is only `FROM` (+ `WHERE` when `keep_where`) can be a join
-/// operand directly; anything richer becomes a derived table. Returns the
-/// operand, a `WHERE` to hoist, and CTEs to hoist.
-fn join_operand(q: Query, keep_where: bool) -> (TableRef, Option<Expr>, Vec<Cte>) {
-    let simple = q.select.is_empty()
-        && q.group_by.is_empty()
-        && q.order_by.is_empty()
-        && q.limit_by.is_none()
-        && q.limit.is_none()
-        && (keep_where || q.where_clause.is_none() && matches!(q.from, TableRef::Scan { .. }));
-    if simple {
-        (q.from, q.where_clause, q.ctes)
-    } else {
-        let alias = alias_of(&q).to_string();
-        let mut q = q;
-        let ctes = std::mem::take(&mut q.ctes);
-        (as_table(q, &alias), None, ctes)
-    }
 }
 
 fn emit(op: PhysOp, input: &Input) -> Query {
@@ -309,69 +246,77 @@ fn emit(op: PhysOp, input: &Input) -> Query {
     }
 }
 
-fn expr(e: &PExpr) -> Expr {
-    match e {
-        PExpr::Col(a, c) => Expr::col(a, c),
-        PExpr::Ident(name) => Expr::ident(name),
-        PExpr::Lit(Lit::Int(i)) => Expr::int(*i),
-        PExpr::Lit(Lit::Str(s)) => Expr::string(s),
-        PExpr::Lit(Lit::Bool(b)) => Expr::param(ChType::Bool, *b),
-        PExpr::Func(name, args) => Expr::func(name, args.iter().map(expr).collect()),
-        PExpr::Cmp(op, l, r) => {
-            let op = match op {
-                CmpOp::Eq => Op::Eq,
-                CmpOp::Ne => Op::Ne,
-                CmpOp::Lt => Op::Lt,
-                CmpOp::Le => Op::Le,
-                CmpOp::Gt => Op::Gt,
-                CmpOp::Ge => Op::Ge,
-            };
-            Expr::binary(op, expr(l), expr(r))
-        }
-        PExpr::And(xs) => xs
-            .iter()
-            .map(expr)
-            .reduce(Expr::and)
-            .unwrap_or_else(|| Expr::lit(1)),
-        // Balanced so hundreds of alternatives stay within parser depth.
-        PExpr::Or(xs) => or_balanced(xs.iter().map(expr).collect()),
-        PExpr::In(x, vs) => {
-            let PExpr::Col(a, c) = x.as_ref() else {
-                panic!("IN over a non-column expression");
-            };
-            let ch_type = match vs.first() {
-                Some(Lit::Int(_)) => ChType::Int64,
-                Some(Lit::Bool(_)) => ChType::Bool,
-                _ => ChType::String,
-            };
-            let values = vs
-                .iter()
-                .map(|v| match v {
-                    Lit::Int(i) => serde_json::Value::from(*i),
-                    Lit::Str(s) => serde_json::Value::from(s.as_str()),
-                    Lit::Bool(b) => serde_json::Value::from(*b),
-                })
-                .collect();
-            Expr::col_in(a, c, ch_type, values).unwrap_or_else(|| Expr::param(ChType::Bool, false))
-        }
-        PExpr::Lambda(param, body) => Expr::lambda(param, expr(body)),
-        PExpr::NodeFilter {
-            alias,
-            property,
-            filter,
-        } => filter_to_expr(alias, property, filter),
-        PExpr::Scope(alias, prefix) => prefix.predicate(alias),
-        PExpr::ScopeResolved(prefix) => prefix.resolved(),
+// ── Blocks ────────────────────────────────────────────────────────────────────
+
+/// The block already projects, groups, or limits: further filters and
+/// projections apply to its result.
+fn is_closed(q: &Query) -> bool {
+    !q.select.is_empty() || !q.group_by.is_empty() || q.limit.is_some()
+}
+
+fn close(q: Query) -> Query {
+    let alias = alias_of(&q).to_string();
+    Query {
+        from: as_table(q, &alias),
+        ..Default::default()
     }
 }
 
-fn or_balanced(mut xs: Vec<Expr>) -> Expr {
-    match xs.len() {
-        0 => Expr::lit(0),
-        1 => xs.pop().unwrap(),
-        n => {
-            let right = xs.split_off(n / 2);
-            Expr::binary(Op::Or, or_balanced(xs), or_balanced(right))
-        }
+fn as_table(mut q: Query, alias: &str) -> TableRef {
+    if q.select.is_empty() {
+        q.select.push(SelectExpr::star());
     }
+    TableRef::subquery(q, alias)
+}
+
+/// A block that is only `FROM` (+ `WHERE` when `keep_where`) can be a join
+/// operand directly; anything richer becomes a derived table. Returns the
+/// operand, a `WHERE` to hoist, and CTEs to hoist.
+fn join_operand(q: Query, keep_where: bool) -> (TableRef, Option<Expr>, Vec<Cte>) {
+    let simple = q.select.is_empty()
+        && q.group_by.is_empty()
+        && q.order_by.is_empty()
+        && q.limit_by.is_none()
+        && q.limit.is_none()
+        && (keep_where || q.where_clause.is_none() && matches!(q.from, TableRef::Scan { .. }));
+    if simple {
+        (q.from, q.where_clause, q.ctes)
+    } else {
+        let alias = alias_of(&q).to_string();
+        let mut q = q;
+        let ctes = std::mem::take(&mut q.ctes);
+        (as_table(q, &alias), None, ctes)
+    }
+}
+
+fn alias_of(q: &Query) -> &str {
+    match &q.from {
+        TableRef::Scan { alias, .. }
+        | TableRef::Subquery { alias, .. }
+        | TableRef::Union { alias, .. } => alias,
+        TableRef::Join { .. } => "_q",
+    }
+}
+
+fn and_where(q: &mut Query, pred: Expr) {
+    q.where_clause = Some(match q.where_clause.take() {
+        Some(existing) => Expr::and(existing, pred),
+        None => pred,
+    });
+}
+
+/// A union's output columns are named after its first arm's aliases; project
+/// them explicitly so later passes can see which aliases the query returns.
+fn default_select(from: &TableRef) -> Vec<SelectExpr> {
+    if let TableRef::Union { queries, alias } = from
+        && let Some(first) = queries.first()
+        && first.select.iter().all(|s| s.alias.is_some())
+    {
+        return first
+            .select
+            .iter()
+            .map(|s| SelectExpr::col(alias.as_str(), s.alias.as_deref().unwrap()))
+            .collect();
+    }
+    vec![SelectExpr::star()]
 }

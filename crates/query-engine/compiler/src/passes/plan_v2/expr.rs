@@ -1,269 +1,231 @@
-//! A small expression language so plans read as the SQL they produce:
+//! Scalar expressions. Every column reference is qualified (`alias.column`),
+//! so an expression means the same thing wherever it sits in the tree; that
+//! is what lets the optimizer move predicates and rewrite joins safely.
 //!
-//! ```text
-//! arrayConcat([tuple(f.anchor_id, 'User')], f.path_nodes) AS _gkg_path
-//! e0.relationship_kind = 'AUTHORED' AND e0._deleted = false
-//! e1.source_id IN (1, 2, 3)
-//! x -> tupleElement(x, 1)
-//! ```
-//!
-//! Parsed into `PExpr` when a plan is built. Anything the optimizer must
-//! recognize (`Scope`, `NodeFilter`) is constructed directly, not parsed.
+//! Plans mostly write expressions with `pe!` (see `parse.rs`). The builders
+//! here exist for the parts that carry **user data**: ids, filter values,
+//! relationship kinds. Those become typed literals and never touch
+//! expression text.
 
-use super::{CmpOp, Col, Lit, Named, PExpr};
+use super::prelude::*;
+use serde::Serialize;
 
-/// Parse one expression. Panics on a syntax error: plan text is code, and
-/// every shape is built by the fixture tests.
-pub fn pe(src: &str) -> PExpr {
-    let mut p = Parser::new(src);
-    let e = p.or();
-    p.expect_end();
-    e
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+/// Plan-level scalar expression. Every column reference is qualified, so an
+/// expression means the same thing wherever it sits in the tree.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum PExpr {
+    Col(String, String),
+    /// Bare identifier: an output alias in ORDER BY, or a lambda parameter.
+    Ident(String),
+    Lit(Lit),
+    Func(String, Vec<PExpr>),
+    Cmp(CmpOp, Box<PExpr>, Box<PExpr>),
+    And(Vec<PExpr>),
+    Or(Vec<PExpr>),
+    In(Box<PExpr>, Vec<Lit>),
+    Lambda(String, Box<PExpr>),
+    /// A user filter on `alias.property`; lowering owns operator and
+    /// parameter typing (`filter_to_expr`).
+    NodeFilter {
+        alias: String,
+        property: String,
+        #[serde(skip)]
+        filter: InputFilter,
+    },
+    /// Namespace scope restriction on `alias.traversal_path`.
+    Scope(String, #[serde(skip)] crate::scope::ScopePrefix),
+    /// The scope's anchor resolved to a real path (guards an elided anchor).
+    ScopeResolved(#[serde(skip)] crate::scope::ScopePrefix),
 }
 
-/// Parse `expr AS alias`.
-pub fn pn(src: &str) -> Named {
-    let mut p = Parser::new(src);
-    let e = p.or();
-    p.keyword("AS");
-    let alias = p.ident();
-    p.expect_end();
-    (e, alias)
+// ── Expressions ─────────────────────────────────────────────────────────────
+
+/// `(alias, column)`: a fully qualified column reference.
+pub type Col = (String, String);
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum Lit {
+    Int(i64),
+    Str(String),
+    Bool(bool),
 }
 
-/// Parse `a.x = b.y` join conditions.
-pub fn on(conds: &[&str]) -> Vec<(Col, Col)> {
-    conds
-        .iter()
-        .map(|c| match pe(c) {
-            PExpr::Cmp(CmpOp::Eq, l, r) => match (*l, *r) {
-                (PExpr::Col(a, b), PExpr::Col(c, d)) => ((a, b), (c, d)),
-                _ => panic!("join condition must be col = col: {c}"),
-            },
-            _ => panic!("join condition must be col = col: {c}"),
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+// ── Builders for user data ────────────────────────────────────────────────────
+
+pub fn deleted_false(alias: &str) -> PExpr {
+    pe!("{alias}._deleted = false")
+}
+
+/// `alias.column IN ids`, or `= id` for a single value.
+pub fn id_in(alias: &str, column: &str, ids: &[i64]) -> PExpr {
+    match ids {
+        [id] => pe!("{alias}.{column} = {id}"),
+        _ => PExpr::In(
+            Box::new(pe!("{alias}.{column}")),
+            ids.iter().map(|&i| Lit::Int(i)).collect(),
+        ),
+    }
+}
+
+pub fn id_range(alias: &str, column: &str, r: &InputIdRange) -> PExpr {
+    pe!(
+        "{alias}.{column} >= {} AND {alias}.{column} <= {}",
+        r.start,
+        r.end
+    )
+}
+
+/// Relationship kinds come from the query; they are user data and go
+/// through a typed literal, not the expression text.
+pub fn rel_kind(alias: &str, types: &[String]) -> Option<PExpr> {
+    if crate::passes::normalize::is_wildcard(types) {
+        return None;
+    }
+    let kind = Box::new(pe!("{alias}.relationship_kind"));
+    let lits: Vec<Lit> = types.iter().map(|t| Lit::Str(t.clone())).collect();
+    Some(match lits.as_slice() {
+        [t] => PExpr::Cmp(CmpOp::Eq, kind, Box::new(PExpr::Lit(t.clone()))),
+        _ => PExpr::In(kind, lits),
+    })
+}
+
+/// User filters on a node's properties, in property order for stable output.
+pub fn node_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Vec<PExpr> {
+    let mut props: Vec<_> = filters.iter().collect();
+    props.sort_unstable_by_key(|(k, _)| *k);
+    props
+        .into_iter()
+        .flat_map(|(prop, fs)| {
+            fs.iter().map(|f| PExpr::NodeFilter {
+                alias: alias.to_string(),
+                property: prop.clone(),
+                filter: f.clone(),
+            })
         })
         .collect()
 }
 
-#[macro_export]
-macro_rules! pe {
-    ($($t:tt)*) => { $crate::passes::plan_v2::expr::pe(&format!($($t)*)) };
+// ── Denormalized tags ───────────────────────────────────────────────────────
+
+/// `has(tags, 'key:value')` / `hasAny(tags, [...])` for an eq or in filter.
+pub fn denorm_tag(edge: &str, tag_col: &str, tag_key: &str, f: &InputFilter) -> Option<PExpr> {
+    let scalar = |v: &serde_json::Value| match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    };
+    let tags: Vec<String> = match (&f.op, &f.value) {
+        (None | Some(FilterOp::Eq), Some(v)) => vec![scalar(v)?],
+        (Some(FilterOp::In), Some(serde_json::Value::Array(vs))) => {
+            vs.iter().filter_map(scalar).collect()
+        }
+        _ => return None,
+    };
+    // Tag values are user data: typed literals, never expression text.
+    let tags: Vec<PExpr> = tags
+        .into_iter()
+        .map(|t| PExpr::Lit(Lit::Str(format!("{tag_key}:{t}"))))
+        .collect();
+    let tags_col = pe!("{edge}.{tag_col}");
+    match tags.len() {
+        0 => None,
+        1 => Some(PExpr::Func(
+            "has".into(),
+            vec![tags_col, tags.into_iter().next().unwrap()],
+        )),
+        _ => Some(PExpr::Func(
+            "hasAny".into(),
+            vec![tags_col, PExpr::Func("array".into(), tags)],
+        )),
+    }
 }
-#[macro_export]
-macro_rules! pn {
-    ($($t:tt)*) => { $crate::passes::plan_v2::expr::pn(&format!($($t)*)) };
-}
 
-struct Parser<'s> {
-    src: &'s str,
-    pos: usize,
-}
+// ── Rewriting ─────────────────────────────────────────────────────────────────
 
-impl<'s> Parser<'s> {
-    fn new(src: &'s str) -> Self {
-        Self { src, pos: 0 }
-    }
-
-    fn rest(&self) -> &'s str {
-        &self.src[self.pos..]
-    }
-
-    fn skip_ws(&mut self) {
-        self.pos += self.rest().len() - self.rest().trim_start().len();
-    }
-
-    fn peek(&mut self, tok: &str) -> bool {
-        self.skip_ws();
-        self.rest().starts_with(tok)
-    }
-
-    fn eat(&mut self, tok: &str) -> bool {
-        if self.peek(tok) {
-            self.pos += tok.len();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn keyword(&mut self, kw: &str) -> bool {
-        self.skip_ws();
-        let r = self.rest();
-        let matches = r.len() >= kw.len()
-            && r[..kw.len()].eq_ignore_ascii_case(kw)
-            && !r[kw.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_');
-        if matches {
-            self.pos += kw.len();
-        }
-        matches
-    }
-
-    fn fail(&self, what: &str) -> ! {
-        panic!("expected {what} at {:?} in {:?}", self.rest(), self.src)
-    }
-
-    fn expect(&mut self, tok: &str) {
-        if !self.eat(tok) {
-            self.fail(tok);
-        }
-    }
-
-    fn expect_end(&mut self) {
-        self.skip_ws();
-        if !self.rest().is_empty() {
-            self.fail("end of expression");
-        }
-    }
-
-    fn ident(&mut self) -> String {
-        self.skip_ws();
-        let r = self.rest();
-        let n = r
-            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
-            .unwrap_or(r.len());
-        if n == 0 || r.starts_with(|c: char| c.is_ascii_digit()) {
-            self.fail("identifier");
-        }
-        self.pos += n;
-        r[..n].to_string()
-    }
-
-    fn or(&mut self) -> PExpr {
-        let mut xs = vec![self.and()];
-        while self.keyword("OR") {
-            xs.push(self.and());
-        }
-        if xs.len() == 1 {
-            xs.pop().unwrap()
-        } else {
-            PExpr::Or(xs)
-        }
-    }
-
-    fn and(&mut self) -> PExpr {
-        let mut xs = vec![self.cmp()];
-        while self.keyword("AND") {
-            xs.push(self.cmp());
-        }
-        if xs.len() == 1 {
-            xs.pop().unwrap()
-        } else {
-            PExpr::And(xs)
-        }
-    }
-
-    fn cmp(&mut self) -> PExpr {
-        let l = self.term();
-        for (tok, op) in [
-            ("!=", CmpOp::Ne),
-            ("<=", CmpOp::Le),
-            (">=", CmpOp::Ge),
-            ("=", CmpOp::Eq),
-            ("<", CmpOp::Lt),
-            (">", CmpOp::Gt),
-        ] {
-            if self.eat(tok) {
-                return PExpr::Cmp(op, Box::new(l), Box::new(self.term()));
-            }
-        }
-        if self.keyword("IN") {
-            self.expect("(");
-            let mut vs = Vec::new();
-            while !self.eat(")") {
-                match self.term() {
-                    PExpr::Lit(v) => vs.push(v),
-                    _ => self.fail("literal in IN list"),
-                }
-                self.eat(",");
-            }
-            return PExpr::In(Box::new(l), vs);
-        }
-        l
-    }
-
-    fn args(&mut self, close: &str) -> Vec<PExpr> {
-        let mut xs = Vec::new();
-        while !self.eat(close) {
-            xs.push(self.or());
-            self.eat(",");
-        }
-        xs
-    }
-
-    fn term(&mut self) -> PExpr {
-        self.skip_ws();
-        if self.eat("(") {
-            let e = self.or();
-            self.expect(")");
+impl PExpr {
+    /// Rebuilds the expression bottom-up; `leaf` may replace any node.
+    pub fn map(&self, leaf: &dyn Fn(&PExpr) -> Option<PExpr>) -> PExpr {
+        if let Some(e) = leaf(self) {
             return e;
         }
-        if self.eat("[") {
-            return PExpr::Func("array".into(), self.args("]"));
+        let go = |x: &PExpr| x.map(leaf);
+        match self {
+            PExpr::Func(n, xs) => PExpr::Func(n.clone(), xs.iter().map(go).collect()),
+            PExpr::And(xs) => PExpr::And(xs.iter().map(go).collect()),
+            PExpr::Or(xs) => PExpr::Or(xs.iter().map(go).collect()),
+            PExpr::Cmp(op, l, r) => PExpr::Cmp(*op, Box::new(go(l)), Box::new(go(r))),
+            PExpr::In(x, vs) => PExpr::In(Box::new(go(x)), vs.clone()),
+            PExpr::Lambda(p, b) => PExpr::Lambda(p.clone(), Box::new(go(b))),
+            other => other.clone(),
         }
-        for q in ['\'', '"'] {
-            if self.eat(&q.to_string()) {
-                let end = self
-                    .rest()
-                    .find(q)
-                    .unwrap_or_else(|| self.fail("closing quote"));
-                let s = self.rest()[..end].to_string();
-                self.pos += end + 1;
-                return PExpr::Lit(Lit::Str(s));
-            }
-        }
-        let r = self.rest();
-        if r.starts_with(|c: char| c.is_ascii_digit() || c == '-') {
-            let n = r[1..]
-                .find(|c: char| !c.is_ascii_digit())
-                .map(|i| i + 1)
-                .unwrap_or(r.len());
-            self.pos += n;
-            return PExpr::Lit(Lit::Int(
-                r[..n].parse().unwrap_or_else(|_| self.fail("integer")),
-            ));
-        }
-        let name = self.ident();
-        match name.as_str() {
-            "true" => return PExpr::Lit(Lit::Bool(true)),
-            "false" => return PExpr::Lit(Lit::Bool(false)),
-            _ => {}
-        }
-        if self.eat("->") {
-            return PExpr::Lambda(name, Box::new(self.or()));
-        }
-        if self.eat("(") {
-            return PExpr::Func(name, self.args(")"));
-        }
-        if self.eat(".") {
-            return PExpr::Col(name, self.ident());
-        }
-        PExpr::Ident(name)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    /// Rewrites column references through `s`.
+    pub fn subst(&self, s: &HashMap<Col, PExpr>) -> PExpr {
+        self.map(&|e| match e {
+            PExpr::Col(a, c) => s.get(&(a.clone(), c.clone())).cloned(),
+            _ => None,
+        })
+    }
 
-    #[test]
-    fn parses_sql_shapes() {
-        assert_eq!(
-            pe("a.b = 'x'"),
-            PExpr::Cmp(
-                CmpOp::Eq,
-                Box::new(PExpr::Col("a".into(), "b".into())),
-                Box::new(PExpr::Lit(Lit::Str("x".into())))
-            )
-        );
-        assert!(matches!(
-            pe("f(a.b, [1, 2]) AND x.y IN (1, 2) OR z.w >= -3"),
-            PExpr::Or(_)
-        ));
-        assert!(matches!(pe("x -> tupleElement(x, 1)"), PExpr::Lambda(..)));
-        assert_eq!(pn("plus(f.depth, b.depth) AS depth").1, "depth");
-        assert_eq!(
-            on(&["a.x = b.y"]),
-            vec![(("a".into(), "x".into()), ("b".into(), "y".into()))]
-        );
+    /// Renames every reference to alias `from`.
+    pub fn realias(&self, from: &str, to: &str) -> PExpr {
+        self.map(&|e| match e {
+            PExpr::Col(a, c) if a == from => Some(PExpr::Col(to.into(), c.clone())),
+            PExpr::Scope(a, p) if a == from => Some(PExpr::Scope(to.into(), p.clone())),
+            PExpr::NodeFilter {
+                alias,
+                property,
+                filter,
+            } if alias == from => Some(PExpr::NodeFilter {
+                alias: to.into(),
+                property: property.clone(),
+                filter: filter.clone(),
+            }),
+            _ => None,
+        })
+    }
+
+    pub fn aliases(&self, out: &mut HashSet<String>) {
+        match self {
+            PExpr::Col(a, _) | PExpr::Scope(a, _) | PExpr::NodeFilter { alias: a, .. } => {
+                out.insert(a.clone());
+            }
+            PExpr::Ident(_) | PExpr::Lit(_) | PExpr::ScopeResolved(_) => {}
+            PExpr::Func(_, xs) | PExpr::And(xs) | PExpr::Or(xs) => {
+                xs.iter().for_each(|x| x.aliases(out))
+            }
+            PExpr::Cmp(_, l, r) => {
+                l.aliases(out);
+                r.aliases(out);
+            }
+            PExpr::In(x, _) | PExpr::Lambda(_, x) => x.aliases(out),
+        }
+    }
+
+    /// The column this predicate constrains, for `col = lit`, `col IN`, and
+    /// `col >= .. AND col <= ..` shapes.
+    pub fn constrained_col(&self) -> Option<(&str, &str)> {
+        match self {
+            PExpr::Cmp(_, l, _) | PExpr::In(l, _) => match l.as_ref() {
+                PExpr::Col(a, c) => Some((a, c)),
+                _ => None,
+            },
+            PExpr::And(xs) => xs.first().and_then(|x| x.constrained_col()),
+            _ => None,
+        }
     }
 }

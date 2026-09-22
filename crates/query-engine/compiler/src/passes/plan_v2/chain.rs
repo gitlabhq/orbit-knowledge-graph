@@ -1,8 +1,21 @@
-//! Traversal and aggregation: a left-deep join over edge scans and the node
-//! tables something reads, then the optimizer.
+//! Traversal and aggregation: the query types the optimizer works on.
+//!
+//! The naive plan is one left-deep join over every edge scan, then every node
+//! table something reads:
+//!
+//! ```sql
+//! SELECT e0.source_id AS e0_src, ..., g.name AS g_name
+//! FROM gl_edge e0                                   -- one scan per relationship
+//! JOIN gl_edge e1 ON e0.target_id = e1.source_id    -- joined where they share a node
+//! JOIN gl_group g  ON e0.target_id = g.id           -- node tables only when read
+//! WHERE e0.relationship_kind = 'MEMBER_OF' AND ...
+//! LIMIT 11
+//! ```
+//!
+//! `plan_chain_query` builds that, hands it to `optimize`, and for traversal
+//! adds inline columns for node tables the optimizer joined.
 
-use super::*;
-use crate::{pe, pn};
+use super::prelude::*;
 
 /// Edge columns a traversal returns per hop, with their output suffixes.
 const EDGE_OUTPUT: [(&str, &str); 5] = [
@@ -13,166 +26,9 @@ const EDGE_OUTPUT: [(&str, &str); 5] = [
     (TARGET_KIND_COLUMN, crate::constants::EDGE_DST_TYPE_SUFFIX),
 ];
 
-/// Kind column that goes with an id column on the same edge side.
-pub fn kind_col(id_col: &str) -> &'static str {
-    if id_col == SOURCE_ID_COLUMN {
-        SOURCE_KIND_COLUMN
-    } else {
-        TARGET_KIND_COLUMN
-    }
-}
-
-/// A chain `e1 -> e2 -> ... -> eN` over one edge table, each hop joined on
-/// the previous hop's end id. Shared by variable-length hops and pathfinding
-/// frontiers; callers project what they need from `e1` and `eN`.
-pub fn hop_chain(
-    edge: &dyn Fn(&str) -> PhysOp,
-    depth: u32,
-    (start_col, end_col): (&str, &str),
-    hop_preds: &dyn Fn(&str, bool) -> Vec<PExpr>,
-    hop_on: &dyn Fn(&str, &str) -> Vec<(Col, Col)>,
-) -> PhysOp {
-    let mut chain = edge("e1").filter(hop_preds("e1", true));
-    for i in 2..=depth {
-        let (prev, curr) = (format!("e{}", i - 1), format!("e{i}"));
-        let mut on = vec![(
-            (prev.clone(), end_col.to_string()),
-            (curr.clone(), start_col.to_string()),
-        )];
-        on.extend(hop_on(&prev, &curr));
-        chain = chain.join(edge(&curr).filter(hop_preds(&curr, false)), on);
-    }
-    chain
-}
-
-/// `array(tuple(e_i.end, e_i.end_kind), ...)` for hops `range`.
-pub fn path_nodes(range: impl Iterator<Item = u32>, end_col: &str) -> PExpr {
-    let kind = kind_col(end_col);
-    let tuples: Vec<String> = range
-        .map(|i| format!("tuple(e{i}.{end_col}, e{i}.{kind})"))
-        .collect();
-    pe!("[{}]", tuples.join(", "))
-}
+// ── Entry ─────────────────────────────────────────────────────────────────────
 
 impl<'a> PlanCtx<'a> {
-    /// First edge column that carries each node's id, in relationship order.
-    pub fn bindings(&self) -> HashMap<String, Col> {
-        let mut bound = HashMap::new();
-        for (i, rel) in self.input.relationships.iter().enumerate() {
-            let ea = format!("e{i}");
-            let (sc, ec) = rel.direction.edge_columns();
-            for (n, c) in [(&rel.from, sc), (&rel.to, ec)] {
-                bound
-                    .entry(n.clone())
-                    .or_insert_with(|| (ea.clone(), c.to_string()));
-            }
-        }
-        bound
-    }
-
-    /// Predicates on a single-hop edge scan: kinds, endpoint entity kinds,
-    /// relationship filters, scope, and endpoint id pins.
-    fn edge_preds(&self, rel: &InputRelationship, a: &str) -> Vec<PExpr> {
-        let (sc, ec) = rel.direction.edge_columns();
-        let mut p: Vec<PExpr> = rel_kind(a, &rel.types).into_iter().collect();
-        for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
-            if let Some(ent) = self.node(nid).and_then(|n| n.entity.as_deref()) {
-                p.push(pe!("{a}.{} = {ent:?}", kind_col(ic)));
-            }
-        }
-        p.push(deleted_false(a));
-        p.extend(node_filters(a, &rel.filters));
-        if let Some(ref pfx) = rel.scope_prefix {
-            p.push(PExpr::Scope(a.to_string(), pfx.clone()));
-        }
-        for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
-            let Some(n) = self.node(nid) else { continue };
-            if !n.node_ids.is_empty() {
-                p.push(id_in(a, ic, &n.node_ids));
-            }
-            if let Some(ref r) = n.id_range {
-                p.push(id_range(a, ic, r));
-            }
-        }
-        p
-    }
-
-    /// Something reads the node table: property filters, group-by, a
-    /// non-count metric, or order-by.
-    pub fn reads_node(&self, node: &InputNode) -> bool {
-        let a = node.id.as_str();
-        let agg = &self.input.aggregation;
-        !node.filters.is_empty()
-            || agg.group_by.iter().any(|g| g.node() == a)
-            || agg.metrics.iter().any(|m| {
-                m.expr.node() == a
-                    && m.expr.property().is_some()
-                    && !matches!(m.expr.function(), AggFunction::Count)
-            })
-            || self.input.order_by.as_ref().is_some_and(|ob| ob.node == a)
-    }
-
-    /// Joined when read or range-filtered. Pinned ids live on the edge
-    /// columns; requested columns come from hydration unless the table is
-    /// in the query anyway.
-    fn needs_node_join(&self, node: &InputNode) -> bool {
-        node.id_range.is_some() || self.reads_node(node)
-    }
-
-    /// Each edge joins on the columns of nodes an earlier edge already binds,
-    /// so star and cycle patterns get the right conditions.
-    fn plan_chain(&self) -> PhysOp {
-        if self.input.relationships.is_empty() {
-            return self.node_scan(&self.input.nodes[0]);
-        }
-        let det = &self.input.compiler.default_edge_table;
-        let mut bound: HashMap<String, Col> = HashMap::new();
-        let mut tree: Option<PhysOp> = None;
-        for (i, rel) in self.input.relationships.iter().enumerate() {
-            let ea = format!("e{i}");
-            let (sc, ec) = rel.direction.edge_columns();
-            let table = self.graph.edge_table(&rel.types, det);
-            let leaf = if rel.hops.max > 1 {
-                self.multi_hop(rel, &ea, &table)
-            } else {
-                scan(&table, &ea, Dedup::None).filter(self.edge_preds(rel, &ea))
-            };
-            let mut on = Vec::new();
-            for (n, c) in [(&rel.from, sc), (&rel.to, ec)] {
-                let here = (ea.clone(), c.to_string());
-                match bound.get(n) {
-                    Some(b) => on.push((b.clone(), here)),
-                    None => {
-                        bound.insert(n.clone(), here);
-                    }
-                }
-            }
-            tree = Some(match tree {
-                None => leaf,
-                Some(t) => t.join(leaf, on),
-            });
-        }
-        let mut tree = tree.unwrap();
-        for n in &self.input.nodes {
-            if let Some(b) = bound.get(&n.id)
-                && self.needs_node_join(n)
-            {
-                tree = tree.join(
-                    self.node_scan(n),
-                    vec![(b.clone(), (n.id.clone(), "id".into()))],
-                );
-            }
-        }
-        tree
-    }
-
-    fn requested(&self, n: &InputNode) -> Vec<Named> {
-        crate::passes::shared::requested_columns(&n.columns)
-            .into_iter()
-            .map(|p| named(self.property(n, &p), format!("{}_{p}", n.id)))
-            .collect()
-    }
-
     pub fn plan_chain_query(&self, limit: u32) -> PhysOp {
         let naive = match self.input.query_type {
             QueryType::Traversal => self.plan_traversal(limit),
@@ -189,7 +45,11 @@ impl<'a> PlanCtx<'a> {
             op
         }
     }
+}
 
+// ── Traversal ─────────────────────────────────────────────────────────────────
+
+impl<'a> PlanCtx<'a> {
     fn plan_traversal(&self, limit: u32) -> PhysOp {
         let mut columns = Vec::new();
         for (i, rel) in self.input.relationships.iter().enumerate() {
@@ -239,17 +99,6 @@ impl<'a> PlanCtx<'a> {
         input.project(columns).limit(count)
     }
 
-    pub fn sort_keys(&self) -> Vec<(PExpr, bool)> {
-        self.input
-            .order_by
-            .as_ref()
-            .map(|ob| {
-                let desc = matches!(ob.direction, OrderDirection::Desc);
-                vec![(pe!("{}.{}", ob.node, ob.property), desc)]
-            })
-            .unwrap_or_default()
-    }
-
     /// Completes the sort into a total order for keyset pagination: each
     /// edge's id pair, or the node's own id when there are no edges.
     fn traversal_tie_breakers(&self) -> Vec<(PExpr, bool)> {
@@ -265,7 +114,11 @@ impl<'a> PlanCtx<'a> {
             })
             .collect()
     }
+}
 
+// ── Aggregation ───────────────────────────────────────────────────────────────
+
+impl<'a> PlanCtx<'a> {
     fn plan_aggregation(&self, limit: u32) -> PhysOp {
         let agg = &self.input.aggregation;
         let mut group_by = Vec::new();
@@ -322,6 +175,57 @@ impl<'a> PlanCtx<'a> {
         .sort(keys)
         .limit(limit)
     }
+}
+
+// ── The join chain ────────────────────────────────────────────────────────────
+
+impl<'a> PlanCtx<'a> {
+    /// Each edge joins on the columns of nodes an earlier edge already binds,
+    /// so star and cycle patterns get the right conditions.
+    fn plan_chain(&self) -> PhysOp {
+        if self.input.relationships.is_empty() {
+            return self.node_scan(&self.input.nodes[0]);
+        }
+        let det = &self.input.compiler.default_edge_table;
+        let mut bound: HashMap<String, Col> = HashMap::new();
+        let mut tree: Option<PhysOp> = None;
+        for (i, rel) in self.input.relationships.iter().enumerate() {
+            let ea = format!("e{i}");
+            let (sc, ec) = rel.direction.edge_columns();
+            let table = self.graph.edge_table(&rel.types, det);
+            let leaf = if rel.hops.max > 1 {
+                self.multi_hop(rel, &ea, &table)
+            } else {
+                scan(&table, &ea, Dedup::None).filter(self.edge_preds(rel, &ea))
+            };
+            let mut on = Vec::new();
+            for (n, c) in [(&rel.from, sc), (&rel.to, ec)] {
+                let here = (ea.clone(), c.to_string());
+                match bound.get(n) {
+                    Some(b) => on.push((b.clone(), here)),
+                    None => {
+                        bound.insert(n.clone(), here);
+                    }
+                }
+            }
+            tree = Some(match tree {
+                None => leaf,
+                Some(t) => t.join(leaf, on),
+            });
+        }
+        let mut tree = tree.unwrap();
+        for n in &self.input.nodes {
+            if let Some(b) = bound.get(&n.id)
+                && self.needs_node_join(n)
+            {
+                tree = tree.join(
+                    self.node_scan(n),
+                    vec![(b.clone(), (n.id.clone(), "id".into()))],
+                );
+            }
+        }
+        tree
+    }
 
     /// `UNION ALL` of one arm per depth, aliased as the hop's edge so the
     /// outer query reads it like a single edge with a `path_nodes` column.
@@ -377,5 +281,61 @@ impl<'a> PlanCtx<'a> {
         }
         outer.push(deleted_false(alias));
         PhysOp::union(arms, alias).filter(outer)
+    }
+
+    /// Predicates on a single-hop edge scan: kinds, endpoint entity kinds,
+    /// relationship filters, scope, and endpoint id pins.
+    fn edge_preds(&self, rel: &InputRelationship, a: &str) -> Vec<PExpr> {
+        let (sc, ec) = rel.direction.edge_columns();
+        let mut p: Vec<PExpr> = rel_kind(a, &rel.types).into_iter().collect();
+        for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
+            if let Some(ent) = self.node(nid).and_then(|n| n.entity.as_deref()) {
+                p.push(pe!("{a}.{} = {ent:?}", kind_col(ic)));
+            }
+        }
+        p.push(deleted_false(a));
+        p.extend(node_filters(a, &rel.filters));
+        if let Some(ref pfx) = rel.scope_prefix {
+            p.push(PExpr::Scope(a.to_string(), pfx.clone()));
+        }
+        for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
+            let Some(n) = self.node(nid) else { continue };
+            if !n.node_ids.is_empty() {
+                p.push(id_in(a, ic, &n.node_ids));
+            }
+            if let Some(ref r) = n.id_range {
+                p.push(id_range(a, ic, r));
+            }
+        }
+        p
+    }
+
+    /// Joined when read or range-filtered. Pinned ids live on the edge
+    /// columns; requested columns come from hydration unless the table is
+    /// in the query anyway.
+    fn needs_node_join(&self, node: &InputNode) -> bool {
+        node.id_range.is_some() || self.reads_node(node)
+    }
+
+    /// Something reads the node table: property filters, group-by, a
+    /// non-count metric, or order-by.
+    pub fn reads_node(&self, node: &InputNode) -> bool {
+        let a = node.id.as_str();
+        let agg = &self.input.aggregation;
+        !node.filters.is_empty()
+            || agg.group_by.iter().any(|g| g.node() == a)
+            || agg.metrics.iter().any(|m| {
+                m.expr.node() == a
+                    && m.expr.property().is_some()
+                    && !matches!(m.expr.function(), AggFunction::Count)
+            })
+            || self.input.order_by.as_ref().is_some_and(|ob| ob.node == a)
+    }
+
+    fn requested(&self, n: &InputNode) -> Vec<Named> {
+        crate::passes::shared::requested_columns(&n.columns)
+            .into_iter()
+            .map(|p| named(self.property(n, &p), format!("{}_{p}", n.id)))
+            .collect()
     }
 }

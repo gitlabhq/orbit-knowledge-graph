@@ -2,11 +2,7 @@
 //! depth), combined as direct hits (forward reaches the end) plus meets
 //! (forward and backward share an `end_id`).
 
-use super::chain::{hop_chain, kind_col, path_nodes};
-use super::expr::on;
-use super::*;
-use crate::constants::*;
-use crate::{pe, pn};
+use super::prelude::*;
 
 const SCOPE_CTE: &str = "_path_scope_traversal_paths";
 

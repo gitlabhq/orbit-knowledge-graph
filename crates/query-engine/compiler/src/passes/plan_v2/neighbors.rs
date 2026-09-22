@@ -2,11 +2,7 @@
 //! own `_gkg_*` redaction columns since the center's edge column differs per
 //! direction arm.
 
-use super::chain::kind_col;
-use super::expr::on;
-use super::*;
-use crate::constants::*;
-use crate::{pe, pn};
+use super::prelude::*;
 
 /// Column roles of one direction arm.
 struct Arm {

@@ -1,6 +1,7 @@
-//! S-expression rendering of a plan, for fixtures and devtools.
+//! The plan as an S-expression, one operator per line, for plan-shape
+//! fixtures and `orbit-devtools compile --plan`.
 
-use super::plan_v2::*;
+use super::*;
 use ontology::constants::DELETED_COLUMN;
 
 impl PhysOp {

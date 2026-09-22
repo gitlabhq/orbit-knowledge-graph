@@ -1,8 +1,8 @@
 //! Hydration: fetch requested properties for known ids, one latest-row arm
 //! per entity, returned as a JSON map per row.
 
-use super::*;
-use crate::{pe, pn};
+use super::prelude::*;
+
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 /// Above this many dynamic paths, OR-of-startsWith risks ClickHouse parser
