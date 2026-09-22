@@ -17,9 +17,9 @@ stages:
       - match: '(file_scoped_namespace_declaration name: $N)'
         replace: '(cs_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(using_directive (static) $Q:qualified_name)'
-        replace: '(__import (__import_kind "static") (__source @$Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
+        replace: '(__import (__source @$Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
       - match: '(using_directive (static) $Q:identifier)'
-        replace: '(__import (__import_kind "static") (__source @$Q) (__source_path @$Q) (__name "*"))'
+        replace: '(__import (__source @$Q) (__source_path @$Q) (__name "*"))'
       - match: '(using_directive name: $A:identifier $Q:qualified_name)'
         replace: '(__import (__source @$Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
       - match: '(using_directive name: $A:identifier $Q:alias_qualified_name)'
@@ -40,7 +40,7 @@ stages:
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
       - match: '(modifier "partial")'
-        replace: '(__partial)'
+        replace: '(__visibility "partial")'
 
       # Types collapse to a bare identifier
       - match: '(generic_name $T:identifier)'
@@ -96,7 +96,7 @@ stages:
       - match: '(invocation_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(invocation_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F (__implicit)) $A)'
+        replace: '(__call (__callee @$F) $A)'
       - match: '(invocation_expression function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
       - match: '(object_creation_expression type: $T:identifier arguments:? $A $$$B:initializer_expression)'
@@ -176,7 +176,7 @@ stages:
       - match: '(method_declaration $$$PRE name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $$$PRE $P $B)'
       - match: '(constructor_declaration $$$PRE name: $N:identifier parameters: $P body: $B)'
-        replace: '(__def (__defname @$N) (__method) (__constructor) $$$PRE $P $B)'
+        replace: '(__def (__defname @$N) (__method) $$$PRE $P $B)'
       - match: '(local_function_statement $$$PRE name: $N:identifier parameters: $P body: $B)'
         replace: '(__def (__defname @$N) (__function) $$$PRE $P $B)'
 
@@ -203,7 +203,7 @@ stages:
 
   - name: tag-defs
     rules:
-      - match: '(__import (__import_kind "static"))'
+      - match: '(__import )'
         tag: { callable: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
@@ -269,7 +269,7 @@ display:
         tag: { def_type: Function }
       - match: '(__def (__method))'
         tag: { def_type: Method }
-      - match: '(__def (__method) (__constructor))'
+      - match: '(__def (__method))'
         tag: { def_type: Constructor }
       - match: '(__def (__class))'
         tag: { def_type: Class }
@@ -309,7 +309,7 @@ display:
       - match: '(__import (__name "*"))'
         tag:
           import_type: WildcardImport
-      - match: '(__import (__import_kind "static"))'
+      - match: '(__import )'
         tag:
           import_type: StaticImport
       - match: '(__name "*")'

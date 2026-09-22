@@ -118,7 +118,7 @@ stages:
       - match: '(call_expression $F:__member (call_suffix $$$A))'
         replace: '(__call (__callee $F) $$$A)'
       - match: '(call_expression $F:(simple_identifier "/^(println|print|readLine|require|requireNotNull|check|checkNotNull|error|TODO|lazy|run|with|repeat|arrayOf|listOf|setOf|mapOf|mutableListOf|mutableSetOf|mutableMapOf|emptyList|emptySet|emptyMap)$/") (call_suffix $$$A))'
-        replace: '(__call (__callee @$F (__predeclared)) $$$A)'
+        replace: '(__call (__callee @$F) $$$A)'
       - match: '(call_expression $F:simple_identifier (call_suffix $$$A))'
         replace: '(__call (__callee @$F) $$$A)'
       - match: '(call_expression $F (call_suffix $$$A))'
@@ -193,9 +193,9 @@ stages:
 
       # Class-likes
       - match: '(companion_object $N:type_identifier $B:class_body)'
-        replace: '(__def (__defname @$N) (__class) (__companion) $B)'
+        replace: '(__def (__defname @$N) (__class) $B)'
       - match: '(companion_object $B:class_body)'
-        replace: '(__def (__defname "Companion") (__class) (__companion) $B)'
+        replace: '(__def (__defname "Companion") (__class) $B)'
       - match: '(object_declaration $N:type_identifier $$$D:__supertype $B?:class_body)'
         replace: '(__def (__defname @$N) (__class) $$$D $B)'
       - match: '(class_declaration $M?:modifiers (interface) $N:type_identifier $$$D:__supertype $B?:class_body)'

@@ -52,7 +52,7 @@ stages:
         replace: '(__member @$F (__object @$O))'
 
       - match: '(call_expression function: $F:(identifier "/^(append|cap|clear|close|complex|copy|delete|imag|len|make|max|min|new|panic|print|println|real|recover)$/") arguments: $A)'
-        replace: '(__call (__callee @$F (__predeclared)) $A)'
+        replace: '(__call (__callee @$F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'

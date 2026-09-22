@@ -50,9 +50,11 @@ stages:
   - name: classify
     rules:
       - match: '(declaration declarator: (function_declarator declarator: $N:identifier))'
-        replace: '(__decl (__defname @$N))'
+        replace: '(__def (__defname @$N) (__function))'
+        tag: { decl: "true", callable: "true" }
       - match: '(declaration declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier)))'
-        replace: '(__decl (__defname @$N))'
+        replace: '(__def (__defname @$N) (__function))'
+        tag: { decl: "true", callable: "true" }
       # Definitions (prototypes stay declarations)
       - match: '(function_definition declarator: (function_declarator declarator: (parenthesized_declarator (pointer_declarator (function_declarator declarator: $N:identifier parameters: $P)))) body: $B)'
         replace: '(__def (__defname @$N) (__function) $P $B)'
@@ -183,7 +185,7 @@ display:
         tag: { def_type: Function }
       - match: '(__def (__method))'
         tag: { def_type: Method }
-      - match: '(__def (__method) (__constructor))'
+      - match: '(__def (__method))'
         tag: { def_type: Constructor }
       - match: '(__def (__class))'
         tag: { def_type: Class }
