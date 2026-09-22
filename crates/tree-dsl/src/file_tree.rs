@@ -71,13 +71,9 @@ impl<'a> ProjectTree<'a> {
 
         let mut children_map: FxHashMap<String, Vec<(String, bool)>> = FxHashMap::default();
         for &path in self.paths {
-            let parts: Vec<&str> = path.split(PATH_SEP).collect();
+            let parts: Vec<&str> = path.split(PATH_SEP).filter(|p| !p.is_empty()).collect();
             for i in 0..parts.len() {
-                let parent = if i == 0 {
-                    String::new()
-                } else {
-                    parts[..i].join(PATH_SEP)
-                };
+                let parent = parts[..i].join(PATH_SEP);
                 let segment = parts[i].to_string();
                 let is_file = i == parts.len() - 1;
                 let entry = children_map.entry(parent).or_default();
