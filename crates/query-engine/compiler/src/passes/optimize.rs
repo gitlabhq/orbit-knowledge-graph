@@ -30,6 +30,7 @@ fn apply_rules(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
         rule_denorm_tag_pushdown,
         rule_column_pushdown,
         rule_prune_unreferenced_agg_node,
+        rule_remove_stale_edge_predicates,
     ];
     for rule in rules {
         if let Some(rewritten) = rule(&tree, ctx) {
@@ -640,5 +641,55 @@ fn rule_prune_unreferenced_agg_node(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp
         Some(*left.clone())
     } else {
         None
+    }
+}
+
+// ── Rule 9: Remove stale edge predicates after FK elision ───────────────────
+
+fn rule_remove_stale_edge_predicates(op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
+    let PhysOp::Filter { predicates, input } = op else {
+        return None;
+    };
+    // If the input is NOT an edge scan (no edge table underneath), then
+    // edge-specific predicates (relationship_kind, source_kind, target_kind)
+    // are stale and should be removed.
+    if edge_scan_alias(input).is_some() {
+        return None; // edge scan still exists, predicates are valid
+    }
+
+    let edge_columns: std::collections::HashSet<&str> = [
+        ontology_constants::RELATIONSHIP_KIND_COLUMN,
+        ontology_constants::SOURCE_KIND_COLUMN,
+        ontology_constants::TARGET_KIND_COLUMN,
+        ontology_constants::SOURCE_ID_COLUMN,
+        ontology_constants::TARGET_ID_COLUMN,
+        ontology_constants::SOURCE_TAGS_COLUMN,
+        ontology_constants::TARGET_TAGS_COLUMN,
+    ]
+    .into_iter()
+    .collect();
+
+    let cleaned: Vec<Predicate> = predicates
+        .iter()
+        .filter(|p| match p {
+            Predicate::Eq { column, .. } | Predicate::In { column, .. } => {
+                !edge_columns.contains(column.as_str())
+            }
+            _ => true,
+        })
+        .cloned()
+        .collect();
+
+    if cleaned.len() == predicates.len() {
+        return None; // nothing removed
+    }
+
+    if cleaned.is_empty() {
+        Some(*input.clone()) // no predicates left, unwrap the Filter
+    } else {
+        Some(PhysOp::Filter {
+            predicates: cleaned,
+            input: input.clone(),
+        })
     }
 }

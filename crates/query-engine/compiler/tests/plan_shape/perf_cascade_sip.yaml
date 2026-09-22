@@ -7,7 +7,7 @@ expected: |
         (Join Inner (e0.target_id = e1.source_id)
           (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" !deleted scope(…) source_id∈[1]]
             (Scan gl_edge e0))
-          (Filter [relationship_kind="IN_PROJECT" source_kind="MergeRequest" target_kind="Project" !deleted scope(…) source_id∈[1]]
+          (Filter [!deleted scope(…)]
             (Join Inner (mr.project_id = p.id)
               (Filter [id∈[1] !deleted]
                 (Scan gl_merge_request mr FINAL))
