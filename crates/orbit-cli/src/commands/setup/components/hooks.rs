@@ -5,10 +5,11 @@ use serde_json::Value;
 
 use super::json;
 use super::{
-    Installer, Report, backup_once, file_mentions, remove_file_and_empty_parents, write_file,
+    Installer, Report, backup_once, file_mentions, remove_file_and_empty_parents,
+    write_unless_unchanged,
 };
 use crate::commands::setup::Target;
-use crate::commands::setup::spec::{self, Agent};
+use crate::commands::setup::spec::{self, Agent, TemplateFile};
 
 pub(super) struct Hooks;
 
@@ -63,22 +64,23 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
             .map(substitute_launcher_in_json)
             .collect();
         let mut root = json::read_object(&path)?;
-        if path.exists() {
+        if !file_mentions(&path, &merge.marker) {
             backup_once(&path, &label, report)?;
         }
         json::replace_marked_entries(&mut root, &merge.path, &merge.marker, &entries)
             .with_context(|| format!("failed to update {}", path.display()))?;
-        json::write_object(&path, &root)?;
-        report.note(&label, "orbit entries installed");
+        let installed = json::render(&root)?;
+        write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
     }
 
     for template_file in &agent.template_files {
         let (path, label) = target.resolve(&template_file.path)?;
-        if path.exists() {
+        let written_by_orbit = std::fs::read_to_string(&path)
+            .is_ok_and(|current| TemplateFile::is_unmodified(&current));
+        if !written_by_orbit {
             backup_once(&path, &label, report)?;
         }
-        write_file(&path, template_file.render())?;
-        report.note(&label, "written");
+        write_unless_unchanged(&path, &label, &template_file.render(), "written", report)?;
     }
 
     for registration in &agent.registrations {
@@ -89,9 +91,7 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         if json::append_unique(&mut root, &registration.path, &value)
             .with_context(|| format!("failed to update {}", path.display()))?
         {
-            if path.exists() {
-                backup_once(&path, &label, report)?;
-            }
+            backup_once(&path, &label, report)?;
             json::write_object(&path, &root)?;
             report.note(&label, format!("{value_label} registered"));
         }
@@ -119,7 +119,7 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
         }
         let current = std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        if !template_file.is_unmodified(&current) {
+        if !TemplateFile::is_unmodified(&current) {
             report.note(&label, "kept (edited since install; delete it by hand)");
             continue;
         }

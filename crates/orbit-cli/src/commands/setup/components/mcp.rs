@@ -7,7 +7,7 @@ use toml_edit::{Array, DocumentMut, Item, Table, value};
 use super::json;
 use super::{
     Installer, Report, backup_once, drop_backup_when_restored, file_mentions,
-    remove_file_and_empty_parents, write_file,
+    remove_file_and_empty_parents, write_file, write_unless_unchanged,
 };
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent, DIRECT_LAUNCHER, McpFormat};
@@ -109,14 +109,19 @@ fn install_json(
             path.display()
         );
     };
-    servers.insert(server.name.to_string(), entry);
-
-    if path.exists() {
+    if !orbit_owns_json_entry(servers, server.name) {
         backup_once(path, label, report)?;
     }
-    json::write_object(path, &root)?;
-    report.note(label, format!("mcp server {} registered", server.name));
-    Ok(())
+    servers.insert(server.name.to_string(), entry);
+
+    let registered = format!("mcp server {} registered", server.name);
+    write_unless_unchanged(path, label, &json::render(&root)?, &registered, report)
+}
+
+fn orbit_owns_json_entry(servers: &serde_json::Map<String, Value>, name: &str) -> bool {
+    servers
+        .get(name)
+        .is_some_and(|entry| json::contains_marker(entry, DIRECT_LAUNCHER))
 }
 
 fn refuse_commented_sibling(path: &Path, key: &str, name: &str, entry: &Value) -> Result<()> {
@@ -145,10 +150,7 @@ fn remove_json(
     let Some(servers) = map.get_mut(key).and_then(Value::as_object_mut) else {
         return Ok(());
     };
-    let owned = servers
-        .get(name)
-        .is_some_and(|entry| json::contains_marker(entry, DIRECT_LAUNCHER));
-    if !owned {
+    if !orbit_owns_json_entry(servers, name) {
         return Ok(());
     }
 
@@ -179,17 +181,22 @@ fn install_toml(
         );
     };
 
+    if !orbit_owns_toml_entry(servers, server.name) {
+        backup_once(path, label, report)?;
+    }
     let mut entry = Table::new();
     entry["command"] = value(server.command.as_str());
     entry["args"] = value(server.args.iter().map(String::as_str).collect::<Array>());
     servers.insert(server.name, Item::Table(entry));
 
-    if path.exists() {
-        backup_once(path, label, report)?;
-    }
-    write_file(path, document.to_string())?;
-    report.note(label, format!("mcp server {} registered", server.name));
-    Ok(())
+    let registered = format!("mcp server {} registered", server.name);
+    write_unless_unchanged(path, label, &document.to_string(), &registered, report)
+}
+
+fn orbit_owns_toml_entry(servers: &Table, name: &str) -> bool {
+    servers
+        .get(name)
+        .is_some_and(|entry| entry.to_string().contains(DIRECT_LAUNCHER))
 }
 
 fn remove_toml(
@@ -204,10 +211,7 @@ fn remove_toml(
     let Some(servers) = document.get_mut(key).and_then(Item::as_table_mut) else {
         return Ok(());
     };
-    let owned = servers
-        .get(name)
-        .is_some_and(|entry| entry.to_string().contains(DIRECT_LAUNCHER));
-    if !owned {
+    if !orbit_owns_toml_entry(servers, name) {
         return Ok(());
     }
 

@@ -36,7 +36,13 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 
     if interactive {
         let location_hints = summary::detected_location_hints(&detected_agents, machine);
-        selection = ask_which_agents(selection, "Which agents should use Orbit?", &location_hints)?;
+        let every_agent: Vec<_> = spec::agents().collect();
+        selection = ask_which_agents(
+            selection,
+            "Which agents should use Orbit?",
+            &every_agent,
+            &location_hints,
+        )?;
     }
     if selection.agents.is_empty() {
         tui::outro_cancel(format!(
@@ -98,12 +104,18 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
         "Orbit uninstall ({})",
         summary::join_component_labels(&selection.components)
     ))?;
+    if selection.agents.is_empty() {
+        tui::outro("Orbit is not set up for any agent. Nothing to remove.")?;
+        return Ok(());
+    }
 
     if interactive {
         let location_hints = summary::detected_location_hints(&detected_agents, machine);
+        let installed_agents = selection.agents.clone();
         selection = ask_which_agents(
             selection,
             "Remove Orbit from which agents?",
+            &installed_agents,
             &location_hints,
         )?;
     }
@@ -131,11 +143,12 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
 fn ask_which_agents(
     selection: Selection,
     question: &str,
+    offered_agents: &[spec::Agent],
     location_hints: &BTreeMap<String, String>,
 ) -> Result<Selection> {
     let chosen_agents = tui::multiselect(
         question,
-        &summary::agent_picker_choices(&selection.agents, location_hints),
+        &summary::agent_picker_choices(offered_agents, location_hints),
         &selection.selected_agent_names(),
     )?;
     selection.with_agents_named(&chosen_agents)
@@ -655,6 +668,35 @@ mod tests {
             "// my own plugin\n"
         );
         assert!(!dir.path().join("CLAUDE.md.orbit-backup").exists());
+    }
+
+    #[test]
+    fn rerunning_setup_leaves_nothing_behind_after_uninstall() {
+        let dir = tempfile::tempdir().unwrap();
+        let every_agent = ["claude", "codex", "duo", "opencode", "pi"];
+
+        install_with_mcp(&every_agent, dir.path());
+        install_with_mcp(&every_agent, dir.path());
+        uninstall_named(&every_agent, dir.path());
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:#?}");
+    }
+
+    #[test]
+    fn opencode_plugin_looks_for_the_graph_where_orbit_writes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_mcp(&["opencode"], dir.path());
+
+        let plugin =
+            std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
+        assert!(
+            plugin.contains(r#"join(homedir(), ".gitlab", "orbit")"#),
+            "{plugin}"
+        );
     }
 
     #[test]

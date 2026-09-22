@@ -25,10 +25,13 @@ pub(super) fn read_object(path: &Path) -> Result<Value> {
     }
 }
 
+pub(super) fn render(value: &Value) -> Result<String> {
+    let raw = serde_json::to_string_pretty(value).context("failed to serialize JSON")?;
+    Ok(raw + "\n")
+}
+
 pub(super) fn write_object(path: &Path, value: &Value) -> Result<()> {
-    let mut raw = serde_json::to_string_pretty(value).context("failed to serialize JSON")?;
-    raw.push('\n');
-    write_file(path, raw)
+    write_file(path, render(value)?)
 }
 
 pub(super) fn write_or_delete_when_empty(

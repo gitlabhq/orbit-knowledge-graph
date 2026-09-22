@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+use ontology::migrations::sha256_hex;
 use rust_embed::Embed;
 use serde::Deserialize;
 use serde_json::Value;
@@ -254,23 +255,22 @@ pub(crate) fn agent_names() -> Vec<&'static str> {
     AGENT_SPECS.iter().map(|spec| spec.name.as_str()).collect()
 }
 
+const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
+
 impl TemplateFile {
     pub(super) fn render(&self) -> String {
-        self.render_with_launcher(launcher())
-    }
-
-    fn render_with_launcher(&self, launcher: &str) -> String {
-        let mut rendered = read_embedded_text(&self.template);
+        let mut body = read_embedded_text(&self.template);
         for (name, value) in &TEXTS.template_vars {
-            rendered = rendered.replace(&format!("{{{{{name}}}}}"), value);
+            body = body.replace(&format!("{{{{{name}}}}}"), value);
         }
-        substitute_launcher(&rendered, launcher)
+        let body = substitute_launcher(&body, launcher());
+        format!("{TEMPLATE_CHECKSUM_PREFIX}{}\n{body}", sha256_hex(&body))
     }
 
-    pub(super) fn is_unmodified(&self, contents: &str) -> bool {
-        [DIRECT_LAUNCHER, GLAB_LAUNCHER]
-            .iter()
-            .any(|launcher| self.render_with_launcher(launcher) == contents)
+    pub(super) fn is_unmodified(contents: &str) -> bool {
+        contents.split_once('\n').is_some_and(|(stamp, body)| {
+            stamp.strip_prefix(TEMPLATE_CHECKSUM_PREFIX) == Some(sha256_hex(body).as_str())
+        })
     }
 }
 
