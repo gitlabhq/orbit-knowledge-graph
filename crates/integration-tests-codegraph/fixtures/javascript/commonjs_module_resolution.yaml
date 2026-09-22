@@ -186,7 +186,30 @@ fixtures:
         return installPolyfill();
       }
 
+  - path: external/scoped.js
+    content: |
+      import { track } from 'outer-sdk';
+      function inner() {
+        const { track } = require('inner-sdk');
+        const alias = track;
+        function nested() { alias(); }
+        track();
+        nested();
+      }
+      function other() { track(); }
+
 tests:
+  - name: CommonJS captures keep their originating import beside shadowed ESM
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'external/scoped.js'
+      RETURN caller.name AS caller, sym.import_path AS path, sym.start_line AS import_line
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "inner", path: "inner-sdk", import_line: 3 } }
+      - { row: { caller: "nested", path: "inner-sdk", import_line: 3 } }
+      - { row: { caller: "other", path: "outer-sdk", import_line: 1 } }
+
   - name: Destructured require targets named export proxy
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
