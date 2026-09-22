@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
@@ -58,7 +58,8 @@ impl Workspace {
     pub fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let canonical = dunce::canonicalize(path)?;
 
-        let discovered = discover_repos(&canonical);
+        let mut discovered = discover_repos(&canonical);
+        discovered.retain(|repo| *repo == canonical || !is_ignored_by_enclosing_repo(repo));
         if discovered.is_empty() && is_git_repo(&canonical) {
             Ok(vec![canonical])
         } else {
@@ -395,6 +396,19 @@ pub fn project_id_from_path(path: &str) -> i64 {
 fn is_git_repo(path: &Path) -> bool {
     let git = path.join(".git");
     git.is_dir() || git.is_file()
+}
+
+fn is_ignored_by_enclosing_repo(repo: &Path) -> bool {
+    let Some(enclosing) = repo.parent().and_then(|parent| git_toplevel(parent).ok()) else {
+        return false;
+    };
+    Command::new("git")
+        .args(["check-ignore", "--quiet"])
+        .arg(repo)
+        .current_dir(enclosing)
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {

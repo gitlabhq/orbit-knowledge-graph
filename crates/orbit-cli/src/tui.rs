@@ -55,6 +55,41 @@ pub(crate) fn format_with_thousands(count: usize) -> String {
     grouped
 }
 
+/// The terminal echoes Ctrl-C as `^C`, which shifts the progress bars cliclack redraws in place.
+pub(crate) struct ControlEchoOff {
+    #[cfg(unix)]
+    saved: Option<rustix::termios::Termios>,
+}
+
+pub(crate) fn turn_off_control_echo() -> ControlEchoOff {
+    #[cfg(unix)]
+    {
+        use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
+        let saved = tcgetattr(std::io::stdin()).ok();
+        if let Some(saved) = &saved {
+            let mut quiet = saved.clone();
+            quiet.local_modes.remove(LocalModes::ECHOCTL);
+            let _ = tcsetattr(std::io::stdin(), OptionalActions::Now, &quiet);
+        }
+        ControlEchoOff { saved }
+    }
+    #[cfg(not(unix))]
+    ControlEchoOff {}
+}
+
+impl Drop for ControlEchoOff {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(saved) = &self.saved {
+            let _ = rustix::termios::tcsetattr(
+                std::io::stdin(),
+                rustix::termios::OptionalActions::Now,
+                saved,
+            );
+        }
+    }
+}
+
 pub(crate) struct ProgressGroup(cliclack::MultiProgress);
 
 pub(crate) fn progress_group(title: impl Display) -> ProgressGroup {
@@ -68,7 +103,10 @@ impl ProgressGroup {
                 .with_template("{msg} {bar:30.magenta} {human_pos}/{human_len}"),
         );
         bar.start(label);
-        Bar(bar)
+        Bar {
+            bar,
+            label: label.to_string(),
+        }
     }
 
     pub(crate) fn note(&self, line: impl Display) {
@@ -82,17 +120,34 @@ impl ProgressGroup {
     pub(crate) fn fail(&self, message: impl Display) {
         self.0.error(message);
     }
+
+    pub(crate) fn cancel(&self) {
+        self.0.cancel();
+    }
 }
 
-pub(crate) struct Bar(cliclack::ProgressBar);
+pub(crate) struct Bar {
+    bar: cliclack::ProgressBar,
+    label: String,
+}
 
 impl Bar {
     pub(crate) fn advance(&self, count: usize) {
-        self.0.inc(count as u64);
+        self.bar.inc(count as u64);
     }
 
     pub(crate) fn finish(&self, message: impl Display) {
-        self.0.stop(message);
+        self.bar.stop(message);
+    }
+
+    pub(crate) fn stop_at_current_count(&self) {
+        let total = self.bar.length().unwrap_or_default() as usize;
+        self.bar.cancel(format!(
+            "{}  {}/{}",
+            self.label,
+            format_with_thousands(self.bar.position() as usize),
+            format_with_thousands(total)
+        ));
     }
 }
 
@@ -112,6 +167,10 @@ impl Spinner {
     pub(crate) fn error(self, message: impl Display) {
         self.0.error(message);
     }
+}
+
+pub(crate) fn cancelled(message: &str) -> anyhow::Error {
+    std::io::Error::new(std::io::ErrorKind::Interrupted, message.to_string()).into()
 }
 
 pub(crate) fn is_cancelled(error: &anyhow::Error) -> bool {

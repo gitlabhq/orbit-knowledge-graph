@@ -35,8 +35,8 @@ struct Cli {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("index"))]
 struct IndexArgs {
-    /// Path to the repository to index
-    #[arg(value_name = "PATH")]
+    /// Repository path, or a directory that holds repositories (default: current directory).
+    #[arg(value_name = "PATH", default_value = ".")]
     path: PathBuf,
 
     /// Number of worker threads (0 = auto-detect based on CPU cores)

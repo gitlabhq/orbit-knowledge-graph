@@ -5352,6 +5352,7 @@ dependencies = [
  "reqwest 0.13.4",
  "rmcp",
  "rust-embed",
+ "rustix 1.1.4",
  "rustls",
  "schemars 1.2.1",
  "serde",
