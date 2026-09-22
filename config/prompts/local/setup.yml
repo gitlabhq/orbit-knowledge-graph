@@ -1,5 +1,5 @@
 name: setup
-version: 1.2.0
+version: 1.3.0
 short: Configure AI coding agents to consult the graph
 description: >-
   Configure AI coding agents to consult the graph
@@ -7,7 +7,8 @@ description: >-
 
   Detects the agents installed on this machine and gives each one the Orbit
   instruction section, hooks, and skill. A picker lists the detected agents;
-  `--yes` skips it. `--mcp` also registers the MCP server. Writes
-  user-global configuration unless `--project` or `--dir` is given.
+  `--yes` skips it. `--mcp` also registers the MCP server. Inside a Git
+  repository it then indexes the repository; `--no-index` skips that.
+  Writes user-global configuration unless `--project` or `--dir` is given.
   Existing files get a one-time `.orbit-backup` sibling. Re-running updates
   in place. `orbit uninstall` reverts it.

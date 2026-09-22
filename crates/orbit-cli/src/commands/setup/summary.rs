@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use super::Component;
 use super::components::{Outcome, Report};
 use super::detect::Machine;
+use super::index_repo::Indexed;
 use super::plan::Plan;
 use super::spec::{self, Agent};
 use crate::tui::Choice;
@@ -87,6 +88,30 @@ pub(super) fn format_files_per_component(plan: &Plan) -> String {
         rows.extend(paths.into_iter().map(|path| format!("  {path}")));
     }
     rows.join("\n")
+}
+
+pub(super) fn format_try_it_command(indexed: Option<&Indexed>) -> Option<String> {
+    let name = indexed?.suggested_grep.as_deref()?;
+    let is_plain_word = name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    let argument = match is_plain_word {
+        true => name.to_string(),
+        false => format!("'{}'", name.replace('\'', "'\\''")),
+    };
+    Some(format!("{} grep {argument}", spec::launcher()))
+}
+
+pub(super) fn format_closing_line(indexed: Option<&Indexed>) -> String {
+    match indexed {
+        Some(Indexed {
+            suggested_grep: Some(_),
+            ..
+        }) => "Done.".to_string(),
+        Some(_) => "Done. Ask your agent where a function is defined.".to_string(),
+        None => format!(
+            "Done. Run {} index in a repository, then ask your agent where a function is defined.",
+            spec::launcher()
+        ),
+    }
 }
 
 pub(super) fn format_outcomes_per_component(report: &Report) -> Vec<(String, String)> {
