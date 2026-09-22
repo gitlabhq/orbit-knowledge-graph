@@ -37,6 +37,7 @@ SCOPE = (
     ".gitlab/merge_request_templates/*.md",
     ".gitlab/issue_templates/*.md",
     "skills/**/*.md",
+    "plugins/**/*.md",
     "config/prompts/**/*.yml",
     "config/setup/setup.yaml",
 )

@@ -1,0 +1,12 @@
+{
+  "name": "gitlab-orbit",
+  "owner": { "name": "GitLab" },
+  "metadata": { "description": "Orbit integrations for coding agents." },
+  "plugins": [
+    {
+      "name": "orbit",
+      "source": "./plugins/orbit",
+      "description": "Search code and follow its relationships with Orbit CLI."
+    }
+  ]
+}

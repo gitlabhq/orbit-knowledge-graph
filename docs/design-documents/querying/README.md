@@ -38,7 +38,7 @@ Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents 
 
 ### Agent Skill Source Trees
 
-Orbit maintains two independently usable agent skill trees. `skills/orbit/` documents Orbit Remote, while `skills/orbit-cli/` documents the local capabilities embedded in the `orbit` binary. Local reference files use the `references/local/` namespace so the two trees form a collision-free path union. `orbit skills` lists the selected instance's deployed skills. `orbit skills get <name> [path]` conditionally downloads and validates the named whole tree, composes it in memory with local guidance, and prints `SKILL.md` by default. The previous `orbit skills <name> [path]` form and path shorthand remain as hidden compatibility aliases. The singular `skill` spelling is also a hidden compatibility alias.
+Orbit maintains two independently usable agent skill trees. `skills/orbit/` documents Orbit Remote, while `plugins/orbit/skills/orbit-cli/` documents the local capabilities embedded in the `orbit` binary. Local reference files use the `references/local/` namespace so the two trees form a collision-free path union. `orbit skills` lists the selected instance's deployed skills. `orbit skills get <name> [path]` conditionally downloads and validates the named whole tree, composes it in memory with local guidance, and prints `SKILL.md` by default. The previous `orbit skills <name> [path]` form and path shorthand remain as hidden compatibility aliases. The singular `skill` spelling is also a hidden compatibility alias.
 
 The CLI uses only the complete `ORBIT_API_BASE_URL`, `ORBIT_AUTH_HEADER_NAME`, and `ORBIT_AUTH_HEADER_VALUE` tuple exported by glab for skill requests. An absent or incomplete tuple selects the embedded local tree without invoking a credential helper. A `404` or unreachable instance also falls back with a warning; authentication and authorization failures remain errors. A transient server failure can use the last validated tree for that instance, but remains an error when no cached tree exists. A `200` response without an ETag uses the last validated tree, or the embedded tree when no cache exists.
 
@@ -46,6 +46,19 @@ Validated remote trees are cached below the operating system's user cache direct
 The cache stores the byte-for-byte remote files and a validation manifest, never local files or composed output. Conditional requests use the cached version ETag; a new version refreshes the cache. Skill versions are identity, not content hashes: if a deployment reuses a version for different content, a `304` cannot detect the change. Pruning retains the two most recently validated versions per instance and skill.
 
 The remote manifest uses line-oriented HTML placeholders to show where the local manifest's sections belong. Both consumer build scripts call the shared validator in `orbit-prompts`. It requires every placeholder to have one matching local section and prevents duplicate paths across the combined trees. The build-time validator also resolves relative Markdown links and checks documented remote commands against the clap command inventory. The runtime composer reuses the same marker parser but tolerates release skew: unmatched remote placeholders disappear and unmatched local sections are appended under `## Local CLI`. General Markdown checks remain responsible for prose, external URLs, and fragments.
+
+### Agent plugin distribution
+
+The `plugins/orbit/` directory is a self-contained package for Claude Code and
+Codex. The portable `plugin.json` serves Codex; `.claude-plugin/plugin.json`
+adds Claude's hook configuration. Both load the canonical local skill that the
+Orbit binary embeds. Neither installs a binary, starts indexing, or registers
+MCP. Claude's hooks call the existing `orbit hook-guard` command and fail open.
+
+The repository holds a marketplace catalog for each host. Tag releases also
+publish a deterministic ZIP with both catalogs and the plugin. Package tests
+check paths after extraction, version agreement, and hook behavior. See the
+[plugin guide](../../../plugins/orbit/README.md) for installation and migration.
 
 ### Named Queries
 

@@ -24,6 +24,7 @@ ARTIFACTS=(
   "orbit-cli-darwin-x86_64.tar.gz"
   "orbit-cli-darwin-aarch64.tar.gz"
   "orbit-cli-windows-x86_64.zip"
+  "orbit-agent-plugin.zip"
 )
 
 for artifact in "${ARTIFACTS[@]}"; do

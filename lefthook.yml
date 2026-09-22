@@ -45,6 +45,7 @@ pre-commit:
         - ".gitlab/merge_request_templates/*.md"
         - ".gitlab/issue_templates/*.md"
         - "skills/**/*.md"
+        - "plugins/**/*.md"
         - "config/prompts/**/*.yml"
         - "config/setup/setup.yaml"
     - name: agent-file-sync
@@ -64,7 +65,9 @@ pre-commit:
         - "rust-toolchain.toml"
     - name: skill-version-bump
       run: bash ./scripts/check-skill-version-bump.sh
-      glob: "skills/**/*"
+      glob:
+        - "skills/**/*"
+        - "plugins/orbit/**/*"
     - name: prompt-version-bump
       run: bash ./scripts/check-prompt-version-bump.sh
       glob: "config/prompts/**/*.yml"
