@@ -5,10 +5,16 @@ parameters:
     schema: { type: string }
     example: MergeRequest
 query:
-  query_type: traversal
-  nodes:
-    - id: n
-      entity: { $param: entity }
-      filters:
-        id: { is_not_null: true }
-  limit: 50
+  json:
+    query_type: traversal
+    nodes:
+      - id: n
+        entity: { $param: entity }
+        filters:
+          id: { is_not_null: true }
+    limit: 50
+  gql: |
+    MATCH (n:{{ identifier("entity") }})
+    WHERE n.id IS NOT NULL
+    RETURN n
+    LIMIT 50

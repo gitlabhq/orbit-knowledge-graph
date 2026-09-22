@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use clickhouse_client::ArrowClickHouseClient;
 use futures::TryStreamExt;
-use named_queries::{NamedQueries, NamedQuery};
+use named_queries::{Language, NamedQueries, NamedQuery};
 use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 use opentelemetry::KeyValue;
@@ -13,7 +13,7 @@ use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
 use orbit_server_config::AppConfig;
-use query_engine::compiler::validate_normalize;
+use query_engine::compiler::{validate_normalize, validate_normalize_gql};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
@@ -216,8 +216,14 @@ impl SnapshotLoader {
 }
 
 fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), String> {
-    let rendered = query.render_example().map_err(|error| error.to_string())?;
-    validate_normalize(&rendered, ontology).map_err(|error| error.to_string())?;
+    let json = query
+        .render_example_language(Language::Json)
+        .map_err(|error| error.to_string())?;
+    validate_normalize(&json, ontology).map_err(|error| error.to_string())?;
+    let gql = query
+        .render_example_language(Language::Gql)
+        .map_err(|error| error.to_string())?;
+    validate_normalize_gql(&gql, ontology).map_err(|error| error.to_string())?;
     Ok(())
 }
 
