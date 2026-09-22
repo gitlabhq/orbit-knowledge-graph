@@ -202,9 +202,9 @@ stages:
 
       # Class-likes
       - match: '(companion_object $N:type_identifier $B:class_body)'
-        replace: '(__def (__defname @$N) (__class) (__companion) $B)'
+        replace: '(__def (__defname @$N) (__class) (__impl) $B)'
       - match: '(companion_object $B:class_body)'
-        replace: '(__def (__defname "Companion") (__class) (__companion) $B)'
+        replace: '(__def (__defname "Companion") (__class) (__impl) $B)'
       - match: '(object_declaration $N:type_identifier $$$D:__supertype $B?:class_body)'
         replace: '(__def (__defname @$N) (__class) $$$D $B)'
       - match: '(class_declaration $M?:modifiers (interface) $N:type_identifier $$$D:__supertype $B?:class_body)'
@@ -277,11 +277,16 @@ display:
           fqn: '@$M|child_sym("__package")'
           file_path: '@$M'
           language: '@$M|split_last(".")|map("kt:kotlin", "kts:kotlin")'
-      - match: '(__def (__impl))'
+      - match: '(__def !(__class) (__impl))'
         tag:
           entity: Definition
           file_path: '@$ROOT|ancestor_tag("file_path")'
       - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__class) (__impl))'
         tag:
           entity: Definition
           fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
@@ -304,7 +309,7 @@ display:
         tag: { def_type: EnumVariant }
       - match: '(__def (__trait))'
         tag: { def_type: Trait }
-      - match: '(__def (__impl))'
+      - match: '(__def !(__class) (__impl))'
         tag: { def_type: Impl }
       - match: '(__def (__variable))'
         tag: { def_type: Variable }

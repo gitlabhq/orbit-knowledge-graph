@@ -467,7 +467,7 @@ pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
         if n.is(C::Def) && n.index() != class.index() && n.child_sym(C::DefName) == Some(name) {
             return Step::Out(n);
         }
-        if n.is_class() && !n.has(C::ImplBlock) && !n.has(C::Companion) {
+        if n.is_class() && !n.has(C::ImplBlock) {
             return Step::Over;
         }
         Step::Into
