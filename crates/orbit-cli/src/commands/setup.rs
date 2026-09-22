@@ -23,22 +23,22 @@ use spec::ScopedPath;
 use crate::tui;
 
 pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Result<()> {
-    let prompt = tui::can_prompt(options.yes)?;
-    let detected = machine.installed_assistants();
-    let mut selection = Selection::for_install(&options, &detected)?;
+    let interactive = tui::can_prompt(options.yes)?;
+    let detected_agents = machine.installed_assistants();
+    let mut selection = Selection::for_install(&options, &detected_agents)?;
     tui::intro(format!(
         "Orbit setup ({})",
-        summary::component_list(&selection.components)
+        summary::join_component_labels(&selection.components)
     ))?;
 
-    if prompt {
-        let hints = summary::detection_hints(&detected, machine);
-        let chosen = tui::multiselect(
+    if interactive {
+        let location_hints = summary::detected_location_hints(&detected_agents, machine);
+        let chosen_agents = tui::multiselect(
             "Which agents should use Orbit?",
-            &summary::agent_choices(&hints),
-            &selection.names(),
+            &summary::agent_picker_choices(&location_hints),
+            &selection.selected_agent_names(),
         )?;
-        selection.choose(&chosen)?;
+        selection = selection.with_agents_named(&chosen_agents)?;
     }
     if selection.assistants.is_empty() {
         tui::outro_cancel(format!(
@@ -55,12 +55,12 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     }
 
     let mut report = Report::default();
-    let applied = components::install(&selection, &target, &mut report);
+    let install_result = components::install(&selection, &target, &mut report);
     if options.verbose {
-        show_every_file(&report)?;
+        show_outcomes_per_component(&report)?;
     }
-    applied?;
-    tui::card("Configured", summary::plan_rows(&plan))?;
+    install_result?;
+    tui::card("Configured", summary::format_components_per_agent(&plan))?;
     tui::outro(format!(
         "Done. Run {} index in a repository, then ask your agent where a function is defined.",
         spec::launcher()
@@ -69,20 +69,20 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 }
 
 pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
-    let prompt = tui::can_prompt(options.yes)?;
+    let interactive = tui::can_prompt(options.yes)?;
     let mut selection = Selection::for_uninstall(&options)?;
     tui::intro(format!(
         "Orbit uninstall ({})",
-        summary::component_list(&selection.components)
+        summary::join_component_labels(&selection.components)
     ))?;
 
-    if prompt {
-        let chosen = tui::multiselect(
+    if interactive {
+        let chosen_agents = tui::multiselect(
             "Remove Orbit from which agents?",
-            &summary::agent_choices(&Default::default()),
-            &selection.names(),
+            &summary::agent_picker_choices(&Default::default()),
+            &selection.selected_agent_names(),
         )?;
-        selection.choose(&chosen)?;
+        selection = selection.with_agents_named(&chosen_agents)?;
     }
     if selection.assistants.is_empty() {
         tui::outro_cancel("No agent selected.")?;
@@ -96,27 +96,30 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
     }
 
     let mut report = Report::default();
-    let removed = components::remove(&selection, &target, &mut report);
+    let remove_result = components::remove(&selection, &target, &mut report);
     if options.verbose {
-        show_every_file(&report)?;
+        show_outcomes_per_component(&report)?;
     }
-    removed?;
-    tui::card("Removed", summary::removed_rows(&report))?;
+    remove_result?;
+    tui::card(
+        "Removed",
+        summary::format_removed_files_per_component(&report),
+    )?;
     tui::outro("Done. Backups stay only for files you edited after setup.")?;
     Ok(())
 }
 
 fn show_dry_run(plan: &Plan, closing: &str) -> Result<()> {
-    tui::card("Plan", summary::plan_rows(plan))?;
+    tui::card("Plan", summary::format_components_per_agent(plan))?;
     tui::card(
         format!("Files in {}", plan.scope),
-        summary::paths_rows(plan),
+        summary::format_files_per_component(plan),
     )?;
     tui::outro(closing)
 }
 
-fn show_every_file(report: &Report) -> Result<()> {
-    for (group, body) in summary::report_cards(report) {
+fn show_outcomes_per_component(report: &Report) -> Result<()> {
+    for (group, body) in summary::format_outcomes_per_component(report) {
         tui::card(group, body)?;
     }
     Ok(())

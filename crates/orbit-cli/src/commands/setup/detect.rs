@@ -20,7 +20,7 @@ impl Machine {
         Machine { home, env }
     }
 
-    pub(super) fn abbreviate(&self, path: &Path) -> String {
+    pub(super) fn display_with_tilde(&self, path: &Path) -> String {
         match path.strip_prefix(&self.home) {
             Ok(rest) => format!("~/{}", rest.display()),
             Err(_) => path.display().to_string(),

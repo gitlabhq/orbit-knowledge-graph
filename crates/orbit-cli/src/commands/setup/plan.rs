@@ -30,16 +30,16 @@ impl Selection {
         })
     }
 
-    pub(super) fn names(&self) -> Vec<String> {
+    pub(super) fn selected_agent_names(&self) -> Vec<String> {
         self.assistants
             .iter()
             .map(|agent| agent.name.clone())
             .collect()
     }
 
-    pub(super) fn choose(&mut self, names: &[String]) -> Result<()> {
+    pub(super) fn with_agents_named(mut self, names: &[String]) -> Result<Selection> {
         self.assistants = named_specs(names)?;
-        Ok(())
+        Ok(self)
     }
 
     pub(super) fn for_uninstall(options: &Options) -> Result<Selection> {
