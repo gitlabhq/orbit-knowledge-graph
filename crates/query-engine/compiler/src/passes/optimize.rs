@@ -181,20 +181,65 @@ fn set_edge_dedup(op: PhysOp, dedup_val: bool) -> PhysOp {
 // Replaces Filter(Scan(edge_table)) with Join(node_a, node_b, on: fk)
 
 fn rule_fk_elision(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    let PhysOp::Filter {
-        predicates: _,
-        input,
+    // Match: Join where either child is an FK-eligible edge scan
+    if let PhysOp::Join {
+        left,
+        right,
+        on,
+        kind: JoinKind::Inner,
     } = op
-    else {
-        return None;
-    };
-    let PhysOp::Scan { table, alias, .. } = input.as_ref() else {
-        return None;
-    };
-    if !table.contains("edge") {
-        return None;
+    {
+        // Try right child first (most common: chain builds left-to-right)
+        if let Some(edge_alias) = edge_scan_alias(right) {
+            if let Some(result) = fk_elide_edge(&edge_alias, left, on, false, ctx) {
+                return Some(result);
+            }
+        }
+        // Try left child (first edge in chain, or reversed)
+        if let Some(edge_alias) = edge_scan_alias(left) {
+            if let Some(result) = fk_elide_edge(&edge_alias, right, on, true, ctx) {
+                return Some(result);
+            }
+        }
     }
-    let idx = alias_to_rel_index(alias)?;
+
+    // Bare Filter(Scan(edge)) — single relationship with no joins at all
+    if let Some(edge_alias) = edge_scan_alias(op) {
+        let idx = alias_to_rel_index(&edge_alias)?;
+        let rel = ctx.input.relationships.get(idx)?;
+        let fk_col = rel.fk_column.as_ref()?;
+        if rel.hops.max != 1 || matches!(rel.direction, Direction::Both) || !rel.filters.is_empty()
+        {
+            return None;
+        }
+        let (fk_alias, tgt_alias) = fk_sides(rel, fk_col, ctx);
+        let fk_node = ctx.input.nodes.iter().find(|n| n.id == fk_alias)?;
+        let tgt_node = ctx.input.nodes.iter().find(|n| n.id == tgt_alias)?;
+        return Some(PhysOp::Join {
+            left: Box::new(filtered_node_scan(fk_node)),
+            right: Box::new(filtered_node_scan(tgt_node)),
+            on: JoinOn {
+                left: (fk_alias.to_string(), fk_col.clone()),
+                right: (
+                    tgt_alias.to_string(),
+                    ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+                ),
+            },
+            kind: JoinKind::Inner,
+        });
+    }
+
+    None
+}
+
+fn fk_elide_edge(
+    edge_alias: &str,
+    other: &PhysOp,
+    on: &JoinOn,
+    edge_is_left: bool,
+    ctx: &RuleCtx,
+) -> Option<PhysOp> {
+    let idx = alias_to_rel_index(edge_alias)?;
     let rel = ctx.input.relationships.get(idx)?;
     let fk_col = rel.fk_column.as_ref()?;
     if rel.hops.max != 1 || matches!(rel.direction, Direction::Both) || !rel.filters.is_empty() {
@@ -205,7 +250,7 @@ fn rule_fk_elision(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
     let fk_node = ctx.input.nodes.iter().find(|n| n.id == fk_alias)?;
     let tgt_node = ctx.input.nodes.iter().find(|n| n.id == tgt_alias)?;
 
-    Some(PhysOp::Join {
+    let fk_join = PhysOp::Join {
         left: Box::new(filtered_node_scan(fk_node)),
         right: Box::new(filtered_node_scan(tgt_node)),
         on: JoinOn {
@@ -216,11 +261,48 @@ fn rule_fk_elision(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
             ),
         },
         kind: JoinKind::Inner,
+    };
+
+    let from_alias = &rel.from;
+    let new_on = if edge_is_left {
+        JoinOn {
+            left: (
+                from_alias.clone(),
+                ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+            ),
+            right: on.right.clone(),
+        }
+    } else {
+        JoinOn {
+            left: on.left.clone(),
+            right: (
+                from_alias.clone(),
+                ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+            ),
+        }
+    };
+
+    let (new_left, new_right) = if edge_is_left {
+        (Box::new(fk_join), Box::new(other.clone()))
+    } else {
+        (Box::new(other.clone()), Box::new(fk_join))
+    };
+
+    Some(PhysOp::Join {
+        left: new_left,
+        right: new_right,
+        on: new_on,
+        kind: JoinKind::Inner,
     })
 }
 
-// ── Rule 5: Prune duplicate node joins ──────────────────────────────────────
-// After FK elision, the naive plan's node joins become redundant
+fn edge_scan_alias(op: &PhysOp) -> Option<String> {
+    match op {
+        PhysOp::Scan { alias, table, .. } if table.contains("edge") => Some(alias.clone()),
+        PhysOp::Filter { input, .. } => edge_scan_alias(input),
+        _ => None,
+    }
+}
 
 fn rule_prune_duplicate_node_join(op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
     let PhysOp::Join {
