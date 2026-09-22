@@ -1,0 +1,28 @@
+name: "Java: a throw arm is bottom and does not take part in the join"
+fixtures:
+  - path: com/example/bottom/A.java
+    content: |
+      package com.example.bottom;
+      public class A { public void n() {} }
+  - path: com/example/bottom/Use.java
+    content: |
+      package com.example.bottom;
+      public class Use {
+          void run(int c) {
+              var p = switch (c) {
+                  case 1 -> new A();
+                  default -> throw new IllegalStateException("no");
+              };
+              p.n();
+          }
+      }
+
+tests:
+  - name: "p.n() dispatches on A after a switch whose other arm throws"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.bottom.Use.run' AND e.edge_kind = 'Calls' AND callee.name = 'n'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "com.example.bottom.A.n" } }

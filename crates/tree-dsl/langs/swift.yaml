@@ -72,6 +72,8 @@ stages:
         replace: '(__binding @$T (__rhs $R))'
       - match: '(assignment target: (directly_assignable_expression $T:simple_identifier) result: $R)'
         replace: '(__binding @$T (__rhs @$R))'
+      - match: '(control_transfer_statement (throw_keyword) $$$V)'
+        replace: '(__ssa_branch $$$V)'
       - match: '(if_statement $$$X)'
         replace: '(__ssa_branch (__ssa_arm $$$X))'
       - match: '(guard_statement $$$X)'

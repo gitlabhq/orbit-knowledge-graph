@@ -1,0 +1,37 @@
+name: "C#: a local shadows a method for a simple name"
+fixtures:
+  - path: R.cs
+    content: |
+      namespace Shadow
+      {
+          public class R
+          {
+              public void Log() {}
+              public void Run()
+              {
+                  System.Action Log = () => {};
+                  Log();
+              }
+              public void Plain()
+              {
+                  Log();
+              }
+          }
+      }
+
+tests:
+  - name: "Log() with a local delegate named Log does not call the method (C# spec 12.8.4)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Shadow.R.Run' AND e.edge_kind = 'Calls' AND callee.name = 'Log'
+      RETURN callee.fqn AS callee
+    assert:
+      - { empty: true }
+  - name: "Log() without a local calls the method"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Shadow.R.Plain' AND e.edge_kind = 'Calls' AND callee.name = 'Log'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Shadow.R.Log" } }

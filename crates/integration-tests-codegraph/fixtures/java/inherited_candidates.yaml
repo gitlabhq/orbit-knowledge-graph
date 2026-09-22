@@ -1,0 +1,49 @@
+name: "Java: inherited candidates at the shallowest depth are all emitted"
+fixtures:
+  - path: com/example/lin/I.java
+    content: |
+      package com.example.lin;
+      public interface I { default void m() {} }
+  - path: com/example/lin/J.java
+    content: |
+      package com.example.lin;
+      public interface J { default void m() {} }
+  - path: com/example/lin/A.java
+    content: |
+      package com.example.lin;
+      public class A { public void m() {} }
+  - path: com/example/lin/C.java
+    content: |
+      package com.example.lin;
+      public class C extends A implements I {}
+  - path: com/example/lin/D.java
+    content: |
+      package com.example.lin;
+      public class D implements I, J {}
+  - path: com/example/lin/Use.java
+    content: |
+      package com.example.lin;
+      public class Use {
+          void viaClass() { new C().m(); }
+          void viaTwoDefaults() { new D().m(); }
+      }
+
+tests:
+  - name: "C.m() emits the superclass method and the interface default; the JLS pick is a follow-up"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.lin.Use.viaClass' AND e.edge_kind = 'Calls' AND callee.name = 'm'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "com.example.lin.A.m" } }
+      - { row: { callee: "com.example.lin.I.m" } }
+  - name: "D.m() with two inherited defaults emits both candidates"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.lin.Use.viaTwoDefaults' AND e.edge_kind = 'Calls' AND callee.name = 'm'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "com.example.lin.I.m" } }
+      - { row: { callee: "com.example.lin.J.m" } }

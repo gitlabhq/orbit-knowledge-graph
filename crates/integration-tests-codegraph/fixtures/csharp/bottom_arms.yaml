@@ -1,0 +1,31 @@
+name: "C#: a throw expression is bottom and does not take part in the join"
+fixtures:
+  - path: A.cs
+    content: |
+      namespace Bottom
+      {
+          public class A { public void N() {} }
+      }
+  - path: Use.cs
+    content: |
+      namespace Bottom
+      {
+          public class Use
+          {
+              public void Run(bool c)
+              {
+                  var p = c ? new A() : throw new System.InvalidOperationException("no");
+                  p.N();
+              }
+          }
+      }
+
+tests:
+  - name: "p.N() dispatches on A after a conditional whose other arm throws"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Bottom.Use.Run' AND e.edge_kind = 'Calls' AND callee.name = 'N'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Bottom.A.N" } }

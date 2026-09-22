@@ -1,4 +1,5 @@
 name: "C/C++ cross-language resolution — .cpp calling through .h to .c definitions"
+pipeline: cpp
 
 fixtures:
   - path: math/ops.h

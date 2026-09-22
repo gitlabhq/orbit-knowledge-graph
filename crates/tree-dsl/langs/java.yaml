@@ -69,6 +69,8 @@ stages:
         replace: '(instanceof_expression $L (__call (__callee @$T)) (__binding @$N (__ssa_typed @$T)))'
       - match: '(instanceof_expression left: $L right: $T:type_identifier)'
         replace: '(instanceof_expression $L (__call (__callee @$T)))'
+      - match: '(throw_statement $$$V)'
+        replace: '(__ssa_branch $$$V)'
       - match: '(record_pattern_component (type_identifier "var") $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(record_pattern_component $T:type_identifier $N:identifier)'
@@ -161,6 +163,8 @@ stages:
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__member))'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V))'
         replace: '(__binding @$N (__rhs @$V))'
@@ -269,14 +273,14 @@ stages:
 
   - name: tag-defs
     rules:
-      - match: '(__import )'
+      - match: '(__import)'
         tag: { callable: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true", definition_span: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true", linearize: "class" }
+        tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
@@ -377,7 +381,7 @@ display:
       - match: '(__import (__name "*"))'
         tag:
           import_type: WildcardImport
-      - match: '(__import )'
+      - match: '(__import)'
         tag:
           import_type: StaticImport
       - match: '(__name "*")'

@@ -1,4 +1,5 @@
 name: "JVM: cross-language Java/Kotlin resolution"
+pipeline: java
 
 fixtures:
   - path: com/example/model/User.java

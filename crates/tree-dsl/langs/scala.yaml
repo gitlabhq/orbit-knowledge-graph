@@ -28,7 +28,7 @@ stages:
       - match: '(compilation_unit $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_clause name: $N:package_identifier)'
-        replace: '(__package @$N)'
+        replace: '(sc_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
       - match: '(return_expression $$$V)'
         replace: '(__ssa_return $$$V)'
       - match: '(generic_type type: $T:type_identifier)'
@@ -64,7 +64,7 @@ stages:
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F (__simple_name)) $A)'
       - match: '(call_expression function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
       - match: '(instance_expression $T:type_identifier $A:arguments)'
@@ -76,6 +76,8 @@ stages:
     rules:
       - match: '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V:__call)'
         replace: '(__binding @$N (__ssa_typed? @$T) (__rhs $V))'
+      - match: '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V:__ssa_branch)'
+        replace: '(__binding @$N (__ssa_typed? @$T) (__rhs $V))'
       - match: '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V)'
         replace: '(__binding @$N (__ssa_typed? @$T) (__rhs @$V))'
       - match: '(var_definition pattern: $N:identifier type:? $T:type_identifier value: $V:__call)'
@@ -86,6 +88,8 @@ stages:
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N:identifier right: $R)'
         replace: '(__binding @$N (__rhs @$R))'
+      - match: '(throw_expression $$$V)'
+        replace: '(__ssa_branch $$$V)'
       - match: '(if_expression condition: $C consequence: $Q alternative:? $A)'
         replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
       - match: '(match_expression value: $V body: (case_block $$$C:case_clause))'
@@ -125,7 +129,7 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true", linearize: "right" }
+        tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
@@ -228,7 +232,7 @@ display:
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
           import_type: Import
-      - match: '(__import )'
+      - match: '(__import)'
         tag: { import_type: GroupedImport }
       - match: '(__name "*")'
         tag:

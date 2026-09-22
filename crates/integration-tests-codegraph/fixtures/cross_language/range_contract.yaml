@@ -1,4 +1,5 @@
 name: "Range contract — bytes 0-indexed, lines + chars 1-indexed, every language"
+pipeline: python
 
 fixtures:
   - path: pkg/user.py

@@ -181,13 +181,13 @@ display:
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
           import_type: Alias
-      - match: '(__import )'
+      - match: '(__import)'
         tag: { import_type: Import }
-      - match: '(__import )'
+      - match: '(__import)'
         tag: { import_type: Require }
-      - match: '(__import )'
+      - match: '(__import)'
         tag: { import_type: Use }
-      - match: '(__import )'
+      - match: '(__import)'
         tag: { import_type: Module }
       - match: '(__name)'
         tag:
