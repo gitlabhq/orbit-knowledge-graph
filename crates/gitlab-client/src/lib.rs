@@ -1,7 +1,6 @@
 mod cc_token;
 mod circuit_breaking;
 mod client;
-mod endpoints;
 mod error;
 mod types;
 

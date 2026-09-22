@@ -132,7 +132,10 @@ impl GitlabClient {
     }
 
     pub async fn project_info(&self, project_id: i64) -> Result<ProjectInfo, GitlabClientError> {
-        let url = crate::endpoints::project_info(&self.base_url, project_id);
+        let url = format!(
+            "{}/api/v4/internal/orbit/project/{}/info",
+            self.base_url, project_id
+        );
 
         debug!(project_id, url = %url, "fetching project info from GitLab");
 
@@ -144,7 +147,10 @@ impl GitlabClient {
     }
 
     pub async fn cloud_connector_token(&self) -> Result<CloudConnectorToken, GitlabClientError> {
-        let url = crate::endpoints::cloud_connector_token(&self.base_url);
+        let url = format!(
+            "{}/api/v4/internal/orbit/cloud_connector_token",
+            self.base_url
+        );
 
         info!(url = %url, "fetching cloud connector token from GitLab");
 
@@ -166,7 +172,10 @@ impl GitlabClient {
         project_id: i64,
         ref_name: &str,
     ) -> Result<ByteStream, GitlabClientError> {
-        let base = crate::endpoints::project_archive(&self.base_url, project_id);
+        let base = format!(
+            "{}/api/v4/internal/orbit/project/{}/repository/archive",
+            self.base_url, project_id
+        );
         let url = reqwest::Url::parse_with_params(
             &base,
             &[("ref", ref_name), ("include_lfs_blobs", "false")],
@@ -187,7 +196,10 @@ impl GitlabClient {
         from_sha: &str,
         to_sha: &str,
     ) -> Result<ByteStream, GitlabClientError> {
-        let base = crate::endpoints::project_changed_paths(&self.base_url, project_id);
+        let base = format!(
+            "{}/api/v4/internal/orbit/project/{}/repository/changed_paths",
+            self.base_url, project_id
+        );
         let url = reqwest::Url::parse_with_params(
             &base,
             &[
@@ -210,7 +222,10 @@ impl GitlabClient {
         project_id: i64,
         oids: &[String],
     ) -> Result<ByteStream, GitlabClientError> {
-        let url = crate::endpoints::project_list_blobs(&self.base_url, project_id);
+        let url = format!(
+            "{}/api/v4/internal/orbit/project/{}/repository/list_blobs",
+            self.base_url, project_id
+        );
 
         debug!(
             project_id,
@@ -233,7 +248,10 @@ impl GitlabClient {
         diff_id: i64,
         paths: &[String],
     ) -> Result<MergeRequestDiffBatch, GitlabClientError> {
-        let base = crate::endpoints::merge_request_diff_files(&self.base_url, project_id, diff_id);
+        let base = format!(
+            "{}/api/v4/internal/orbit/project/{}/merge_request_diffs/{}",
+            self.base_url, project_id, diff_id,
+        );
         let mut url = reqwest::Url::parse(&base)
             .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
 
@@ -261,7 +279,10 @@ impl GitlabClient {
         project_id: i64,
         diff_id: i64,
     ) -> Result<ByteStream, GitlabClientError> {
-        let url = crate::endpoints::merge_request_diff_raw(&self.base_url, project_id, diff_id);
+        let url = format!(
+            "{}/api/v4/internal/orbit/project/{}/merge_request_diffs/{}/raw_diffs",
+            self.base_url, project_id, diff_id,
+        );
 
         debug!(project_id, diff_id, "fetching MR raw diff");
 
@@ -275,10 +296,9 @@ impl GitlabClient {
         project_id: i64,
         merge_request_iid: i64,
     ) -> Result<ByteStream, GitlabClientError> {
-        let url = crate::endpoints::merge_request_raw_diff_by_iid(
-            &self.base_url,
-            project_id,
-            merge_request_iid,
+        let url = format!(
+            "{}/api/v4/internal/orbit/project/{}/merge_requests/{}/raw_diffs",
+            self.base_url, project_id, merge_request_iid,
         );
 
         debug!(project_id, merge_request_iid, "fetching MR raw diff by IID");
