@@ -207,8 +207,6 @@ pub enum Canonical {
     ImportKind,
     #[strum(serialize = "__decl")]
     Decl,
-    #[strum(serialize = "__constructor")]
-    Constructor,
     #[strum(serialize = "__implicit")]
     Implicit,
     #[strum(serialize = "__simple_name")]

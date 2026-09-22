@@ -1,7 +1,7 @@
 # C# rewrite rules.
 # Handles: namespaces (block and file-scoped), using directives (namespace,
 # static, alias), classes, structs, records, interfaces, enums, fields,
-# properties, constructors (marked with __constructor), methods, this./base.
+# properties, constructors, methods, this./base.
 # calls, implicit-this calls, control flow, bindings.
 #
 # Known gaps (engine, not rules):
@@ -186,7 +186,7 @@ stages:
       - match: '(method_declaration $$$PRE name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $$$PRE $P $B)'
       - match: '(constructor_declaration $$$PRE name: $N:identifier parameters: $P body: $B)'
-        replace: '(__def (__defname @$N) (__method) (__constructor) $$$PRE $P $B)'
+        replace: '(__def (__defname @$N) (__method) $$$PRE $P $B)'
       - match: '(local_function_statement $$$PRE name: $N:identifier parameters: $P body: $B)'
         replace: '(__def (__defname @$N) (__function) $$$PRE $P $B)'
 
@@ -279,8 +279,6 @@ display:
         tag: { def_type: Function }
       - match: '(__def (__method))'
         tag: { def_type: Method }
-      - match: '(__def (__method) (__constructor))'
-        tag: { def_type: Constructor }
       - match: '(__def (__class))'
         tag: { def_type: Class }
       - match: '(__def (__struct))'

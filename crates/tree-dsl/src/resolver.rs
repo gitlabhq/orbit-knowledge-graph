@@ -376,7 +376,7 @@ impl ResolveCtx<'_> {
 
 fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32, Loc> {
     tree.root().fold_tree(FxHashMap::default(), |names, c, _w| {
-        if !c.is(C::Def) || c.has(C::Constructor) || c.has(C::ImplBlock) {
+        if !c.is(C::Def) || c.has(C::ImplBlock) {
             return;
         }
         let loc = Loc::new(fi, c.index());
@@ -810,9 +810,7 @@ fn callee_of<'a>(ctx: &'a ResolveCtx, call: Cursor<'a>) -> Option<Cursor<'a>> {
 
 fn class_of<'a>(ctx: &'a ResolveCtx, callee: Cursor<'a>) -> Option<Cursor<'a>> {
     let target = value_type(ctx, callee)?;
-    if target.has(C::Constructor) {
-        target.enclosing_def(CLASS_LIKE)
-    } else if target.is_class() {
+    if target.is_class() {
         Some(target)
     } else if let Some(ty) = target.child(C::SsaReturnType) {
         resolve_chain(ctx, ty)
