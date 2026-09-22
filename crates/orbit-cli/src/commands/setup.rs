@@ -74,17 +74,11 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 }
 
 fn index_current_repository() -> Option<Indexed> {
+    let repo_root = index_repo::current_repository_root()?;
     let command = index_repo::index_command_line();
-    let cwd = match index_repo::current_repository_dir() {
-        Ok(cwd) => cwd?,
-        Err(error) => {
-            tui::warn(format!("{command} skipped: {error}"));
-            return None;
-        }
-    };
 
     let spinner = tui::spinner(&command);
-    match index_repo::index_repository(&cwd) {
+    match index_repo::index_repository(&repo_root) {
         Ok(indexed) => {
             spinner.stop(format!("{command}  {}", indexed.summary));
             Some(indexed)

@@ -81,21 +81,23 @@ pub(super) fn format_files_per_component(plan: &Plan) -> String {
 }
 
 pub(super) fn format_try_it_command(indexed: Option<&Indexed>) -> Option<String> {
-    let name = indexed?.suggested_grep.as_deref()?;
-    Some(crate::commands::index::grep_command_line(name))
+    match indexed {
+        None => Some(index_repo::index_command_line()),
+        Some(indexed) => indexed
+            .suggested_grep
+            .as_deref()
+            .map(crate::commands::index::grep_command_line),
+    }
 }
 
-pub(super) fn format_closing_line(indexed: Option<&Indexed>) -> String {
+pub(super) fn format_closing_line(indexed: Option<&Indexed>) -> &'static str {
     match indexed {
+        None => "Done. Run it in a repository, then ask your agent where a function is defined.",
         Some(Indexed {
-            suggested_grep: Some(_),
+            suggested_grep: None,
             ..
-        }) => "Done.".to_string(),
-        Some(_) => "Done. Ask your agent where a function is defined.".to_string(),
-        None => format!(
-            "Done. Run {} in a repository, then ask your agent where a function is defined.",
-            index_repo::index_command_line()
-        ),
+        }) => "Done. Ask your agent where a function is defined.",
+        Some(_) => "Done.",
     }
 }
 
