@@ -51,12 +51,15 @@ fn encode_identifier(value: &Value) -> Result<String, String> {
         .as_str()
         .ok_or_else(|| "identifier must be a string".to_string())?;
     let mut chars = name.chars();
-    if !chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    if name.len() > 64
+        || !chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
-        return Err("identifier must match [A-Za-z_][A-Za-z0-9_]*".to_string());
+        return Err(
+            "identifier must be at most 64 bytes and match [A-Za-z_][A-Za-z0-9_]*".to_string(),
+        );
     }
     Ok(format!("`{name}`"))
 }
@@ -94,7 +97,13 @@ mod tests {
     #[test]
     fn encoders_enforce_gql_identifier_and_integer_bounds() {
         assert_eq!(encode_identifier(&json!("User_1")).unwrap(), "`User_1`");
-        for value in [json!(""), json!("1User"), json!("Üser"), json!("User`)")] {
+        for value in [
+            json!(""),
+            json!("1User"),
+            json!("Üser"),
+            json!("User`"),
+            json!("x".repeat(65)),
+        ] {
             assert!(encode_identifier(&value).is_err(), "{value}");
         }
         assert_eq!(

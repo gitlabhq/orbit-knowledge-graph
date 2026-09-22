@@ -2,7 +2,7 @@ name: expand_neighbors
 description: Immediate graph neighborhood of selected nodes.
 parameters:
   entity:
-    schema: { type: string }
+    schema: { type: string, maxLength: 64 }
     example: User
   node_ids:
     schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }

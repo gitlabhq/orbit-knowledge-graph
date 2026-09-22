@@ -2,7 +2,7 @@ name: list_nodes
 description: A sample of nodes of one entity type
 parameters:
   entity:
-    schema: { type: string }
+    schema: { type: string, maxLength: 64 }
     example: MergeRequest
 query:
   json:
