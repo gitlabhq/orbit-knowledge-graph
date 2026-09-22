@@ -232,8 +232,6 @@ display:
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
           import_type: Import
-      - match: '(__import)'
-        tag: { import_type: GroupedImport }
       - match: '(__name "*")'
         tag:
           import_type: WildcardImport

@@ -321,9 +321,6 @@ display:
       - match: '(__import (__name "*"))'
         tag:
           import_type: WildcardImport
-      - match: '(__import)'
-        tag:
-          import_type: StaticImport
       - match: '(__name "*")'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'

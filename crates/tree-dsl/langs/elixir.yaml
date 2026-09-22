@@ -8,16 +8,22 @@ stages:
     rules:
       - match: '(call target: (identifier "alias") (arguments (dot left: $L:alias right: (tuple $$$M:alias))))'
         replace: '(__import (__source @$L) (__source_path @$L|replace(".", "/")) $$$M->__name)'
+        tag: { import_type: Alias }
       - match: '(call target: (identifier "alias") (arguments $A:alias (keywords (pair value: $T:alias))))'
         replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".") (__alias @$T)))'
+        tag: { import_type: Alias }
       - match: '(call target: (identifier "alias") (arguments $A:alias))'
         replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+        tag: { import_type: Alias }
       - match: '(call target: (identifier "import") (arguments $A:alias $$$R))'
         replace: '(__import (__source @$A) (__source_path @$A|replace(".", "/")) (__name @$A (__ssa_hint "*")))'
+        tag: { import_type: Import }
       - match: '(call target: (identifier "require") (arguments $A:alias $$$R))'
         replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+        tag: { import_type: Require }
       - match: '(call target: (identifier "use") (arguments $A:alias $$$R))'
         replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+        tag: { import_type: Use }
 
   - name: defs
     rules:
@@ -180,15 +186,6 @@ display:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
-          import_type: Alias
-      - match: '(__import)'
-        tag: { import_type: Import }
-      - match: '(__import)'
-        tag: { import_type: Require }
-      - match: '(__import)'
-        tag: { import_type: Use }
-      - match: '(__import)'
-        tag: { import_type: Module }
       - match: '(__name)'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'

@@ -131,6 +131,7 @@ display:
       - match: '$M:__source_file'
         tag:
           entity: File
+          fqn: '@$M|stem'
           file_path: '@$M'
           language: '@$M|split_last(".")|map("lua:lua")'
       - match: '(__def (__impl))'
