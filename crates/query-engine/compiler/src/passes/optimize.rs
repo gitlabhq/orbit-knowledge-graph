@@ -27,6 +27,8 @@ fn apply_rules(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
         rule_edge_dedup,
         rule_fk_elision,
         rule_prune_duplicate_node_join,
+        rule_denorm_tag_pushdown,
+        rule_column_pushdown,
     ];
     for rule in rules {
         if let Some(rewritten) = rule(&tree, ctx) {
@@ -317,5 +319,201 @@ fn filtered_node_scan(n: &InputNode) -> PhysOp {
             dedup: true,
         }),
         predicates: preds,
+    }
+}
+
+// ── Rule 6: Denorm tag pushdown ─────────────────────────────────────────────
+// When a node filter matches a denormalized property on the edge, push a
+// has(tag_col, "key:value") predicate onto the edge scan.
+
+fn rule_denorm_tag_pushdown(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    // Match: Filter(Scan(edge_table)) — push denorm tags from endpoint nodes
+    let PhysOp::Filter { predicates, input } = op else {
+        return None;
+    };
+    let PhysOp::Scan { table, alias, .. } = input.as_ref() else {
+        return None;
+    };
+    if !table.contains("edge") {
+        return None;
+    }
+    let rel_idx = alias_to_rel_index(alias)?;
+    let rel = ctx.input.relationships.get(rel_idx)?;
+    if crate::passes::normalize::is_wildcard(&rel.types) {
+        return None;
+    }
+
+    let (sc, ec) = rel.direction.edge_columns();
+    let meta = &ctx.input.compiler;
+    let mut new_preds = Vec::new();
+
+    for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
+        let Some(node) = ctx.input.nodes.iter().find(|n| &n.id == nid) else {
+            continue;
+        };
+        let entity = node.entity.as_deref().unwrap_or("");
+        let dir = if ic == ontology_constants::SOURCE_ID_COLUMN {
+            "source"
+        } else {
+            "target"
+        };
+
+        for (prop, fs) in &node.filters {
+            let key = (entity.to_string(), prop.clone(), dir.to_string());
+            if !meta
+                .denorm_rel_kinds
+                .get(&key)
+                .is_some_and(|ks| rel.types.iter().any(|t| ks.contains(t)))
+            {
+                continue;
+            }
+            let Some((tc, tk)) = meta.denormalized_columns.get(&key) else {
+                continue;
+            };
+
+            for f in fs {
+                match (&f.op, &f.value) {
+                    (None | Some(FilterOp::Eq), Some(val)) => {
+                        let tag_val = match val {
+                            serde_json::Value::String(s) => s.clone(),
+                            serde_json::Value::Bool(b) => b.to_string(),
+                            serde_json::Value::Number(n) => n.to_string(),
+                            _ => continue,
+                        };
+                        new_preds.push(Predicate::Func {
+                            name: "has".to_string(),
+                            column: tc.clone(),
+                            value: Value::Str(format!("{tk}:{tag_val}")),
+                        });
+                    }
+                    (Some(FilterOp::In), Some(serde_json::Value::Array(arr))) => {
+                        let tags: Vec<String> = arr
+                            .iter()
+                            .filter_map(|v| {
+                                let s = match v {
+                                    serde_json::Value::String(s) => s.clone(),
+                                    serde_json::Value::Bool(b) => b.to_string(),
+                                    serde_json::Value::Number(n) => n.to_string(),
+                                    _ => return None,
+                                };
+                                Some(format!("{tk}:{s}"))
+                            })
+                            .collect();
+                        if tags.len() == 1 {
+                            new_preds.push(Predicate::Func {
+                                name: "has".to_string(),
+                                column: tc.clone(),
+                                value: Value::Str(tags.into_iter().next().unwrap()),
+                            });
+                        } else if !tags.is_empty() {
+                            new_preds.push(Predicate::Func {
+                                name: "hasAny".to_string(),
+                                column: tc.clone(),
+                                value: Value::Strs(tags),
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if new_preds.is_empty() {
+        return None;
+    }
+
+    // Check we haven't already pushed these (idempotency)
+    if predicates
+        .iter()
+        .any(|p| matches!(p, Predicate::Func { name, .. } if name == "has" || name == "hasAny"))
+    {
+        return None;
+    }
+
+    let mut merged = predicates.clone();
+    merged.extend(new_preds);
+    Some(PhysOp::Filter {
+        predicates: merged,
+        input: input.clone(),
+    })
+}
+
+fn rule_column_pushdown(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    // Match: Filter(Scan(edge_table)) — push node filters when edge table has the column
+    let PhysOp::Filter { predicates, input } = op else {
+        return None;
+    };
+    let PhysOp::Scan { table, alias, .. } = input.as_ref() else {
+        return None;
+    };
+    if !table.contains("edge") {
+        return None;
+    }
+    let rel_idx = alias_to_rel_index(alias)?;
+    let rel = ctx.input.relationships.get(rel_idx)?;
+
+    let meta = &ctx.input.compiler;
+    let ecols = meta.table_columns.get(table)?;
+    let reserved: std::collections::HashSet<&str> = ontology_constants::EDGE_RESERVED_COLUMNS
+        .iter()
+        .copied()
+        .collect();
+
+    let mut new_preds = Vec::new();
+    for nid in [&rel.from, &rel.to] {
+        let Some(node) = ctx.input.nodes.iter().find(|n| &n.id == nid) else {
+            continue;
+        };
+        for (prop, fs) in &node.filters {
+            if ecols.contains(prop) && !reserved.contains(prop.as_str()) {
+                // Check we haven't already pushed this
+                if predicates.iter().any(
+                    |p| matches!(p, Predicate::NodeFilter { property, .. } if property == prop),
+                ) {
+                    continue;
+                }
+                for f in fs {
+                    new_preds.push(Predicate::NodeFilter {
+                        property: prop.clone(),
+                        filter: f.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    if new_preds.is_empty() {
+        return None;
+    }
+    let mut merged = predicates.clone();
+    merged.extend(new_preds);
+    Some(PhysOp::Filter {
+        predicates: merged,
+        input: input.clone(),
+    })
+}
+
+fn add_predicates_to_filter(op: PhysOp, extra: Vec<Predicate>) -> PhysOp {
+    match op {
+        PhysOp::Filter {
+            mut predicates,
+            input,
+        } => {
+            predicates.extend(extra);
+            PhysOp::Filter { predicates, input }
+        }
+        other => PhysOp::Filter {
+            predicates: extra,
+            input: Box::new(other),
+        },
+    }
+}
+
+fn edge_table_name(op: &PhysOp) -> Option<String> {
+    match op {
+        PhysOp::Scan { table, .. } => Some(table.clone()),
+        PhysOp::Filter { input, .. } => edge_table_name(input),
+        _ => None,
     }
 }
