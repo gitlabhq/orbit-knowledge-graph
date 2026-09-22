@@ -55,12 +55,12 @@ The command registry lives in the GKG server at `crates/orbit-server/src/tools/r
 
 Initial commands:
 
-| Command | Catalog visibility | Where it executes | Why |
-|---|---|---|---|
-| `query_graph` | Listed | Rails interceptor builds `workhorse_send_data`; Workhorse calls GKG `ExecuteQuery` | Needs Workhorse streaming and the bidirectional redaction exchange |
-| `get_graph_schema` | Listed | GKG executor (`InvokeAgentCommand`) | Pure ontology lookup, no Rails context required |
-| `get_query_dsl` | Listed | GKG executor (`InvokeAgentCommand`) | Returns `config/schemas/graph_query.schema.json` and `config/QUERY_DSL_VERSION` (RAW) or a versioned TOON-condensed grammar (LLM) |
-| `get_response_format` | Listed | GKG executor (`InvokeAgentCommand`) | Returns the response JSON Schema and its semver from `RAW_OUTPUT_FORMAT_VERSION` |
+| Command | Where it executes | Why |
+|---|---|---|
+| `query_graph` | Rails interceptor builds `workhorse_send_data`; Workhorse calls GKG `ExecuteQuery` | Needs Workhorse streaming and the bidirectional redaction exchange |
+| `get_graph_schema` | GKG executor (`InvokeAgentCommand`) | Pure ontology lookup, no Rails context required |
+| `get_query_dsl` | GKG executor (`InvokeAgentCommand`) | Returns `config/schemas/graph_query.schema.json` and `config/QUERY_DSL_VERSION` (RAW) or a versioned TOON-condensed grammar (LLM) |
+| `get_response_format` | GKG executor (`InvokeAgentCommand`) | Returns the response JSON Schema and its semver from `RAW_OUTPUT_FORMAT_VERSION` |
 
 The schema-discovery commands (`get_query_dsl`, `get_response_format`) directly answer the discovery problems that motivated this ADR:
 
