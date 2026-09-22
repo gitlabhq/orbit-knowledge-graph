@@ -83,9 +83,15 @@ canonical nodes named here.
   class-like definition unless it is an `__impl` block or carries
   `(__companion)`. Nested class-like definitions are not file-level names; a
   class wins over a same-named non-class in the visible names.
-- Branch results meet on the supertype graph. A producer whose return is an
-  `if` or `try` with several class results dispatches on the unique least
-  common supertype; without one it emits nothing.
+- Branch results meet on the supertype graph. A binding whose value is an
+  `if`, `when`, or `try` is a phi of its arms; each arm writes its tail
+  expression's value in its own sealed block. A consumer with several reaching
+  producers dispatches on the unique least common supertype of their classes;
+  a `throw` or `null` arm is bottom and does not take part; without a unique
+  meet it emits nothing.
+- Module-object members. An Imports edge whose call site is a member call on
+  the import's own local name (`import * as ns; ns.foo()`, `import m as ml;
+  ml.f()`) resolves that member in the import target's visible names.
 - A Kotlin property read in receiver position is a getter call, so the
   property is tagged callable and its getter body attaches to the property.
 
@@ -129,11 +135,14 @@ are corrected to the language rule and carry a `corrected:` note.
   package key. Elixir modules carry an `exports` tag with their short name.
 - Typed parameters carry `(__binding $x (__ssa_typed T) (__rhs (__member
   (__object T))))`, a type reference that dispatches member calls on `$x`.
-- A bare call `N()` in Java, C#, Scala, and Ruby is `(__call (__callee (__ivar
-  N)) (__member (__object N)))`: the implicit-receiver leg finds a member of
-  the enclosing class; the name leg finds a named import or, when tagged
-  `callable`, a member wildcard such as `import static C.*` or `using static
-  T`. A type wildcard supplies no callees (JLS 15.12.1).
+- A bare call `N()` in Java, C#, Scala, and Ruby is `(__call (__callee N
+  (__implicit)))`. The linker looks up the name in order: a member of the
+  enclosing class, then a lexical binding or named import, then a wildcard
+  import tagged `callable` such as `import static C.*` or `using static T`. A
+  type wildcard supplies no callees (JLS 15.12.1). Every edge carries the site.
+- A predeclared identifier such as Go `len` or Kotlin `println` is `(__callee N
+  (__predeclared))`: a lexical definition shadows it; otherwise it binds to
+  nothing, never to a wildcard import.
 - A static import is a member wildcard `(__name "*")` with `(__import_kind
   "static")`, tagged `callable` in the tag-defs stage.
 - Java records declare `equals`, `hashCode`, and `toString` (JLS 8.10.3)

@@ -76,6 +76,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Class" } }
 
+  # corrected: a record struct is a value type (C# spec 16.1), so it is a Struct
   - name: "record struct Range is extracted as Record"
     query: |
       MATCH (d:Definition)
@@ -83,7 +84,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Class" } }
+      - { row: { type: "Struct" } }
 
   - name: "Method on a record is extracted"
     query: |

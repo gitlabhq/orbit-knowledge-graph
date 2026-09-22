@@ -9,7 +9,7 @@ fixtures:
   - path: callers.ex
     content: |
       defmodule Imported do
-        import Util
+        import Util, only: [dub: 1]
         def doubled(x), do: dub(x)
         def local(x), do: internal(x)
         defp internal(x), do: x
