@@ -117,7 +117,7 @@ stages:
         replace: '(__call (__callee $F) $A)'
       - match: '(invocation_expression function: $F:identifier arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
-        tag: { implicit_self: "locals" }
+        tag: { implicit_self: "true" }
       - match: '(invocation_expression function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
       - match: '(object_creation_expression type: $T:identifier arguments:? $A $$$B:initializer_expression)'

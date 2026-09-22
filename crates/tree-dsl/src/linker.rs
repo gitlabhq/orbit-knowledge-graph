@@ -287,8 +287,8 @@ impl<'t> Fold<'t> {
                 self.push_calls(from, self.find_method_in(cls, iv.sym()));
             }
         } else if let Some(sym) = callee.sym_opt() {
-            if let Some(mode) = c.tag(self.tags.implicit_self) {
-                self.resolve_implicit(sym, from, mode == self.tags.implicit_self_locals);
+            if c.has_tag(self.tags.implicit_self) {
+                self.resolve_implicit(sym, from);
             } else {
                 self.resolve_name(sym, from, !self.config.builtins.contains(&sym));
             }
@@ -435,8 +435,8 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn resolve_implicit(&mut self, sym: u32, from: u32, locals_first: bool) {
-        if locals_first && self.ssa.is_defined(sym, self.cur) {
+    fn resolve_implicit(&mut self, sym: u32, from: u32) {
+        if self.ssa.is_defined(sym, self.cur) {
             let mut bound = self.lookup(sym);
             bound.retain(|r| matches!(r, Linked::Def(_) | Linked::Import(_)));
             for r in &bound {

@@ -161,7 +161,7 @@ stages:
         replace: '(__call (__callee (__member @$N (__object @$O))) $A)'
       - match: '(method_invocation name: $N:identifier arguments: $A)'
         replace: '(__call (__callee @$N) $A)'
-        tag: { implicit_self: "members" }
+        tag: { implicit_self: "true" }
       # new T(...) [with optional anonymous body]
       - match: '(object_creation_expression type: $T:__member arguments: $A $$$B:class_body)'
         replace: '(__call (__callee $T) $A $$$B)'

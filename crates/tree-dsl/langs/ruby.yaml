@@ -177,7 +177,7 @@ stages:
       # m(...) → implicit self
       - match: '(call method: $M:identifier arguments:? $A block:? $B)'
         replace: '(__call (__callee @$M) $A $B)'
-        tag: { implicit_self: "members" }
+        tag: { implicit_self: "true" }
 
   - name: classify
     rules:
@@ -200,7 +200,7 @@ stages:
         replace: '(__binding @$L (__rhs (__call (__callee @$R))))'
       - match: '(assignment left: $L:identifier right: $R:identifier)'
         replace: '(__binding @$L (__rhs (__call (__callee @$R))))'
-        tag: { implicit_self: "locals" }
+        tag: { implicit_self: "true" }
         tag_on: __call
       - match: '(assignment left: $L:identifier right: $R)'
         replace: '(__binding @$L (__rhs @$R))'
@@ -250,7 +250,7 @@ stages:
       # Remaining bare identifiers: implicit-self calls (may be locals)
       - match: '(identifier)'
         replace: '(__call (__callee @$ROOT))'
-        tag: { implicit_self: "locals" }
+        tag: { implicit_self: "true" }
       # Remaining bare constants: references
       - match: '(constant)'
         replace: '(__call (__callee @$ROOT))'
