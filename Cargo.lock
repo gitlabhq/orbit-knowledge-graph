@@ -5351,6 +5351,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-devtools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "compiler",
+ "ontology",
+ "serde_json",
+]
+
+[[package]]
 name = "orbit-fuzz"
 version = "0.1.0"
 dependencies = [

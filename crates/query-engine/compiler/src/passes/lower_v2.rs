@@ -97,9 +97,23 @@ fn emit(op: PhysOp, input: &Input) -> Query {
         } => {
             let mut consumer_q = emit(*left, input);
             let body_q = emit(*right, input);
-            let cte_name = on.left.0.clone();
+            let cte_name = on.right.0.clone();
+            let cte_column = on.right.1.clone();
+            let filter_alias = on.left.0.clone();
+            let filter_column = on.left.1.clone();
             if !cte_name.is_empty() {
                 consumer_q.ctes.insert(0, Cte::new(&cte_name, body_q));
+                if !filter_column.is_empty() {
+                    let in_pred = Expr::InSubquery {
+                        expr: Box::new(Expr::col(&filter_alias, &filter_column)),
+                        cte_name,
+                        column: cte_column,
+                    };
+                    consumer_q.where_clause = Some(match consumer_q.where_clause.take() {
+                        Some(existing) => Expr::and(existing, in_pred),
+                        None => in_pred,
+                    });
+                }
             }
             consumer_q
         }

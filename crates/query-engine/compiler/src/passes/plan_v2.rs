@@ -941,8 +941,8 @@ impl<'a> PlanCtx<'a> {
         let det = &self.input.compiler.default_edge_table;
         let cl = self.input.relationships.len();
         let mut fk_joined: HashSet<String> = HashSet::new();
-        let mut narrowing_joins: Vec<(String, PhysOp)> = Vec::new();
-        let narrowing_disabled = true; // TODO: narrowing CTEs cause correctness issues
+        // (cte_name, edge_alias, edge_column, body)
+        let mut narrowing_joins: Vec<(String, String, String, PhysOp)> = Vec::new();
 
         let all_fk = cl >= 1
             && self
@@ -1019,16 +1019,18 @@ impl<'a> PlanCtx<'a> {
                     let (from_col, to_col) = rel.direction.edge_columns();
 
                     // Narrowing: selective endpoints → semi-join (materialized as CTE)
-                    for (na, _edge_col) in [(&rel.from, from_col), (&rel.to, to_col)] {
-                        if narrowing_disabled {
-                            continue;
-                        }
+                    for (na, edge_col) in [(&rel.from, from_col), (&rel.to, to_col)] {
                         if let Some(n) = self.input.nodes.iter().find(|n| &n.id == na) {
                             if self.is_selective(n) && n.table.is_some() {
                                 let cte_name = format!("_nf_{na}");
-                                if !narrowing_joins.iter().any(|(name, _)| name == &cte_name) {
+                                if !narrowing_joins
+                                    .iter()
+                                    .any(|(name, _, _, _)| name == &cte_name)
+                                {
                                     narrowing_joins.push((
                                         cte_name,
+                                        ea.clone(),
+                                        edge_col.to_string(),
                                         PhysOp::Filter {
                                             input: Box::new(PhysOp::Scan {
                                                 table: n.table.as_deref().unwrap_or("").to_string(),
@@ -1120,12 +1122,12 @@ impl<'a> PlanCtx<'a> {
 
         // Wrap in narrowing semi-joins (materialized as CTEs)
         let mut result = tree.unwrap();
-        for (cte_name, body) in narrowing_joins.into_iter().rev() {
+        for (cte_name, edge_alias, edge_col, body) in narrowing_joins.into_iter().rev() {
             result = PhysOp::Join {
                 left: Box::new(result),
                 right: Box::new(body),
                 on: JoinOn {
-                    left: (String::new(), String::new()),
+                    left: (edge_alias, edge_col),
                     right: (
                         cte_name,
                         ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),

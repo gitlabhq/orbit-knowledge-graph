@@ -1,0 +1,17 @@
+[package]
+name = "orbit-devtools"
+version.workspace = true
+edition = "2024"
+
+[[bin]]
+name = "orbit-devtools"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+compiler = { path = "../query-engine/compiler" }
+ontology = { path = "../ontology" }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
