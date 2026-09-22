@@ -310,10 +310,6 @@ impl<'a> Cursor<'a> {
             .unwrap_or(self)
     }
 
-    pub fn object_ivar(self) -> Option<Self> {
-        self.child(C::Object)?.child(C::Ivar)
-    }
-
     pub fn rhs_callee(self) -> Option<u32> {
         self.child(C::Rhs)?.child(C::Call)?.child_sym(C::Callee)
     }

@@ -21,6 +21,14 @@ enum WorkItem {
     ExitScope(usize),
 }
 
+/// Which wildcard imports an unresolved bare name may fall back to.
+#[derive(Clone, Copy)]
+enum Wildcards {
+    None,
+    All,
+    Callable,
+}
+
 struct Fold<'t> {
     tree: &'t Tree,
     ssa: SsaEngine,
@@ -257,29 +265,9 @@ impl<'t> Fold<'t> {
         let first = self.edges.len();
         if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
-                if let Some(call) = obj.child(C::Call) {
-                    if call.has(C::Property) && self.chain_is_class(obj) {
-                        self.resolve_obj(obj, m.sym(), from);
-                    } else {
-                        self.edges
-                            .push(Edge::local(from, call.index(), EdgeKind::TypeFlow));
-                    }
-                } else if let Some(iv) = obj.child(C::Ivar) {
-                    if let Some(cls) = self.enclosing_class(from)
-                        && let Some(field) = self.ivar_type(cls, iv.sym())
-                    {
-                        if let Some(ty) = field.typed() {
-                            self.resolve_obj(ty, m.sym(), from);
-                        }
-                        let producer = Self::producer_of(field);
-                        self.edges
-                            .push(Edge::local(from, producer, EdgeKind::TypeFlow));
-                    }
-                } else {
-                    self.resolve_obj(obj, m.sym(), from);
-                    if obj.child(C::Member).is_some() {
-                        self.flow_chain_root(obj, from);
-                    }
+                self.resolve_obj(obj, m.sym(), from);
+                if obj.child(C::Member).is_some() {
+                    self.flow_chain_root(obj, from);
                 }
             }
         } else if let Some(iv) = callee.child(C::Ivar) {
@@ -290,7 +278,11 @@ impl<'t> Fold<'t> {
             if c.has_tag(self.tags.implicit_self) {
                 self.resolve_implicit(sym, from);
             } else {
-                self.resolve_name(sym, from, !self.config.builtins.contains(&sym));
+                let fallback = match self.config.builtins.contains(&sym) {
+                    true => Wildcards::None,
+                    false => Wildcards::All,
+                };
+                self.resolve_name(sym, from, fallback);
             }
         }
         for edge in &mut self.edges[first..] {
@@ -299,23 +291,8 @@ impl<'t> Fold<'t> {
     }
 
     fn handle_standalone_member(&mut self, c: Cursor<'t>) {
-        let Some(obj) = c.child_sym(C::Object) else {
-            return;
-        };
-        let method = c.sym();
-        let from = self.enclosing();
-        for r in self.lookup(obj) {
-            match r {
-                Linked::Type(ts) if method != 0 => self.resolve_method(ts, method, from),
-                Linked::Call(n)
-                    if method != 0
-                        && let Some(ty) = self.binding_type(n) =>
-                {
-                    self.resolve_obj(ty, method, from);
-                }
-                Linked::Import(node) => self.edges.push(Edge::local(from, node, EdgeKind::Imports)),
-                _ => {}
-            }
+        if let Some(obj) = c.child(C::Object) {
+            self.resolve_obj(obj, c.sym(), self.enclosing());
         }
     }
 
@@ -452,25 +429,22 @@ impl<'t> Fold<'t> {
             self.push_calls(from, members);
             return;
         }
-        let mut targets = self.lookup(sym);
-        targets.retain(|r| matches!(r, Linked::Def(_) | Linked::Import(_)));
-        let supplies_callees = |&n: &u32| {
-            let import = self.tree.cursor(n).parent();
-            import.is_some_and(|i| i.has_tag(self.tags.callable))
-        };
-        if targets.is_empty() {
-            let wild = self.wildcards.iter().copied().filter(supplies_callees);
-            targets = wild.map(Linked::Import).collect();
-        }
-        for r in &targets {
-            self.emit(r, from);
-        }
+        self.resolve_name(sym, from, Wildcards::Callable);
     }
 
-    fn resolve_name(&mut self, sym: u32, from: u32, imported: bool) {
+    fn resolve_name(&mut self, sym: u32, from: u32, fallback: Wildcards) {
         let mut targets = self.lookup(sym);
-        if targets.is_empty() && imported {
-            targets = self.wildcards.iter().map(|&n| Linked::Import(n)).collect();
+        if targets.is_empty() {
+            let callable_import = |&n: &u32| {
+                let import = self.tree.cursor(n).parent();
+                import.is_some_and(|i| i.has_tag(self.tags.callable))
+            };
+            let wild = self.wildcards.iter().filter(|n| match fallback {
+                Wildcards::None => false,
+                Wildcards::All => true,
+                Wildcards::Callable => callable_import(n),
+            });
+            targets = wild.map(|&n| Linked::Import(n)).collect();
         }
         for r in &targets {
             match r {
@@ -557,14 +531,25 @@ impl<'t> Fold<'t> {
     }
 
     fn lookup_chain(&mut self, c: Cursor) -> Vec<Linked> {
+        if let Some(call) = c.child(C::Call)
+            && !(call.has(C::Property) && self.chain_is_class(c.reference()))
+        {
+            return vec![Linked::Call(call.index())];
+        }
         let c = c.reference();
         let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) else {
-            let mut bound = self.lookup(c.sym());
+            let ivar = c.child(C::Ivar);
+            let sym = ivar.map_or(c.sym(), |iv| iv.sym());
+            let mut bound = if ivar.is_some() {
+                vec![]
+            } else {
+                self.lookup(sym)
+            };
             if bound.is_empty() {
                 let field = self
                     .enclosing_class(self.enclosing())
-                    .and_then(|cls| self.ivar_type(cls, c.sym()));
-                bound.extend(field.map(|f| Linked::Call(f.index())));
+                    .and_then(|cls| self.ivar_type(cls, sym));
+                bound.extend(field.map(|f| Linked::Call(Self::producer_of(f))));
             }
             return bound
                 .into_iter()
