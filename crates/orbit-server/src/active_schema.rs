@@ -26,14 +26,14 @@ pub struct ActiveSchema {
 
 impl ActiveSchema {
     pub fn spawn(
+        active: &Arc<Self>,
         graph: Arc<ArrowClickHouseClient>,
         embedded: OntologyArchive,
         catalog: OntologyCatalog,
         config: &AppConfig,
         shutdown: CancellationToken,
-    ) -> Arc<Self> {
-        let active = Arc::new(Self::default());
-        register_state_gauge(&active);
+    ) {
+        register_state_gauge(active);
         let loader = SnapshotLoader {
             graph,
             embedded,
@@ -41,7 +41,6 @@ impl ActiveSchema {
         };
         let retry_backoff = Duration::from_secs(config.schema.version_poll_interval_secs);
         tokio::spawn(active.clone().follow(loader, retry_backoff, shutdown));
-        active
     }
 
     pub fn snapshot(&self) -> Result<Arc<SchemaSnapshot>, Status> {

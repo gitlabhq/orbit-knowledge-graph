@@ -272,10 +272,12 @@ Services are instrumented with OpenTelemetry for distributed tracing. A single r
 
 ### Health Checks
 
-The Webserver, Indexer, and Dispatcher expose `/live` and `/ready` endpoints. The Indexer and
-Dispatcher use dedicated health ports (default 4202 and 4203 respectively). These pod-level probes
-report local serving state only. `/live` confirms that the process can answer HTTP. `/ready`
-keeps a pod out of rotation until its schema gate has cleared. The HealthCheck service's `/health`
+Every service serves `/-/liveness` and `/-/readiness` on the probe server port (default 9394), the
+same port that serves `/-/metrics`. The Webserver, Indexer, and Dispatcher also keep the `/live` and
+`/ready` endpoints that the Helm chart probes today. The Indexer and Dispatcher serve those on dedicated health ports
+(default 4202 and 4203 respectively). These pod-level probes report local serving state only.
+Liveness confirms that the process can answer HTTP. Readiness keeps a pod out of rotation until its
+schema gate has cleared. The HealthCheck service's `/health`
 endpoint reports ClickHouse and Kubernetes Deployment and StatefulSet health; NATS queue depth is
 reported separately by `/queue-depth`. GitLab is not checked by the HealthCheck service.
 
@@ -295,7 +297,7 @@ Interface contracts (what we provide):
 - **Metrics**: Each service exposes a Prometheus-compatible `/-/metrics` endpoint for service-level KPIs; we also expose gauges for graph database disk usage where applicable. CPU and host/container resource utilization are expected to be collected via standard exporters alongside our service metrics.
 - **Logs**: All services emit structured JSON to `stdout`/`stderr` using the schema defined in [Logging Structure and Format](#logging-structure-and-format) (including `correlation_id`).
 - **Tracing**: Services are instrumented with OpenTelemetry, allowing operators to configure an OTLP exporter (gRPC/HTTP) to a customer-managed collector or backend.
-- **Health**: Liveness (`/live`) and readiness (`/ready`) endpoints on dedicated health ports for orchestration and local SLOs.
+- **Health**: Liveness (`/-/liveness`) and readiness (`/-/readiness`) endpoints on the probe server port for orchestration and local SLOs.
 
 Operator responsibilities:
 

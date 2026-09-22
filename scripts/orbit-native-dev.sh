@@ -145,15 +145,21 @@ gdk_overlay_yaml() {
   echo "      events_stream_name: $(yaml_str "$SIPHON_STREAM_NAME")"
 }
 
-# The only value that differs between the processes `mise run dev` starts side by side; it matters
-# once metrics.prometheus.enabled is switched on in config/dev.local.yaml.
+# The only value that differs between the processes `mise run dev` starts side by side. Every mode
+# binds this address for the labkit probe server, so each one needs its own even with metrics off.
 mode_overlay_yaml() {
   case "$1" in
     webserver)
-      printf 'metrics:\n  prometheus:\n    port: 9100\n'
+      printf 'probe_server:\n  bind_address: "127.0.0.1:9100"\n'
       ;;
     indexer)
-      printf 'metrics:\n  prometheus:\n    port: 9200\n'
+      printf 'probe_server:\n  bind_address: "127.0.0.1:9200"\n'
+      ;;
+    dispatch-indexing)
+      printf 'probe_server:\n  bind_address: "127.0.0.1:9300"\n'
+      ;;
+    health-check)
+      printf 'probe_server:\n  bind_address: "127.0.0.1:9400"\n'
       ;;
     *)
       ;;

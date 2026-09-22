@@ -62,6 +62,9 @@
     "object_storage": {
       "$ref": "#/$defs/ObjectStorageConfig"
     },
+    "probe_server": {
+      "$ref": "#/$defs/ProbeServerConfig"
+    },
     "query": {
       "$ref": "#/$defs/QuerySettings"
     },
@@ -90,6 +93,7 @@
     "indexer_health_bind_address",
     "dispatcher_health_bind_address",
     "metrics",
+    "probe_server",
     "tls",
     "query",
     "grpc",
@@ -1087,6 +1091,18 @@
         "endpoint"
       ]
     },
+    "ProbeServerConfig": {
+      "type": "object",
+      "properties": {
+        "bind_address": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "ProfilingConfig": {
       "type": "object",
       "properties": {
@@ -1122,7 +1138,10 @@
           "type": "boolean"
         },
         "port": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0
@@ -1130,8 +1149,7 @@
       },
       "additionalProperties": false,
       "required": [
-        "enabled",
-        "port"
+        "enabled"
       ]
     },
     "QueryConfig": {

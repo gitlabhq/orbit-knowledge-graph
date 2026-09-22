@@ -10,6 +10,7 @@ pub mod graph_status;
 pub mod grpc;
 pub mod health_check;
 pub mod pipeline;
+pub mod probes;
 pub mod proto;
 pub mod redaction;
 pub mod shutdown;
