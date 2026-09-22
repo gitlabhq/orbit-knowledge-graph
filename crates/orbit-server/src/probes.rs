@@ -63,7 +63,7 @@ mod tests {
             .into_iter()
             .map(|(name, check)| ReadinessCheck::new(name, check))
             .collect();
-        labkit::health::spawn_server(addr, checks, None).unwrap();
+        labkit::health::spawn_server(addr, checks, None, None).unwrap();
         format!("http://{addr}")
     }
 
