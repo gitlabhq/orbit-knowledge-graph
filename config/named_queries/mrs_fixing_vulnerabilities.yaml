@@ -1,16 +1,21 @@
 name: mrs_fixing_vulnerabilities
 description: Merge requests fixing open vulnerabilities
 query:
-  query_type: traversal
-  nodes:
-    - id: mr
-      entity: MergeRequest
-      columns: [id, title, state]
-    - id: vuln
-      entity: Vulnerability
-      filters:
-        state: detected
-      columns: [id, title, severity]
-  relationships:
-    - { type: FIXES, from: mr, to: vuln }
-  limit: 100
+  json:
+    query_type: traversal
+    nodes:
+      - id: mr
+        entity: MergeRequest
+        columns: [id, title, state]
+      - id: vuln
+        entity: Vulnerability
+        filters:
+          state: detected
+        columns: [id, title, severity]
+    relationships:
+      - { type: FIXES, from: mr, to: vuln }
+    limit: 100
+  gql: |
+    MATCH (mr:MergeRequest)-[:FIXES]->(vuln:Vulnerability {state: "detected"})
+    RETURN mr.id, mr.title, mr.state, vuln.id, vuln.title, vuln.severity
+    LIMIT 100

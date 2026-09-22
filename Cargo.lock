@@ -4851,6 +4851,7 @@ name = "named-queries"
 version = "0.1.0"
 dependencies = [
  "jsonschema",
+ "minijinja",
  "orbit-utils",
  "rust-embed",
  "serde",
