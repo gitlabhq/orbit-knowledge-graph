@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Result, bail};
@@ -6,15 +6,17 @@ use arrow::array::{Array, StringArray};
 use serde::Deserialize;
 
 use super::spec;
+use crate::workspace::{Workspace, git_info, git_toplevel};
 
 pub(super) struct Indexed {
     pub(super) summary: String,
     pub(super) suggested_grep: Option<String>,
 }
 
-pub(super) fn is_inside_repository(cwd: &Path) -> Result<bool> {
-    let repos = crate::workspace::Workspace::open_default()?.resolve_repos(cwd)?;
-    Ok(!repos.is_empty())
+pub(super) fn current_repository_dir() -> Result<Option<PathBuf>> {
+    let cwd = std::env::current_dir()?;
+    let repos = Workspace::open_default()?.resolve_repos(&cwd)?;
+    Ok((!repos.is_empty()).then_some(cwd))
 }
 
 pub(super) fn index_command_line() -> String {
@@ -31,7 +33,7 @@ pub(super) fn index_repository(cwd: &Path) -> Result<Indexed> {
         bail!("failed with {}", output.status);
     }
 
-    let summary = serde_json::Deserializer::from_slice(&output.stdout)
+    let counts = serde_json::Deserializer::from_slice(&output.stdout)
         .into_iter::<IndexSummary>()
         .filter_map(Result::ok)
         .map(|summary| {
@@ -42,8 +44,11 @@ pub(super) fn index_repository(cwd: &Path) -> Result<Indexed> {
                 summary.time_seconds
             )
         })
-        .collect::<Vec<_>>()
-        .join("; ");
+        .collect::<Vec<_>>();
+    let summary = match counts.is_empty() {
+        true => "done".to_string(),
+        false => counts.join("; "),
+    };
     Ok(Indexed {
         summary,
         suggested_grep: most_referenced_definition(cwd),
@@ -74,17 +79,14 @@ struct IndexedGraph {
 }
 
 fn most_referenced_definition(repo: &Path) -> Option<String> {
-    let indexed = crate::workspace::open_indexed(Some(repo.to_path_buf()), None).ok()?;
-    let batches = indexed
-        .client
+    let git = git_info(&git_toplevel(repo).ok()?).ok()?;
+    let batches = crate::sql::open_graph(None)
+        .ok()?
         .query_arrow_json(
             "SELECT d.name FROM gl_definition d JOIN gl_edge e ON e.target_id = d.id \
              WHERE d.project_id = ?1 AND d.commit_sha = ?2 AND length(d.name) > 3 \
              GROUP BY d.name ORDER BY count(*) DESC, d.name LIMIT 1",
-            &[
-                indexed.git.project_id.into(),
-                indexed.git.commit_sha.clone().into(),
-            ],
+            &[git.project_id.into(), git.commit_sha.into()],
         )
         .ok()?;
     let names = batches

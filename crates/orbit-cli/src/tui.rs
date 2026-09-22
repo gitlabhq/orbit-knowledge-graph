@@ -38,6 +38,10 @@ pub(crate) fn card(title: impl Display, body: impl Display) -> Result<()> {
     Ok(cliclack::note(title, body)?)
 }
 
+pub(crate) fn warn(message: impl Display) {
+    let _ = cliclack::log::warning(message);
+}
+
 pub(crate) struct Spinner(cliclack::ProgressBar);
 
 pub(crate) fn spinner(label: impl Display) -> Spinner {

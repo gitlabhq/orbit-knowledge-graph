@@ -95,7 +95,7 @@ pub(super) fn format_try_it_command(indexed: Option<&Indexed>) -> Option<String>
     let is_plain_word = name.chars().all(|c| c.is_alphanumeric() || c == '_');
     let argument = match is_plain_word {
         true => name.to_string(),
-        false => format!("'{name}'"),
+        false => format!("'{}'", name.replace('\'', "'\\''")),
     };
     Some(format!("{} grep {argument}", spec::launcher()))
 }

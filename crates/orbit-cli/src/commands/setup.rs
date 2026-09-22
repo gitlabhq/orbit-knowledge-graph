@@ -57,7 +57,7 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
 
     let indexed = match options.index {
-        true => index_current_repository()?,
+        true => index_current_repository(),
         false => None,
     };
     if let Some(command) = summary::format_try_it_command(indexed.as_ref()) {
@@ -67,22 +67,25 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     Ok(())
 }
 
-fn index_current_repository() -> Result<Option<Indexed>> {
-    let cwd = std::env::current_dir()?;
-    if !index_repo::is_inside_repository(&cwd)? {
-        return Ok(None);
-    }
-
+fn index_current_repository() -> Option<Indexed> {
     let command = index_repo::index_command_line();
+    let cwd = match index_repo::current_repository_dir() {
+        Ok(cwd) => cwd?,
+        Err(error) => {
+            tui::warn(format!("{command} skipped: {error}"));
+            return None;
+        }
+    };
+
     let spinner = tui::spinner(&command);
     match index_repo::index_repository(&cwd) {
         Ok(indexed) => {
             spinner.stop(format!("{command}  {}", indexed.summary));
-            Ok(Some(indexed))
+            Some(indexed)
         }
         Err(error) => {
             spinner.error(format!("{command}  {error}"));
-            Ok(None)
+            None
         }
     }
 }
