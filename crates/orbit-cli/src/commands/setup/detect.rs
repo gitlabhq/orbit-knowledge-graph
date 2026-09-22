@@ -20,20 +20,27 @@ impl Machine {
         Machine { home, env }
     }
 
-    pub(super) fn installed_assistants(&self) -> Vec<(Agent, PathBuf)> {
-        spec::all()
-            .filter_map(|assistant| {
-                let found = assistant
+    pub(super) fn display_with_tilde(&self, path: &Path) -> String {
+        match path.strip_prefix(&self.home) {
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => path.display().to_string(),
+        }
+    }
+
+    pub(super) fn installed_agents(&self) -> Vec<(Agent, PathBuf)> {
+        spec::agents()
+            .filter_map(|agent| {
+                let found = agent
                     .detect
                     .iter()
-                    .filter_map(|pattern| self.expand(pattern))
+                    .filter_map(|pattern| self.expand_detect_pattern(pattern))
                     .find(|path| path.exists())?;
-                Some((assistant, found))
+                Some((agent, found))
             })
             .collect()
     }
 
-    fn expand(&self, pattern: &str) -> Option<PathBuf> {
+    fn expand_detect_pattern(&self, pattern: &str) -> Option<PathBuf> {
         if let Some(rest) = pattern.strip_prefix("~/") {
             return Some(self.home.join(rest));
         }

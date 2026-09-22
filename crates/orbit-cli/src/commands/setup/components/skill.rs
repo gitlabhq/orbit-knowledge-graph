@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{Installer, Report, remove_empty_parents};
+use super::{Installer, Report, remove_empty_parents, write_file};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::Agent;
 use crate::skill::{INSTALL_DIR_NAME, embedded_files};
@@ -11,68 +11,77 @@ use crate::skill::{INSTALL_DIR_NAME, embedded_files};
 pub(super) struct Skill;
 
 impl Installer for Skill {
-    fn plan(&self, assistant: Agent, target: &Target) -> Result<Vec<String>> {
+    fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
         let mut paths: Vec<String> = Vec::new();
-        for skill in targets(&[assistant], target)? {
+        for skill in skill_targets(&[agent], target)? {
             paths.push(skill.label);
-            paths.extend(
-                skill
-                    .link
-                    .map(|(_, link_label)| format!("{link_label} (link)")),
-            );
+            paths.extend(skill.link.map(|link| format!("{} (link)", link.label)));
         }
         Ok(paths)
     }
 
-    fn install(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for skill in targets(assistants, target)? {
-            write_files(&skill.root, &skill.label, report)?;
-            if let Some((link_path, link_label)) = &skill.link {
-                link(link_path, &skill.root, &skill.label, link_label, report)?;
+    fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
+        for skill in skill_targets(agents, target)? {
+            write_skill_files(&skill.root, &skill.label, report)?;
+            if let Some(link) = &skill.link {
+                link_skill_dir(&link.path, &skill.root, &skill.label, &link.label, report)?;
             }
         }
         Ok(())
     }
 
-    fn remove(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for skill in targets(assistants, target)? {
-            if let Some((link_path, link_label)) = &skill.link {
-                unlink(link_path, link_label, target, report)?;
+    fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
+        for skill in skill_targets(agents, target)? {
+            if let Some(link) = &skill.link {
+                unlink_skill_dir(&link.path, &link.label, target, report)?;
             }
-            remove_files(&skill.root, &skill.label, target, report)?;
+            remove_skill_files(&skill.root, &skill.label, target, report)?;
         }
         Ok(())
+    }
+
+    fn is_installed(&self, agent: Agent, target: &Target) -> bool {
+        skill_targets(&[agent], target).is_ok_and(|targets| {
+            targets
+                .iter()
+                .any(|skill| skill.root.join("SKILL.md").exists())
+        })
     }
 }
 
 struct SkillTarget {
     root: PathBuf,
     label: String,
-    link: Option<(PathBuf, String)>,
+    link: Option<SkillLink>,
 }
 
-fn targets(assistants: &[Agent], target: &Target) -> Result<Vec<SkillTarget>> {
+struct SkillLink {
+    path: PathBuf,
+    label: String,
+}
+
+fn skill_targets(agents: &[Agent], target: &Target) -> Result<Vec<SkillTarget>> {
     let mut targets: Vec<SkillTarget> = Vec::new();
-    for dirs in assistants
-        .iter()
-        .filter_map(|assistant| assistant.skills.as_ref())
-    {
+    for dirs in agents.iter().filter_map(|agent| agent.skills.as_ref()) {
         let (dir, dir_label) = target.resolve(&dirs.dir)?;
         let root = dir.join(INSTALL_DIR_NAME);
-        let link = dirs
-            .link
-            .as_ref()
-            .map(|link| target.resolve(link))
-            .transpose()?
-            .map(|(dir, label)| {
-                (
-                    dir.join(INSTALL_DIR_NAME),
-                    format!("{label}/{INSTALL_DIR_NAME}"),
-                )
-            });
+        let link = match &dirs.link {
+            Some(scoped) => {
+                let (link_dir, link_label) = target.resolve(scoped)?;
+                Some(SkillLink {
+                    path: link_dir.join(INSTALL_DIR_NAME),
+                    label: format!("{link_label}/{INSTALL_DIR_NAME}"),
+                })
+            }
+            None => None,
+        };
 
         match targets.iter_mut().find(|existing| existing.root == root) {
-            Some(existing) => existing.link = existing.link.take().or(link),
+            Some(existing) => {
+                if existing.link.is_none() {
+                    existing.link = link;
+                }
+            }
             None => targets.push(SkillTarget {
                 root,
                 label: format!("{dir_label}/{INSTALL_DIR_NAME}"),
@@ -83,24 +92,19 @@ fn targets(assistants: &[Agent], target: &Target) -> Result<Vec<SkillTarget>> {
     Ok(targets)
 }
 
-fn write_files(skill_root: &Path, label: &str, report: &mut Report) -> Result<()> {
+fn write_skill_files(skill_root: &Path, label: &str, report: &mut Report) -> Result<()> {
     for (relative, contents) in embedded_files() {
         let destination = skill_root.join(&relative);
         if std::fs::read(&destination).is_ok_and(|current| current == contents) {
             continue;
         }
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        std::fs::write(&destination, contents)
-            .with_context(|| format!("failed to write {}", destination.display()))?;
+        write_file(&destination, contents)?;
     }
     report.note(label, "skill installed");
     Ok(())
 }
 
-fn link(
+fn link_skill_dir(
     link_path: &Path,
     skill_root: &Path,
     skill_label: &str,
@@ -121,16 +125,16 @@ fn link(
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    match symlink_dir(&relative_to(link_path, skill_root), link_path) {
+    match symlink_dir(&relative_path_from_link(link_path, skill_root), link_path) {
         Ok(()) => {
             report.note(label, format!("linked to {skill_label}"));
             Ok(())
         }
-        Err(_) => write_files(link_path, label, report),
+        Err(_) => write_skill_files(link_path, label, report),
     }
 }
 
-fn remove_files(
+fn remove_skill_files(
     skill_root: &Path,
     label: &str,
     target: &Target,
@@ -175,12 +179,17 @@ fn remove_files(
     Ok(())
 }
 
-fn unlink(link_path: &Path, label: &str, target: &Target, report: &mut Report) -> Result<()> {
+fn unlink_skill_dir(
+    link_path: &Path,
+    label: &str,
+    target: &Target,
+    report: &mut Report,
+) -> Result<()> {
     let Ok(metadata) = std::fs::symlink_metadata(link_path) else {
         return Ok(());
     };
     if !metadata.is_symlink() {
-        return remove_files(link_path, label, target, report);
+        return remove_skill_files(link_path, label, target, report);
     }
     remove_symlink(link_path)
         .with_context(|| format!("failed to remove {}", link_path.display()))?;
@@ -189,7 +198,7 @@ fn unlink(link_path: &Path, label: &str, target: &Target, report: &mut Report) -
     Ok(())
 }
 
-fn relative_to(link_path: &Path, target: &Path) -> PathBuf {
+fn relative_path_from_link(link_path: &Path, target: &Path) -> PathBuf {
     let link_dir = link_path.parent().unwrap_or(link_path);
     let shared = link_dir
         .components()

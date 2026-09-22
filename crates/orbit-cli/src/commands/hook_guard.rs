@@ -64,8 +64,8 @@ fn local_graph_exists() -> bool {
 
 fn nudge_text(kind: Kind) -> &'static str {
     match kind {
-        Kind::Search => spec::nudge_search(),
-        Kind::Read => spec::nudge_read(),
+        Kind::Search => spec::search_nudge_text(),
+        Kind::Read => spec::read_nudge_text(),
     }
 }
 

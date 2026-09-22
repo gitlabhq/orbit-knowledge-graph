@@ -4,6 +4,7 @@ pub(super) mod json;
 mod mcp;
 mod skill;
 
+use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
@@ -14,14 +15,30 @@ use super::spec::{self, Agent};
 use super::{Component, Target};
 
 pub(super) trait Installer {
-    fn plan(&self, assistant: Agent, target: &Target) -> Result<Vec<String>>;
+    fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>>;
 
-    fn install(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()>;
+    fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()>;
 
-    fn remove(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()>;
+    fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()>;
+
+    fn is_installed(&self, agent: Agent, target: &Target) -> bool;
 }
 
-pub(super) fn for_component(component: Component) -> &'static dyn Installer {
+pub(super) fn installed_agents(components: &BTreeSet<Component>, target: &Target) -> Vec<Agent> {
+    spec::agents()
+        .filter(|agent| {
+            components
+                .iter()
+                .any(|component| installer_for(*component).is_installed(*agent, target))
+        })
+        .collect()
+}
+
+fn file_mentions(path: &Path, marker: &str) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|text| text.contains(marker))
+}
+
+pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
     match component {
         Component::Instructions => &instructions::Instructions,
         Component::Hooks => &hooks::Hooks,
@@ -43,7 +60,7 @@ pub(super) struct Report {
 }
 
 impl Report {
-    pub(super) fn group(&mut self, title: impl Into<String>) {
+    pub(super) fn start_group(&mut self, title: impl Into<String>) {
         self.group = title.into();
     }
 
@@ -58,11 +75,11 @@ impl Report {
 
 pub(super) fn install(selection: &Selection, target: &Target, report: &mut Report) -> Result<()> {
     for component in &selection.components {
-        report.group(component.label());
-        for_component(*component).install(&selection.assistants, target, report)?;
+        report.start_group(component.label());
+        installer_for(*component).install(&selection.agents, target, report)?;
     }
     if spec::launcher() == spec::GLAB_LAUNCHER {
-        report.group("glab");
+        report.start_group("glab");
         ensure_glab_auto_run(report);
     }
     Ok(())
@@ -70,8 +87,8 @@ pub(super) fn install(selection: &Selection, target: &Target, report: &mut Repor
 
 pub(super) fn remove(selection: &Selection, target: &Target, report: &mut Report) -> Result<()> {
     for component in &selection.components {
-        report.group(component.label());
-        for_component(*component).remove(&selection.assistants, target, report)?;
+        report.start_group(component.label());
+        installer_for(*component).remove(&selection.agents, target, report)?;
     }
     Ok(())
 }
@@ -96,6 +113,14 @@ fn ensure_glab_auto_run(report: &mut Report) {
     }
 }
 
+fn write_file(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    std::fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
+}
+
 fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let backup = backup_path(path);
     if backup.exists() {
@@ -107,7 +132,7 @@ fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     Ok(())
 }
 
-fn remove_file(path: &Path, target: &Target) -> Result<()> {
+fn remove_file_and_empty_parents(path: &Path, target: &Target) -> Result<()> {
     std::fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
     remove_empty_parents(path, &target.root()?);
     Ok(())

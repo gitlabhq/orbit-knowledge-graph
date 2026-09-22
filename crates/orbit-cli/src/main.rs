@@ -11,6 +11,7 @@ mod skill;
 mod sql;
 mod sql_format;
 mod telemetry;
+mod tui;
 mod workspace;
 
 use anyhow::{Context, Result};
@@ -386,9 +387,17 @@ enum SkillsCommands {
 
 #[derive(Args, Debug, PartialEq)]
 struct SetupFlags {
+    /// Skip the agent picker and apply to the pre-selected agents.
+    #[arg(long, short = 'y')]
+    yes: bool,
+
     /// Print what would change and exit without writing.
     #[arg(long)]
     dry_run: bool,
+
+    /// List every file touched instead of a per-component summary.
+    #[arg(long, short = 'v')]
+    verbose: bool,
 
     /// Write into the current project instead of the user-global config
     /// files.
@@ -401,16 +410,18 @@ struct SetupFlags {
 }
 
 impl SetupFlags {
-    fn options(
+    fn to_options(
         &self,
-        assistants: Vec<String>,
+        agents: Vec<String>,
         all: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
     ) -> commands::setup::Options {
         commands::setup::Options {
-            assistants,
+            agents,
             all,
+            yes: self.yes,
             dry_run: self.dry_run,
+            verbose: self.verbose,
             components,
         }
     }
@@ -441,13 +452,13 @@ enum Commands {
     Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
     Setup {
-        /// Agents to configure. Default: every agent detected on this
-        /// machine.
-        #[arg(value_name = "AGENT", value_parser = commands::setup::assistant_value_parser())]
-        assistants: Vec<String>,
+        /// Agents to pre-select in the picker. Default: every agent detected
+        /// on this machine.
+        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser())]
+        agents: Vec<String>,
 
         /// Configure every supported agent, detected or not.
-        #[arg(long, conflicts_with = "assistants")]
+        #[arg(long, conflicts_with = "agents")]
         all: bool,
 
         /// Also register the `orbit` MCP server. Off by default.
@@ -464,8 +475,8 @@ enum Commands {
     #[command(about = descriptions::short("uninstall"), long_about = descriptions::long("uninstall"))]
     Uninstall {
         /// Agents to clean up. Default: all of them.
-        #[arg(value_name = "AGENT", value_parser = commands::setup::assistant_value_parser())]
-        assistants: Vec<String>,
+        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser())]
+        agents: Vec<String>,
 
         #[command(flatten)]
         flags: SetupFlags,
@@ -717,20 +728,21 @@ async fn dispatch(command: Commands) -> Result<()> {
             None => skill::run(name_or_path, path),
         },
         Commands::Setup {
-            assistants,
+            agents,
             all,
             mcp,
             skip,
             flags,
         } => {
-            let components = commands::setup::Component::selection(mcp, &skip);
-            let options = flags.options(assistants, all, components);
+            let components = commands::setup::Component::from_flags(mcp, &skip);
+            let options = flags.to_options(agents, all, components);
             let machine = commands::setup::detect::Machine::current()?;
             commands::setup::install(options, flags.target()?, &machine)
         }
-        Commands::Uninstall { assistants, flags } => {
-            let options = flags.options(assistants, false, Default::default());
-            commands::setup::uninstall(options, flags.target()?)
+        Commands::Uninstall { agents, flags } => {
+            let options = flags.to_options(agents, false, Default::default());
+            let machine = commands::setup::detect::Machine::current()?;
+            commands::setup::uninstall(options, flags.target()?, &machine)
         }
         Commands::HookGuard { kind, mode: _ } => {
             commands::hook_guard::run(kind);
