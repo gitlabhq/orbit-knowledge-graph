@@ -288,7 +288,7 @@ fn apply_rewrites_inner(
                         t.set_tag(raw, entry.key, val);
                     }
                 }
-                Out::Replace(p, tag_entries) => {
+                Out::Replace(p, tag_entries, tag_on) => {
                     let built = build_template(t, lang, p, &caps, &r.filters, span, edge_ctx);
                     let first = built.first().copied();
                     if let (Some((pat, kind, nslots)), Some(new_root)) = (&r.unique, first) {
@@ -309,7 +309,14 @@ fn apply_rewrites_inner(
                     }
                     t.replace(target, built);
                     if let (Some(entries), Some(new_root)) = (tag_entries, first) {
-                        let raw = Tree::to_raw(new_root);
+                        let tagged = tag_on
+                            .and_then(|k| {
+                                new_root
+                                    .descendants(&t.arena)
+                                    .find(|&n| t.node(n).kind == k)
+                            })
+                            .unwrap_or(new_root);
+                        let raw = Tree::to_raw(tagged);
                         for entry in entries {
                             let src = caps[entry.slot as usize]
                                 .first()
@@ -353,6 +360,9 @@ impl Tree {
     ) -> NodeId {
         let children: Vec<NodeId> = id.children(&source.arena).collect();
         let copy = self.arena.new_node(*source.node(id));
+        if let Some(tags) = source.tags.get(&Tree::to_raw(id)) {
+            self.tags.insert(Tree::to_raw(copy), tags.clone());
+        }
         if let Some(parent) = parent {
             parent.append(copy, &mut self.arena);
         }

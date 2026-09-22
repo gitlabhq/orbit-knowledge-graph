@@ -11,17 +11,22 @@ stages:
   - name: import-selectors
     rules:
       - match: '(import_declaration $$$P:identifier (namespace_selectors $$$S:identifier|arrow_renamed_identifier (namespace_wildcard)))'
-        replace: '(sc_imports (__import (__import_kind "grouped") (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) $$$S->__name) (__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) (__name "*")))'
+        replace: '(sc_imports (__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) $$$S->__name) (__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) (__name "*")))'
+        tag: { import_type: GroupedImport }
+        tag_on: __import
       - match: '(import_declaration $$$P:identifier (namespace_selectors $$$S:identifier|arrow_renamed_identifier))'
-        replace: '(__import (__import_kind "grouped") (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) $$$S->__name)'
+        replace: '(__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.\{.*$", "")|replace(".", "/")) $$$S->__name)'
+        tag: { import_type: GroupedImport }
   - name: import-wildcards
     rules:
       - match: '(import_declaration $$$P:identifier (namespace_wildcard))'
         replace: '(__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\._$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|regex_replace("\._$", "")|replace(".", "/")) (__name "*"))'
+        tag: { import_type: Import }
   - name: import-simple
     rules:
       - match: '(import_declaration $$$P:identifier)'
         replace: '(__import (__source @$ROOT|regex_replace("^import\s+", "")|regex_replace("\.[^.]+$", "")) (__source_path @$ROOT|regex_replace("^import\s+", "")|replace(".", "/")) (__name @$ROOT|split_last(".")))'
+        tag: { import_type: Import }
 
   - name: normalize
     rules:
@@ -29,6 +34,8 @@ stages:
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_clause name: $N:package_identifier)'
         replace: '(sc_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
+        tag: { import_type: Import }
+        tag_on: __import
       - match: '(return_expression $$$V)'
         replace: '(__ssa_return $$$V)'
       - match: '(generic_type type: $T:type_identifier)'
@@ -229,9 +236,6 @@ display:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
-          import_type: Import
-      - match: '(__import (__import_kind "grouped"))'
-        tag: { import_type: GroupedImport }
       - match: '(__name "*")'
         tag:
           import_type: WildcardImport

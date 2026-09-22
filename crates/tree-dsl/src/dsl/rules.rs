@@ -141,6 +141,8 @@ struct Rule {
     where_clause: Option<String>,
     #[serde(default)]
     unique: Option<String>,
+    #[serde(default)]
+    tag_on: Option<String>,
 }
 
 fn unique_guard(lang: &Lang, spec: &str) -> (Pat, u16, usize) {
@@ -294,10 +296,11 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
     if let Some(ref tpl) = rule.replace {
         let tpl = tpl.clone();
         let tags = rule.tag.clone();
+        let tag_on = rule.tag_on.as_deref().map(|k| lang.intern_kind(k));
         let mut rw = Rewrite::new(lang, pat, move |c| {
             let replace = c.template(&tpl);
             let tag_entries = tags.as_ref().map(|t| compile_tags(t, c));
-            Out::Replace(replace, tag_entries)
+            Out::Replace(replace, tag_entries, tag_on)
         });
         if let Some(ref wc) = rule.where_clause {
             rw.guards = parse_where_clause(wc, &rw.slots);

@@ -17,13 +17,16 @@ stages:
     rules:
       # import static a.b.C.*;
       - match: '(import_declaration (static) $S:scoped_identifier (asterisk))'
-        replace: '(__import (__import_kind "static") (__source @$S) (__source_path @$S|replace(".", "/")) (__name "*"))'
+        replace: '(__import (__source @$S) (__source_path @$S|replace(".", "/")) (__name "*"))'
+        tag: { import_type: StaticImport, callable: "true" }
       # import static a.b.C.m;
       - match: '(import_declaration (static) $S:scoped_identifier)'
-        replace: '(__import (__import_kind "static") (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|regex_replace("\.[^.]+$", "")|replace(".", "/")) (__name @$S|split_last(".")))'
+        replace: '(__import (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|regex_replace("\.[^.]+$", "")|replace(".", "/")) (__name @$S|split_last(".")))'
+        tag: { import_type: StaticImport, callable: "true" }
       # import a.b.*;
       - match: '(import_declaration $S:scoped_identifier (asterisk))'
         replace: '(__import (__source @$S) (__source_path @$S|replace(".", "/")) (__name "*"))'
+        tag: { import_type: WildcardImport }
       # import a.b.C;
       - match: '(import_declaration $S:scoped_identifier)'
         replace: '(__import (__source @$S|regex_replace("\.[^.]+$", "")) (__source_path @$S|replace(".", "/")) (__name @$S|split_last(".")))'
@@ -34,10 +37,16 @@ stages:
         replace: '(__source_file @$ROOT $P $$$C)'
       - match: '(program $$$C)'
         replace: '(__source_file @$ROOT (__module_export (__import (__source ".") (__source_path "./*") (__name "*"))) $$$C)'
+        tag: { import_type: WildcardImport }
+        tag_on: __import
       - match: '(package_declaration $S:scoped_identifier)'
         replace: '(java_pkg (__package @$S) (__module_export (__import (__source @$S) (__source_path @$S|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
+        tag: { import_type: WildcardImport }
+        tag_on: __import
       - match: '(package_declaration $S:identifier)'
         replace: '(java_pkg (__package @$S) (__module_export (__import (__source @$S) (__source_path @$S|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
+        tag: { import_type: WildcardImport }
+        tag_on: __import
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
 
@@ -271,8 +280,6 @@ stages:
 
   - name: tag-defs
     rules:
-      - match: '(__import (__import_kind "static"))'
-        tag: { callable: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'
@@ -374,12 +381,6 @@ display:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
-      - match: '(__import (__name "*"))'
-        tag:
-          import_type: WildcardImport
-      - match: '(__import (__import_kind "static"))'
-        tag:
-          import_type: StaticImport
       - match: '(__name "*")'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'

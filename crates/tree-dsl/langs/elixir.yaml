@@ -7,17 +7,23 @@ stages:
   - name: imports
     rules:
       - match: '(call target: (identifier "alias") (arguments (dot left: $L:alias right: (tuple $$$M:alias))))'
-        replace: '(__import (__import_kind "alias") (__source @$L) (__source_path @$L|replace(".", "/")) $$$M->__name)'
+        replace: '(__import (__source @$L) (__source_path @$L|replace(".", "/")) $$$M->__name)'
+        tag: { import_type: Alias }
       - match: '(call target: (identifier "alias") (arguments $A:alias (keywords (pair value: $T:alias))))'
-        replace: '(__import (__import_kind "alias") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".") (__alias @$T)))'
+        replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".") (__alias @$T)))'
+        tag: { import_type: Alias }
       - match: '(call target: (identifier "alias") (arguments $A:alias))'
-        replace: '(__import (__import_kind "alias") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+        replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+        tag: { import_type: Alias }
       - match: '(call target: (identifier "import") (arguments $A:alias $$$R))'
-        replace: '(__import (__import_kind "import") (__source @$A) (__source_path @$A|replace(".", "/")) (__name @$A (__ssa_hint "*")))'
+        replace: '(__import (__source @$A) (__source_path @$A|replace(".", "/")) (__name @$A (__ssa_hint "*")))'
+        tag: { import_type: Import }
       - match: '(call target: (identifier "require") (arguments $A:alias $$$R))'
-        replace: '(__import (__import_kind "require") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+        replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+        tag: { import_type: Require }
       - match: '(call target: (identifier "use") (arguments $A:alias $$$R))'
-        replace: '(__import (__import_kind "use") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+        replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+        tag: { import_type: Use }
 
   - name: defs
     rules:
@@ -63,7 +69,9 @@ stages:
   - name: retag-calls
     rules:
       - match: '(call target: (dot left: $M:alias right: $F:identifier) $A:arguments)'
-        replace: '(ex_ref (__import (__import_kind "module") (__source @$M) (__source_path @$M|replace(".", "/")) (__name @$M|split_last("."))) (__call (__callee (__member @$F (__object @$M|split_last(".")))) $A))'
+        replace: '(ex_ref (__import (__source @$M) (__source_path @$M|replace(".", "/")) (__name @$M|split_last("."))) (__call (__callee (__member @$F (__object @$M|split_last(".")))) $A))'
+        tag: { import_type: Module }
+        tag_on: __import
       - match: '(call target: (dot left: $M:identifier right: $F:identifier) $A:arguments)'
         replace: '(__call (__callee (__member @$F (__object @$M))) $A)'
       - match: '(call target: $F:identifier $A:arguments $$$B)'
@@ -178,15 +186,6 @@ display:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
           source_path: '@$ROOT|child_sym("__source")'
-          import_type: Alias
-      - match: '(__import (__import_kind "import"))'
-        tag: { import_type: Import }
-      - match: '(__import (__import_kind "require"))'
-        tag: { import_type: Require }
-      - match: '(__import (__import_kind "use"))'
-        tag: { import_type: Use }
-      - match: '(__import (__import_kind "module"))'
-        tag: { import_type: Module }
       - match: '(__name)'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'
