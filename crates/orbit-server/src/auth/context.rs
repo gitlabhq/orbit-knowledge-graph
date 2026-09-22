@@ -4,7 +4,6 @@ use super::Claims;
 pub struct RequestContext {
     pub claims: Claims,
     pub user_agent: Option<String>,
-    pub frontend: query_engine::compiler::Frontend,
 }
 
 impl RequestContext {

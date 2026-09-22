@@ -5,8 +5,10 @@ Paste-ready request bodies for each `query_type`. All examples omit
 `--response-format raw` when piping into `jq`.
 
 Every recipe assumes `glab auth login` has succeeded and the
-`knowledge_graph` feature flag is on for your user. See
-[`SKILL.md`](../SKILL.md) for prerequisites.
+`knowledge_graph` feature flag is on for your user, with `orbit_gql_queries`
+off (JSON mode). These JSON recipes reject when that flag is on. In GQL mode,
+use the active command catalog and `CALL db.schema()` instead of JSON DSL
+guidance. See [`SKILL.md`](../SKILL.md) for prerequisites.
 
 The shell pattern is always:
 

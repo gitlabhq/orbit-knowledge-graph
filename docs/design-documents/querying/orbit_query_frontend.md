@@ -6,8 +6,8 @@ The Orbit query frontend accepts a read-only graph language based on openCypher 
 It includes Orbit-specific query restrictions, extensions, and schema discovery.
 
 Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend.
-GitLab Rails selects GQL per user or root group with the `orbit_gql_queries` flag and sends text queries. The JSON Query DSL remains the default.
-Unknown selectors and mismatched payload shapes reject rather than selecting a parser from the query's syntax.
+GitLab Rails selects GQL per user with the default-off `orbit_gql_queries` flag and sends text queries. The JSON Query DSL remains the default.
+The modes are mutually exclusive. Mismatched payload shapes reject without syntax inference or parser fallback.
 
 A **Pest pair** is a matched grammar rule and its source span.
 A query's **syntax tree** is its typed Rust form, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
@@ -93,12 +93,29 @@ Only case-sensitive `db.schema` is allowed. `resolve_schema` rejects unknown or 
 
 ## Remote transport
 
-The gRPC `QueryType` enum is `JSON=0`, `NAMED=1`, `GQL=2`; unknown values reject.
-Rails selects the language with the `x-gitlab-orbit-query-language` gRPC metadata header (`json` or `gql`; absent means `json`). `extract_request_context` parses it once into `RequestContext.frontend`. Both ad hoc and named queries use that frontend. The existing `JSON` and `GQL` wire values identify ad hoc requests; neither overrides the context. `NAMED` selects template execution.
-The catalog renders `raw_query` in the context's language, without a language field. Tool and command discovery describe only the active mode. Under GQL, `GetQueryDsl` and the `get_query_dsl` command return `NOT_FOUND` and point to `CALL db.schema()`. See [Named Queries](README.md#named-queries).
-REST and MCP `query_graph` have no language field. Rails maps the default-off `orbit_gql_queries` flag onto the header: off accepts JSON objects, on accepts GQL text.
-The flag can target a user or a root group.
-The root-group gate requires the Developer role or higher in that group or one of its subgroups.
+The gRPC transport separates query source from language:
+
+| Enum | Values | Purpose |
+|---|---|---|
+| `QueryType` | `QUERY_TYPE_RAW=0`, `QUERY_TYPE_NAMED=1` | Select raw query text or a named-query envelope |
+| `QueryLanguage` | `QUERY_LANGUAGE_JSON=0`, `QUERY_LANGUAGE_GQL=1` | Select `Frontend::JsonDsl` or `Frontend::Gql` |
+
+`ExecuteQueryRequest.query_type` remains field 3. Either kind supports either language. NAMED with GQL renders the GQL template and compiles with the GQL frontend; the JSON spelling never enters that path.
+Rails derives `language` from the default-off, per-user `orbit_gql_queries` feature flag. Flag off selects JSON; flag on selects GQL. Both Workhorse streaming and direct Ruby gRPC requests carry it. Request authentication does not select a frontend, and metadata headers cannot override it. There is no language boolean.
+
+| Request | `language` field tag |
+|---|---|
+| `ExecuteQueryRequest` | 4 |
+| `ListToolsRequest` | 1 |
+| `ListAgentCommandsRequest` | 3 |
+| `InvokeAgentCommandRequest` | 3 |
+| `GetQueryDslRequest` | 2 |
+| `ListNamedQueriesRequest` | 1 |
+
+Missing kind defaults to RAW and missing language to JSON, preserving the original zero-valued wire behavior. Unknown kinds and languages reject without fallback. Unary discovery and guidance methods accept only a language, not a source kind, and reject unknown languages with `INVALID_ARGUMENT`.
+Language-neutral RPCs have no mode selector. Each language-sensitive method decodes its request's language through the same helper; there is no process-wide Orbit mode.
+The catalog renders `raw_query` in that mode, without a language field. Tool and command discovery describe only the active mode. Under GQL, `GetQueryDsl` and the `get_query_dsl` command return `NOT_FOUND` and point to `CALL db.schema()`. See [Named Queries](README.md#named-queries).
+REST and MCP `query_graph` have no public language selector. Rails, not agents or public client input, sets the transport language. Payload shape only validates that selected language. Flag off accepts only JSON objects; flag on accepts only GQL strings. Existing JSON callers for opted-in users reject. Discovery results must not cross users or modes in caches.
 Orbit Remote does not evaluate the flag. The CLI accepts inline query text, for example `orbit query 'CALL db.schema()'`, and sends it as the `query` string. Existing request-envelope files and stdin remain supported: `query` is an object for JSON or a string for GQL. The CLI has no language selector.
 The server routing stage parses GQL once and returns its result through `PipelineRunner`.
 For MATCH, it carries the lowered Input into path resolution and compilation; the `gql_parse` wrapper leaves that Input unchanged.

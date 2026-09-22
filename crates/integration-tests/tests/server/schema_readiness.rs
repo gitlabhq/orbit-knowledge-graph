@@ -442,6 +442,7 @@ impl Cluster {
             .invoke_agent_command(authenticated(InvokeAgentCommandRequest {
                 command_name: "get_graph_schema".into(),
                 parameters_json: json!({"format": "raw", "expand_nodes": ["Project"]}).to_string(),
+                language: QueryLanguage::Json as i32,
             }))
             .await;
         let response = match command {

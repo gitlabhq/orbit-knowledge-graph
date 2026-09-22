@@ -101,11 +101,14 @@ message ExecuteQueryMessage {
   }
 }
 
-// Query language selector.
 enum QueryType {
-  QUERY_TYPE_JSON = 0;
+  QUERY_TYPE_RAW = 0;
   QUERY_TYPE_NAMED = 1;  // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
-  QUERY_TYPE_GQL = 2;
+}
+
+enum QueryLanguage {
+  QUERY_LANGUAGE_JSON = 0;
+  QUERY_LANGUAGE_GQL = 1;
 }
 
 // Client-sent initial message to start a query.
@@ -113,6 +116,7 @@ message ExecuteQueryRequest {
   string query = 1;
   ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: GOON text
   QueryType query_type = 3;
+  QueryLanguage language = 4;
 }
 
 // Server-sent final message with query results.
@@ -220,6 +224,7 @@ message SchemaNodeStyle {
 // Request for the query DSL grammar.
 message GetQueryDslRequest {
   ResponseFormat format = 1;  // RAW: full JSON Schema; LLM: condensed TOON
+  QueryLanguage language = 2;
 }
 
 // Response carrying the DSL grammar in the requested format.
@@ -305,9 +310,9 @@ message ResponseFormatSchema {
 // ListNamedQueries — unary, returns the named-query catalog
 // ---------------------------------------------------------------------------
 
-// Request for the named-query catalog. The x-gitlab-orbit-query-language
-// metadata selects the rendered language (json by default).
-message ListNamedQueriesRequest {}
+message ListNamedQueriesRequest {
+  QueryLanguage language = 1;
+}
 
 message ListNamedQueriesResponse {
   repeated NamedQueryDefinition queries = 1;
@@ -362,7 +367,9 @@ message ResourceAuthorization {
 // ListTools — unary, returns available MCP tool definitions
 // ---------------------------------------------------------------------------
 
-message ListToolsRequest {}
+message ListToolsRequest {
+  QueryLanguage language = 1;
+}
 
 message ListToolsResponse {
   repeated ToolDefinition tools = 1;
@@ -383,6 +390,7 @@ message ToolDefinition {
 message ListAgentCommandsRequest {
   repeated string command_names = 1; // empty means list every command
   ResponseFormat format = 2;         // RAW: command definitions; LLM: TOON command catalog
+  QueryLanguage language = 3;
 }
 
 message ListAgentCommandsResponse {
@@ -393,6 +401,7 @@ message ListAgentCommandsResponse {
 message InvokeAgentCommandRequest {
   string command_name = 1;
   string parameters_json = 2; // downstream command parameters object as JSON
+  QueryLanguage language = 3;
 }
 
 message InvokeAgentCommandResponse {

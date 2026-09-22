@@ -29,7 +29,9 @@ glab orbit ontology Project |
   jq '.nodes[] | select(.name == "Project") | .properties'
 ```
 
-The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in the caller's active mode: JSON objects by default, GQL text when GitLab enables GQL. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
+The default-off Rails `orbit_gql_queries` flag selects one mode per user: JSON objects when off, GQL strings when on. Follow only the active mode's discovery; a mismatched query rejects without parser fallback. GQL mode hides and rejects `get_query_dsl`; use `CALL db.schema()` instead. The JSON recipes below apply only when the flag is off.
+
+The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in that mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one `aggregation` query over N traversal queries for "how many X grouped by Y", and batch related lookups.
 

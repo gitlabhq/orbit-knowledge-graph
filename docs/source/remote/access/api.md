@@ -83,10 +83,9 @@ curl --request POST \
 
 See the [query language reference](../queries/query-language.md) for the full DSL.
 
-The `orbit_gql_queries` feature flag in Rails selects the language. It is off by default, which keeps JSON.
-The flag can target your user or a root group.
-For the group gate, you need at least the Developer role in that group or one of its subgroups.
-With the flag on, the query endpoint, the named-query catalog, and the dashboard editor all use GQL text.
+The per-user `orbit_gql_queries` feature flag in Rails selects the mode. It is off by default, which accepts only JSON objects.
+With the flag on, the query endpoint, the named-query catalog, and the dashboard editor all use GQL text. JSON queries then reject, including requests from existing JSON callers.
+There is no public language selector. Rails sets the protobuf language for GitLab Orbit to JSON or GQL. Raw or named query kind is separate; named queries render and compile in that selected language. Agents and public REST callers do not send a language selector.
 
 To send read-only query text or inspect its ontology with the flag on:
 

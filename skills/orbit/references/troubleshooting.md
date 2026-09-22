@@ -81,7 +81,7 @@ Common causes: a malformed JSON body (validate with `jq . /tmp/q.json`), an unre
 
 ## Named-query catalog
 
-The catalog lists parameterless named queries rendered in the caller's active mode. `raw_query` is a JSON query object by default and GQL text when GitLab enables GQL. There is no language field. Rails supplies the explorer's mode directly; an empty catalog does not reset it to JSON. The catalog binds caller identity, so do not reuse another caller's response. Missing entries can require client parameters or depend on entities unavailable in the active schema.
+The catalog lists parameterless named queries rendered in the caller's active mode. `raw_query` is a JSON query object when the per-user `orbit_gql_queries` flag is off and GQL text when on. There is no language field. Rails supplies the explorer's mode directly; an empty catalog does not reset it to JSON. The catalog binds caller identity and mode, so do not reuse another caller's response or retain it across mode changes. JSON queries reject in GQL mode, and GQL strings reject in JSON mode. There is no client override or parser fallback. Missing entries can require client parameters or depend on entities unavailable in the active schema.
 
 ## Empty result body
 

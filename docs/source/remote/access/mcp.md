@@ -51,15 +51,16 @@ Commands available through `invoke_command`:
 
 | Command | Description |
 |---------|-------------|
-| `query_graph` | Execute a graph query using the GitLab Orbit query DSL, or read-only GQL text when the instance has enabled GQL. |
+| `query_graph` | Execute a graph query using the GitLab Orbit query DSL, or read-only GQL text when enabled for the user. |
 | `get_graph_schema` | Fetch the current schema: all node types, their properties, and relationship types. |
 | `get_query_dsl` | Return the `query_graph` JSON DSL grammar and version. |
 | `get_response_format` | Return the `query_graph` response JSON Schema and version. |
 
-GQL query text requires the Rails `orbit_gql_queries` feature flag.
+The default-off Rails `orbit_gql_queries` feature flag selects one mode per user.
 See the [GQL access requirements](api.md#query-endpoint).
-`list_commands` advertises GQL even when the flag is off.
-Rails rejects GQL requests from users outside the enabled cohort.
+With the flag off, `list_commands` teaches JSON and `query_graph` accepts only JSON objects.
+With the flag on, discovery teaches only GQL and `query_graph` accepts only strings. The catalog hides `get_query_dsl`, and direct or invoked DSL requests reject. Use `CALL db.schema()` for graph discovery instead.
+Clients cannot select a language, and discovery results must not be shared across users or modes.
 
 ## Connect your MCP client
 

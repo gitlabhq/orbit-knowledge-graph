@@ -1,9 +1,6 @@
-use query_engine::compiler::Frontend;
 use tonic::{Request, Status};
 
 use crate::auth::{JwtValidator, RequestContext};
-
-pub const QUERY_LANGUAGE_HEADER: &str = "x-gitlab-orbit-query-language";
 
 pub fn extract_request_context<T>(
     request: &Request<T>,
@@ -44,29 +41,7 @@ pub fn extract_request_context<T>(
         .and_then(|v| v.to_str().ok())
         .map(String::from);
 
-    let frontend = match request
-        .metadata()
-        .get(QUERY_LANGUAGE_HEADER)
-        .map(|v| v.to_str().map_err(|_| v.as_bytes().to_vec()))
-    {
-        None => Frontend::JsonDsl,
-        Some(Ok(value)) => value.parse().map_err(|_| {
-            Status::invalid_argument(format!(
-                "{QUERY_LANGUAGE_HEADER} must be json or gql, not {value:?}"
-            ))
-        })?,
-        Some(Err(_)) => {
-            return Err(Status::invalid_argument(format!(
-                "{QUERY_LANGUAGE_HEADER} must be ASCII"
-            )));
-        }
-    };
-
-    Ok(RequestContext {
-        claims,
-        user_agent,
-        frontend,
-    })
+    Ok(RequestContext { claims, user_agent })
 }
 
 #[cfg(test)]
@@ -152,7 +127,6 @@ mod tests {
                 is_gitlab_team_member: None,
             },
             user_agent: user_agent.map(Into::into),
-            frontend: Frontend::JsonDsl,
         }
     }
 
