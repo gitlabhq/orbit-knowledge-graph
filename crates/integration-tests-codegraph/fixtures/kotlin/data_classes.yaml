@@ -81,15 +81,17 @@ tests:
     assert:
       - { row: { fqn: "com.example.consumePair" } }
 
-  # corrected: destructuring invokes component functions, not the class
-  - name: cross-file consumePair calls Pair
+  - name: cross-file consumePair destructures Pair into its components, not the class
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'consumePair' AND e.edge_kind = 'Calls'
-        AND callee.fqn = 'com.example.Pair'
       RETURN callee.fqn AS callee
+      ORDER BY callee
     assert:
-      - { empty: true }
+      - { row_count: 2 }
+      - { row: { callee: "com.example.Pair.a" } }
+      - { row: { callee: "com.example.Pair.b" } }
+      - { not: true, row: { callee: "com.example.Pair" } }
 
   - name: cross-file createAndDestructure calls User
     query: |

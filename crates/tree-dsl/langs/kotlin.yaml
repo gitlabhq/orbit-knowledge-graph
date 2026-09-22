@@ -140,6 +140,11 @@ stages:
 
   - name: classify
     rules:
+      # val (a, b) = expr: each slot reads the value's positional component
+      - match: '(property_declaration (binding_pattern_kind) (multi_variable_declaration $$$V:variable_declaration) $E:__call)'
+        replace: '(__destructure (__rhs $E) $$$V->__binding)'
+      - match: '(property_declaration (binding_pattern_kind) (multi_variable_declaration $$$V:variable_declaration) $E:simple_identifier)'
+        replace: '(__destructure (__rhs @$E) $$$V->__binding)'
       - match: '(property_declaration (binding_pattern_kind) $R:type_identifier (variable_declaration $N:simple_identifier) $$$V)'
         replace: '(__def (__defname @$R) (__impl) (__def (__defname @$N) (__property) $$$V))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $G:getter)'
@@ -216,6 +221,11 @@ stages:
       - match: '(class_declaration $M?:modifiers $N:type_identifier $P?:primary_constructor $B?:class_body)'
         replace: '(__def (__defname @$N) (__class) $M $P $B)'
 
+  - name: data-components
+    rules:
+      # A data class destructures by its primary-constructor order
+      - match: '(__def $$$A (modifiers (class_modifier "data")) $$$B (primary_constructor $$$P) $$$C)'
+        replace: '(__def $$$A (modifiers (class_modifier "data")) $$$B (__positional $$$P) $$$C)'
   - name: ssa-cleanup
     rules:
       - match: '(__ssa_return $V:simple_identifier)'

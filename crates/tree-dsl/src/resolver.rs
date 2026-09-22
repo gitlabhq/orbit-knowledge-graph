@@ -1061,24 +1061,39 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
         }
     }
     for d in root.descendants().filter(|d| d.is(C::Destructure)) {
-        let class = d
-            .child(C::Call)
-            .and_then(|c| c.child(C::Callee))
-            .and_then(|k| resolve_chain(ctx, k));
-        let Some((from, class)) = d.enclosing(|e| e.is(C::Def)).zip(class) else {
+        let Some(from) = d.enclosing(|e| e.is(C::Def)) else {
+            continue;
+        };
+        let typed_local = |k: Cursor| {
+            let s = k.sym_opt()?;
+            let binding = from
+                .descendants()
+                .find(|b| b.is(C::Binding) && b.sym_opt() == Some(s))?;
+            resolve_chain(ctx, binding.typed()?)
+        };
+        let class = match (d.child(C::Call), d.child(C::Rhs)) {
+            (Some(pattern), _) => pattern.child(C::Callee).and_then(|k| resolve_chain(ctx, k)),
+            (None, Some(value)) => match value.child(C::Call) {
+                Some(call) => producer_class(ctx, call),
+                None => typed_local(value),
+            },
+            (None, None) => None,
+        };
+        let Some(class) = class else {
             continue;
         };
         let slots: Vec<Cursor> = d
             .children()
             .filter(|s| s.is(C::Binding) || s.is(C::Destructure))
             .collect();
-        let Some(positional) = class
+        let components: Vec<Cursor> = class
             .child(C::Positional)
-            .filter(|p| p.children().count() == slots.len())
-        else {
+            .map(|p| p.children().filter(|c| c.is(C::Binding)).collect())
+            .unwrap_or_default();
+        if components.len() != slots.len() {
             continue;
-        };
-        for (slot, component) in slots.iter().zip(positional.children()) {
+        }
+        for (slot, component) in slots.iter().zip(components) {
             let members = method_up(ctx, class, component.sym(), fi);
             out.extend(call_edges(from, members, Some(slot.index())));
         }
