@@ -168,7 +168,6 @@ impl Resolver {
         config: &ResolveConfig,
         aliases: &[(String, String)],
     ) -> ResolveResult {
-        let t = std::time::Instant::now();
         let index_names = support_lang.index_names();
         self.file_index = build_file_index(trees, lang, support_lang, index_names);
 
@@ -178,8 +177,6 @@ impl Resolver {
                 self.visible[fi] = gather_visible_one(&trees[fi], fi, self.tags.exports);
             }
         }
-
-        eprintln!("  R visible {:.2}s", t.elapsed().as_secs_f64());
         self.reqs.retain(|r| !dirty_fis.contains(&r.fi));
         let (new_reqs, mut cross_edges) = gather_imports_for(
             trees,
@@ -191,8 +188,6 @@ impl Resolver {
             aliases,
         );
         self.reqs.extend(new_reqs);
-
-        eprintln!("  R imports {:.2}s", t.elapsed().as_secs_f64());
         let ambiguous = propagate_reexports(
             trees,
             &self.reqs,
@@ -201,8 +196,6 @@ impl Resolver {
             self.tags,
             config.merge_same_named_types,
         );
-
-        eprintln!("  R reexports {:.2}s", t.elapsed().as_secs_f64());
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
             .reqs
             .iter()
@@ -299,22 +292,12 @@ impl Resolver {
             exporters: &exporters,
             imports: &imports,
         };
-
-        eprintln!("  R ctx {:.2}s", t.elapsed().as_secs_f64());
         let inherit = |&fi: &usize| resolve_file(&ctx, fi);
-        let imp: Vec<Edge> = self
+        let wave1: Vec<Edge> = self
             .reqs
             .par_iter()
             .filter(|r| active_fis.contains(&r.fi) || active_fis.contains(&r.target_fi))
             .flat_map(|req| resolve_one_import(&ctx, req))
-            .collect();
-        eprintln!(
-            "  R wave1-imports {:.2}s ({} edges)",
-            t.elapsed().as_secs_f64(),
-            imp.len()
-        );
-        let wave1: Vec<Edge> = imp
-            .into_par_iter()
             .chain(active_fis.par_iter().flat_map(inherit))
             .filter(|e| {
                 !(e.kind == EdgeKind::Calls
@@ -323,11 +306,6 @@ impl Resolver {
                     && ctx.corpus.follow(e).is_class())
             })
             .collect();
-        eprintln!(
-            "  R wave1 {:.2}s ({} edges)",
-            t.elapsed().as_secs_f64(),
-            wave1.len()
-        );
         for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
             ctx.extends_of.entry(e.from()).or_default().push(e.to());
         }
@@ -346,11 +324,6 @@ impl Resolver {
             .collect();
         cross_edges.extend(&wave2);
 
-        eprintln!(
-            "  R wave2 {:.2}s ({} edges)",
-            t.elapsed().as_secs_f64(),
-            wave2.len()
-        );
         let mut seen = FxHashSet::default();
         let mut wave: Vec<Edge> = edges
             .iter()
@@ -372,11 +345,6 @@ impl Resolver {
                 .collect();
             type_edges.extend(&wave);
         }
-        eprintln!(
-            "  R fixpoint {:.2}s ({} edges)",
-            t.elapsed().as_secs_f64(),
-            type_edges.len()
-        );
         cross_edges.extend(type_edges);
 
         ResolveResult {

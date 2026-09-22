@@ -313,86 +313,105 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
         vec![(rel, content)]
     };
 
-    let lang_id = resolve_lang(
-        lang_override.as_deref(),
-        files.first().map(|(p, _)| p.as_str()),
-    );
+    // One graph per pipeline; a repo mixing Python and TypeScript gets two.
+    let mut by_lang: std::collections::BTreeMap<String, (SupportLang, Vec<(String, String)>)> =
+        Default::default();
+    for (rel, content) in files {
+        let lang = resolve_lang(lang_override.as_deref(), Some(&rel)).pipeline();
+        by_lang
+            .entry(format!("{lang:?}"))
+            .or_insert_with(|| (lang, Vec::new()))
+            .1
+            .push((rel, content));
+    }
 
-    let (env, state) = tree_dsl::index(lang_id, &files);
-    let elapsed = t0.elapsed();
-
-    let mut total_defs = 0usize;
-    let mut total_imports = 0usize;
-
-    for tree in &state.trees {
-        for c in tree.root().descendants() {
-            if c.is(tree_dsl::canonical::Canonical::Def) {
-                total_defs += 1;
-            } else if c.is(tree_dsl::canonical::Canonical::Import)
-                || c.is(tree_dsl::canonical::Canonical::ImportType)
-            {
-                total_imports += 1;
+    let (mut total_files, mut total_defs, mut total_imports, mut total_edges) = (0, 0, 0, 0);
+    for (name, (lang_id, files)) in by_lang {
+        let t_lang = Instant::now();
+        let (env, state) = tree_dsl::index(lang_id, &files);
+        let (mut defs, mut imports) = (0usize, 0usize);
+        for tree in &state.trees {
+            for c in tree.root().descendants() {
+                if c.is(tree_dsl::canonical::Canonical::Def) {
+                    defs += 1;
+                } else if c.is(tree_dsl::canonical::Canonical::Import)
+                    || c.is(tree_dsl::canonical::Canonical::ImportType)
+                {
+                    imports += 1;
+                }
             }
+        }
+        eprintln!(
+            "{name:<12} files {:>6}  defs {:>7}  imports {:>7}  edges {:>7}  {:.2}s",
+            state.trees.len(),
+            defs,
+            imports,
+            state.edges.len(),
+            t_lang.elapsed().as_secs_f64()
+        );
+        total_files += state.trees.len();
+        total_defs += defs;
+        total_imports += imports;
+        total_edges += state.edges.len();
+
+        if !no_save {
+            let graphs_dir = dirs::home_dir()
+                .unwrap_or_else(|| Path::new(".").to_path_buf())
+                .join(".orbit/var/graphs");
+            std::fs::create_dir_all(&graphs_dir)?;
+            let repo = Path::new(path)
+                .file_name()
+                .unwrap_or(std::ffi::OsStr::new("graph"))
+                .to_string_lossy();
+            let snap_path = graphs_dir.join(format!("{repo}.{}.bin", name.to_lowercase()));
+            let t_save = Instant::now();
+            state.save(&env, &snap_path)?;
+            let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
+            eprintln!(
+                "saved:        {} ({:.1} MB, {:.2}s)",
+                snap_path.display(),
+                size_mb,
+                t_save.elapsed().as_secs_f64()
+            );
         }
     }
 
     eprintln!();
     eprintln!("--- stats ---");
-    eprintln!("files:        {}", state.trees.len());
-    eprintln!("definitions:  {}", total_defs);
-    eprintln!("imports:      {}", total_imports);
-    eprintln!("edges:        {}", state.edges.len());
-    eprintln!("total:        {:.2}s", elapsed.as_secs_f64());
-
-    if !no_save {
-        let graphs_dir = dirs::home_dir()
-            .unwrap_or_else(|| Path::new(".").to_path_buf())
-            .join(".orbit/var/graphs");
-        std::fs::create_dir_all(&graphs_dir)?;
-        let name = Path::new(path)
-            .file_name()
-            .unwrap_or(std::ffi::OsStr::new("graph"))
-            .to_string_lossy();
-        let snap_path = graphs_dir.join(format!("{name}.bin"));
-        let t_save = Instant::now();
-        state.save(&env, &snap_path)?;
-        let save_s = t_save.elapsed().as_secs_f64();
-        let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
-        eprintln!(
-            "saved:        {} ({:.1} MB, {:.2}s)",
-            snap_path.display(),
-            size_mb,
-            save_s
-        );
-    }
+    eprintln!("files:        {total_files}");
+    eprintln!("definitions:  {total_defs}");
+    eprintln!("imports:      {total_imports}");
+    eprintln!("edges:        {total_edges}");
+    eprintln!("total:        {:.2}s", t0.elapsed().as_secs_f64());
     Ok(())
 }
 
 fn collect_files(dir: &Path) -> Vec<(String, String)> {
-    let mut files = Vec::new();
-    for entry in walkdir::WalkDir::new(dir)
+    use rayon::prelude::*;
+    let paths: Vec<std::path::PathBuf> = walkdir::WalkDir::new(dir)
         .into_iter()
         .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if path.is_file()
-            && path
-                .extension()
-                .and_then(|e| e.to_str())
-                .and_then(SupportLang::from_extension)
-                .is_some()
-            && let Ok(content) = std::fs::read_to_string(path)
-        {
+        .map(|e| e.into_path())
+        .filter(|p| {
+            p.is_file()
+                && p.extension()
+                    .and_then(|e| e.to_str())
+                    .and_then(SupportLang::from_extension)
+                    .is_some()
+        })
+        .collect();
+    paths
+        .par_iter()
+        .filter_map(|path| {
+            let content = std::fs::read_to_string(path).ok()?;
             let rel = path
                 .strip_prefix(dir)
                 .unwrap_or(path)
                 .to_string_lossy()
                 .to_string();
-            files.push((rel, content));
-        }
-    }
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    files
+            Some((rel, content))
+        })
+        .collect()
 }
 
 #[cfg(feature = "test-runner")]

@@ -98,6 +98,15 @@ impl SupportLang {
         Self::from_extension(ext)
     }
 
+    /// The language whose rule file this one shares. TypeScript, TSX, and
+    /// JavaScript differ only in grammar and form one graph.
+    pub fn pipeline(self) -> Self {
+        match self {
+            Self::Tsx | Self::JavaScript => Self::TypeScript,
+            other => other,
+        }
+    }
+
     pub fn ts_language(&self) -> tree_sitter::Language {
         let entry = &LANG_CONFIG.languages[self];
         grammar_to_ts_language(&entry.grammar)

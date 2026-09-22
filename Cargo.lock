@@ -13618,6 +13618,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs",
+ "rayon",
  "serde_json",
  "serde_yaml",
  "tokio",

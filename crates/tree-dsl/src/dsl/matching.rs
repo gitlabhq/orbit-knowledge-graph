@@ -45,15 +45,13 @@ pub(crate) fn matches(t: &Tree, lang: &Lang, id: NodeId, p: &Pat, caps: &mut [Ca
                 return false;
             }
             match text {
-                Text::Lit(s) if n.sym != *s => {
-                    if n.sym != 0 || t.text(id, lang) != lang.syms.resolve(*s) {
-                        return false;
-                    }
+                Text::Lit(s)
+                    if n.sym != *s && (n.sym != 0 || t.text(id, lang) != lang.syms.resolve(*s)) =>
+                {
+                    return false;
                 }
-                Text::Prefix(p) => {
-                    if !t.text(id, lang).starts_with(lang.syms.resolve(*p)) {
-                        return false;
-                    }
+                Text::Prefix(p) if !t.text(id, lang).starts_with(lang.syms.resolve(*p)) => {
+                    return false;
                 }
                 Text::Regex(re) if !re.is_match(t.text(id, lang)) => return false,
                 _ => {}

@@ -10,7 +10,10 @@ use crate::{linker, pattern, treesitter};
 use super::types::{Env, State};
 
 pub fn process_file(env: &Env, path: &str, source: &str) -> (Tree, Vec<Edge>) {
-    let mut tree = treesitter::parse(source, env.lang_id, &env.lang, path);
+    let grammar = SupportLang::from_path(path)
+        .filter(|l| l.pipeline() == env.lang_id.pipeline())
+        .unwrap_or(env.lang_id);
+    let mut tree = treesitter::parse(source, grammar, &env.lang, path);
     for stage in &env.rewrite_stages {
         pattern::apply_rewrites(&mut tree, &env.lang, stage);
     }
@@ -21,13 +24,11 @@ pub fn process_file(env: &Env, path: &str, source: &str) -> (Tree, Vec<Edge>) {
 }
 
 pub fn parse(env: &Env, state: &mut State, files: Vec<(String, String)>) {
-    let t = std::time::Instant::now();
     let results: Vec<(Tree, Vec<Edge>)> = files
         .par_iter()
         .filter(|(p, _)| SupportLang::from_path(p).is_some())
         .map(|(path, content)| process_file(env, path, content))
         .collect();
-    eprintln!("TIME parse+link {:.2}s", t.elapsed().as_secs_f64());
     let base_fi = state.trees.len();
     for (i, (tree, intra)) in results.into_iter().enumerate() {
         let fi = (base_fi + i) as u32;
@@ -46,7 +47,6 @@ pub fn resolve(
     dirty_fis: FxHashSet<usize>,
     files: Option<&[(String, String)]>,
 ) {
-    let t = std::time::Instant::now();
     let paths: Vec<&str> = state.trees.iter().map(|t| t.label.as_str()).collect();
     let walk = ProjectTree::build(
         &env.lang,
@@ -55,8 +55,6 @@ pub fn resolve(
         &paths,
         files,
     );
-    eprintln!("TIME project-tree {:.2}s", t.elapsed().as_secs_f64());
-    let t = std::time::Instant::now();
     let result = state.resolver.resolve(
         &state.trees,
         &state.edges,
@@ -67,7 +65,6 @@ pub fn resolve(
         &env.config.resolve,
         &walk.aliases,
     );
-    eprintln!("TIME resolve {:.2}s", t.elapsed().as_secs_f64());
     for rsp in &result.resolved_source_paths {
         let nid = state.trees[rsp.fi].to_id(rsp.node);
         state.trees[rsp.fi].node_mut(nid).sym = rsp.sym;
