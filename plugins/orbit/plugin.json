@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "orbit",
+  "version": "0.18.0",
+  "description": "Find code and read definitions, callers, and callees with Orbit CLI.",
+  "author": { "name": "GitLab" },
+  "homepage": "https://docs.gitlab.com/orbit/local/",
+  "repository": "https://gitlab.com/gitlab-org/orbit/knowledge-graph",
+  "extensions": {
+    "com.openai": {
+      "hooks": [],
+      "interface": {
+        "displayName": "Orbit CLI",
+        "shortDescription": "Search code and follow its relationships",
+        "developerName": "GitLab",
+        "category": "Developer tools",
+        "capabilities": ["Read"],
+        "defaultPrompt": ["Use Orbit to find the implementation and its callers."]
+      }
+    }
+  }
+}
