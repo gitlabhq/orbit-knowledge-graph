@@ -2450,6 +2450,8 @@ namespace MyApp {
         let sources = [
             ("a.py", "def a():\n    pass\n"),
             ("b.py", "from a import a\n\ndef b():\n    a()\n"),
+            ("c.rs", "pub fn c() {}\n"),
+            ("d.js", "export function d() {\n    return 1;\n}\n"),
             ("notes.txt", "not code\n"),
         ];
         for (name, content) in sources {
@@ -2478,8 +2480,8 @@ namespace MyApp {
             Arc::new(|_: &str, _: RecordBatch| Ok(())),
         );
 
-        assert_eq!(*progress.discoveries.lock().unwrap(), vec![(3, 2)]);
-        assert_eq!(progress.parsed.load(Ordering::Relaxed), 2);
-        assert_eq!(progress.resolved.load(Ordering::Relaxed), 2);
+        assert_eq!(*progress.discoveries.lock().unwrap(), vec![(5, 4)]);
+        assert_eq!(progress.parsed.load(Ordering::Relaxed), 4);
+        assert_eq!(progress.resolved.load(Ordering::Relaxed), 4);
     }
 }

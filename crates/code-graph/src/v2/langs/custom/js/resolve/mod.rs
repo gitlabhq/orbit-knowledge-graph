@@ -71,6 +71,9 @@ pub fn attach_resolution_edges(
                         "per-file watchdog killed local call resolution",
                     );
                 }
+                ctx.config
+                    .progress
+                    .files_advanced(crate::v2::pipeline::ProgressPhase::Resolve, 1);
                 edges
             })
             .collect()
@@ -775,7 +778,13 @@ mod tests {
 
         let files = vec!["a.js".to_string()];
         let root_path = root.to_str().expect("utf8 root path");
-        let (analyzed, _) = analyze_files(&files, root_path, None, &Default::default());
+        let (analyzed, _) = analyze_files(
+            &files,
+            root_path,
+            None,
+            &Default::default(),
+            &crate::v2::pipeline::SilentProgress,
+        );
         let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
         let mut infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved = Vec::new();
