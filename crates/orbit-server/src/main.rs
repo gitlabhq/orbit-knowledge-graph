@@ -62,8 +62,7 @@ async fn main() -> anyhow::Result<()> {
     if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
     }
-    let orbit_server::tls::ListenerTls { http, probe_server } =
-        orbit_server::tls::ListenerTls::load(&config.tls)?;
+    let internal_tls = orbit_server::tls::load_internal(&config.tls)?;
     let probe_bind_address = config.probe_server_bind_address()?;
     builder = builder.health_bind(probe_bind_address);
     if config.metrics.prometheus.enabled {
@@ -74,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
     for (name, check) in probes::readiness_checks(args.mode, &active_schema, &serving) {
         builder = builder.add_readiness_check(name, check);
     }
-    builder = builder.probe_tls(probe_server);
+    builder = builder.probe_tls(internal_tls.clone());
     let _guard = builder.init().expect("labkit init");
 
     if config.metrics.prometheus.port.is_some() {
@@ -106,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .map_err(Into::into)
         }
-        Mode::HealthCheck => health_check_mode::run(&config, http)
+        Mode::HealthCheck => health_check_mode::run(&config, internal_tls)
             .await
             .map_err(Into::into),
         Mode::Indexer => {

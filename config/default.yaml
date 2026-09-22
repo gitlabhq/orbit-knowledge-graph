@@ -87,18 +87,14 @@ gitlab:
     # verifying_key: ""
 
 tls:
-  # Shared identity. Setting both enables TLS on the gRPC server, and each
-  # listener group below inherits them unless it names its own.
+  # Shared identity. Setting both enables TLS on the gRPC server, and the
+  # internal group below inherits them unless it names its own.
   # cert_path: "/path/to/cert.pem"
   # key_path: "/path/to/key.pem"
-  # The HTTP listeners this binary binds: webserver, indexer, dispatcher and
-  # health-check. A group inherits the identity above when enabled, or names its
-  # own cert_path and key_path as a pair.
-  http:
-    enabled: false
-  # The listener labkit binds: /-/metrics plus its own /-/liveness and
-  # /-/readiness.
-  probe_server:
+  # The internal listeners: the probe server in every mode (/-/liveness,
+  # /-/readiness and /-/metrics) and the health-check API. Inherits the identity
+  # above when enabled, or names its own cert_path and key_path as a pair.
+  internal:
     enabled: false
 
 engine:

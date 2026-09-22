@@ -734,7 +734,7 @@
       "additionalProperties": false
     },
     "ListenerTlsConfig": {
-      "description": "TLS for one group of listeners.",
+      "description": "TLS for a group of listeners.",
       "type": "object",
       "properties": {
         "cert_path": {
@@ -1535,8 +1535,8 @@
             "null"
           ]
         },
-        "http": {
-          "description": "The HTTP listeners this binary binds: the webserver, the indexer and\ndispatcher health ports, and the health-check service.",
+        "internal": {
+          "description": "The internal listeners: the probe server in every mode and the\nhealth-check API.",
           "$ref": "#/$defs/ListenerTlsConfig",
           "default": {
             "cert_path": null,
@@ -1549,15 +1549,6 @@
             "string",
             "null"
           ]
-        },
-        "probe_server": {
-          "description": "The listener labkit binds: `/-/metrics`, and its own `/-/liveness` and\n`/-/readiness` on the same port.",
-          "$ref": "#/$defs/ListenerTlsConfig",
-          "default": {
-            "cert_path": null,
-            "enabled": false,
-            "key_path": null
-          }
         }
       },
       "additionalProperties": false

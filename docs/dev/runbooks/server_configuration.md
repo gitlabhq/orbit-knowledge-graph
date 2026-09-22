@@ -422,7 +422,7 @@ These settings are used by the Webserver mode.
 ### TLS
 
 `cert_path` and `key_path` are the shared identity. Setting both enables TLS on the gRPC
-server. Each listener group below is off by default; when enabled it inherits that identity
+server. The internal group below is off by default. When enabled it inherits that identity
 unless it names its own, so an externally pinned certificate and an internal one can rotate
 on different cycles.
 
@@ -430,26 +430,24 @@ on different cycles.
 |-------------|---------|-------------|
 | `tls.cert_path` | None | TLS certificate path (PEM) |
 | `tls.key_path` | None | TLS private key path (PEM) |
-| `tls.http.enabled` | `false` | TLS on the webserver, indexer, dispatcher and health-check HTTP listeners |
-| `tls.http.cert_path` | None | Overrides `tls.cert_path` for those listeners |
-| `tls.http.key_path` | None | Overrides `tls.key_path` for those listeners |
-| `tls.probe_server.enabled` | `false` | TLS on the labkit listener: `/-/metrics` plus its own `/-/liveness` and `/-/readiness` |
-| `tls.probe_server.cert_path` | None | Overrides `tls.cert_path` for the probe server |
-| `tls.probe_server.key_path` | None | Overrides `tls.key_path` for the probe server |
+| `tls.internal.enabled` | `false` | TLS on the probe server (`/-/liveness`, `/-/readiness`, `/-/metrics`) and the health-check API |
+| `tls.internal.cert_path` | None | Overrides `tls.cert_path` for the internal listeners |
+| `tls.internal.key_path` | None | Overrides `tls.key_path` for the internal listeners |
 
 Certificates are read at startup, so rotation needs a pod restart.
 
-Enabling `tls.http` changes what clients must send:
+Enabling `tls.internal` changes what clients must send:
 
-- Kubernetes probes need `scheme: HTTPS`. The kubelet does not verify the certificate.
+- Kubernetes probes on the probe server need `scheme: HTTPS`. The kubelet does not verify the
+  certificate.
 - `health_check_url` must become `https://`. The webserver verifies that certificate against
-  the OS trust store, so the certificate needs a SAN for the health-check service name and
-  its CA must be present in `/etc/pki/tls/certs`.
+  the OS trust store. The certificate needs a SAN for the health-check service name, and its
+  CA must be present in `/etc/pki/tls/certs`.
 - KEDA scalers that read `/queue-depth` need the same treatment.
+- The PodMonitor needs `scheme: https` and a `tlsConfig` that either trusts the issuing CA
+  (with `serverName`, because Prometheus connects to the pod IP) or sets `insecureSkipVerify`.
 
-Enabling `tls.probe_server` requires the PodMonitor to set `scheme: https` and a `tlsConfig` that
-either trusts the issuing CA (with `serverName`, because Prometheus connects to the pod IP)
-or sets `insecureSkipVerify`.
+The legacy `/live` and `/ready` listeners stay plaintext until the chart probes the probe server.
 
 ### gRPC tuning
 

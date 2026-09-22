@@ -4,9 +4,9 @@
 //! depends on `tonic` stays in `orbit-server`.
 //!
 //! `cert_path` and `key_path` are the shared identity. The gRPC server uses
-//! them directly. Each other group of listeners is off by default and may
-//! either inherit that identity or name its own, so an external-facing
-//! certificate and an internal one can be rotated on different cycles.
+//! them directly. The internal listeners are off by default and may either
+//! inherit that identity or name their own, so an external-facing certificate
+//! and an internal one can be rotated on different cycles.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,19 +17,14 @@ use serde::{Deserialize, Serialize};
 pub struct TlsConfig {
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
-    /// The HTTP listeners this binary binds: the webserver, the indexer and
-    /// dispatcher health ports, and the health-check service.
+    /// The internal listeners: the probe server in every mode and the
+    /// health-check API.
     #[serde(default)]
     #[schemars(default)]
-    pub http: ListenerTlsConfig,
-    /// The listener labkit binds: `/-/metrics`, and its own `/-/liveness` and
-    /// `/-/readiness` on the same port.
-    #[serde(default)]
-    #[schemars(default)]
-    pub probe_server: ListenerTlsConfig,
+    pub internal: ListenerTlsConfig,
 }
 
-/// TLS for one group of listeners.
+/// TLS for a group of listeners.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
@@ -57,16 +52,10 @@ pub enum IdentityError {
 }
 
 impl TlsConfig {
-    /// Certificate and key for the HTTP listeners, or `None` when they stay
-    /// plaintext.
-    pub fn http_paths(&self) -> Result<Option<(&str, &str)>, IdentityError> {
-        self.resolve(&self.http, "http")
-    }
-
-    /// Certificate and key for the labkit probe server, or `None` when it
-    /// stays plaintext.
-    pub fn probe_server_paths(&self) -> Result<Option<(&str, &str)>, IdentityError> {
-        self.resolve(&self.probe_server, "probe_server")
+    /// Certificate and key for the internal listeners, or `None` when they
+    /// stay plaintext.
+    pub fn internal_paths(&self) -> Result<Option<(&str, &str)>, IdentityError> {
+        self.resolve(&self.internal, "internal")
     }
 
     fn resolve<'a>(
@@ -125,56 +114,53 @@ mod tests {
     fn listener_tls_is_off_by_default() {
         let tls = AppConfig::embedded_defaults().tls;
 
-        assert!(!tls.http.enabled);
-        assert!(!tls.probe_server.enabled);
-        assert_eq!(tls.http_paths().unwrap(), None);
-        assert_eq!(tls.probe_server_paths().unwrap(), None);
+        assert!(!tls.internal.enabled);
+        assert_eq!(tls.internal_paths().unwrap(), None);
     }
 
     #[test]
     fn an_enabled_group_inherits_the_shared_identity() {
         let tls = config_from(
-            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  http:\n    enabled: true\n",
+            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  internal:\n    enabled: true\n",
         )
         .tls;
 
         assert_eq!(
-            tls.http_paths().unwrap(),
+            tls.internal_paths().unwrap(),
             Some(("/etc/tls/tls.crt", "/etc/tls/tls.key"))
         );
-        assert_eq!(tls.probe_server_paths().unwrap(), None);
     }
 
     #[test]
     fn a_group_can_override_the_shared_identity() {
         let tls = config_from(
-            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  http:\n    enabled: true\n    cert_path: /etc/tls-internal/tls.crt\n    key_path: /etc/tls-internal/tls.key\n",
+            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  internal:\n    enabled: true\n    cert_path: /etc/tls-internal/tls.crt\n    key_path: /etc/tls-internal/tls.key\n",
         )
         .tls;
 
         assert_eq!(
-            tls.http_paths().unwrap(),
+            tls.internal_paths().unwrap(),
             Some(("/etc/tls-internal/tls.crt", "/etc/tls-internal/tls.key"))
         );
     }
 
     #[test]
     fn an_enabled_group_without_an_identity_is_an_error() {
-        let tls = config_from("tls:\n  probe_server:\n    enabled: true\n").tls;
+        let tls = config_from("tls:\n  internal:\n    enabled: true\n").tls;
 
-        let error = tls.probe_server_paths().unwrap_err();
+        let error = tls.internal_paths().unwrap_err();
 
-        assert!(error.to_string().contains("tls.probe_server.cert_path"));
+        assert!(error.to_string().contains("tls.internal.cert_path"));
     }
 
     #[test]
     fn a_group_naming_only_one_half_of_an_identity_is_an_error() {
         let tls = config_from(
-            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  probe_server:\n    enabled: true\n    cert_path: /etc/tls-internal/tls.crt\n",
+            "tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n  internal:\n    enabled: true\n    cert_path: /etc/tls-internal/tls.crt\n",
         )
         .tls;
 
-        let error = tls.probe_server_paths().unwrap_err();
+        let error = tls.internal_paths().unwrap_err();
 
         assert!(
             error
@@ -185,12 +171,12 @@ mod tests {
     }
 
     #[test]
-    fn the_orbit_prd_overlay_still_parses_without_the_new_groups() {
+    fn the_orbit_prd_overlay_still_parses_without_the_internal_group() {
         let tls =
             config_from("tls:\n  cert_path: /etc/tls/tls.crt\n  key_path: /etc/tls/tls.key\n").tls;
 
-        assert!(!tls.http.enabled);
-        assert_eq!(tls.http_paths().unwrap(), None);
+        assert!(!tls.internal.enabled);
+        assert_eq!(tls.internal_paths().unwrap(), None);
     }
 
     #[test]
@@ -199,8 +185,8 @@ mod tests {
         // inside it would each leave the listener plaintext while the config
         // looks right.
         for overlay in [
-            "tls:\n  http:\n    enable: true\n",
-            "tls:\n  htp:\n    enabled: true\n",
+            "tls:\n  internal:\n    enable: true\n",
+            "tls:\n  internl:\n    enabled: true\n",
         ] {
             let result: Result<AppConfig, _> = config::Config::builder()
                 .add_source(config::File::from_str(
