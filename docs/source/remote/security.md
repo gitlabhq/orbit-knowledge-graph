@@ -96,10 +96,13 @@ follow the token owner's access in GitLab, not the other permissions on the toke
 
 - Add the GitLab Orbit **Read** permission under the **User** tab. The token can then call every
   GitLab Orbit REST endpoint and the MCP endpoint, and sees everything the token owner can see.
+- Or add the GitLab Orbit **Read** permission under **Group and project access** for one or more
+  groups. The token can call the same endpoints. GitLab Orbit then trims the token owner's access
+  to the selected groups and their subgroups. Data outside those groups does not appear in results.
+- A token with the permission under both tabs, or with **All memberships**, is not trimmed.
+- GitLab Orbit does not support project selections. A token that selects only projects gets `403`.
 - A fine-grained token without that permission gets `403` from every GitLab Orbit endpoint,
   including MCP.
-- GitLab Orbit does not offer group or project scopes yet. A token created only under
-  **Group and project access** gets `403` from GitLab Orbit.
 - Other permissions on the token have no effect on GitLab Orbit results. A token without the Work item
   **Read** permission still gets work items from GitLab Orbit when the owner can read them in GitLab.
 - The Reporter floor and the Security Manager rule in

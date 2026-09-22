@@ -41,7 +41,8 @@ Bearer token:
 
 Results are scoped to entities the token owner can access in GitLab.
 
-A fine-grained token needs the GitLab Orbit **Read** permission under the **User** tab. For more
+A fine-grained token needs the GitLab Orbit **Read** permission under the **User** tab, or under
+**Group and project access** for the groups it may read. For more
 information, see [Fine-grained personal access tokens](../security.md#fine-grained-personal-access-tokens).
 
 ## Billing
