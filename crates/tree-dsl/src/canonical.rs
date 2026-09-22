@@ -211,6 +211,8 @@ pub enum Canonical {
     Constructor,
     #[strum(serialize = "__implicit")]
     Implicit,
+    #[strum(serialize = "__simple_name")]
+    SimpleName,
     #[strum(serialize = "__predeclared")]
     Predeclared,
     #[strum(serialize = "__companion")]

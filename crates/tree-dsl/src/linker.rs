@@ -127,7 +127,7 @@ impl<'t> Fold<'t> {
                 self.value_sink.insert(tail.index(), lhs);
             }
             self.walk_children(arm);
-            if let Some(lhs) = lhs.filter(|_| !tail.is(C::SsaBranch)) {
+            if let Some(lhs) = lhs.filter(|_| !tail.is(C::SsaBranch) && !tail.is(C::SsaReturn)) {
                 let val = self.classify_tail(tail);
                 if val != Value::Opaque {
                     self.ssa.write_variable(lhs, self.cur, val);
@@ -285,8 +285,8 @@ impl<'t> Fold<'t> {
                 self.push_calls(from, self.find_method_in(cls, iv.sym()));
             }
         } else if let Some(sym) = callee.sym_opt() {
-            if callee.has(C::Implicit) {
-                self.resolve_implicit(sym, from);
+            if callee.has(C::Implicit) || callee.has(C::SimpleName) {
+                self.resolve_implicit(sym, from, callee.has(C::SimpleName));
             } else {
                 self.resolve_name(sym, from, !callee.has(C::Predeclared));
             }
@@ -426,7 +426,16 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn resolve_implicit(&mut self, sym: u32, from: u32) {
+    fn resolve_implicit(&mut self, sym: u32, from: u32, locals_first: bool) {
+        let local = |b: Cursor| b.is(C::Binding) && b.sym_opt() == Some(sym) && !b.has(C::Ivar);
+        if locals_first && self.tree.cursor(from).any_desc(local) {
+            let mut bound = self.lookup(sym);
+            bound.retain(|r| matches!(r, Linked::Def(_) | Linked::Import(_)));
+            for r in &bound {
+                self.emit(r, from);
+            }
+            return;
+        }
         let members = self
             .enclosing_class(from)
             .map(|cls| self.find_method_in(cls, sym))

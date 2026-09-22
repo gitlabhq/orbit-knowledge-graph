@@ -145,11 +145,13 @@ corrected to the language rule and carry a `corrected:` note.
   package key. Elixir modules carry an `exports` tag with their short name.
 - Typed parameters carry `(__binding $x (__ssa_typed T) (__rhs (__member
   (__object T))))`, a type reference that dispatches member calls on `$x`.
-- A bare call `N()` in Java, C#, Scala, and Ruby is `(__call (__callee N
-  (__implicit)))`. The linker looks up the name in order: a member of the
+- A bare call is `(__call (__callee N (__implicit)))` in a method namespace
+  (Java, Ruby `m(...)`): the linker looks the name up as a member of the
   enclosing class, then a lexical binding or named import, then a wildcard
-  import tagged `callable` such as `import static C.*` or `using static T`. A
-  type wildcard supplies no callees (JLS 15.12.1). Every edge carries the site.
+  import tagged `callable` (JLS 15.12.1). In a unified namespace (C#, Scala,
+  a Ruby bare identifier) it is `(__callee N (__simple_name))`: a local
+  binding in the enclosing definition shadows the member first. Every edge
+  carries the site. A type wildcard supplies no callees.
 - A predeclared identifier such as Go `len` or Kotlin `println` is `(__callee N
   (__predeclared))`: a lexical definition shadows it; otherwise it binds to
   nothing, never to a wildcard import.
@@ -169,26 +171,24 @@ corrected to the language rule and carry a `corrected:` note.
 
 ## Follow-ups the audit found
 
-Rules the engine applies for every language today where one language's
-semantics differ, or where only one rule file declares the fact.
-
 - Inherited-member pick. Every shallowest-level candidate gets an edge. The
   language rule differs: Python C3 leftmost, Ruby last include, Scala
   rightmost trait, Java superclass over interface default, Go and Kotlin
   reject. Declare it per class when a fixture needs the exact pick;
   prototyped as a `linearize` tag at 2f31390d2.
-- Bottom-typed arms. Only kotlin.yaml declares `throw` and `null` as
-  valueless branches. Java `throw` in a switch-expression arm, C# throw
-  expressions, Scala, Swift, and Rust `panic!` or `return` in match arms
-  should declare `(__ssa_branch)` the same way; until then a join over such
-  an arm yields no edge.
-- Bare-call order. The linker resolves an implicit-receiver call as class
-  member, then lexical binding or named import, then callable wildcard. C#
-  resolves a simple name to a local before a member (spec 12.8.4); Ruby stops
-  at the self chain. No fixture exercises the difference; declare the order
-  when one does.
-- Ruby `module` definitions carry `__class`, so they export as Class. The
-  rule file can emit a module kind when the export vocabulary has one.
+- Ruby and Elixir `module` definitions carry `__class` and export as Class
+  because the definition vocabulary has no module kind. Adding one is an
+  export-vocabulary change, not a rule change.
+
+Handled: bottom-typed arms are declared in java.yaml (`throw_statement`),
+csharp.yaml (`throw_statement`, `throw_expression`), scala.yaml
+(`throw_expression`), swift.yaml (`control_transfer_statement` with
+`throw_keyword`), rust.yaml (`panic!`, `unreachable!`, `todo!`,
+`unimplemented!`) and kotlin.yaml (`throw`, `null`); a `return` arm is bottom
+in every language. A simple name in a unified namespace (C#, Scala, a Ruby
+bare identifier) is `(__callee N (__simple_name))`: a local binding in the
+enclosing definition shadows a member (C# spec 12.8.4); a method-namespace
+call (Java, Ruby `m(...)`) stays `(__implicit)`.
 
 ## Base-branch behavior the reviews flagged
 

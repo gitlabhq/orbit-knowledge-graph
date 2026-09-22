@@ -9,6 +9,8 @@ stages:
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_expression $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
+      - match: '(macro_invocation macro: (identifier "/^(panic|unreachable|todo|unimplemented)$/") $$$V)'
+        replace: '(__ssa_branch $$$V)'
 
       # match_arm → __ssa_arm (keep only the value expression)
       - match: '(match_arm value: $V)'

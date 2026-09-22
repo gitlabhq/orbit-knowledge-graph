@@ -663,8 +663,9 @@ fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
                         continue;
                     }
                     let callee = call.child(C::Callee).and_then(|k| {
-                        k.child_sym(C::Ivar)
-                            .or_else(|| k.has(C::Implicit).then(|| k.sym()))
+                        k.child_sym(C::Ivar).or_else(|| {
+                            (k.has(C::Implicit) || k.has(C::SimpleName)).then(|| k.sym())
+                        })
                     });
                     let Some((from, name)) = call.enclosing(|e| e.is(C::Def)).zip(callee) else {
                         continue;
@@ -892,7 +893,9 @@ fn branch_type<'a>(ctx: &'a ResolveCtx, branch: Cursor<'a>) -> Option<Cursor<'a>
         .filter(|a| a.is(C::SsaArm))
         .filter_map(|a| {
             let tail = a.tail_expr();
-            if tail.is(C::SsaBranch) && !tail.children().any(|c| c.is(C::SsaArm)) {
+            if tail.is(C::SsaReturn)
+                || tail.is(C::SsaBranch) && !tail.children().any(|c| c.is(C::SsaArm))
+            {
                 return None;
             }
             Some(if tail.is(C::SsaBranch) {

@@ -171,7 +171,7 @@ stages:
       - match: '(assignment left: $L:identifier right: $R:constant)'
         replace: '(__binding @$L (__rhs (__call (__callee @$R))))'
       - match: '(assignment left: $L:identifier right: $R:identifier)'
-        replace: '(__binding @$L (__rhs (__call (__callee @$R (__implicit)))))'
+        replace: '(__binding @$L (__rhs (__call (__callee @$R (__simple_name)))))'
       - match: '(assignment left: $L:identifier right: $R)'
         replace: '(__binding @$L (__rhs @$R))'
 
@@ -219,7 +219,7 @@ stages:
     rules:
       # Remaining bare identifiers: implicit-self calls (may be locals)
       - match: '(identifier)'
-        replace: '(__call (__callee @$ROOT (__implicit)))'
+        replace: '(__call (__callee @$ROOT (__simple_name)))'
       # Remaining bare constants: references
       - match: '(constant)'
         replace: '(__call (__callee @$ROOT))'

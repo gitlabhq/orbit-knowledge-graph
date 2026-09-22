@@ -1,0 +1,25 @@
+name: "Scala: a throw expression is bottom and does not take part in the join"
+fixtures:
+  - path: bottom/A.scala
+    content: |
+      package bottom
+      class A { def n(): Unit = () }
+  - path: bottom/Use.scala
+    content: |
+      package bottom
+      object Use {
+        def run(c: Boolean): Unit = {
+          val p = if (c) new A() else throw new RuntimeException("no")
+          p.n()
+        }
+      }
+
+tests:
+  - name: "p.n() dispatches on A after an if whose other arm throws"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND e.edge_kind = 'Calls' AND callee.name = 'n'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "bottom.A.n" } }

@@ -39,6 +39,10 @@ stages:
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
+      - match: '(throw_statement $$$V)'
+        replace: '(__ssa_branch $$$V)'
+      - match: '(throw_expression $$$V)'
+        replace: '(__ssa_branch $$$V)'
       - match: '(modifier "partial")'
         replace: '(__partial)'
 
@@ -96,7 +100,7 @@ stages:
       - match: '(invocation_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(invocation_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F (__implicit)) $A)'
+        replace: '(__call (__callee @$F (__simple_name)) $A)'
       - match: '(invocation_expression function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
       - match: '(object_creation_expression type: $T:identifier arguments:? $A $$$B:initializer_expression)'
@@ -108,6 +112,8 @@ stages:
     rules:
       # Locals
       - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V:__call))'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V:__ssa_branch))'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V))'
         replace: '(__binding @$N (__rhs @$V))'
