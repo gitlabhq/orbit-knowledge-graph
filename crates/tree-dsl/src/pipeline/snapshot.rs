@@ -97,6 +97,7 @@ pub struct SnapshotNode {
 pub struct TreeSnapshot {
     pub nodes: Vec<SnapshotNode>,
     pub label: String,
+    pub source: String,
     pub tags: Vec<(u32, Vec<Tag>)>,
 }
 
@@ -137,6 +138,7 @@ impl From<&Tree> for TreeSnapshot {
         Self {
             nodes,
             label: tree.label.clone(),
+            source: tree.source.to_string(),
             tags,
         }
     }
@@ -186,6 +188,7 @@ impl From<TreeSnapshot> for Tree {
             id_map.push(id);
         }
         tree.label = snap.label;
+        tree.source = std::sync::Arc::from(snap.source);
         for (node, tags) in snap.tags {
             tree.tags.insert(node, SmallVec::from_vec(tags));
         }

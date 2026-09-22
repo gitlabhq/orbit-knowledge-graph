@@ -45,15 +45,17 @@ pub(crate) fn matches(t: &Tree, lang: &Lang, id: NodeId, p: &Pat, caps: &mut [Ca
                 return false;
             }
             match text {
-                Text::Lit(s) if n.sym != *s => return false,
-                Text::Prefix(p) => {
-                    let sym_str = lang.syms.resolve(n.sym);
-                    let pfx_str = lang.syms.resolve(*p);
-                    if !sym_str.starts_with(pfx_str) {
+                Text::Lit(s) if n.sym != *s => {
+                    if n.sym != 0 || t.text(id, lang) != lang.syms.resolve(*s) {
                         return false;
                     }
                 }
-                Text::Regex(re) if !re.is_match(lang.syms.resolve(n.sym)) => return false,
+                Text::Prefix(p) => {
+                    if !t.text(id, lang).starts_with(lang.syms.resolve(*p)) {
+                        return false;
+                    }
+                }
+                Text::Regex(re) if !re.is_match(t.text(id, lang)) => return false,
                 _ => {}
             }
             let children: Vec<NodeId> = id.children(&t.arena).collect();

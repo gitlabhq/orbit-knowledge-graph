@@ -8,10 +8,10 @@ use crate::tree::{EdgeKind, Tree};
 
 use super::types::{Ctx, EdgeCtx, EdgeDir, Tf};
 
-fn child_sym(t: &Tree, id: NodeId, pred: impl Fn(&crate::tree::Node) -> bool) -> u32 {
+fn child_sym(t: &Tree, lang: &Lang, id: NodeId, pred: impl Fn(&crate::tree::Node) -> bool) -> u32 {
     id.children(&t.arena)
         .find(|&c| pred(t.node(c)))
-        .map_or(0, |c| t.node(c).sym)
+        .map_or(0, |c| t.sym_of(c, lang))
 }
 
 fn nonempty(lang: &Lang, sym: u32) -> Option<u32> {
@@ -211,30 +211,34 @@ impl Tf {
         edge_ctx: Option<&EdgeCtx>,
     ) -> u32 {
         match self {
-            Tf::Id => t.node(id).sym,
+            Tf::Id => t.sym_of(id, lang),
             Tf::Field(f) => {
                 let f = *f;
-                let found = child_sym(t, id, |n| n.field == f);
-                if found != 0 { found } else { t.node(id).sym }
+                let found = child_sym(t, lang, id, |n| n.field == f);
+                if found != 0 {
+                    found
+                } else {
+                    t.sym_of(id, lang)
+                }
             }
             Tf::Const(s) => lang.syms.intern(s),
-            Tf::Child(k) => child_sym(t, id, |n| n.kind == *k),
+            Tf::Child(k) => child_sym(t, lang, id, |n| n.kind == *k),
             Tf::FieldChild(f, k) => {
                 let (f, k) = (*f, *k);
                 id.children(&t.arena)
                     .find(|&c| t.node(c).field == f)
-                    .map_or(0, |n| child_sym(t, n, |n| n.kind == k))
+                    .map_or(0, |n| child_sym(t, lang, n, |n| n.kind == k))
             }
             Tf::ParentSym(k) => {
                 let k = *k;
                 id.parent(&t.arena)
-                    .map_or(0, |p| child_sym(t, p, |n| n.kind == k))
+                    .map_or(0, |p| child_sym(t, lang, p, |n| n.kind == k))
             }
             Tf::AncestorSym(k) => {
                 let k = *k;
                 let mut cur = id;
                 loop {
-                    let sym = child_sym(t, cur, |n| n.kind == k);
+                    let sym = child_sym(t, lang, cur, |n| n.kind == k);
                     if sym != 0 {
                         break sym;
                     }
@@ -293,7 +297,7 @@ impl Tf {
                 }
             }
             Tf::Pipeline(steps) => {
-                let mut s = lang.syms.resolve(t.node(id).sym).to_string();
+                let mut s = t.text(id, lang).to_string();
                 for step in steps {
                     if step.is_node_tf() {
                         s = lang
@@ -307,11 +311,10 @@ impl Tf {
                 lang.syms.intern(&s)
             }
             _ => {
-                let sym = t.node(id).sym;
-                if sym == 0 {
+                let s = t.text(id, lang);
+                if s.is_empty() {
                     return 0;
                 }
-                let s = lang.syms.resolve(sym);
                 let result = self.apply_to_str(s);
                 lang.syms.intern(&result)
             }

@@ -223,6 +223,7 @@ fn from_tree_sitter(
         },
     );
     tree.label = label.to_string();
+    tree.source = std::sync::Arc::from(source);
 
     let root_nid = tree.root;
     let mut parent_stack: Vec<indextree::NodeId> = vec![root_nid];
@@ -237,14 +238,8 @@ fn from_tree_sitter(
         let field = cursor
             .field_id()
             .map_or(0, |f| field_map.get(f.get() as usize).copied().unwrap_or(0));
-        let sym = if ts.is_named() {
-            let len = ts.end_byte() - ts.start_byte();
-            if len <= 1024 {
-                let text = &source[ts.start_byte()..ts.end_byte()];
-                lang.syms.intern(text)
-            } else {
-                0
-            }
+        let sym = if ts.is_named() && ts.named_child_count() == 0 {
+            lang.syms.intern(&source[ts.start_byte()..ts.end_byte()])
         } else {
             0
         };

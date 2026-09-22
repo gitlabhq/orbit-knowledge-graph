@@ -108,6 +108,9 @@ pub struct Tree {
     pub(crate) root: NodeId,
     pub label: String,
     pub tags: FxHashMap<u32, SmallVec<[Tag; 2]>>,
+    /// The file text. Nodes with named children carry no interned sym; their
+    /// text is sliced from here when a rule asks for it.
+    pub source: std::sync::Arc<str>,
 }
 
 impl Tree {
@@ -119,11 +122,38 @@ impl Tree {
             root,
             label: String::new(),
             tags: FxHashMap::default(),
+            source: std::sync::Arc::from(""),
         }
     }
 
     pub fn new(root_node: Node) -> Self {
         Self::with_capacity(1, root_node)
+    }
+
+    /// A node's text: the interned sym when it has one, else its source span.
+    pub fn text<'a>(&'a self, id: NodeId, lang: &'a crate::intern::Lang) -> &'a str {
+        let n = self.node(id);
+        if n.sym != 0 {
+            return lang.syms.resolve(n.sym);
+        }
+        if n.synth || !n.named {
+            return "";
+        }
+        self.source
+            .get(n.start as usize..n.end as usize)
+            .unwrap_or("")
+    }
+
+    /// A node's sym, interning its source text on first use.
+    pub fn sym_of(&self, id: NodeId, lang: &crate::intern::Lang) -> u32 {
+        let n = self.node(id);
+        if n.sym != 0 {
+            return n.sym;
+        }
+        match self.text(id, lang) {
+            "" => 0,
+            s => lang.syms.intern(s),
+        }
     }
 
     #[inline]
