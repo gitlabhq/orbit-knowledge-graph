@@ -13,8 +13,8 @@ fn load_scenarios() -> Vec<(String, serde_json::Value)> {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "yaml") {
             let content = std::fs::read_to_string(&path).unwrap();
-            let doc: serde_json::Value =
-                serde_saphyr::from_str(&content).unwrap_or_else(|e| panic!("parse {:?}: {e}", path));
+            let doc: serde_json::Value = serde_saphyr::from_str(&content)
+                .unwrap_or_else(|e| panic!("parse {:?}: {e}", path));
             let name = doc["name"].as_str().unwrap_or("unnamed").to_string();
             scenarios.push((name, doc));
         }
@@ -46,15 +46,22 @@ fn plan_shape_scenarios() {
             continue;
         };
 
-        let compiled = match compiler::compile(json_str, compiler::Frontend::JsonDsl, &ontology, &ctx) {
-            Ok(c) => c,
-            Err(e) => { failures.push(format!("{name}: compile failed: {e}")); continue; }
-        };
+        let compiled =
+            match compiler::compile(json_str, compiler::Frontend::JsonDsl, &ontology, &ctx) {
+                Ok(c) => c,
+                Err(e) => {
+                    failures.push(format!("{name}: compile failed: {e}"));
+                    continue;
+                }
+            };
 
         let mut input = compiled.input.clone();
         let (_, phys_op) = match compiler::passes::plan_v2::plan(&mut input, &ontology) {
             Ok(p) => p,
-            Err(e) => { failures.push(format!("{name}: plan failed: {e}")); continue; }
+            Err(e) => {
+                failures.push(format!("{name}: plan failed: {e}"));
+                continue;
+            }
         };
 
         let actual = phys_op.to_sexpr();

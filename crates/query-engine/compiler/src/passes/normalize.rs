@@ -167,7 +167,7 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
 
     let excerpt_max_chars = {
         let limit = input.fetch_limit();
-        (8 * 1024 * 1024u32 / 4 / limit.max(1)) as u32
+        8 * 1024 * 1024u32 / 4 / limit.max(1)
     };
 
     for node in &mut input.nodes {
@@ -205,9 +205,7 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             let mut excerpt: std::collections::HashSet<String> = node_entity
                 .fields
                 .iter()
-                .filter(|f| {
-                    f.column_name().is_some() && f.data_type == ontology::DataType::String
-                })
+                .filter(|f| f.column_name().is_some() && f.data_type == ontology::DataType::String)
                 .map(|f| f.name.clone())
                 .collect();
             for f in &node_entity.fields {
