@@ -205,7 +205,16 @@ impl ColumnExpr {
     fn to_sexpr(&self) -> String {
         match self {
             ColumnExpr::Col(table, col) => format!("{table}.{col}"),
+            ColumnExpr::Ident(name) => name.clone(),
             ColumnExpr::Lit(v) => v.to_sexpr(),
+            ColumnExpr::Func(name, args) => {
+                let inner = args
+                    .iter()
+                    .map(|i| i.to_sexpr())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("{name}({inner})")
+            }
             ColumnExpr::Array(items) => {
                 let inner = items
                     .iter()
@@ -247,6 +256,6 @@ impl Metric {
 impl SortKey {
     fn to_sexpr(&self) -> String {
         let dir = if self.desc { "↓" } else { "↑" };
-        format!("{}{dir}", self.column)
+        format!("{}{dir}", self.expr.to_sexpr())
     }
 }

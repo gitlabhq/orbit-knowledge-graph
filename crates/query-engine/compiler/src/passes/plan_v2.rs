@@ -33,6 +33,15 @@ impl JoinGraph {
         Self { by_kind }
     }
 
+    /// Every relationship kind's edge carries the containing namespace's
+    /// traversal path, so a scope prefix on the edge implies containment.
+    pub fn scope_preserving(&self, rel_types: &[String]) -> bool {
+        !rel_types.is_empty()
+            && rel_types
+                .iter()
+                .all(|t| self.by_kind.get(t).is_some_and(|jp| jp.scope_preserving))
+    }
+
     pub fn edge_table(&self, rel_types: &[String], default: &str) -> String {
         for t in rel_types {
             if let Some(jp) = self.by_kind.get(t) {
@@ -179,6 +188,21 @@ pub fn rel_kind_predicate(types: &[String]) -> Option<Predicate> {
     })
 }
 
+/// Relationship-level filters on edge columns (e.g. `project_id`, `traversal_path`).
+fn rel_filter_predicates(rel: &InputRelationship) -> Vec<Predicate> {
+    let mut props: Vec<_> = rel.filters.iter().collect();
+    props.sort_unstable_by_key(|(k, _)| *k);
+    props
+        .into_iter()
+        .flat_map(|(prop, fs)| {
+            fs.iter().map(|f| Predicate::NodeFilter {
+                property: prop.clone(),
+                filter: f.clone(),
+            })
+        })
+        .collect()
+}
+
 fn id_in(column: &str, ids: &[i64]) -> Predicate {
     Predicate::In {
         column: column.to_string(),
@@ -217,9 +241,18 @@ pub enum ProjectedColumn {
 #[derive(Clone, PartialEq, Serialize)]
 pub enum ColumnExpr {
     Col(String, String),
+    /// Bare identifier, e.g. an output alias in ORDER BY.
+    Ident(String),
     Lit(Value),
     Array(Vec<ColumnExpr>),
     Tuple(Vec<ColumnExpr>),
+    Func(String, Vec<ColumnExpr>),
+}
+
+impl ColumnExpr {
+    pub fn col(alias: &str, column: &str) -> Self {
+        ColumnExpr::Col(alias.to_string(), column.to_string())
+    }
 }
 
 fn col_ref(table: &str, column: &str, alias: impl Into<String>) -> ProjectedColumn {
@@ -259,8 +292,34 @@ pub struct Metric {
 
 #[derive(Clone, PartialEq, Serialize)]
 pub struct SortKey {
-    pub column: String,
+    pub expr: ColumnExpr,
     pub desc: bool,
+}
+
+impl SortKey {
+    pub fn asc(expr: ColumnExpr) -> Self {
+        Self { expr, desc: false }
+    }
+}
+
+impl GroupKey {
+    /// The grouping expression: the column, or its calendar truncation.
+    pub fn expr(&self) -> ColumnExpr {
+        let col = ColumnExpr::col(&self.node, &self.property);
+        match self.truncate {
+            None => col,
+            Some(unit) => {
+                let truncated = ColumnExpr::Func(unit.ch_function().to_string(), vec![col]);
+                match unit {
+                    TruncateUnit::Minute | TruncateUnit::Hour => ColumnExpr::Func(
+                        "toDateTime64".into(),
+                        vec![truncated, ColumnExpr::Ident("0".into())],
+                    ),
+                    _ => ColumnExpr::Func("toDate32".into(), vec![truncated]),
+                }
+            }
+        }
+    }
 }
 
 // ── Constructors ────────────────────────────────────────────────────────────
@@ -383,7 +442,12 @@ pub fn plan(
                 input,
                 graph: &graph,
             };
-            super::optimize::optimize(naive, &rule_ctx)
+            let optimized = super::optimize::optimize(naive, &rule_ctx);
+            if input.query_type == QueryType::Traversal {
+                ctx.inline_joined_columns(optimized)
+            } else {
+                optimized
+            }
         }
         QueryType::Neighbors => ctx.plan_neighbors(limit),
         QueryType::PathFinding => ctx.plan_pathfinding(limit),
@@ -431,11 +495,12 @@ impl<'a> PlanCtx<'a> {
             )]);
         }
         let bound = self.bindings();
+        let joined = super::optimize::inner_aliases(op);
         self.input
             .nodes
             .iter()
             .filter_map(|n| {
-                if super::optimize::has_alias(op, &n.id) {
+                if joined.contains(&n.id) {
                     Some((n.id.clone(), col(&n.id, DEFAULT_PRIMARY_KEY)))
                 } else {
                     bound.get(&n.id).map(|b| (n.id.clone(), b.clone()))
@@ -497,6 +562,7 @@ impl<'a> PlanCtx<'a> {
             }
         }
         p.push(deleted_false());
+        p.extend(rel_filter_predicates(rel));
         if let Some(ref pfx) = rel.scope_prefix {
             p.push(Predicate::ScopePrefix(pfx.clone()));
         }
@@ -517,14 +583,18 @@ impl<'a> PlanCtx<'a> {
         p
     }
 
-    /// A node table is joined only when something reads it: property filters,
-    /// an id range, group-by, a non-count metric, or order-by. Pinned ids live
-    /// on the edge columns, and requested columns come from the hydration query.
+    /// A node table is joined only when something reads it (`reads_node`) or
+    /// an id range filters it. Pinned ids live on the edge columns, and
+    /// requested columns come from the hydration query unless the table is
+    /// read anyway.
     fn needs_node_join(&self, node: &InputNode) -> bool {
+        node.id_range.is_some() || self.reads_node(node)
+    }
+
+    fn reads_node(&self, node: &InputNode) -> bool {
         let a = node.id.as_str();
         let input = self.input;
         !node.filters.is_empty()
-            || node.id_range.is_some()
             || input.aggregation.group_by.iter().any(|g| g.node() == a)
             || input.aggregation.metrics.iter().any(|m| {
                 m.expr.node() == a
@@ -540,7 +610,7 @@ impl<'a> PlanCtx<'a> {
             .as_ref()
             .map(|ob| {
                 vec![SortKey {
-                    column: format!("{}.{}", ob.node, ob.property),
+                    expr: ColumnExpr::col(&ob.node, &ob.property),
                     desc: matches!(ob.direction, OrderDirection::Desc),
                 }]
             })
@@ -614,7 +684,7 @@ impl<'a> PlanCtx<'a> {
         let mut cols = Vec::new();
         let single_node = self.input.relationships.is_empty();
         for n in &self.input.nodes {
-            if !single_node && !self.needs_node_join(n) {
+            if !single_node && !self.reads_node(n) {
                 continue;
             }
             for property in crate::passes::shared::requested_columns(&n.columns) {
@@ -625,6 +695,33 @@ impl<'a> PlanCtx<'a> {
             }
         }
         cols
+    }
+
+    /// FK elision joins node tables the naive plan left to hydration; once
+    /// a table is in the query its requested columns come from it directly.
+    fn inline_joined_columns(&self, op: PhysOp) -> PhysOp {
+        let PhysOp::Limit { input, count } = op else {
+            return op;
+        };
+        let PhysOp::Project { input, mut columns } = *input else {
+            return limit(*input, count);
+        };
+        let joined = super::optimize::inner_aliases(&input);
+        for n in &self.input.nodes {
+            if !joined.contains(&n.id) {
+                continue;
+            }
+            for property in crate::passes::shared::requested_columns(&n.columns) {
+                let c = ProjectedColumn::NodeProperty {
+                    node: n.id.clone(),
+                    property,
+                };
+                if !columns.contains(&c) {
+                    columns.push(c);
+                }
+            }
+        }
+        limit(project(*input, columns), count)
     }
 
     fn plan_traversal(&self, limit_count: u32) -> PhysOp {
@@ -648,10 +745,31 @@ impl<'a> PlanCtx<'a> {
             }
         }
         columns.extend(self.joined_node_columns());
-        limit(
-            project(sort(self.plan_chain(), self.sort_keys()), columns),
-            limit_count,
-        )
+        let mut keys = self.sort_keys();
+        if self.input.cursor.is_some() {
+            keys.extend(self.traversal_tie_breakers());
+        }
+        limit(project(sort(self.plan_chain(), keys), columns), limit_count)
+    }
+
+    /// Completes the sort into a total order for keyset pagination: each
+    /// edge's id pair, or the node's own id when there are no edges.
+    fn traversal_tie_breakers(&self) -> Vec<SortKey> {
+        if self.input.relationships.is_empty() {
+            return vec![SortKey::asc(ColumnExpr::col(
+                &self.input.nodes[0].id,
+                DEFAULT_PRIMARY_KEY,
+            ))];
+        }
+        (0..self.input.relationships.len())
+            .flat_map(|i| {
+                let ea = format!("e{i}");
+                [
+                    SortKey::asc(ColumnExpr::col(&ea, SOURCE_ID_COLUMN)),
+                    SortKey::asc(ColumnExpr::col(&ea, TARGET_ID_COLUMN)),
+                ]
+            })
+            .collect()
     }
 
     fn plan_aggregation(&self, limit_count: u32) -> PhysOp {
@@ -662,15 +780,12 @@ impl<'a> PlanCtx<'a> {
                     node,
                     property,
                     truncate,
-                    alias,
                     ..
                 } => group_by.push(GroupKey {
                     node: node.clone(),
                     property: property.clone(),
                     truncate: *truncate,
-                    alias: alias
-                        .clone()
-                        .unwrap_or_else(|| format!("{node}_{property}")),
+                    alias: g.output_name(),
                 }),
                 InputGroupByKey::Node { node, .. } => {
                     let cols = self
@@ -703,15 +818,14 @@ impl<'a> PlanCtx<'a> {
         let mut keys = Vec::new();
         if let Some(ref s) = self.input.aggregation.sort {
             keys.push(SortKey {
-                column: s.column.clone(),
+                expr: ColumnExpr::Ident(s.column.clone()),
                 desc: matches!(s.direction, OrderDirection::Desc),
             });
         }
         if self.input.cursor.is_some() {
-            keys.extend(group_by.iter().map(|gk| SortKey {
-                column: format!("{}.{}", gk.node, gk.property),
-                desc: false,
-            }));
+            // The group-key tuple is unique per result row, so it completes
+            // the sort into a total order the keyset seek can anchor on.
+            keys.extend(group_by.iter().map(|gk| SortKey::asc(gk.expr())));
         }
         let agg = PhysOp::Aggregate {
             input: Box::new(self.plan_chain()),
@@ -762,6 +876,7 @@ impl<'a> PlanCtx<'a> {
         let hop_preds = |first: bool| {
             let mut p: Vec<Predicate> = rel_kind_predicate(&rel.types).into_iter().collect();
             p.push(deleted_false());
+            p.extend(rel_filter_predicates(rel));
             if first && let Some(ref pfx) = rel.scope_prefix {
                 p.push(Predicate::ScopePrefix(pfx.clone()));
             }
@@ -1133,10 +1248,7 @@ impl<'a> PlanCtx<'a> {
         let edge_tiebreakers = || {
             [SOURCE_ID_COLUMN, TARGET_ID_COLUMN, RELATIONSHIP_KIND_COLUMN]
                 .iter()
-                .map(|c| SortKey {
-                    column: format!("{e}.{c}"),
-                    desc: false,
-                })
+                .map(|c| SortKey::asc(ColumnExpr::col(e, c)))
                 .collect::<Vec<_>>()
         };
         let projected_tiebreakers = || {
@@ -1147,10 +1259,7 @@ impl<'a> PlanCtx<'a> {
                 neighbor_is_outgoing_column().to_string(),
             ]
             .into_iter()
-            .map(|c| SortKey {
-                column: c,
-                desc: false,
-            })
+            .map(|c| SortKey::asc(ColumnExpr::Ident(c)))
             .collect::<Vec<_>>()
         };
         let tiebreakers = || {
@@ -1493,20 +1602,20 @@ impl<'a> PlanCtx<'a> {
             ));
         }
 
-        let paths = union(arms, PATHS_ALIAS);
-        let mut keys = vec![SortKey {
-            column: format!("{PATHS_ALIAS}.{DEPTH_COLUMN}"),
-            desc: false,
-        }];
+        // Always a derived table named `paths`, even with one arm, so the
+        // projection and sort above read a stable alias.
+        let paths = PhysOp::Union {
+            arms,
+            alias: PATHS_ALIAS.to_string(),
+        };
+        let mut keys = vec![SortKey::asc(ColumnExpr::col(PATHS_ALIAS, DEPTH_COLUMN))];
         if self.input.cursor.is_some() {
-            keys.extend(
-                [path_column(), edge_kinds_column()]
-                    .iter()
-                    .map(|c| SortKey {
-                        column: format!("toString({PATHS_ALIAS}.{c})"),
-                        desc: false,
-                    }),
-            );
+            keys.extend([path_column(), edge_kinds_column()].iter().map(|c| {
+                SortKey::asc(ColumnExpr::Func(
+                    "toString".into(),
+                    vec![ColumnExpr::col(PATHS_ALIAS, c)],
+                ))
+            }));
         }
         let body = limit(
             sort(

@@ -38,6 +38,7 @@ const LOCAL_RULES: &[Rule] = &[
 ];
 
 const GLOBAL_RULES: &[Rule] = &[
+    rule_scope_anchor_elision,
     rule_fk_elision,
     rule_edge_dedup,
     rule_unreferenced_nodes,
@@ -132,6 +133,27 @@ pub fn leaf_alias(op: &PhysOp) -> Option<&str> {
         PhysOp::Filter { input, .. } | PhysOp::Project { input, .. } => leaf_alias(input),
         _ => None,
     }
+}
+
+/// Aliases visible to the outer query: every scan or union reached without
+/// crossing into a semi-join's producer side or a union arm.
+pub fn inner_aliases(op: &PhysOp) -> HashSet<String> {
+    fn go(op: &PhysOp, out: &mut HashSet<String>) {
+        match op {
+            PhysOp::Scan { alias, .. } | PhysOp::Union { alias, .. } => {
+                out.insert(alias.clone());
+            }
+            PhysOp::Join {
+                left,
+                kind: JoinKind::Semi,
+                ..
+            } => go(left, out),
+            _ => children(op).into_iter().for_each(|c| go(c, out)),
+        }
+    }
+    let mut out = HashSet::new();
+    go(op, &mut out);
+    out
 }
 
 pub fn has_alias(op: &PhysOp, target: &str) -> bool {
@@ -239,13 +261,7 @@ fn referenced_aliases(op: &PhysOp, out: &mut HashSet<String>) {
             out.extend(group_by.iter().map(|g| g.node.clone()));
             out.extend(metrics.iter().map(|m| m.node.clone()));
         }
-        PhysOp::Sort { keys, .. } => {
-            for k in keys {
-                if let Some((a, _)) = k.column.split_once('.') {
-                    out.insert(a.to_string());
-                }
-            }
-        }
+        PhysOp::Sort { keys, .. } => keys.iter().for_each(|k| column_expr_aliases(&k.expr, out)),
         PhysOp::Union { .. } => return,
         _ => {}
     }
@@ -259,8 +275,8 @@ fn column_expr_aliases(e: &ColumnExpr, out: &mut HashSet<String>) {
         ColumnExpr::Col(a, _) => {
             out.insert(a.clone());
         }
-        ColumnExpr::Lit(_) => {}
-        ColumnExpr::Array(items) | ColumnExpr::Tuple(items) => {
+        ColumnExpr::Lit(_) | ColumnExpr::Ident(_) => {}
+        ColumnExpr::Array(items) | ColumnExpr::Tuple(items) | ColumnExpr::Func(_, items) => {
             items.iter().for_each(|i| column_expr_aliases(i, out))
         }
     }
@@ -446,13 +462,17 @@ fn subst_expr(e: &ColumnExpr, s: &Subst) -> ColumnExpr {
             .get(&(a.clone(), b.clone()))
             .cloned()
             .unwrap_or_else(|| e.clone()),
-        ColumnExpr::Lit(_) => e.clone(),
+        ColumnExpr::Lit(_) | ColumnExpr::Ident(_) => e.clone(),
         ColumnExpr::Array(items) => {
             ColumnExpr::Array(items.iter().map(|i| subst_expr(i, s)).collect())
         }
         ColumnExpr::Tuple(items) => {
             ColumnExpr::Tuple(items.iter().map(|i| subst_expr(i, s)).collect())
         }
+        ColumnExpr::Func(name, items) => ColumnExpr::Func(
+            name.clone(),
+            items.iter().map(|i| subst_expr(i, s)).collect(),
+        ),
     }
 }
 
@@ -490,15 +510,9 @@ fn subst_tree(op: PhysOp, s: &Subst) -> PhysOp {
             input,
             keys: keys
                 .into_iter()
-                .map(|k| match k.column.split_once('.') {
-                    Some((a, b)) => {
-                        let (a, b) = subst_col(&(a.to_string(), b.to_string()), s);
-                        SortKey {
-                            column: format!("{a}.{b}"),
-                            desc: k.desc,
-                        }
-                    }
-                    None => k,
+                .map(|k| SortKey {
+                    expr: subst_expr(&k.expr, s),
+                    desc: k.desc,
                 })
                 .collect(),
         },
@@ -1014,4 +1028,88 @@ fn realias(op: PhysOp, from: &str, to: &str) -> PhysOp {
         },
         other => map_children(other, |c| realias(c, from, to)),
     }
+}
+
+/// An aggregation anchored on a namespace (`(g:Group {full_path})-[:CONTAINS]->(p)`)
+/// whose only edge scan is that containment hop: the scope prefix restrict
+/// derived from the anchor already pins every other scan to the namespace, so
+/// the anchor table and its edge are redundant. A guard keeps a missing anchor
+/// yielding no rows instead of the broad fallback.
+fn rule_scope_anchor_elision(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    if ctx.input.query_type != QueryType::Aggregation {
+        return None;
+    }
+    let mut referenced = HashSet::new();
+    referenced_aliases(tree, &mut referenced);
+    let spine = spine_of(tree)?;
+    let non_fk_edges: Vec<(usize, &InputRelationship)> = spine
+        .leaves
+        .iter()
+        .filter_map(|(l, _)| edge_scan_alias(l, ctx))
+        .filter_map(|a| rel_index(a))
+        .filter_map(|i| ctx.input.relationships.get(i).map(|r| (i, r)))
+        .filter(|(_, r)| r.fk_column.is_none())
+        .collect();
+    let [(idx, rel)] = non_fk_edges[..] else {
+        return None;
+    };
+    let Some(prefix) = rel.scope_prefix.as_ref() else {
+        return None;
+    };
+    if !ctx.graph.scope_preserving(&rel.types) || !rel.filters.is_empty() {
+        return None;
+    }
+    let degree = |a: &str| {
+        ctx.input
+            .relationships
+            .iter()
+            .filter(|r| r.from == a || r.to == a)
+            .count()
+    };
+    let anchor = [&rel.from, &rel.to].into_iter().find(|a| {
+        let Some(n) = ctx.input.nodes.iter().find(|n| &n.id == *a) else {
+            return false;
+        };
+        n.has_traversal_path
+            && degree(a) == 1
+            && crate::scope::is_scope_only(n)
+            && !referenced.contains(a.as_str())
+    })?;
+    let edge_alias = format!("e{idx}");
+    let guard = Predicate::Expr(prefix.resolved());
+
+    rewrite_spine(tree, &|join_op| {
+        let mut sp = flatten(join_op);
+        // Re-bind columns the edge carried for the surviving endpoint onto
+        // whichever other column shared them, then drop the edge and anchor.
+        let mut s: Subst = HashMap::new();
+        for (x, y) in &sp.eqs {
+            let (edge_side, other) = if x.0 == edge_alias {
+                (x, y)
+            } else if y.0 == edge_alias {
+                (y, x)
+            } else {
+                continue;
+            };
+            if other.0 != *anchor {
+                s.entry(edge_side.clone())
+                    .or_insert_with(|| ColumnExpr::Col(other.0.clone(), other.1.clone()));
+            }
+        }
+        sp.leaves.retain(
+            |(l, _)| !matches!(leaf_alias(l), Some(a) if a == edge_alias || a == anchor.as_str()),
+        );
+        sp.eqs = sp
+            .eqs
+            .into_iter()
+            .map(|(x, y)| (subst_col(&x, &s), subst_col(&y, &s)))
+            .filter(|(x, y)| {
+                x != y && x.0 != edge_alias && y.0 != edge_alias && x.0 != *anchor && y.0 != *anchor
+            })
+            .collect();
+        if sp.leaves.is_empty() {
+            return None;
+        }
+        Some(filter(rebuild(sp), vec![guard.clone()]))
+    })
 }

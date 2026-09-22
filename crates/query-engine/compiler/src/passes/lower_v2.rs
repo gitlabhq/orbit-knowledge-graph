@@ -242,19 +242,7 @@ fn emit(op: PhysOp, input: &Input) -> Query {
                 q = close(q);
             }
             for gk in &group_by {
-                let col = Expr::col(&gk.node, &gk.property);
-                let expr = match gk.truncate {
-                    Some(unit) => {
-                        let tr = Expr::func(unit.ch_function(), vec![col]);
-                        match unit {
-                            TruncateUnit::Minute | TruncateUnit::Hour => {
-                                Expr::func("toDateTime64", vec![tr, Expr::ident("0")])
-                            }
-                            _ => Expr::func("toDate32", vec![tr]),
-                        }
-                    }
-                    None => col,
-                };
+                let expr = emit_column_expr(&gk.expr());
                 q.select.push(SelectExpr::new(expr.clone(), &gk.alias));
                 if !q.group_by.contains(&expr) {
                     q.group_by.push(expr);
@@ -296,7 +284,7 @@ fn emit(op: PhysOp, input: &Input) -> Query {
                 q = close(q);
             }
             for sk in &keys {
-                let expr = sort_expr(&sk.column);
+                let expr = emit_column_expr(&sk.expr);
                 q.order_by.push(if sk.desc {
                     OrderExpr::desc(expr)
                 } else {
@@ -352,19 +340,6 @@ fn join_operand_keep_where(q: Query) -> ((TableRef, Option<Expr>), Vec<Cte>) {
         let mut q = q;
         let ctes = std::mem::take(&mut q.ctes);
         ((as_table(q, &alias), None), ctes)
-    }
-}
-
-/// `a.b`, `b`, or `func(a.b)`.
-fn sort_expr(column: &str) -> Expr {
-    if let Some((name, rest)) = column.split_once('(')
-        && let Some(inner) = rest.strip_suffix(')')
-    {
-        return Expr::func(name, vec![sort_expr(inner)]);
-    }
-    match column.split_once('.') {
-        Some((a, b)) => Expr::col(a, b),
-        None => Expr::ident(column),
     }
 }
 
@@ -487,7 +462,11 @@ fn emit_column(alias: Option<&str>, col: ProjectedColumn, input: &Input) -> Sele
 fn emit_column_expr(ce: &ColumnExpr) -> Expr {
     match ce {
         ColumnExpr::Col(table, col) => Expr::col(table, col),
+        ColumnExpr::Ident(name) => Expr::ident(name),
         ColumnExpr::Lit(v) => emit_value(v),
+        ColumnExpr::Func(name, args) => {
+            Expr::func(name, args.iter().map(emit_column_expr).collect())
+        }
         ColumnExpr::Array(items) => {
             Expr::func("array", items.iter().map(emit_column_expr).collect())
         }
