@@ -23,7 +23,7 @@ pub(crate) fn can_prompt(skip_prompts: bool) -> Result<bool> {
 }
 
 pub(crate) fn intro(title: impl Display) -> Result<()> {
-    cliclack::set_theme(OrbitTheme);
+    cliclack::set_theme(CompactCards);
     Ok(cliclack::intro(title)?)
 }
 
@@ -128,17 +128,20 @@ pub(crate) fn multiselect(
         picker = picker.item(choice.key.as_str(), &choice.label, &choice.hint);
     }
     picker = picker.initial_values(preselected.iter().map(String::as_str).collect());
-    Ok(picker.interact()?.into_iter().map(str::to_string).collect())
+    cliclack::set_theme(KeyHintsFooter);
+    let chosen = picker.interact();
+    cliclack::set_theme(CompactCards);
+    Ok(chosen?.into_iter().map(str::to_string).collect())
 }
 
 struct Stock;
 
 impl Theme for Stock {}
 
-/// Stock theme plus key hints under pickers and cards without the empty top row.
-struct OrbitTheme;
+/// Set for the whole run: cards without the empty top row.
+struct CompactCards;
 
-impl Theme for OrbitTheme {
+impl Theme for CompactCards {
     fn format_note(&self, prompt: &str, message: &str) -> String {
         let card = Stock.format_note(prompt, message);
         let mut lines: Vec<&str> = card.lines().collect();
@@ -149,7 +152,12 @@ impl Theme for OrbitTheme {
         }
         lines.join("\n") + "\n"
     }
+}
 
+/// Set only while a picker is open: every active widget shares this footer.
+struct KeyHintsFooter;
+
+impl Theme for KeyHintsFooter {
     fn format_footer_with_message(&self, state: &ThemeState, message: &str) -> String {
         let keys = match state {
             ThemeState::Active => "space toggles, enter confirms",
