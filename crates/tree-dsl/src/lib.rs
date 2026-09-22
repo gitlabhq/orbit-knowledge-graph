@@ -7,6 +7,7 @@ pub mod linker;
 pub mod pipeline;
 pub mod resolver;
 pub mod ssa;
+pub mod tags;
 pub mod tree;
 pub mod treesitter;
 

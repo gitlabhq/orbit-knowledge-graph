@@ -6,6 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
 use crate::intern::Lang;
+use crate::tags::ReservedTags;
 use crate::tree::{
     Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, members_by_level, reachable,
 };
@@ -78,8 +79,7 @@ pub struct Resolver {
     reqs: Vec<ImportReq>,
     file_index: FileIndex,
     wildcard_sym: u32,
-    exports_key: u32,
-    visible_from_key: u32,
+    tags: ReservedTags,
 }
 
 impl Resolver {
@@ -89,8 +89,7 @@ impl Resolver {
             reqs: Vec::new(),
             file_index: FileIndex::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
-            exports_key: lang.syms.intern("exports"),
-            visible_from_key: lang.syms.intern("visible_from"),
+            tags: ReservedTags::new(lang),
         }
     }
 
@@ -174,7 +173,7 @@ impl Resolver {
         self.visible.resize_with(trees.len(), Default::default);
         for &fi in dirty_fis {
             if fi < trees.len() {
-                self.visible[fi] = gather_visible_one(&trees[fi], fi, self.exports_key);
+                self.visible[fi] = gather_visible_one(&trees[fi], fi, self.tags.exports);
             }
         }
 
@@ -195,8 +194,7 @@ impl Resolver {
             &self.reqs,
             &mut self.visible,
             self.wildcard_sym,
-            self.visible_from_key,
-            self.exports_key,
+            self.tags,
         );
 
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
@@ -274,8 +272,7 @@ impl Resolver {
             support_lang,
             index_names,
             wildcard_sym: self.wildcard_sym,
-            callable_key: lang.syms.intern("callable"),
-            implicit_self_key: lang.syms.intern("implicit_self"),
+            tags: self.tags,
             partials: &partials,
             extensions: &extensions,
             exporters: &exporters,
@@ -357,8 +354,7 @@ struct ResolveCtx<'a> {
     support_lang: SupportLang,
     index_names: &'a [String],
     wildcard_sym: u32,
-    callable_key: u32,
-    implicit_self_key: u32,
+    tags: ReservedTags,
     partials: &'a FxHashMap<(u32, u32, usize), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     exporters: &'a [FxHashSet<usize>],
@@ -410,7 +406,7 @@ fn gather_imports_for(
     dirty_fis: &FxHashSet<usize>,
     aliases: &[(String, String)],
 ) -> (Vec<ImportReq>, Vec<Edge>) {
-    let resolved_tag_key = lang.syms.intern("resolved_source");
+    let resolved_tag_key = ReservedTags::new(lang).resolved_source;
     let dirty_vec: Vec<usize> = dirty_fis.iter().copied().collect();
     let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
         .par_iter()
@@ -483,8 +479,7 @@ fn propagate_reexports(
     reqs: &[ImportReq],
     visible: &mut VisibleMap,
     wildcard_sym: u32,
-    visible_from_key: u32,
-    exports_key: u32,
+    tags: ReservedTags,
 ) -> FxHashSet<(usize, u32)> {
     let mut ambiguous: FxHashSet<(usize, u32)> = FxHashSet::default();
 
@@ -492,10 +487,10 @@ fn propagate_reexports(
     let mut declared = vec![Vec::new(); trees.len()];
     for (fi, tree) in trees.iter().enumerate() {
         for c in tree.root().descendants() {
-            if let Some(source_sym) = c.tag(visible_from_key) {
+            if let Some(source_sym) = c.tag(tags.visible_from) {
                 visible_from_directives.push((fi, source_sym));
             }
-            if let Some(name) = c.tag(exports_key) {
+            if let Some(name) = c.tag(tags.exports) {
                 declared[fi].push(name);
             }
         }
@@ -635,14 +630,14 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             .filter_map(|&t| ctx.visible[t].get(&m.sym()))
             .unique()
             .map(|loc| ctx.corpus.jump(loc.fi as u32, loc.node))
-            .filter(|tgt| tgt.has_tag(ctx.callable_key))
+            .filter(|tgt| tgt.has_tag(ctx.tags.callable))
             .collect();
         edges.extend(call_edges(caller, members, edge.site));
     }
 
     for ie in &import_edges {
         let target = ctx.corpus.follow(ie);
-        if !target.has_tag(ctx.callable_key) {
+        if !target.has_tag(ctx.tags.callable) {
             continue;
         }
         let target_loc = Loc::new(ie.to_fi(), ie.to_node);
@@ -699,7 +694,7 @@ fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
                     let owned = owner.is_some_and(|o| o.index() == child.index());
                     let callee = call.child(C::Callee).and_then(|k| {
                         k.child_sym(C::Ivar)
-                            .or_else(|| call.has_tag(ctx.implicit_self_key).then(|| k.sym()))
+                            .or_else(|| call.has_tag(ctx.tags.implicit_self).then(|| k.sym()))
                     });
                     let from = call.enclosing(|e| e.is(C::Def)).filter(|_| owned);
                     let Some((from, name)) = from.zip(callee) else {

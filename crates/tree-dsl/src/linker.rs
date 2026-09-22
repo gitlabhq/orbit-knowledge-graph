@@ -5,6 +5,7 @@ use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::resolver::CLASS_LIKE;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
+use crate::tags::ReservedTags;
 use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, members_by_level};
 
 enum Linked {
@@ -28,14 +29,9 @@ struct Fold<'t> {
     supertypes: FxHashMap<u32, Vec<u32>>,
     imports: Vec<u32>,
     wildcards: Vec<u32>,
-    callable_key: u32,
-    implicit_self_key: u32,
-    locals_first_sym: u32,
-    non_shadowing_key: u32,
+    tags: ReservedTags,
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
-    scoped_key: u32,
-    hoisted_key: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
 }
@@ -157,7 +153,7 @@ impl<'t> Fold<'t> {
                 .child_sym(C::Alias)
                 .or(n.child_sym(C::SsaHint))
                 .unwrap_or(sym);
-            if c.has_tag(self.non_shadowing_key)
+            if c.has_tag(self.tags.non_shadowing)
                 && self
                     .lookup(local)
                     .iter()
@@ -210,8 +206,8 @@ impl<'t> Fold<'t> {
         for dn in supers {
             self.edges.push(Edge::local(idx, dn, EdgeKind::Extends));
         }
-        if c.has_tag(self.scoped_key) {
-            if c.has_tag(self.hoisted_key) {
+        if c.has_tag(self.tags.scoped) {
+            if c.has_tag(self.tags.hoisted) {
                 self.predeclare(c);
             }
             self.def_stack.push((Some(idx), parent_block));
@@ -289,8 +285,8 @@ impl<'t> Fold<'t> {
                 self.push_calls(from, self.find_method_in(cls, iv.sym()));
             }
         } else if let Some(sym) = callee.sym_opt() {
-            if let Some(mode) = c.tag(self.implicit_self_key) {
-                self.resolve_implicit(sym, from, mode == self.locals_first_sym);
+            if let Some(mode) = c.tag(self.tags.implicit_self) {
+                self.resolve_implicit(sym, from, mode == self.tags.implicit_self_locals);
             } else {
                 self.resolve_name(sym, from, !callee.has(C::Predeclared));
             }
@@ -396,7 +392,7 @@ impl<'t> Fold<'t> {
     fn emit(&mut self, r: &Linked, from: u32) {
         match r {
             Linked::Def(node) => {
-                if self.tree.cursor(*node).has_tag(self.callable_key) {
+                if self.tree.cursor(*node).has_tag(self.tags.callable) {
                     self.edges.push(Edge::local(from, *node, EdgeKind::Calls));
                 }
             }
@@ -458,7 +454,7 @@ impl<'t> Fold<'t> {
         targets.retain(|r| matches!(r, Linked::Def(_) | Linked::Import(_)));
         let supplies_callees = |&n: &u32| {
             let import = self.tree.cursor(n).parent();
-            import.is_some_and(|i| i.has_tag(self.callable_key))
+            import.is_some_and(|i| i.has_tag(self.tags.callable))
         };
         if targets.is_empty() {
             let wild = self.wildcards.iter().copied().filter(supplies_callees);
@@ -645,14 +641,9 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         supertypes: FxHashMap::default(),
         imports: Vec::new(),
         wildcards: Vec::new(),
-        callable_key: lang.syms.intern("callable"),
-        implicit_self_key: lang.syms.intern("implicit_self"),
-        locals_first_sym: lang.syms.intern("locals"),
-        non_shadowing_key: lang.syms.intern("non_shadowing"),
+        tags: ReservedTags::new(lang),
         def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern(WILDCARD),
-        scoped_key: lang.syms.intern("scoped"),
-        hoisted_key: lang.syms.intern("hoisted"),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
     };
