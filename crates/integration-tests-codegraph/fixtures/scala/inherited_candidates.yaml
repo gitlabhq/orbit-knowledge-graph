@@ -1,4 +1,4 @@
-name: "Scala: trait linearization, the rightmost trait wins"
+name: "Scala: two mixed-in traits emit every candidate"
 fixtures:
   - path: Shapes.scala
     content: |
@@ -13,11 +13,12 @@ fixtures:
       }
 
 tests:
-  - name: "d.m() on a D resolves to the rightmost trait B.m"
+  - name: "d.m() on a D emits both mixed-in traits' m"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'run' AND e.edge_kind = 'Calls' AND callee.name = 'm'
       RETURN callee.fqn AS callee
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
+      - { row: { callee: "A.m" } }
       - { row: { callee: "B.m" } }

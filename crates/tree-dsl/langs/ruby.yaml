@@ -243,7 +243,6 @@ stages:
         tag:
           callable: "true"
           scoped: "true"
-          linearize: "right"
           exports: '@$ROOT|child_sym("__defname")'
       - match: '(__def (__lambda))'
         tag: { callable: "true" }

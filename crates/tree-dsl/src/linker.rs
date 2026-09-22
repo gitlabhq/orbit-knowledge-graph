@@ -5,9 +5,7 @@ use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::resolver::CLASS_LIKE;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{
-    Cursor, Edge, EdgeKind, LinearizeKeys, Step, Tree, find_method_in, pick_member, unique_by_level,
-};
+use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, members_by_level};
 
 enum Linked {
     Def(u32),
@@ -38,7 +36,6 @@ struct Fold<'t> {
     hoisted_key: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
-    linearize: LinearizeKeys,
 }
 
 impl<'t> Fold<'t> {
@@ -284,10 +281,8 @@ impl<'t> Fold<'t> {
                 }
             }
         } else if let Some(iv) = callee.child(C::Ivar) {
-            if let Some(cls) = self.enclosing_class(from)
-                && let Some(m) = self.find_method_in(cls, iv.sym())
-            {
-                self.edges.push(Edge::local(from, m, EdgeKind::Calls));
+            if let Some(cls) = self.enclosing_class(from) {
+                self.push_calls(from, self.find_method_in(cls, iv.sym()));
             }
         } else if let Some(sym) = callee.sym_opt() {
             if callee.has(C::Implicit) {
@@ -419,11 +414,11 @@ impl<'t> Fold<'t> {
             match r {
                 Linked::Type(ts) => self.resolve_method(ts, method, from),
                 Linked::Def(node) => {
-                    if let Some(m) = self.find_method_in(node, method) {
-                        self.edges.push(Edge::local(from, m, EdgeKind::Calls));
-                    } else if obj.is(C::Object) {
+                    let members = self.find_method_in(node, method);
+                    if members.is_empty() && obj.is(C::Object) {
                         self.emit(&Linked::Def(node), from);
                     }
+                    self.push_calls(from, members);
                 }
                 _ if obj.is(C::Object) => self.emit(&r, from),
                 _ => {}
@@ -432,11 +427,12 @@ impl<'t> Fold<'t> {
     }
 
     fn resolve_implicit(&mut self, sym: u32, from: u32) {
-        let member = self
+        let members = self
             .enclosing_class(from)
-            .and_then(|cls| self.find_method_in(cls, sym));
-        if let Some(m) = member {
-            self.edges.push(Edge::local(from, m, EdgeKind::Calls));
+            .map(|cls| self.find_method_in(cls, sym))
+            .unwrap_or_default();
+        if !members.is_empty() {
+            self.push_calls(from, members);
             return;
         }
         let mut targets = self.lookup(sym);
@@ -465,11 +461,9 @@ impl<'t> Fold<'t> {
                     for inner in self.lookup(*ts) {
                         if let Linked::Def(target) = inner {
                             let callable = self.tree.cursor(target).child_sym(C::Callable);
-                            if let Some(target) = callable
-                                .map_or(Some(target), |name| self.find_method_in(target, name))
-                            {
-                                self.edges.push(Edge::local(from, target, EdgeKind::Calls));
-                            }
+                            let targets = callable
+                                .map_or(vec![target], |name| self.find_method_in(target, name));
+                            self.push_calls(from, targets);
                         }
                     }
                 }
@@ -480,10 +474,8 @@ impl<'t> Fold<'t> {
 
     fn resolve_method(&mut self, type_sym: u32, method: u32, from: u32) {
         for r in self.lookup(type_sym) {
-            if let Linked::Def(cls) = r
-                && let Some(m) = self.find_method_in(cls, method)
-            {
-                self.edges.push(Edge::local(from, m, EdgeKind::Calls));
+            if let Linked::Def(cls) = r {
+                self.push_calls(from, self.find_method_in(cls, method));
             }
         }
     }
@@ -534,15 +526,25 @@ impl<'t> Fold<'t> {
             .collect();
         targets
             .into_iter()
-            .filter_map(|r| match r {
-                Linked::Def(d) => self.find_method_in(d, m.sym()).map(Linked::Def),
-                Linked::Import(_) => Some(r),
-                _ => None,
+            .flat_map(|r| match r {
+                Linked::Def(d) => self
+                    .find_method_in(d, m.sym())
+                    .into_iter()
+                    .map(Linked::Def)
+                    .collect(),
+                Linked::Import(_) => vec![r],
+                _ => vec![],
             })
             .collect()
     }
 
-    fn find_method_in(&self, container: u32, name: u32) -> Option<u32> {
+    fn push_calls(&mut self, from: u32, targets: Vec<u32>) {
+        for m in targets {
+            self.edges.push(Edge::local(from, m, EdgeKind::Calls));
+        }
+    }
+
+    fn find_method_in(&self, container: u32, name: u32) -> Vec<u32> {
         let wrappers = |dn: u32| {
             let c = self.tree.cursor(dn);
             let same_name = c
@@ -558,11 +560,8 @@ impl<'t> Fold<'t> {
             let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
             supers.flat_map(wrappers).collect::<Vec<_>>()
         };
-        let mode = self.linearize.of(self.tree.cursor(container));
         let found = |dn| find_method_in(self.tree.cursor(dn), name).map(|m| m.index());
-        unique_by_level(wrappers(container), supers, found, |found| {
-            pick_member(mode, |dn| self.tree.cursor(dn).has(C::Class), found)
-        })
+        members_by_level(wrappers(container), supers, found)
     }
 }
 
@@ -588,7 +587,6 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         hoisted_key: lang.syms.intern("hoisted"),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
-        linearize: LinearizeKeys::new(lang),
     };
 
     let root = tree.root();

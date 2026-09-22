@@ -274,7 +274,7 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true", definition_span: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true", linearize: "class" }
+        tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'

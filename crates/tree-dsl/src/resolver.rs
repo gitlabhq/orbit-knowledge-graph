@@ -7,8 +7,7 @@ use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
 use crate::intern::Lang;
 use crate::tree::{
-    Cursor, Edge, EdgeKind, LinearizeKeys, Tree, find_method_in, infer_return_type, pick_member,
-    reachable, unique_by_level,
+    Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, members_by_level, reachable,
 };
 use crate::treesitter::SupportLang;
 
@@ -252,7 +251,6 @@ impl Resolver {
             index_names,
             wildcard_sym: self.wildcard_sym,
             callable_key: lang.syms.intern("callable"),
-            linearize: LinearizeKeys::new(lang),
             partials: &partials,
         };
 
@@ -326,7 +324,6 @@ struct ResolveCtx<'a> {
     index_names: &'a [String],
     wildcard_sym: u32,
     callable_key: u32,
-    linearize: LinearizeKeys,
     partials: &'a FxHashMap<(u32, u32), Vec<Loc>>,
 }
 
@@ -672,10 +669,10 @@ fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
                     let Some((from, name)) = call.enclosing(|e| e.is(C::Def)).zip(callee) else {
                         continue;
                     };
-                    if find_method_in(child, name).is_none()
-                        && let Some(m) = method_up(ctx, parent, name, fi)
-                    {
-                        out.push(call_edge(from, m, Some(call.index())));
+                    if find_method_in(child, name).is_none() {
+                        for m in method_up(ctx, parent, name, fi) {
+                            out.push(call_edge(from, m, Some(call.index())));
+                        }
                     }
                 }
             }
@@ -709,13 +706,18 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
                 .member()
                 .map(|m| m.sym())
                 .or_else(|| class.child_sym(C::Callable));
-            let target = match name {
-                Some(name) => method_up(ctx, class, name, usage.from_fi())?,
-                None => class,
+            let targets = match name {
+                Some(name) => method_up(ctx, class, name, usage.from_fi()),
+                None => vec![class],
             };
             let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
-            Some(call_edge(from, target, usage.site))
+            Some(
+                targets
+                    .into_iter()
+                    .map(move |t| call_edge(from, t, usage.site)),
+            )
         })
+        .flatten()
         .collect()
 }
 
@@ -780,7 +782,11 @@ fn chain<'a>(
         return root(c);
     };
     let receiver = chain(ctx, m.child(C::Object)?, root)?;
-    value_type(ctx, method_up(ctx, receiver, m.sym(), c.fi() as usize)?)
+    let member = method_up(ctx, receiver, m.sym(), c.fi() as usize)
+        .into_iter()
+        .exactly_one()
+        .ok()?;
+    value_type(ctx, member)
 }
 
 fn value_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>) -> Option<Cursor<'a>> {
@@ -898,18 +904,25 @@ fn branch_type<'a>(ctx: &'a ResolveCtx, branch: Cursor<'a>) -> Option<Cursor<'a>
     lub(ctx, arms)
 }
 
-fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, fi: usize) -> Option<Cursor<'a>> {
+fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, fi: usize) -> Vec<Cursor<'a>> {
     let jump = |(sf, n): (u32, u32)| ctx.corpus.jump(sf, n);
-    let mode = ctx.linearize.of(cls);
-    let inherited = unique_by_level(
+    let inherited = members_by_level(
         vec![(cls.fi(), cls.index())],
         |id| supertypes(ctx, jump(id)),
         |id| declared_member(ctx, jump(id), name).map(|m| (m.fi(), m.index())),
-        |found| pick_member(mode, |id| jump(id).has(C::Class), found),
     );
-    if let Some(id) = inherited {
-        return Some(jump(id));
+    if !inherited.is_empty() {
+        return inherited.into_iter().map(jump).collect();
     }
+    extension_member(ctx, cls, name, fi).into_iter().collect()
+}
+
+fn extension_member<'a>(
+    ctx: &'a ResolveCtx,
+    cls: Cursor<'a>,
+    name: u32,
+    fi: usize,
+) -> Option<Cursor<'a>> {
     if ctx.ambiguous.contains(&(fi, name)) {
         return None;
     }
@@ -989,7 +1002,7 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
             continue;
         };
         for (slot, component) in slots.iter().zip(positional.children()) {
-            if let Some(m) = method_up(ctx, class, component.sym(), fi) {
+            for m in method_up(ctx, class, component.sym(), fi) {
                 out.push(call_edge(from, m, Some(slot.index())));
             }
         }
@@ -1011,7 +1024,7 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
         };
         match resolve_receiver(ctx, object) {
             Some(target) if target.fi() != fi as u32 && target.is_class() => {
-                if let Some(method) = method_up(ctx, target, m.sym(), fi) {
+                for method in method_up(ctx, target, m.sym(), fi) {
                     out.push(call_edge(from, method, Some(call.index())));
                 }
             }
@@ -1062,7 +1075,7 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
             }) else {
                 continue;
             };
-            if let Some(m) = method_up(ctx, target, member.sym(), ce.from_fi()) {
+            for m in method_up(ctx, target, member.sym(), ce.from_fi()) {
                 edges.push(call_edge(caller, m, Some(call.index())));
             }
         }

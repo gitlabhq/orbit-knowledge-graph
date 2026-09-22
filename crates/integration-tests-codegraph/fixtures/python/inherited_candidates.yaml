@@ -1,4 +1,4 @@
-name: "Python: diamond resolves by C3 order, leftmost base wins"
+name: "Python: a diamond emits every shallowest-depth candidate"
 fixtures:
   - path: shapes.py
     content: |
@@ -18,11 +18,12 @@ fixtures:
           d.m()
 
 tests:
-  - name: "d.m() on a D resolves to the leftmost base B.m"
+  - name: "d.m() on a D emits both shallowest candidates, B.m and C.m"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'use' AND e.edge_kind = 'Calls' AND callee.name = 'm'
       RETURN callee.fqn AS callee
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
       - { row: { callee: "shapes.B.m" } }
+      - { row: { callee: "shapes.C.m" } }
