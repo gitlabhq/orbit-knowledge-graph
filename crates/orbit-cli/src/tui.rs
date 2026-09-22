@@ -23,6 +23,7 @@ pub(crate) fn can_prompt(skip_prompts: bool) -> Result<bool> {
 }
 
 pub(crate) fn intro(title: impl Display) -> Result<()> {
+    cliclack::set_theme(OrbitTheme);
     Ok(cliclack::intro(title)?)
 }
 
@@ -127,20 +128,29 @@ pub(crate) fn multiselect(
         picker = picker.item(choice.key.as_str(), &choice.label, &choice.hint);
     }
     picker = picker.initial_values(preselected.iter().map(String::as_str).collect());
-
-    cliclack::set_theme(KeyHintsFooter);
-    let chosen = picker.interact();
-    cliclack::reset_theme();
-    Ok(chosen?.into_iter().map(str::to_string).collect())
+    Ok(picker.interact()?.into_iter().map(str::to_string).collect())
 }
 
-struct KeyHintsFooter;
+struct Stock;
 
-impl Theme for KeyHintsFooter {
+impl Theme for Stock {}
+
+/// Stock theme plus key hints under pickers and cards without the empty top row.
+struct OrbitTheme;
+
+impl Theme for OrbitTheme {
+    fn format_note(&self, prompt: &str, message: &str) -> String {
+        let card = Stock.format_note(prompt, message);
+        let mut lines: Vec<&str> = card.lines().collect();
+        if let Some(box_top) = lines.iter().position(|line| line.contains('╮'))
+            && box_top + 1 < lines.len()
+        {
+            lines.remove(box_top + 1);
+        }
+        lines.join("\n") + "\n"
+    }
+
     fn format_footer_with_message(&self, state: &ThemeState, message: &str) -> String {
-        struct Stock;
-        impl Theme for Stock {}
-
         let keys = match state {
             ThemeState::Active => "space toggles, enter confirms",
             _ => "",
