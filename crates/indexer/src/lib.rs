@@ -84,7 +84,6 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
-    health_tls: Option<labkit::tls::ServerTls>,
 ) -> Result<(), IndexerError> {
     let resources = orbit_server_config::ContainerResources::detect();
     let mut config = config.clone();
@@ -121,11 +120,10 @@ pub async fn run(
     // wait phase. Readiness stays `503` until the gate clears (`serving`).
     let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
-    let health_listener = std::net::TcpListener::bind(config.health_bind_address)?;
-    info!(address = %config.health_bind_address, tls = health_tls.is_some(), "health server bound");
+    let health_bind_address = config.health_bind_address;
     let health_task = tokio::spawn(async move {
         tokio::select! {
-            result = run_health_server(health_listener, health_serving, health_tls) => result,
+            result = run_health_server(health_bind_address, health_serving) => result,
             _ = health_shutdown.cancelled() => Ok(()),
         }
     });
@@ -249,7 +247,6 @@ pub async fn run_dispatcher(
     archive: &ontology::archive::OntologyArchive,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
-    health_tls: Option<labkit::tls::ServerTls>,
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
@@ -281,11 +278,10 @@ pub async fn run_dispatcher(
     // `503` until migration completes (`serving`).
     let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
-    let health_listener = std::net::TcpListener::bind(config.health_bind_address)?;
-    info!(address = %config.health_bind_address, tls = health_tls.is_some(), "health server bound");
+    let health_bind_address = config.health_bind_address;
     let health_task = tokio::spawn(async move {
         tokio::select! {
-            result = run_health_server(health_listener, health_serving, health_tls) => result,
+            result = run_health_server(health_bind_address, health_serving) => result,
             _ = health_shutdown.cancelled() => Ok(()),
         }
     });

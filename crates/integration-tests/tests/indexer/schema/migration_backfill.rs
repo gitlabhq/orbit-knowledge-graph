@@ -680,7 +680,7 @@ async fn dispatcher_bootstraps_bundled_active_archive_before_migration() {
 
     let archive = embedded_archive(*SCHEMA_VERSION);
     let shutdown = CancellationToken::new();
-    let dispatcher = indexer::run_dispatcher(&config, &archive, serving_flag(), shutdown.clone(), None);
+    let dispatcher = indexer::run_dispatcher(&config, &archive, serving_flag(), shutdown.clone());
     tokio::pin!(dispatcher);
     let migration_started = tokio::select! {
         result = &mut dispatcher => panic!("dispatcher exited before migration: {result:?}"),
@@ -733,7 +733,6 @@ async fn dispatcher_rejects_unbundled_missing_active_archive_before_migration() 
             &archive,
             serving_flag(),
             CancellationToken::new(),
-            None,
         ),
     )
     .await
@@ -778,7 +777,6 @@ async fn dispatcher_rejects_corrupt_active_archive_before_migration() {
             &archive,
             serving_flag(),
             CancellationToken::new(),
-            None,
         ),
     )
     .await

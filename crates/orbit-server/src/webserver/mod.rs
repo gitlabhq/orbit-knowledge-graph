@@ -1,10 +1,11 @@
 mod health_client;
 mod router;
 
-use std::net::{SocketAddr, TcpListener};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
-use labkit::tls::ServerTls;
+use tokio::net::TcpListener;
+use tracing::info;
 
 use crate::active_schema::ActiveSchema;
 
@@ -14,22 +15,13 @@ pub use router::create_router;
 pub struct Server {
     listener: TcpListener,
     router: axum::Router,
-    tls: Option<ServerTls>,
 }
 
 impl Server {
-    pub fn bind(
-        addr: SocketAddr,
-        active_schema: Arc<ActiveSchema>,
-        tls: Option<ServerTls>,
-    ) -> std::io::Result<Self> {
-        let listener = TcpListener::bind(addr)?;
+    pub async fn bind(addr: SocketAddr, active_schema: Arc<ActiveSchema>) -> std::io::Result<Self> {
+        let listener = TcpListener::bind(addr).await?;
         let router = create_router(active_schema);
-        Ok(Self {
-            listener,
-            router,
-            tls,
-        })
+        Ok(Self { listener, router })
     }
 
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
@@ -37,6 +29,7 @@ impl Server {
     }
 
     pub async fn run(self) -> std::io::Result<()> {
-        labkit::server::serve(self.listener, self.router, self.tls).await
+        info!("listening on {}", self.listener.local_addr()?);
+        axum::serve(self.listener, self.router).await
     }
 }

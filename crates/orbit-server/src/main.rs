@@ -102,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
             schema::version::init(&graph).await?;
 
             let dispatcher_config = DispatcherConfig::from(&config);
-            indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown, http)
+            indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
@@ -111,13 +111,13 @@ async fn main() -> anyhow::Result<()> {
             .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, serving, shutdown, http)
+            indexer::run(&indexer_config, ontology, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, active_schema, shutdown.clone(), http).await
+            run_webserver(&config, active_schema, shutdown.clone()).await
         }
     };
 
@@ -130,7 +130,6 @@ async fn run_webserver(
     config: &AppConfig,
     active_schema: Arc<ActiveSchema>,
     shutdown: CancellationToken,
-    probe_tls: Option<labkit::tls::ServerTls>,
 ) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
@@ -182,7 +181,7 @@ async fn run_webserver(
         shutdown.clone(),
     );
 
-    let http_server = HttpServer::bind(config.bind_address, active_schema.clone(), probe_tls)?;
+    let http_server = HttpServer::bind(config.bind_address, active_schema.clone()).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
     let tls_config = orbit_server::tls::load_tls_config(&config.tls).await?;
