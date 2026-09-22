@@ -202,6 +202,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn caches_a_token_fetched_through_a_real_gitlab_client() {
+        use axum::Router;
+        use axum::routing::get;
+        use base64::Engine;
+        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+
+        let real_exp = Utc::now().timestamp() + 3_600;
+        let key = EncodingKey::from_secret(b"any-secret");
+        let cc_token = encode(
+            &Header::new(Algorithm::HS256),
+            &serde_json::json!({ "exp": real_exp }),
+            &key,
+        )
+        .unwrap();
+        let expected_token = cc_token.clone();
+
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/cloud_connector_token",
+            get(move || {
+                let cc_token = cc_token.clone();
+                async move { axum::Json(serde_json::json!({ "token": cc_token })) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let config = orbit_server_config::GitlabClientConfiguration {
+            base_url: format!("http://{addr}"),
+            signing_key: base64::engine::general_purpose::STANDARD
+                .encode(b"test-secret-that-is-long-enough!"),
+            resolve_host: None,
+        };
+        let client = Arc::new(GitlabClient::new(config).unwrap());
+        let cache = CloudConnectorTokenCache::new(client);
+
+        let token = cache.token().await.unwrap();
+
+        assert_eq!(token, expected_token);
+    }
+
+    #[tokio::test]
     async fn propagates_fetch_error_without_caching() {
         struct FailingFetcher;
         impl CloudConnectorTokenFetcher for FailingFetcher {
