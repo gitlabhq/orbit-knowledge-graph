@@ -168,6 +168,7 @@ impl Resolver {
         config: &ResolveConfig,
         aliases: &[(String, String)],
     ) -> ResolveResult {
+        let t = std::time::Instant::now();
         let index_names = support_lang.index_names();
         self.file_index = build_file_index(trees, lang, support_lang, index_names);
 
@@ -178,6 +179,7 @@ impl Resolver {
             }
         }
 
+        eprintln!("  R visible {:.2}s", t.elapsed().as_secs_f64());
         self.reqs.retain(|r| !dirty_fis.contains(&r.fi));
         let (new_reqs, mut cross_edges) = gather_imports_for(
             trees,
@@ -190,6 +192,7 @@ impl Resolver {
         );
         self.reqs.extend(new_reqs);
 
+        eprintln!("  R imports {:.2}s", t.elapsed().as_secs_f64());
         let ambiguous = propagate_reexports(
             trees,
             &self.reqs,
@@ -199,6 +202,7 @@ impl Resolver {
             config.merge_same_named_types,
         );
 
+        eprintln!("  R reexports {:.2}s", t.elapsed().as_secs_f64());
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
             .reqs
             .iter()
@@ -252,7 +256,8 @@ impl Resolver {
             }
         }
 
-        let (partials, extensions) = gather_members(trees, config.merge_same_named_types);
+        let (partials, extensions, defs_by_name) =
+            gather_members(trees, config.merge_same_named_types);
         let exporters: Vec<FxHashSet<usize>> = self
             .visible
             .iter()
@@ -290,16 +295,26 @@ impl Resolver {
             merge_types: config.merge_same_named_types,
             partials: &partials,
             extensions: &extensions,
+            defs_by_name: &defs_by_name,
             exporters: &exporters,
             imports: &imports,
         };
 
+        eprintln!("  R ctx {:.2}s", t.elapsed().as_secs_f64());
         let inherit = |&fi: &usize| resolve_file(&ctx, fi);
-        let wave1: Vec<Edge> = self
+        let imp: Vec<Edge> = self
             .reqs
             .par_iter()
             .filter(|r| active_fis.contains(&r.fi) || active_fis.contains(&r.target_fi))
             .flat_map(|req| resolve_one_import(&ctx, req))
+            .collect();
+        eprintln!(
+            "  R wave1-imports {:.2}s ({} edges)",
+            t.elapsed().as_secs_f64(),
+            imp.len()
+        );
+        let wave1: Vec<Edge> = imp
+            .into_par_iter()
             .chain(active_fis.par_iter().flat_map(inherit))
             .filter(|e| {
                 !(e.kind == EdgeKind::Calls
@@ -308,6 +323,11 @@ impl Resolver {
                     && ctx.corpus.follow(e).is_class())
             })
             .collect();
+        eprintln!(
+            "  R wave1 {:.2}s ({} edges)",
+            t.elapsed().as_secs_f64(),
+            wave1.len()
+        );
         for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
             ctx.extends_of.entry(e.from()).or_default().push(e.to());
         }
@@ -326,6 +346,11 @@ impl Resolver {
             .collect();
         cross_edges.extend(&wave2);
 
+        eprintln!(
+            "  R wave2 {:.2}s ({} edges)",
+            t.elapsed().as_secs_f64(),
+            wave2.len()
+        );
         let mut seen = FxHashSet::default();
         let mut wave: Vec<Edge> = edges
             .iter()
@@ -347,6 +372,11 @@ impl Resolver {
                 .collect();
             type_edges.extend(&wave);
         }
+        eprintln!(
+            "  R fixpoint {:.2}s ({} edges)",
+            t.elapsed().as_secs_f64(),
+            type_edges.len()
+        );
         cross_edges.extend(type_edges);
 
         ResolveResult {
@@ -375,6 +405,7 @@ struct ResolveCtx<'a> {
     merge_types: bool,
     partials: &'a FxHashMap<(u32, u32, usize), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
+    defs_by_name: &'a [FxHashMap<u32, Vec<u32>>],
     exporters: &'a [FxHashSet<usize>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
@@ -872,16 +903,24 @@ fn partial_key(d: Cursor, merge_types: bool) -> Option<(u32, u32, usize)> {
 type Members = (
     FxHashMap<(u32, u32, usize), Vec<Loc>>,
     FxHashMap<u32, Vec<Loc>>,
+    Vec<FxHashMap<u32, Vec<u32>>>,
 );
 
+/// Partial-type parts by key, extension members by name, and every def by
+/// name per file.
 fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
-    let (mut parts, mut extensions) = Members::default();
+    let (mut parts, mut extensions, mut defs_by_name) = Members::default();
+    defs_by_name.resize_with(trees.len(), Default::default);
     for (fi, tree) in trees.iter().enumerate() {
-        let defs = tree
-            .root()
-            .descendants_pruned(|n| n.is(C::Def) && !n.has(C::ImplBlock))
-            .filter(|d| d.is(C::Def));
-        for d in defs {
+        for d in tree.root().descendants().filter(|d| d.is(C::Def)) {
+            let Some(name) = d.child_sym(C::DefName) else {
+                continue;
+            };
+            defs_by_name[fi].entry(name).or_default().push(d.index());
+            let nested = d.ancestors().any(|a| a.is(C::Def) && !a.has(C::ImplBlock));
+            if nested {
+                continue;
+            }
             let loc = Loc::new(fi, d.index());
             if let Some(key) = partial_key(d, merge_types) {
                 parts.entry(key).or_default().push(loc);
@@ -889,12 +928,12 @@ fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
             let wrapped = d
                 .parent()
                 .is_some_and(|p| p.is(C::Def) && p.has(C::ImplBlock));
-            if let Some(name) = d.child_sym(C::DefName).filter(|_| wrapped) {
+            if wrapped {
                 extensions.entry(name).or_default().push(loc);
             }
         }
     }
-    (parts, extensions)
+    (parts, extensions, defs_by_name)
 }
 
 fn supertypes<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> Vec<(u32, u32)> {
@@ -997,12 +1036,15 @@ fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Optio
         .into_iter()
         .flatten()
         .map(|l| cls.jump(l.fi as u32, l.node));
+    let same_named = cls
+        .child_sym(C::DefName)
+        .and_then(|n| ctx.defs_by_name[cls.fi() as usize].get(&n))
+        .into_iter()
+        .flatten()
+        .map(|&n| cls.jump(cls.fi(), n))
+        .filter(|d| d.index() != cls.index() && (d.has(C::ImplBlock) || cls.has(C::ImplBlock)));
     std::iter::once(cls)
-        .chain(cls.jump(cls.fi(), 0).descendants().filter(|d| {
-            d.is(C::Def)
-                && (d.has(C::ImplBlock) || cls.has(C::ImplBlock))
-                && d.child_sym(C::DefName) == cls.child_sym(C::DefName)
-        }))
+        .chain(same_named)
         .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())))
         .find_map(|b| find_method_in(b, name))
 }
@@ -1031,6 +1073,7 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
             .collect()
     };
     let cross = |c: Cursor| c.fi() != fi as u32;
+    let mut bound_in: FxHashMap<u32, FxHashSet<u32>> = FxHashMap::default();
 
     for node in root.descendants() {
         let Some(from) = Some(node)
@@ -1047,15 +1090,14 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
                     None => out.extend(unbound(node, dec.sym())),
                 }
             }
-            for parent in node
+            let parents: Vec<Cursor> = node
                 .children_of(C::SuperType)
                 .filter_map(|s| resolve_chain(ctx, s))
-            {
-                if !cross(parent) {
-                    continue;
-                }
-                out.push(node.edge_to(parent, EdgeKind::Extends));
-                out.extend(inherited_calls(ctx, node, parent, fi));
+                .filter(|p| cross(*p))
+                .collect();
+            out.extend(parents.iter().map(|p| node.edge_to(*p, EdgeKind::Extends)));
+            if !parents.is_empty() {
+                out.extend(inherited_calls(ctx, node, &parents, fi));
             }
         } else if node.is(C::Destructure) {
             out.extend(destructure_calls(ctx, node, from, fi));
@@ -1066,13 +1108,22 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
             let Some(obj) = object.reference().chain_root().sym_opt() else {
                 continue;
             };
-            let bound = |s: u32| from.any_desc(|b| b.is(C::Binding) && b.sym_opt() == Some(s));
             match resolve_chain(ctx, object) {
                 Some(target) if cross(target) && target.is_class() => {
                     let members = method_up(ctx, target, m.sym(), fi);
                     out.extend(call_edges(from, members, Some(node.index())));
                 }
-                None if !bound(obj) => out.extend(unbound(from, obj)),
+                None => {
+                    let bound = bound_in.entry(from.index()).or_insert_with(|| {
+                        from.descendants()
+                            .filter(|b| b.is(C::Binding))
+                            .filter_map(|b| b.sym_opt())
+                            .collect()
+                    });
+                    if !bound.contains(&obj) {
+                        out.extend(unbound(from, obj));
+                    }
+                }
                 _ => {}
             }
         }
@@ -1081,13 +1132,18 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
 }
 
 /// Unqualified and self calls inside `class` that reach a member `class` does
-/// not declare itself, resolved on a cross-file `parent`.
+/// not declare itself, resolved on each cross-file parent.
 fn inherited_calls<'a>(
     ctx: &'a ResolveCtx,
     class: Cursor<'a>,
-    parent: Cursor<'a>,
+    parents: &[Cursor<'a>],
     fi: usize,
 ) -> Vec<Edge> {
+    let own: FxHashSet<u32> = class
+        .descendants_pruned(|n| n.index() != class.index() && n.is_class() && !n.has(C::ImplBlock))
+        .filter(|n| n.is(C::Def))
+        .filter_map(|n| n.child_sym(C::DefName))
+        .collect();
     let mut out = Vec::new();
     for call in class.calls() {
         let owned = call
@@ -1101,9 +1157,12 @@ fn inherited_calls<'a>(
         let Some((from, name)) = from.zip(callee) else {
             continue;
         };
-        if find_method_in(class, name).is_none() {
+        if own.contains(&name) {
+            continue;
+        }
+        for parent in parents {
             let site = Some(call.index());
-            out.extend(call_edges(from, method_up(ctx, parent, name, fi), site));
+            out.extend(call_edges(from, method_up(ctx, *parent, name, fi), site));
         }
     }
     out
