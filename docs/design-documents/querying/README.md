@@ -50,6 +50,8 @@ The `named-queries` crate validates and embeds both spellings. JSON templates us
 
 Templates are trusted, checked-in code. The build compiles both rendered examples against the ontology. Compiler parity tests require both spellings to produce the same SQL, parameters, and query type. Grammar, ontology, or parity drift fails before deployment.
 
+Unknown names, missing values, and invalid parameters return client-safe errors. A JSON `"$param:name"` key lets a string parameter select a property. The catalog lists parameterless queries with caller bindings resolved, so clients can execute the returned text as-is.
+
 Runtime callers can keep using the existing JSON methods. Language-aware methods let the query transport select a spelling without changing the named-query envelope or caller bindings.
 
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails. Three factors decide it: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
