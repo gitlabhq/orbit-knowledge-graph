@@ -11,6 +11,7 @@ mod skill;
 mod sql;
 mod sql_format;
 mod telemetry;
+mod tui;
 mod workspace;
 
 use anyhow::{Context, Result};
@@ -384,6 +385,56 @@ enum SkillsCommands {
     },
 }
 
+#[derive(Args, Debug, PartialEq)]
+struct SetupFlags {
+    /// Skip the agent picker and apply to the pre-selected agents.
+    #[arg(long, short = 'y')]
+    yes: bool,
+
+    /// Print what would change and exit without writing.
+    #[arg(long)]
+    dry_run: bool,
+
+    /// List every file touched instead of a per-component summary.
+    #[arg(long, short = 'v')]
+    verbose: bool,
+
+    /// Write into the current project instead of the user-global config
+    /// files.
+    #[arg(long)]
+    project: bool,
+
+    /// Project directory (implies --project; default: current directory).
+    #[arg(long, value_name = "PATH")]
+    dir: Option<PathBuf>,
+}
+
+impl SetupFlags {
+    fn to_options(
+        &self,
+        agents: Vec<String>,
+        all: bool,
+        components: std::collections::BTreeSet<commands::setup::Component>,
+    ) -> commands::setup::Options {
+        commands::setup::Options {
+            agents,
+            all,
+            yes: self.yes,
+            dry_run: self.dry_run,
+            verbose: self.verbose,
+            components,
+        }
+    }
+
+    fn target(self) -> Result<commands::setup::Target> {
+        if self.project || self.dir.is_some() {
+            commands::setup::Target::project(self.dir)
+        } else {
+            Ok(commands::setup::Target::Global)
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Print the version string and exit.
@@ -401,23 +452,34 @@ enum Commands {
     Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
     Setup {
-        /// Assistants to configure. Required when installing. `--remove`
-        /// without assistants removes the setup for all of them.
-        #[arg(value_name = "ASSISTANT", value_parser = commands::setup::assistant_value_parser(), required_unless_present = "remove")]
-        assistants: Vec<String>,
+        /// Agents to pre-select in the picker. Default: every agent detected
+        /// on this machine.
+        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser())]
+        agents: Vec<String>,
 
-        /// Remove the configuration written by `orbit setup`.
+        /// Configure every supported agent, detected or not.
+        #[arg(long, conflicts_with = "agents")]
+        all: bool,
+
+        /// Also register the `orbit` MCP server. Off by default.
         #[arg(long)]
-        remove: bool,
+        mcp: bool,
 
-        /// Write into the current project instead of the user-global config
-        /// files.
-        #[arg(long)]
-        project: bool,
+        /// Leave a component out (repeatable).
+        #[arg(long, value_enum, value_name = "COMPONENT")]
+        skip: Vec<commands::setup::Component>,
 
-        /// Project directory (implies --project; default: current directory).
-        #[arg(long, value_name = "PATH")]
-        dir: Option<PathBuf>,
+        #[command(flatten)]
+        flags: SetupFlags,
+    },
+    #[command(about = descriptions::short("uninstall"), long_about = descriptions::long("uninstall"))]
+    Uninstall {
+        /// Agents to clean up. Default: all of them.
+        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser())]
+        agents: Vec<String>,
+
+        #[command(flatten)]
+        flags: SetupFlags,
     },
     #[command(hide = true)]
     HookGuard {
@@ -666,17 +728,21 @@ async fn dispatch(command: Commands) -> Result<()> {
             None => skill::run(name_or_path, path),
         },
         Commands::Setup {
-            assistants,
-            remove,
-            project,
-            dir,
+            agents,
+            all,
+            mcp,
+            skip,
+            flags,
         } => {
-            let target = if project || dir.is_some() {
-                commands::setup::Target::project(dir)?
-            } else {
-                commands::setup::Target::Global
-            };
-            commands::setup::run(assistants, remove, target)
+            let components = commands::setup::Component::from_flags(mcp, &skip);
+            let options = flags.to_options(agents, all, components);
+            let machine = commands::setup::detect::Machine::current()?;
+            commands::setup::install(options, flags.target()?, &machine)
+        }
+        Commands::Uninstall { agents, flags } => {
+            let options = flags.to_options(agents, false, Default::default());
+            let machine = commands::setup::detect::Machine::current()?;
+            commands::setup::uninstall(options, flags.target()?, &machine)
         }
         Commands::HookGuard { kind, mode: _ } => {
             commands::hook_guard::run(kind);

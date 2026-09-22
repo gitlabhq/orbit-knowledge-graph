@@ -61,6 +61,7 @@ enum-as-inner = "0.7.0"
 either = "1.15.0"
 datafusion = { version = "54.1.0", default-features = false, features = ["sql", "nested_expressions"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
+cliclack = "0.5"
 comrak = { version = "0.53.0", default-features = false }
 dirs = "6"
 dunce = "1.0.5"
@@ -111,6 +112,7 @@ siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.g
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
 toml = "1.0.0"
+toml_edit = "0.25"
 toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"

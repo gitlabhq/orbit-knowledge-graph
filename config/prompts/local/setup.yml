@@ -1,13 +1,13 @@
 name: setup
-version: 1.0.0
-short: Configure AI coding assistants to consult the graph
+version: 1.2.0
+short: Configure AI coding agents to consult the graph
 description: >-
-  Configure AI coding assistants to consult the graph
+  Configure AI coding agents to consult the graph
 
 
-  Writes a managed section into each assistant's user-global instruction file,
-  or into the project with `--project` or `--dir`. The section tells the
-  assistant to query the graph before it searches raw files with grep. Claude Code and
-  OpenCode also get nudge hooks. Existing files get a one-time `.orbit-backup`
-  sibling before the first change. Re-running updates the section in place.
-  `--remove` uninstalls.
+  Detects the agents installed on this machine and gives each one the Orbit
+  instruction section, hooks, and skill. A picker lists the detected agents;
+  `--yes` skips it. `--mcp` also registers the MCP server. Writes
+  user-global configuration unless `--project` or `--dir` is given.
+  Existing files get a one-time `.orbit-backup` sibling. Re-running updates
+  in place. `orbit uninstall` reverts it.

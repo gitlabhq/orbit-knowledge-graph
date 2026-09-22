@@ -14,6 +14,12 @@ struct SkillAssets;
 
 const MANIFEST: &str = "SKILL.md";
 const DEFAULT_SKILL: &str = "orbit";
+pub(crate) const INSTALL_DIR_NAME: &str = "orbit-cli";
+
+pub(crate) fn embedded_files() -> impl Iterator<Item = (String, Vec<u8>)> {
+    SkillAssets::iter()
+        .filter_map(|path| Some((path.to_string(), SkillAssets::get(&path)?.data.into_owned())))
+}
 
 struct Skill {
     name: &'static str,

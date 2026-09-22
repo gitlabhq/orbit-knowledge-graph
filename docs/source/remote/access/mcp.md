@@ -168,12 +168,12 @@ paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI,
 Antigravity.
 
 > [!note]
-> A planned `glab orbit setup` subcommand will install the GitLab Orbit skill and
-> write this MCP config in one step. Until it ships, configure your MCP client
-> manually as shown above.
+> [`orbit setup --mcp`](../../local/access/cli.md#set-up-your-ai-agent)
+> configures the local server in one step. The hosted endpoint above still
+> needs the manual configuration shown.
 
 You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
-today to give the agent query recipes, DSL guidance, and troubleshooting.
+to give the agent query recipes, DSL guidance, and troubleshooting.
 
 ### Test it
 

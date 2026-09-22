@@ -2,11 +2,29 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "setup.schema.json",
   "title": "Orbit setup texts",
-  "description": "Every string `orbit setup` writes into an assistant's files: the managed instruction block, the two hook nudges, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-cli/src/commands/setup/spec.rs.",
+  "description": "Every string `orbit setup` writes into an assistant's files: the managed instruction block, the two hook nudges, the MCP server entry, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-cli/src/commands/setup/spec.rs.",
   "type": "object",
-  "required": ["instructions", "nudge_search", "nudge_read"],
+  "required": ["mcp_server", "instructions", "nudge_search", "nudge_read"],
   "additionalProperties": false,
   "properties": {
+    "mcp_server": {
+      "type": "object",
+      "required": ["name", "command"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "description": "Key of the MCP server entry written into each assistant's MCP config."
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Whitespace-separated stdio command. `{{orbit}}` resolves to the launcher."
+        }
+      },
+      "description": "The one stdio MCP server every assistant with an `mcp` block registers."
+    },
     "instructions": {
       "type": "string",
       "minLength": 1,
