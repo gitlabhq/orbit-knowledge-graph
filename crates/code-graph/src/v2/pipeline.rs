@@ -135,9 +135,7 @@ pub trait ProgressObserver: Send + Sync {
         _files_per_family: &[(String, usize)],
     ) {
     }
-    /// Fires from parallel workers; implementations must be cheap and never block.
     fn files_advanced(&self, _phase: ProgressPhase, _count: usize) {}
-    /// Fires from parallel workers; implementations must be cheap and never block.
     fn family_finished(&self) {}
 }
 
