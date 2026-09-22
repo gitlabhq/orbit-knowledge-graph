@@ -136,7 +136,7 @@ stages:
       - match: '(method_invocation object: $O name: $N:identifier arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$O))) $A)'
       - match: '(method_invocation name: $N:identifier arguments: $A)'
-        replace: '(__call (__callee (__ivar @$N)) (__member (__object @$N)) $A)'
+        replace: '(__call (__callee @$N (__implicit)) $A)'
       # new T(...) [with optional anonymous body]
       - match: '(object_creation_expression type: $T:__member arguments: $A $$$B:class_body)'
         replace: '(__call (__callee $T) $A $$$B)'
@@ -149,6 +149,8 @@ stages:
         replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))) $V)'
       # Local variables
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__member))'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V))'
         replace: '(__binding @$N (__rhs @$V))'

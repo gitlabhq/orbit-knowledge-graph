@@ -33,6 +33,10 @@ stages:
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_header $I:identifier)'
         replace: '(kt_pkg (__package @$I) (__module_export (__import (__source @$I) (__source_path @$I|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
+      - match: '(jump_expression (throw) $$$V)'
+        replace: '(__ssa_branch $$$V)'
+      - match: '(null_literal)'
+        replace: '(__ssa_branch)'
       - match: '(jump_expression (return) $$$V)'
         replace: '(__ssa_return $$$V)'
 
@@ -113,8 +117,8 @@ stages:
         replace: '(__call (__callee $F) $$$A)'
       - match: '(call_expression $F:__member (call_suffix $$$A))'
         replace: '(__call (__callee $F) $$$A)'
-      - match: '(call_expression (simple_identifier "/^(println|print|readLine|require|requireNotNull|check|checkNotNull|error|TODO|lazy|run|with|repeat|arrayOf|listOf|setOf|mapOf|mutableListOf|mutableSetOf|mutableMapOf|emptyList|emptySet|emptyMap)$/") (call_suffix $$$A))'
-        replace: '(__call (__callee) $$$A)'
+      - match: '(call_expression $F:(simple_identifier "/^(println|print|readLine|require|requireNotNull|check|checkNotNull|error|TODO|lazy|run|with|repeat|arrayOf|listOf|setOf|mapOf|mutableListOf|mutableSetOf|mutableMapOf|emptyList|emptySet|emptyMap)$/") (call_suffix $$$A))'
+        replace: '(__call (__callee @$F (__predeclared)) $$$A)'
       - match: '(call_expression $F:simple_identifier (call_suffix $$$A))'
         replace: '(__call (__callee @$F) $$$A)'
       - match: '(call_expression $F (call_suffix $$$A))'
@@ -188,7 +192,9 @@ stages:
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
 
       # Class-likes
-      - match: '(companion_object $N?:type_identifier $B:class_body)'
+      - match: '(companion_object $N:type_identifier $B:class_body)'
+        replace: '(__def (__defname @$N) (__class) (__companion) $B)'
+      - match: '(companion_object $B:class_body)'
         replace: '(__def (__defname "Companion") (__class) (__companion) $B)'
       - match: '(object_declaration $N:type_identifier $$$D:__supertype $B?:class_body)'
         replace: '(__def (__defname @$N) (__class) $$$D $B)'

@@ -39,6 +39,8 @@ stages:
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_statement $$$V)'
         replace: '(__ssa_return $$$V)'
+      - match: '(modifier "partial")'
+        replace: '(__partial)'
 
       # Types collapse to a bare identifier
       - match: '(generic_name $T:identifier)'
@@ -94,7 +96,7 @@ stages:
       - match: '(invocation_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(invocation_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee (__ivar @$F)) (__member (__object @$F)) $A)'
+        replace: '(__call (__callee @$F (__implicit)) $A)'
       - match: '(invocation_expression function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
       - match: '(object_creation_expression type: $T:identifier arguments:? $A $$$B:initializer_expression)'
@@ -183,6 +185,8 @@ stages:
         replace: '(__def (__defname @$N) (__class) $$$PRE $S $$$REST (__binding (__ivar "base") (__rhs (__call (__callee @$S)))) $$$B)'
       - match: '(class_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))'
         replace: '(__def (__defname @$N) (__class) $$$PRE $$$ANN $$$B)'
+      - match: '(record_declaration $$$PRE ("struct") name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))'
+        replace: '(__def (__defname @$N) (__struct) $$$PRE $$$ANN $P $$$B)'
       - match: '(record_declaration $$$PRE name: $N:identifier $P?:parameter_list $$$ANN body:? (declaration_list $$$B))'
         replace: '(__def (__defname @$N) (__class) $$$PRE $$$ANN $P $$$B)'
       - match: '(struct_declaration $$$PRE name: $N:identifier $$$ANN body: (declaration_list $$$B))'

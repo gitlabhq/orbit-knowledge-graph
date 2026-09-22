@@ -267,12 +267,30 @@ impl<'a> Cursor<'a> {
         self.child(C::Callee)?.child(C::Member)
     }
 
+    pub fn tail_expr(mut self) -> Self {
+        while !self.is(C::Call) && !self.is(C::SsaBranch) && !self.is(C::Member) {
+            match self.last_named() {
+                Some(c) => self = c,
+                None => break,
+            }
+        }
+        self
+    }
+
     pub fn object_ivar(self) -> Option<Self> {
         self.child(C::Object)?.child(C::Ivar)
     }
 
     pub fn rhs_callee(self) -> Option<u32> {
         self.child(C::Rhs)?.child(C::Call)?.child_sym(C::Callee)
+    }
+
+    pub fn typed(self) -> Option<Self> {
+        self.child(C::SsaTyped).or_else(|| {
+            let rhs = self.child(C::Rhs)?;
+            let callee = rhs.child(C::Call).and_then(|c| c.child(C::Callee));
+            callee.or_else(|| rhs.child(C::Member))
+        })
     }
 
     pub fn enclosing_def(self, kinds: &'a [C]) -> Option<Self> {

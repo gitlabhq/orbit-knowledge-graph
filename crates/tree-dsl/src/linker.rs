@@ -35,6 +35,7 @@ struct Fold<'t> {
     scoped_key: u32,
     hoisted_key: u32,
     edges: Vec<Edge>,
+    value_sink: FxHashMap<u32, u32>,
 }
 
 impl<'t> Fold<'t> {
@@ -90,7 +91,8 @@ impl<'t> Fold<'t> {
                 Self::push_children(c, stack);
             }
         } else if k == C::SsaBranch {
-            self.handle_branch(c);
+            let sink = self.value_sink.remove(&c.index());
+            self.handle_branch(c, sink);
         } else if k == C::SsaLoop {
             self.handle_loop(c);
         } else {
@@ -98,20 +100,34 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn handle_branch(&mut self, branch: Cursor<'t>) {
+    fn handle_branch(&mut self, branch: Cursor<'t>, lhs: Option<u32>) {
         for child in branch.children().filter(|c| !c.is(C::SsaArm)) {
             self.run(vec![WorkItem::Visit(child.index())]);
         }
-
+        let arms: Vec<Cursor<'t>> = branch.children().filter(|c| c.is(C::SsaArm)).collect();
+        if arms.is_empty() {
+            return;
+        }
         let pre = self.cur;
         let mut exit_blocks = Vec::new();
-        for arm in branch.children().filter(|c| c.is(C::SsaArm)) {
-            let entry = self.ssa.add_sealed_successor(pre);
-            self.cur = entry;
+        for arm in arms {
+            self.cur = self.ssa.add_sealed_successor(pre);
+            let tail = arm.tail_expr();
+            if let Some(lhs) = lhs.filter(|_| tail.is(C::SsaBranch)) {
+                self.value_sink.insert(tail.index(), lhs);
+            }
             self.walk_children(arm);
+            if let Some(lhs) = lhs.filter(|_| !tail.is(C::SsaBranch)) {
+                let val = self.classify_tail(tail);
+                if val != Value::Opaque {
+                    self.ssa.write_variable(lhs, self.cur, val);
+                }
+            }
             exit_blocks.push(self.cur);
         }
-        exit_blocks.push(pre);
+        if lhs.is_none() {
+            exit_blocks.push(pre);
+        }
         self.cur = self.ssa.add_sealed_join(exit_blocks);
     }
 
@@ -261,7 +277,11 @@ impl<'t> Fold<'t> {
                 self.edges.push(Edge::local(from, m, EdgeKind::Calls));
             }
         } else if let Some(sym) = callee.sym_opt() {
-            self.resolve_name(sym, from);
+            if callee.has(C::Implicit) {
+                self.resolve_implicit(sym, from);
+            } else {
+                self.resolve_name(sym, from, !callee.has(C::Predeclared));
+            }
         }
         for edge in &mut self.edges[first..] {
             edge.site = Some(c.index());
@@ -274,13 +294,7 @@ impl<'t> Fold<'t> {
         };
         let method = c.sym();
         let from = self.enclosing();
-        let bare_call = method == 0 && c.parent().is_some_and(|p| p.is(C::Call));
-        let targets = if bare_call {
-            self.lookup_or_wildcards(obj, true)
-        } else {
-            self.lookup(obj)
-        };
-        for r in targets {
+        for r in self.lookup(obj) {
             match r {
                 Linked::Type(ts) if method != 0 => self.resolve_method(ts, method, from),
                 Linked::Import(node) => self.edges.push(Edge::local(from, node, EdgeKind::Imports)),
@@ -300,7 +314,7 @@ impl<'t> Fold<'t> {
 
         if let Some(rhs) = c.child(C::Rhs) {
             if let Some(branch) = rhs.child(C::SsaBranch) {
-                self.walk_branch_binding(branch, lhs);
+                self.handle_branch(branch, Some(lhs));
                 return true;
             }
 
@@ -326,17 +340,20 @@ impl<'t> Fold<'t> {
             return Value::Type(ts);
         }
 
-        if let Some(call) = rhs.child(C::Call) {
-            if let Some(sym) = call.child_sym(C::Callee) {
+        self.classify_tail(rhs.tail_expr())
+    }
+
+    fn classify_tail(&mut self, tail: Cursor<'_>) -> Value {
+        if tail.is(C::Call) {
+            if let Some(sym) = tail.child_sym(C::Callee) {
                 let targets = self.lookup(sym);
                 if self.any_class(&targets) {
                     return Value::Type(sym);
                 }
             }
-            return Value::Call(call.index());
+            return Value::Call(tail.index());
         }
-
-        let sym = self.tail_sym(rhs);
+        let sym = self.tail_sym(tail);
         if sym != 0 {
             self.tail_value(sym)
         } else {
@@ -351,25 +368,6 @@ impl<'t> Fold<'t> {
         } else {
             Value::Alias(sym)
         }
-    }
-
-    fn walk_branch_binding(&mut self, branch: Cursor<'_>, lhs: u32) {
-        let pre = self.cur;
-        let mut exits = Vec::new();
-
-        for arm in branch.children().filter(|c| c.is(C::SsaArm)) {
-            let block = self.ssa.add_sealed_successor(pre);
-            self.cur = block;
-            self.walk_children(arm);
-            let sym = self.tail_sym(arm);
-            if sym != 0 {
-                let val = self.tail_value(sym);
-                self.ssa.write_variable(lhs, self.cur, val);
-            }
-            exits.push(self.cur);
-        }
-
-        self.cur = self.ssa.add_sealed_join(exits);
     }
 
     fn tail_sym(&self, node: Cursor<'_>) -> u32 {
@@ -439,21 +437,44 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn lookup_or_wildcards(&mut self, sym: u32, callable_only: bool) -> Vec<Linked> {
+    fn resolve_implicit(&mut self, sym: u32, from: u32) {
+        let member = self
+            .enclosing_class(from)
+            .and_then(|cls| self.find_method_in(cls, sym));
+        if let Some(m) = member {
+            self.edges.push(Edge::local(from, m, EdgeKind::Calls));
+            return;
+        }
         let targets = self.lookup(sym);
         if !targets.is_empty() {
-            return targets;
+            for r in &targets {
+                if matches!(r, Linked::Def(_) | Linked::Import(_)) {
+                    self.emit(r, from);
+                }
+            }
+            return;
         }
-        let supplies_callees = |n: &&u32| {
-            let import = self.tree.cursor(**n).parent();
-            !callable_only || import.is_some_and(|i| i.has_tag(self.callable_key))
+        let supplies_callees = |&n: &u32| {
+            let import = self.tree.cursor(n).parent();
+            import.is_some_and(|i| i.has_tag(self.callable_key))
         };
-        let wild = self.wildcards.iter().filter(supplies_callees);
-        wild.map(|&n| Linked::Import(n)).collect()
+        for n in self
+            .wildcards
+            .iter()
+            .copied()
+            .filter(supplies_callees)
+            .collect::<Vec<_>>()
+        {
+            self.edges.push(Edge::local(from, n, EdgeKind::Imports));
+        }
     }
 
-    fn resolve_name(&mut self, sym: u32, from: u32) {
-        for r in &self.lookup_or_wildcards(sym, false) {
+    fn resolve_name(&mut self, sym: u32, from: u32, imported: bool) {
+        let mut targets = self.lookup(sym);
+        if targets.is_empty() && imported {
+            targets = self.wildcards.iter().map(|&n| Linked::Import(n)).collect();
+        }
+        for r in &targets {
             match r {
                 Linked::Type(ts) => {
                     for inner in self.lookup(*ts) {
@@ -575,6 +596,7 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         scoped_key: lang.syms.intern("scoped"),
         hoisted_key: lang.syms.intern("hoisted"),
         edges: Vec::new(),
+        value_sink: FxHashMap::default(),
     };
 
     let root = tree.root();

@@ -64,7 +64,7 @@ stages:
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee (__ivar @$F)) (__member (__object @$F)) $A)'
+        replace: '(__call (__callee @$F (__implicit)) $A)'
       - match: '(call_expression function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
       - match: '(instance_expression $T:type_identifier $A:arguments)'
