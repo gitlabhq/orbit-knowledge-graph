@@ -246,6 +246,19 @@ impl Resolver {
             .iter()
             .map(|names| names.values().map(|l| l.fi).collect())
             .collect();
+        let imports: Vec<FxHashMap<u32, (u32, u32)>> = trees
+            .iter()
+            .map(|t| {
+                let imports = t.root().descendants().filter(|c| c.is(C::Import));
+                imports
+                    .flat_map(|i| i.names())
+                    .fold(FxHashMap::default(), |mut m, n| {
+                        let local = n.child_sym(C::Alias).unwrap_or(n.sym());
+                        m.entry(local).or_insert_with(|| import_identity(n));
+                        m
+                    })
+            })
+            .collect();
         let mut ctx = ResolveCtx {
             extends: &[],
             corpus: Cursor::new(trees, 0, 0),
@@ -264,6 +277,7 @@ impl Resolver {
             partials: &partials,
             extensions: &extensions,
             exporters: &exporters,
+            imports: &imports,
         };
 
         let inherit =
@@ -345,6 +359,7 @@ struct ResolveCtx<'a> {
     partials: &'a FxHashMap<(u32, u32, usize), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     exporters: &'a [FxHashSet<usize>],
+    imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
 
 impl ResolveCtx<'_> {
@@ -701,13 +716,8 @@ fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
 }
 
 fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
-    let Some(uses) = ce
-        .site
-        .and_then(|site| ctx.type_uses.get(&(ce.from_tree, site)))
-    else {
-        return vec![];
-    };
-    let Some(site) = ce.site else {
+    let uses = |site| Some((site, ctx.type_uses.get(&(ce.from_tree, site))?));
+    let Some((site, uses)) = ce.site.and_then(uses) else {
         return vec![];
     };
     let producer = ctx.corpus.jump(ce.from_tree, site);
@@ -733,12 +743,10 @@ fn dispatch(
                 ),
                 _ => class,
             };
+            let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
             let Some(class) = class else {
-                let external = external_of(ctx, producer)?;
-                let name = call.member()?.sym();
-                let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
-                let targets =
-                    extension_members(ctx, Owner::External(external), name, usage.from_fi());
+                let owner = Owner::External(external_of(ctx, producer)?);
+                let targets = extension_members(ctx, owner, call.member()?.sym(), usage.from_fi());
                 return Some(call_edges(from, targets, usage.site));
             };
             let class = match call.member().and_then(|m| m.child(C::Object)) {
@@ -755,21 +763,10 @@ fn dispatch(
                 Some(name) => method_up(ctx, class, name, usage.from_fi()),
                 None => vec![class],
             };
-            let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
             Some(call_edges(from, targets, usage.site))
         })
         .flatten()
         .collect()
-}
-
-fn import_of<'a>(ctx: &'a ResolveCtx, fi: u32, sym: u32) -> Option<Cursor<'a>> {
-    let local = |n: Cursor| n.child_sym(C::Alias).unwrap_or(n.sym());
-    ctx.corpus
-        .jump(fi, 0)
-        .descendants()
-        .filter(|c| c.is(C::Import))
-        .flat_map(|i| i.names())
-        .find(|n| local(*n) == sym)
 }
 
 fn import_identity(name: Cursor) -> (u32, u32) {
@@ -778,17 +775,15 @@ fn import_identity(name: Cursor) -> (u32, u32) {
 }
 
 fn external_of(ctx: &ResolveCtx, producer: Cursor) -> Option<(u32, u32)> {
-    let named = if producer.is(C::Binding) {
-        producer.typed().filter(|t| t.child(C::Member).is_none())?
-    } else {
-        producer
-            .child(C::Callee)
-            .filter(|k| k.child(C::Member).is_none())?
+    let named = match producer.is(C::Binding) {
+        true => producer.typed(),
+        false => producer.child(C::Callee),
     };
+    let named = named.filter(|t| !t.has(C::Member))?;
     if visible_type(ctx, named.fi(), named.sym()).is_some() {
         return None;
     }
-    import_of(ctx, named.fi(), named.sym()).map(import_identity)
+    ctx.imports[named.fi() as usize].get(&named.sym()).copied()
 }
 
 enum Owner<'a> {
@@ -1002,7 +997,7 @@ fn extension_members<'a>(
             }
             Owner::External(id) => {
                 visible_type(ctx, method.fi(), receiver).is_none()
-                    && import_of(ctx, method.fi(), receiver).map(import_identity) == Some(id)
+                    && ctx.imports[method.fi() as usize].get(&receiver) == Some(&id)
             }
         };
         same.then_some(method)
@@ -1091,10 +1086,7 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
         let Some(object) = m.child(C::Object) else {
             continue;
         };
-        let root = std::iter::successors(Some(object.reference()), |r| {
-            r.child(C::Member)?.child(C::Object)
-        });
-        let Some(obj) = root.last().and_then(Cursor::sym_opt) else {
+        let Some(obj) = object.reference().chain_root().sym_opt() else {
             continue;
         };
         match resolve_chain(ctx, object) {

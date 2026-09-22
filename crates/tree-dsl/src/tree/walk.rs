@@ -294,6 +294,13 @@ impl<'a> Cursor<'a> {
         self.child(C::Callee)?.child(C::Member)
     }
 
+    pub fn chain_root(self) -> Self {
+        let inner = |r: &Self| r.child(C::Member)?.child(C::Object);
+        std::iter::successors(Some(self), inner)
+            .last()
+            .unwrap_or(self)
+    }
+
     pub fn tail_expr(self) -> Self {
         let stop =
             |c: &Self| c.is(C::Call) || c.is(C::SsaBranch) || c.is(C::SsaReturn) || c.is(C::Member);

@@ -506,10 +506,7 @@ impl<'t> Fold<'t> {
     }
 
     fn flow_chain_root(&mut self, obj: Cursor, from: u32) {
-        let root = std::iter::successors(Some(obj), |r| r.child(C::Member)?.child(C::Object))
-            .last()
-            .unwrap_or(obj);
-        for r in self.lookup_chain(root) {
+        for r in self.lookup_chain(obj.chain_root()) {
             if let Linked::Call(n) = r
                 && self.binding_type(n).is_some()
             {
@@ -529,21 +526,17 @@ impl<'t> Fold<'t> {
 
     fn field_value(&self, def: u32) -> Option<Linked> {
         let d = self.tree.cursor(def);
-        let stored = (d.has(C::FieldDef) || d.has(C::Property)).then_some(d)?;
-        let binding = stored.child(C::Binding).filter(|b| b.typed().is_some())?;
-        Some(Linked::Call(Self::producer_of(binding)))
+        let binding = d.child(C::Binding).filter(|b| b.typed().is_some())?;
+        let stored = d.has(C::FieldDef) || d.has(C::Property);
+        stored.then(|| Linked::Call(Self::producer_of(binding)))
     }
 
     fn producer_of(binding: Cursor) -> u32 {
         let call = binding.child(C::Rhs).and_then(|r| r.child(C::Call));
-        let invokes_member = |c: Cursor| {
-            c.child(C::Callee)
-                .is_some_and(|k| k.child(C::Member).is_some())
-        };
-        match call {
-            Some(call) if !binding.has(C::SsaTyped) && invokes_member(call) => call.index(),
-            _ => binding.index(),
-        }
+        let member_call = call
+            .filter(|_| !binding.has(C::SsaTyped))
+            .filter(|c| c.child(C::Callee).is_some_and(|k| k.has(C::Member)));
+        member_call.map_or(binding.index(), |c| c.index())
     }
 
     fn ivar_type(&self, class: u32, attr: u32) -> Option<Cursor<'t>> {
