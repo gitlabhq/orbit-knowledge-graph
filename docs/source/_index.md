@@ -62,7 +62,6 @@ To give agents access to your indexed graph:
 
 
 If GitLab Orbit doesn't appear, indexing might not be turned on for your group.
-For help, see [troubleshooting](troubleshooting.md#exit-code-2).
 
 ### Use your own coding agent
 
