@@ -12,7 +12,8 @@ use rmcp::{
 use serde::Deserialize;
 use std::path::PathBuf;
 
-use crate::{descriptions, index_collect, sql, sql_format};
+use crate::commands::index::collect as index_collect;
+use crate::{descriptions, sql, sql_format};
 
 const MAX_RESULT_ARROW_BYTES: usize = 1_000_000;
 
