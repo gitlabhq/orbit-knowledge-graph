@@ -3606,7 +3606,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -3836,7 +3835,6 @@ dependencies = [
  "gitlab-client",
  "indexmap 2.14.2",
  "jsonschema",
- "labkit",
  "labkit-events",
  "moka",
  "nats-client",
@@ -4483,7 +4481,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7a2735929880cd08e995f6003de5f6a5f8741d16#7a2735929880cd08e995f6003de5f6a5f8741d16"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
 dependencies = [
  "axum",
  "axum-server",
@@ -4516,7 +4514,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7a2735929880cd08e995f6003de5f6a5f8741d16#7a2735929880cd08e995f6003de5f6a5f8741d16"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4534,7 +4532,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7a2735929880cd08e995f6003de5f6a5f8741d16#7a2735929880cd08e995f6003de5f6a5f8741d16"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
 
 [[package]]
 name = "language-tags"
@@ -8013,7 +8011,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams 0.4.2",
  "web-sys",
- "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -9632,6 +9629,7 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
+ "rustls-native-certs",
  "socket2",
  "sync_wrapper",
  "tokio",
