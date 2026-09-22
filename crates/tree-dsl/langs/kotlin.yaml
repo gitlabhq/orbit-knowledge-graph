@@ -74,7 +74,7 @@ stages:
 
       # Parameters
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:__member)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding (__ivar @$N) (__rhs (__call (__callee $T)))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T)))))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T)))))'
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier $T:type_identifier)'
         replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(class_parameter (binding_pattern_kind) $N:simple_identifier)'
@@ -138,14 +138,14 @@ stages:
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T?:type_identifier) $G:getter)'
         replace: '(__def (__defname @$N) (__property) (__ssa_return_type? @$T) $G)'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $$$V)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T)))) (__binding (__ivar @$N) (__rhs (__call (__callee $T)))) $$$V)'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T)))) $$$V)'
       # Properties and locals: a __def for the graph plus SSA bindings
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier) $V:__call)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier))'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__call)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs $V))) (__binding @$N (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__ssa_branch)'
         replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:simple_identifier)'
@@ -225,9 +225,7 @@ stages:
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
-        tag:
-          callable: "true"
-          returns: '@$ROOT|ancestor_sym("__enum")'
+        tag: { callable: "true" }
       - match: '(__def (__struct))'
         tag: { scoped: "true" }
       - match: '(__def (__impl))'

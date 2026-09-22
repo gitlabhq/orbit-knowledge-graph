@@ -249,7 +249,6 @@ impl Resolver {
             index_names,
             wildcard_sym: self.wildcard_sym,
             callable_key: lang.syms.intern("callable"),
-            returns_key: lang.syms.intern("returns"),
             partials: &partials,
         };
 
@@ -323,7 +322,6 @@ struct ResolveCtx<'a> {
     index_names: &'a [String],
     wildcard_sym: u32,
     callable_key: u32,
-    returns_key: u32,
     partials: &'a FxHashMap<(u32, u32), Vec<Loc>>,
 }
 
@@ -688,11 +686,7 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     else {
         return vec![];
     };
-    let class = class_of(
-        ctx,
-        ce.site.map(|s| ctx.corpus.jump(ce.from_tree, s)),
-        ctx.corpus.follow(ce),
-    );
+    let class = class_of(ctx, ctx.corpus.follow(ce));
     uses.iter()
         .filter_map(|usage| {
             let call = ctx.corpus.jump(usage.from_tree, usage.site?);
@@ -701,7 +695,7 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
                     ctx,
                     reaching.iter().map(|e| {
                         let producer = ctx.corpus.jump(e.to_tree, e.to_node);
-                        class_of(ctx, Some(producer), callee_of(ctx, producer)?)
+                        class_of(ctx, callee_of(ctx, producer)?)
                     }),
                 )?,
                 _ => class?,
@@ -727,20 +721,12 @@ fn callee_of<'a>(ctx: &'a ResolveCtx, call: Cursor<'a>) -> Option<Cursor<'a>> {
     local.or_else(|| resolve_chain(ctx, call.child(C::Callee)?))
 }
 
-fn class_of<'a>(
-    ctx: &'a ResolveCtx,
-    call: Option<Cursor<'a>>,
-    callee: Cursor<'a>,
-) -> Option<Cursor<'a>> {
-    let target = call
-        .filter(|c| c.has_tag(ctx.returns_key))
-        .unwrap_or(callee);
+fn class_of<'a>(ctx: &'a ResolveCtx, callee: Cursor<'a>) -> Option<Cursor<'a>> {
+    let target = value_type(ctx, callee)?;
     if target.has(C::Constructor) {
         target.enclosing_def(CLASS_LIKE)
     } else if target.is_class() {
         Some(target)
-    } else if let Some(sym) = target.tag(ctx.returns_key) {
-        visible_type(ctx, target.fi(), sym)
     } else if let Some(ty) = target.child(C::SsaReturnType) {
         resolve_chain(ctx, ty)
     } else if let Some(branch) = target
@@ -797,7 +783,10 @@ fn value_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>) -> Option<Cursor<'a>> {
         d.enclosing_def(&[C::Enum])
     } else if d.has(C::FieldDef) || d.has(C::Property) {
         let declared = d.child(C::Binding).and_then(Cursor::typed);
-        resolve_chain(ctx, declared.or_else(|| d.child(C::SsaReturnType))?)
+        match declared.or_else(|| d.child(C::SsaReturnType)) {
+            Some(ty) => resolve_chain(ctx, ty),
+            None => Some(d),
+        }
     } else {
         Some(d)
     }

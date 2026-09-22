@@ -154,10 +154,6 @@ stages:
   - name: classify
     rules:
       # Bindings
-      - match: '(assignment left: $L:instance_variable right: (rb_ref $I:__import $C:(__call $T:__ssa_return_type)))'
-        replace: '(__binding (__ivar @$L|strip=@) (__ssa_typed @$T) (__rhs $I $C))'
-      - match: '(assignment left: $L:identifier right: (rb_ref $I:__import $C:(__call $T:__ssa_return_type)))'
-        replace: '(__binding @$L (__ssa_typed @$T) (__rhs $I $C))'
       - match: '(assignment left: $L:instance_variable right: $R:__call)'
         replace: '(__binding (__ivar @$L|strip=@) (__rhs $R))'
       - match: '(assignment left: $L:instance_variable right: $R:rb_ref)'
@@ -239,8 +235,6 @@ stages:
     rules:
       - match: '(__import (__import_kind "autoload"))'
         tag: { non_shadowing: "true" }
-      - match: '(__call $T:__ssa_return_type)'
-        tag: { returns: '@$T' }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'
