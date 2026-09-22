@@ -196,6 +196,7 @@ impl Resolver {
             &mut self.visible,
             self.wildcard_sym,
             self.visible_from_key,
+            self.exports_key,
         );
 
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
@@ -483,6 +484,7 @@ fn propagate_reexports(
     visible: &mut VisibleMap,
     wildcard_sym: u32,
     visible_from_key: u32,
+    exports_key: u32,
 ) -> FxHashSet<(usize, u32)> {
     let mut ambiguous: FxHashSet<(usize, u32)> = FxHashSet::default();
 
@@ -493,9 +495,7 @@ fn propagate_reexports(
             if let Some(source_sym) = c.tag(visible_from_key) {
                 visible_from_directives.push((fi, source_sym));
             }
-            if c.is(C::Decl)
-                && let Some(name) = c.child_sym(C::DefName)
-            {
+            if let Some(name) = c.tag(exports_key) {
                 declared[fi].push(name);
             }
         }

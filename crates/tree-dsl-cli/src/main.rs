@@ -212,7 +212,7 @@ fn cmd_rewrite(
         .map(|(pat, tpl)| {
             let tpl = tpl.clone();
             tree_dsl::pattern::Rewrite::new(&env.lang, pat, move |c| {
-                tree_dsl::pattern::Out::Replace(c.template(&tpl), None)
+                tree_dsl::pattern::Out::Replace(c.template(&tpl), None, None)
             })
         })
         .collect();

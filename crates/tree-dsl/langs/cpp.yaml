@@ -87,9 +87,11 @@ stages:
       - match: '(function_definition declarator: $C:operator_cast body: $B)'
         replace: '(__def (__defname @$C|regex_replace("\s*\(\s*\)\s*(const)?\s*$", "")|regex_replace("\s*/\*[^*]*\*/\s*$", "")) (__function) $B)'
       - match: '(declaration declarator: (function_declarator declarator: $N:identifier))'
-        replace: '(__decl (__defname @$N))'
+        replace: '(__defname @$N)'
+        tag: { exports: '@$N' }
       - match: '(declaration declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier)))'
-        replace: '(__decl (__defname @$N))'
+        replace: '(__defname @$N)'
+        tag: { exports: '@$N' }
       # Method declarations and definitions inside a class body
       - match: '(field_declaration type:? $RT:type_identifier declarator: (function_declarator declarator: $N:field_identifier parameters: $P))'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'

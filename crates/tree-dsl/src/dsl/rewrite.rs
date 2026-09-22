@@ -307,21 +307,11 @@ fn apply_rewrites_inner(
                             break;
                         }
                     }
-                    t.replace(target, built);
-                    if let (Some(entries), Some(new_root)) = (tag_entries, first) {
-                        let tagged = tag_on
-                            .and_then(|k| {
-                                new_root
-                                    .descendants(&t.arena)
-                                    .find(|&n| t.node(n).kind == k)
-                            })
-                            .unwrap_or(new_root);
-                        let raw = Tree::to_raw(tagged);
-                        for entry in entries {
-                            let src = caps[entry.slot as usize]
-                                .first()
-                                .copied()
-                                .unwrap_or(new_root);
+                    let tags: Vec<(u32, u32)> = tag_entries
+                        .iter()
+                        .flatten()
+                        .map(|entry| {
+                            let src = caps[entry.slot as usize].first().copied().unwrap_or(target);
                             let val = if entry.val.is_node_tf() {
                                 entry.val.apply_sym(t, lang, src, edge_ctx)
                             } else {
@@ -333,7 +323,20 @@ fn apply_rewrites_inner(
                                     lang.syms.intern(&entry.val.apply_to_str(s))
                                 }
                             };
-                            t.set_tag(raw, entry.key, val);
+                            (entry.key, val)
+                        })
+                        .collect();
+                    t.replace(target, built);
+                    if let Some(new_root) = first {
+                        let tagged = tag_on
+                            .and_then(|k| {
+                                new_root
+                                    .descendants(&t.arena)
+                                    .find(|&n| t.node(n).kind == k)
+                            })
+                            .unwrap_or(new_root);
+                        for (key, val) in tags {
+                            t.set_tag(Tree::to_raw(tagged), key, val);
                         }
                     }
                     break;
