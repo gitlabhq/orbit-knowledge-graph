@@ -136,7 +136,7 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
         || indexed_count(&client)? == 0
     {
         drop(client);
-        crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
+        crate::commands::index::collect(git.repo_path.clone(), 0, false, Some(db.clone()))
             .context("failed to index the repository")?;
         client = crate::sql::open_graph(Some(db))?;
         if indexed_count(&client)? == 0 {
@@ -304,6 +304,7 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     }
 }
 
+#[derive(Clone)]
 pub struct GitInfo {
     pub repo_path: PathBuf,
     /// Deterministic project ID derived from `repo_path`.
