@@ -2,16 +2,29 @@ name: "Both + center filter = Union of two Joins"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"both"},"limit":20}
 expected: |
   (Limit 21
-    (Union
-      (Project [e.target_id:_gkg_neighbor_id e.target_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type 1:_gkg_neighbor_is_outgoing e.source_id:_gkg_mr_id "MergeRequest":_gkg_mr_type]
-        (Join Semi/mat (e.source_id = _nf_mr.id)
-          (Filter [source_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !deleted]
-            (Scan gl_edge e FINAL))
+    (Union _union
+      (Project [e.target_id:_gkg_neighbor_id e.target_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type expr(…):_gkg_neighbor_is_outgoing e.source_id:_gkg_mr_id expr(…):_gkg_mr_type e.traversal_path:_gkg_mr_tp]
+        (Join Inner (e.source_id = mr.id)
+          (Union e
+            (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
+              (Filter [source_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !deleted]
+                (Scan gl_ci_edge _e)))
+            (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
+              (Filter [source_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !deleted]
+                (Scan gl_diff_edge _e)))
+            (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
+              (Filter [source_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !deleted]
+                (Scan gl_edge _e))))
           (Filter [title:contains !deleted]
             (Scan gl_merge_request mr FINAL))))
-      (Project [e.source_id:_gkg_neighbor_id e.source_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type 0:_gkg_neighbor_is_outgoing e.target_id:_gkg_mr_id "MergeRequest":_gkg_mr_type]
-        (Join Semi/mat (e.target_id = _nf_mr.id)
-          (Filter [target_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !deleted]
-            (Scan gl_edge e FINAL))
+      (Project [e.source_id:_gkg_neighbor_id e.source_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type expr(…):_gkg_neighbor_is_outgoing e.target_id:_gkg_mr_id expr(…):_gkg_mr_type e.traversal_path:_gkg_mr_tp]
+        (Join Inner (e.target_id = mr.id)
+          (Union e
+            (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
+              (Filter [target_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !deleted]
+                (Scan gl_ci_edge _e)))
+            (Project [_e.traversal_path:traversal_path _e.relationship_kind:relationship_kind _e.source_id:source_id _e.source_kind:source_kind _e.target_id:target_id _e.target_kind:target_kind _e._deleted:_deleted]
+              (Filter [target_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED",…+21] !deleted]
+                (Scan gl_edge _e))))
           (Filter [title:contains !deleted]
             (Scan gl_merge_request mr FINAL))))))

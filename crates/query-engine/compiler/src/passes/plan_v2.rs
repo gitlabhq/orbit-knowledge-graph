@@ -3,7 +3,7 @@ use crate::input::*;
 use ontology::Ontology;
 use ontology::constants::*;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // ── Join Graph ──────────────────────────────────────────────────────────────
 
@@ -459,6 +459,15 @@ pub fn plan(
         hop_count: input.relationships.len(),
         phys_op: None,
     };
+    // A scope anchor the optimizer elided has no representation in the query
+    // at all; later passes must not expect it in the result.
+    let represented: HashSet<String> = meta.node_edge_mappings.keys().cloned().collect();
+    if input.query_type == QueryType::Aggregation {
+        input.nodes.retain(|n| represented.contains(&n.id));
+        input
+            .relationships
+            .retain(|r| represented.contains(&r.from) && represented.contains(&r.to));
+    }
     Ok((meta, op))
 }
 
@@ -503,7 +512,10 @@ impl<'a> PlanCtx<'a> {
                 if joined.contains(&n.id) {
                     Some((n.id.clone(), col(&n.id, DEFAULT_PRIMARY_KEY)))
                 } else {
-                    bound.get(&n.id).map(|b| (n.id.clone(), b.clone()))
+                    bound
+                        .get(&n.id)
+                        .filter(|(edge, _)| joined.contains(edge))
+                        .map(|b| (n.id.clone(), b.clone()))
                 }
             })
             .collect()
@@ -861,7 +873,15 @@ impl<'a> PlanCtx<'a> {
             }
         }
         outer.push(deleted_false());
-        filter(union(arms, alias), outer)
+        // Always a derived table named after the hop, even with one arm, so
+        // the arm's internal e1..eN aliases never leak into the outer spine.
+        filter(
+            PhysOp::Union {
+                arms,
+                alias: alias.to_string(),
+            },
+            outer,
+        )
     }
 
     fn depth_arm(

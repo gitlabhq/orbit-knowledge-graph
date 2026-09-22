@@ -41,6 +41,7 @@ const GLOBAL_RULES: &[Rule] = &[
     rule_scope_anchor_elision,
     rule_fk_elision,
     rule_edge_dedup,
+    rule_single_hop_agg_limit_by,
     rule_unreferenced_nodes,
     rule_cascade_sip,
 ];
@@ -859,6 +860,43 @@ fn rule_edge_dedup(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
         }
     }
     let updated = set_final(tree.clone(), &edges, ctx);
+    (updated != *tree).then_some(updated)
+}
+
+/// An aggregation over one edge scan must not count stale edge versions.
+/// `LIMIT 1 BY <sort key>` dedups while keeping the scan eligible for column
+/// pruning and projections; with two or more edges the self-join uses `FINAL`
+/// instead (see `rule_edge_dedup`).
+fn rule_single_hop_agg_limit_by(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    if ctx.input.query_type != QueryType::Aggregation {
+        return None;
+    }
+    let spine = spine_of(tree)?;
+    let edges: Vec<&str> = spine
+        .leaves
+        .iter()
+        .filter_map(|(l, _)| edge_scan_alias(l, ctx))
+        .collect();
+    let [alias] = edges[..] else {
+        return None;
+    };
+    let alias = alias.to_string();
+    fn set(op: PhysOp, alias: &str) -> PhysOp {
+        match op {
+            PhysOp::Scan {
+                table,
+                alias: a,
+                dedup: Dedup::None,
+            } if a == alias => PhysOp::Scan {
+                table,
+                alias: a,
+                dedup: Dedup::LimitBy,
+            },
+            PhysOp::Union { .. } => op,
+            other => map_children(other, |c| set(c, alias)),
+        }
+    }
+    let updated = set(tree.clone(), &alias);
     (updated != *tree).then_some(updated)
 }
 

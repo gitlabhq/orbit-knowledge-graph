@@ -2,10 +2,9 @@ name: "Aggregation prunes unreferenced User"
 input: {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"merged_mrs"}],"limit":5}
 expected: |
   (Limit 6
-    (Agg [group: p.id:p p.name:p p.full_path:p p.visibility_level:p] [metrics: COUNT(mr.*):merged_mrs]
-      (Filter [!deleted]
-        (Join Inner (mr.project_id = p.id)
-          (Filter [state:eq !deleted]
-            (Scan gl_merge_request mr FINAL))
-          (Filter [!deleted]
-            (Scan gl_project p FINAL))))))
+    (Agg [group: p.id:p_id p.name:p_name p.full_path:p_full_path p.visibility_level:p_visibility_level] [metrics: COUNT(mr.*):merged_mrs]
+      (Join Inner (mr.project_id = p.id)
+        (Filter [!deleted]
+          (Scan gl_project p FINAL))
+        (Filter [state:eq !deleted]
+          (Scan gl_merge_request mr FINAL)))))

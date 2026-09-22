@@ -2,10 +2,9 @@ name: "Single-hop aggregation — edge scan uses LIMIT BY not FINAL"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
 expected: |
   (Limit 11
-    (Agg [group: p.id:p p.name:p p.full_path:p p.visibility_level:p] [metrics: COUNT(mr.*):n]
-      (Filter [!deleted scope(…)]
-        (Join Inner (mr.project_id = p.id)
-          (Filter [state:eq !deleted]
-            (Scan gl_merge_request mr FINAL))
-          (Filter [id∈[1] !deleted]
-            (Scan gl_project p FINAL))))))
+    (Agg [group: p.id:p_id p.name:p_name p.full_path:p_full_path p.visibility_level:p_visibility_level] [metrics: COUNT(mr.*):n]
+      (Join Inner (mr.project_id = p.id)
+        (Filter [state:eq !deleted]
+          (Scan gl_merge_request mr FINAL))
+        (Filter [id∈[1] !deleted]
+          (Scan gl_project p FINAL)))))

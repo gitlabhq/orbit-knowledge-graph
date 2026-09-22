@@ -1,23 +1,31 @@
 name: "User->Project — User has no traversal_path"
 input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}
 expected: |
-  (Limit 11
-    (Join Semi/mat (_nf_start)
-      (Join Semi/mat (forward)
-        (Join Semi/mat (_nf_end)
-          (Join Semi/mat (backward)
-            (Union
-              (Scan forward f)
-              (Join Inner (f.end_id = b.end_id)
-                (Scan forward f)
-                (Scan backward b)))
-            (Scan gl_edge e1 FINAL))
-          (Filter [id∈[100] !deleted]
-            (Scan gl_project end FINAL)))
-        (Union
-          (Scan gl_edge e1 FINAL)
+  (With
+    (forward =
+      (Union _frontier
+        (Project [e1.source_id:anchor_id e1.target_id:end_id e1.target_kind:end_kind expr(…):path_nodes expr(…):edge_kinds expr(…):depth]
+          (Filter [source_id∈[1] relationship_kind∈["MEMBER_OF","CONTAINS"] source_kind="User" !deleted]
+            (Scan gl_edge e1)))
+        (Project [e1.source_id:anchor_id e2.target_id:end_id e2.target_kind:end_kind expr(…):path_nodes expr(…):edge_kinds expr(…):depth]
           (Join Inner (e1.target_id = e2.source_id)
-            (Scan gl_edge e1 FINAL)
-            (Scan gl_edge e2 FINAL))))
-      (Filter [id∈[1] !deleted]
-        (Scan gl_user start FINAL))))
+            (Filter [source_id∈[1] relationship_kind∈["MEMBER_OF","CONTAINS"] source_kind="User" !deleted]
+              (Scan gl_edge e1))
+            (Filter [relationship_kind∈["MEMBER_OF","CONTAINS"] !deleted]
+              (Scan gl_edge e2))))))
+    (backward =
+      (Project [e1.target_id:anchor_id e1.source_id:end_id e1.source_kind:end_kind expr(…):path_nodes expr(…):edge_kinds expr(…):depth]
+        (Filter [target_id∈[100] relationship_kind∈["MEMBER_OF","CONTAINS"] target_kind="Project" !deleted]
+          (Scan gl_edge e1))))
+    (Limit 11
+      (Sort [paths.depth↑]
+        (Project [paths._gkg_path:_gkg_path paths._gkg_edge_kinds:_gkg_edge_kinds paths.depth:depth]
+          (Union paths
+            (Project [f.depth:depth expr(…):_gkg_path f.edge_kinds:_gkg_edge_kinds]
+              (Filter [depth=1 end_kind="Project" end_id∈[100]]
+                (Scan forward f)))
+            (Project [expr(…):depth expr(…):_gkg_path expr(…):_gkg_edge_kinds]
+              (Filter [expr(…)]
+                (Join Inner (f.end_id = b.end_id)
+                  (Scan forward f)
+                  (Scan backward b)))))))))

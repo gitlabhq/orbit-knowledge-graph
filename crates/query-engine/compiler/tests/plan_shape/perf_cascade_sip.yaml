@@ -2,16 +2,16 @@ name: "Cascade SIP — e1 gets IN-subquery anchored to e0"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}},{"id":"p","entity":"Project"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"limit":10}
 expected: |
   (Limit 11
-    (Project [e0.traversal_path:e0_path e0.relationship_kind:e0_type e0.source_id:e0_src e0.source_kind:e0_src_type e0.target_id:e0_dst e0.target_kind:e0_dst_type e1.traversal_path:e1_path "IN_PROJECT":e1_type (mr.id):e1_src "MergeRequest":e1_src_type (p.id):e1_dst "Project":e1_dst_type @id @iid @title @state @source_branch @target_branch @id @title @color @id @name @full_path @visibility_level]
-      (Join Semi/mat (e0.target_id = _nf_label.id)
-        (Join Inner (e0.target_id = e1.source_id)
+    (Project [e0.relationship_kind:e0_type e0.source_id:e0_src e0.source_kind:e0_src_type e0.target_id:e0_dst e0.target_kind:e0_dst_type e1.relationship_kind:e1_type e1.source_id:e1_src e1.source_kind:e1_src_type e1.target_id:e1_dst e1.target_kind:e1_dst_type @label.id @label.title @label.color]
+      (Join Semi (e1.source_id = _sip_e0.source_id)
+        (Join Inner (e0.target_id = label.id)
+          (Join Inner (e0.source_id = e1.source_id)
+            (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" !deleted scope(…) source_id∈[1]]
+              (Scan gl_edge e0 FINAL))
+            (Filter [relationship_kind="IN_PROJECT" source_kind="MergeRequest" target_kind="Project" !deleted scope(…) source_id∈[1]]
+              (Scan gl_edge e1 FINAL)))
+          (Filter [title:eq !deleted]
+            (Scan gl_label label FINAL)))
+        (Project [_sip_e0.source_id:source_id]
           (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" !deleted scope(…) source_id∈[1]]
-            (Scan gl_edge e0))
-          (Filter [!deleted scope(…)]
-            (Join Inner (mr.project_id = p.id)
-              (Filter [id∈[1] !deleted]
-                (Scan gl_merge_request mr FINAL))
-              (Filter [!deleted]
-                (Scan gl_project p FINAL)))))
-        (Filter [title:eq !deleted]
-          (Scan gl_label label FINAL)))))
+            (Scan gl_edge _sip_e0 FINAL))))))
