@@ -97,6 +97,7 @@ fn round_trip_save_load() {
         assert_eq!(orig.from_node, restored.from_node);
         assert_eq!(orig.to_tree, restored.to_tree);
         assert_eq!(orig.to_node, restored.to_node);
+        assert_eq!(orig.site, restored.site);
     }
 }
 

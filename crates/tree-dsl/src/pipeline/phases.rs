@@ -100,14 +100,10 @@ pub fn remap(
                     .get(e.to_fi())
                     .is_some_and(|l| !dirty.contains(l.as_str()))
         })
-        .map(|e| {
-            Edge::new(
-                label_to_fi[old_labels[e.from_fi()].as_str()],
-                e.from_node,
-                label_to_fi[old_labels[e.to_fi()].as_str()],
-                e.to_node,
-                e.kind,
-            )
+        .map(|e| Edge {
+            from_tree: label_to_fi[old_labels[e.from_fi()].as_str()],
+            to_tree: label_to_fi[old_labels[e.to_fi()].as_str()],
+            ..*e
         })
         .collect();
 

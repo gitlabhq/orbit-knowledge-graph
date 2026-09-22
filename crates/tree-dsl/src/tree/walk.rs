@@ -73,6 +73,87 @@ where
     })
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum Linearize {
+    Reject,
+    Left,
+    Right,
+    Class,
+}
+
+pub struct LinearizeKeys {
+    key: u32,
+    modes: [u32; 3],
+}
+
+impl LinearizeKeys {
+    pub fn new(lang: &crate::intern::Lang) -> Self {
+        Self {
+            key: lang.syms.intern("linearize"),
+            modes: ["left", "right", "class"].map(|m| lang.syms.intern(m)),
+        }
+    }
+
+    pub fn of(&self, class: Cursor) -> Linearize {
+        match class.tag(self.key) {
+            Some(m) if m == self.modes[0] => Linearize::Left,
+            Some(m) if m == self.modes[1] => Linearize::Right,
+            Some(m) if m == self.modes[2] => Linearize::Class,
+            _ => Linearize::Reject,
+        }
+    }
+}
+
+pub fn pick_member<N: Copy, T: PartialEq>(
+    mode: Linearize,
+    is_class: impl Fn(N) -> bool,
+    mut found: Vec<(N, T)>,
+) -> Option<T> {
+    if found.is_empty() {
+        return None;
+    }
+    if found.iter().all(|(_, t)| *t == found[0].1) {
+        return Some(found.swap_remove(0).1);
+    }
+    match mode {
+        Linearize::Reject => None,
+        Linearize::Left => Some(found.swap_remove(0).1),
+        Linearize::Right => found.pop().map(|(_, t)| t),
+        Linearize::Class => {
+            let mut classes = found.into_iter().filter(|&(n, _)| is_class(n));
+            let first = classes.next()?;
+            classes.next().is_none().then_some(first.1)
+        }
+    }
+}
+
+pub fn unique_by_level<N, I, T>(
+    start: Vec<N>,
+    succ: impl Fn(N) -> I,
+    find: impl Fn(N) -> Option<T>,
+    pick: impl Fn(Vec<(N, T)>) -> Option<T>,
+) -> Option<T>
+where
+    N: Copy + Eq + std::hash::Hash,
+    I: IntoIterator<Item = N>,
+    T: PartialEq,
+{
+    let mut seen: rustc_hash::FxHashSet<N> = start.iter().copied().collect();
+    let mut level = start;
+    while !level.is_empty() {
+        let found: Vec<(N, T)> = level.iter().filter_map(|&n| Some((n, find(n)?))).collect();
+        if !found.is_empty() {
+            return pick(found);
+        }
+        level = level
+            .iter()
+            .flat_map(|&n| succ(n))
+            .filter(|m| seen.insert(*m))
+            .collect();
+    }
+    None
+}
+
 #[derive(Clone, Copy)]
 pub struct Cursor<'a> {
     trees: &'a [Tree],
