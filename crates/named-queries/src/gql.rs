@@ -74,7 +74,7 @@ fn encode_integer(value: &Value) -> Result<String, String> {
 fn encode_literal(value: &Value) -> Result<String, String> {
     match value {
         Value::String(_) | Value::Bool(_) => Ok(value.to_string()),
-        Value::Number(number) if number.is_i64() => Ok(value.to_string()),
+        Value::Number(number) if number.is_i64() || number.is_u64() => Ok(value.to_string()),
         Value::Array(items) => {
             let values = items
                 .iter()
@@ -105,6 +105,9 @@ mod tests {
             assert!(encode_integer(&value).is_err(), "{value}");
         }
         assert!(encode_literal(&json!(["x", true, 1])).is_ok());
-        assert!(encode_literal(&json!(u64::MAX)).is_err());
+        assert_eq!(
+            encode_literal(&json!(u64::MAX)).unwrap(),
+            u64::MAX.to_string()
+        );
     }
 }
