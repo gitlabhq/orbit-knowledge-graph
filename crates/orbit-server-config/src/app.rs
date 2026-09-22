@@ -109,17 +109,15 @@ impl AppConfig {
     /// The listener that serves `/-/liveness`, `/-/readiness` and, when
     /// `metrics.prometheus.enabled`, `/-/metrics`.
     pub fn probe_server_bind_address(&self) -> Result<SocketAddr, ConfigError> {
-        let legacy = self.metrics.prometheus.port.map(bind_address_for_port);
-
-        match (self.probe_server.bind_address, legacy) {
-            (Some(address), Some(legacy)) if address != legacy => {
+        match (self.probe_server.bind_address, self.metrics.prometheus.port) {
+            (Some(address), Some(port)) if address.port() != port => {
                 Err(ConfigError::ProbeServerAddressConflict {
                     bind_address: address,
-                    port: legacy.port(),
+                    port,
                 })
             }
             (Some(address), _) => Ok(address),
-            (None, Some(legacy)) => Ok(legacy),
+            (None, Some(port)) => Ok(bind_address_for_port(port)),
             (None, None) => Ok(default_bind_address()),
         }
     }
@@ -228,6 +226,18 @@ gitlab:
         assert_eq!(
             config.probe_server_bind_address().unwrap(),
             address("0.0.0.0:9200")
+        );
+    }
+
+    #[test]
+    fn probe_server_address_accepts_a_loopback_address_on_the_deprecated_port() {
+        let mut config = AppConfig::embedded_defaults();
+        config.probe_server.bind_address = Some(address("127.0.0.1:9200"));
+        config.metrics.prometheus.port = Some(9200);
+
+        assert_eq!(
+            config.probe_server_bind_address().unwrap(),
+            address("127.0.0.1:9200")
         );
     }
 
