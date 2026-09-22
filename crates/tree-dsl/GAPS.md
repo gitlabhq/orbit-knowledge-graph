@@ -157,6 +157,27 @@ are corrected to the language rule and carry a `corrected:` note.
   the name is unambiguous in that file; two extensions with one name on
   different receivers resolve neither.
 
+## Base-branch behavior the reviews flagged
+
+These predate this branch and are unchanged here. Each is a search or a cap
+where the language defines a scope rule.
+
+- `lookup` retries the root block after an empty local result, so a local
+  bound to an unknown value does not shadow a root definition.
+- A missing method retries the receiver as the callee.
+- Five Calls writes bypass `emit` and its callable gate.
+- `ivar_type` takes the first assignment to a field; writes do not join.
+- Every root definition is pre-declared without `hoisted`.
+- SSA alias reads stop after eight hops; `method_up` stops at depth eight and
+  takes the first successful ancestor.
+- The flat visible map keeps one definition per name; `visible_from` takes the
+  first same-named definition in the corpus; header promotion matches by name.
+- A failed import path retries `path/name`; a missing export retries a
+  submodule derived from the file name.
+- Directory names select source roots in the rule files; a project
+  configuration is the right home.
+- The `returns` reserved tag has no rule-file user.
+
 ## Not covered
 
 HCL has no rule file. The canonical alphabet has no kind for resource, data
