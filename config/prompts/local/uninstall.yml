@@ -6,6 +6,7 @@ description: >-
 
 
   Removes the instruction section, hooks, MCP server entry, and skill files
-  that `orbit setup` wrote. A picker lists the agents that have Orbit installed; `--yes` skips it.
+  that `orbit setup` wrote. A picker lists the detected agents that have Orbit installed; `--yes`
+  skips it.
   Files you edited after setup are kept, with their `.orbit-backup` copies.
   Targets user-global configuration unless `--project` or `--dir` is given.

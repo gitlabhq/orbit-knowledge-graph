@@ -741,7 +741,8 @@ async fn dispatch(command: Commands) -> Result<()> {
         }
         Commands::Uninstall { agents, flags } => {
             let options = flags.to_options(agents, false, Default::default());
-            commands::setup::uninstall(options, flags.target()?)
+            let machine = commands::setup::detect::Machine::current()?;
+            commands::setup::uninstall(options, flags.target()?, &machine)
         }
         Commands::HookGuard { kind, mode: _ } => {
             commands::hook_guard::run(kind);

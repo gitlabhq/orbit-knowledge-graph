@@ -30,10 +30,17 @@ impl Selection {
         })
     }
 
-    pub(super) fn from_uninstall_options(options: &Options, target: &Target) -> Result<Selection> {
+    pub(super) fn from_uninstall_options(
+        options: &Options,
+        target: &Target,
+        detected: &[(Agent, PathBuf)],
+    ) -> Result<Selection> {
         let components: BTreeSet<Component> = Component::ALL.into_iter().collect();
         let agents = if options.agents.is_empty() {
             components::installed_agents(&components, target)
+                .into_iter()
+                .filter(|agent| detected.iter().any(|(found, _)| found.name == agent.name))
+                .collect()
         } else {
             agents_named(&options.agents)?
         };

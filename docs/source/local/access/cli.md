@@ -229,8 +229,8 @@ To undo the changes, run:
 orbit uninstall
 ```
 
-It lists the agents that have Orbit installed in that scope. Name agents to
-target only those. It removes what `orbit setup` wrote and leaves
+It lists the detected agents that have Orbit installed in that scope. Name
+agents to target only those. It removes what `orbit setup` wrote and leaves
 the rest of each file untouched. Files you edited after setup are kept, and so
 are their backups. A backup goes away once its file is back to the original.
 `--yes`, `--project`, and `--dir` work as they do for `orbit setup`.

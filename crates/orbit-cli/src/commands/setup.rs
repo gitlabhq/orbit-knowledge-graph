@@ -59,19 +59,21 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     Ok(())
 }
 
-pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
+pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> Result<()> {
     let interactive = tui::can_prompt(options.yes)?;
-    let mut selection = Selection::from_uninstall_options(&options, &target)?;
+    let detected_agents = machine.installed_agents();
+    let mut selection = Selection::from_uninstall_options(&options, &target, &detected_agents)?;
     tui::intro(format!(
         "Orbit uninstall ({})",
         summary::join_component_labels(&selection.components)
     ))?;
 
     if interactive {
+        let location_hints = summary::detected_location_hints(&detected_agents, machine);
         selection = ask_which_agents(
             selection,
             "Remove Orbit from which agents?",
-            &BTreeMap::new(),
+            &location_hints,
         )?;
     }
     if selection.agents.is_empty() {
@@ -275,7 +277,7 @@ mod tests {
     }
 
     fn uninstall_named(names: &[&str], dir: &Path) {
-        uninstall(options_for(names), project(dir)).unwrap();
+        uninstall(options_for(names), project(dir), &bare_machine()).unwrap();
     }
 
     fn read_json(path: &Path) -> Value {
@@ -353,12 +355,16 @@ mod tests {
     }
 
     #[test]
-    fn bare_uninstall_covers_the_installed_agents() {
+    fn bare_uninstall_covers_the_installed_and_detected_agents() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".config/opencode")).unwrap();
+        std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+        let machine = Machine::new(home.path().to_path_buf(), BTreeMap::new());
         let dir = tempfile::tempdir().unwrap();
         install_with_mcp(&["opencode"], dir.path());
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
 
-        uninstall_named(&[], dir.path());
+        uninstall(options_for(&[]), project(dir.path()), &machine).unwrap();
 
         assert!(!dir.path().join(".opencode").exists());
         assert!(!dir.path().join("AGENTS.md").exists());
