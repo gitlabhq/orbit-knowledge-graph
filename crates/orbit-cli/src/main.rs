@@ -410,14 +410,14 @@ struct SetupFlags {
 }
 
 impl SetupFlags {
-    fn options(
+    fn to_options(
         &self,
-        assistants: Vec<String>,
+        agents: Vec<String>,
         all: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
     ) -> commands::setup::Options {
         commands::setup::Options {
-            assistants,
+            agents,
             all,
             yes: self.yes,
             dry_run: self.dry_run,
@@ -454,11 +454,11 @@ enum Commands {
     Setup {
         /// Agents to pre-select in the picker. Default: every agent detected
         /// on this machine.
-        #[arg(value_name = "AGENT", value_parser = commands::setup::assistant_value_parser())]
-        assistants: Vec<String>,
+        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser())]
+        agents: Vec<String>,
 
         /// Configure every supported agent, detected or not.
-        #[arg(long, conflicts_with = "assistants")]
+        #[arg(long, conflicts_with = "agents")]
         all: bool,
 
         /// Also register the `orbit` MCP server. Off by default.
@@ -475,8 +475,8 @@ enum Commands {
     #[command(about = descriptions::short("uninstall"), long_about = descriptions::long("uninstall"))]
     Uninstall {
         /// Agents to clean up. Default: all of them.
-        #[arg(value_name = "AGENT", value_parser = commands::setup::assistant_value_parser())]
-        assistants: Vec<String>,
+        #[arg(value_name = "AGENT", value_parser = commands::setup::agent_name_parser())]
+        agents: Vec<String>,
 
         #[command(flatten)]
         flags: SetupFlags,
@@ -728,19 +728,19 @@ async fn dispatch(command: Commands) -> Result<()> {
             None => skill::run(name_or_path, path),
         },
         Commands::Setup {
-            assistants,
+            agents,
             all,
             mcp,
             skip,
             flags,
         } => {
-            let components = commands::setup::Component::selection(mcp, &skip);
-            let options = flags.options(assistants, all, components);
+            let components = commands::setup::Component::from_flags(mcp, &skip);
+            let options = flags.to_options(agents, all, components);
             let machine = commands::setup::detect::Machine::current()?;
             commands::setup::install(options, flags.target()?, &machine)
         }
-        Commands::Uninstall { assistants, flags } => {
-            let options = flags.options(assistants, false, Default::default());
+        Commands::Uninstall { agents, flags } => {
+            let options = flags.to_options(agents, false, Default::default());
             commands::setup::uninstall(options, flags.target()?)
         }
         Commands::HookGuard { kind, mode: _ } => {

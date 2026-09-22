@@ -20,7 +20,7 @@ pub(super) fn detected_location_hints(
     detected: &[(Agent, PathBuf)],
     machine: &Machine,
 ) -> BTreeMap<String, String> {
-    spec::all()
+    spec::agents()
         .map(|agent| {
             let hint = detected
                 .iter()
@@ -33,7 +33,7 @@ pub(super) fn detected_location_hints(
 }
 
 pub(super) fn agent_picker_choices(location_hints: &BTreeMap<String, String>) -> Vec<Choice> {
-    spec::all()
+    spec::agents()
         .map(|agent| Choice {
             key: agent.name.clone(),
             label: agent.title.clone(),
@@ -44,24 +44,24 @@ pub(super) fn agent_picker_choices(location_hints: &BTreeMap<String, String>) ->
 
 pub(super) fn format_components_per_agent(plan: &Plan) -> String {
     let width = plan
-        .assistants
+        .agents
         .iter()
-        .map(|assistant| assistant.title.len())
+        .map(|agent| agent.title.len())
         .max()
         .unwrap_or_default();
-    plan.assistants
+    plan.agents
         .iter()
-        .map(|assistant| {
-            let components = match assistant.components.is_empty() {
+        .map(|agent| {
+            let components = match agent.components.is_empty() {
                 true => "nothing selected applies".to_string(),
-                false => assistant
+                false => agent
                     .components
                     .iter()
                     .map(|(component, _)| component.label())
                     .collect::<Vec<_>>()
                     .join(", "),
             };
-            format!("{:<width$}   {components}", assistant.title)
+            format!("{:<width$}   {components}", agent.title)
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -69,8 +69,8 @@ pub(super) fn format_components_per_agent(plan: &Plan) -> String {
 
 pub(super) fn format_files_per_component(plan: &Plan) -> String {
     let mut files_by_component: BTreeMap<Component, BTreeSet<&str>> = BTreeMap::new();
-    for assistant in &plan.assistants {
-        for (component, paths) in &assistant.components {
+    for agent in &plan.agents {
+        for (component, paths) in &agent.components {
             files_by_component
                 .entry(*component)
                 .or_default()

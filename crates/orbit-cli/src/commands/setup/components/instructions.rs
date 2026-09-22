@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{Installer, Report, backup_once, drop_backup_when_restored, remove_file};
+use super::{
+    Installer, Report, backup_once, drop_backup_when_restored, remove_file_and_empty_parents,
+};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
 
@@ -12,29 +14,29 @@ const BLOCK_END: &str = "<!-- orbit:setup:end -->";
 pub(super) struct Instructions;
 
 impl Installer for Instructions {
-    fn plan(&self, assistant: Agent, target: &Target) -> Result<Vec<String>> {
-        Ok(vec![target.resolve(&assistant.instruction_file)?.1])
+    fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
+        Ok(vec![target.resolve(&agent.instruction_file)?.1])
     }
 
-    fn install(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for (path, label) in files(assistants, target)? {
+    fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
+        for (path, label) in instruction_files(agents, target)? {
             upsert_block_in_file(&path, &label, report)?;
         }
         Ok(())
     }
 
-    fn remove(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for (path, label) in files(assistants, target)? {
+    fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
+        for (path, label) in instruction_files(agents, target)? {
             strip_block_from_file(&path, target, &label, report)?;
         }
         Ok(())
     }
 }
 
-fn files(assistants: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {
-    let mut resolved: Vec<(PathBuf, String)> = assistants
+fn instruction_files(agents: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>> {
+    let mut resolved: Vec<(PathBuf, String)> = agents
         .iter()
-        .map(|assistant| target.resolve(&assistant.instruction_file))
+        .map(|agent| target.resolve(&agent.instruction_file))
         .collect::<Result<_>>()?;
     resolved.sort_by(|a, b| a.0.cmp(&b.0));
     resolved.dedup_by(|a, b| a.0 == b.0);
@@ -53,7 +55,7 @@ fn files(assistants: &[Agent], target: &Target) -> Result<Vec<(PathBuf, String)>
 }
 
 fn rendered_block() -> String {
-    format!("{BLOCK_BEGIN}\n{}\n{BLOCK_END}", spec::instructions())
+    format!("{BLOCK_BEGIN}\n{}\n{BLOCK_END}", spec::instructions_text())
 }
 
 fn upsert_block_in_file(path: &Path, label: &str, report: &mut Report) -> Result<()> {
@@ -95,7 +97,7 @@ fn strip_block_from_file(
         return Ok(());
     };
     if remaining.trim().is_empty() {
-        remove_file(path, target)?;
+        remove_file_and_empty_parents(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {
         std::fs::write(path, remaining)

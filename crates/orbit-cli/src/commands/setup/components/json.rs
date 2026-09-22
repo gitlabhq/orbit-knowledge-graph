@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use super::{Report, drop_backup_when_restored, remove_file};
+use super::{Report, drop_backup_when_restored, remove_file_and_empty_parents};
 use crate::commands::setup::Target;
 
 pub(super) fn read_object(path: &Path) -> Result<Value> {
@@ -43,7 +43,7 @@ pub(super) fn write_or_delete_when_empty(
     report: &mut Report,
 ) -> Result<()> {
     if root.as_object().is_some_and(|map| map.is_empty()) {
-        remove_file(path, target)?;
+        remove_file_and_empty_parents(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {
         write_object(path, root)?;
@@ -62,7 +62,7 @@ pub(in crate::commands::setup) fn contains_marker(value: &Value, marker: &str) -
     }
 }
 
-pub(super) fn merge_owned(
+pub(super) fn replace_marked_entries(
     root: &mut Value,
     path: &[String],
     marker: &str,
@@ -74,11 +74,11 @@ pub(super) fn merge_owned(
     Ok(())
 }
 
-pub(super) fn remove_owned(root: &mut Value, path: &[String], marker: &str) -> bool {
+pub(super) fn remove_marked_entries(root: &mut Value, path: &[String], marker: &str) -> bool {
     retain_and_prune(root, path, &|entry| !contains_marker(entry, marker))
 }
 
-pub(super) fn register(root: &mut Value, path: &[String], value: &str) -> Result<bool> {
+pub(super) fn append_unique(root: &mut Value, path: &[String], value: &str) -> Result<bool> {
     let target = ensure_array_at(root, path)?;
     if target.iter().any(|entry| entry.as_str() == Some(value)) {
         return Ok(false);
@@ -87,7 +87,7 @@ pub(super) fn register(root: &mut Value, path: &[String], value: &str) -> Result
     Ok(true)
 }
 
-pub(super) fn deregister(root: &mut Value, path: &[String], value: &str) -> bool {
+pub(super) fn remove_value(root: &mut Value, path: &[String], value: &str) -> bool {
     retain_and_prune(root, path, &|entry| entry.as_str() != Some(value))
 }
 
