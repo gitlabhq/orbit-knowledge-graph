@@ -29,6 +29,7 @@ fn apply_rules(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
         rule_prune_duplicate_node_join,
         rule_denorm_tag_pushdown,
         rule_column_pushdown,
+        rule_prune_unreferenced_agg_node,
     ];
     for rule in rules {
         if let Some(rewritten) = rule(&tree, ctx) {
@@ -512,5 +513,50 @@ fn edge_table_name(op: &PhysOp) -> Option<String> {
         PhysOp::Scan { table, .. } => Some(table.clone()),
         PhysOp::Filter { input, .. } => edge_table_name(input),
         _ => None,
+    }
+}
+
+// ── Rule 8: Prune unreferenced node in aggregation ──────────────────────────
+
+fn rule_prune_unreferenced_agg_node(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    if ctx.input.query_type != QueryType::Aggregation {
+        return None;
+    }
+    let PhysOp::Join {
+        left,
+        right,
+        kind: JoinKind::Inner,
+        ..
+    } = op
+    else {
+        return None;
+    };
+    let alias = scan_alias(right)?;
+    let node = ctx.input.nodes.iter().find(|n| n.id == alias)?;
+
+    let in_group_by = ctx
+        .input
+        .aggregation
+        .group_by
+        .iter()
+        .any(|g| g.node() == alias.as_str());
+    let in_metrics = ctx
+        .input
+        .aggregation
+        .metrics
+        .iter()
+        .any(|m| m.expr.node() == alias.as_str());
+    let has_filters =
+        !node.filters.is_empty() || !node.node_ids.is_empty() || node.id_range.is_some();
+    let in_order_by = ctx
+        .input
+        .order_by
+        .as_ref()
+        .is_some_and(|ob| ob.node == alias);
+
+    if !in_group_by && !in_metrics && !has_filters && !in_order_by {
+        Some(*left.clone())
+    } else {
+        None
     }
 }
