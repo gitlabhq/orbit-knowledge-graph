@@ -5,6 +5,7 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::constants::*;
 use crate::input::*;
+use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
     let col = Expr::col(alias, prop);
@@ -379,4 +380,144 @@ pub fn has_non_denorm_filters(
             denorm_map.contains_key(&(entity.to_string(), prop.clone(), "target".to_string()));
         !src && !tgt
     })
+}
+
+// ── Hydration traversal-path predicates ─────────────────────────────────────
+
+pub(crate) const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
+
+#[derive(Clone, Copy)]
+struct HydrationPathFilterContext {
+    array_exists_path_threshold: usize,
+}
+
+impl Default for HydrationPathFilterContext {
+    fn default() -> Self {
+        Self {
+            array_exists_path_threshold: ARRAY_EXISTS_PATH_THRESHOLD,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HydrationPathFilterShape {
+    OrStartsWith,
+    ArrayExists,
+}
+
+impl HydrationPathFilterContext {
+    fn shape_for(self, is_dynamic: bool, path_count: usize) -> HydrationPathFilterShape {
+        if is_dynamic && path_count > self.array_exists_path_threshold {
+            HydrationPathFilterShape::ArrayExists
+        } else {
+            HydrationPathFilterShape::OrStartsWith
+        }
+    }
+}
+
+/// Build a traversal-path predicate from collected paths.
+///
+/// 1. **Leaf pruning:** drop any path that is a strict prefix of another
+///    in the set. Keeps the most specific (deepest) paths for maximum
+///    granule selectivity. Safe because `id IN (...)` is the correctness
+///    guarantee — TP is purely a scan optimizer.
+/// 2. **Small path sets:** balanced OR of `startsWith` calls. This keeps the
+///    primary-key pruning that makes low-fanout hydration fast.
+/// 3. **Large dynamic path sets:** `arrayExists(path -> startsWith(...))`.
+///    This avoids ClickHouse parser-depth failures when dynamic hydration
+///    discovers hundreds of traversal paths.
+pub fn traversal_path_filter(
+    alias: &str,
+    paths: &[TraversalPath],
+    is_dynamic: bool,
+    path_segment_budget: Option<usize>,
+) -> Option<Expr> {
+    if paths.is_empty() {
+        return None;
+    }
+    let leaves = prune_to_leaves(paths);
+    if leaves.is_empty() {
+        return None;
+    }
+    let leaves = match path_segment_budget {
+        Some(budget) => generalize_to_budget(leaves, budget),
+        None => leaves,
+    };
+    let ctx = HydrationPathFilterContext::default();
+    match ctx.shape_for(is_dynamic, leaves.len()) {
+        HydrationPathFilterShape::OrStartsWith => or_starts_with(alias, &leaves),
+        HydrationPathFilterShape::ArrayExists => Some(array_exists_starts_with(alias, &leaves)),
+    }
+}
+
+pub(crate) fn generalize_to_budget(
+    mut leaves: Vec<TraversalPath>,
+    budget: usize,
+) -> Vec<TraversalPath> {
+    while leaves.iter().map(|p| p.segment_count()).sum::<usize>() > budget {
+        let parents: Vec<TraversalPath> = leaves.iter().map(|p| p.parent()).collect();
+        if parents == leaves {
+            break;
+        }
+        leaves = prune_to_leaves(&parents);
+    }
+    leaves
+}
+
+fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {
+    or_balanced(paths.iter().map(|tp| starts_with_path(alias, tp)).collect())
+}
+
+fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
+    Expr::func(
+        "startsWith",
+        vec![
+            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+            Expr::string(tp.as_str()),
+        ],
+    )
+}
+
+fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
+    let lambda_param = "_gkg_path";
+    Expr::func(
+        "arrayExists",
+        vec![
+            Expr::lambda(
+                lambda_param,
+                Expr::func(
+                    "startsWith",
+                    vec![
+                        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                        Expr::ident(lambda_param),
+                    ],
+                ),
+            ),
+            Expr::param(
+                ChType::String.to_array(),
+                serde_json::Value::Array(
+                    paths
+                        .iter()
+                        .map(|p| serde_json::Value::String(p.as_str().to_string()))
+                        .collect(),
+                ),
+            ),
+        ],
+    )
+}
+
+fn or_balanced(mut exprs: Vec<Expr>) -> Option<Expr> {
+    match exprs.len() {
+        0 => None,
+        1 => exprs.pop(),
+        _ => {
+            let right = exprs.split_off(exprs.len() / 2);
+            let left = exprs;
+            Some(Expr::binary(
+                Op::Or,
+                or_balanced(left)?,
+                or_balanced(right)?,
+            ))
+        }
+    }
 }

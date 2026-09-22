@@ -5357,6 +5357,7 @@ dependencies = [
  "clap",
  "compiler",
  "ontology",
+ "orbit-utils",
  "serde_json",
 ]
 

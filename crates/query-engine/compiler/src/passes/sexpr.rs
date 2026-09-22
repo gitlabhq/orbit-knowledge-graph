@@ -16,7 +16,11 @@ impl PhysOp {
                 alias,
                 dedup,
             } => {
-                let d = if *dedup { " FINAL" } else { "" };
+                let d = match dedup {
+                    Dedup::None => "",
+                    Dedup::Final => " FINAL",
+                    Dedup::LimitBy => " LIMIT-BY",
+                };
                 format!("{pad}(Scan {table} {alias}{d})")
             }
             PhysOp::Filter { input, predicates } => {
@@ -43,17 +47,13 @@ impl PhysOp {
             } => {
                 let k = match kind {
                     JoinKind::Inner => "Inner",
-                    JoinKind::Semi { materialize: true } => "Semi/mat",
-                    JoinKind::Semi { materialize: false } => "Semi",
+                    JoinKind::Semi => "Semi",
                 };
-                let on_str = if on.left.1.is_empty() && on.right.1.is_empty() {
-                    on.left.0.clone()
-                } else {
-                    format!(
-                        "{}.{} = {}.{}",
-                        on.left.0, on.left.1, on.right.0, on.right.1
-                    )
-                };
+                let on_str = on
+                    .iter()
+                    .map(|(x, y)| format!("{}.{} = {}.{}", x.0, x.1, y.0, y.1))
+                    .collect::<Vec<_>>()
+                    .join(" ∧ ");
                 format!(
                     "{pad}(Join {k} ({on_str})\n{}\n{})",
                     left.fmt_sexpr(indent + 1),
@@ -80,9 +80,20 @@ impl PhysOp {
                     input.fmt_sexpr(indent + 1)
                 )
             }
-            PhysOp::Union { arms } => {
+            PhysOp::Union { arms, alias } => {
                 let arm_strs: Vec<String> = arms.iter().map(|a| a.fmt_sexpr(indent + 1)).collect();
-                format!("{pad}(Union\n{})", arm_strs.join("\n"))
+                format!("{pad}(Union {alias}\n{})", arm_strs.join("\n"))
+            }
+            PhysOp::With { ctes, input } => {
+                let cte_strs: Vec<String> = ctes
+                    .iter()
+                    .map(|(n, c)| format!("{pad}  ({n} =\n{})", c.fmt_sexpr(indent + 2)))
+                    .collect();
+                format!(
+                    "{pad}(With\n{}\n{})",
+                    cte_strs.join("\n"),
+                    input.fmt_sexpr(indent + 1)
+                )
             }
             PhysOp::Sort { input, keys } => {
                 if keys.is_empty() {
@@ -139,6 +150,7 @@ impl Predicate {
                 value,
             } => format!("{name}({column},{value})", value = value.to_sexpr()),
             Predicate::ScopePrefix(_) => "scope(…)".to_string(),
+            Predicate::Expr(_) => "expr(…)".to_string(),
         }
     }
 }
@@ -179,11 +191,12 @@ impl ProjectedColumn {
                     format!("{table}.{column}:{alias}")
                 }
             }
-            ProjectedColumn::NodeProperty { property } => format!("@{property}"),
+            ProjectedColumn::NodeProperty { node, property } => format!("@{node}.{property}"),
             ProjectedColumn::Computed { expr, alias } => match expr {
                 ColumnExpr::Lit(v) => format!("{}:{alias}", v.to_sexpr()),
                 _ => format!("({}):{alias}", expr.to_sexpr()),
             },
+            ProjectedColumn::Expr { alias, .. } => format!("expr(…):{alias}"),
         }
     }
 }

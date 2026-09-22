@@ -1,6 +1,11 @@
+//! Fixpoint rewriter over the naive `PhysOp` tree for traversal and
+//! aggregation queries. Local rules run bottom-up on each node; global rules
+//! see the whole tree. Rules fire until nothing changes.
+
 use super::plan_v2::*;
 use crate::input::*;
-use ontology::constants as ontology_constants;
+use ontology::constants::*;
+use std::collections::{HashMap, HashSet};
 
 pub struct RuleCtx<'a> {
     pub input: &'a Input,
@@ -11,7 +16,12 @@ pub fn optimize(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
     let mut tree = tree;
     loop {
         let prev = tree.clone();
-        tree = apply_rules(tree, ctx);
+        tree = apply_local(tree, ctx);
+        for rule in GLOBAL_RULES {
+            if let Some(t) = rule(&tree, ctx) {
+                tree = t;
+            }
+        }
         if tree == prev {
             break;
         }
@@ -19,34 +29,32 @@ pub fn optimize(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
     tree
 }
 
-fn apply_rules(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
-    let tree = map_children(tree, |child| apply_rules(child, ctx));
-    let rules: &[fn(&PhysOp, &RuleCtx) -> Option<PhysOp>] = &[
-        rule_elide_empty_sort,
-        rule_merge_filters,
-        rule_edge_dedup,
-        rule_fk_elision,
-        rule_prune_duplicate_node_join,
-        rule_denorm_tag_pushdown,
-        rule_column_pushdown,
-        rule_prune_unreferenced_agg_node,
-        rule_remove_stale_edge_predicates,
-        rule_narrowing_cte,
-        rule_cascade_sip,
-        rule_fk_edge_metadata,
-        rule_scope_anchor_elision,
-        rule_count_target_fk_rejoin,
-        rule_limit_by_single_hop_agg,
-    ];
-    for rule in rules {
-        if let Some(rewritten) = rule(&tree, ctx) {
-            return rewritten;
+type Rule = fn(&PhysOp, &RuleCtx) -> Option<PhysOp>;
+
+const LOCAL_RULES: &[Rule] = &[
+    rule_merge_filters,
+    rule_denorm_tag_pushdown,
+    rule_column_pushdown,
+];
+
+const GLOBAL_RULES: &[Rule] = &[
+    rule_fk_elision,
+    rule_edge_dedup,
+    rule_unreferenced_nodes,
+    rule_cascade_sip,
+];
+
+fn apply_local(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
+    let tree = map_children(tree, |c| apply_local(c, ctx));
+    for rule in LOCAL_RULES {
+        if let Some(t) = rule(&tree, ctx) {
+            return t;
         }
     }
     tree
 }
 
-fn map_children(op: PhysOp, f: impl Fn(PhysOp) -> PhysOp) -> PhysOp {
+pub fn map_children(op: PhysOp, f: impl Fn(PhysOp) -> PhysOp) -> PhysOp {
     match op {
         PhysOp::Scan { .. } => op,
         PhysOp::Filter { input, predicates } => PhysOp::Filter {
@@ -77,8 +85,9 @@ fn map_children(op: PhysOp, f: impl Fn(PhysOp) -> PhysOp) -> PhysOp {
             group_by,
             metrics,
         },
-        PhysOp::Union { arms } => PhysOp::Union {
-            arms: arms.into_iter().map(&f).collect(),
+        PhysOp::Union { arms, alias } => PhysOp::Union {
+            arms: arms.into_iter().map(f).collect(),
+            alias,
         },
         PhysOp::Sort { input, keys } => PhysOp::Sort {
             input: Box::new(f(*input)),
@@ -88,275 +97,76 @@ fn map_children(op: PhysOp, f: impl Fn(PhysOp) -> PhysOp) -> PhysOp {
             input: Box::new(f(*input)),
             count,
         },
-    }
-}
-
-// ── Rule 1: Elide empty Sort ────────────────────────────────────────────────
-
-fn rule_elide_empty_sort(op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
-    match op {
-        PhysOp::Sort { keys, input } if keys.is_empty() => Some(*input.clone()),
-        _ => None,
-    }
-}
-
-// ── Rule 2: Merge adjacent Filters ──────────────────────────────────────────
-
-fn rule_merge_filters(op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
-    match op {
-        PhysOp::Filter {
-            predicates: p1,
-            input,
-        } => {
-            if let PhysOp::Filter {
-                predicates: p2,
-                input: inner,
-            } = input.as_ref()
-            {
-                let mut merged = p1.clone();
-                merged.extend(p2.clone());
-                Some(PhysOp::Filter {
-                    predicates: merged,
-                    input: inner.clone(),
-                })
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-// ── Rule 3: Edge dedup for multi-edge chains ────────────────────────────────
-
-fn rule_edge_dedup(op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
-    let edge_count = count_edge_scans(op);
-    if edge_count < 2 {
-        return None;
-    }
-    let updated = set_edge_dedup(op.clone(), true);
-    if updated == *op { None } else { Some(updated) }
-}
-
-fn count_edge_scans(op: &PhysOp) -> usize {
-    match op {
-        PhysOp::Scan {
-            table,
-            dedup: false,
-            ..
-        } if table.starts_with("gl_")
-            && table != "gl_user"
-            && !table.ends_with("_request")
-            && !table.ends_with("_item") =>
-        {
-            // Heuristic: edge tables are gl_edge, gl_code_edge, etc.
-            // Node tables are gl_merge_request, gl_project, gl_user, etc.
-            // Better: check if the table is in the edge table config
-            if table.contains("edge") { 1 } else { 0 }
-        }
-        PhysOp::Scan { .. } => 0,
-        PhysOp::Filter { input, .. } => count_edge_scans(input),
-        PhysOp::Project { input, .. } => count_edge_scans(input),
-        PhysOp::Join { left, right, .. } => count_edge_scans(left) + count_edge_scans(right),
-        PhysOp::Aggregate { input, .. } => count_edge_scans(input),
-        PhysOp::Union { arms } => arms.iter().map(count_edge_scans).sum(),
-        PhysOp::Sort { input, .. } => count_edge_scans(input),
-        PhysOp::Limit { input, .. } => count_edge_scans(input),
-    }
-}
-
-fn set_edge_dedup(op: PhysOp, dedup_val: bool) -> PhysOp {
-    match op {
-        PhysOp::Scan {
-            table,
-            alias,
-            dedup,
-        } if table.contains("edge") && !dedup => PhysOp::Scan {
-            table,
-            alias,
-            dedup: dedup_val,
+        PhysOp::With { ctes, input } => PhysOp::With {
+            ctes: ctes.into_iter().map(|(n, c)| (n, f(c))).collect(),
+            input: Box::new(f(*input)),
         },
-        other => map_children(other, |child| set_edge_dedup(child, dedup_val)),
     }
 }
 
-// ── Rule 4: FK elision ──────────────────────────────────────────────────────
-// Replace edge scans with FK joins when the relationship has an FK column.
-// Only fires when ALL edge scans in the tree can be FK-elided.
-
-// ── Rule 4: FK elision (per-hop, bottom-up) ─────────────────────────────────
-// Replaces Filter(Scan(edge_table)) with Join(node_a, node_b, on: fk)
-
-fn rule_fk_elision(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    // Match: Join where either child is an FK-eligible edge scan
-    if let PhysOp::Join {
-        left,
-        right,
-        on,
-        kind: JoinKind::Inner,
-    } = op
-    {
-        // Try right child first (most common: chain builds left-to-right)
-        if let Some(edge_alias) = edge_scan_alias(right) {
-            if let Some(result) = fk_elide_edge(&edge_alias, left, on, false, ctx) {
-                return Some(result);
-            }
-        }
-        // Try left child (first edge in chain, or reversed)
-        if let Some(edge_alias) = edge_scan_alias(left) {
-            if let Some(result) = fk_elide_edge(&edge_alias, right, on, true, ctx) {
-                return Some(result);
-            }
-        }
-    }
-
-    // Bare Filter(Scan(edge)) — single relationship with no joins at all
-    if let Some(edge_alias) = edge_scan_alias(op) {
-        let idx = alias_to_rel_index(&edge_alias)?;
-        let rel = ctx.input.relationships.get(idx)?;
-        let fk_col = rel.fk_column.as_ref()?;
-        if rel.hops.max != 1 || matches!(rel.direction, Direction::Both) || !rel.filters.is_empty()
-        {
-            return None;
-        }
-        let (fk_alias, tgt_alias) = fk_sides(rel, fk_col, ctx);
-        let fk_node = ctx.input.nodes.iter().find(|n| n.id == fk_alias)?;
-        let tgt_node = ctx.input.nodes.iter().find(|n| n.id == tgt_alias)?;
-        return Some(PhysOp::Join {
-            left: Box::new(filtered_node_scan(fk_node)),
-            right: Box::new(filtered_node_scan(tgt_node)),
-            on: JoinOn {
-                left: (fk_alias.to_string(), fk_col.clone()),
-                right: (
-                    tgt_alias.to_string(),
-                    ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
-                ),
-            },
-            kind: JoinKind::Inner,
-        });
-    }
-
-    None
-}
-
-fn fk_elide_edge(
-    edge_alias: &str,
-    other: &PhysOp,
-    on: &JoinOn,
-    edge_is_left: bool,
-    ctx: &RuleCtx,
-) -> Option<PhysOp> {
-    let idx = alias_to_rel_index(edge_alias)?;
-    let rel = ctx.input.relationships.get(idx)?;
-    let fk_col = rel.fk_column.as_ref()?;
-    if rel.hops.max != 1 || matches!(rel.direction, Direction::Both) || !rel.filters.is_empty() {
-        return None;
-    }
-
-    let (fk_alias, tgt_alias) = fk_sides(rel, fk_col, ctx);
-    let fk_node = ctx.input.nodes.iter().find(|n| n.id == fk_alias)?;
-    let tgt_node = ctx.input.nodes.iter().find(|n| n.id == tgt_alias)?;
-
-    let fk_join = PhysOp::Join {
-        left: Box::new(filtered_node_scan(fk_node)),
-        right: Box::new(filtered_node_scan(tgt_node)),
-        on: JoinOn {
-            left: (fk_alias.to_string(), fk_col.clone()),
-            right: (
-                tgt_alias.to_string(),
-                ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
-            ),
-        },
-        kind: JoinKind::Inner,
-    };
-
-    let from_alias = &rel.from;
-    let new_on = if edge_is_left {
-        JoinOn {
-            left: (
-                from_alias.clone(),
-                ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
-            ),
-            right: on.right.clone(),
-        }
-    } else {
-        JoinOn {
-            left: on.left.clone(),
-            right: (
-                from_alias.clone(),
-                ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
-            ),
-        }
-    };
-
-    let (new_left, new_right) = if edge_is_left {
-        (Box::new(fk_join), Box::new(other.clone()))
-    } else {
-        (Box::new(other.clone()), Box::new(fk_join))
-    };
-
-    Some(PhysOp::Join {
-        left: new_left,
-        right: new_right,
-        on: new_on,
-        kind: JoinKind::Inner,
-    })
-}
-
-fn edge_scan_alias(op: &PhysOp) -> Option<String> {
+fn children(op: &PhysOp) -> Vec<&PhysOp> {
     match op {
-        PhysOp::Scan { alias, table, .. } if table.contains("edge") => Some(alias.clone()),
-        PhysOp::Filter { input, .. } => edge_scan_alias(input),
-        _ => None,
-    }
-}
-
-fn rule_prune_duplicate_node_join(op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
-    let PhysOp::Join {
-        left,
-        right,
-        kind: JoinKind::Inner,
-        ..
-    } = op
-    else {
-        return None;
-    };
-    let right_alias = scan_alias(right)?;
-    if has_alias(left, &right_alias) {
-        Some(*left.clone())
-    } else {
-        None
-    }
-}
-
-fn scan_alias(op: &PhysOp) -> Option<String> {
-    match op {
-        PhysOp::Scan { alias, .. } => Some(alias.clone()),
-        PhysOp::Filter { input, .. } => scan_alias(input),
-        _ => None,
-    }
-}
-
-fn has_alias(op: &PhysOp, target: &str) -> bool {
-    match op {
-        PhysOp::Scan { alias, .. } => alias == target,
-        PhysOp::Filter { input, .. } => has_alias(input, target),
-        PhysOp::Join { left, right, .. } => has_alias(left, target) || has_alias(right, target),
-        PhysOp::Project { input, .. }
+        PhysOp::Scan { .. } => vec![],
+        PhysOp::Filter { input, .. }
+        | PhysOp::Project { input, .. }
+        | PhysOp::Aggregate { input, .. }
         | PhysOp::Sort { input, .. }
-        | PhysOp::Limit { input, .. }
-        | PhysOp::Aggregate { input, .. } => has_alias(input, target),
-        PhysOp::Union { arms } => arms.iter().any(|a| has_alias(a, target)),
+        | PhysOp::Limit { input, .. } => vec![input],
+        PhysOp::Join { left, right, .. } => vec![left, right],
+        PhysOp::Union { arms, .. } => arms.iter().collect(),
+        PhysOp::With { ctes, input } => {
+            let mut v: Vec<&PhysOp> = ctes.iter().map(|(_, c)| c).collect();
+            v.push(input);
+            v
+        }
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Tree queries ────────────────────────────────────────────────────────────
 
-fn alias_to_rel_index(alias: &str) -> Option<usize> {
+/// Alias a relation is visible under: a scan's alias, a union's alias, or
+/// that of a filter/project over either.
+pub fn leaf_alias(op: &PhysOp) -> Option<&str> {
+    match op {
+        PhysOp::Scan { alias, .. } | PhysOp::Union { alias, .. } => Some(alias),
+        PhysOp::Filter { input, .. } | PhysOp::Project { input, .. } => leaf_alias(input),
+        _ => None,
+    }
+}
+
+pub fn has_alias(op: &PhysOp, target: &str) -> bool {
+    match op {
+        PhysOp::Scan { alias, .. } | PhysOp::Union { alias, .. } if alias == target => true,
+        _ => children(op).into_iter().any(|c| has_alias(c, target)),
+    }
+}
+
+fn is_edge_table(ctx: &RuleCtx, table: &str) -> bool {
+    ctx.input.compiler.edge_tables.contains(table)
+}
+
+/// `Filter(Scan(edge))` or `Scan(edge)`: returns the edge alias.
+fn edge_scan_alias<'o>(op: &'o PhysOp, ctx: &RuleCtx) -> Option<&'o str> {
+    match op {
+        PhysOp::Scan { alias, table, .. } if is_edge_table(ctx, table) => Some(alias),
+        PhysOp::Filter { input, .. } => edge_scan_alias(input, ctx),
+        _ => None,
+    }
+}
+
+fn node_scan_alias<'o>(op: &'o PhysOp, ctx: &RuleCtx) -> Option<&'o str> {
+    match op {
+        PhysOp::Scan { alias, table, .. } if !is_edge_table(ctx, table) => Some(alias),
+        PhysOp::Filter { input, .. } => node_scan_alias(input, ctx),
+        _ => None,
+    }
+}
+
+fn rel_index(alias: &str) -> Option<usize> {
     alias.strip_prefix('e')?.parse().ok()
 }
 
-fn fk_sides<'a>(rel: &'a InputRelationship, fk_col: &str, ctx: &'a RuleCtx) -> (&'a str, &'a str) {
+fn fk_sides<'r>(rel: &'r InputRelationship, fk_col: &str, ctx: &RuleCtx) -> (&'r str, &'r str) {
     let from_has = ctx
         .input
         .nodes
@@ -372,711 +182,836 @@ fn fk_sides<'a>(rel: &'a InputRelationship, fk_col: &str, ctx: &'a RuleCtx) -> (
     }
 }
 
-fn filtered_node_scan(n: &InputNode) -> PhysOp {
-    let mut preds = Vec::new();
+fn node_scan(n: &InputNode) -> PhysOp {
+    let mut p = Vec::new();
     let mut props: Vec<_> = n.filters.iter().collect();
     props.sort_unstable_by_key(|(k, _)| *k);
     for (prop, fs) in props {
         for f in fs {
-            preds.push(Predicate::NodeFilter {
+            p.push(Predicate::NodeFilter {
                 property: prop.clone(),
                 filter: f.clone(),
             });
         }
     }
     if !n.node_ids.is_empty() {
-        preds.push(Predicate::In {
-            column: ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+        p.push(Predicate::In {
+            column: DEFAULT_PRIMARY_KEY.to_string(),
             values: n.node_ids.iter().map(|&id| Value::Int(id)).collect(),
         });
     }
     if let Some(ref r) = n.id_range {
-        preds.push(Predicate::Range {
-            column: ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+        p.push(Predicate::Range {
+            column: DEFAULT_PRIMARY_KEY.to_string(),
             start: r.start,
             end: r.end,
         });
     }
-    preds.push(Predicate::Eq {
-        column: "_deleted".to_string(),
-        value: Value::Bool(false),
-    });
-
-    PhysOp::Filter {
-        input: Box::new(PhysOp::Scan {
-            table: n.table.as_deref().unwrap_or("").to_string(),
-            alias: n.id.clone(),
-            dedup: true,
-        }),
-        predicates: preds,
-    }
+    p.push(deleted_false());
+    filter(
+        scan(n.table.as_deref().unwrap_or(""), &n.id, Dedup::Final),
+        p,
+    )
 }
 
-// ── Rule 6: Denorm tag pushdown ─────────────────────────────────────────────
-// When a node filter matches a denormalized property on the edge, push a
-// has(tag_col, "key:value") predicate onto the edge scan.
-
-fn rule_denorm_tag_pushdown(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    // Match: Filter(Scan(edge_table)) — push denorm tags from endpoint nodes
-    let PhysOp::Filter { predicates, input } = op else {
-        return None;
-    };
-    let PhysOp::Scan { table, alias, .. } = input.as_ref() else {
-        return None;
-    };
-    if !table.contains("edge") {
-        return None;
-    }
-    let rel_idx = alias_to_rel_index(alias)?;
-    let rel = ctx.input.relationships.get(rel_idx)?;
-    if crate::passes::normalize::is_wildcard(&rel.types) {
-        return None;
-    }
-
-    let (sc, ec) = rel.direction.edge_columns();
-    let meta = &ctx.input.compiler;
-    let mut new_preds = Vec::new();
-
-    for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
-        let Some(node) = ctx.input.nodes.iter().find(|n| &n.id == nid) else {
-            continue;
-        };
-        let entity = node.entity.as_deref().unwrap_or("");
-        let dir = if ic == ontology_constants::SOURCE_ID_COLUMN {
-            "source"
-        } else {
-            "target"
-        };
-
-        for (prop, fs) in &node.filters {
-            let key = (entity.to_string(), prop.clone(), dir.to_string());
-            let denorm_kinds = meta.denorm_rel_kinds.get(&key);
-            if !denorm_kinds.is_some_and(|ks| rel.types.iter().any(|t| ks.contains(t))) {
-                continue;
-            }
-            let Some((tc, tk)) = meta.denormalized_columns.get(&key) else {
-                continue;
-            };
-
-            for f in fs {
-                match (&f.op, &f.value) {
-                    (None | Some(FilterOp::Eq), Some(val)) => {
-                        let tag_val = match val {
-                            serde_json::Value::String(s) => s.clone(),
-                            serde_json::Value::Bool(b) => b.to_string(),
-                            serde_json::Value::Number(n) => n.to_string(),
-                            _ => continue,
-                        };
-                        new_preds.push(Predicate::Func {
-                            name: "has".to_string(),
-                            column: tc.clone(),
-                            value: Value::Str(format!("{tk}:{tag_val}")),
-                        });
-                    }
-                    (Some(FilterOp::In), Some(serde_json::Value::Array(arr))) => {
-                        let tags: Vec<String> = arr
-                            .iter()
-                            .filter_map(|v| {
-                                let s = match v {
-                                    serde_json::Value::String(s) => s.clone(),
-                                    serde_json::Value::Bool(b) => b.to_string(),
-                                    serde_json::Value::Number(n) => n.to_string(),
-                                    _ => return None,
-                                };
-                                Some(format!("{tk}:{s}"))
-                            })
-                            .collect();
-                        if tags.len() == 1 {
-                            new_preds.push(Predicate::Func {
-                                name: "has".to_string(),
-                                column: tc.clone(),
-                                value: Value::Str(tags.into_iter().next().unwrap()),
-                            });
-                        } else if !tags.is_empty() {
-                            new_preds.push(Predicate::Func {
-                                name: "hasAny".to_string(),
-                                column: tc.clone(),
-                                value: Value::Strs(tags),
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    if new_preds.is_empty() {
-        return None;
-    }
-
-    // Check we haven't already pushed these (idempotency)
-    if predicates
-        .iter()
-        .any(|p| matches!(p, Predicate::Func { name, .. } if name == "has" || name == "hasAny"))
-    {
-        return None;
-    }
-
-    let mut merged = predicates.clone();
-    merged.extend(new_preds);
-    Some(PhysOp::Filter {
-        predicates: merged,
-        input: input.clone(),
-    })
-}
-
-fn rule_column_pushdown(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    // Match: Filter(Scan(edge_table)) — push node filters when edge table has the column
-    let PhysOp::Filter { predicates, input } = op else {
-        return None;
-    };
-    let PhysOp::Scan { table, alias, .. } = input.as_ref() else {
-        return None;
-    };
-    if !table.contains("edge") {
-        return None;
-    }
-    let rel_idx = alias_to_rel_index(alias)?;
-    let rel = ctx.input.relationships.get(rel_idx)?;
-
-    let meta = &ctx.input.compiler;
-    let ecols = meta.table_columns.get(table)?;
-    let reserved: std::collections::HashSet<&str> = ontology_constants::EDGE_RESERVED_COLUMNS
-        .iter()
-        .copied()
-        .collect();
-
-    let mut new_preds = Vec::new();
-    for nid in [&rel.from, &rel.to] {
-        let Some(node) = ctx.input.nodes.iter().find(|n| &n.id == nid) else {
-            continue;
-        };
-        for (prop, fs) in &node.filters {
-            if ecols.contains(prop) && !reserved.contains(prop.as_str()) {
-                // Check we haven't already pushed this
-                if predicates.iter().any(
-                    |p| matches!(p, Predicate::NodeFilter { property, .. } if property == prop),
-                ) {
-                    continue;
-                }
-                for f in fs {
-                    new_preds.push(Predicate::NodeFilter {
-                        property: prop.clone(),
-                        filter: f.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    if new_preds.is_empty() {
-        return None;
-    }
-    let mut merged = predicates.clone();
-    merged.extend(new_preds);
-    Some(PhysOp::Filter {
-        predicates: merged,
-        input: input.clone(),
-    })
-}
-
-fn add_predicates_to_filter(op: PhysOp, extra: Vec<Predicate>) -> PhysOp {
+/// Aliases read by projections, group keys, metrics, and sort keys. Join
+/// conditions are excluded: they tie a relation in without reading it.
+/// Union arms are their own scope and are skipped.
+fn referenced_aliases(op: &PhysOp, out: &mut HashSet<String>) {
     match op {
-        PhysOp::Filter {
-            mut predicates,
-            input,
+        PhysOp::Project { columns, .. } => {
+            for c in columns {
+                match c {
+                    ProjectedColumn::Ref { table, .. } => {
+                        out.insert(table.clone());
+                    }
+                    ProjectedColumn::NodeProperty { node, .. } => {
+                        out.insert(node.clone());
+                    }
+                    ProjectedColumn::Computed { expr, .. } => column_expr_aliases(expr, out),
+                    ProjectedColumn::Expr { .. } => {}
+                }
+            }
+        }
+        PhysOp::Aggregate {
+            group_by, metrics, ..
         } => {
-            predicates.extend(extra);
-            PhysOp::Filter { predicates, input }
+            out.extend(group_by.iter().map(|g| g.node.clone()));
+            out.extend(metrics.iter().map(|m| m.node.clone()));
         }
-        other => PhysOp::Filter {
-            predicates: extra,
-            input: Box::new(other),
-        },
+        PhysOp::Sort { keys, .. } => {
+            for k in keys {
+                if let Some((a, _)) = k.column.split_once('.') {
+                    out.insert(a.to_string());
+                }
+            }
+        }
+        PhysOp::Union { .. } => return,
+        _ => {}
+    }
+    for c in children(op) {
+        referenced_aliases(c, out);
     }
 }
 
-fn edge_table_name(op: &PhysOp) -> Option<String> {
+fn column_expr_aliases(e: &ColumnExpr, out: &mut HashSet<String>) {
+    match e {
+        ColumnExpr::Col(a, _) => {
+            out.insert(a.clone());
+        }
+        ColumnExpr::Lit(_) => {}
+        ColumnExpr::Array(items) | ColumnExpr::Tuple(items) => {
+            items.iter().for_each(|i| column_expr_aliases(i, out))
+        }
+    }
+}
+
+// ── Join spine ──────────────────────────────────────────────────────────────
+//
+// The chain constructors emit one left-deep tree of inner joins over edge and
+// node leaves. Rules that add, drop, or re-wire relations flatten that spine
+// to (leaves, equalities), edit the flat form, and rebuild the tree.
+
+struct Spine {
+    leaves: Vec<(PhysOp, JoinKind)>,
+    eqs: Vec<(Col, Col)>,
+}
+
+fn flatten(op: &PhysOp) -> Spine {
+    let mut s = Spine {
+        leaves: Vec::new(),
+        eqs: Vec::new(),
+    };
+    fn go(op: &PhysOp, s: &mut Spine) {
+        match op {
+            PhysOp::Join {
+                left,
+                right,
+                on,
+                kind,
+            } => {
+                go(left, s);
+                match kind {
+                    JoinKind::Inner => go(right, s),
+                    JoinKind::Semi => s.leaves.push(((**right).clone(), JoinKind::Semi)),
+                }
+                s.eqs.extend(on.iter().cloned());
+            }
+            leaf => s.leaves.push((leaf.clone(), JoinKind::Inner)),
+        }
+    }
+    go(op, &mut s);
+    let mut seen: Vec<(Col, Col)> = Vec::new();
+    for (x, y) in s.eqs {
+        if !seen
+            .iter()
+            .any(|(a, b)| (a == &x && b == &y) || (a == &y && b == &x))
+        {
+            seen.push((x, y));
+        }
+    }
+    s.eqs = seen;
+    s
+}
+
+/// Left-deep rebuild. Each inner leaf joins on every equality tying it to an
+/// already placed alias; a leaf nothing ties to yet is deferred. Semi leaves
+/// go last, each on its single equality.
+fn rebuild(spine: Spine) -> PhysOp {
+    let Spine { leaves, mut eqs } = spine;
+    let (inner, semi): (Vec<_>, Vec<_>) =
+        leaves.into_iter().partition(|(_, k)| *k == JoinKind::Inner);
+    let mut pending: Vec<PhysOp> = inner.into_iter().map(|(l, _)| l).collect();
+    let mut placed: HashSet<String> = HashSet::new();
+    let mut tree: Option<PhysOp> = None;
+
+    while !pending.is_empty() {
+        let pick = if tree.is_none() {
+            0
+        } else {
+            pending
+                .iter()
+                .position(|l| {
+                    let a = leaf_alias(l).unwrap_or_default();
+                    eqs.iter().any(|(x, y)| touches(x, y, a, &placed))
+                })
+                .unwrap_or(0)
+        };
+        let leaf = pending.remove(pick);
+        let a = leaf_alias(&leaf).unwrap_or_default().to_string();
+        let (on, rest): (Vec<_>, Vec<_>) = eqs
+            .into_iter()
+            .partition(|(x, y)| touches(x, y, &a, &placed));
+        eqs = rest;
+        placed.insert(a);
+        tree = Some(match tree {
+            None => leaf,
+            Some(t) => join(t, leaf, on),
+        });
+    }
+
+    let mut tree = tree.expect("spine has at least one leaf");
+    for (leaf, _) in semi {
+        let a = leaf_alias(&leaf).unwrap_or_default().to_string();
+        let (on, rest): (Vec<_>, Vec<_>) = eqs.into_iter().partition(|(x, y)| x.0 == a || y.0 == a);
+        eqs = rest;
+        let eq = on.into_iter().next().expect("semi leaf has its equality");
+        // Consumer side first so lowering reads `left IN (SELECT right)`.
+        let eq = if eq.1.0 == a { eq } else { (eq.1, eq.0) };
+        tree = semi_join(tree, leaf, eq);
+    }
+    tree
+}
+
+fn touches(x: &Col, y: &Col, a: &str, placed: &HashSet<String>) -> bool {
+    (x.0 == a && placed.contains(&y.0)) || (y.0 == a && placed.contains(&x.0))
+}
+
+/// The spine root: the topmost join, or the single leaf when the chain has
+/// no joins at all.
+fn is_spine_root(op: &PhysOp) -> bool {
     match op {
-        PhysOp::Scan { table, .. } => Some(table.clone()),
-        PhysOp::Filter { input, .. } => edge_table_name(input),
+        PhysOp::Join { .. } | PhysOp::Scan { .. } | PhysOp::Union { .. } => true,
+        PhysOp::Filter { input, .. } => {
+            matches!(input.as_ref(), PhysOp::Scan { .. } | PhysOp::Union { .. })
+        }
+        _ => false,
+    }
+}
+
+/// Applies `f` to the spine under the plan's wrapper operators. `None` when
+/// there is no spine or `f` declines.
+fn rewrite_spine(op: &PhysOp, f: &dyn Fn(&PhysOp) -> Option<PhysOp>) -> Option<PhysOp> {
+    if is_spine_root(op) {
+        return f(op);
+    }
+    match op {
+        PhysOp::Filter { input, predicates } => Some(PhysOp::Filter {
+            input: Box::new(rewrite_spine(input, f)?),
+            predicates: predicates.clone(),
+        }),
+        PhysOp::Project { input, columns } => Some(PhysOp::Project {
+            input: Box::new(rewrite_spine(input, f)?),
+            columns: columns.clone(),
+        }),
+        PhysOp::Aggregate {
+            input,
+            group_by,
+            metrics,
+        } => Some(PhysOp::Aggregate {
+            input: Box::new(rewrite_spine(input, f)?),
+            group_by: group_by.clone(),
+            metrics: metrics.clone(),
+        }),
+        PhysOp::Sort { input, keys } => Some(PhysOp::Sort {
+            input: Box::new(rewrite_spine(input, f)?),
+            keys: keys.clone(),
+        }),
+        PhysOp::Limit { input, count } => Some(PhysOp::Limit {
+            input: Box::new(rewrite_spine(input, f)?),
+            count: *count,
+        }),
         _ => None,
     }
 }
 
-// ── Rule 8: Prune unreferenced node in aggregation ──────────────────────────
-
-fn rule_prune_unreferenced_agg_node(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    if ctx.input.query_type != QueryType::Aggregation {
-        return None;
+fn spine_of(op: &PhysOp) -> Option<Spine> {
+    if is_spine_root(op) {
+        return Some(flatten(op));
     }
-    let PhysOp::Join {
-        left,
-        right,
-        kind: JoinKind::Inner,
-        ..
+    match op {
+        PhysOp::Filter { input, .. }
+        | PhysOp::Project { input, .. }
+        | PhysOp::Aggregate { input, .. }
+        | PhysOp::Sort { input, .. }
+        | PhysOp::Limit { input, .. } => spine_of(input),
+        _ => None,
+    }
+}
+
+// ── Column substitution ─────────────────────────────────────────────────────
+
+type Subst = HashMap<Col, ColumnExpr>;
+
+fn subst_col(c: &Col, s: &Subst) -> Col {
+    match s.get(c) {
+        Some(ColumnExpr::Col(a, b)) => (a.clone(), b.clone()),
+        _ => c.clone(),
+    }
+}
+
+fn subst_expr(e: &ColumnExpr, s: &Subst) -> ColumnExpr {
+    match e {
+        ColumnExpr::Col(a, b) => s
+            .get(&(a.clone(), b.clone()))
+            .cloned()
+            .unwrap_or_else(|| e.clone()),
+        ColumnExpr::Lit(_) => e.clone(),
+        ColumnExpr::Array(items) => {
+            ColumnExpr::Array(items.iter().map(|i| subst_expr(i, s)).collect())
+        }
+        ColumnExpr::Tuple(items) => {
+            ColumnExpr::Tuple(items.iter().map(|i| subst_expr(i, s)).collect())
+        }
+    }
+}
+
+fn subst_tree(op: PhysOp, s: &Subst) -> PhysOp {
+    let op = match op {
+        PhysOp::Project { input, columns } => PhysOp::Project {
+            input,
+            columns: columns
+                .into_iter()
+                .map(|c| match c {
+                    ProjectedColumn::Ref {
+                        table,
+                        column,
+                        alias,
+                    } => match s.get(&(table.clone(), column.clone())) {
+                        Some(expr) => ProjectedColumn::Computed {
+                            expr: expr.clone(),
+                            alias,
+                        },
+                        None => ProjectedColumn::Ref {
+                            table,
+                            column,
+                            alias,
+                        },
+                    },
+                    ProjectedColumn::Computed { expr, alias } => ProjectedColumn::Computed {
+                        expr: subst_expr(&expr, s),
+                        alias,
+                    },
+                    other => other,
+                })
+                .collect(),
+        },
+        PhysOp::Sort { input, keys } => PhysOp::Sort {
+            input,
+            keys: keys
+                .into_iter()
+                .map(|k| match k.column.split_once('.') {
+                    Some((a, b)) => {
+                        let (a, b) = subst_col(&(a.to_string(), b.to_string()), s);
+                        SortKey {
+                            column: format!("{a}.{b}"),
+                            desc: k.desc,
+                        }
+                    }
+                    None => k,
+                })
+                .collect(),
+        },
+        PhysOp::Join {
+            left,
+            right,
+            on,
+            kind,
+        } => PhysOp::Join {
+            left,
+            right,
+            on: on
+                .into_iter()
+                .map(|(x, y)| (subst_col(&x, s), subst_col(&y, s)))
+                .collect(),
+            kind,
+        },
+        // Union arms are their own scope; their aliases don't leak out.
+        PhysOp::Union { .. } => return op,
+        other => other,
+    };
+    map_children(op, |c| subst_tree(c, s))
+}
+
+// ── Local rules ─────────────────────────────────────────────────────────────
+
+fn rule_merge_filters(op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
+    let PhysOp::Filter {
+        predicates: outer,
+        input,
     } = op
     else {
         return None;
     };
-    let alias = scan_alias(right)?;
-    let node = ctx.input.nodes.iter().find(|n| n.id == alias)?;
+    let PhysOp::Filter {
+        predicates: inner,
+        input: leaf,
+    } = input.as_ref()
+    else {
+        return None;
+    };
+    let mut merged = inner.clone();
+    merged.extend(outer.iter().cloned());
+    Some(PhysOp::Filter {
+        predicates: merged,
+        input: leaf.clone(),
+    })
+}
 
-    let in_group_by = ctx
-        .input
-        .aggregation
-        .group_by
-        .iter()
-        .any(|g| g.node() == alias.as_str());
-    let in_metrics = ctx
-        .input
-        .aggregation
-        .metrics
-        .iter()
-        .any(|m| m.expr.node() == alias.as_str());
-    let has_filters =
-        !node.filters.is_empty() || !node.node_ids.is_empty() || node.id_range.is_some();
-    let in_order_by = ctx
-        .input
-        .order_by
-        .as_ref()
-        .is_some_and(|ob| ob.node == alias);
+/// A node filter on a denormalized property also lives as a tag on the edges
+/// of the relationships that write it (`source_tags` / `target_tags`). Push
+/// it onto the edge scan so the edge prunes before the node join.
+fn rule_denorm_tag_pushdown(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    let (predicates, _, alias) = edge_filter_parts(op, ctx)?;
+    let rel = ctx.input.relationships.get(rel_index(alias)?)?;
+    if crate::passes::normalize::is_wildcard(&rel.types) {
+        return None;
+    }
+    let (sc, ec) = rel.direction.edge_columns();
+    let mut pushed = Vec::new();
+    for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
+        let Some(node) = ctx.input.nodes.iter().find(|n| &n.id == nid) else {
+            continue;
+        };
+        let dir = if ic == SOURCE_ID_COLUMN {
+            "source"
+        } else {
+            "target"
+        };
+        let mut props: Vec<_> = node.filters.iter().collect();
+        props.sort_unstable_by_key(|(k, _)| *k);
+        for (prop, fs) in props {
+            let Some((tc, tk)) = denorm_tag_for(ctx, node, prop, dir, rel) else {
+                continue;
+            };
+            for f in fs {
+                pushed.extend(tag_predicate(tc, tk, f));
+            }
+        }
+    }
+    if pushed.is_empty() || pushed.iter().all(|p| predicates.contains(p)) {
+        return None;
+    }
+    let mut merged = predicates.to_vec();
+    for p in pushed {
+        if !merged.contains(&p) {
+            merged.push(p);
+        }
+    }
+    Some(with_predicates(op, merged))
+}
 
-    if !in_group_by && !in_metrics && !has_filters && !in_order_by {
-        Some(*left.clone())
-    } else {
-        None
+/// `(tag_column, tag_key)` when `rel` writes `prop` of `node` as a denorm tag
+/// on its `dir` side.
+fn denorm_tag_for<'c>(
+    ctx: &'c RuleCtx,
+    node: &InputNode,
+    prop: &str,
+    dir: &str,
+    rel: &InputRelationship,
+) -> Option<(&'c str, &'c str)> {
+    let meta = &ctx.input.compiler;
+    let key = (
+        node.entity.clone().unwrap_or_default(),
+        prop.to_string(),
+        dir.to_string(),
+    );
+    let kinds = meta.denorm_rel_kinds.get(&key)?;
+    if !rel.types.iter().any(|t| kinds.contains(t)) {
+        return None;
+    }
+    let (tc, tk) = meta.denormalized_columns.get(&key)?;
+    Some((tc, tk))
+}
+
+fn tag_predicate(tag_col: &str, tag_key: &str, f: &InputFilter) -> Option<Predicate> {
+    let scalar = |v: &serde_json::Value| match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    };
+    match (&f.op, &f.value) {
+        (None | Some(FilterOp::Eq), Some(v)) => Some(Predicate::Func {
+            name: "has".into(),
+            column: tag_col.into(),
+            value: Value::Str(format!("{tag_key}:{}", scalar(v)?)),
+        }),
+        (Some(FilterOp::In), Some(serde_json::Value::Array(arr))) => {
+            let tags: Vec<String> = arr
+                .iter()
+                .filter_map(scalar)
+                .map(|s| format!("{tag_key}:{s}"))
+                .collect();
+            match tags.len() {
+                0 => None,
+                1 => Some(Predicate::Func {
+                    name: "has".into(),
+                    column: tag_col.into(),
+                    value: Value::Str(tags.into_iter().next().unwrap()),
+                }),
+                _ => Some(Predicate::Func {
+                    name: "hasAny".into(),
+                    column: tag_col.into(),
+                    value: Value::Strs(tags),
+                }),
+            }
+        }
+        _ => None,
     }
 }
 
-// ── Rule 9: Remove stale edge predicates after FK elision ───────────────────
+/// Edge tables that carry node columns (e.g. `project_id`, `branch`) can
+/// evaluate node filters on those columns directly.
+fn rule_column_pushdown(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    let (predicates, table, alias) = edge_filter_parts(op, ctx)?;
+    if !matches!(op, PhysOp::Filter { input, .. } if matches!(input.as_ref(), PhysOp::Scan { .. }))
+    {
+        return None;
+    }
+    let rel = ctx.input.relationships.get(rel_index(alias)?)?;
+    let ecols = ctx.input.compiler.table_columns.get(table)?;
+    let mut pushed = Vec::new();
+    for nid in [&rel.from, &rel.to] {
+        let Some(node) = ctx.input.nodes.iter().find(|n| &n.id == nid) else {
+            continue;
+        };
+        let mut props: Vec<_> = node.filters.iter().collect();
+        props.sort_unstable_by_key(|(k, _)| *k);
+        for (prop, fs) in props {
+            if !ecols.contains(prop) || EDGE_RESERVED_COLUMNS.contains(&prop.as_str()) {
+                continue;
+            }
+            for f in fs {
+                pushed.push(Predicate::NodeFilter {
+                    property: prop.clone(),
+                    filter: f.clone(),
+                });
+            }
+        }
+    }
+    pushed.retain(|p| !predicates.contains(p));
+    if pushed.is_empty() {
+        return None;
+    }
+    let mut merged = predicates.to_vec();
+    merged.extend(pushed);
+    Some(with_predicates(op, merged))
+}
 
-fn rule_remove_stale_edge_predicates(op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
+/// `Filter` over an edge scan, or over a multi-hop union aliased as an edge
+/// (whose arms project the reserved edge columns and tags).
+fn edge_filter_parts<'o>(
+    op: &'o PhysOp,
+    ctx: &'o RuleCtx,
+) -> Option<(&'o [Predicate], &'o str, &'o str)> {
     let PhysOp::Filter { predicates, input } = op else {
         return None;
     };
-    // If the input is NOT an edge scan (no edge table underneath), then
-    // edge-specific predicates (relationship_kind, source_kind, target_kind)
-    // are stale and should be removed.
-    if edge_scan_alias(input).is_some() {
-        return None; // edge scan still exists, predicates are valid
-    }
-
-    let edge_columns: std::collections::HashSet<&str> = [
-        ontology_constants::RELATIONSHIP_KIND_COLUMN,
-        ontology_constants::SOURCE_KIND_COLUMN,
-        ontology_constants::TARGET_KIND_COLUMN,
-        ontology_constants::SOURCE_ID_COLUMN,
-        ontology_constants::TARGET_ID_COLUMN,
-        ontology_constants::SOURCE_TAGS_COLUMN,
-        ontology_constants::TARGET_TAGS_COLUMN,
-    ]
-    .into_iter()
-    .collect();
-
-    let cleaned: Vec<Predicate> = predicates
-        .iter()
-        .filter(|p| match p {
-            Predicate::Eq { column, .. } | Predicate::In { column, .. } => {
-                !edge_columns.contains(column.as_str())
-            }
-            _ => true,
-        })
-        .cloned()
-        .collect();
-
-    if cleaned.len() == predicates.len() {
-        return None; // nothing removed
-    }
-
-    if cleaned.is_empty() {
-        Some(*input.clone()) // no predicates left, unwrap the Filter
-    } else {
-        Some(PhysOp::Filter {
-            predicates: cleaned,
-            input: input.clone(),
-        })
-    }
-}
-
-// ── Rule 10: Narrowing CTE for selective endpoints ──────────────────────────
-
-fn rule_narrowing_cte(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    // Match: Join(left, Filter(Scan(node_table, alias, FINAL), preds))
-    // where the node has high-selectivity filters
-    // and there's an edge scan somewhere in `left` that references this node
-    let PhysOp::Join {
-        left,
-        right,
-        on,
-        kind: JoinKind::Inner,
-    } = op
-    else {
-        return None;
-    };
-    let node_alias = scan_alias(right)?;
-    let node = ctx.input.nodes.iter().find(|n| n.id == node_alias)?;
-    if !is_selective(node) || node.table.is_none() {
-        return None;
-    }
-
-    // Check that left has an edge scan that references this node via the join ON
-    let edge_alias_str = &on.left.0;
-    if alias_to_rel_index(edge_alias_str).is_none() && !edge_alias_str.starts_with('e') {
-        return None; // left side isn't an edge
-    }
-
-    // Don't add narrowing if already present
-    if has_semi_join_for(left, &node_alias) {
-        return None;
-    }
-
-    let cte_name = format!("_nf_{node_alias}");
-    let edge_col = &on.left.1;
-
-    // Wrap the left (edge chain) in a Semi join with the node scan as CTE
-    let narrowed = PhysOp::Join {
-        left: left.clone(),
-        right: Box::new(filtered_node_scan(node)),
-        on: JoinOn {
-            left: (edge_alias_str.clone(), edge_col.clone()),
-            right: (
-                cte_name,
-                ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
-            ),
-        },
-        kind: JoinKind::Semi { materialize: true },
-    };
-
-    Some(PhysOp::Join {
-        left: Box::new(narrowed),
-        right: right.clone(),
-        on: on.clone(),
-        kind: JoinKind::Inner,
-    })
-}
-
-fn is_selective(node: &InputNode) -> bool {
-    !node.node_ids.is_empty()
-        || node.id_range.is_some()
-        || node.filters.iter().any(|(_, fs)| {
-            fs.iter()
-                .any(|f| f.selectivity == ontology::FieldSelectivity::High)
-        })
-}
-
-fn has_semi_join_for(op: &PhysOp, alias: &str) -> bool {
-    match op {
-        PhysOp::Join {
-            kind: JoinKind::Semi { .. },
-            on,
-            ..
-        } => on.right.0.contains(alias),
-        PhysOp::Join { left, right, .. } => {
-            has_semi_join_for(left, alias) || has_semi_join_for(right, alias)
+    match input.as_ref() {
+        PhysOp::Scan { table, alias, .. } if is_edge_table(ctx, table) => {
+            Some((predicates, table, alias))
         }
-        PhysOp::Filter { input, .. }
-        | PhysOp::Project { input, .. }
-        | PhysOp::Sort { input, .. }
-        | PhysOp::Limit { input, .. }
-        | PhysOp::Aggregate { input, .. } => has_semi_join_for(input, alias),
-        _ => false,
+        PhysOp::Union { alias, .. } if rel_index(alias).is_some() => {
+            Some((predicates, &ctx.input.compiler.default_edge_table, alias))
+        }
+        _ => None,
     }
 }
 
-// ── Rule 11: Cascade SIP ────────────────────────────────────────────────────
+fn with_predicates(op: &PhysOp, predicates: Vec<Predicate>) -> PhysOp {
+    match op {
+        PhysOp::Filter { input, .. } => filter((**input).clone(), predicates),
+        other => filter(other.clone(), predicates),
+    }
+}
 
-fn rule_cascade_sip(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    // Match: Join(prev_chain, Filter(Scan(edge, e{N})), on: prev.col = e{N}.col)
-    // where N > 0 and the previous hop has selective endpoints
-    let PhysOp::Join {
-        left,
-        right,
-        on,
-        kind: JoinKind::Inner,
-    } = op
-    else {
-        return None;
+// ── Global rules ────────────────────────────────────────────────────────────
+
+/// A single-hop relationship backed by a foreign key needs no edge scan: the
+/// two node tables join directly on the FK column. The edge leaf leaves the
+/// spine, its columns are rewritten to node columns or literals, and both
+/// endpoint tables are guaranteed present.
+fn rule_fk_elision(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    let spine = spine_of(tree)?;
+    let fk_of = |leaf: &PhysOp| -> Option<(&InputRelationship, String)> {
+        let alias = edge_scan_alias(leaf, ctx)?;
+        let rel = ctx.input.relationships.get(rel_index(alias)?)?;
+        let fk = rel.fk_column.as_ref()?;
+        let eligible = rel.hops.max == 1
+            && !matches!(rel.direction, Direction::Both)
+            && rel.filters.is_empty();
+        eligible.then(|| (rel, fk.clone()))
     };
-    let edge_alias = edge_scan_alias(right)?;
-    let idx = alias_to_rel_index(&edge_alias)?;
-    if idx == 0 {
+    // Mixed chains keep every edge scan: a remaining edge may carry denorm
+    // tags for the FK hop's endpoints, and edge-only chains dedup uniformly.
+    let all_fk = spine.leaves.iter().all(|(leaf, _)| {
+        let is_edge = edge_scan_alias(leaf, ctx).is_some()
+            || matches!(leaf_alias(leaf), Some(a) if rel_index(a).is_some());
+        !is_edge || fk_of(leaf).is_some()
+    });
+    if !all_fk {
         return None;
-    } // first hop, no previous to anchor from
+    }
+    let (idx, rel, fk_col) = spine
+        .leaves
+        .iter()
+        .enumerate()
+        .find_map(|(i, (leaf, kind))| {
+            if *kind != JoinKind::Inner {
+                return None;
+            }
+            fk_of(leaf).map(|(rel, fk)| (i, rel, fk))
+        })?;
 
-    // Check previous hop has selective nodes
-    let prev_rel = ctx.input.relationships.get(idx - 1)?;
-    let prev_selective = [&prev_rel.from, &prev_rel.to].iter().any(|na| {
+    let alias = edge_scan_alias(&spine.leaves[idx].0, ctx)?.to_string();
+    let (sc, _) = rel.direction.edge_columns();
+    let (src, tgt) = if sc == SOURCE_ID_COLUMN {
+        (&rel.from, &rel.to)
+    } else {
+        (&rel.to, &rel.from)
+    };
+    let entity = |a: &str| {
         ctx.input
             .nodes
             .iter()
-            .find(|n| &n.id == *na)
-            .is_some_and(|n| is_selective(n))
-    });
-    if !prev_selective {
-        return None;
-    }
-
-    // Don't add if already has a semi-join
-    if matches!(
-        right.as_ref(),
-        PhysOp::Join {
-            kind: JoinKind::Semi { .. },
-            ..
-        }
-    ) {
-        return None;
-    }
-
-    // Add Semi join: e{N}.start_col IN (SELECT prev.end_col FROM prev WHERE prev_preds)
-    let (_, prev_end) = prev_rel.direction.edge_columns();
-    let prev_alias = format!("e{}", idx - 1);
-    let (curr_start, _) = ctx.input.relationships[idx].direction.edge_columns();
-
-    let new_right = PhysOp::Join {
-        left: right.clone(),
-        right: Box::new(PhysOp::Scan {
-            table: String::new(),
-            alias: prev_alias.clone(),
-            dedup: false,
-        }),
-        on: JoinOn {
-            left: (edge_alias.clone(), curr_start.to_string()),
-            right: (prev_alias, prev_end.to_string()),
-        },
-        kind: JoinKind::Semi { materialize: false },
+            .find(|n| n.id == a)
+            .and_then(|n| n.entity.clone())
+            .unwrap_or_default()
     };
+    let mut s: Subst = HashMap::new();
+    s.insert(
+        col(&alias, SOURCE_ID_COLUMN),
+        ColumnExpr::Col(src.clone(), DEFAULT_PRIMARY_KEY.into()),
+    );
+    s.insert(
+        col(&alias, TARGET_ID_COLUMN),
+        ColumnExpr::Col(tgt.clone(), DEFAULT_PRIMARY_KEY.into()),
+    );
+    s.insert(
+        col(&alias, SOURCE_KIND_COLUMN),
+        ColumnExpr::Lit(Value::Str(entity(src))),
+    );
+    s.insert(
+        col(&alias, TARGET_KIND_COLUMN),
+        ColumnExpr::Lit(Value::Str(entity(tgt))),
+    );
+    s.insert(
+        col(&alias, RELATIONSHIP_KIND_COLUMN),
+        ColumnExpr::Lit(Value::Str(rel.types.first().cloned().unwrap_or_default())),
+    );
 
-    Some(PhysOp::Join {
-        left: left.clone(),
-        right: Box::new(new_right),
-        on: on.clone(),
-        kind: JoinKind::Inner,
-    })
+    let (fk_alias, tgt_alias) = fk_sides(rel, &fk_col, ctx);
+    let rewritten = rewrite_spine(tree, &|join_op| {
+        let mut sp = flatten(join_op);
+        sp.leaves.remove(idx);
+        sp.eqs = sp
+            .eqs
+            .into_iter()
+            .map(|(x, y)| (subst_col(&x, &s), subst_col(&y, &s)))
+            .filter(|(x, y)| x != y)
+            .collect();
+        sp.eqs
+            .push((col(fk_alias, &fk_col), col(tgt_alias, DEFAULT_PRIMARY_KEY)));
+        for a in [&rel.from, &rel.to] {
+            let present = sp
+                .leaves
+                .iter()
+                .any(|(l, _)| leaf_alias(l) == Some(a.as_str()));
+            if !present && let Some(n) = ctx.input.nodes.iter().find(|n| &n.id == a) {
+                sp.leaves.push((node_scan(n), JoinKind::Inner));
+            }
+        }
+        Some(rebuild(sp))
+    })?;
+    Some(subst_tree(rewritten, &s))
 }
 
-// ── Rule 12: FK edge metadata synthesis ─────────────────────────────────────
-
-fn rule_fk_edge_metadata(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    let PhysOp::Project { input, columns } = op else {
-        return None;
-    };
-
-    // Check if any columns reference edge aliases that don't exist in the tree
-    let has_stale_edge_refs = columns.iter().any(|c| match c {
-        ProjectedColumn::Ref { table, .. } => {
-            table.starts_with('e')
-                && alias_to_rel_index(table).is_some()
-                && !has_alias(input, table)
-        }
-        _ => false,
-    });
-    if !has_stale_edge_refs {
-        return None;
-    }
-
-    // Rewrite edge column refs to literals/computed values
-    let new_columns: Vec<ProjectedColumn> = columns
+/// Two or more single-hop edge scans in one spine self-join the edge table;
+/// read them with `FINAL` so stale versions don't multiply rows.
+fn rule_edge_dedup(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    let spine = spine_of(tree)?;
+    let edges: Vec<String> = spine
+        .leaves
         .iter()
-        .map(|c| match c {
-            ProjectedColumn::Ref {
-                table,
-                column,
-                alias,
-            } if table.starts_with('e')
-                && alias_to_rel_index(table).is_some()
-                && !has_alias(input, table) =>
-            {
-                let idx = alias_to_rel_index(table).unwrap();
-                if let Some(rel) = ctx.input.relationships.get(idx) {
-                    let rel_type = rel.types.first().map(|s| s.as_str()).unwrap_or("");
-                    let from_entity = ctx
-                        .input
-                        .nodes
-                        .iter()
-                        .find(|n| n.id == rel.from)
-                        .and_then(|n| n.entity.as_deref())
-                        .unwrap_or("");
-                    let to_entity = ctx
-                        .input
-                        .nodes
-                        .iter()
-                        .find(|n| n.id == rel.to)
-                        .and_then(|n| n.entity.as_deref())
-                        .unwrap_or("");
-
-                    match column.as_str() {
-                        c if c == ontology_constants::RELATIONSHIP_KIND_COLUMN => {
-                            ProjectedColumn::Computed {
-                                expr: ColumnExpr::Lit(Value::Str(rel_type.to_string())),
-                                alias: alias.clone(),
-                            }
-                        }
-                        c if c == ontology_constants::SOURCE_ID_COLUMN => {
-                            ProjectedColumn::Computed {
-                                expr: ColumnExpr::Col(
-                                    rel.from.clone(),
-                                    ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
-                                ),
-                                alias: alias.clone(),
-                            }
-                        }
-                        c if c == ontology_constants::SOURCE_KIND_COLUMN => {
-                            ProjectedColumn::Computed {
-                                expr: ColumnExpr::Lit(Value::Str(from_entity.to_string())),
-                                alias: alias.clone(),
-                            }
-                        }
-                        c if c == ontology_constants::TARGET_ID_COLUMN => {
-                            ProjectedColumn::Computed {
-                                expr: ColumnExpr::Col(
-                                    rel.to.clone(),
-                                    ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
-                                ),
-                                alias: alias.clone(),
-                            }
-                        }
-                        c if c == ontology_constants::TARGET_KIND_COLUMN => {
-                            ProjectedColumn::Computed {
-                                expr: ColumnExpr::Lit(Value::Str(to_entity.to_string())),
-                                alias: alias.clone(),
-                            }
-                        }
-                        _ => c.clone(),
-                    }
-                } else {
-                    c.clone()
-                }
-            }
-            _ => c.clone(),
-        })
+        .filter_map(|(l, _)| edge_scan_alias(l, ctx).map(str::to_string))
         .collect();
-
-    if new_columns == *columns {
+    if edges.len() < 2 {
         return None;
     }
-    Some(PhysOp::Project {
-        input: input.clone(),
-        columns: new_columns,
+    fn set_final(op: PhysOp, edges: &[String], ctx: &RuleCtx) -> PhysOp {
+        match op {
+            PhysOp::Scan {
+                table,
+                alias,
+                dedup: Dedup::None,
+            } if is_edge_table(ctx, &table) && edges.contains(&alias) => PhysOp::Scan {
+                table,
+                alias,
+                dedup: Dedup::Final,
+            },
+            PhysOp::Union { .. } => op,
+            other => map_children(other, |c| set_final(c, edges, ctx)),
+        }
+    }
+    let updated = set_final(tree.clone(), &edges, ctx);
+    (updated != *tree).then_some(updated)
+}
+
+/// A node table nothing reads is a pure filter on its edge column. When
+/// every filter is already carried by an edge's denorm tags the join goes
+/// away; otherwise it becomes a semi-join (`IN (SELECT id ...)`), which
+/// never multiplies rows and lets ClickHouse build a hash set once.
+fn rule_unreferenced_nodes(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    let mut referenced = HashSet::new();
+    referenced_aliases(tree, &mut referenced);
+    rewrite_spine(tree, &|join_op| {
+        let mut sp = flatten(join_op);
+        let mut changed = false;
+        let mut i = 0;
+        while i < sp.leaves.len() {
+            let (leaf, kind) = &sp.leaves[i];
+            let Some(alias) = node_scan_alias(leaf, ctx).map(str::to_string) else {
+                i += 1;
+                continue;
+            };
+            let Some(node) = ctx.input.nodes.iter().find(|n| n.id == alias) else {
+                i += 1;
+                continue;
+            };
+            let touching: Vec<&(Col, Col)> = sp
+                .eqs
+                .iter()
+                .filter(|(x, y)| x.0 == alias || y.0 == alias)
+                .collect();
+            if *kind != JoinKind::Inner || referenced.contains(&alias) || touching.len() != 1 {
+                i += 1;
+                continue;
+            }
+            let (x, y) = touching[0];
+            let own_col = if x.0 == alias { &x.1 } else { &y.1 };
+            if own_col != DEFAULT_PRIMARY_KEY {
+                // Joined on its FK column: several rows may match one key, so
+                // the inner join's row multiplication is the graph semantics.
+                i += 1;
+                continue;
+            }
+            let unconstrained =
+                node.filters.is_empty() && node.node_ids.is_empty() && node.id_range.is_none();
+            let edges_present: HashSet<String> = sp
+                .leaves
+                .iter()
+                .filter_map(|(l, _)| leaf_alias(l).map(str::to_string))
+                .collect();
+            if unconstrained || all_filters_denormed(ctx, node, &edges_present) {
+                sp.leaves.remove(i);
+                sp.eqs.retain(|(x, y)| x.0 != alias && y.0 != alias);
+                changed = true;
+                continue;
+            }
+            sp.leaves[i].1 = JoinKind::Semi;
+            changed = true;
+            i += 1;
+        }
+        changed.then(|| rebuild(sp))
     })
 }
 
-// ── Rule 13: Scope anchor elision ───────────────────────────────────────────
-
-fn rule_scope_anchor_elision(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    if ctx.input.query_type != QueryType::Aggregation {
-        return None;
-    }
-    let PhysOp::Join {
-        left,
-        right,
-        kind: JoinKind::Inner,
-        ..
-    } = op
-    else {
-        return None;
-    };
-    let alias = scan_alias(right)?;
-    let node = ctx.input.nodes.iter().find(|n| n.id == alias)?;
-
-    // Pure scope anchor: only scope filters, not in group-by/metrics/order-by
-    let in_group_by = ctx
-        .input
-        .aggregation
-        .group_by
-        .iter()
-        .any(|g| g.node() == alias.as_str());
-    let in_metrics = ctx
-        .input
-        .aggregation
-        .metrics
-        .iter()
-        .any(|m| m.expr.node() == alias.as_str());
-    let in_order_by = ctx
-        .input
-        .order_by
-        .as_ref()
-        .is_some_and(|ob| ob.node == alias);
-    if in_group_by || in_metrics || in_order_by {
-        return None;
-    }
-
-    // Must have only scope-related filters (no user-visible filters)
-    let has_only_scope =
-        node.filters.is_empty() && node.node_ids.is_empty() && node.id_range.is_none();
-    if !has_only_scope {
-        return None;
-    }
-
-    // Check if a scope prefix has been resolved (restrict sets this)
-    let has_scope = ctx
-        .input
-        .relationships
-        .iter()
-        .any(|r| (r.from == alias || r.to == alias) && r.scope_prefix.is_some());
-    if !has_scope {
-        return None;
-    }
-
-    Some(*left.clone())
-}
-
-// ── Rule 14: Count target FK re-join ────────────────────────────────────────
-
-fn rule_count_target_fk_rejoin(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
-    if ctx.input.query_type != QueryType::Aggregation {
-        return None;
-    }
-    let PhysOp::Aggregate {
-        input,
-        group_by,
-        metrics,
-    } = op
-    else {
-        return None;
-    };
-
-    for m in metrics {
-        let node_alias = &m.node;
-        if !has_alias(input, node_alias) {
-            // Count target not in tree — need to re-join
-            let node = ctx.input.nodes.iter().find(|n| &n.id == node_alias)?;
-            // Find the FK relationship that connects this node
-            for rel in &ctx.input.relationships {
-                if let Some(ref fk_col) = rel.fk_column {
-                    let (fk_alias, tgt_alias) = fk_sides(rel, fk_col, ctx);
-                    if tgt_alias == node_alias || fk_alias == node_alias {
-                        let new_input = PhysOp::Join {
-                            left: input.clone(),
-                            right: Box::new(filtered_node_scan(node)),
-                            on: JoinOn {
-                                left: (fk_alias.to_string(), fk_col.clone()),
-                                right: (
-                                    node_alias.clone(),
-                                    ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
-                                ),
-                            },
-                            kind: JoinKind::Inner,
+/// Every property filter on `node` is carried as a denorm tag by an edge
+/// that is still scanned in the spine.
+fn all_filters_denormed(ctx: &RuleCtx, node: &InputNode, present: &HashSet<String>) -> bool {
+    !node.filters.is_empty()
+        && node.node_ids.is_empty()
+        && node.id_range.is_none()
+        && node.filters.keys().all(|prop| {
+            ctx.input
+                .relationships
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| present.contains(&format!("e{i}")))
+                .any(|(_, rel)| {
+                    let (sc, ec) = rel.direction.edge_columns();
+                    [(&rel.from, sc), (&rel.to, ec)].into_iter().any(|(n, ic)| {
+                        let dir = if ic == SOURCE_ID_COLUMN {
+                            "source"
+                        } else {
+                            "target"
                         };
-                        return Some(PhysOp::Aggregate {
-                            input: Box::new(new_input),
-                            group_by: group_by.clone(),
-                            metrics: metrics.clone(),
-                        });
-                    }
-                }
-            }
-        }
-    }
-    None
+                        n == &node.id && denorm_tag_for(ctx, node, prop, dir, rel).is_some()
+                    })
+                })
+        })
 }
 
-// ── Rule 15: LIMIT BY for single-hop aggregation ────────────────────────────
-// Single-hop edge aggregation: use dedup=false (LIMIT BY in lower) instead of FINAL
+/// Sideways information passing along the chain: when hop N-1 is pinned by
+/// ids or filters, hop N only needs the rows whose start id appears among
+/// hop N-1's end ids. Adds `e_N.start IN (SELECT e_{N-1}.end FROM ...)`.
+fn rule_cascade_sip(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    rewrite_spine(tree, &|join_op| {
+        let mut sp = flatten(join_op);
+        let edge_leaves: HashMap<String, PhysOp> = sp
+            .leaves
+            .iter()
+            .filter_map(|(l, k)| {
+                (*k == JoinKind::Inner)
+                    .then(|| edge_scan_alias(l, ctx).map(|a| (a.to_string(), l.clone())))
+                    .flatten()
+            })
+            .collect();
+        let mut added = Vec::new();
+        for (x, y) in &sp.eqs {
+            let (Some(ix), Some(iy)) = (rel_index(&x.0), rel_index(&y.0)) else {
+                continue;
+            };
+            if !edge_leaves.contains_key(&x.0) || !edge_leaves.contains_key(&y.0) {
+                continue;
+            }
+            // Anchor from the earlier hop into the later one.
+            let (prev, curr) = if ix < iy { (x, y) } else { (y, x) };
+            let prev_rel = &ctx.input.relationships[ix.min(iy)];
+            if prev_rel.fk_column.is_some() || !is_selective(&edge_leaves[&prev.0]) {
+                continue;
+            }
+            let sip_alias = format!("_sip_{}", prev.0);
+            if has_alias(join_op, &sip_alias) {
+                continue;
+            }
+            let body = project(
+                realias(edge_leaves[&prev.0].clone(), &prev.0, &sip_alias),
+                vec![ProjectedColumn::Ref {
+                    table: sip_alias.clone(),
+                    column: prev.1.clone(),
+                    alias: prev.1.clone(),
+                }],
+            );
+            added.push((body, (curr.clone(), col(&sip_alias, &prev.1))));
+        }
+        if added.is_empty() {
+            return None;
+        }
+        for (body, eq) in added {
+            sp.leaves.push((body, JoinKind::Semi));
+            sp.eqs.push(eq);
+        }
+        Some(rebuild(sp))
+    })
+}
 
-fn rule_limit_by_single_hop_agg(_op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
-    // TODO: This requires lower_v2 to emit LIMIT BY instead of FINAL when dedup=false
-    // on an edge scan inside an Aggregate. For now, skip.
-    None
+/// An edge leaf pinned by ids, an id range, or a node-property filter.
+fn is_selective(leaf: &PhysOp) -> bool {
+    match leaf {
+        PhysOp::Filter { predicates, .. } => predicates.iter().any(|p| {
+            matches!(
+                p,
+                Predicate::In { column, .. } | Predicate::Range { column, .. }
+                    if column == SOURCE_ID_COLUMN || column == TARGET_ID_COLUMN
+            ) || matches!(p, Predicate::NodeFilter { .. } | Predicate::Func { .. })
+        }),
+        _ => false,
+    }
+}
+
+fn realias(op: PhysOp, from: &str, to: &str) -> PhysOp {
+    match op {
+        PhysOp::Scan {
+            table,
+            alias,
+            dedup,
+        } if alias == from => PhysOp::Scan {
+            table,
+            alias: to.to_string(),
+            dedup,
+        },
+        other => map_children(other, |c| realias(c, from, to)),
+    }
 }

@@ -11,6 +11,7 @@ path = "src/main.rs"
 clap = { workspace = true }
 compiler = { path = "../query-engine/compiler" }
 ontology = { path = "../ontology" }
+orbit-utils = { path = "../utils" }
 serde_json = { workspace = true }
 
 [lints]

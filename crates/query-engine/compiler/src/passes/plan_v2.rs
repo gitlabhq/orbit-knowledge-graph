@@ -1,7 +1,9 @@
+use crate::ast::Expr;
 use crate::input::*;
 use ontology::Ontology;
+use ontology::constants::*;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 // ── Join Graph ──────────────────────────────────────────────────────────────
 
@@ -14,11 +16,6 @@ pub struct JoinPath {
     pub fk_column: Option<String>,
     pub scope_preserving: bool,
     pub edge_table: String,
-}
-
-pub enum HopStrategy {
-    EdgeScan { table: String, dedup: bool },
-    FkJoin { fk_column: String },
 }
 
 impl JoinGraph {
@@ -36,27 +33,6 @@ impl JoinGraph {
         Self { by_kind }
     }
 
-    pub fn resolve(
-        &self,
-        rel: &InputRelationship,
-        default_table: &str,
-        chain_len: usize,
-    ) -> HopStrategy {
-        if rel.hops.max == 1
-            && !matches!(rel.direction, Direction::Both)
-            && rel.filters.is_empty()
-            && rel.fk_column.is_some()
-        {
-            return HopStrategy::FkJoin {
-                fk_column: rel.fk_column.clone().unwrap(),
-            };
-        }
-        HopStrategy::EdgeScan {
-            table: self.edge_table(&rel.types, default_table),
-            dedup: chain_len >= 2 && rel.hops.max == 1,
-        }
-    }
-
     pub fn edge_table(&self, rel_types: &[String], default: &str) -> String {
         for t in rel_types {
             if let Some(jp) = self.by_kind.get(t) {
@@ -69,13 +45,26 @@ impl JoinGraph {
 
 // ── PhysOp ──────────────────────────────────────────────────────────────────
 
+/// `(alias, column)` reference into a relation visible in the current scope.
+pub type Col = (String, String);
+
+#[derive(Clone, Copy, PartialEq, Serialize)]
+pub enum Dedup {
+    None,
+    /// `FINAL`: ReplacingMergeTree merge-on-read.
+    Final,
+    /// `ORDER BY <sort_key>, _version DESC LIMIT 1 BY <sort_key>`; keeps
+    /// column pruning eligible. `_deleted` must be filtered after the dedup.
+    LimitBy,
+}
+
 #[derive(Clone, PartialEq, Serialize)]
 #[serde(tag = "op")]
 pub enum PhysOp {
     Scan {
         table: String,
         alias: String,
-        dedup: bool,
+        dedup: Dedup,
     },
     Filter {
         input: Box<PhysOp>,
@@ -88,7 +77,7 @@ pub enum PhysOp {
     Join {
         left: Box<PhysOp>,
         right: Box<PhysOp>,
-        on: JoinOn,
+        on: Vec<(Col, Col)>,
         kind: JoinKind,
     },
     Aggregate {
@@ -98,6 +87,7 @@ pub enum PhysOp {
     },
     Union {
         arms: Vec<PhysOp>,
+        alias: String,
     },
     Sort {
         input: Box<PhysOp>,
@@ -107,22 +97,24 @@ pub enum PhysOp {
         input: Box<PhysOp>,
         count: u32,
     },
+    /// Named subqueries (CTEs) visible to `input`.
+    With {
+        ctes: Vec<(String, PhysOp)>,
+        input: Box<PhysOp>,
+    },
 }
 
-#[derive(Clone, PartialEq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Serialize)]
 pub enum JoinKind {
     Inner,
-    Semi { materialize: bool },
-}
-
-#[derive(Clone, PartialEq, Serialize)]
-pub struct JoinOn {
-    pub left: (String, String),
-    pub right: (String, String),
+    /// `left.col IN (SELECT right.col FROM right)`; only `on[0]` is used.
+    Semi,
 }
 
 // ── Predicates ──────────────────────────────────────────────────────────────
 
+/// Predicates apply to the alias of the `Filter`'s input relation, except
+/// `Expr`, which is fully qualified and may sit over any input.
 #[derive(Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 pub enum Predicate {
@@ -150,6 +142,9 @@ pub enum Predicate {
         value: Value,
     },
     ScopePrefix(#[serde(skip)] crate::scope::ScopePrefix),
+    /// Opaque, fully qualified predicate. Used by the constructors that skip
+    /// optimization (neighbors, pathfinding, hydration); never rewritten.
+    Expr(#[serde(skip)] Expr),
 }
 
 #[derive(Clone, PartialEq, Serialize)]
@@ -158,6 +153,37 @@ pub enum Value {
     Str(String),
     Bool(bool),
     Strs(Vec<String>),
+}
+
+pub fn deleted_false() -> Predicate {
+    Predicate::Eq {
+        column: DELETED_COLUMN.to_string(),
+        value: Value::Bool(false),
+    }
+}
+
+pub fn rel_kind_predicate(types: &[String]) -> Option<Predicate> {
+    if crate::passes::normalize::is_wildcard(types) {
+        return None;
+    }
+    Some(if types.len() == 1 {
+        Predicate::Eq {
+            column: RELATIONSHIP_KIND_COLUMN.to_string(),
+            value: Value::Str(types[0].clone()),
+        }
+    } else {
+        Predicate::In {
+            column: RELATIONSHIP_KIND_COLUMN.to_string(),
+            values: types.iter().map(|t| Value::Str(t.clone())).collect(),
+        }
+    })
+}
+
+fn id_in(column: &str, ids: &[i64]) -> Predicate {
+    Predicate::In {
+        column: column.to_string(),
+        values: ids.iter().map(|&id| Value::Int(id)).collect(),
+    }
 }
 
 // ── Projections ─────────────────────────────────────────────────────────────
@@ -170,11 +196,20 @@ pub enum ProjectedColumn {
         column: String,
         alias: String,
     },
+    /// `node.property AS {node}_{property}`, with text-excerpt truncation
+    /// applied when the property is an excerpt column.
     NodeProperty {
+        node: String,
         property: String,
     },
     Computed {
         expr: ColumnExpr,
+        alias: String,
+    },
+    /// Opaque projection, see `Predicate::Expr`.
+    Expr {
+        #[serde(skip)]
+        expr: Expr,
         alias: String,
     },
 }
@@ -185,6 +220,21 @@ pub enum ColumnExpr {
     Lit(Value),
     Array(Vec<ColumnExpr>),
     Tuple(Vec<ColumnExpr>),
+}
+
+fn col_ref(table: &str, column: &str, alias: impl Into<String>) -> ProjectedColumn {
+    ProjectedColumn::Ref {
+        table: table.to_string(),
+        column: column.to_string(),
+        alias: alias.into(),
+    }
+}
+
+fn expr_col(expr: Expr, alias: impl Into<String>) -> ProjectedColumn {
+    ProjectedColumn::Expr {
+        expr,
+        alias: alias.into(),
+    }
 }
 
 // ── Aggregation / Sort ──────────────────────────────────────────────────────
@@ -211,6 +261,82 @@ pub struct Metric {
 pub struct SortKey {
     pub column: String,
     pub desc: bool,
+}
+
+// ── Constructors ────────────────────────────────────────────────────────────
+
+pub fn scan(table: &str, alias: &str, dedup: Dedup) -> PhysOp {
+    PhysOp::Scan {
+        table: table.to_string(),
+        alias: alias.to_string(),
+        dedup,
+    }
+}
+
+pub fn filter(input: PhysOp, predicates: Vec<Predicate>) -> PhysOp {
+    if predicates.is_empty() {
+        return input;
+    }
+    PhysOp::Filter {
+        input: Box::new(input),
+        predicates,
+    }
+}
+
+pub fn project(input: PhysOp, columns: Vec<ProjectedColumn>) -> PhysOp {
+    PhysOp::Project {
+        input: Box::new(input),
+        columns,
+    }
+}
+
+pub fn join(left: PhysOp, right: PhysOp, on: Vec<(Col, Col)>) -> PhysOp {
+    PhysOp::Join {
+        left: Box::new(left),
+        right: Box::new(right),
+        on,
+        kind: JoinKind::Inner,
+    }
+}
+
+pub fn semi_join(left: PhysOp, right: PhysOp, on: (Col, Col)) -> PhysOp {
+    PhysOp::Join {
+        left: Box::new(left),
+        right: Box::new(right),
+        on: vec![on],
+        kind: JoinKind::Semi,
+    }
+}
+
+pub fn col(alias: &str, column: &str) -> Col {
+    (alias.to_string(), column.to_string())
+}
+
+fn union(arms: Vec<PhysOp>, alias: &str) -> PhysOp {
+    if arms.len() == 1 {
+        return arms.into_iter().next().unwrap();
+    }
+    PhysOp::Union {
+        arms,
+        alias: alias.to_string(),
+    }
+}
+
+fn limit(input: PhysOp, count: u32) -> PhysOp {
+    PhysOp::Limit {
+        input: Box::new(input),
+        count,
+    }
+}
+
+fn sort(input: PhysOp, keys: Vec<SortKey>) -> PhysOp {
+    if keys.is_empty() {
+        return input;
+    }
+    PhysOp::Sort {
+        input: Box::new(input),
+        keys,
+    }
 }
 
 // ── PlanMetadata ────────────────────────────────────────────────────────────
@@ -244,33 +370,28 @@ pub fn plan(
     };
     let limit = input.fetch_limit();
 
+    // Neighbors, pathfinding, and hydration are single-purpose shapes with no
+    // join graph to rewrite; they bypass the optimizer.
     let op = match input.query_type {
-        QueryType::Traversal => ctx.plan_traversal(limit),
-        QueryType::Aggregation => ctx.plan_aggregation(limit),
+        QueryType::Traversal | QueryType::Aggregation => {
+            let naive = if input.query_type == QueryType::Traversal {
+                ctx.plan_traversal(limit)
+            } else {
+                ctx.plan_aggregation(limit)
+            };
+            let rule_ctx = super::optimize::RuleCtx {
+                input,
+                graph: &graph,
+            };
+            super::optimize::optimize(naive, &rule_ctx)
+        }
         QueryType::Neighbors => ctx.plan_neighbors(limit),
         QueryType::PathFinding => ctx.plan_pathfinding(limit),
         QueryType::Hydration => ctx.plan_hydration(limit),
     };
 
-    let rule_ctx = super::optimize::RuleCtx {
-        input,
-        graph: &graph,
-    };
-    let op = super::optimize::optimize(op, &rule_ctx);
-
-    let mut nem = ctx.compute_node_edge_mappings();
-    if input.query_type == QueryType::Neighbors {
-        nem.insert(
-            input.nodes[0].id.clone(),
-            (
-                "e".to_string(),
-                ontology::constants::SOURCE_ID_COLUMN.to_string(),
-            ),
-        );
-    }
-
     let meta = PlanMetadata {
-        node_edge_mappings: nem,
+        node_edge_mappings: ctx.node_edge_mappings(&op),
         hop_count: input.relationships.len(),
         phys_op: None,
     };
@@ -283,50 +404,44 @@ struct PlanCtx<'a> {
 }
 
 impl<'a> PlanCtx<'a> {
-    fn compute_node_edge_mappings(&self) -> HashMap<String, (String, String)> {
-        let mut m = HashMap::new();
-        let det = &self.input.compiler.default_edge_table;
-        let cl = self.input.relationships.len();
-        for (i, rel) in self.input.relationships.iter().enumerate() {
-            match self.graph.resolve(rel, det, cl) {
-                HopStrategy::FkJoin { fk_column } => {
-                    let (fk_a, tgt_a) = self.fk_sides(rel, &fk_column);
-                    m.entry(fk_a.to_string()).or_insert_with(|| {
-                        (
-                            fk_a.to_string(),
-                            ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
-                        )
-                    });
-                    m.entry(tgt_a.to_string())
-                        .or_insert_with(|| (fk_a.to_string(), fk_column));
-                }
-                HopStrategy::EdgeScan { .. } => {
-                    let ea = format!("e{i}");
-                    let (sc, ec) = rel.direction.edge_columns();
-                    m.entry(rel.from.clone())
-                        .or_insert_with(|| (ea.clone(), sc.to_string()));
-                    m.entry(rel.to.clone())
-                        .or_insert_with(|| (ea.clone(), ec.to_string()));
-                }
-            }
-        }
-        m
+    fn node(&self, alias: &str) -> Option<&'a InputNode> {
+        self.input.nodes.iter().find(|n| n.id == alias)
     }
 
-    fn fk_sides<'r>(&self, rel: &'r InputRelationship, fk_col: &str) -> (&'r str, &'r str) {
-        let from_has = self
-            .input
+    /// First edge column that carries each node's id, in relationship order.
+    fn bindings(&self) -> HashMap<String, Col> {
+        let mut bound = HashMap::new();
+        for (i, rel) in self.input.relationships.iter().enumerate() {
+            let ea = format!("e{i}");
+            let (sc, ec) = rel.direction.edge_columns();
+            for (n, c) in [(&rel.from, sc), (&rel.to, ec)] {
+                bound.entry(n.clone()).or_insert_with(|| col(&ea, c));
+            }
+        }
+        bound
+    }
+
+    /// Where `enforce` reads each node's id from: its own scan when joined,
+    /// otherwise the edge column that carries it.
+    fn node_edge_mappings(&self, op: &PhysOp) -> HashMap<String, (String, String)> {
+        if self.input.query_type == QueryType::Neighbors {
+            return HashMap::from([(
+                self.input.nodes[0].id.clone(),
+                ("e".to_string(), SOURCE_ID_COLUMN.to_string()),
+            )]);
+        }
+        let bound = self.bindings();
+        self.input
             .nodes
             .iter()
-            .find(|n| n.id == rel.from)
-            .and_then(|n| n.table.as_deref())
-            .and_then(|t| self.input.compiler.table_columns.get(t))
-            .is_some_and(|cols| cols.contains(fk_col));
-        if from_has {
-            (&rel.from, &rel.to)
-        } else {
-            (&rel.to, &rel.from)
-        }
+            .filter_map(|n| {
+                if super::optimize::has_alias(op, &n.id) {
+                    Some((n.id.clone(), col(&n.id, DEFAULT_PRIMARY_KEY)))
+                } else {
+                    bound.get(&n.id).map(|b| (n.id.clone(), b.clone()))
+                }
+            })
+            .collect()
     }
 
     fn node_predicates(&self, node: &InputNode) -> Vec<Predicate> {
@@ -342,50 +457,38 @@ impl<'a> PlanCtx<'a> {
             }
         }
         if !node.node_ids.is_empty() {
-            p.push(Predicate::In {
-                column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
-                values: node.node_ids.iter().map(|&id| Value::Int(id)).collect(),
-            });
+            p.push(id_in(DEFAULT_PRIMARY_KEY, &node.node_ids));
         }
         if let Some(ref r) = node.id_range {
             p.push(Predicate::Range {
-                column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
+                column: DEFAULT_PRIMARY_KEY.to_string(),
                 start: r.start,
                 end: r.end,
             });
         }
-        p.push(Predicate::Eq {
-            column: "_deleted".to_string(),
-            value: Value::Bool(false),
-        });
+        p.push(deleted_false());
         p
+    }
+
+    fn node_scan(&self, n: &InputNode) -> PhysOp {
+        filter(
+            scan(n.table.as_deref().unwrap_or(""), &n.id, Dedup::Final),
+            self.node_predicates(n),
+        )
     }
 
     fn edge_predicates(&self, rel: &InputRelationship) -> Vec<Predicate> {
         let mut p = Vec::new();
         let (sc, ec) = rel.direction.edge_columns();
-
-        if !crate::passes::normalize::is_wildcard(&rel.types) {
-            if rel.types.len() == 1 {
-                p.push(Predicate::Eq {
-                    column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                    value: Value::Str(rel.types[0].clone()),
-                });
-            } else {
-                p.push(Predicate::In {
-                    column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                    values: rel.types.iter().map(|t| Value::Str(t.clone())).collect(),
-                });
-            }
-        }
+        p.extend(rel_kind_predicate(&rel.types));
         for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
-            if let Some(n) = self.input.nodes.iter().find(|n| &n.id == nid)
+            if let Some(n) = self.node(nid)
                 && let Some(ref ent) = n.entity
             {
-                let kc = if ic == ontology::constants::SOURCE_ID_COLUMN {
-                    ontology::constants::SOURCE_KIND_COLUMN
+                let kc = if ic == SOURCE_ID_COLUMN {
+                    SOURCE_KIND_COLUMN
                 } else {
-                    ontology::constants::TARGET_KIND_COLUMN
+                    TARGET_KIND_COLUMN
                 };
                 p.push(Predicate::Eq {
                     column: kc.to_string(),
@@ -393,22 +496,14 @@ impl<'a> PlanCtx<'a> {
                 });
             }
         }
-        p.push(Predicate::Eq {
-            column: "_deleted".to_string(),
-            value: Value::Bool(false),
-        });
-
+        p.push(deleted_false());
         if let Some(ref pfx) = rel.scope_prefix {
             p.push(Predicate::ScopePrefix(pfx.clone()));
         }
-
         for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
-            if let Some(n) = self.input.nodes.iter().find(|n| &n.id == nid) {
+            if let Some(n) = self.node(nid) {
                 if !n.node_ids.is_empty() {
-                    p.push(Predicate::In {
-                        column: ic.to_string(),
-                        values: n.node_ids.iter().map(|&id| Value::Int(id)).collect(),
-                    });
+                    p.push(id_in(ic, &n.node_ids));
                 }
                 if let Some(ref r) = n.id_range {
                     p.push(Predicate::Range {
@@ -419,88 +514,147 @@ impl<'a> PlanCtx<'a> {
                 }
             }
         }
-
         p
     }
 
+    /// A node table is joined only when something reads it: property filters,
+    /// an id range, group-by, a non-count metric, or order-by. Pinned ids live
+    /// on the edge columns, and requested columns come from the hydration query.
     fn needs_node_join(&self, node: &InputNode) -> bool {
-        let a = &node.id;
+        let a = node.id.as_str();
         let input = self.input;
-        let has_filters =
-            !node.filters.is_empty() || !node.node_ids.is_empty() || node.id_range.is_some();
-        let in_group_by = input
-            .aggregation
-            .group_by
-            .iter()
-            .any(|g| g.node() == a.as_str());
-        let in_agg_prop = input.aggregation.metrics.iter().any(|m| {
-            m.expr.node() == a.as_str()
-                && m.expr.property().is_some()
-                && !matches!(m.expr.function(), AggFunction::Count)
-        });
-        let in_order_by = input.order_by.as_ref().is_some_and(|ob| ob.node == *a);
-        let has_columns = matches!(&node.columns, Some(ColumnSelection::List(c)) if !c.is_empty());
-        if input.query_type == QueryType::Aggregation {
-            has_filters || in_group_by || in_agg_prop || in_order_by
-        } else {
-            has_filters || has_columns || in_order_by || in_group_by || in_agg_prop
-        }
+        !node.filters.is_empty()
+            || node.id_range.is_some()
+            || input.aggregation.group_by.iter().any(|g| g.node() == a)
+            || input.aggregation.metrics.iter().any(|m| {
+                m.expr.node() == a
+                    && m.expr.property().is_some()
+                    && !matches!(m.expr.function(), AggFunction::Count)
+            })
+            || input.order_by.as_ref().is_some_and(|ob| ob.node == a)
+    }
+
+    fn sort_keys(&self) -> Vec<SortKey> {
+        self.input
+            .order_by
+            .as_ref()
+            .map(|ob| {
+                vec![SortKey {
+                    column: format!("{}.{}", ob.node, ob.property),
+                    desc: matches!(ob.direction, OrderDirection::Desc),
+                }]
+            })
+            .unwrap_or_default()
     }
 }
 
 // ── Traversal / Aggregation ─────────────────────────────────────────────────
 
+/// Edge columns a traversal returns per hop, with their output suffixes.
+const EDGE_OUTPUT_COLUMNS: [(&str, &str); 5] = [
+    (RELATIONSHIP_KIND_COLUMN, crate::constants::EDGE_TYPE_SUFFIX),
+    (SOURCE_ID_COLUMN, crate::constants::EDGE_SRC_SUFFIX),
+    (SOURCE_KIND_COLUMN, crate::constants::EDGE_SRC_TYPE_SUFFIX),
+    (TARGET_ID_COLUMN, crate::constants::EDGE_DST_SUFFIX),
+    (TARGET_KIND_COLUMN, crate::constants::EDGE_DST_TYPE_SUFFIX),
+];
+
 impl<'a> PlanCtx<'a> {
-    fn plan_traversal(&self, limit: u32) -> PhysOp {
-        let chain = self.plan_chain();
+    /// Left-deep join over every edge scan, then every node table something
+    /// reads. Each edge joins on the columns of nodes an earlier edge already
+    /// binds, so star and cycle patterns get the right conditions.
+    fn plan_chain(&self) -> PhysOp {
+        if self.input.relationships.is_empty() {
+            return self.node_scan(&self.input.nodes[0]);
+        }
+        let det = &self.input.compiler.default_edge_table;
+        let mut bound: HashMap<String, Col> = HashMap::new();
+        let mut tree: Option<PhysOp> = None;
+
+        for (i, rel) in self.input.relationships.iter().enumerate() {
+            let ea = format!("e{i}");
+            let (sc, ec) = rel.direction.edge_columns();
+            let et = self.graph.edge_table(&rel.types, det);
+            let leaf = if rel.hops.max > 1 {
+                self.multi_hop(rel, &ea, &et)
+            } else {
+                filter(scan(&et, &ea, Dedup::None), self.edge_predicates(rel))
+            };
+            let mut on = Vec::new();
+            for (n, c) in [(&rel.from, sc), (&rel.to, ec)] {
+                match bound.get(n) {
+                    Some(b) => on.push((b.clone(), col(&ea, c))),
+                    None => {
+                        bound.insert(n.clone(), col(&ea, c));
+                    }
+                }
+            }
+            tree = Some(match tree {
+                None => leaf,
+                Some(t) => join(t, leaf, on),
+            });
+        }
+
+        let mut tree = tree.unwrap();
+        for n in &self.input.nodes {
+            if let Some(b) = bound.get(&n.id)
+                && self.needs_node_join(n)
+            {
+                tree = join(
+                    tree,
+                    self.node_scan(n),
+                    vec![(b.clone(), col(&n.id, DEFAULT_PRIMARY_KEY))],
+                );
+            }
+        }
+        tree
+    }
+
+    fn joined_node_columns(&self) -> Vec<ProjectedColumn> {
+        let mut cols = Vec::new();
+        let single_node = self.input.relationships.is_empty();
+        for n in &self.input.nodes {
+            if !single_node && !self.needs_node_join(n) {
+                continue;
+            }
+            for property in crate::passes::shared::requested_columns(&n.columns) {
+                cols.push(ProjectedColumn::NodeProperty {
+                    node: n.id.clone(),
+                    property,
+                });
+            }
+        }
+        cols
+    }
+
+    fn plan_traversal(&self, limit_count: u32) -> PhysOp {
         let mut columns = Vec::new();
         for (i, rel) in self.input.relationships.iter().enumerate() {
             let ea = format!("e{i}");
-            if rel.hops.max > 1 {
-                let prefix = format!("hop_{ea}");
-                for (col, suffix) in crate::constants::EDGE_ALIAS_SUFFIXES.iter().enumerate() {
-                    columns.push(ProjectedColumn::Ref {
-                        table: ea.clone(),
-                        column: ontology::constants::EDGE_RESERVED_COLUMNS[col].to_string(),
-                        alias: format!("{prefix}_{suffix}"),
-                    });
-                }
-                columns.push(ProjectedColumn::Ref {
-                    table: ea.clone(),
-                    column: crate::constants::PATH_NODES_COLUMN.to_string(),
-                    alias: format!("{prefix}_{}", crate::constants::PATH_NODES_COLUMN),
-                });
+            let prefix = if rel.hops.max > 1 {
+                format!("hop_{ea}")
             } else {
-                for (col_idx, suffix) in crate::constants::EDGE_ALIAS_SUFFIXES.iter().enumerate() {
-                    columns.push(ProjectedColumn::Ref {
-                        table: ea.clone(),
-                        column: ontology::constants::EDGE_RESERVED_COLUMNS[col_idx].to_string(),
-                        alias: format!("{ea}_{suffix}"),
-                    });
-                }
+                ea.clone()
+            };
+            for (column, suffix) in EDGE_OUTPUT_COLUMNS {
+                columns.push(col_ref(&ea, column, format!("{prefix}_{suffix}")));
+            }
+            if rel.hops.max > 1 {
+                columns.push(col_ref(
+                    &ea,
+                    crate::constants::PATH_NODES_COLUMN,
+                    format!("{prefix}_{}", crate::constants::PATH_NODES_COLUMN),
+                ));
             }
         }
-        for node in &self.input.nodes {
-            for col in crate::passes::shared::requested_columns(&node.columns) {
-                columns.push(ProjectedColumn::NodeProperty { property: col });
-            }
-        }
-        let sorted = PhysOp::Sort {
-            input: Box::new(chain),
-            keys: self.sort_keys(),
-        };
-        let projected = PhysOp::Project {
-            input: Box::new(sorted),
-            columns,
-        };
-        PhysOp::Limit {
-            input: Box::new(projected),
-            count: limit,
-        }
+        columns.extend(self.joined_node_columns());
+        limit(
+            project(sort(self.plan_chain(), self.sort_keys()), columns),
+            limit_count,
+        )
     }
 
-    fn plan_aggregation(&self, limit: u32) -> PhysOp {
-        let chain = self.plan_chain();
+    fn plan_aggregation(&self, limit_count: u32) -> PhysOp {
         let mut group_by = Vec::new();
         for g in &self.input.aggregation.group_by {
             match g {
@@ -510,31 +664,25 @@ impl<'a> PlanCtx<'a> {
                     truncate,
                     alias,
                     ..
-                } => {
-                    group_by.push(GroupKey {
-                        node: node.clone(),
-                        property: property.clone(),
-                        truncate: *truncate,
-                        alias: alias
-                            .as_ref()
-                            .cloned()
-                            .unwrap_or_else(|| format!("{node}_{property}")),
-                    });
-                }
-                InputGroupByKey::Node { node, alias, .. } => {
-                    for col in self
-                        .input
-                        .nodes
-                        .iter()
-                        .find(|n| &n.id == node)
+                } => group_by.push(GroupKey {
+                    node: node.clone(),
+                    property: property.clone(),
+                    truncate: *truncate,
+                    alias: alias
+                        .clone()
+                        .unwrap_or_else(|| format!("{node}_{property}")),
+                }),
+                InputGroupByKey::Node { node, .. } => {
+                    let cols = self
+                        .node(node)
                         .map(|n| crate::passes::shared::requested_columns(&n.columns))
-                        .unwrap_or_default()
-                    {
+                        .unwrap_or_default();
+                    for property in cols {
                         group_by.push(GroupKey {
                             node: node.clone(),
-                            property: col,
+                            alias: format!("{node}_{property}"),
+                            property,
                             truncate: None,
-                            alias: alias.as_ref().cloned().unwrap_or_else(|| node.clone()),
                         });
                     }
                 }
@@ -553,726 +701,1061 @@ impl<'a> PlanCtx<'a> {
             })
             .collect();
         let mut keys = Vec::new();
-        if let Some(ref sort) = self.input.aggregation.sort {
+        if let Some(ref s) = self.input.aggregation.sort {
             keys.push(SortKey {
-                column: sort.column.clone(),
-                desc: matches!(sort.direction, OrderDirection::Desc),
+                column: s.column.clone(),
+                desc: matches!(s.direction, OrderDirection::Desc),
             });
         }
         if self.input.cursor.is_some() {
-            for gk in &group_by {
-                keys.push(SortKey {
-                    column: format!("{}.{}", gk.node, gk.property),
-                    desc: false,
-                });
-            }
+            keys.extend(group_by.iter().map(|gk| SortKey {
+                column: format!("{}.{}", gk.node, gk.property),
+                desc: false,
+            }));
         }
-        PhysOp::Limit {
-            input: Box::new(PhysOp::Sort {
-                input: Box::new(PhysOp::Aggregate {
-                    input: Box::new(chain),
-                    group_by,
-                    metrics,
-                }),
-                keys,
-            }),
-            count: limit,
-        }
-    }
-
-    fn plan_chain(&self) -> PhysOp {
-        if self.input.relationships.is_empty() {
-            let n = &self.input.nodes[0];
-            return self.filtered_node_scan(n);
-        }
-
-        let det = &self.input.compiler.default_edge_table;
-        let mut tree: Option<PhysOp> = None;
-
-        for (i, rel) in self.input.relationships.iter().enumerate() {
-            let ea = format!("e{i}");
-            let (sc, _) = rel.direction.edge_columns();
-            let et = self.graph.edge_table(&rel.types, det);
-
-            let edge = if rel.hops.max > 1 {
-                self.build_multi_hop(rel, &ea, &et)
-            } else {
-                PhysOp::Filter {
-                    input: Box::new(PhysOp::Scan {
-                        table: et,
-                        alias: ea.clone(),
-                        dedup: false,
-                    }),
-                    predicates: self.edge_predicates(rel),
-                }
-            };
-
-            tree = Some(match tree {
-                None => edge,
-                Some(prev) => {
-                    let prev_col = if i > 0 {
-                        let (_, pe) = self.input.relationships[i - 1].direction.edge_columns();
-                        (format!("e{}", i - 1), pe.to_string())
-                    } else {
-                        (ea.clone(), sc.to_string())
-                    };
-                    PhysOp::Join {
-                        left: Box::new(prev),
-                        right: Box::new(edge),
-                        on: JoinOn {
-                            left: prev_col,
-                            right: (ea.clone(), sc.to_string()),
-                        },
-                        kind: JoinKind::Inner,
-                    }
-                }
-            });
-        }
-
-        let mut hydrated: HashSet<String> = HashSet::new();
-        for (i, rel) in self.input.relationships.iter().enumerate() {
-            let ea = format!("e{i}");
-            let (sc, ec) = rel.direction.edge_columns();
-            for (na, col) in [(&rel.from, sc), (&rel.to, ec)] {
-                if !hydrated.insert(na.clone()) {
-                    continue;
-                }
-                let Some(n) = self.input.nodes.iter().find(|n| &n.id == na) else {
-                    continue;
-                };
-                if !self.needs_node_join(n) {
-                    continue;
-                }
-                tree = Some(PhysOp::Join {
-                    left: Box::new(tree.unwrap()),
-                    right: Box::new(self.filtered_node_scan(n)),
-                    on: JoinOn {
-                        left: (ea.clone(), col.to_string()),
-                        right: (
-                            na.clone(),
-                            ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
-                        ),
-                    },
-                    kind: JoinKind::Inner,
-                });
-            }
-        }
-
-        tree.unwrap()
-    }
-
-    fn filtered_node_scan(&self, n: &InputNode) -> PhysOp {
-        PhysOp::Filter {
-            input: Box::new(PhysOp::Scan {
-                table: n.table.as_deref().unwrap_or("").to_string(),
-                alias: n.id.clone(),
-                dedup: true,
-            }),
-            predicates: self.node_predicates(n),
-        }
-    }
-
-    fn build_multi_hop(&self, rel: &InputRelationship, _alias: &str, edge_table: &str) -> PhysOp {
-        let (sc, ec) = rel.direction.edge_columns();
-        let end_type_col = match rel.direction {
-            Direction::Outgoing | Direction::Both => ontology::constants::TARGET_KIND_COLUMN,
-            Direction::Incoming => ontology::constants::SOURCE_KIND_COLUMN,
+        let agg = PhysOp::Aggregate {
+            input: Box::new(self.plan_chain()),
+            group_by,
+            metrics,
         };
+        limit(sort(agg, keys), limit_count)
+    }
 
-        let arms: Vec<PhysOp> = (rel.hops.min.max(1)..=rel.hops.max)
-            .map(|depth| self.build_depth_arm(depth, edge_table, sc, ec, end_type_col, rel))
+    /// `UNION ALL` of one arm per depth, aliased as the hop's edge so the
+    /// outer query reads it like a single edge with a `path_nodes` column.
+    fn multi_hop(&self, rel: &InputRelationship, alias: &str, edge_table: &str) -> PhysOp {
+        let (sc, ec) = rel.direction.edge_columns();
+        let (start_kind, end_kind) = match rel.direction {
+            Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
+            Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
+        };
+        let arms = (rel.hops.min.max(1)..=rel.hops.max)
+            .map(|depth| self.depth_arm(depth, edge_table, sc, ec, end_kind, rel))
             .collect();
 
-        let inner = if arms.len() == 1 {
-            arms.into_iter().next().unwrap()
-        } else {
-            PhysOp::Union { arms }
-        };
-
-        let mut outer_preds = Vec::new();
-        let (fk, tk) = match rel.direction {
-            Direction::Outgoing | Direction::Both => (
-                ontology::constants::SOURCE_KIND_COLUMN,
-                ontology::constants::TARGET_KIND_COLUMN,
-            ),
-            Direction::Incoming => (
-                ontology::constants::TARGET_KIND_COLUMN,
-                ontology::constants::SOURCE_KIND_COLUMN,
-            ),
-        };
-        let (from_id_col, to_id_col) = rel.direction.edge_columns();
-        for (na, kc, ic) in [(&rel.from, fk, from_id_col), (&rel.to, tk, to_id_col)] {
-            if let Some(n) = self.input.nodes.iter().find(|n| &n.id == na) {
-                if let Some(ref e) = n.entity {
-                    outer_preds.push(Predicate::Eq {
-                        column: kc.to_string(),
-                        value: Value::Str(e.clone()),
-                    });
-                }
-                if !n.node_ids.is_empty() {
-                    outer_preds.push(Predicate::In {
-                        column: ic.to_string(),
-                        values: n.node_ids.iter().map(|&id| Value::Int(id)).collect(),
-                    });
-                }
+        let mut outer = Vec::new();
+        for (n, kc, ic) in [(&rel.from, start_kind, sc), (&rel.to, end_kind, ec)] {
+            let Some(n) = self.node(n) else { continue };
+            if let Some(ref e) = n.entity {
+                outer.push(Predicate::Eq {
+                    column: kc.to_string(),
+                    value: Value::Str(e.clone()),
+                });
+            }
+            if !n.node_ids.is_empty() {
+                outer.push(id_in(ic, &n.node_ids));
             }
         }
-        outer_preds.push(Predicate::Eq {
-            column: "_deleted".to_string(),
-            value: Value::Bool(false),
-        });
-
-        PhysOp::Filter {
-            input: Box::new(inner),
-            predicates: outer_preds,
-        }
+        outer.push(deleted_false());
+        filter(union(arms, alias), outer)
     }
 
-    fn build_depth_arm(
+    fn depth_arm(
         &self,
         depth: u32,
         edge_table: &str,
         start_col: &str,
         end_col: &str,
-        end_type_col: &str,
+        end_kind_col: &str,
         rel: &InputRelationship,
     ) -> PhysOp {
-        let mut preds = Vec::new();
-        if !crate::passes::normalize::is_wildcard(&rel.types) {
-            if rel.types.len() == 1 {
-                preds.push(Predicate::Eq {
-                    column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                    value: Value::Str(rel.types[0].clone()),
-                });
-            } else {
-                preds.push(Predicate::In {
-                    column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                    values: rel.types.iter().map(|t| Value::Str(t.clone())).collect(),
-                });
+        let hop_preds = |first: bool| {
+            let mut p: Vec<Predicate> = rel_kind_predicate(&rel.types).into_iter().collect();
+            p.push(deleted_false());
+            if first && let Some(ref pfx) = rel.scope_prefix {
+                p.push(Predicate::ScopePrefix(pfx.clone()));
             }
-        }
-        preds.push(Predicate::Eq {
-            column: "_deleted".to_string(),
-            value: Value::Bool(false),
-        });
-        if let Some(ref pfx) = rel.scope_prefix {
-            preds.push(Predicate::ScopePrefix(pfx.clone()));
-        }
-
-        let mut chain = PhysOp::Filter {
-            input: Box::new(PhysOp::Scan {
-                table: edge_table.to_string(),
-                alias: "e1".to_string(),
-                dedup: false,
-            }),
-            predicates: preds,
+            p
         };
+        let mut chain = filter(scan(edge_table, "e1", Dedup::None), hop_preds(true));
         for j in 2..=depth {
-            let mut join_preds = vec![Predicate::Eq {
-                column: "_deleted".to_string(),
-                value: Value::Bool(false),
-            }];
-            if !crate::passes::normalize::is_wildcard(&rel.types) {
-                if rel.types.len() == 1 {
-                    join_preds.push(Predicate::Eq {
-                        column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                        value: Value::Str(rel.types[0].clone()),
-                    });
-                } else {
-                    join_preds.push(Predicate::In {
-                        column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                        values: rel.types.iter().map(|t| Value::Str(t.clone())).collect(),
-                    });
-                }
-            }
-            chain = PhysOp::Join {
-                left: Box::new(chain),
-                right: Box::new(PhysOp::Filter {
-                    input: Box::new(PhysOp::Scan {
-                        table: edge_table.to_string(),
-                        alias: format!("e{j}"),
-                        dedup: false,
-                    }),
-                    predicates: join_preds,
-                }),
-                on: JoinOn {
-                    left: (format!("e{}", j - 1), end_col.to_string()),
-                    right: (format!("e{j}"), start_col.to_string()),
-                },
-                kind: JoinKind::Inner,
-            };
+            let (prev, curr) = (format!("e{}", j - 1), format!("e{j}"));
+            chain = join(
+                chain,
+                filter(scan(edge_table, &curr, Dedup::None), hop_preds(false)),
+                vec![(col(&prev, end_col), col(&curr, start_col))],
+            );
         }
-
-        let _last = format!("e{depth}");
         let last = format!("e{depth}");
-        let proj_cols = vec![
-            ProjectedColumn::Ref {
-                table: "e1".to_string(),
-                column: start_col.to_string(),
-                alias: start_col.to_string(),
-            },
-            ProjectedColumn::Ref {
-                table: last.clone(),
-                column: end_col.to_string(),
-                alias: end_col.to_string(),
-            },
-            ProjectedColumn::Ref {
-                table: "e1".to_string(),
-                column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                alias: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-            },
-            ProjectedColumn::Computed {
-                expr: ColumnExpr::Array(
-                    (1..=depth)
-                        .map(|i| {
-                            let e = format!("e{i}");
-                            ColumnExpr::Tuple(vec![
-                                ColumnExpr::Col(e.clone(), end_col.to_string()),
-                                ColumnExpr::Col(e, end_type_col.to_string()),
-                            ])
-                        })
-                        .collect(),
-                ),
-                alias: crate::constants::PATH_NODES_COLUMN.to_string(),
-            },
-            ProjectedColumn::Computed {
-                expr: ColumnExpr::Lit(Value::Int(depth as i64)),
-                alias: crate::constants::DEPTH_COLUMN.to_string(),
-            },
-            ProjectedColumn::Ref {
-                table: "e1".to_string(),
-                column: "_deleted".to_string(),
-                alias: "_deleted".to_string(),
-            },
-            ProjectedColumn::Ref {
-                table: "e1".to_string(),
-                column: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
-                alias: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
-            },
-        ];
-
-        PhysOp::Project {
-            input: Box::new(chain),
-            columns: proj_cols,
-        }
+        let path_nodes = ColumnExpr::Array(
+            (1..=depth)
+                .map(|i| {
+                    let e = format!("e{i}");
+                    ColumnExpr::Tuple(vec![
+                        ColumnExpr::Col(e.clone(), end_col.to_string()),
+                        ColumnExpr::Col(e, end_kind_col.to_string()),
+                    ])
+                })
+                .collect(),
+        );
+        // Union arms must agree on shape: first-hop start + last-hop end, plus
+        // the first edge's kind/tp/deleted and the reserved kind columns the
+        // outer filter reads.
+        let start_kind_col = if start_col == SOURCE_ID_COLUMN {
+            SOURCE_KIND_COLUMN
+        } else {
+            TARGET_KIND_COLUMN
+        };
+        project(
+            chain,
+            vec![
+                col_ref("e1", TRAVERSAL_PATH_COLUMN, TRAVERSAL_PATH_COLUMN),
+                col_ref("e1", RELATIONSHIP_KIND_COLUMN, RELATIONSHIP_KIND_COLUMN),
+                col_ref("e1", start_col, start_col),
+                col_ref("e1", start_kind_col, start_kind_col),
+                col_ref(&last, end_col, end_col),
+                col_ref(&last, end_kind_col, end_kind_col),
+                col_ref("e1", SOURCE_TAGS_COLUMN, SOURCE_TAGS_COLUMN),
+                col_ref(&last, TARGET_TAGS_COLUMN, TARGET_TAGS_COLUMN),
+                ProjectedColumn::Computed {
+                    expr: path_nodes,
+                    alias: crate::constants::PATH_NODES_COLUMN.to_string(),
+                },
+                ProjectedColumn::Computed {
+                    expr: ColumnExpr::Lit(Value::Int(depth as i64)),
+                    alias: crate::constants::DEPTH_COLUMN.to_string(),
+                },
+                col_ref("e1", DELETED_COLUMN, DELETED_COLUMN),
+            ],
+        )
     }
+}
 
-    fn sort_keys(&self) -> Vec<SortKey> {
-        self.input
-            .order_by
-            .as_ref()
-            .map(|ob| {
-                vec![SortKey {
-                    column: format!("{}.{}", ob.node, ob.property),
-                    desc: matches!(ob.direction, OrderDirection::Desc),
-                }]
+// ── Hydration ───────────────────────────────────────────────────────────────
+
+impl<'a> PlanCtx<'a> {
+    /// One `LIMIT 1 BY` latest-row arm per entity, projecting the requested
+    /// columns as a JSON map. Traversal paths from the base query narrow the
+    /// scan via the primary key.
+    fn plan_hydration(&self, limit_count: u32) -> PhysOp {
+        let input = self.input;
+        let arms = input
+            .nodes
+            .iter()
+            .map(|n| {
+                let alias = n.id.as_str();
+                let table = n.table.as_deref().unwrap_or("");
+                let pk = n.id_property.as_str();
+                let columns = crate::passes::shared::requested_columns(&n.columns);
+
+                let mut inner = Vec::new();
+                if let Some(tp) = crate::passes::shared::traversal_path_filter(
+                    alias,
+                    &n.traversal_paths,
+                    input.hydration_dynamic,
+                    input.path_segment_budget,
+                ) {
+                    inner.push(Predicate::Expr(tp));
+                }
+                if !n.node_ids.is_empty() {
+                    inner.push(id_in(pk, &n.node_ids));
+                }
+                let mut inner_cols = vec![
+                    col_ref(alias, pk, pk),
+                    col_ref(alias, DELETED_COLUMN, DELETED_COLUMN),
+                ];
+                for c in &columns {
+                    if c != pk && c != DELETED_COLUMN {
+                        inner_cols.push(col_ref(alias, c, c));
+                    }
+                }
+                let props = if columns.is_empty() {
+                    Expr::string("{}")
+                } else {
+                    let map_args = columns
+                        .iter()
+                        .flat_map(|c| {
+                            [
+                                Expr::string(c),
+                                Expr::func("toString", vec![Expr::col(alias, c)]),
+                            ]
+                        })
+                        .collect();
+                    Expr::func("toJSONString", vec![Expr::func("map", map_args)])
+                };
+                let deduped = project(
+                    filter(scan(table, alias, Dedup::LimitBy), inner),
+                    inner_cols,
+                );
+                project(
+                    filter(deduped, vec![deleted_false()]),
+                    vec![
+                        col_ref(alias, pk, format!("{alias}_{pk}")),
+                        expr_col(
+                            Expr::string(n.entity.as_deref().unwrap_or("")),
+                            format!("{alias}_entity_type"),
+                        ),
+                        expr_col(props, format!("{alias}_props")),
+                    ],
+                )
             })
-            .unwrap_or_default()
+            .collect();
+        limit(
+            union(arms, crate::constants::HYDRATION_NODE_ALIAS),
+            limit_count,
+        )
     }
 }
 
 // ── Neighbors ───────────────────────────────────────────────────────────────
 
+/// Physical edge tables a neighbors arm scans, narrowed per direction to the
+/// tables whose relationships can have the center as source or target.
+struct EdgeTables {
+    all: Vec<String>,
+    outgoing: Vec<String>,
+    incoming: Vec<String>,
+}
+
 impl<'a> PlanCtx<'a> {
-    fn plan_neighbors(&self, limit: u32) -> PhysOp {
-        let config = self.input.neighbors.as_ref().expect("neighbors config");
-        let center = &self.input.nodes[0];
-        let center_entity = center.entity.as_deref().unwrap_or("");
-        let et = self
-            .graph
-            .edge_table(&config.rel_types, &self.input.compiler.default_edge_table);
-
-        let build_arm = |dir: Direction| -> PhysOp {
-            let (center_col, center_kind, neighbor_id, neighbor_kind, is_out) = match dir {
-                Direction::Outgoing => (
-                    ontology::constants::SOURCE_ID_COLUMN,
-                    ontology::constants::SOURCE_KIND_COLUMN,
-                    ontology::constants::TARGET_ID_COLUMN,
-                    ontology::constants::TARGET_KIND_COLUMN,
-                    1i64,
-                ),
-                Direction::Incoming => (
-                    ontology::constants::TARGET_ID_COLUMN,
-                    ontology::constants::TARGET_KIND_COLUMN,
-                    ontology::constants::SOURCE_ID_COLUMN,
-                    ontology::constants::SOURCE_KIND_COLUMN,
-                    0i64,
-                ),
-                Direction::Both => unreachable!(),
-            };
-            let mut preds = vec![Predicate::Eq {
-                column: center_kind.to_string(),
-                value: Value::Str(center_entity.to_string()),
-            }];
-            if !center.node_ids.is_empty() {
-                preds.push(Predicate::In {
-                    column: center_col.to_string(),
-                    values: center.node_ids.iter().map(|&id| Value::Int(id)).collect(),
-                });
-            }
-            if !crate::passes::normalize::is_wildcard(&config.rel_types) {
-                if config.rel_types.len() == 1 {
-                    preds.push(Predicate::Eq {
-                        column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                        value: Value::Str(config.rel_types[0].clone()),
-                    });
-                } else {
-                    preds.push(Predicate::In {
-                        column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                        values: config
-                            .rel_types
-                            .iter()
-                            .map(|t| Value::Str(t.clone()))
-                            .collect(),
-                    });
-                }
-            }
-            preds.push(Predicate::Eq {
-                column: "_deleted".to_string(),
-                value: Value::Bool(false),
-            });
-
-            let columns = vec![
-                ProjectedColumn::Ref {
-                    table: "e".to_string(),
-                    column: neighbor_id.to_string(),
-                    alias: crate::constants::neighbor_id_column().to_string(),
-                },
-                ProjectedColumn::Ref {
-                    table: "e".to_string(),
-                    column: neighbor_kind.to_string(),
-                    alias: crate::constants::neighbor_type_column().to_string(),
-                },
-                ProjectedColumn::Ref {
-                    table: "e".to_string(),
-                    column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
-                    alias: crate::constants::relationship_type_column().to_string(),
-                },
-                ProjectedColumn::Computed {
-                    expr: ColumnExpr::Lit(Value::Int(is_out)),
-                    alias: crate::constants::neighbor_is_outgoing_column().to_string(),
-                },
-                ProjectedColumn::Ref {
-                    table: "e".to_string(),
-                    column: center_col.to_string(),
-                    alias: crate::constants::redaction_id_column(&center.id),
-                },
-                ProjectedColumn::Computed {
-                    expr: ColumnExpr::Lit(Value::Str(center_entity.to_string())),
-                    alias: crate::constants::redaction_type_column(&center.id),
-                },
-            ];
-
-            let scan = PhysOp::Filter {
-                input: Box::new(PhysOp::Scan {
-                    table: et.clone(),
-                    alias: "e".to_string(),
-                    dedup: false,
-                }),
-                predicates: preds,
-            };
-
-            let has_non_denorm = center.filters.iter().any(|(prop, _)| {
-                let src = self.input.compiler.denormalized_columns.contains_key(&(
-                    center_entity.to_string(),
-                    prop.clone(),
-                    "source".to_string(),
-                ));
-                let tgt = self.input.compiler.denormalized_columns.contains_key(&(
-                    center_entity.to_string(),
-                    prop.clone(),
-                    "target".to_string(),
-                ));
-                !src && !tgt
-            }) || center.id_range.is_some();
-
-            let base = if has_non_denorm {
-                PhysOp::Join {
-                    left: Box::new(scan),
-                    right: Box::new(PhysOp::Filter {
-                        input: Box::new(PhysOp::Scan {
-                            table: center.table.as_deref().unwrap_or("").to_string(),
-                            alias: center.id.clone(),
-                            dedup: true,
-                        }),
-                        predicates: self.node_predicates(center),
-                    }),
-                    on: JoinOn {
-                        left: ("e".to_string(), center_col.to_string()),
-                        right: (
-                            center.id.clone(),
-                            ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
-                        ),
-                    },
-                    kind: JoinKind::Inner,
-                }
+    fn neighbor_edge_tables(&self, rel_types: &[String], center_entity: &str) -> EdgeTables {
+        let meta = &self.input.compiler;
+        let all = meta.resolve_edge_tables(rel_types);
+        let rels: Vec<&String> = if rel_types.is_empty() {
+            meta.edge_table_for_rel.keys().collect()
+        } else {
+            rel_types.iter().collect()
+        };
+        let tables_for = |kinds: &HashMap<String, Vec<String>>| -> Vec<String> {
+            let mut t: Vec<String> = rels
+                .iter()
+                .filter(|r| {
+                    kinds
+                        .get(**r)
+                        .is_some_and(|ks| ks.iter().any(|k| k == center_entity))
+                })
+                .map(|r| {
+                    meta.edge_table_for_rel
+                        .get(*r)
+                        .cloned()
+                        .unwrap_or_else(|| meta.default_edge_table.clone())
+                })
+                .collect();
+            t.sort();
+            t.dedup();
+            t
+        };
+        let outgoing = tables_for(&meta.edge_source_kinds);
+        let incoming = tables_for(&meta.edge_target_kinds);
+        EdgeTables {
+            outgoing: if outgoing.is_empty() {
+                all.clone()
             } else {
-                scan
-            };
-
-            PhysOp::Project {
-                input: Box::new(base),
-                columns,
-            }
-        };
-
-        let body = match config.direction {
-            Direction::Both => PhysOp::Union {
-                arms: vec![
-                    build_arm(Direction::Outgoing),
-                    build_arm(Direction::Incoming),
-                ],
+                outgoing
             },
-            dir => build_arm(dir),
-        };
-
-        PhysOp::Limit {
-            input: Box::new(PhysOp::Sort {
-                input: Box::new(body),
-                keys: self.sort_keys(),
-            }),
-            count: limit,
+            incoming: if incoming.is_empty() {
+                all.clone()
+            } else {
+                incoming
+            },
+            all,
         }
     }
 
-    // ── Pathfinding ─────────────────────────────────────────────────────────
+    /// Scan of one or more physical edge tables under one alias. Several
+    /// tables union on the reserved edge columns so extra per-table columns
+    /// don't break the union; `arm_where` is pushed into each arm.
+    fn edge_scan(
+        &self,
+        tables: &[String],
+        alias: &str,
+        arm_where: impl Fn(&str) -> Vec<Predicate>,
+    ) -> PhysOp {
+        if tables.len() == 1 {
+            return filter(scan(&tables[0], alias, Dedup::None), arm_where(alias));
+        }
+        let inner = format!("_{alias}");
+        let arms = tables
+            .iter()
+            .map(|t| {
+                let mut cols: Vec<ProjectedColumn> = EDGE_RESERVED_COLUMNS
+                    .iter()
+                    .map(|c| col_ref(&inner, c, *c))
+                    .collect();
+                cols.push(col_ref(&inner, DELETED_COLUMN, DELETED_COLUMN));
+                project(
+                    filter(scan(t, &inner, Dedup::None), arm_where(&inner)),
+                    cols,
+                )
+            })
+            .collect();
+        union(arms, alias)
+    }
 
-    fn plan_pathfinding(&self, limit: u32) -> PhysOp {
+    fn plan_neighbors(&self, limit_count: u32) -> PhysOp {
+        use crate::constants::*;
+        use crate::passes::shared::{denorm_tag_expr, id_list_predicate};
+
+        let config = self.input.neighbors.as_ref().expect("neighbors config");
+        let center = &self.input.nodes[0];
+        let cid = center.id.as_str();
+        let entity = center.entity.as_deref().unwrap_or("");
+        let table = center.table.as_deref().unwrap_or("");
+        let default_pk = center.redaction_id_column == DEFAULT_PRIMARY_KEY;
+        let meta = &self.input.compiler;
+        let tables = self.neighbor_edge_tables(&config.rel_types, entity);
+        let rel_kind = rel_kind_predicate(&config.rel_types);
+        let tp_lookup = meta.tp_id_lookup.get(entity);
+        let has_non_denorm = center.filters.keys().any(|prop| {
+            !["source", "target"].iter().any(|d| {
+                meta.denormalized_columns.contains_key(&(
+                    entity.to_string(),
+                    prop.clone(),
+                    d.to_string(),
+                ))
+            })
+        }) || center.id_range.is_some();
+        let e = "e";
+
+        let denorm_tags = |dir: &str| -> Vec<Predicate> {
+            let mut out = Vec::new();
+            let mut props: Vec<_> = center.filters.iter().collect();
+            props.sort_unstable_by_key(|(k, _)| *k);
+            for (prop, fs) in props {
+                let key = (entity.to_string(), prop.clone(), dir.to_string());
+                let Some((tag_col, tag_key)) = meta.denormalized_columns.get(&key) else {
+                    continue;
+                };
+                for f in fs {
+                    if let Some(x) = denorm_tag_expr(e, tag_col, tag_key, f) {
+                        out.push(Predicate::Expr(x));
+                    }
+                }
+            }
+            out
+        };
+
+        let build_arm = |dir: Direction| -> PhysOp {
+            let (center_col, center_kind, nb_id, nb_kind, is_out, denorm_dir, arm_tables) =
+                match dir {
+                    Direction::Outgoing => (
+                        SOURCE_ID_COLUMN,
+                        SOURCE_KIND_COLUMN,
+                        TARGET_ID_COLUMN,
+                        TARGET_KIND_COLUMN,
+                        1i64,
+                        "source",
+                        &tables.outgoing,
+                    ),
+                    Direction::Incoming => (
+                        TARGET_ID_COLUMN,
+                        TARGET_KIND_COLUMN,
+                        SOURCE_ID_COLUMN,
+                        SOURCE_KIND_COLUMN,
+                        0i64,
+                        "target",
+                        &tables.incoming,
+                    ),
+                    Direction::Both => unreachable!(),
+                };
+
+            let arm_where = |a: &str| -> Vec<Predicate> {
+                let mut p = vec![Predicate::Eq {
+                    column: center_kind.to_string(),
+                    value: Value::Str(entity.to_string()),
+                }];
+                if !center.node_ids.is_empty() {
+                    p.push(id_in(center_col, &center.node_ids));
+                }
+                p.extend(rel_kind.clone());
+                // Incoming edges to a namespace center sit at the center's own
+                // tp; pin to the resolved paths for a leading-PK point lookup.
+                if dir == Direction::Incoming
+                    && !center.node_ids.is_empty()
+                    && let Some((src, key_col)) = tp_lookup
+                {
+                    p.push(Predicate::Expr(Expr::InSelect {
+                        expr: Box::new(Expr::col(a, TRAVERSAL_PATH_COLUMN)),
+                        query: Box::new(crate::ast::Query {
+                            select: vec![crate::ast::SelectExpr::col(
+                                "_tpd",
+                                TRAVERSAL_PATH_COLUMN,
+                            )],
+                            from: crate::ast::TableRef::scan(src, "_tpd"),
+                            where_clause: Expr::conjoin(vec![
+                                id_list_predicate("_tpd", key_col, &center.node_ids),
+                                crate::passes::shared::deleted_false("_tpd"),
+                            ]),
+                            ..Default::default()
+                        }),
+                    }));
+                }
+                p.push(deleted_false());
+                p
+            };
+
+            let mut base = self.edge_scan(arm_tables, e, arm_where);
+            // Denorm tags aren't in the per-arm projection, so they filter
+            // the union output alias.
+            base = filter(base, denorm_tags(denorm_dir));
+
+            let mut columns = vec![
+                col_ref(e, nb_id, neighbor_id_column()),
+                col_ref(e, nb_kind, neighbor_type_column()),
+                col_ref(e, RELATIONSHIP_KIND_COLUMN, relationship_type_column()),
+                expr_col(Expr::int(is_out), neighbor_is_outgoing_column()),
+            ];
+
+            let center_join = |base: PhysOp, dedup: Dedup, preds: Vec<Predicate>| {
+                join(
+                    base,
+                    filter(scan(table, cid, dedup), preds),
+                    vec![(col(e, center_col), col(cid, DEFAULT_PRIMARY_KEY))],
+                )
+            };
+            if has_non_denorm {
+                base = center_join(base, Dedup::Final, self.node_predicates(center));
+            }
+            if default_pk {
+                columns.push(col_ref(e, center_col, redaction_id_column(cid)));
+            } else {
+                if !has_non_denorm {
+                    base = center_join(base, Dedup::Final, vec![deleted_false()]);
+                }
+                columns.push(col_ref(
+                    cid,
+                    &center.redaction_id_column,
+                    redaction_id_column(cid),
+                ));
+                columns.push(col_ref(cid, DEFAULT_PRIMARY_KEY, primary_key_column(cid)));
+            }
+            columns.push(expr_col(Expr::string(entity), redaction_type_column(cid)));
+            if center.has_traversal_path {
+                columns.push(col_ref(
+                    e,
+                    TRAVERSAL_PATH_COLUMN,
+                    traversal_path_column(cid),
+                ));
+            }
+            project(base, columns)
+        };
+
+        let edge_tiebreakers = || {
+            [SOURCE_ID_COLUMN, TARGET_ID_COLUMN, RELATIONSHIP_KIND_COLUMN]
+                .iter()
+                .map(|c| SortKey {
+                    column: format!("{e}.{c}"),
+                    desc: false,
+                })
+                .collect::<Vec<_>>()
+        };
+        let projected_tiebreakers = || {
+            [
+                redaction_id_column(cid),
+                neighbor_id_column().to_string(),
+                relationship_type_column().to_string(),
+                neighbor_is_outgoing_column().to_string(),
+            ]
+            .into_iter()
+            .map(|c| SortKey {
+                column: c,
+                desc: false,
+            })
+            .collect::<Vec<_>>()
+        };
+        let tiebreakers = || {
+            if config.direction == Direction::Both {
+                projected_tiebreakers()
+            } else {
+                edge_tiebreakers()
+            }
+        };
+        let mut keys = self.sort_keys();
+        if self.input.cursor.is_some() {
+            keys.extend(tiebreakers());
+        }
+
+        // Default-PK center, denorm-only filters, one physical table: both
+        // directions collapse into one scan (see `fused_both_arm`).
+        let fused = config.direction == Direction::Both
+            && !has_non_denorm
+            && default_pk
+            && tables.all.len() == 1;
+        let body = if fused {
+            self.fused_both_arm(center, entity, &tables.all[0], e, rel_kind, &denorm_tags)
+        } else {
+            match config.direction {
+                Direction::Both => union(
+                    vec![
+                        build_arm(Direction::Outgoing),
+                        build_arm(Direction::Incoming),
+                    ],
+                    "_union",
+                ),
+                dir => build_arm(dir),
+            }
+        };
+        limit(sort(body, keys), limit_count)
+    }
+
+    /// Scan the edge once with `WHERE (source side) OR (target side)`, then
+    /// `arrayJoin(arrayFilter(matched, [out_tuple, in_tuple]))` so each row
+    /// yields one entry per matched arm; a self-loop still yields two rows.
+    fn fused_both_arm(
+        &self,
+        center: &InputNode,
+        entity: &str,
+        edge_table: &str,
+        e: &str,
+        rel_kind: Option<Predicate>,
+        denorm_tags: &dyn Fn(&str) -> Vec<Predicate>,
+    ) -> PhysOp {
+        use crate::constants::*;
+        use crate::passes::shared::id_list_predicate;
+
+        let cid = center.id.as_str();
+        let arm_predicate = |kind_col: &str, id_col: &str, dir: &str| -> Expr {
+            let mut parts = vec![Expr::eq(Expr::col(e, kind_col), Expr::string(entity))];
+            if !center.node_ids.is_empty() {
+                parts.push(id_list_predicate(e, id_col, &center.node_ids));
+            }
+            for p in denorm_tags(dir) {
+                if let Predicate::Expr(x) = p {
+                    parts.push(x);
+                }
+            }
+            Expr::conjoin(parts).expect("kind conjunct")
+        };
+        let source_arm = arm_predicate(SOURCE_KIND_COLUMN, SOURCE_ID_COLUMN, "source");
+        let target_arm = arm_predicate(TARGET_KIND_COLUMN, TARGET_ID_COLUMN, "target");
+
+        // (matched, is_outgoing, neighbor_id, neighbor_kind, center_id)
+        let out_tuple = Expr::func(
+            "tuple",
+            vec![
+                source_arm.clone(),
+                Expr::int(1),
+                Expr::col(e, TARGET_ID_COLUMN),
+                Expr::col(e, TARGET_KIND_COLUMN),
+                Expr::col(e, SOURCE_ID_COLUMN),
+            ],
+        );
+        let in_tuple = Expr::func(
+            "tuple",
+            vec![
+                target_arm.clone(),
+                Expr::int(0),
+                Expr::col(e, SOURCE_ID_COLUMN),
+                Expr::col(e, SOURCE_KIND_COLUMN),
+                Expr::col(e, TARGET_ID_COLUMN),
+            ],
+        );
+        let matched = Expr::func(
+            "arrayFilter",
+            vec![
+                Expr::lambda(
+                    "_gkg_arm",
+                    Expr::func("tupleElement", vec![Expr::ident("_gkg_arm"), Expr::int(1)]),
+                ),
+                Expr::func("array", vec![out_tuple, in_tuple]),
+            ],
+        );
+        const ROW_COL: &str = "_gkg_arm_row";
+        let rel_col = relationship_type_column();
+        let tp_col = traversal_path_column(cid);
+        let mut inner_cols = vec![
+            expr_col(Expr::func("arrayJoin", vec![matched]), ROW_COL),
+            col_ref(e, RELATIONSHIP_KIND_COLUMN, rel_col),
+        ];
+        if center.has_traversal_path {
+            inner_cols.push(col_ref(e, TRAVERSAL_PATH_COLUMN, tp_col.clone()));
+        }
+        let mut inner_where = vec![Predicate::Expr(Expr::binary(
+            crate::ast::Op::Or,
+            source_arm,
+            target_arm,
+        ))];
+        inner_where.extend(rel_kind);
+        inner_where.push(deleted_false());
+
+        let inner = project(
+            filter(scan(edge_table, e, Dedup::None), inner_where),
+            inner_cols,
+        );
+        let te = |n: i64| Expr::func("tupleElement", vec![Expr::col(e, ROW_COL), Expr::int(n)]);
+        let mut columns = vec![
+            expr_col(te(3), neighbor_id_column()),
+            expr_col(te(4), neighbor_type_column()),
+            col_ref(e, rel_col, rel_col),
+            expr_col(te(2), neighbor_is_outgoing_column()),
+            expr_col(te(5), redaction_id_column(cid)),
+            expr_col(Expr::string(entity), redaction_type_column(cid)),
+        ];
+        if center.has_traversal_path {
+            columns.push(col_ref(e, &tp_col, tp_col.clone()));
+        }
+        project(inner, columns)
+    }
+}
+
+// ── Pathfinding ─────────────────────────────────────────────────────────────
+
+/// How a path endpoint constrains the first frontier hop: pinned ids go
+/// straight onto the edge column; filters become an `_nf_` anchor CTE.
+struct Anchor {
+    edge_filter: Option<Predicate>,
+    cte: Option<(String, PhysOp)>,
+    has_tp: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum FDir {
+    Forward,
+    Backward,
+}
+
+#[derive(Clone)]
+struct Frontier<'f> {
+    rel_types: &'f [String],
+    first_hop_types: &'f [String],
+    anchor_entity: &'f str,
+    edge_tables: &'f [String],
+    scope_cte: Option<&'f str>,
+    include_tp: bool,
+    anchor_denorm_tags: Vec<Predicate>,
+}
+
+impl<'a> PlanCtx<'a> {
+    /// Bidirectional BFS: `forward` and `backward` frontier CTEs (one arm per
+    /// depth), combined as direct hits (forward reaches the end) plus
+    /// intersections (forward meets backward on `end_id`).
+    fn plan_pathfinding(&self, limit_count: u32) -> PhysOp {
+        use crate::constants::*;
+        use crate::passes::shared::denorm_tag_expr;
+
         let cfg = self.input.path.as_ref().expect("path config");
-        let start = self
-            .input
-            .nodes
-            .iter()
-            .find(|n| n.id == cfg.from)
-            .expect("start");
-        let end = self
-            .input
-            .nodes
-            .iter()
-            .find(|n| n.id == cfg.to)
-            .expect("end");
-        let et = self
-            .graph
-            .edge_table(&cfg.rel_types, &self.input.compiler.default_edge_table);
+        let start = self.node(&cfg.from).expect("start node");
+        let end = self.node(&cfg.to).expect("end node");
+        let start_entity = start.entity.as_deref().unwrap_or("");
+        let end_entity = end.entity.as_deref().unwrap_or("");
+        let scoped_by_tp = start.has_traversal_path && end.has_traversal_path;
+        let edge_tables = self.input.compiler.resolve_edge_tables(&cfg.rel_types);
         let max_depth = cfg.max_depth;
         let fwd_depth = max_depth / 2 + max_depth % 2;
         let bwd_depth = if max_depth >= 2 { max_depth / 2 } else { 0 };
 
-        let frontier = |depth: u32| -> PhysOp {
-            let arms: Vec<PhysOp> = (1..=depth)
-                .map(|d| {
-                    let mut chain = PhysOp::Scan {
-                        table: et.clone(),
-                        alias: "e1".to_string(),
-                        dedup: false,
-                    };
-                    for j in 2..=d {
-                        chain = PhysOp::Join {
-                            left: Box::new(chain),
-                            right: Box::new(PhysOp::Scan {
-                                table: et.clone(),
-                                alias: format!("e{j}"),
-                                dedup: false,
-                            }),
-                            on: JoinOn {
-                                left: (
-                                    format!("e{}", j - 1),
-                                    ontology::constants::TARGET_ID_COLUMN.to_string(),
-                                ),
-                                right: (
-                                    format!("e{j}"),
-                                    ontology::constants::SOURCE_ID_COLUMN.to_string(),
-                                ),
-                            },
-                            kind: JoinKind::Inner,
-                        };
+        let start_anchor = self.anchor(start, SOURCE_ID_COLUMN, scoped_by_tp);
+        let end_anchor = self.anchor(end, TARGET_ID_COLUMN, scoped_by_tp);
+        let scope_cte = scope_cte(&start_anchor, &end_anchor);
+        let scope_cte_name = scope_cte.as_ref().map(|(n, _)| n.clone());
+
+        let denorm_tags = |node: &InputNode, entity: &str, dir: &str| -> Vec<Predicate> {
+            let mut out = Vec::new();
+            let mut props: Vec<_> = node.filters.iter().collect();
+            props.sort_unstable_by_key(|(k, _)| *k);
+            for (prop, fs) in props {
+                let key = (entity.to_string(), prop.clone(), dir.to_string());
+                let Some((tag_col, tag_key)) = self.input.compiler.denormalized_columns.get(&key)
+                else {
+                    continue;
+                };
+                for f in fs {
+                    if let Some(x) = denorm_tag_expr("e1", tag_col, tag_key, f) {
+                        out.push(Predicate::Expr(x));
                     }
-                    chain
-                })
-                .collect();
-            if arms.len() == 1 {
-                arms.into_iter().next().unwrap()
-            } else {
-                PhysOp::Union { arms }
+                }
             }
+            out
         };
 
-        let start_scan = PhysOp::Filter {
-            input: Box::new(PhysOp::Scan {
-                table: start.table.as_deref().unwrap_or("").to_string(),
-                alias: start.id.clone(),
-                dedup: true,
-            }),
-            predicates: self.node_predicates(start),
+        let fwd = Frontier {
+            rel_types: &cfg.rel_types,
+            first_hop_types: &cfg.forward_first_hop_rel_types,
+            anchor_entity: start_entity,
+            edge_tables: &edge_tables,
+            scope_cte: scope_cte_name.as_deref(),
+            include_tp: scoped_by_tp,
+            anchor_denorm_tags: denorm_tags(start, start_entity, "source"),
         };
-        let end_scan = PhysOp::Filter {
-            input: Box::new(PhysOp::Scan {
-                table: end.table.as_deref().unwrap_or("").to_string(),
-                alias: end.id.clone(),
-                dedup: true,
-            }),
-            predicates: self.node_predicates(end),
+        let bwd = Frontier {
+            first_hop_types: &cfg.backward_first_hop_rel_types,
+            anchor_entity: end_entity,
+            anchor_denorm_tags: denorm_tags(end, end_entity, "target"),
+            ..fwd.clone()
         };
 
-        let fwd_body = frontier(fwd_depth);
+        let mut ctes: Vec<(String, PhysOp)> = Vec::new();
+        ctes.extend(start_anchor.cte.clone());
+        ctes.extend(end_anchor.cte.clone());
+        ctes.extend(scope_cte);
+        ctes.push((
+            FORWARD_CTE.to_string(),
+            self.frontier(
+                start_anchor.edge_filter.clone(),
+                fwd_depth,
+                FDir::Forward,
+                &fwd,
+            ),
+        ));
+        if bwd_depth > 0 {
+            ctes.push((
+                BACKWARD_CTE.to_string(),
+                self.frontier(
+                    end_anchor.edge_filter.clone(),
+                    bwd_depth,
+                    FDir::Backward,
+                    &bwd,
+                ),
+            ));
+        }
 
-        let consumer = if bwd_depth > 0 {
-            let bwd_body = frontier(bwd_depth);
-            let direct = PhysOp::Scan {
-                table: "forward".to_string(),
-                alias: "f".to_string(),
-                dedup: false,
-            };
-            let intersection = PhysOp::Join {
-                left: Box::new(PhysOp::Scan {
-                    table: "forward".to_string(),
-                    alias: "f".to_string(),
-                    dedup: false,
-                }),
-                right: Box::new(PhysOp::Scan {
-                    table: "backward".to_string(),
-                    alias: "b".to_string(),
-                    dedup: false,
-                }),
-                on: JoinOn {
-                    left: ("f".to_string(), "end_id".to_string()),
-                    right: ("b".to_string(), "end_id".to_string()),
-                },
-                kind: JoinKind::Inner,
-            };
-            let union = PhysOp::Union {
-                arms: vec![direct, intersection],
-            };
-            // Nest CTEs inside-out: backward → end → forward → start
-            let r = PhysOp::Join {
-                left: Box::new(union),
-                right: Box::new(bwd_body),
-                on: JoinOn {
-                    left: ("backward".into(), String::new()),
-                    right: (String::new(), String::new()),
-                },
-                kind: JoinKind::Semi { materialize: true },
-            };
-            let r = PhysOp::Join {
-                left: Box::new(r),
-                right: Box::new(end_scan),
-                on: JoinOn {
-                    left: ("_nf_end".into(), String::new()),
-                    right: (String::new(), String::new()),
-                },
-                kind: JoinKind::Semi { materialize: true },
-            };
-            let r = PhysOp::Join {
-                left: Box::new(r),
-                right: Box::new(fwd_body),
-                on: JoinOn {
-                    left: ("forward".into(), String::new()),
-                    right: (String::new(), String::new()),
-                },
-                kind: JoinKind::Semi { materialize: true },
-            };
-            PhysOp::Join {
-                left: Box::new(r),
-                right: Box::new(start_scan),
-                on: JoinOn {
-                    left: ("_nf_start".into(), String::new()),
-                    right: (String::new(), String::new()),
-                },
-                kind: JoinKind::Semi { materialize: true },
+        let tuple = |t: &str, entity: &str| {
+            Expr::func(
+                "tuple",
+                vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(entity)],
+            )
+        };
+        let f = FORWARD_ALIAS;
+        let b = BACKWARD_ALIAS;
+
+        let mut direct_where = vec![
+            Predicate::Eq {
+                column: DEPTH_COLUMN.to_string(),
+                value: Value::Int(1),
+            },
+            Predicate::Eq {
+                column: END_KIND_COLUMN.to_string(),
+                value: Value::Str(end_entity.to_string()),
+            },
+        ];
+        direct_where.extend(endpoint_filter(end, f, END_ID_COLUMN));
+        let direct = project(
+            filter(scan(FORWARD_CTE, f, Dedup::None), direct_where),
+            vec![
+                col_ref(f, DEPTH_COLUMN, DEPTH_COLUMN),
+                expr_col(
+                    Expr::func(
+                        "arrayConcat",
+                        vec![
+                            Expr::func("array", vec![tuple(f, start_entity)]),
+                            Expr::col(f, PATH_NODES_COLUMN),
+                        ],
+                    ),
+                    path_column(),
+                ),
+                col_ref(f, FRONTIER_EDGE_KINDS_COLUMN, edge_kinds_column()),
+            ],
+        );
+
+        let mut arms = vec![direct];
+        if bwd_depth > 0 {
+            let depth_sum = Expr::binary(
+                crate::ast::Op::Add,
+                Expr::col(f, DEPTH_COLUMN),
+                Expr::col(b, DEPTH_COLUMN),
+            );
+            let mut on = vec![(col(f, END_ID_COLUMN), col(b, END_ID_COLUMN))];
+            if scoped_by_tp {
+                on.push((col(f, TRAVERSAL_PATH_COLUMN), col(b, TRAVERSAL_PATH_COLUMN)));
             }
-        } else {
-            let direct = PhysOp::Scan {
-                table: "forward".to_string(),
-                alias: "f".to_string(),
-                dedup: false,
-            };
-            let r = PhysOp::Join {
-                left: Box::new(direct),
-                right: Box::new(fwd_body),
-                on: JoinOn {
-                    left: ("forward".into(), String::new()),
-                    right: (String::new(), String::new()),
-                },
-                kind: JoinKind::Semi { materialize: true },
-            };
-            PhysOp::Join {
-                left: Box::new(r),
-                right: Box::new(start_scan),
-                on: JoinOn {
-                    left: ("_nf_start".into(), String::new()),
-                    right: (String::new(), String::new()),
-                },
-                kind: JoinKind::Semi { materialize: true },
-            }
-        };
-        let paths = consumer;
+            let meet = join(
+                scan(FORWARD_CTE, f, Dedup::None),
+                scan(BACKWARD_CTE, b, Dedup::None),
+                on,
+            );
+            arms.push(project(
+                filter(
+                    meet,
+                    vec![Predicate::Expr(Expr::binary(
+                        crate::ast::Op::Le,
+                        depth_sum.clone(),
+                        Expr::int(max_depth as i64),
+                    ))],
+                ),
+                vec![
+                    expr_col(depth_sum, DEPTH_COLUMN),
+                    expr_col(
+                        Expr::func(
+                            "arrayConcat",
+                            vec![
+                                Expr::func("array", vec![tuple(f, start_entity)]),
+                                Expr::col(f, PATH_NODES_COLUMN),
+                                Expr::func("arrayReverse", vec![Expr::col(b, PATH_NODES_COLUMN)]),
+                                Expr::func("array", vec![tuple(b, end_entity)]),
+                            ],
+                        ),
+                        path_column(),
+                    ),
+                    expr_col(
+                        Expr::func(
+                            "arrayConcat",
+                            vec![
+                                Expr::col(f, FRONTIER_EDGE_KINDS_COLUMN),
+                                Expr::func(
+                                    "arrayReverse",
+                                    vec![Expr::col(b, FRONTIER_EDGE_KINDS_COLUMN)],
+                                ),
+                            ],
+                        ),
+                        edge_kinds_column(),
+                    ),
+                ],
+            ));
+        }
 
-        PhysOp::Limit {
-            input: Box::new(paths),
-            count: limit,
+        let paths = union(arms, PATHS_ALIAS);
+        let mut keys = vec![SortKey {
+            column: format!("{PATHS_ALIAS}.{DEPTH_COLUMN}"),
+            desc: false,
+        }];
+        if self.input.cursor.is_some() {
+            keys.extend(
+                [path_column(), edge_kinds_column()]
+                    .iter()
+                    .map(|c| SortKey {
+                        column: format!("toString({PATHS_ALIAS}.{c})"),
+                        desc: false,
+                    }),
+            );
+        }
+        let body = limit(
+            sort(
+                project(
+                    paths,
+                    vec![
+                        col_ref(PATHS_ALIAS, &path_column(), path_column()),
+                        col_ref(PATHS_ALIAS, &edge_kinds_column(), edge_kinds_column()),
+                        col_ref(PATHS_ALIAS, DEPTH_COLUMN, DEPTH_COLUMN),
+                    ],
+                ),
+                keys,
+            ),
+            limit_count,
+        );
+        PhysOp::With {
+            ctes,
+            input: Box::new(body),
         }
     }
 
-    // ── Hydration ───────────────────────────────────────────────────────────
+    fn anchor(&self, n: &InputNode, edge_col: &str, force_cte: bool) -> Anchor {
+        if !force_cte && !n.node_ids.is_empty() {
+            return Anchor {
+                edge_filter: Some(id_in(edge_col, &n.node_ids)),
+                cte: None,
+                has_tp: false,
+            };
+        }
+        if n.node_ids.is_empty() && n.filters.is_empty() && n.id_range.is_none() {
+            return Anchor {
+                edge_filter: None,
+                cte: None,
+                has_tp: false,
+            };
+        }
+        let alias = n.id.as_str();
+        let cte_name = crate::constants::node_filter_cte(alias);
+        let mut preds = self.node_predicates(n);
+        preds.retain(|p| *p != deleted_false());
+        let mut cols = vec![col_ref(alias, DEFAULT_PRIMARY_KEY, DEFAULT_PRIMARY_KEY)];
+        if n.has_traversal_path {
+            cols.push(col_ref(alias, TRAVERSAL_PATH_COLUMN, TRAVERSAL_PATH_COLUMN));
+        }
+        let mut inner_cols = cols.clone();
+        inner_cols.push(col_ref(alias, DELETED_COLUMN, DELETED_COLUMN));
+        let body = limit(
+            project(
+                filter(
+                    project(
+                        filter(
+                            scan(n.table.as_deref().unwrap_or(""), alias, Dedup::Final),
+                            preds,
+                        ),
+                        inner_cols,
+                    ),
+                    vec![deleted_false()],
+                ),
+                cols,
+            ),
+            crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32,
+        );
+        Anchor {
+            edge_filter: Some(Predicate::Expr(Expr::InSubquery {
+                expr: Box::new(Expr::col("e1", edge_col)),
+                cte_name: cte_name.clone(),
+                column: DEFAULT_PRIMARY_KEY.into(),
+            })),
+            cte: Some((cte_name, body)),
+            has_tp: n.has_traversal_path,
+        }
+    }
 
-    fn plan_hydration(&self, limit: u32) -> PhysOp {
-        let arms: Vec<PhysOp> = self
-            .input
-            .nodes
-            .iter()
-            .map(|n| {
-                let mut preds = Vec::new();
-                if !n.node_ids.is_empty() {
-                    preds.push(Predicate::In {
-                        column: n.id_property.clone(),
-                        values: n.node_ids.iter().map(|&id| Value::Int(id)).collect(),
-                    });
-                }
-                preds.push(Predicate::Eq {
-                    column: "_deleted".to_string(),
-                    value: Value::Bool(false),
-                });
+    fn frontier(
+        &self,
+        anchor_cond: Option<Predicate>,
+        max_depth: u32,
+        dir: FDir,
+        opts: &Frontier<'_>,
+    ) -> PhysOp {
+        let arms = (1..=max_depth)
+            .map(|depth| self.frontier_arm(anchor_cond.clone(), depth, dir, opts))
+            .collect();
+        union(arms, "_frontier")
+    }
 
-                let _cols = match &n.columns {
-                    Some(ColumnSelection::List(cs)) => cs.clone(),
-                    _ => vec![],
-                };
-                let entity = n.entity.as_deref().unwrap_or("");
-                let columns = vec![
-                    ProjectedColumn::Ref {
-                        table: n.id.clone(),
-                        column: n.id_property.clone(),
-                        alias: format!("{}_{}", n.id, n.id_property),
-                    },
-                    ProjectedColumn::Computed {
-                        expr: ColumnExpr::Lit(Value::Str(entity.to_string())),
-                        alias: format!("{}_entity_type", n.id),
-                    },
-                ];
+    fn frontier_arm(
+        &self,
+        anchor_cond: Option<Predicate>,
+        depth: u32,
+        dir: FDir,
+        opts: &Frontier<'_>,
+    ) -> PhysOp {
+        use crate::constants::*;
+        let (anchor_col, next_col, next_kind_col, anchor_kind_col) = match dir {
+            FDir::Forward => (
+                SOURCE_ID_COLUMN,
+                TARGET_ID_COLUMN,
+                TARGET_KIND_COLUMN,
+                SOURCE_KIND_COLUMN,
+            ),
+            FDir::Backward => (
+                TARGET_ID_COLUMN,
+                SOURCE_ID_COLUMN,
+                SOURCE_KIND_COLUMN,
+                TARGET_KIND_COLUMN,
+            ),
+        };
+        let scope_filter = |alias: &str| {
+            opts.scope_cte.map(|sc| {
+                Predicate::Expr(Expr::InSubquery {
+                    expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
+                    cte_name: sc.to_string(),
+                    column: TRAVERSAL_PATH_COLUMN.to_string(),
+                })
+            })
+        };
 
-                PhysOp::Project {
-                    input: Box::new(PhysOp::Filter {
-                        input: Box::new(PhysOp::Scan {
-                            table: n.table.as_deref().unwrap_or("").to_string(),
-                            alias: n.id.clone(),
-                            dedup: false,
-                        }),
-                        predicates: preds,
-                    }),
-                    columns,
-                }
+        // A specific first-hop filter wins; otherwise fall back to the general
+        // rel_type filter so e1 isn't left unfiltered.
+        let first_types = if opts.first_hop_types.is_empty() {
+            opts.rel_types
+        } else {
+            opts.first_hop_types
+        };
+        let mut first = Vec::new();
+        first.extend(anchor_cond);
+        first.extend(rel_kind_predicate(first_types));
+        first.push(Predicate::Eq {
+            column: anchor_kind_col.to_string(),
+            value: Value::Str(opts.anchor_entity.to_string()),
+        });
+        first.extend(scope_filter("e1"));
+        first.push(deleted_false());
+        first.extend(opts.anchor_denorm_tags.iter().cloned());
+
+        let mut chain = filter(
+            self.edge_scan(opts.edge_tables, "e1", |_| Vec::new()),
+            first,
+        );
+        for i in 2..=depth {
+            let (prev, curr) = (format!("e{}", i - 1), format!("e{i}"));
+            let mut hop = Vec::new();
+            hop.extend(rel_kind_predicate(opts.rel_types));
+            hop.extend(scope_filter(&curr));
+            hop.push(deleted_false());
+            let mut on = vec![(col(&prev, next_col), col(&curr, anchor_col))];
+            if opts.include_tp {
+                on.push((
+                    col(&prev, TRAVERSAL_PATH_COLUMN),
+                    col(&curr, TRAVERSAL_PATH_COLUMN),
+                ));
+            }
+            let right = filter(self.edge_scan(opts.edge_tables, &curr, |_| Vec::new()), hop);
+            chain = join(chain, right, on);
+        }
+
+        let last = format!("e{depth}");
+        let path_range = match dir {
+            FDir::Forward => 1..=depth,
+            FDir::Backward => 1..=depth.saturating_sub(1),
+        };
+        let tuples: Vec<Expr> = path_range
+            .map(|i| {
+                let a = format!("e{i}");
+                Expr::func(
+                    "tuple",
+                    vec![Expr::col(&a, next_col), Expr::col(&a, next_kind_col)],
+                )
             })
             .collect();
-
-        let body = if arms.len() == 1 {
-            arms.into_iter().next().unwrap()
+        // Backward depth 1 has no intermediate nodes; keep the arm's column
+        // type as Array(Tuple(Int64, String)) with an empty typed array.
+        let path_nodes = if tuples.is_empty() {
+            Expr::func(
+                "arrayResize",
+                vec![
+                    Expr::func(
+                        "array",
+                        vec![Expr::func("tuple", vec![Expr::int(0), Expr::string("")])],
+                    ),
+                    Expr::int(0),
+                ],
+            )
         } else {
-            PhysOp::Union { arms }
+            Expr::func("array", tuples)
         };
-
-        PhysOp::Limit {
-            input: Box::new(body),
-            count: limit,
+        let edge_kinds = Expr::func(
+            "array",
+            (1..=depth)
+                .map(|i| Expr::col(format!("e{i}"), RELATIONSHIP_KIND_COLUMN))
+                .collect(),
+        );
+        let mut columns = vec![
+            col_ref("e1", anchor_col, ANCHOR_ID_COLUMN),
+            col_ref(&last, next_col, END_ID_COLUMN),
+            col_ref(&last, next_kind_col, END_KIND_COLUMN),
+            expr_col(path_nodes, PATH_NODES_COLUMN),
+            expr_col(edge_kinds, FRONTIER_EDGE_KINDS_COLUMN),
+            expr_col(Expr::int(depth as i64), DEPTH_COLUMN),
+        ];
+        if opts.include_tp {
+            columns.push(col_ref("e1", TRAVERSAL_PATH_COLUMN, TRAVERSAL_PATH_COLUMN));
         }
+        project(chain, columns)
     }
+}
+
+/// Endpoints at different namespace depths are linked by edges carrying only
+/// the deeper tp, so the scope is the UNION (not intersection) of both anchors'
+/// traversal paths.
+fn scope_cte(start: &Anchor, end: &Anchor) -> Option<(String, PhysOp)> {
+    let (start_cte, _) = start.cte.as_ref()?;
+    let (end_cte, _) = end.cte.as_ref()?;
+    if !start.has_tp || !end.has_tp {
+        return None;
+    }
+    let arm = |cte: &str, alias: &str| PhysOp::Aggregate {
+        input: Box::new(scan(cte, alias, Dedup::None)),
+        group_by: vec![GroupKey {
+            node: alias.to_string(),
+            property: TRAVERSAL_PATH_COLUMN.to_string(),
+            truncate: None,
+            alias: TRAVERSAL_PATH_COLUMN.to_string(),
+        }],
+        metrics: vec![],
+    };
+    Some((
+        "_path_scope_traversal_paths".to_string(),
+        union(
+            vec![
+                arm(start_cte, "_path_scope_start"),
+                arm(end_cte, "_path_scope_end"),
+            ],
+            "_path_scope",
+        ),
+    ))
+}
+
+fn endpoint_filter(n: &InputNode, alias: &str, column: &str) -> Option<Predicate> {
+    if !n.node_ids.is_empty() {
+        return Some(id_in(column, &n.node_ids));
+    }
+    if !n.filters.is_empty() || n.id_range.is_some() {
+        return Some(Predicate::Expr(Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, column)),
+            cte_name: crate::constants::node_filter_cte(&n.id),
+            column: DEFAULT_PRIMARY_KEY.into(),
+        }));
+    }
+    None
 }
