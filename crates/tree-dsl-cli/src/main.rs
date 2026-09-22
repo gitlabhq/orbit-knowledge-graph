@@ -325,55 +325,71 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
             .push((rel, content));
     }
 
-    let (mut total_files, mut total_defs, mut total_imports, mut total_edges) = (0, 0, 0, 0);
-    for (name, (lang_id, files)) in by_lang {
-        let t_lang = Instant::now();
-        let (env, state) = tree_dsl::index(lang_id, &files);
-        let (mut defs, mut imports) = (0usize, 0usize);
-        for tree in &state.trees {
-            for c in tree.root().descendants() {
-                if c.is(tree_dsl::canonical::Canonical::Def) {
-                    defs += 1;
-                } else if c.is(tree_dsl::canonical::Canonical::Import)
-                    || c.is(tree_dsl::canonical::Canonical::ImportType)
-                {
-                    imports += 1;
+    let graphs_dir = dirs::home_dir()
+        .unwrap_or_else(|| Path::new(".").to_path_buf())
+        .join(".orbit/var/graphs");
+    let repo = Path::new(path)
+        .file_name()
+        .unwrap_or(std::ffi::OsStr::new("graph"))
+        .to_string_lossy()
+        .to_string();
+
+    // Pipelines are independent graphs; one pipeline's serial resolve phases
+    // overlap another's parallel parse.
+    use rayon::prelude::*;
+    let groups: Vec<(String, SupportLang, Vec<(String, String)>)> = by_lang
+        .into_iter()
+        .map(|(name, (lang, files))| (name, lang, files))
+        .collect();
+    let reports: Vec<anyhow::Result<(String, usize, usize, usize, usize)>> = groups
+        .into_par_iter()
+        .map(|(name, lang_id, files)| {
+            let t_lang = Instant::now();
+            let (env, state) = tree_dsl::index(lang_id, &files);
+            let (mut defs, mut imports) = (0usize, 0usize);
+            for tree in &state.trees {
+                for c in tree.root().descendants() {
+                    if c.is(tree_dsl::canonical::Canonical::Def) {
+                        defs += 1;
+                    } else if c.is(tree_dsl::canonical::Canonical::Import)
+                        || c.is(tree_dsl::canonical::Canonical::ImportType)
+                    {
+                        imports += 1;
+                    }
                 }
             }
-        }
-        eprintln!(
-            "{name:<12} files {:>6}  defs {:>7}  imports {:>7}  edges {:>7}  {:.2}s",
-            state.trees.len(),
-            defs,
-            imports,
-            state.edges.len(),
-            t_lang.elapsed().as_secs_f64()
-        );
-        total_files += state.trees.len();
+            let mut line = format!(
+                "{name:<12} files {:>6}  defs {:>7}  imports {:>7}  edges {:>7}  {:.2}s",
+                state.trees.len(),
+                defs,
+                imports,
+                state.edges.len(),
+                t_lang.elapsed().as_secs_f64()
+            );
+            if !no_save {
+                std::fs::create_dir_all(&graphs_dir)?;
+                let snap_path = graphs_dir.join(format!("{repo}.{}.bin", name.to_lowercase()));
+                let t_save = Instant::now();
+                state.save(&env, &snap_path)?;
+                let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
+                line.push_str(&format!(
+                    "\nsaved:        {} ({size_mb:.1} MB, {:.2}s)",
+                    snap_path.display(),
+                    t_save.elapsed().as_secs_f64()
+                ));
+            }
+            Ok((line, state.trees.len(), defs, imports, state.edges.len()))
+        })
+        .collect();
+
+    let (mut total_files, mut total_defs, mut total_imports, mut total_edges) = (0, 0, 0, 0);
+    for report in reports {
+        let (line, files, defs, imports, edges) = report?;
+        eprintln!("{line}");
+        total_files += files;
         total_defs += defs;
         total_imports += imports;
-        total_edges += state.edges.len();
-
-        if !no_save {
-            let graphs_dir = dirs::home_dir()
-                .unwrap_or_else(|| Path::new(".").to_path_buf())
-                .join(".orbit/var/graphs");
-            std::fs::create_dir_all(&graphs_dir)?;
-            let repo = Path::new(path)
-                .file_name()
-                .unwrap_or(std::ffi::OsStr::new("graph"))
-                .to_string_lossy();
-            let snap_path = graphs_dir.join(format!("{repo}.{}.bin", name.to_lowercase()));
-            let t_save = Instant::now();
-            state.save(&env, &snap_path)?;
-            let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
-            eprintln!(
-                "saved:        {} ({:.1} MB, {:.2}s)",
-                snap_path.display(),
-                size_mb,
-                t_save.elapsed().as_secs_f64()
-            );
-        }
+        total_edges += edges;
     }
 
     eprintln!();
