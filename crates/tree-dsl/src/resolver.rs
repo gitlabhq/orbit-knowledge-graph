@@ -274,6 +274,7 @@ impl Resolver {
             index_names,
             wildcard_sym: self.wildcard_sym,
             callable_key: lang.syms.intern("callable"),
+            implicit_self_key: lang.syms.intern("implicit_self"),
             partials: &partials,
             extensions: &extensions,
             exporters: &exporters,
@@ -356,6 +357,7 @@ struct ResolveCtx<'a> {
     index_names: &'a [String],
     wildcard_sym: u32,
     callable_key: u32,
+    implicit_self_key: u32,
     partials: &'a FxHashMap<(u32, u32, usize), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     exporters: &'a [FxHashSet<usize>],
@@ -696,9 +698,8 @@ fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
                     let owner = call.enclosing(|e| e.is_class());
                     let owned = owner.is_some_and(|o| o.index() == child.index());
                     let callee = call.child(C::Callee).and_then(|k| {
-                        k.child_sym(C::Ivar).or_else(|| {
-                            (k.has(C::Implicit) || k.has(C::SimpleName)).then(|| k.sym())
-                        })
+                        k.child_sym(C::Ivar)
+                            .or_else(|| call.has_tag(ctx.implicit_self_key).then(|| k.sym()))
                     });
                     let from = call.enclosing(|e| e.is(C::Def)).filter(|_| owned);
                     let Some((from, name)) = from.zip(callee) else {

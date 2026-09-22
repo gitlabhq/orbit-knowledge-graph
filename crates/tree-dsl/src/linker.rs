@@ -29,6 +29,8 @@ struct Fold<'t> {
     imports: Vec<u32>,
     wildcards: Vec<u32>,
     callable_key: u32,
+    implicit_self_key: u32,
+    locals_first_sym: u32,
     non_shadowing_key: u32,
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
@@ -287,8 +289,8 @@ impl<'t> Fold<'t> {
                 self.push_calls(from, self.find_method_in(cls, iv.sym()));
             }
         } else if let Some(sym) = callee.sym_opt() {
-            if callee.has(C::Implicit) || callee.has(C::SimpleName) {
-                self.resolve_implicit(sym, from, callee.has(C::SimpleName));
+            if let Some(mode) = c.tag(self.implicit_self_key) {
+                self.resolve_implicit(sym, from, mode == self.locals_first_sym);
             } else {
                 self.resolve_name(sym, from, !callee.has(C::Predeclared));
             }
@@ -644,6 +646,8 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         imports: Vec::new(),
         wildcards: Vec::new(),
         callable_key: lang.syms.intern("callable"),
+        implicit_self_key: lang.syms.intern("implicit_self"),
+        locals_first_sym: lang.syms.intern("locals"),
         non_shadowing_key: lang.syms.intern("non_shadowing"),
         def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern(WILDCARD),

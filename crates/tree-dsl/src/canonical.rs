@@ -205,10 +205,6 @@ pub enum Canonical {
     SsaHint,
     #[strum(serialize = "__decl")]
     Decl,
-    #[strum(serialize = "__implicit")]
-    Implicit,
-    #[strum(serialize = "__simple_name")]
-    SimpleName,
     #[strum(serialize = "__predeclared")]
     Predeclared,
     #[strum(serialize = "__companion")]
