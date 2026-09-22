@@ -150,9 +150,12 @@ fn plan_feeds_domain(ontology: &Ontology, plan: &PipelineDescriptor, domain: &Do
     if in_domain(&plan.entity) {
         return true;
     }
-    if ontology.get_node(&plan.entity).is_some() {
+
+    let plan_writes_a_node = ontology.get_node(&plan.entity).is_some();
+    if plan_writes_a_node {
         return false;
     }
+
     plan.reindex_targets
         .iter()
         .filter_map(|kind| ontology.get_edge(kind))

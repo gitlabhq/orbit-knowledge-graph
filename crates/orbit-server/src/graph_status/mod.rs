@@ -59,9 +59,8 @@ impl GraphStatusService {
             "Graph status fetched"
         );
 
-        let indexing = Some(status_with_state(phase::indexing_state_for(
-            first_sync.phase,
-        )));
+        let sdlc_state = phase::indexing_state_for(first_sync.phase);
+        let indexing = Some(status_with_state(sdlc_state));
         let structured = StructuredGraphStatus {
             domains: visible_domains(ontology, &visible_nodes, &first_sync, &code),
             projects: Some(code.projects),
@@ -117,11 +116,11 @@ fn visible_domains(
                 return None;
             }
 
+            let phase = phase_from_sdlc_plans_and_code_coverage(ontology, domain, first_sync, code);
             Some(GraphStatusDomain {
                 name: domain.name.clone(),
                 items,
-                phase: phase_from_sdlc_plans_and_code_coverage(ontology, domain, first_sync, code)
-                    .into(),
+                phase: phase.into(),
             })
         })
         .collect()
@@ -140,9 +139,10 @@ fn visible_items(
         .filter(|name| visible_nodes.contains(*name))
         .filter_map(|name| ontology.get_node(name))
         .map(|node| {
-            let state = first_sync
-                .node_state(node)
-                .or_else(|| node.pipelines.is_empty().then_some(code.state).flatten());
+            let state = first_sync.node_state(node).or_else(|| {
+                let is_code_node = node.pipelines.is_empty();
+                if is_code_node { code.state } else { None }
+            });
             GraphStatusItem {
                 name: node.name.clone(),
                 count: None,
@@ -166,6 +166,7 @@ fn phase_from_sdlc_plans_and_code_coverage(
 
     let sdlc_phase = first_sync.phase_of_plans_feeding(ontology, domain);
     let code_phase = has_code_nodes.then(|| phase_from_code_coverage(code));
+
     match (sdlc_phase, code_phase) {
         (Some(sdlc), Some(code)) if sdlc == code => sdlc,
         (Some(IndexingPhase::Unknown), Some(_)) | (Some(_), Some(IndexingPhase::Unknown)) => {
@@ -208,11 +209,12 @@ async fn execute_query(
 }
 
 fn append_query_settings(sql: &str) -> Result<String, String> {
-    let settings = QueryConfig {
+    let config = QueryConfig {
         use_query_cache: Some(true),
         ..orbit_server_config::query::default_config()
-    }
-    .to_clickhouse_settings()?;
+    };
+    let settings = config.to_clickhouse_settings()?;
+
     if settings.is_empty() {
         return Ok(sql.to_string());
     }
