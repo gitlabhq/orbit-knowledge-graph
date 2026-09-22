@@ -1,8 +1,5 @@
-name: "Hydration uses LIMIT BY dedup not FINAL"
+name: "Hydration uses LIMIT BY not FINAL"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"limit":10}
 expected:
   op: TopN
-  input:
-    op: Scan
-    table: gl_merge_request
-    dedup: true
+  input: {op: Scan, table: gl_merge_request, dedup: true}

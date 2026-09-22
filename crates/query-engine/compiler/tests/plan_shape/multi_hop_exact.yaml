@@ -1,17 +1,16 @@
-name: "Exact 2 hops — 1 depth arm, e1 JOIN e2"
+name: "Exact 2 hops — 1 depth arm with narrowing CTE"
 input: {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[2,2]}],"limit":10}
 expected:
   op: TopN
   input:
-    op: Join
-    left:
+    op: Cte
+    name: _nf_g
+    consumer:
       op: Join
       left:
-        op: Project
-        input:
+        op: Join
+        left:
           op: Project
-          select: [source_id, target_id, path_nodes, depth]
           input:
-            op: Join
-            left: {op: Scan, alias: e1, table: gl_edge}
-            right: {op: Scan, alias: e2, table: gl_edge}
+            op: Project
+            select: [source_id, target_id, path_nodes, depth]

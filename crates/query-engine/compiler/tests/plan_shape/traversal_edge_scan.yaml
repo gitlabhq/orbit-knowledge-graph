@@ -1,10 +1,11 @@
-name: "HAS_LABEL has no FK — edge table required"
+name: "HAS_LABEL has no FK — edge table with narrowing CTEs"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
 expected:
   op: TopN
   select: [e0_type, e0_src, e0_src_type, e0_dst, e0_dst_type]
   input:
-    op: Join
-    left:
-      op: Join
-      left: {op: Scan, table: gl_edge, dedup: false}
+    op: Cte
+    name: _nf_mr
+    consumer:
+      op: Cte
+      name: _nf_label

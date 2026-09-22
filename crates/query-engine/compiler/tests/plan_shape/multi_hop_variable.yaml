@@ -1,18 +1,19 @@
-name: "Variable-length 1..3 — 3 depth arms with frontier projections"
+name: "Variable-length 1..3 — 3 depth arms with narrowing CTE"
 input: {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,3]}],"limit":10}
 expected:
   op: TopN
   input:
-    op: Join
-    left:
+    op: Cte
+    name: _nf_u
+    consumer:
       op: Join
       left:
-        op: Project
-        input:
-          op: Union
-          arms:
-            - {op: Project, select: [source_id, target_id, path_nodes, depth]}
-            - {op: Project, select: [source_id, target_id, path_nodes, depth]}
-            - {op: Project, select: [source_id, target_id, path_nodes, depth]}
-      right: {op: Scan, table: gl_user, dedup: true}
-    right: {op: Scan, table: gl_project, dedup: true}
+        op: Join
+        left:
+          op: Project
+          input:
+            op: Union
+            arms:
+              - {op: Project, select: [source_id, target_id, path_nodes, depth]}
+              - {op: Project, select: [source_id, target_id, path_nodes, depth]}
+              - {op: Project, select: [source_id, target_id, path_nodes, depth]}

@@ -29,11 +29,14 @@ fn shape_matches(actual: &serde_json::Value, expected: &serde_json::Value) -> bo
             e.iter().all(|(k, v)| a.get(k).is_some_and(|av| shape_matches(av, v)))
         }
         (serde_json::Value::Array(a), serde_json::Value::Array(e)) => {
-            // For arrays of objects (Union arms), check positional match.
-            // For arrays of strings (select), check subset inclusion.
             if e.iter().all(|v| v.is_string()) {
+                // Select lists: subset inclusion
                 e.iter().all(|ev| a.contains(ev))
+            } else if e.iter().all(|v| v.is_object()) && e.len() < a.len() {
+                // Predicate/arm lists: every expected item must match some actual item
+                e.iter().all(|ev| a.iter().any(|av| shape_matches(av, ev)))
             } else {
+                // Positional match (Union arms with exact count)
                 a.len() == e.len()
                     && a.iter().zip(e.iter()).all(|(av, ev)| shape_matches(av, ev))
             }
@@ -126,4 +129,3 @@ fn plan_shape_scenarios() {
         );
     }
 }
-

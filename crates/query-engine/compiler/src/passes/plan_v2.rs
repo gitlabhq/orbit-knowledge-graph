@@ -81,16 +81,46 @@ pub enum PhysOp {
     Aggregate { input: Box<PhysOp>, select: Vec<SelectExpr>, group_by: Vec<Expr>, order_by: Vec<OrderExpr>, limit: u32 },
 }
 
+fn pred_shape(expr: &Expr) -> serde_json::Value {
+    use serde_json::json;
+    match expr {
+        Expr::BinaryOp { op, left, right } => json!({
+            "op": op.to_string(),
+            "left": pred_shape(left),
+            "right": pred_shape(right),
+        }),
+        Expr::Column { table, column } => json!(format!("{table}.{column}")),
+        Expr::Param { data_type, value } => json!({"param": value, "type": data_type.to_string()}),
+        Expr::FuncCall { name, args } => json!({
+            "func": name,
+            "args": args.iter().map(pred_shape).collect::<Vec<_>>(),
+        }),
+        Expr::InSubquery { expr, cte_name, column } => json!({
+            "in_subquery": {"expr": pred_shape(expr), "cte": cte_name, "column": column},
+        }),
+        Expr::InSelect { expr, .. } => json!({
+            "in_select": {"expr": pred_shape(expr)},
+        }),
+        Expr::UnaryOp { op, expr } => json!({"unary": op.to_string(), "expr": pred_shape(expr)}),
+        Expr::Literal(v) => json!({"lit": v}),
+        Expr::Lambda { param, body } => json!({"lambda": param, "body": pred_shape(body)}),
+        Expr::Identifier(s) => json!({"ident": s}),
+        Expr::Scalar(q) => json!({"scalar": "subquery"}),
+        Expr::Star => json!("*"),
+    }
+}
+
 impl PhysOp {
     pub fn shape(&self) -> serde_json::Value {
         use serde_json::json;
         match self {
-            PhysOp::Scan { table, alias, dedup, select, .. } => json!({
+            PhysOp::Scan { table, alias, dedup, select, predicates } => json!({
                 "op": "Scan",
                 "table": table,
                 "alias": alias,
                 "dedup": dedup,
                 "select": select.iter().filter_map(|s| s.alias.as_deref()).collect::<Vec<_>>(),
+                "predicates": predicates.iter().map(pred_shape).collect::<Vec<_>>(),
             }),
             PhysOp::Join { left, right, .. } => json!({
                 "op": "Join",
@@ -102,10 +132,11 @@ impl PhysOp {
                 "alias": alias,
                 "arms": arms.iter().map(|a| a.shape()).collect::<Vec<_>>(),
             }),
-            PhysOp::Project { input, select, .. } => json!({
+            PhysOp::Project { input, select, predicates } => json!({
                 "op": "Project",
                 "input": input.shape(),
                 "select": select.iter().filter_map(|s| s.alias.as_deref()).collect::<Vec<_>>(),
+                "predicates": predicates.iter().map(pred_shape).collect::<Vec<_>>(),
             }),
             PhysOp::Cte { name, body, consumer } => json!({
                 "op": "Cte",
@@ -457,6 +488,8 @@ impl<'a> PlanCtx<'a> {
         let det = &self.input.compiler.default_edge_table;
         let cl = self.input.relationships.len();
         let mut fk_joined: HashSet<String> = HashSet::new();
+        let mut ctes: Vec<(String, PhysOp)> = Vec::new();
+        let mut cte_names: HashSet<String> = HashSet::new();
 
         let all_fk = cl >= 1 && self.input.relationships.iter().all(|r| {
             matches!(self.graph.resolve(r, det, cl), HopStrategy::FkJoin { .. })
@@ -505,12 +538,63 @@ impl<'a> PlanCtx<'a> {
                     }
                 }
                 HopStrategy::EdgeScan { table, dedup } => {
+                    let mut extra_preds = Vec::new();
+
+                    // Narrowing: selective endpoint nodes get a CTE, edge gets IN-subquery
+                    let (from_col, to_col) = rel.direction.edge_columns();
+                    for (na, edge_col) in [(&rel.from, from_col), (&rel.to, to_col)] {
+                        if let Some(n) = self.input.nodes.iter().find(|n| &n.id == na) {
+                            let selective = !n.node_ids.is_empty()
+                                || n.id_range.is_some()
+                                || n.filters.iter().any(|(_, fs)| fs.iter().any(|f| f.selectivity == ontology::FieldSelectivity::High));
+                            if selective && n.table.is_some() {
+                                let cte_name = format!("_nf_{na}");
+                                if !cte_names.contains(&cte_name) {
+                                    ctes.push((cte_name.clone(), self.node_scan(n)));
+                                    cte_names.insert(cte_name.clone());
+                                }
+                                extra_preds.push(Expr::InSubquery {
+                                    expr: Box::new(Expr::col(&ea, edge_col)),
+                                    cte_name,
+                                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                                });
+                            }
+                        }
+                    }
+
+                    // Cascade SIP: non-first hop gets IN-subquery from previous hop
+                    if i > 0 {
+                        let prev_rel = &self.input.relationships[i - 1];
+                        let (_, pe) = prev_rel.direction.edge_columns();
+                        let prev_selective = [&prev_rel.from, &prev_rel.to].iter().any(|na| {
+                            self.input.nodes.iter().find(|n| &n.id == *na)
+                                .is_some_and(|n| !n.node_ids.is_empty() || n.id_range.is_some())
+                        });
+                        if prev_selective {
+                            extra_preds.push(Expr::InSelect {
+                                expr: Box::new(Expr::col(&ea, sc)),
+                                query: Box::new(crate::ast::Query {
+                                    select: vec![SelectExpr::col(&format!("e{}", i - 1), pe)],
+                                    from: TableRef::scan(
+                                        &self.graph.edge_table(&prev_rel.types, det),
+                                        &format!("e{}", i - 1),
+                                    ),
+                                    where_clause: Expr::conjoin(self.edge_predicates(&format!("e{}", i - 1), prev_rel)),
+                                    ..Default::default()
+                                }),
+                            });
+                        }
+                    }
+
+                    let mut preds = self.edge_predicates(&ea, rel);
+                    preds.extend(extra_preds);
+
                     let edge = if rel.hops.max > 1 {
                         self.build_multi_hop_union(rel, &ea, &table)
                     } else {
                         PhysOp::Scan {
                             table, alias: ea.clone(), dedup,
-                            predicates: self.edge_predicates(&ea, rel),
+                            predicates: preds,
                             select: vec![],
                         }
                     };
@@ -547,7 +631,15 @@ impl<'a> PlanCtx<'a> {
             }
         }
 
-        tree.unwrap()
+        let mut result = tree.unwrap();
+        for (name, body) in ctes.into_iter().rev() {
+            result = PhysOp::Cte {
+                name,
+                body: Box::new(body),
+                consumer: Box::new(result),
+            };
+        }
+        result
     }
 
     fn build_multi_hop_union(&self, rel: &InputRelationship, alias: &str, edge_table: &str) -> PhysOp {
