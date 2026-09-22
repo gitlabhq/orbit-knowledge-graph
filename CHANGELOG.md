@@ -1,3 +1,25 @@
+## [0.127.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.126.0...v0.127.0) (2026-09-22)
+
+### Features
+
+* **ci:** sign images with keyless cosign ([2b707f5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2b707f5c149525f1706dd81173c2d823c84500c2)) by Bohdan Parkhomchuk
+* **cli:** detect installed agents, register MCP and skills, add orbit uninstall ([17b16ce](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/17b16ce5a3d0668756f78969fac3047ed207b4be)) by Jean-Gabriel Doyon
+* **cli:** index the current repository at the end of setup and suggest a grep ([82482f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/82482f9305ebb8682236728f122cb0f4e3171eb7)) by Jean-Gabriel Doyon
+* **cli:** interactive setup wizard with agent picker and one-line receipt ([f239a31](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f239a31e228c5e55f00ae5a051e47b7dbd4999f1)) by Jean-Gabriel Doyon
+* **cli:** rank exact names first and give agents file ranges in grep and context ([3d7e61f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3d7e61ff94b5e743dd142ba7adcf114428771051)) by Aaron Algutifan
+* **gql:** support [secure] nodes and grouped projections ([d7bf2b7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d7bf2b7fc1d9f3f6904fb5aa82a6d83fc4b22f6f)) by Aaron Algutifan
+
+### Fixes
+
+* **code-graph:** preserve JS and TS declaration spans ([b24987e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b24987e05b55559761ff913e8578d08c5823d839)) by Aaron Algutifan
+
+### Other
+
+* **cli:** use the orbit_cli glab config keys ([8e542d0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8e542d0a8dffa8b94738c0dabbad1086da671eaf)) by Jean-Gabriel Doyon
+* **codegraph-tests:** replace lance-graph with Orbit cypher + DuckDB ([804a10e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/804a10eb5f3154c59b5be2fb729307393bacd1a8)) by Michael Usachenko
+* **deps:** update rust crate futures to v0.3.34 ([a9ed63e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a9ed63e2d3811fd6d51b8c3418d0fcbf9928485d)) by GitLab Renovate Bot
+* **mr-template:** ask for before/after output on user-facing changes ([adea9b2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/adea9b2d1035e5d63568fdce2bba30bf55aa92fb)) by Dmitry Gruzd
+
 ## [0.126.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.125.0...v0.126.0) (2026-09-21)
 
 ### Features
