@@ -113,13 +113,14 @@ pub(super) fn format_removed_files_per_component(report: &Report) -> String {
         .map(|(component, outcomes)| {
             let mut files: Vec<String> = Vec::new();
             for outcome in outcomes {
-                let file = match outcome.action.starts_with("kept") {
+                let already_listed = files.iter().any(|file| file.starts_with(&outcome.label));
+                if already_listed {
+                    continue;
+                }
+                files.push(match outcome.action.starts_with("kept") {
                     true => format!("{} (kept)", outcome.label),
                     false => outcome.label.clone(),
-                };
-                if !files.iter().any(|known| known.starts_with(&outcome.label)) {
-                    files.push(file);
-                }
+                });
             }
             format!("{component:<width$}   {}", files.join(", "))
         })

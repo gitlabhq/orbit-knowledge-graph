@@ -30,15 +30,6 @@ impl Selection {
         })
     }
 
-    pub(super) fn selected_agent_names(&self) -> Vec<String> {
-        self.agents.iter().map(|agent| agent.name.clone()).collect()
-    }
-
-    pub(super) fn with_agents_named(mut self, names: &[String]) -> Result<Selection> {
-        self.agents = agents_named(names)?;
-        Ok(self)
-    }
-
     pub(super) fn from_uninstall_options(options: &Options) -> Result<Selection> {
         let agents = if options.agents.is_empty() {
             spec::agents().collect()
@@ -49,6 +40,15 @@ impl Selection {
             agents,
             components: Component::ALL.into_iter().collect(),
         })
+    }
+
+    pub(super) fn selected_agent_names(&self) -> Vec<String> {
+        self.agents.iter().map(|agent| agent.name.clone()).collect()
+    }
+
+    pub(super) fn with_agents_named(mut self, names: &[String]) -> Result<Selection> {
+        self.agents = agents_named(names)?;
+        Ok(self)
     }
 }
 

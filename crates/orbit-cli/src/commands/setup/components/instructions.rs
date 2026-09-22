@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 
 use super::{
     Installer, Report, backup_once, drop_backup_when_restored, remove_file_and_empty_parents,
+    write_file,
 };
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
@@ -73,11 +74,7 @@ fn upsert_block_in_file(path: &Path, label: &str, report: &mut Report) -> Result
         }
         Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
     };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    std::fs::write(path, updated).with_context(|| format!("failed to write {}", path.display()))?;
+    write_file(path, updated)?;
     report.note(label, action);
     Ok(())
 }

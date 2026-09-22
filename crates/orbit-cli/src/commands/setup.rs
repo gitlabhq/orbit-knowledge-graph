@@ -10,7 +10,7 @@ mod plan;
 pub(crate) mod spec;
 mod summary;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -33,12 +33,7 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 
     if interactive {
         let location_hints = summary::detected_location_hints(&detected_agents, machine);
-        let chosen_agents = tui::multiselect(
-            "Which agents should use Orbit?",
-            &summary::agent_picker_choices(&location_hints),
-            &selection.selected_agent_names(),
-        )?;
-        selection = selection.with_agents_named(&chosen_agents)?;
+        selection = ask_which_agents(selection, "Which agents should use Orbit?", &location_hints)?;
     }
     if selection.agents.is_empty() {
         tui::outro_cancel(format!(
@@ -50,16 +45,12 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
 
     let plan = plan::for_selection(&selection, &target)?;
     if options.dry_run {
-        show_dry_run(&plan, "Dry run: nothing written.")?;
-        return Ok(());
+        return show_dry_run(&plan, "Dry run: nothing written.");
     }
 
-    let mut report = Report::default();
-    let install_result = components::install(&selection, &target, &mut report);
-    if options.verbose {
-        show_outcomes_per_component(&report)?;
-    }
-    install_result?;
+    apply_and_report(&options, |report| {
+        components::install(&selection, &target, report)
+    })?;
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
     tui::outro(format!(
         "Done. Run {} index in a repository, then ask your agent where a function is defined.",
@@ -77,12 +68,11 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
     ))?;
 
     if interactive {
-        let chosen_agents = tui::multiselect(
+        selection = ask_which_agents(
+            selection,
             "Remove Orbit from which agents?",
-            &summary::agent_picker_choices(&Default::default()),
-            &selection.selected_agent_names(),
+            &BTreeMap::new(),
         )?;
-        selection = selection.with_agents_named(&chosen_agents)?;
     }
     if selection.agents.is_empty() {
         tui::outro_cancel("No agent selected.")?;
@@ -91,22 +81,44 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
 
     let plan = plan::for_selection(&selection, &target)?;
     if options.dry_run {
-        show_dry_run(&plan, "Dry run: nothing removed.")?;
-        return Ok(());
+        return show_dry_run(&plan, "Dry run: nothing removed.");
     }
 
-    let mut report = Report::default();
-    let remove_result = components::remove(&selection, &target, &mut report);
-    if options.verbose {
-        show_outcomes_per_component(&report)?;
-    }
-    remove_result?;
+    let report = apply_and_report(&options, |report| {
+        components::remove(&selection, &target, report)
+    })?;
     tui::card(
         "Removed",
         summary::format_removed_files_per_component(&report),
     )?;
     tui::outro("Done. Backups stay only for files you edited after setup.")?;
     Ok(())
+}
+
+fn ask_which_agents(
+    selection: Selection,
+    question: &str,
+    location_hints: &BTreeMap<String, String>,
+) -> Result<Selection> {
+    let chosen_agents = tui::multiselect(
+        question,
+        &summary::agent_picker_choices(location_hints),
+        &selection.selected_agent_names(),
+    )?;
+    selection.with_agents_named(&chosen_agents)
+}
+
+fn apply_and_report(
+    options: &Options,
+    apply: impl FnOnce(&mut Report) -> Result<()>,
+) -> Result<Report> {
+    let mut report = Report::default();
+    let outcome = apply(&mut report);
+    if options.verbose {
+        show_outcomes_per_component(&report)?;
+    }
+    outcome?;
+    Ok(report)
 }
 
 fn show_dry_run(plan: &Plan, closing: &str) -> Result<()> {

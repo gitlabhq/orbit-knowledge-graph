@@ -7,6 +7,7 @@ use toml_edit::{Array, DocumentMut, Item, Table, value};
 use super::json;
 use super::{
     Installer, Report, backup_once, drop_backup_when_restored, remove_file_and_empty_parents,
+    write_file,
 };
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent, DIRECT_LAUNCHER, McpFormat};
@@ -177,7 +178,7 @@ fn install_toml(
     if path.exists() {
         backup_once(path, label, report)?;
     }
-    write_toml(path, &document)?;
+    write_file(path, document.to_string())?;
     report.note(label, format!("mcp server {} registered", server.name));
     Ok(())
 }
@@ -209,7 +210,7 @@ fn remove_toml(
         remove_file_and_empty_parents(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {
-        write_toml(path, &document)?;
+        write_file(path, document.to_string())?;
         report.note(label, "orbit entries removed");
         drop_backup_when_restored(path, label, report)?;
     }
@@ -227,13 +228,4 @@ fn read_toml(path: &Path) -> Result<DocumentMut> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DocumentMut::new()),
         Err(e) => Err(e).with_context(|| format!("failed to read {}", path.display())),
     }
-}
-
-fn write_toml(path: &Path, document: &DocumentMut) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    std::fs::write(path, document.to_string())
-        .with_context(|| format!("failed to write {}", path.display()))
 }

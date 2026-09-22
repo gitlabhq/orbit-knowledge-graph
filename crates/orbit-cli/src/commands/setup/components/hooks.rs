@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use super::json;
-use super::{Installer, Report, backup_once, remove_file_and_empty_parents};
+use super::{Installer, Report, backup_once, remove_file_and_empty_parents, write_file};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
 
@@ -61,12 +61,7 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         if path.exists() {
             backup_once(&path, &label, report)?;
         }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        std::fs::write(&path, template_file.render())
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        write_file(&path, template_file.render())?;
         report.note(&label, "written");
     }
 

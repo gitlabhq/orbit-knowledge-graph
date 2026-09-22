@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use super::{Report, drop_backup_when_restored, remove_file_and_empty_parents};
+use super::{Report, drop_backup_when_restored, remove_file_and_empty_parents, write_file};
 use crate::commands::setup::Target;
 
 pub(super) fn read_object(path: &Path) -> Result<Value> {
@@ -26,13 +26,9 @@ pub(super) fn read_object(path: &Path) -> Result<Value> {
 }
 
 pub(super) fn write_object(path: &Path, value: &Value) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
     let mut raw = serde_json::to_string_pretty(value).context("failed to serialize JSON")?;
     raw.push('\n');
-    std::fs::write(path, raw).with_context(|| format!("failed to write {}", path.display()))
+    write_file(path, raw)
 }
 
 pub(super) fn write_or_delete_when_empty(

@@ -96,6 +96,14 @@ fn ensure_glab_auto_run(report: &mut Report) {
     }
 }
 
+fn write_file(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    std::fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
+}
+
 fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let backup = backup_path(path);
     if backup.exists() {
