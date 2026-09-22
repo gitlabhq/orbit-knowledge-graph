@@ -2,6 +2,7 @@
 //! per entity, returned as a JSON map per row.
 
 use super::*;
+use crate::{pe, pn};
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 /// Above this many dynamic paths, OR-of-startsWith risks ClickHouse parser
@@ -31,23 +32,16 @@ fn traversal_path_filter(
     if leaves.is_empty() {
         return None;
     }
-    let tp = col(alias, TRAVERSAL_PATH_COLUMN);
     if is_dynamic && leaves.len() > ARRAY_EXISTS_PATH_THRESHOLD {
-        let param = "_gkg_path";
-        return Some(func(
-            "arrayExists",
-            vec![
-                PExpr::Lambda(
-                    param.into(),
-                    Box::new(func("startsWith", vec![tp, PExpr::Ident(param.into())])),
-                ),
-                func("array", leaves.iter().map(|p| lit(p.as_str())).collect()),
-            ],
+        let paths: Vec<String> = leaves.iter().map(|p| format!("{:?}", p.as_str())).collect();
+        return Some(pe!(
+            "arrayExists(_gkg_path -> startsWith({alias}.traversal_path, _gkg_path), [{}])",
+            paths.join(", ")
         ));
     }
     let arms: Vec<PExpr> = leaves
         .iter()
-        .map(|p| func("startsWith", vec![tp.clone(), lit(p.as_str())]))
+        .map(|p| pe!("startsWith({alias}.traversal_path, {:?})", p.as_str()))
         .collect();
     Some(match arms.len() {
         1 => arms.into_iter().next().unwrap(),
@@ -79,17 +73,17 @@ impl<'a> PlanCtx<'a> {
                     .map(String::as_str)
                     .filter(|c| *c != pk && *c != DELETED_COLUMN),
             )
-            .map(|c| named(col(a, c), c))
+            .map(|c| pn!("{a}.{c} AS {c}"))
             .collect();
 
         let props = if columns.is_empty() {
-            lit("{}")
+            pe!("'{{}}'")
         } else {
-            let entries = columns
+            let entries: Vec<String> = columns
                 .iter()
-                .flat_map(|c| [lit(c.as_str()), func("toString", vec![col(a, c)])])
+                .map(|c| format!("{c:?}, toString({a}.{c})"))
                 .collect();
-            func("toJSONString", vec![func("map", entries)])
+            pe!("toJSONString(map({}))", entries.join(", "))
         };
         // Traversal paths and ids prune inside the LIMIT BY scan; `_deleted`
         // must be judged on the surviving latest row, so it filters outside.
@@ -98,11 +92,8 @@ impl<'a> PlanCtx<'a> {
             .project(inner_cols)
             .filter(vec![deleted_false(a)])
             .project(vec![
-                named(col(a, pk), format!("{a}_{pk}")),
-                named(
-                    lit(n.entity.as_deref().unwrap_or("")),
-                    format!("{a}_entity_type"),
-                ),
+                pn!("{a}.{pk} AS {a}_{pk}"),
+                pn!("{:?} AS {a}_entity_type", n.entity.as_deref().unwrap_or("")),
                 named(props, format!("{a}_props")),
             ])
     }

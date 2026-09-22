@@ -2,6 +2,7 @@
 //! tables something reads, then the optimizer.
 
 use super::*;
+use crate::{pe, pn};
 
 /// Edge columns a traversal returns per hop, with their output suffixes.
 const EDGE_OUTPUT: [(&str, &str); 5] = [
@@ -46,15 +47,11 @@ pub fn hop_chain(
 
 /// `array(tuple(e_i.end, e_i.end_kind), ...)` for hops `range`.
 pub fn path_nodes(range: impl Iterator<Item = u32>, end_col: &str) -> PExpr {
-    func(
-        "array",
-        range
-            .map(|i| {
-                let e = format!("e{i}");
-                func("tuple", vec![col(&e, end_col), col(&e, kind_col(end_col))])
-            })
-            .collect(),
-    )
+    let kind = kind_col(end_col);
+    let tuples: Vec<String> = range
+        .map(|i| format!("tuple(e{i}.{end_col}, e{i}.{kind})"))
+        .collect();
+    pe!("[{}]", tuples.join(", "))
 }
 
 impl<'a> PlanCtx<'a> {
@@ -80,7 +77,7 @@ impl<'a> PlanCtx<'a> {
         let mut p: Vec<PExpr> = rel_kind(a, &rel.types).into_iter().collect();
         for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
             if let Some(ent) = self.node(nid).and_then(|n| n.entity.as_deref()) {
-                p.push(eq(col(a, kind_col(ic)), lit(ent)));
+                p.push(pe!("{a}.{} = {ent:?}", kind_col(ic)));
             }
         }
         p.push(deleted_false(a));
@@ -162,7 +159,7 @@ impl<'a> PlanCtx<'a> {
             {
                 tree = tree.join(
                     self.node_scan(n),
-                    vec![(b.clone(), (n.id.clone(), DEFAULT_PRIMARY_KEY.into()))],
+                    vec![(b.clone(), (n.id.clone(), "id".into()))],
                 );
             }
         }
@@ -203,11 +200,10 @@ impl<'a> PlanCtx<'a> {
                 ea.clone()
             };
             for (c, suffix) in EDGE_OUTPUT {
-                columns.push(named(col(&ea, c), format!("{prefix}_{suffix}")));
+                columns.push(pn!("{ea}.{c} AS {prefix}_{suffix}"));
             }
             if rel.hops.max > 1 {
-                let pn = crate::constants::PATH_NODES_COLUMN;
-                columns.push(named(col(&ea, pn), format!("{prefix}_{pn}")));
+                columns.push(pn!("{ea}.path_nodes AS {prefix}_path_nodes"));
             }
         }
         let single = self.input.relationships.is_empty();
@@ -249,7 +245,7 @@ impl<'a> PlanCtx<'a> {
             .as_ref()
             .map(|ob| {
                 let desc = matches!(ob.direction, OrderDirection::Desc);
-                vec![(col(&ob.node, &ob.property), desc)]
+                vec![(pe!("{}.{}", ob.node, ob.property), desc)]
             })
             .unwrap_or_default()
     }
@@ -258,14 +254,13 @@ impl<'a> PlanCtx<'a> {
     /// edge's id pair, or the node's own id when there are no edges.
     fn traversal_tie_breakers(&self) -> Vec<(PExpr, bool)> {
         if self.input.relationships.is_empty() {
-            return vec![(col(&self.input.nodes[0].id, DEFAULT_PRIMARY_KEY), false)];
+            return vec![(pe!("{}.id", self.input.nodes[0].id), false)];
         }
         (0..self.input.relationships.len())
             .flat_map(|i| {
-                let ea = format!("e{i}");
                 [
-                    (col(&ea, SOURCE_ID_COLUMN), false),
-                    (col(&ea, TARGET_ID_COLUMN), false),
+                    (pe!("e{i}.source_id"), false),
+                    (pe!("e{i}.target_id"), false),
                 ]
             })
             .collect()
@@ -282,18 +277,12 @@ impl<'a> PlanCtx<'a> {
                     truncate,
                     ..
                 } => {
-                    let c = col(node, property);
                     let expr = match truncate {
-                        None => c,
-                        Some(unit) => {
-                            let t = func(unit.ch_function(), vec![c]);
-                            match unit {
-                                TruncateUnit::Minute | TruncateUnit::Hour => {
-                                    func("toDateTime64", vec![t, PExpr::Ident("0".into())])
-                                }
-                                _ => func("toDate32", vec![t]),
-                            }
+                        None => pe!("{node}.{property}"),
+                        Some(unit @ (TruncateUnit::Minute | TruncateUnit::Hour)) => {
+                            pe!("toDateTime64({}({node}.{property}), 0)", unit.ch_function())
                         }
+                        Some(unit) => pe!("toDate32({}({node}.{property}))", unit.ch_function()),
                     };
                     group_by.push(named(expr, g.output_name()));
                 }
@@ -308,11 +297,9 @@ impl<'a> PlanCtx<'a> {
             .metrics
             .iter()
             .map(|m| {
-                let e = m.expr.node();
-                let f = m.expr.function();
-                let expr = match (f, m.expr.property()) {
-                    (AggFunction::Count, _) | (_, None) => func("COUNT", vec![]),
-                    (f, Some(p)) => func(f.as_sql(), vec![col(e, p)]),
+                let expr = match (m.expr.function(), m.expr.property()) {
+                    (AggFunction::Count, _) | (_, None) => pe!("COUNT()"),
+                    (f, Some(p)) => pe!("{}({}.{p})", f.as_sql(), m.expr.node()),
                 };
                 named(expr, m.output_name())
             })
@@ -357,24 +344,22 @@ impl<'a> PlanCtx<'a> {
                 // Arms must agree on shape: first-hop start + last-hop end,
                 // the reserved kind and tag columns the outer filter reads,
                 // and the first edge's kind/tp/deleted.
+                let (sk, ek) = (kind_col(sc), kind_col(ec));
                 let columns = vec![
-                    named(col("e1", TRAVERSAL_PATH_COLUMN), TRAVERSAL_PATH_COLUMN),
-                    named(
-                        col("e1", RELATIONSHIP_KIND_COLUMN),
-                        RELATIONSHIP_KIND_COLUMN,
-                    ),
-                    named(col("e1", sc), sc),
-                    named(col("e1", kind_col(sc)), kind_col(sc)),
-                    named(col(&last, ec), ec),
-                    named(col(&last, kind_col(ec)), kind_col(ec)),
-                    named(col("e1", SOURCE_TAGS_COLUMN), SOURCE_TAGS_COLUMN),
-                    named(col(&last, TARGET_TAGS_COLUMN), TARGET_TAGS_COLUMN),
+                    pn!("e1.traversal_path AS traversal_path"),
+                    pn!("e1.relationship_kind AS relationship_kind"),
+                    pn!("e1.{sc} AS {sc}"),
+                    pn!("e1.{sk} AS {sk}"),
+                    pn!("{last}.{ec} AS {ec}"),
+                    pn!("{last}.{ek} AS {ek}"),
+                    pn!("e1.source_tags AS source_tags"),
+                    pn!("{last}.target_tags AS target_tags"),
                     named(
                         path_nodes(1..=depth, ec),
                         crate::constants::PATH_NODES_COLUMN,
                     ),
-                    named(lit(depth as i64), crate::constants::DEPTH_COLUMN),
-                    named(col("e1", DELETED_COLUMN), DELETED_COLUMN),
+                    pn!("{depth} AS depth"),
+                    pn!("e1._deleted AS _deleted"),
                 ];
                 hop_chain(&edge, depth, cols, &hop_preds, &|_, _| vec![]).project(columns)
             })
@@ -384,7 +369,7 @@ impl<'a> PlanCtx<'a> {
         for (nid, ic) in [(&rel.from, sc), (&rel.to, ec)] {
             let Some(n) = self.node(nid) else { continue };
             if let Some(ref e) = n.entity {
-                outer.push(eq(col(alias, kind_col(ic)), lit(e.as_str())));
+                outer.push(pe!("{alias}.{} = {e:?}", kind_col(ic)));
             }
             if !n.node_ids.is_empty() {
                 outer.push(id_in(alias, ic, &n.node_ids));

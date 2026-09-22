@@ -4,6 +4,7 @@
 
 use super::plan_v2::*;
 use crate::input::*;
+use crate::{pe, pn};
 use ontology::constants::*;
 use std::collections::{HashMap, HashSet};
 
@@ -445,19 +446,19 @@ fn rule_fk_elision(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
             .unwrap_or_default()
     };
     let s: HashMap<Col, PExpr> = HashMap::from([
+        ((alias.clone(), SOURCE_ID_COLUMN.into()), pe!("{src}.id")),
+        ((alias.clone(), TARGET_ID_COLUMN.into()), pe!("{tgt}.id")),
         (
-            (alias.clone(), SOURCE_ID_COLUMN.into()),
-            col(src, DEFAULT_PRIMARY_KEY),
+            (alias.clone(), SOURCE_KIND_COLUMN.into()),
+            PExpr::Lit(Lit::Str(entity(src))),
         ),
         (
-            (alias.clone(), TARGET_ID_COLUMN.into()),
-            col(tgt, DEFAULT_PRIMARY_KEY),
+            (alias.clone(), TARGET_KIND_COLUMN.into()),
+            PExpr::Lit(Lit::Str(entity(tgt))),
         ),
-        ((alias.clone(), SOURCE_KIND_COLUMN.into()), lit(entity(src))),
-        ((alias.clone(), TARGET_KIND_COLUMN.into()), lit(entity(tgt))),
         (
             (alias.clone(), RELATIONSHIP_KIND_COLUMN.into()),
-            lit(rel.types.first().cloned().unwrap_or_default()),
+            PExpr::Lit(Lit::Str(rel.types.first().cloned().unwrap_or_default())),
         ),
     ]);
     let (fk_alias, tgt_alias) = ctx.fk_sides(rel, fk_col);
@@ -619,8 +620,11 @@ fn rule_cascade_sip(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
             if sp.leaf(&sip).is_some() {
                 continue;
             }
-            let body = realias(leaf.clone(), &prev.0, &sip)
-                .project(vec![named(col(&sip, &prev.1), prev.1.clone())]);
+            let body = realias(leaf.clone(), &prev.0, &sip).project(vec![pn!(
+                "{sip}.{} AS {}",
+                prev.1,
+                prev.1
+            )]);
             added.push((body, (curr.clone(), (sip, prev.1.clone()))));
         }
         if added.is_empty() {
@@ -647,56 +651,19 @@ fn is_selective(leaf: &PhysOp) -> bool {
 }
 
 fn realias(op: PhysOp, from: &str, to: &str) -> PhysOp {
-    let s: HashMap<Col, PExpr> = EDGE_RESERVED_COLUMNS
-        .iter()
-        .chain([&DELETED_COLUMN, &SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN])
-        .map(|c| ((from.to_string(), c.to_string()), col(to, c)))
-        .collect();
-    fn go(op: PhysOp, from: &str, to: &str, s: &HashMap<Col, PExpr>) -> PhysOp {
-        let op = match op {
-            PhysOp::Scan {
-                table,
-                alias,
-                dedup,
-            } if alias == from => PhysOp::Scan {
-                table,
-                alias: to.to_string(),
-                dedup,
-            },
-            other => other.map_exprs(&|e| realias_expr(e, from, to)),
-        };
-        op.map_children(&mut |c| go(c, from, to, s))
-    }
-    go(op, from, to, &s)
-}
-
-fn realias_expr(e: &PExpr, from: &str, to: &str) -> PExpr {
-    match e {
-        PExpr::Col(a, c) if a == from => col(to, c),
-        PExpr::Scope(a, p) if a == from => PExpr::Scope(to.into(), p.clone()),
-        PExpr::NodeFilter {
+    let op = match op {
+        PhysOp::Scan {
+            table,
             alias,
-            property,
-            filter,
-        } if alias == from => PExpr::NodeFilter {
-            alias: to.into(),
-            property: property.clone(),
-            filter: filter.clone(),
+            dedup,
+        } if alias == from => PhysOp::Scan {
+            table,
+            alias: to.to_string(),
+            dedup,
         },
-        PExpr::Func(n, xs) => PExpr::Func(
-            n.clone(),
-            xs.iter().map(|x| realias_expr(x, from, to)).collect(),
-        ),
-        PExpr::And(xs) => PExpr::And(xs.iter().map(|x| realias_expr(x, from, to)).collect()),
-        PExpr::Or(xs) => PExpr::Or(xs.iter().map(|x| realias_expr(x, from, to)).collect()),
-        PExpr::Cmp(op, l, r) => PExpr::Cmp(
-            *op,
-            Box::new(realias_expr(l, from, to)),
-            Box::new(realias_expr(r, from, to)),
-        ),
-        PExpr::In(x, vs) => PExpr::In(Box::new(realias_expr(x, from, to)), vs.clone()),
-        other => other.clone(),
-    }
+        other => other.map_exprs(&|e| e.realias(from, to)),
+    };
+    op.map_children(&mut |c| realias(c, from, to))
 }
 
 /// An aggregation anchored on a namespace (`(g:Group {full_path})-[:CONTAINS]->(p)`)
@@ -756,7 +723,7 @@ fn rule_scope_anchor_elision(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
             };
             if other.0 != *anchor {
                 s.entry(edge_side.clone())
-                    .or_insert_with(|| col(&other.0, &other.1));
+                    .or_insert_with(|| PExpr::Col(other.0.clone(), other.1.clone()));
             }
         }
         sp.subst(&s);

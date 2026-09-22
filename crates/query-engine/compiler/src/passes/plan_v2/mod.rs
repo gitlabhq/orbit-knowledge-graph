@@ -6,11 +6,13 @@
 //! turns the tree into SQL.
 
 mod chain;
+pub mod expr;
 mod hydration;
 mod neighbors;
 mod pathfinding;
 
 use crate::input::*;
+use crate::{pe, pn};
 use ontology::Ontology;
 use ontology::constants::*;
 use serde::Serialize;
@@ -64,14 +66,14 @@ impl JoinGraph {
 /// `(alias, column)`: a fully qualified column reference.
 pub type Col = (String, String);
 
-#[derive(Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Lit {
     Int(i64),
     Str(String),
     Bool(bool),
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum CmpOp {
     Eq,
     Ne,
@@ -83,7 +85,7 @@ pub enum CmpOp {
 
 /// Plan-level scalar expression. Every column reference is qualified, so an
 /// expression means the same thing wherever it sits in the tree.
-#[derive(Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum PExpr {
     Col(String, String),
     /// Bare identifier: an output alias in ORDER BY, or a lambda parameter.
@@ -109,79 +111,40 @@ pub enum PExpr {
     ScopeResolved(#[serde(skip)] crate::scope::ScopePrefix),
 }
 
-pub fn col(alias: &str, column: &str) -> PExpr {
-    PExpr::Col(alias.to_string(), column.to_string())
-}
-
-pub fn lit(v: impl Into<Lit>) -> PExpr {
-    PExpr::Lit(v.into())
-}
-
-impl From<i64> for Lit {
-    fn from(v: i64) -> Self {
-        Lit::Int(v)
-    }
-}
-impl From<&str> for Lit {
-    fn from(v: &str) -> Self {
-        Lit::Str(v.to_string())
-    }
-}
-impl From<String> for Lit {
-    fn from(v: String) -> Self {
-        Lit::Str(v)
-    }
-}
-impl From<bool> for Lit {
-    fn from(v: bool) -> Self {
-        Lit::Bool(v)
-    }
-}
-
-pub fn func(name: &str, args: Vec<PExpr>) -> PExpr {
-    PExpr::Func(name.to_string(), args)
-}
-
-pub fn eq(l: PExpr, r: PExpr) -> PExpr {
-    PExpr::Cmp(CmpOp::Eq, Box::new(l), Box::new(r))
-}
-
-pub fn cmp(op: CmpOp, l: PExpr, r: PExpr) -> PExpr {
-    PExpr::Cmp(op, Box::new(l), Box::new(r))
-}
-
 pub fn deleted_false(alias: &str) -> PExpr {
-    eq(col(alias, DELETED_COLUMN), lit(false))
+    pe!("{alias}._deleted = false")
 }
 
 /// `alias.column IN ids`, or `= id` for a single value.
 pub fn id_in(alias: &str, column: &str, ids: &[i64]) -> PExpr {
     match ids {
-        [id] => eq(col(alias, column), lit(*id)),
+        [id] => pe!("{alias}.{column} = {id}"),
         _ => PExpr::In(
-            Box::new(col(alias, column)),
+            Box::new(pe!("{alias}.{column}")),
             ids.iter().map(|&i| Lit::Int(i)).collect(),
         ),
     }
 }
 
 pub fn id_range(alias: &str, column: &str, r: &InputIdRange) -> PExpr {
-    PExpr::And(vec![
-        cmp(CmpOp::Ge, col(alias, column), lit(r.start)),
-        cmp(CmpOp::Le, col(alias, column), lit(r.end)),
-    ])
+    pe!(
+        "{alias}.{column} >= {} AND {alias}.{column} <= {}",
+        r.start,
+        r.end
+    )
 }
 
+/// Relationship kinds come from the query; they are user data and go
+/// through a typed literal, not the expression text.
 pub fn rel_kind(alias: &str, types: &[String]) -> Option<PExpr> {
     if crate::passes::normalize::is_wildcard(types) {
         return None;
     }
-    Some(match types {
-        [t] => eq(col(alias, RELATIONSHIP_KIND_COLUMN), lit(t.as_str())),
-        _ => PExpr::In(
-            Box::new(col(alias, RELATIONSHIP_KIND_COLUMN)),
-            types.iter().map(|t| Lit::Str(t.clone())).collect(),
-        ),
+    let kind = Box::new(pe!("{alias}.relationship_kind"));
+    let lits: Vec<Lit> = types.iter().map(|t| Lit::Str(t.clone())).collect();
+    Some(match lits.as_slice() {
+        [t] => PExpr::Cmp(CmpOp::Eq, kind, Box::new(PExpr::Lit(t.clone()))),
+        _ => PExpr::In(kind, lits),
     })
 }
 
@@ -219,14 +182,13 @@ impl PExpr {
         }
     }
 
-    /// Rewrites column references through `s`.
-    pub fn subst(&self, s: &HashMap<Col, PExpr>) -> PExpr {
-        let go = |x: &PExpr| x.subst(s);
+    /// Rebuilds the expression bottom-up; `leaf` may replace any node.
+    pub fn map(&self, leaf: &dyn Fn(&PExpr) -> Option<PExpr>) -> PExpr {
+        if let Some(e) = leaf(self) {
+            return e;
+        }
+        let go = |x: &PExpr| x.map(leaf);
         match self {
-            PExpr::Col(a, c) => s
-                .get(&(a.clone(), c.clone()))
-                .cloned()
-                .unwrap_or_else(|| self.clone()),
             PExpr::Func(n, xs) => PExpr::Func(n.clone(), xs.iter().map(go).collect()),
             PExpr::And(xs) => PExpr::And(xs.iter().map(go).collect()),
             PExpr::Or(xs) => PExpr::Or(xs.iter().map(go).collect()),
@@ -235,6 +197,32 @@ impl PExpr {
             PExpr::Lambda(p, b) => PExpr::Lambda(p.clone(), Box::new(go(b))),
             other => other.clone(),
         }
+    }
+
+    /// Rewrites column references through `s`.
+    pub fn subst(&self, s: &HashMap<Col, PExpr>) -> PExpr {
+        self.map(&|e| match e {
+            PExpr::Col(a, c) => s.get(&(a.clone(), c.clone())).cloned(),
+            _ => None,
+        })
+    }
+
+    /// Renames every reference to alias `from`.
+    pub fn realias(&self, from: &str, to: &str) -> PExpr {
+        self.map(&|e| match e {
+            PExpr::Col(a, c) if a == from => Some(PExpr::Col(to.into(), c.clone())),
+            PExpr::Scope(a, p) if a == from => Some(PExpr::Scope(to.into(), p.clone())),
+            PExpr::NodeFilter {
+                alias,
+                property,
+                filter,
+            } if alias == from => Some(PExpr::NodeFilter {
+                alias: to.into(),
+                property: property.clone(),
+                filter: filter.clone(),
+            }),
+            _ => None,
+        })
     }
 
     /// The column this predicate constrains, for `col = lit`, `col IN`, and
@@ -253,7 +241,7 @@ impl PExpr {
 
 // ── Operators ───────────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum Dedup {
     None,
     /// `FINAL`: ReplacingMergeTree merge-on-read.
@@ -263,7 +251,7 @@ pub enum Dedup {
     LimitBy,
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum JoinKind {
     Inner,
     /// `left.col IN (SELECT right.col FROM right)`; uses `on[0]`.
@@ -273,7 +261,7 @@ pub enum JoinKind {
 /// `expr AS alias`.
 pub type Named = (PExpr, String);
 
-#[derive(Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "op")]
 pub enum PhysOp {
     Scan {
@@ -332,7 +320,16 @@ pub fn named(expr: PExpr, alias: impl Into<String>) -> Named {
 }
 
 impl PhysOp {
+    /// The predicate list is a conjunction; top-level ANDs are flattened
+    /// into it so rules see one predicate per conjunct.
     pub fn filter(self, predicates: Vec<PExpr>) -> PhysOp {
+        let predicates: Vec<PExpr> = predicates
+            .into_iter()
+            .flat_map(|p| match p {
+                PExpr::And(xs) => xs,
+                p => vec![p],
+            })
+            .collect();
         if predicates.is_empty() {
             return self;
         }
@@ -632,26 +629,12 @@ impl<'a> PlanCtx<'a> {
     /// `node.property`, truncated to an excerpt when the ontology marks the
     /// column as long text.
     pub fn property(&self, n: &InputNode, property: &str) -> PExpr {
-        let value = col(&n.id, property);
-        if !n.excerpt_columns.contains(property) || n.excerpt_max_chars == 0 {
-            return value;
+        let (a, max) = (&n.id, n.excerpt_max_chars);
+        if !n.excerpt_columns.contains(property) || max == 0 {
+            return pe!("{a}.{property}");
         }
-        let excerpt = func(
-            "substringUTF8",
-            vec![value.clone(), lit(1), lit(n.excerpt_max_chars as i64)],
-        );
-        let shortened = cmp(
-            CmpOp::Gt,
-            func("length", vec![value]),
-            func("length", vec![excerpt.clone()]),
-        );
-        func(
-            "concat",
-            vec![
-                excerpt,
-                func("if", vec![shortened, lit(" [truncated]"), lit("")]),
-            ],
-        )
+        let excerpt = format!("substringUTF8({a}.{property}, 1, {max})");
+        pe!("concat({excerpt}, if(length({a}.{property}) > length({excerpt}), ' [truncated]', ''))")
     }
 
     /// Scan of one or more physical edge tables under one alias. Several
@@ -673,7 +656,7 @@ impl<'a> PlanCtx<'a> {
                 let cols = EDGE_RESERVED_COLUMNS
                     .iter()
                     .chain([&DELETED_COLUMN])
-                    .map(|c| named(col(&inner, c), *c))
+                    .map(|c| pn!("{inner}.{c} AS {c}"))
                     .collect();
                 scan(t, &inner, Dedup::None)
                     .filter(arm_where(&inner))
@@ -723,19 +706,21 @@ pub fn denorm_tag(edge: &str, tag_col: &str, tag_key: &str, f: &InputFilter) -> 
         }
         _ => return None,
     };
+    // Tag values are user data: typed literals, never expression text.
     let tags: Vec<PExpr> = tags
         .into_iter()
-        .map(|t| lit(format!("{tag_key}:{t}")))
+        .map(|t| PExpr::Lit(Lit::Str(format!("{tag_key}:{t}"))))
         .collect();
+    let tags_col = pe!("{edge}.{tag_col}");
     match tags.len() {
         0 => None,
-        1 => Some(func(
-            "has",
-            vec![col(edge, tag_col), tags.into_iter().next().unwrap()],
+        1 => Some(PExpr::Func(
+            "has".into(),
+            vec![tags_col, tags.into_iter().next().unwrap()],
         )),
-        _ => Some(func(
-            "hasAny",
-            vec![col(edge, tag_col), func("array", tags)],
+        _ => Some(PExpr::Func(
+            "hasAny".into(),
+            vec![tags_col, PExpr::Func("array".into(), tags)],
         )),
     }
 }

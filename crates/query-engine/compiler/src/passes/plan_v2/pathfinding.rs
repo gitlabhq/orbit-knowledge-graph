@@ -3,8 +3,10 @@
 //! (forward and backward share an `end_id`).
 
 use super::chain::{hop_chain, kind_col, path_nodes};
+use super::expr::on;
 use super::*;
 use crate::constants::*;
+use crate::{pe, pn};
 
 const SCOPE_CTE: &str = "_path_scope_traversal_paths";
 
@@ -30,10 +32,7 @@ impl Anchor {
         match self.cte_name() {
             Some(cte) => op.semi(
                 scan(cte, cte, Dedup::None),
-                (
-                    (alias.into(), column.into()),
-                    (cte.into(), DEFAULT_PRIMARY_KEY.into()),
-                ),
+                on(&[&format!("{alias}.{column} = {cte}.id")])[0].clone(),
             ),
             None => op,
         }
@@ -53,6 +52,10 @@ struct Frontier<'f> {
     first_hop_types: &'f [String],
     /// Denorm tags from the anchor node's filters, on `e1`.
     anchor_tags: Vec<PExpr>,
+    tables: &'f [String],
+    rel_types: &'f [String],
+    has_scope: bool,
+    include_tp: bool,
 }
 
 impl<'a> PlanCtx<'a> {
@@ -60,10 +63,8 @@ impl<'a> PlanCtx<'a> {
         let cfg = self.input.path.as_ref().expect("path config");
         let start = self.node(&cfg.from).expect("start node");
         let end = self.node(&cfg.to).expect("end node");
-        let (se, ee) = (
-            start.entity.as_deref().unwrap_or(""),
-            end.entity.as_deref().unwrap_or(""),
-        );
+        let se = start.entity.as_deref().unwrap_or("");
+        let ee = end.entity.as_deref().unwrap_or("");
         let scoped = start.has_traversal_path && end.has_traversal_path;
         let tables = self.input.compiler.resolve_edge_tables(&cfg.rel_types);
         let fwd_depth = cfg.max_depth / 2 + cfg.max_depth % 2;
@@ -77,29 +78,27 @@ impl<'a> PlanCtx<'a> {
         let end_anchor = self.anchor(end, scoped);
         let scope = scope_cte(&start_anchor, &end_anchor);
 
-        let mut ctes: Vec<(String, PhysOp)> = Vec::new();
-        ctes.extend(start_anchor.cte.clone());
-        ctes.extend(end_anchor.cte.clone());
-        ctes.extend(scope.clone());
-        let frontier = |dir: FDir,
-                        depth: u32,
-                        anchor: &Anchor,
-                        node: &InputNode,
-                        entity: &str,
-                        first: &[String],
-                        tag_dir: &str| {
+        let frontier = |dir, depth, anchor, node: &InputNode, entity, first, tag_dir| {
             let f = Frontier {
                 dir,
                 anchor,
                 anchor_entity: entity,
                 first_hop_types: first,
                 anchor_tags: self.denorm_tags(node, tag_dir, "e1", None),
+                tables: &tables,
+                rel_types: &cfg.rel_types,
+                has_scope: scope.is_some(),
+                include_tp: scoped,
             };
-            let arms = (1..=depth)
-                .map(|d| self.frontier_arm(d, &f, &tables, &cfg.rel_types, scope.is_some(), scoped))
-                .collect();
-            PhysOp::union(arms, "_frontier")
+            PhysOp::union(
+                (1..=depth).map(|d| self.frontier_arm(d, &f)).collect(),
+                "_frontier",
+            )
         };
+        let mut ctes: Vec<(String, PhysOp)> = Vec::new();
+        ctes.extend(start_anchor.cte.clone());
+        ctes.extend(end_anchor.cte.clone());
+        ctes.extend(scope.clone());
         ctes.push((
             FORWARD_CTE.into(),
             frontier(
@@ -127,95 +126,51 @@ impl<'a> PlanCtx<'a> {
             ));
         }
 
-        let (f, b) = (FORWARD_ALIAS, BACKWARD_ALIAS);
-        let endpoint =
-            |t: &str, entity: &str| func("tuple", vec![col(t, ANCHOR_ID_COLUMN), lit(entity)]);
-
+        let (f, b, p) = (FORWARD_ALIAS, BACKWARD_ALIAS, PATHS_ALIAS);
+        let (path, kinds) = (path_column(), edge_kinds_column());
         let direct = end_anchor
             .apply(
-                scan(FORWARD_CTE, f, Dedup::None).filter(vec![
-                    eq(col(f, DEPTH_COLUMN), lit(1)),
-                    eq(col(f, END_KIND_COLUMN), lit(ee)),
-                ]),
+                scan(FORWARD_CTE, f, Dedup::None)
+                    .filter(vec![pe!("{f}.depth = 1 AND {f}.end_kind = {ee:?}")]),
                 f,
                 END_ID_COLUMN,
             )
             .project(vec![
-                named(col(f, DEPTH_COLUMN), DEPTH_COLUMN),
-                named(
-                    func(
-                        "arrayConcat",
-                        vec![
-                            func("array", vec![endpoint(f, se)]),
-                            col(f, PATH_NODES_COLUMN),
-                        ],
-                    ),
-                    path_column(),
-                ),
-                named(col(f, FRONTIER_EDGE_KINDS_COLUMN), edge_kinds_column()),
+                pn!("{f}.depth AS depth"),
+                pn!("arrayConcat([tuple({f}.anchor_id, {se:?})], {f}.path_nodes) AS {path}"),
+                pn!("{f}.edge_kinds AS {kinds}"),
             ]);
 
         let mut arms = vec![direct];
         if bwd_depth > 0 {
-            let depth_sum = func("plus", vec![col(f, DEPTH_COLUMN), col(b, DEPTH_COLUMN)]);
-            let mut on = vec![(
-                (f.into(), END_ID_COLUMN.into()),
-                (b.into(), END_ID_COLUMN.into()),
-            )];
+            let mut join_on = vec![format!("{f}.end_id = {b}.end_id")];
             if scoped {
-                on.push((
-                    (f.into(), TRAVERSAL_PATH_COLUMN.into()),
-                    (b.into(), TRAVERSAL_PATH_COLUMN.into()),
-                ));
+                join_on.push(format!("{f}.traversal_path = {b}.traversal_path"));
             }
-            let meet = scan(FORWARD_CTE, f, Dedup::None)
-                .join(scan(BACKWARD_CTE, b, Dedup::None), on)
-                .filter(vec![cmp(
-                    CmpOp::Le,
-                    depth_sum.clone(),
-                    lit(cfg.max_depth as i64),
-                )]);
-            arms.push(meet.project(vec![
-                named(depth_sum, DEPTH_COLUMN),
-                named(
-                    func(
-                        "arrayConcat",
-                        vec![
-                            func("array", vec![endpoint(f, se)]),
-                            col(f, PATH_NODES_COLUMN),
-                            func("arrayReverse", vec![col(b, PATH_NODES_COLUMN)]),
-                            func("array", vec![endpoint(b, ee)]),
-                        ],
-                    ),
-                    path_column(),
-                ),
-                named(
-                    func(
-                        "arrayConcat",
-                        vec![
-                            col(f, FRONTIER_EDGE_KINDS_COLUMN),
-                            func("arrayReverse", vec![col(b, FRONTIER_EDGE_KINDS_COLUMN)]),
-                        ],
-                    ),
-                    edge_kinds_column(),
-                ),
-            ]));
+            let refs: Vec<&str> = join_on.iter().map(String::as_str).collect();
+            let max = cfg.max_depth;
+            arms.push(
+                scan(FORWARD_CTE, f, Dedup::None)
+                    .join(scan(BACKWARD_CTE, b, Dedup::None), on(&refs))
+                    .filter(vec![pe!("plus({f}.depth, {b}.depth) <= {max}")])
+                    .project(vec![
+                        pn!("plus({f}.depth, {b}.depth) AS depth"),
+                        pn!("arrayConcat([tuple({f}.anchor_id, {se:?})], {f}.path_nodes, arrayReverse({b}.path_nodes), [tuple({b}.anchor_id, {ee:?})]) AS {path}"),
+                        pn!("arrayConcat({f}.edge_kinds, arrayReverse({b}.edge_kinds)) AS {kinds}"),
+                    ]),
+            );
         }
 
-        let p = PATHS_ALIAS;
-        let mut keys = vec![(col(p, DEPTH_COLUMN), false)];
+        let mut keys = vec![(pe!("{p}.depth"), false)];
         if self.input.cursor.is_some() {
-            keys.extend(
-                [path_column(), edge_kinds_column()]
-                    .iter()
-                    .map(|c| (func("toString", vec![col(p, c)]), false)),
-            );
+            keys.push((pe!("toString({p}.{path})"), false));
+            keys.push((pe!("toString({p}.{kinds})"), false));
         }
         let body = PhysOp::union(arms, p)
             .project(vec![
-                named(col(p, &path_column()), path_column()),
-                named(col(p, &edge_kinds_column()), edge_kinds_column()),
-                named(col(p, DEPTH_COLUMN), DEPTH_COLUMN),
+                pn!("{p}.{path} AS {path}"),
+                pn!("{p}.{kinds} AS {kinds}"),
+                pn!("{p}.depth AS depth"),
             ])
             .sort(keys)
             .limit(limit);
@@ -226,27 +181,27 @@ impl<'a> PlanCtx<'a> {
     }
 
     fn anchor(&self, n: &InputNode, force_cte: bool) -> Anchor {
+        let none = Anchor {
+            ids: None,
+            cte: None,
+            has_tp: false,
+        };
         if !force_cte && !n.node_ids.is_empty() {
             return Anchor {
                 ids: Some(n.node_ids.clone()),
-                cte: None,
-                has_tp: false,
+                ..none
             };
         }
         if n.node_ids.is_empty() && n.filters.is_empty() && n.id_range.is_none() {
-            return Anchor {
-                ids: None,
-                cte: None,
-                has_tp: false,
-            };
+            return none;
         }
         let a = n.id.as_str();
-        let mut cols = vec![named(col(a, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY)];
+        let mut cols = vec![pn!("{a}.id AS id")];
         if n.has_traversal_path {
-            cols.push(named(col(a, TRAVERSAL_PATH_COLUMN), TRAVERSAL_PATH_COLUMN));
+            cols.push(pn!("{a}.traversal_path AS traversal_path"));
         }
         let mut inner_cols = cols.clone();
-        inner_cols.push(named(col(a, DELETED_COLUMN), DELETED_COLUMN));
+        inner_cols.push(pn!("{a}._deleted AS _deleted"));
         // node_scan filters `_deleted` inside; the anchor judges it on the
         // deduped row instead, so rebuild the scan without it.
         let PhysOp::Filter {
@@ -270,65 +225,51 @@ impl<'a> PlanCtx<'a> {
         }
     }
 
-    fn frontier_arm(
-        &self,
-        depth: u32,
-        f: &Frontier<'_>,
-        tables: &[String],
-        rel_types: &[String],
-        has_scope: bool,
-        include_tp: bool,
-    ) -> PhysOp {
+    fn frontier_arm(&self, depth: u32, f: &Frontier<'_>) -> PhysOp {
         let (anchor_col, next_col) = match f.dir {
             FDir::Forward => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN),
             FDir::Backward => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
         };
-        let scope_of = |op: PhysOp, a: &str| {
-            if !has_scope {
+        let scoped = |op: PhysOp, a: &str| {
+            if !f.has_scope {
                 return op;
             }
-            op.semi(
-                scan(SCOPE_CTE, SCOPE_CTE, Dedup::None),
-                (
-                    (a.into(), TRAVERSAL_PATH_COLUMN.into()),
-                    (SCOPE_CTE.into(), TRAVERSAL_PATH_COLUMN.into()),
-                ),
-            )
+            let eq = on(&[&format!("{a}.traversal_path = {SCOPE_CTE}.traversal_path")])[0].clone();
+            op.semi(scan(SCOPE_CTE, SCOPE_CTE, Dedup::None), eq)
         };
         // A specific first-hop filter wins; otherwise the general rel_type
         // filter keeps e1 from going unfiltered.
         let first_types = if f.first_hop_types.is_empty() {
-            rel_types
+            f.rel_types
         } else {
             f.first_hop_types
         };
         let edge = |a: &str| -> PhysOp {
-            let base = self.edge_scan(tables, a, |_| vec![]);
-            if a == "e1" {
-                scope_of(f.anchor.apply(base, a, anchor_col), a)
-            } else {
-                scope_of(base, a)
-            }
+            let base = self.edge_scan(f.tables, a, |_| vec![]);
+            scoped(
+                if a == "e1" {
+                    f.anchor.apply(base, a, anchor_col)
+                } else {
+                    base
+                },
+                a,
+            )
         };
         let hop_preds = |a: &str, first: bool| -> Vec<PExpr> {
-            let mut p = Vec::new();
+            let mut p: Vec<PExpr> = rel_kind(a, if first { first_types } else { f.rel_types })
+                .into_iter()
+                .collect();
             if first {
-                p.extend(rel_kind(a, first_types));
-                p.push(eq(col(a, kind_col(anchor_col)), lit(f.anchor_entity)));
-                p.push(deleted_false(a));
+                let kind = kind_col(anchor_col);
+                p.push(pe!("{a}.{kind} = {:?}", f.anchor_entity));
                 p.extend(f.anchor_tags.iter().cloned());
-            } else {
-                p.extend(rel_kind(a, rel_types));
-                p.push(deleted_false(a));
             }
+            p.push(deleted_false(a));
             p
         };
         let hop_on = |prev: &str, curr: &str| -> Vec<(Col, Col)> {
-            if include_tp {
-                vec![(
-                    (prev.into(), TRAVERSAL_PATH_COLUMN.into()),
-                    (curr.into(), TRAVERSAL_PATH_COLUMN.into()),
-                )]
+            if f.include_tp {
+                on(&[&format!("{prev}.traversal_path = {curr}.traversal_path")])
             } else {
                 vec![]
             }
@@ -343,35 +284,24 @@ impl<'a> PlanCtx<'a> {
         // Backward depth 1 has no intermediate nodes; keep the arm's column
         // type as Array(Tuple(Int64, String)) with an empty typed array.
         let path = if nodes.is_empty() {
-            func(
-                "arrayResize",
-                vec![
-                    func("array", vec![func("tuple", vec![lit(0), lit("")])]),
-                    lit(0),
-                ],
-            )
+            pe!("arrayResize([tuple(0, '')], 0)")
         } else {
             path_nodes(nodes, next_col)
         };
-        let kinds = func(
-            "array",
-            (1..=depth)
-                .map(|i| col(&format!("e{i}"), RELATIONSHIP_KIND_COLUMN))
-                .collect(),
-        );
+        let kinds: Vec<String> = (1..=depth)
+            .map(|i| format!("e{i}.relationship_kind"))
+            .collect();
+        let next_kind = kind_col(next_col);
         let mut columns = vec![
-            named(col("e1", anchor_col), ANCHOR_ID_COLUMN),
-            named(col(&last, next_col), END_ID_COLUMN),
-            named(col(&last, kind_col(next_col)), END_KIND_COLUMN),
+            pn!("e1.{anchor_col} AS anchor_id"),
+            pn!("{last}.{next_col} AS end_id"),
+            pn!("{last}.{next_kind} AS end_kind"),
             named(path, PATH_NODES_COLUMN),
-            named(kinds, FRONTIER_EDGE_KINDS_COLUMN),
-            named(lit(depth as i64), DEPTH_COLUMN),
+            pn!("[{}] AS edge_kinds", kinds.join(", ")),
+            pn!("{depth} AS depth"),
         ];
-        if include_tp {
-            columns.push(named(
-                col("e1", TRAVERSAL_PATH_COLUMN),
-                TRAVERSAL_PATH_COLUMN,
-            ));
+        if f.include_tp {
+            columns.push(pn!("e1.traversal_path AS traversal_path"));
         }
         chain.project(columns)
     }
@@ -387,7 +317,7 @@ fn scope_cte(start: &Anchor, end: &Anchor) -> Option<(String, PhysOp)> {
     }
     let arm = |cte: &str, a: &str| PhysOp::Aggregate {
         input: Box::new(scan(cte, a, Dedup::None)),
-        group_by: vec![named(col(a, TRAVERSAL_PATH_COLUMN), TRAVERSAL_PATH_COLUMN)],
+        group_by: vec![pn!("{a}.traversal_path AS traversal_path")],
         metrics: vec![],
     };
     Some((
