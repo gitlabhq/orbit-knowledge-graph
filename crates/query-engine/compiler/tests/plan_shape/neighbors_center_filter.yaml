@@ -3,7 +3,7 @@ input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","fi
 expected: |
   (Limit 21
     (Project [e.target_id:_gkg_neighbor_id e.target_kind:_gkg_neighbor_type e.relationship_kind:_gkg_relationship_type 1:_gkg_neighbor_is_outgoing e.source_id:_gkg_mr_id "MergeRequest":_gkg_mr_type]
-      (Join Inner (e.source_id = mr.id)
+      (Join Semi/mat (e.source_id = _nf_mr.id)
         (Filter [source_kind="MergeRequest" relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES",…+11] !deleted]
           (Scan gl_edge e))
         (Filter [title:contains !deleted]

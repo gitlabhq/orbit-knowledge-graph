@@ -2,7 +2,7 @@ name: "Two FK hops — all nodes joined, no edge tables"
 input: {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}
 expected: |
   (Limit 11
-    (Project [e0.traversal_path:e0_path e0.relationship_kind:e0_type e0.source_id:e0_src e0.source_kind:e0_src_type e0.target_id:e0_dst e0.target_kind:e0_dst_type e1.traversal_path:e1_path e1.relationship_kind:e1_type e1.source_id:e1_src e1.source_kind:e1_src_type e1.target_id:e1_dst e1.target_kind:e1_dst_type @id @iid @status @ref @source @id @name @status @ref @id @name @full_path @visibility_level]
+    (Project [e0.traversal_path:e0_path "HAS_JOB":e0_type (pipe.id):e0_src "Pipeline":e0_src_type (j.id):e0_dst "Job":e0_dst_type e1.traversal_path:e1_path "IN_PROJECT":e1_type (pipe.id):e1_src "Pipeline":e1_src_type (p.id):e1_dst "Project":e1_dst_type @id @iid @status @ref @source @id @name @status @ref @id @name @full_path @visibility_level]
       (Join Inner (e0.target_id = e1.source_id)
         (Filter [!deleted scope(…)]
           (Join Inner (j.pipeline_id = pipe.id)

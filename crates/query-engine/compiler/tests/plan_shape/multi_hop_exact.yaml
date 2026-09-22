@@ -2,9 +2,9 @@ name: "Exact 2 hops — 1 depth arm with narrowing CTE"
 input: {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[2,2]}],"limit":10}
 expected: |
   (Limit 11
-    (Project [e0.traversal_path:hop_e0_path e0.relationship_kind:hop_e0_type e0.source_id:hop_e0_src e0.source_kind:hop_e0_src_type e0.target_id:hop_e0_dst e0.target_kind:hop_e0_dst_type e0.path_nodes:hop_e0_path_nodes @id @name @full_path @visibility_level @id @name @full_path @visibility_level]
+    (Project [e0.traversal_path:hop_e0_path "CONTAINS":hop_e0_type (g.id):hop_e0_src "Group":hop_e0_src_type (p.id):hop_e0_dst "Project":hop_e0_dst_type e0.path_nodes:hop_e0_path_nodes @id @name @full_path @visibility_level @id @name @full_path @visibility_level]
       (Join Inner (e0.target_id = p.id)
-        (Join Inner (e0.source_id = g.id)
+        (Join Semi/mat (e0.source_id = _nf_g.id)
           (Filter [!deleted]
             (Project [e1.source_id:source_id e2.target_id:target_id e1.relationship_kind:relationship_kind ([(e1.target_id e1.target_kind) (e2.target_id e2.target_kind)]):path_nodes 2:depth e1._deleted:_deleted e1.traversal_path:traversal_path]
               (Join Inner (e1.target_id = e2.source_id)

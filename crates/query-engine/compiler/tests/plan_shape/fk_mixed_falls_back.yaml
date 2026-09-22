@@ -3,7 +3,7 @@ input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","
 expected: |
   (Limit 2
     (Agg [group: ] [metrics: COUNT(mr.*):n]
-      (Join Inner (e0.target_id = label.id)
+      (Join Semi/mat (e0.target_id = _nf_label.id)
         (Join Inner (e0.target_id = e1.source_id)
           (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" !deleted scope(…) source_id∈[1]]
             (Scan gl_edge e0))

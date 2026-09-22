@@ -3,7 +3,7 @@ input: {"query_type":"traversal","nodes":[{"id":"label","entity":"Label","filter
 expected: |
   (Limit 11
     (Project [e0.traversal_path:e0_path e0.relationship_kind:e0_type e0.source_id:e0_src e0.source_kind:e0_src_type e0.target_id:e0_dst e0.target_kind:e0_dst_type @id @title @color @id @iid @title @state @source_branch @target_branch]
-      (Join Inner (e0.target_id = label.id)
+      (Join Semi/mat (e0.target_id = _nf_label.id)
         (Join Inner (e0.source_id = mr.id)
           (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" !deleted]
             (Scan gl_edge e0))

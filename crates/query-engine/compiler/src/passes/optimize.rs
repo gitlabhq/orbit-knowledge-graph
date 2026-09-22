@@ -31,6 +31,12 @@ fn apply_rules(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
         rule_column_pushdown,
         rule_prune_unreferenced_agg_node,
         rule_remove_stale_edge_predicates,
+        rule_narrowing_cte,
+        rule_cascade_sip,
+        rule_fk_edge_metadata,
+        rule_scope_anchor_elision,
+        rule_count_target_fk_rejoin,
+        rule_limit_by_single_hop_agg,
     ];
     for rule in rules {
         if let Some(rewritten) = rule(&tree, ctx) {
@@ -692,4 +698,385 @@ fn rule_remove_stale_edge_predicates(op: &PhysOp, _ctx: &RuleCtx) -> Option<Phys
             input: input.clone(),
         })
     }
+}
+
+// ── Rule 10: Narrowing CTE for selective endpoints ──────────────────────────
+
+fn rule_narrowing_cte(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    // Match: Join(left, Filter(Scan(node_table, alias, FINAL), preds))
+    // where the node has high-selectivity filters
+    // and there's an edge scan somewhere in `left` that references this node
+    let PhysOp::Join {
+        left,
+        right,
+        on,
+        kind: JoinKind::Inner,
+    } = op
+    else {
+        return None;
+    };
+    let node_alias = scan_alias(right)?;
+    let node = ctx.input.nodes.iter().find(|n| n.id == node_alias)?;
+    if !is_selective(node) || node.table.is_none() {
+        return None;
+    }
+
+    // Check that left has an edge scan that references this node via the join ON
+    let edge_alias_str = &on.left.0;
+    if alias_to_rel_index(edge_alias_str).is_none() && !edge_alias_str.starts_with('e') {
+        return None; // left side isn't an edge
+    }
+
+    // Don't add narrowing if already present
+    if has_semi_join_for(left, &node_alias) {
+        return None;
+    }
+
+    let cte_name = format!("_nf_{node_alias}");
+    let edge_col = &on.left.1;
+
+    // Wrap the left (edge chain) in a Semi join with the node scan as CTE
+    let narrowed = PhysOp::Join {
+        left: left.clone(),
+        right: Box::new(filtered_node_scan(node)),
+        on: JoinOn {
+            left: (edge_alias_str.clone(), edge_col.clone()),
+            right: (
+                cte_name,
+                ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+            ),
+        },
+        kind: JoinKind::Semi { materialize: true },
+    };
+
+    Some(PhysOp::Join {
+        left: Box::new(narrowed),
+        right: right.clone(),
+        on: on.clone(),
+        kind: JoinKind::Inner,
+    })
+}
+
+fn is_selective(node: &InputNode) -> bool {
+    !node.node_ids.is_empty()
+        || node.id_range.is_some()
+        || node.filters.iter().any(|(_, fs)| {
+            fs.iter()
+                .any(|f| f.selectivity == ontology::FieldSelectivity::High)
+        })
+}
+
+fn has_semi_join_for(op: &PhysOp, alias: &str) -> bool {
+    match op {
+        PhysOp::Join {
+            kind: JoinKind::Semi { .. },
+            on,
+            ..
+        } => on.right.0.contains(alias),
+        PhysOp::Join { left, right, .. } => {
+            has_semi_join_for(left, alias) || has_semi_join_for(right, alias)
+        }
+        PhysOp::Filter { input, .. }
+        | PhysOp::Project { input, .. }
+        | PhysOp::Sort { input, .. }
+        | PhysOp::Limit { input, .. }
+        | PhysOp::Aggregate { input, .. } => has_semi_join_for(input, alias),
+        _ => false,
+    }
+}
+
+// ── Rule 11: Cascade SIP ────────────────────────────────────────────────────
+
+fn rule_cascade_sip(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    // Match: Join(prev_chain, Filter(Scan(edge, e{N})), on: prev.col = e{N}.col)
+    // where N > 0 and the previous hop has selective endpoints
+    let PhysOp::Join {
+        left,
+        right,
+        on,
+        kind: JoinKind::Inner,
+    } = op
+    else {
+        return None;
+    };
+    let edge_alias = edge_scan_alias(right)?;
+    let idx = alias_to_rel_index(&edge_alias)?;
+    if idx == 0 {
+        return None;
+    } // first hop, no previous to anchor from
+
+    // Check previous hop has selective nodes
+    let prev_rel = ctx.input.relationships.get(idx - 1)?;
+    let prev_selective = [&prev_rel.from, &prev_rel.to].iter().any(|na| {
+        ctx.input
+            .nodes
+            .iter()
+            .find(|n| &n.id == *na)
+            .is_some_and(|n| is_selective(n))
+    });
+    if !prev_selective {
+        return None;
+    }
+
+    // Don't add if already has a semi-join
+    if matches!(
+        right.as_ref(),
+        PhysOp::Join {
+            kind: JoinKind::Semi { .. },
+            ..
+        }
+    ) {
+        return None;
+    }
+
+    // Add Semi join: e{N}.start_col IN (SELECT prev.end_col FROM prev WHERE prev_preds)
+    let (_, prev_end) = prev_rel.direction.edge_columns();
+    let prev_alias = format!("e{}", idx - 1);
+    let (curr_start, _) = ctx.input.relationships[idx].direction.edge_columns();
+
+    let new_right = PhysOp::Join {
+        left: right.clone(),
+        right: Box::new(PhysOp::Scan {
+            table: String::new(),
+            alias: prev_alias.clone(),
+            dedup: false,
+        }),
+        on: JoinOn {
+            left: (edge_alias.clone(), curr_start.to_string()),
+            right: (prev_alias, prev_end.to_string()),
+        },
+        kind: JoinKind::Semi { materialize: false },
+    };
+
+    Some(PhysOp::Join {
+        left: left.clone(),
+        right: Box::new(new_right),
+        on: on.clone(),
+        kind: JoinKind::Inner,
+    })
+}
+
+// ── Rule 12: FK edge metadata synthesis ─────────────────────────────────────
+
+fn rule_fk_edge_metadata(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    let PhysOp::Project { input, columns } = op else {
+        return None;
+    };
+
+    // Check if any columns reference edge aliases that don't exist in the tree
+    let has_stale_edge_refs = columns.iter().any(|c| match c {
+        ProjectedColumn::Ref { table, .. } => {
+            table.starts_with('e')
+                && alias_to_rel_index(table).is_some()
+                && !has_alias(input, table)
+        }
+        _ => false,
+    });
+    if !has_stale_edge_refs {
+        return None;
+    }
+
+    // Rewrite edge column refs to literals/computed values
+    let new_columns: Vec<ProjectedColumn> = columns
+        .iter()
+        .map(|c| match c {
+            ProjectedColumn::Ref {
+                table,
+                column,
+                alias,
+            } if table.starts_with('e')
+                && alias_to_rel_index(table).is_some()
+                && !has_alias(input, table) =>
+            {
+                let idx = alias_to_rel_index(table).unwrap();
+                if let Some(rel) = ctx.input.relationships.get(idx) {
+                    let rel_type = rel.types.first().map(|s| s.as_str()).unwrap_or("");
+                    let from_entity = ctx
+                        .input
+                        .nodes
+                        .iter()
+                        .find(|n| n.id == rel.from)
+                        .and_then(|n| n.entity.as_deref())
+                        .unwrap_or("");
+                    let to_entity = ctx
+                        .input
+                        .nodes
+                        .iter()
+                        .find(|n| n.id == rel.to)
+                        .and_then(|n| n.entity.as_deref())
+                        .unwrap_or("");
+
+                    match column.as_str() {
+                        c if c == ontology_constants::RELATIONSHIP_KIND_COLUMN => {
+                            ProjectedColumn::Computed {
+                                expr: ColumnExpr::Lit(Value::Str(rel_type.to_string())),
+                                alias: alias.clone(),
+                            }
+                        }
+                        c if c == ontology_constants::SOURCE_ID_COLUMN => {
+                            ProjectedColumn::Computed {
+                                expr: ColumnExpr::Col(
+                                    rel.from.clone(),
+                                    ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+                                ),
+                                alias: alias.clone(),
+                            }
+                        }
+                        c if c == ontology_constants::SOURCE_KIND_COLUMN => {
+                            ProjectedColumn::Computed {
+                                expr: ColumnExpr::Lit(Value::Str(from_entity.to_string())),
+                                alias: alias.clone(),
+                            }
+                        }
+                        c if c == ontology_constants::TARGET_ID_COLUMN => {
+                            ProjectedColumn::Computed {
+                                expr: ColumnExpr::Col(
+                                    rel.to.clone(),
+                                    ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+                                ),
+                                alias: alias.clone(),
+                            }
+                        }
+                        c if c == ontology_constants::TARGET_KIND_COLUMN => {
+                            ProjectedColumn::Computed {
+                                expr: ColumnExpr::Lit(Value::Str(to_entity.to_string())),
+                                alias: alias.clone(),
+                            }
+                        }
+                        _ => c.clone(),
+                    }
+                } else {
+                    c.clone()
+                }
+            }
+            _ => c.clone(),
+        })
+        .collect();
+
+    if new_columns == *columns {
+        return None;
+    }
+    Some(PhysOp::Project {
+        input: input.clone(),
+        columns: new_columns,
+    })
+}
+
+// ── Rule 13: Scope anchor elision ───────────────────────────────────────────
+
+fn rule_scope_anchor_elision(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    if ctx.input.query_type != QueryType::Aggregation {
+        return None;
+    }
+    let PhysOp::Join {
+        left,
+        right,
+        kind: JoinKind::Inner,
+        ..
+    } = op
+    else {
+        return None;
+    };
+    let alias = scan_alias(right)?;
+    let node = ctx.input.nodes.iter().find(|n| n.id == alias)?;
+
+    // Pure scope anchor: only scope filters, not in group-by/metrics/order-by
+    let in_group_by = ctx
+        .input
+        .aggregation
+        .group_by
+        .iter()
+        .any(|g| g.node() == alias.as_str());
+    let in_metrics = ctx
+        .input
+        .aggregation
+        .metrics
+        .iter()
+        .any(|m| m.expr.node() == alias.as_str());
+    let in_order_by = ctx
+        .input
+        .order_by
+        .as_ref()
+        .is_some_and(|ob| ob.node == alias);
+    if in_group_by || in_metrics || in_order_by {
+        return None;
+    }
+
+    // Must have only scope-related filters (no user-visible filters)
+    let has_only_scope =
+        node.filters.is_empty() && node.node_ids.is_empty() && node.id_range.is_none();
+    if !has_only_scope {
+        return None;
+    }
+
+    // Check if a scope prefix has been resolved (restrict sets this)
+    let has_scope = ctx
+        .input
+        .relationships
+        .iter()
+        .any(|r| (r.from == alias || r.to == alias) && r.scope_prefix.is_some());
+    if !has_scope {
+        return None;
+    }
+
+    Some(*left.clone())
+}
+
+// ── Rule 14: Count target FK re-join ────────────────────────────────────────
+
+fn rule_count_target_fk_rejoin(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    if ctx.input.query_type != QueryType::Aggregation {
+        return None;
+    }
+    let PhysOp::Aggregate {
+        input,
+        group_by,
+        metrics,
+    } = op
+    else {
+        return None;
+    };
+
+    for m in metrics {
+        let node_alias = &m.node;
+        if !has_alias(input, node_alias) {
+            // Count target not in tree — need to re-join
+            let node = ctx.input.nodes.iter().find(|n| &n.id == node_alias)?;
+            // Find the FK relationship that connects this node
+            for rel in &ctx.input.relationships {
+                if let Some(ref fk_col) = rel.fk_column {
+                    let (fk_alias, tgt_alias) = fk_sides(rel, fk_col, ctx);
+                    if tgt_alias == node_alias || fk_alias == node_alias {
+                        let new_input = PhysOp::Join {
+                            left: input.clone(),
+                            right: Box::new(filtered_node_scan(node)),
+                            on: JoinOn {
+                                left: (fk_alias.to_string(), fk_col.clone()),
+                                right: (
+                                    node_alias.clone(),
+                                    ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+                                ),
+                            },
+                            kind: JoinKind::Inner,
+                        };
+                        return Some(PhysOp::Aggregate {
+                            input: Box::new(new_input),
+                            group_by: group_by.clone(),
+                            metrics: metrics.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// ── Rule 15: LIMIT BY for single-hop aggregation ────────────────────────────
+// Single-hop edge aggregation: use dedup=false (LIMIT BY in lower) instead of FINAL
+
+fn rule_limit_by_single_hop_agg(_op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
+    // TODO: This requires lower_v2 to emit LIMIT BY instead of FINAL when dedup=false
+    // on an edge scan inside an Aggregate. For now, skip.
+    None
 }
