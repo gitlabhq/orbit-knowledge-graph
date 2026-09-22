@@ -180,10 +180,11 @@ they reach for grep. It detects the agents installed on your machine:
 orbit setup
 ```
 
-Name agents to configure only those, for example `orbit setup claude codex`.
-Add `--mcp` to also register the `orbit` MCP server. Run `orbit setup --help`
-for the other options. Supported agents are GitLab Duo, Claude Code, Codex,
-OpenCode, and Pi.
+A picker lists the detected agents, all pre-selected. Press Enter to apply,
+or pass `--yes` to skip the picker. Name an agent to add it even when it is
+not detected, for example `orbit setup claude codex`. Add `--mcp` to also register
+the `orbit` MCP server. Run `orbit setup --help` for the other options.
+Supported agents are GitLab Duo, Claude Code, Codex, OpenCode, and Pi.
 
 ### What it changes
 
@@ -228,10 +229,11 @@ To undo the changes, run:
 orbit uninstall
 ```
 
-Name agents to undo only those. It removes what `orbit setup` wrote and leaves
+It lists the detected agents that have GitLab Orbit installed in that scope.
+Name agents to target only those. It removes what `orbit setup` wrote and leaves
 the rest of each file untouched. Files you edited after setup are kept, and so
 are their backups. A backup goes away once its file is back to the original.
-`--project` and `--dir` work as they do for `orbit setup`.
+`--yes`, `--project`, and `--dir` work as they do for `orbit setup`.
 
 If you would rather not have `orbit setup` touch your files, skip it and add the
 same instruction block, MCP entry, and hooks by hand.

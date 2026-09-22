@@ -5,27 +5,27 @@ use serde_json::{Value, json};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 use super::json;
-use super::{Installer, Report, backup_once, drop_backup_when_restored, remove_file};
+use super::{
+    Installer, Report, backup_once, drop_backup_when_restored, file_mentions,
+    remove_file_and_empty_parents, write_file,
+};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent, DIRECT_LAUNCHER, McpFormat};
 
 pub(super) struct McpServer;
 
 impl Installer for McpServer {
-    fn plan(&self, assistant: Agent, target: &Target) -> Result<Vec<String>> {
-        assistant
+    fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
+        agent
             .mcp
             .iter()
             .map(|entry| target.resolve(&entry.file).map(|(_, label)| label))
             .collect()
     }
 
-    fn install(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
+    fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         let server = spec::mcp_server();
-        for entry in assistants
-            .iter()
-            .filter_map(|assistant| assistant.mcp.as_ref())
-        {
+        for entry in agents.iter().filter_map(|agent| agent.mcp.as_ref()) {
             let (path, label) = target.resolve(&entry.file)?;
             match entry.format {
                 McpFormat::Codex => install_toml(&path, &label, &server, report)?,
@@ -37,12 +37,9 @@ impl Installer for McpServer {
         Ok(())
     }
 
-    fn remove(&self, assistants: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
+    fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         let name = spec::mcp_server().name;
-        for entry in assistants
-            .iter()
-            .filter_map(|assistant| assistant.mcp.as_ref())
-        {
+        for entry in agents.iter().filter_map(|agent| agent.mcp.as_ref()) {
             let (path, label) = target.resolve(&entry.file)?;
             if !path.exists() {
                 continue;
@@ -56,9 +53,18 @@ impl Installer for McpServer {
         }
         Ok(())
     }
+
+    fn is_installed(&self, agent: Agent, target: &Target) -> bool {
+        let server = spec::mcp_server();
+        agent.mcp.as_ref().is_some_and(|entry| {
+            target.resolve(&entry.file).is_ok_and(|(path, _)| {
+                file_mentions(&path, server.name) && file_mentions(&path, DIRECT_LAUNCHER)
+            })
+        })
+    }
 }
 
-fn container_key(format: McpFormat) -> &'static str {
+fn servers_key(format: McpFormat) -> &'static str {
     match format {
         McpFormat::Claude => "mcpServers",
         McpFormat::Opencode => "mcp",
@@ -66,7 +72,7 @@ fn container_key(format: McpFormat) -> &'static str {
     }
 }
 
-fn json_entry(format: McpFormat, server: &spec::McpServer) -> Value {
+fn server_json_entry(format: McpFormat, server: &spec::McpServer) -> Value {
     match format {
         McpFormat::Opencode => {
             let command: Vec<&str> = std::iter::once(server.command.as_str())
@@ -87,8 +93,8 @@ fn install_json(
     server: &spec::McpServer,
     report: &mut Report,
 ) -> Result<()> {
-    let key = container_key(format);
-    let entry = json_entry(format, server);
+    let key = servers_key(format);
+    let entry = server_json_entry(format, server);
     refuse_commented_sibling(path, key, server.name, &entry)?;
 
     let mut root = json::read_object(path)?;
@@ -133,7 +139,7 @@ fn remove_json(
     target: &Target,
     report: &mut Report,
 ) -> Result<()> {
-    let key = container_key(format);
+    let key = servers_key(format);
     let mut root = json::read_object(path)?;
     let map = root.as_object_mut().expect("read_object returns objects");
     let Some(servers) = map.get_mut(key).and_then(Value::as_object_mut) else {
@@ -160,7 +166,7 @@ fn install_toml(
     report: &mut Report,
 ) -> Result<()> {
     let mut document = read_toml(path)?;
-    let key = container_key(McpFormat::Codex);
+    let key = servers_key(McpFormat::Codex);
     let container = document.entry(key).or_insert_with(|| {
         let mut table = Table::new();
         table.set_implicit(true);
@@ -181,7 +187,7 @@ fn install_toml(
     if path.exists() {
         backup_once(path, label, report)?;
     }
-    write_toml(path, &document)?;
+    write_file(path, document.to_string())?;
     report.note(label, format!("mcp server {} registered", server.name));
     Ok(())
 }
@@ -194,7 +200,7 @@ fn remove_toml(
     report: &mut Report,
 ) -> Result<()> {
     let mut document = read_toml(path)?;
-    let key = container_key(McpFormat::Codex);
+    let key = servers_key(McpFormat::Codex);
     let Some(servers) = document.get_mut(key).and_then(Item::as_table_mut) else {
         return Ok(());
     };
@@ -210,10 +216,10 @@ fn remove_toml(
         document.remove(key);
     }
     if document.to_string().trim().is_empty() {
-        remove_file(path, target)?;
+        remove_file_and_empty_parents(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {
-        write_toml(path, &document)?;
+        write_file(path, document.to_string())?;
         report.note(label, "orbit entries removed");
         drop_backup_when_restored(path, label, report)?;
     }
@@ -231,13 +237,4 @@ fn read_toml(path: &Path) -> Result<DocumentMut> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DocumentMut::new()),
         Err(e) => Err(e).with_context(|| format!("failed to read {}", path.display())),
     }
-}
-
-fn write_toml(path: &Path, document: &DocumentMut) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    std::fs::write(path, document.to_string())
-        .with_context(|| format!("failed to write {}", path.display()))
 }
