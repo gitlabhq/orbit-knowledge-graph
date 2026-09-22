@@ -8,7 +8,6 @@ publish = false
 tree-dsl = { path = "../tree-dsl" }
 lance-graph = { workspace = true }
 arrow_56 = { workspace = true }
-arrow = { workspace = true }
 globset = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
@@ -16,8 +15,13 @@ serde_json = { workspace = true }
 tabled = { workspace = true }
 anyhow = { workspace = true }
 serde_yaml = { workspace = true }
-tempfile = { workspace = true }
 walkdir = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+tempfile = { workspace = true }
+
+# build.rs generates the suite tests as `#[tokio::test]` functions; cargo-shear
+# does not read generated code, so it reports `tokio` as unused.
+[package.metadata.cargo-shear]
+ignored = ["tokio"]

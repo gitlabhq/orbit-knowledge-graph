@@ -2,6 +2,7 @@
 name = "tree-dsl"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 tree-sitter = "0.26.3"
@@ -26,7 +27,6 @@ tree-sitter-zig = "1.1.2"
 tree-sitter-haskell = "0.23.1"
 tree-sitter-ocaml = "0.25.0"
 smallvec = "1"
-smol_str = "0.3"
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_yaml = "0.9"
@@ -46,4 +46,7 @@ pest = { workspace = true }
 pest_derive = { workspace = true }
 pest_consume = { workspace = true }
 
-
+# pest_derive generates a parser that references `pest` at run time; cargo-shear
+# does not follow derive output, so it reports `pest` as unused.
+[package.metadata.cargo-shear]
+ignored = ["pest"]

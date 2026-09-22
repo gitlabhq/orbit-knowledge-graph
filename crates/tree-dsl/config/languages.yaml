@@ -43,7 +43,8 @@ languages:
     package_markers: [package-info.java]
 
   javascript:
-    extensions: [js, jsx, mjs, cjs]
+    extensions: [js, jsx, mjs, cjs, vue]
+    script_containers: [vue]
     aliases: [js, javascript]
     grammar: tree-sitter-typescript-tsx
     fqn_separator: "::"

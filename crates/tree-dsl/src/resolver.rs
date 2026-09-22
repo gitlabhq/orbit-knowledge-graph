@@ -375,6 +375,23 @@ impl ResolveCtx<'_> {
 }
 
 fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32, Loc> {
+    let mut names = gather_defs_one(tree, fi, exports_key);
+    let aliases: Vec<(u32, u32)> = tree
+        .root()
+        .children()
+        .filter(|c| c.is(C::ModuleExport) && c.child(C::Import).is_none())
+        .flat_map(|e| e.names())
+        .filter_map(|n| Some((n.sym(), n.child_sym(C::Alias)?)))
+        .collect();
+    for (exported, local) in aliases {
+        if let Some(&loc) = names.get(&local) {
+            names.insert(exported, loc);
+        }
+    }
+    names
+}
+
+fn gather_defs_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32, Loc> {
     tree.root().fold_tree(FxHashMap::default(), |names, c, _w| {
         if !c.is(C::Def) || c.has(C::Constructor) || c.has(C::ImplBlock) {
             return;
@@ -429,7 +446,10 @@ fn gather_imports_for(
                         return;
                     };
                     let raw_path = lang.syms.resolve(resolved_sym);
-                    let target_path = apply_aliases(raw_path, aliases);
+                    let target_path = match apply_aliases(source_str, aliases) {
+                        Some(aliased) => aliased,
+                        None => raw_path.to_string(),
+                    };
                     let node_idx = cur.index();
                     let direct = resolve_glob(&target_path, file_index, lookup_prefixes);
                     let candidates = match direct.is_empty() {
@@ -1186,16 +1206,15 @@ fn resolve_submodule(
     file_index.get(&format!("{dir}{PATH_SEP}{name}"))
 }
 
-fn apply_aliases(path: &str, aliases: &[(String, String)]) -> String {
-    for (key, val) in aliases {
-        if let Some(rest) = path.strip_prefix(key.as_str()) {
-            let rest = rest.strip_prefix('/').unwrap_or(rest);
-            return if rest.is_empty() {
-                val.clone()
-            } else {
-                format!("{val}/{rest}")
-            };
+/// An alias rewrites an import request whose leading path segments equal the
+/// alias key; relative requests are resolved against the importing file instead.
+fn apply_aliases(request: &str, aliases: &[(String, String)]) -> Option<String> {
+    aliases.iter().find_map(|(key, val)| {
+        let rest = request.strip_prefix(key.as_str())?;
+        match rest.strip_prefix(PATH_SEP) {
+            None if rest.is_empty() => Some(val.clone()),
+            Some(rest) => Some(format!("{val}{PATH_SEP}{rest}")),
+            None => None,
         }
-    }
-    path.to_string()
+    })
 }

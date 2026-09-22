@@ -110,6 +110,25 @@ canonical nodes named here.
 - A Kotlin property read in receiver position is a getter call, so the
   property is tagged callable and its getter body attaches to the property.
 
+- Script containers. A language declares `script_containers` in
+  `languages.yaml` (JavaScript: `vue`). The parser keeps the text inside every
+  `<script>` element and blanks the rest with spaces, so spans and line numbers
+  are those of the original file. The rule file then sees ordinary source.
+- Config aliases. A raw config value (webpack `path.join(__dirname, x)`) is a
+  path relative to the config file's directory; `ProjectTree` joins it there.
+  An alias rewrites an import request whose leading segments equal the key,
+  whole segments only (`ee` does not match `ee_else_ce`), before path
+  resolution; relative requests resolve against the importing file instead.
+- Local export alias. `(__module_export (__name Y (__alias X)))` with no
+  `__import` child exports local X under Y; `gather_visible_one` maps Y to X's
+  definition. TypeScript emits it for `export default local` and CommonJS
+  `module.exports = local` (Y is `default`).
+- Call receivers. A member rule keeps a call receiver as a node
+  (`(__member m (__object (__call ...)))`), so the inner call links and its
+  result flows to the member; a rule that collapses the receiver to text loses
+  both. JavaScript matches `$O:call_expression` in the member stage, which runs
+  before calls become `__call`.
+
 ## Gaps by count
 
 No skipped tests remain. Assertions that encoded old-pipeline artifacts are
@@ -182,6 +201,12 @@ corrected to the language rule and carry a `corrected:` note.
 
 Open, ours:
 
+- Webpack aliases whose base is a variable (`path.join(ROOT_PATH, x)` with
+  `ROOT_PATH = path.resolve(__dirname, '..')`, the GitLab monolith's form) are
+  not extracted; the raw regex requires `__dirname` as the base. Evaluating the
+  base binding needs a second extraction and a join rule.
+- Vue `<script setup>` components declare no options object, so no component
+  class is emitted; their top-level bindings are ordinary definitions.
 - Inherited-member pick. Every shallowest-level candidate gets an edge. The
   language rule differs: Python C3 leftmost, Ruby last include, Scala
   rightmost trait, Java superclass over interface default, Go and Kotlin

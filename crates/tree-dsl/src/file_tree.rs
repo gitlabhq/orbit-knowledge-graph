@@ -126,7 +126,14 @@ impl<'a> ProjectTree<'a> {
                         format!("{parent_path}{PATH_SEP}{segment}")
                     };
                     if let Some(content) = file_contents.get(full_path.as_str()) {
-                        inline_config(content, &spec.format, nid, &mut self.tree, self.lang);
+                        inline_config(
+                            content,
+                            parent_path,
+                            &spec.format,
+                            nid,
+                            &mut self.tree,
+                            self.lang,
+                        );
                     }
                 }
             } else {
@@ -266,6 +273,7 @@ impl<'a> ProjectTree<'a> {
 
 fn inline_config(
     content: &str,
+    dir: &str,
     format: &ParseFormat,
     parent: indextree::NodeId,
     tree: &mut Tree,
@@ -276,7 +284,9 @@ fn inline_config(
             for cap in re.captures_iter(content) {
                 let Some(key) = cap.get(1) else { continue };
                 let Some(val) = cap.get(2) else { continue };
-                let val_str = val.as_str().strip_prefix("./").unwrap_or(val.as_str());
+                let Some(val_str) = join_relative(dir, val.as_str()) else {
+                    continue;
+                };
                 let field = tree.append(
                     parent,
                     Node {
@@ -291,7 +301,7 @@ fn inline_config(
                     Node {
                         kind: C::Str.into(),
                         named: true,
-                        sym: lang.syms.intern(val_str),
+                        sym: lang.syms.intern(&val_str),
                         ..Default::default()
                     },
                 );
@@ -312,6 +322,22 @@ fn inline_config(
             emit_json_value(&value, parent, tree, lang);
         }
     }
+}
+
+/// Join a path relative to `dir` and normalize it. A path that climbs above the
+/// project root lies outside the indexed files and yields `None`.
+fn join_relative(dir: &str, rel: &str) -> Option<String> {
+    let mut parts: Vec<&str> = dir.split(PATH_SEP).filter(|s| !s.is_empty()).collect();
+    for seg in rel.split(PATH_SEP) {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            s => parts.push(s),
+        }
+    }
+    Some(parts.join(PATH_SEP))
 }
 
 fn toml_to_json(v: toml::Value) -> serde_json::Value {

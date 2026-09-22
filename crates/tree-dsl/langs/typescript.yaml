@@ -53,6 +53,9 @@ stages:
     rules:
       - match: '(member_expression object: $O:__ivar property: $M)'
         replace: '(__member @$M (__object $O))'
+      # A call receiver stays a node, so the inner call links and its result flows to the member
+      - match: '(member_expression object: $O:call_expression property: $M)'
+        replace: '(__member @$M (__object $O))'
       - match: '(member_expression object: $O property: $M)'
         replace: '(__member @$M (__object @$O))'
 
@@ -98,12 +101,23 @@ stages:
 
       # const x = require('./source') — CJS namespace require
       - match: '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
-        replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
+        replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N) (__import_kind "require")))'
         tag: { import_type: CjsRequire }
+
+      # module.exports = local — the module value is the local, so it is visible as default
+      - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: $R:identifier))'
+        replace: '(__module_export (__name "default" (__alias @$R)))'
+      # module.exports = { a, b } — shorthand keys are locals that are already visible
+      - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: (object)))'
+        replace: '(__module_export)'
 
       # export { A, B } from './source' — named re-export with source (before star)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) $$$SPECS->__name))'
+
+      # export * as ns from './source' — namespace re-export
+      - match: '(export_statement (namespace_export $N:identifier) source: (string $S:string_fragment))'
+        replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N))))'
 
       # export * from './source' — star re-export (no export_clause)
       - match: '(export_statement source: (string $S:string_fragment))'
@@ -194,11 +208,28 @@ stages:
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
         tag: { flavor: abstract }
 
+  - name: vue-components
+    rules:
+      # A single-file component's default export is the component. Its name is
+      # the name option, else the file stem (Vue infers the name from the file).
+      - match: '(__source_file "/\.vue$/" $$$A (export_statement **/(default) value: (__call (__callee "defineComponent") (arguments (object **/(pair key: (property_identifier "name") value: (string $N:string_fragment)) $$$PROPS)))) $$$B)'
+        replace: '(__source_file @$ROOT $$$A (__def (__defname @$N) (__class) (__default_export "default") $$$PROPS) $$$B)'
+      - match: '(__source_file "/\.vue$/" $$$A (export_statement **/(default) value: (__call (__callee "defineComponent") (arguments (object $$$PROPS)))) $$$B)'
+        replace: '(__source_file @$ROOT $$$A (__def (__defname @$ROOT|regex_replace("^.*/", "")|regex_replace("\.vue$", "")) (__class) (__default_export "default") $$$PROPS) $$$B)'
+      - match: '(__source_file "/\.vue$/" $$$A (export_statement **/(default) value: (object **/(pair key: (property_identifier "name") value: (string $N:string_fragment)) $$$PROPS)) $$$B)'
+        replace: '(__source_file @$ROOT $$$A (__def (__defname @$N) (__class) (__default_export "default") $$$PROPS) $$$B)'
+      - match: '(__source_file "/\.vue$/" $$$A (export_statement **/(default) value: (object $$$PROPS)) $$$B)'
+        replace: '(__source_file @$ROOT $$$A (__def (__defname @$ROOT|regex_replace("^.*/", "")|regex_replace("\.vue$", "")) (__class) (__default_export "default") $$$PROPS) $$$B)'
+
   - name: exports
     rules:
       # export default function/class → mark the def as default export
       - match: '(export_statement **/(default) (__def $$$CHILDREN))'
         replace: '(export_statement (__def (__default_export "default") $$$CHILDREN))'
+
+      # export default localName → the local is visible as default
+      - match: '(export_statement **/(default) value: $V:identifier)'
+        replace: '(__module_export (__name "default" (__alias @$V)))'
 
       # export const X = ... → promote binding to Variable def
       - match: '(export_statement (lexical_declaration $B:__binding))'
@@ -253,7 +284,7 @@ resolve:
       format: json
     - name: "webpack.config.js"
       format: raw
-      extract: "['\"]([^'\"]+)['\"]\\s*:\\s*path\\.\\w+\\([^,]+,\\s*['\"]([^'\"]+)['\"]"
+      extract: "['\"]?([^'\"\\s:,{}]+)['\"]?\\s*:\\s*path\\.\\w+\\(\\s*__dirname\\s*,\\s*['\"]([^'\"]+)['\"]"
   lookup_from:
     - __source_root
   stages:
@@ -281,7 +312,7 @@ display:
         tag:
           entity: File
           file_path: '@$M'
-          language: '@$M|split_last(".")|map("ts:typescript", "tsx:tsx", "js:javascript", "jsx:javascript", "mjs:javascript", "cjs:javascript")'
+          language: '@$M|split_last(".")|map("ts:typescript", "tsx:tsx", "js:javascript", "jsx:javascript", "mjs:javascript", "cjs:javascript", "vue:vue")'
 
       - match: '(__def)'
         tag:
@@ -349,11 +380,15 @@ display:
         tag:
           import_type: DefaultImport
           resolved: '@$ROOT|has_incoming("Imports")'
-      - match: '(__name (__alias))'
+      - match: '(__name "default" (__alias))'
         tag:
-          import_type: AliasedImport
-          resolved: '@$ROOT|has_incoming("Imports")'
+          import_type: DefaultImport
+      - match: '(__name "*" (__alias))'
+        tag:
+          import_type: NamespaceImport
+      - match: '(__name (__import_kind "require"))'
+        tag:
+          import_type: CjsRequire
       - match: '(__name)'
         tag:
-          import_type: NamedImport
           resolved: '@$ROOT|has_incoming("Imports")'

@@ -44,6 +44,8 @@ struct LangEntry {
     index_names: Vec<String>,
     #[serde(default, rename = "source_root")]
     _source_root: Option<String>,
+    #[serde(default)]
+    script_containers: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -82,6 +84,20 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
 }
 
 impl SupportLang {
+    /// A script container is a markup file whose source is the text inside its
+    /// `<script>` elements, such as a Vue single-file component.
+    pub fn is_script_container(path: &str) -> bool {
+        std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| {
+                LANG_CONFIG
+                    .languages
+                    .values()
+                    .any(|entry| entry.script_containers.iter().any(|e| e == ext))
+            })
+    }
+
     pub fn from_extension(ext: &str) -> Option<Self> {
         for (lang, entry) in &LANG_CONFIG.languages {
             if entry.extensions.iter().any(|e| e == ext) {
@@ -325,10 +341,43 @@ thread_local! {
 }
 
 pub fn parse(source: &str, support_lang: SupportLang, lang: &Lang, label: &str) -> Tree {
+    let masked;
+    let source = if SupportLang::is_script_container(label) {
+        masked = script_text(source);
+        masked.as_str()
+    } else {
+        source
+    };
     CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         c.ensure(support_lang, lang);
         let ts_tree = c.parser.parse(source.as_bytes(), None).unwrap();
         from_tree_sitter(source, &ts_tree, lang, &c.kinds, &c.fields, label)
     })
+}
+
+/// Keep the text inside every `<script ...>...</script>` element and blank the
+/// rest with spaces, so byte offsets and line numbers match the original file.
+fn script_text(source: &str) -> String {
+    let mut out: Vec<u8> = source
+        .bytes()
+        .map(|b| if b == b'\n' { b'\n' } else { b' ' })
+        .collect();
+    let mut rest = source;
+    let mut base = 0;
+    while let Some(open) = rest.find("<script") {
+        let Some(open_end) = rest[open..].find('>') else {
+            break;
+        };
+        let body_start = open + open_end + 1;
+        let Some(close) = rest[body_start..].find("</script>") else {
+            break;
+        };
+        let body_end = body_start + close;
+        let abs = base + body_start;
+        out[abs..base + body_end].copy_from_slice(&source.as_bytes()[abs..base + body_end]);
+        rest = &rest[body_end..];
+        base += body_end;
+    }
+    String::from_utf8(out).expect("blanking ASCII bytes keeps UTF-8 valid")
 }

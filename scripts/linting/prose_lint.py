@@ -289,8 +289,10 @@ def changed_files(base: str) -> list[str]:
     head = os.environ.get("CI_MERGE_REQUEST_SOURCE_BRANCH_SHA", "HEAD")
     if subprocess.run(["git", "cat-file", "-e", f"{base}^{{commit}}"], capture_output=True).returncode:
         subprocess.run(["git", "fetch", "origin", base, "--depth=1"], capture_output=True)
+    has_merge_base = subprocess.run(["git", "merge-base", base, head], capture_output=True).returncode == 0
+    span = [f"{base}...{head}"] if has_merge_base else [base, head]
     try:
-        changed = set(git("diff", "--name-only", "--diff-filter=d", f"{base}...{head}").split())
+        changed = set(git("diff", "--name-only", "--diff-filter=d", *span).split())
     except subprocess.CalledProcessError as exc:
         raise LintError(f"diff base {base} is unreachable; the lint did not run: {exc.stderr.strip()}") from exc
     return [f for f in scoped_files() if f in changed]
