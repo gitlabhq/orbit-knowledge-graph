@@ -17,5 +17,6 @@ pub mod plan_v2;
 pub mod restrict;
 pub mod security;
 pub mod settings;
+pub mod sexpr;
 pub mod shared;
 pub mod validate;
