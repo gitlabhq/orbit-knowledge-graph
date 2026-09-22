@@ -312,6 +312,7 @@ resolve:
 | `resolve.external` | Root module names to skip (stdlib, third-party). Imports to these never resolve. |
 | `resolve.lookup_from` | Synthetic marker kinds whose directories become import resolution prefixes. |
 | `resolve.parse_files` | Manifest files parsed into the directory tree before resolve stages run. Formats: `json`, `toml`, `raw` with `extract`. |
+| `resolve.merge_same_named_types` | Same-named class defs in one package are parts of one type, keyed by generic arity (bare `__binding` children of the def). C# partial classes. |
 | `resolve.stages` | Ordered list of file-tree rewrite stages. Each is either `rules:` or `climb:`. |
 
 ## Canonical Alphabet

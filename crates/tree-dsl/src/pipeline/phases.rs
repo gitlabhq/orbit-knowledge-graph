@@ -59,7 +59,7 @@ pub fn resolve(
         &dirty_fis,
         env.lang_id,
         &walk.prefixes,
-        &env.config.resolve.external,
+        &env.config.resolve,
         &walk.aliases,
     );
     for rsp in &result.resolved_source_paths {

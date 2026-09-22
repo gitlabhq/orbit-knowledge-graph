@@ -6,6 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
 use crate::intern::Lang;
+use crate::rules::ResolveConfig;
 use crate::tags::ReservedTags;
 use crate::tree::{
     Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, members_by_level, reachable,
@@ -164,7 +165,7 @@ impl Resolver {
         dirty_fis: &FxHashSet<usize>,
         support_lang: SupportLang,
         lookup_prefixes: &[String],
-        external: &[String],
+        config: &ResolveConfig,
         aliases: &[(String, String)],
     ) -> ResolveResult {
         let index_names = support_lang.index_names();
@@ -183,7 +184,7 @@ impl Resolver {
             lang,
             &self.file_index,
             lookup_prefixes,
-            external,
+            &config.external,
             dirty_fis,
             aliases,
         );
@@ -195,6 +196,7 @@ impl Resolver {
             &mut self.visible,
             self.wildcard_sym,
             self.tags,
+            config.merge_same_named_types,
         );
 
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
@@ -239,7 +241,7 @@ impl Resolver {
             }
         }
 
-        let (partials, extensions) = gather_members(trees);
+        let (partials, extensions) = gather_members(trees, config.merge_same_named_types);
         let exporters: Vec<FxHashSet<usize>> = self
             .visible
             .iter()
@@ -273,6 +275,7 @@ impl Resolver {
             index_names,
             wildcard_sym: self.wildcard_sym,
             tags: self.tags,
+            merge_types: config.merge_same_named_types,
             partials: &partials,
             extensions: &extensions,
             exporters: &exporters,
@@ -355,6 +358,7 @@ struct ResolveCtx<'a> {
     index_names: &'a [String],
     wildcard_sym: u32,
     tags: ReservedTags,
+    merge_types: bool,
     partials: &'a FxHashMap<(u32, u32, usize), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     exporters: &'a [FxHashSet<usize>],
@@ -480,6 +484,7 @@ fn propagate_reexports(
     visible: &mut VisibleMap,
     wildcard_sym: u32,
     tags: ReservedTags,
+    merge_types: bool,
 ) -> FxHashSet<(usize, u32)> {
     let mut ambiguous: FxHashSet<(usize, u32)> = FxHashSet::default();
 
@@ -543,7 +548,7 @@ fn propagate_reexports(
         }
         for (fi, ns, loc) in new_exports {
             if let Some(&existing) = visible[fi].get(&ns) {
-                let key = |l: Loc| partial_key(trees[l.fi].cursor(l.node));
+                let key = |l: Loc| partial_key(trees[l.fi].cursor(l.node), merge_types);
                 if existing != loc && (key(existing).is_none() || key(existing) != key(loc)) {
                     ambiguous.insert((fi, ns));
                 }
@@ -863,11 +868,17 @@ fn value_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>) -> Option<Cursor<'a>> {
     }
 }
 
-fn partial_key(d: Cursor) -> Option<(u32, u32, usize)> {
+fn partial_key(d: Cursor, merge_types: bool) -> Option<(u32, u32, usize)> {
+    if !merge_types || !d.is_class() {
+        return None;
+    }
     let pkg = d
         .ancestors()
         .find_map(|a| a.children().find_map(|c| c.child_sym(C::Package)));
-    let arity = d.child(C::Partial)?.children().count();
+    let arity = d
+        .children()
+        .filter(|c| c.is(C::Binding) && c.sym_opt().is_some() && c.children().next().is_none())
+        .count();
     Some((pkg.unwrap_or(0), d.child_sym(C::DefName)?, arity))
 }
 
@@ -876,7 +887,7 @@ type Members = (
     FxHashMap<u32, Vec<Loc>>,
 );
 
-fn gather_members(trees: &[Tree]) -> Members {
+fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
     let (mut parts, mut extensions) = Members::default();
     for (fi, tree) in trees.iter().enumerate() {
         let defs = tree
@@ -885,7 +896,7 @@ fn gather_members(trees: &[Tree]) -> Members {
             .filter(|d| d.is(C::Def));
         for d in defs {
             let loc = Loc::new(fi, d.index());
-            if let Some(key) = partial_key(d) {
+            if let Some(key) = partial_key(d, merge_types) {
                 parts.entry(key).or_default().push(loc);
             }
             let wrapped = d
@@ -1004,7 +1015,7 @@ fn extension_members<'a>(
 }
 
 fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
-    let parts = partial_key(cls).and_then(|k| ctx.partials.get(&k));
+    let parts = partial_key(cls, ctx.merge_types).and_then(|k| ctx.partials.get(&k));
     let parts = parts
         .into_iter()
         .flatten()

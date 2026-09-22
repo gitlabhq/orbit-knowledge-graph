@@ -12,6 +12,7 @@ config:
   resolve:
     lookup_from:
       - __source_root
+    merge_same_named_types: true
 
 stages:
   - name: imports
@@ -56,12 +57,10 @@ stages:
         replace: '(__ssa_branch $$$V)'
       - match: '(throw_expression $$$V)'
         replace: '(__ssa_branch $$$V)'
-      - match: '(modifier "partial")'
-        replace: '(__partial)'
-      - match: '(class_declaration $$$A (__partial) $$$B (type_parameter_list $$$T:type_parameter) $$$C)'
-        replace: '(class_declaration $$$A (__partial $$$T->__binding) $$$B $$$C)'
-      - match: '(struct_declaration $$$A (__partial) $$$B (type_parameter_list $$$T:type_parameter) $$$C)'
-        replace: '(struct_declaration $$$A (__partial $$$T->__binding) $$$B $$$C)'
+      # Type parameters are names bound in the type's scope; their count is the
+      # generic arity that tells C<T> apart from C when parts merge.
+      - match: '(type_parameter_list $$$T:type_parameter)'
+        replace: '(type_parameter_list $$$T->__binding)'
 
       # Types collapse to a bare identifier
       - match: '(generic_name $T:identifier)'

@@ -79,6 +79,9 @@ pub struct ResolveConfig {
     pub lookup_from: Vec<u16>,
     /// Manifest files parsed into the directory tree before resolve stages run.
     pub parse_files: Vec<ParseFileSpec>,
+    /// Same-named class defs in one package are parts of one type, keyed by
+    /// generic arity. True for C#, where a non-partial duplicate cannot compile.
+    pub merge_same_named_types: bool,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -105,6 +108,8 @@ struct ResolveSettingsSection {
     lookup_from: Vec<String>,
     #[serde(default)]
     parse_files: Vec<ParseFileEntry>,
+    #[serde(default)]
+    merge_same_named_types: bool,
 }
 
 fn default_true() -> bool {
@@ -153,6 +158,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Config {
                     },
                 })
                 .collect(),
+            merge_same_named_types: r.merge_same_named_types,
         });
     Config { link, resolve }
 }
