@@ -185,12 +185,10 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
-        let def_idx = if let Some(def_idx) = self.predeclared.remove(&idx) {
-            def_idx
-        } else {
+        let def_idx = self.predeclared.remove(&idx).unwrap_or_else(|| {
             self.defs.push(idx);
             self.defs.len() as u32 - 1
-        };
+        });
         let supers = c
             .children()
             .filter(|s| s.is(C::SuperType))
@@ -491,20 +489,17 @@ impl<'t> Fold<'t> {
 
     fn enclosing_class(&self, node: u32) -> Option<u32> {
         let c = self.tree.cursor(node);
-        if c.is_class() {
-            Some(node)
-        } else {
-            c.enclosing_def(CLASS_LIKE).map(|n| n.index())
-        }
+        let class = Some(c)
+            .filter(|c| c.is_class())
+            .or_else(|| c.enclosing_def(CLASS_LIKE));
+        class.map(|n| n.index())
     }
 
     fn ivar_type(&self, class: u32, attr: u32) -> Option<Cursor<'t>> {
         self.tree.cursor(class).descend(|n| {
             if n.is(C::Binding)
                 && n.child(C::Ivar).is_some_and(|iv| iv.sym() == attr)
-                && let Some(s) = n
-                    .child(C::SsaTyped)
-                    .or_else(|| n.child(C::Rhs)?.child(C::Call)?.child(C::Callee))
+                && let Some(s) = n.typed()
             {
                 return Step::Out(s);
             }

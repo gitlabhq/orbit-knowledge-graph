@@ -30,6 +30,12 @@ pub struct Loc {
     pub node: u32,
 }
 
+impl Loc {
+    fn new(fi: usize, node: u32) -> Self {
+        Self { fi, node }
+    }
+}
+
 pub struct ResolvedSourcePath {
     pub fi: usize,
     pub node: u32,
@@ -52,6 +58,10 @@ impl FileIndex {
         let dir = key.rsplit_once(PATH_SEP).map_or("", |(d, _)| d);
         self.dirs.entry(dir.to_string()).or_default().push(fi);
         self.keys.insert(key, fi);
+    }
+
+    fn get(&self, key: &str) -> Option<usize> {
+        self.keys.get(key).copied()
     }
 }
 
@@ -117,13 +127,8 @@ impl Resolver {
                     .get(loc.fi)
                     .and_then(|l| label_to_fi.get(l.as_str()))
                 {
-                    remapped[new_fi as usize].insert(
-                        sym,
-                        Loc {
-                            fi: target_new_fi as usize,
-                            node: loc.node,
-                        },
-                    );
+                    remapped[new_fi as usize]
+                        .insert(sym, Loc::new(target_new_fi as usize, loc.node));
                 }
             }
         }
@@ -344,10 +349,7 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
         if !c.is(C::Def) || c.has(C::Constructor) || c.has(C::ImplBlock) {
             return;
         }
-        let loc = Loc {
-            fi,
-            node: c.index(),
-        };
+        let loc = Loc::new(fi, c.index());
         let nested = c.is_class() && c.enclosing(|p| p.is(C::Def)).is_some_and(|p| p.is_class());
         for name in c
             .child_sym(C::DefName)
@@ -613,10 +615,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         if !target.has_tag(ctx.callable_key) {
             continue;
         }
-        let target_loc = Loc {
-            fi: ie.to_fi(),
-            node: ie.to_node,
-        };
+        let target_loc = Loc::new(ie.to_fi(), ie.to_node);
         let target_name = ctx.reverse_visible.get(&target_loc).copied().unwrap_or(0);
         let name = ctx.corpus.jump(ie.from_tree, ie.from_node);
         let is_wild = (name.sym() == ctx.wildcard_sym
@@ -650,6 +649,14 @@ fn call_edge(from: Cursor, target: Cursor, site: Option<u32>) -> Edge {
     }
 }
 
+fn call_edges<'a>(
+    from: Cursor<'a>,
+    targets: Vec<Cursor<'a>>,
+    site: Option<u32>,
+) -> impl Iterator<Item = Edge> + 'a {
+    targets.into_iter().map(move |t| call_edge(from, t, site))
+}
+
 fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
     let mut out = Vec::new();
     let root = ctx.corpus.jump(fi as u32, 0);
@@ -659,21 +666,19 @@ fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
                 out.push(child.edge_to(parent, EdgeKind::Extends));
                 for call in child.calls() {
                     let owner = call.enclosing(|e| e.is_class());
-                    if owner.map(|o| o.index()) != Some(child.index()) {
-                        continue;
-                    }
+                    let owned = owner.is_some_and(|o| o.index() == child.index());
                     let callee = call.child(C::Callee).and_then(|k| {
                         k.child_sym(C::Ivar).or_else(|| {
                             (k.has(C::Implicit) || k.has(C::SimpleName)).then(|| k.sym())
                         })
                     });
-                    let Some((from, name)) = call.enclosing(|e| e.is(C::Def)).zip(callee) else {
+                    let from = call.enclosing(|e| e.is(C::Def)).filter(|_| owned);
+                    let Some((from, name)) = from.zip(callee) else {
                         continue;
                     };
                     if find_method_in(child, name).is_none() {
-                        for m in method_up(ctx, parent, name, fi) {
-                            out.push(call_edge(from, m, Some(call.index())));
-                        }
+                        let site = Some(call.index());
+                        out.extend(call_edges(from, method_up(ctx, parent, name, fi), site));
                     }
                 }
             }
@@ -696,10 +701,9 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
             let class = match ctx.producers.get(&(usage.from_tree, usage.site?)) {
                 Some(reaching) if reaching.len() > 1 => lub(
                     ctx,
-                    reaching.iter().map(|e| {
-                        let producer = ctx.corpus.jump(e.to_tree, e.to_node);
-                        class_of(ctx, callee_of(ctx, producer)?)
-                    }),
+                    reaching
+                        .iter()
+                        .map(|e| class_of(ctx, callee_of(ctx, ctx.corpus.follow(e))?)),
                 )?,
                 _ => class?,
             };
@@ -712,11 +716,7 @@ fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
                 None => vec![class],
             };
             let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
-            Some(
-                targets
-                    .into_iter()
-                    .map(move |t| call_edge(from, t, usage.site)),
-            )
+            Some(call_edges(from, targets, usage.site))
         })
         .flatten()
         .collect()
@@ -763,13 +763,7 @@ fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
 fn resolve_receiver<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
     chain(ctx, c, &|r| match bindings_of(r) {
         None => visible_type(ctx, r.fi(), r.sym()),
-        Some(bs) => resolve_chain(
-            ctx,
-            bs.into_iter()
-                .filter_map(Cursor::typed)
-                .exactly_one()
-                .ok()?,
-        ),
+        Some(bs) => resolve_chain(ctx, bs.iter().filter_map(|b| b.typed()).exactly_one().ok()?),
     })
 }
 
@@ -835,10 +829,7 @@ fn gather_partials(trees: &[Tree]) -> FxHashMap<(u32, u32), Vec<Loc>> {
     for (fi, tree) in trees.iter().enumerate() {
         for d in tree.root().descendants_pruned(|n| n.is(C::Def)) {
             if let Some(key) = partial_key(d) {
-                parts.entry(key).or_default().push(Loc {
-                    fi,
-                    node: d.index(),
-                });
+                parts.entry(key).or_default().push(Loc::new(fi, d.index()));
             }
         }
     }
@@ -926,18 +917,12 @@ fn extension_member<'a>(
     name: u32,
     fi: usize,
 ) -> Option<Cursor<'a>> {
-    if ctx.ambiguous.contains(&(fi, name)) {
-        return None;
-    }
-    let loc = ctx.visible[fi].get(&name)?;
-    let method = ctx.corpus.jump(loc.fi as u32, loc.node);
-    let owner = method.enclosing_def(&[C::ImplBlock])?;
-    let receiver = owner.child_sym(C::DefName)?;
-    let target = ctx.visible[loc.fi].get(&receiver)?;
-    (target.fi == cls.fi() as usize
-        && target.node == cls.index()
-        && !ctx.ambiguous.contains(&(loc.fi, receiver)))
-    .then_some(method)
+    let method = visible_type(ctx, fi as u32, name)?;
+    let receiver = method
+        .enclosing_def(&[C::ImplBlock])?
+        .child_sym(C::DefName)?;
+    let target = visible_type(ctx, method.fi(), receiver)?;
+    ((target.fi(), target.index()) == (cls.fi(), cls.index())).then_some(method)
 }
 
 fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
@@ -1005,9 +990,8 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
             continue;
         };
         for (slot, component) in slots.iter().zip(positional.children()) {
-            for m in method_up(ctx, class, component.sym(), fi) {
-                out.push(call_edge(from, m, Some(slot.index())));
-            }
+            let members = method_up(ctx, class, component.sym(), fi);
+            out.extend(call_edges(from, members, Some(slot.index())));
         }
     }
     for (call, m) in root.member_calls() {
@@ -1018,18 +1002,16 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
         let Some(object) = m.child(C::Object) else {
             continue;
         };
-        let mut root = object.reference();
-        while let Some(inner) = root.child(C::Member).and_then(|m| m.child(C::Object)) {
-            root = inner;
-        }
-        let Some(obj) = root.sym_opt() else {
+        let root = std::iter::successors(Some(object.reference()), |r| {
+            r.child(C::Member)?.child(C::Object)
+        });
+        let Some(obj) = root.last().and_then(Cursor::sym_opt) else {
             continue;
         };
         match resolve_receiver(ctx, object) {
             Some(target) if target.fi() != fi as u32 && target.is_class() => {
-                for method in method_up(ctx, target, m.sym(), fi) {
-                    out.push(call_edge(from, method, Some(call.index())));
-                }
+                let members = method_up(ctx, target, m.sym(), fi);
+                out.extend(call_edges(from, members, Some(call.index())));
             }
             None if !bound(obj) => out.extend(unbound(from, obj)),
             _ => {}
@@ -1056,31 +1038,24 @@ fn resolve_field_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
         if typed.map(|t| (t.fi() as usize, t.index())) != Some((ce.to_fi(), ce.to_node)) {
             return;
         }
-        let scope = if ivar.is_some() {
-            n.enclosing_def(CLASS_LIKE)
-        } else {
-            n.enclosing(|c| c.is(C::Def))
-        };
+        let scope = ivar.map_or_else(
+            || n.enclosing(|c| c.is(C::Def)),
+            |_| n.enclosing_def(CLASS_LIKE),
+        );
         let Some(scope) = scope else { return };
+        let shadowed = |c: &Cursor| c.any_desc(|b| b.is(C::Binding) && b.sym_opt() == Some(var));
         for (call, member) in scope.member_calls() {
             let object_ivar = member.object_ivar();
             let obj = object_ivar.map_or(member.child_sym(C::Object), |iv| iv.sym_opt());
             let Some(caller) = call.enclosing(|c| c.is(C::Def)).filter(|caller| {
                 obj == Some(var)
-                    && if object_ivar.is_some() {
-                        ivar.is_some()
-                    } else {
-                        ivar.is_none()
-                            || !caller.any_desc(|binding| {
-                                binding.is(C::Binding) && binding.sym_opt() == Some(var)
-                            })
-                    }
+                    && (object_ivar.is_some() == ivar.is_some()
+                        || object_ivar.is_none() && !shadowed(caller))
             }) else {
                 continue;
             };
-            for m in method_up(ctx, target, member.sym(), ce.from_fi()) {
-                edges.push(call_edge(caller, m, Some(call.index())));
-            }
+            let members = method_up(ctx, target, member.sym(), ce.from_fi());
+            edges.extend(call_edges(caller, members, Some(call.index())));
         }
     })
 }
@@ -1146,18 +1121,13 @@ fn is_external(source_str: &str, external: &[String]) -> bool {
 }
 
 fn resolve_path(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Option<usize> {
-    file_index.keys.get(target).copied().or_else(|| {
-        prefixes.iter().find_map(|p| {
-            if p.is_empty() {
-                file_index.keys.get(target).copied()
-            } else {
-                file_index
-                    .keys
-                    .get(&format!("{p}{PATH_SEP}{target}"))
-                    .copied()
-            }
-        })
-    })
+    let prefixed = prefixes.iter().map(|p| match p.is_empty() {
+        true => target.to_string(),
+        false => format!("{p}{PATH_SEP}{target}"),
+    });
+    std::iter::once(target.to_string())
+        .chain(prefixed)
+        .find_map(|key| file_index.get(&key))
 }
 
 fn resolve_submodule(
@@ -1172,10 +1142,7 @@ fn resolve_submodule(
         stem.strip_suffix(idx.as_str())
             .and_then(|s| s.strip_suffix(PATH_SEP))
     })?;
-    file_index
-        .keys
-        .get(&format!("{dir}{PATH_SEP}{name}"))
-        .copied()
+    file_index.get(&format!("{dir}{PATH_SEP}{name}"))
 }
 
 fn apply_aliases(path: &str, aliases: &[(String, String)]) -> String {

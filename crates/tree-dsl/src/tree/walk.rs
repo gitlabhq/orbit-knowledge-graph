@@ -294,14 +294,12 @@ impl<'a> Cursor<'a> {
         self.child(C::Callee)?.child(C::Member)
     }
 
-    pub fn tail_expr(mut self) -> Self {
-        while !self.is(C::Call) && !self.is(C::SsaBranch) && !self.is(C::Member) {
-            match self.last_named() {
-                Some(c) => self = c,
-                None => break,
-            }
-        }
-        self
+    pub fn tail_expr(self) -> Self {
+        let stop = |c: &Self| c.is(C::Call) || c.is(C::SsaBranch) || c.is(C::Member);
+        let next = |c: &Self| (!stop(c)).then(|| c.last_named()).flatten();
+        std::iter::successors(Some(self), next)
+            .last()
+            .unwrap_or(self)
     }
 
     pub fn object_ivar(self) -> Option<Self> {
