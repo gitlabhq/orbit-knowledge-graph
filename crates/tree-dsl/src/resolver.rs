@@ -261,6 +261,12 @@ impl Resolver {
             .collect();
         cross_edges.extend(&wave1);
 
+        let inheritance: Vec<Edge> = active_fis
+            .par_iter()
+            .flat_map(|&fi| resolve_inheritance(&ctx, fi))
+            .collect();
+        cross_edges.extend(inheritance);
+
         let wave2b: Vec<Edge> = cross_edges
             .par_iter()
             .filter(|e| e.kind == EdgeKind::Imports)
@@ -646,6 +652,41 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     }
 
     edges
+}
+
+fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
+    let mut out = Vec::new();
+    let root = ctx.corpus.jump(fi as u32, 0);
+    for child in root.descendants().filter(|d| d.is(C::Def)) {
+        for s in child.children().filter(|s| s.is(C::SuperType)) {
+            let sym = s.sym();
+            if sym == 0 {
+                continue;
+            }
+            let Some(locs) = ctx.visible[fi].get(&sym) else {
+                continue;
+            };
+            for &loc in locs {
+                if loc.fi == fi {
+                    continue;
+                }
+                let parent = ctx.corpus.jump(loc.fi as u32, loc.node);
+                out.push(child.edge_to(parent, EdgeKind::Extends));
+                for (call, m) in child.member_calls() {
+                    let Some(from) = call.enclosing(|e| e.is(C::Def)) else {
+                        continue;
+                    };
+                    let name = m.sym();
+                    if find_method_in(child, name).is_none() {
+                        if let Some(method) = find_method_in(parent, name) {
+                            out.push(from.edge_to(method, EdgeKind::Calls));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 fn resolve_type_edges(
