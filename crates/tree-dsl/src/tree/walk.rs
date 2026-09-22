@@ -111,6 +111,12 @@ impl<'a> Cursor<'a> {
         self.fi
     }
 
+    pub fn child_sym_of_kind(self, kind: u16) -> Option<u32> {
+        self.children()
+            .find(|c| c.kind() == kind)
+            .and_then(|c| c.sym_opt())
+    }
+
     #[inline]
     pub fn tag(self, key: u32) -> Option<u32> {
         self.tree().get_tag(self.id, key)

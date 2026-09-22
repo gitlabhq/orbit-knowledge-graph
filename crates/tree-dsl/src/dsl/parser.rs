@@ -51,7 +51,12 @@ fn visit_element(c: &mut Ctx<'_>, node: PNode<'_>, field: u16) -> Pat {
 
 fn visit_node(c: &mut Ctx<'_>, node: PNode<'_>, field: u16) -> Pat {
     let mut children = node.into_children();
-    let kind = c.intern_kind(children.next().expect("Node has Ident").as_str());
+    let name = children.next().expect("Node has a kind");
+    let kind = c.intern_kind(if name.as_rule() == Rule::Quoted {
+        quoted_inner(&name)
+    } else {
+        name.as_str()
+    });
     let mut kids = Vec::new();
     let mut text = Text::Any;
     let mut optional = false;

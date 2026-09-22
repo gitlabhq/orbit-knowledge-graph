@@ -290,6 +290,22 @@ fn apply_rewrites_inner(
                 Out::Replace(p, tag_entries) => {
                     let built = build_template(t, lang, p, &caps, &r.filters, span, edge_ctx);
                     let first = built.first().copied();
+                    if let (Some((pat, kind, nslots)), Some(new_root)) = (&r.unique, first) {
+                        let key = t.cursor(Tree::to_raw(new_root)).child_sym_of_kind(*kind);
+                        let mut ucaps: Vec<Cap> = (0..*nslots).map(|_| SmallVec::new()).collect();
+                        let taken = target.parent(&t.arena).is_some_and(|parent| {
+                            parent.children(&t.arena).filter(|&c| c != target).any(|c| {
+                                matches(t, lang, c, pat, &mut ucaps)
+                                    && t.cursor(Tree::to_raw(c)).child_sym_of_kind(*kind) == key
+                            })
+                        });
+                        if taken {
+                            built
+                                .into_iter()
+                                .for_each(|n| n.remove_subtree(&mut t.arena));
+                            break;
+                        }
+                    }
                     t.replace(target, built);
                     if let (Some(entries), Some(new_root)) = (tag_entries, first) {
                         let raw = Tree::to_raw(new_root);

@@ -2,6 +2,7 @@ use either::Either;
 use itertools::Itertools;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
@@ -11,7 +12,7 @@ use crate::treesitter::SupportLang;
 
 pub const CLASS_LIKE: &[C] = &[C::Class, C::Struct, C::ImplBlock];
 
-type VisibleMap = Vec<FxHashMap<u32, Loc>>;
+type VisibleMap = Vec<FxHashMap<u32, SmallVec<[Loc; 1]>>>;
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
@@ -40,10 +41,28 @@ pub struct ImportReq {
     pub target_path: String,
 }
 
+#[derive(Default)]
+pub struct FileIndex {
+    keys: FxHashMap<String, usize>,
+    dirs: FxHashMap<String, Vec<usize>>,
+}
+
+impl FileIndex {
+    fn insert(&mut self, key: String, fi: usize) {
+        let dir = key.rsplit_once(PATH_SEP).map_or("", |(d, _)| d);
+        self.dirs.entry(dir.to_string()).or_default().push(fi);
+        self.keys.insert(key, fi);
+    }
+
+    fn get(&self, key: &str) -> Option<usize> {
+        self.keys.get(key).copied()
+    }
+}
+
 pub struct Resolver {
     visible: VisibleMap,
     reqs: Vec<ImportReq>,
-    file_index: FxHashMap<String, usize>,
+    file_index: FileIndex,
     wildcard_sym: u32,
     exports_key: u32,
     visible_from_key: u32,
@@ -54,7 +73,7 @@ impl Resolver {
         Self {
             visible: Vec::new(),
             reqs: Vec::new(),
-            file_index: FxHashMap::default(),
+            file_index: FileIndex::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
             exports_key: lang.syms.intern("exports"),
             visible_from_key: lang.syms.intern("visible_from"),
@@ -65,7 +84,7 @@ impl Resolver {
         Self {
             visible,
             reqs,
-            file_index: FxHashMap::default(),
+            file_index: FileIndex::default(),
             wildcard_sym: lang.syms.intern(WILDCARD),
             exports_key: lang.syms.intern("exports"),
             visible_from_key: lang.syms.intern("visible_from"),
@@ -92,18 +111,17 @@ impl Resolver {
             else {
                 continue;
             };
-            for (&sym, &loc) in names {
-                if let Some(&target_new_fi) = old_labels
-                    .get(loc.fi)
-                    .and_then(|l| label_to_fi.get(l.as_str()))
-                {
-                    remapped[new_fi as usize].insert(
-                        sym,
-                        Loc {
+            for (&sym, locs) in names {
+                for &loc in locs {
+                    if let Some(&target_new_fi) = old_labels
+                        .get(loc.fi)
+                        .and_then(|l| label_to_fi.get(l.as_str()))
+                    {
+                        remapped[new_fi as usize].entry(sym).or_default().push(Loc {
                             fi: target_new_fi as usize,
                             node: loc.node,
-                        },
-                    );
+                        });
+                    }
                 }
             }
         }
@@ -204,7 +222,11 @@ impl Resolver {
         let reverse_visible: FxHashMap<Loc, u32> = self
             .visible
             .iter()
-            .flat_map(|names| names.iter().map(|(&sym, &loc)| (loc, sym)))
+            .flat_map(|names| {
+                names
+                    .iter()
+                    .flat_map(|(&sym, locs)| locs.iter().map(move |&loc| (loc, sym)))
+            })
             .collect();
 
         let mut edges_by_tree: Vec<Vec<&Edge>> = vec![vec![]; trees.len()];
@@ -267,7 +289,7 @@ struct ResolveCtx<'a> {
     lang: &'a Lang,
     visible: &'a VisibleMap,
     ambiguous: &'a FxHashSet<(usize, u32)>,
-    file_index: &'a FxHashMap<String, usize>,
+    file_index: &'a FileIndex,
     reverse_visible: &'a FxHashMap<Loc, u32>,
     support_lang: SupportLang,
     index_names: &'a [String],
@@ -282,7 +304,11 @@ impl ResolveCtx<'_> {
     }
 }
 
-fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32, Loc> {
+fn gather_visible_one(
+    tree: &Tree,
+    fi: usize,
+    exports_key: u32,
+) -> FxHashMap<u32, SmallVec<[Loc; 1]>> {
     tree.root().fold_tree(
         FxHashMap::with_capacity_and_hasher(16, Default::default()),
         |names, c, _w| {
@@ -292,13 +318,13 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
                     node: c.index(),
                 };
                 if let Some(ns) = c.child_sym(C::DefName) {
-                    names.insert(ns, loc);
+                    names.entry(ns).or_default().push(loc);
                 }
                 if let Some(ds) = c.child_sym(C::DefaultExport) {
-                    names.insert(ds, loc);
+                    names.entry(ds).or_default().push(loc);
                 }
                 if let Some(es) = c.tag(exports_key) {
-                    names.insert(es, loc);
+                    names.entry(es).or_default().push(loc);
                 }
             }
         },
@@ -308,7 +334,7 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
 fn gather_imports_for(
     trees: &[Tree],
     lang: &Lang,
-    file_index: &FxHashMap<String, usize>,
+    file_index: &FileIndex,
     lookup_prefixes: &[String],
     external: &[String],
     dirty_fis: &FxHashSet<usize>,
@@ -407,15 +433,19 @@ fn propagate_reexports(
                 for c in trees[req.fi].cursor(req.node).names() {
                     let ns = c.sym();
                     if ns == wildcard_sym {
-                        for (&ds, &loc) in &visible[req.target_fi] {
+                        for (&ds, locs) in &visible[req.target_fi] {
                             if !visible[req.fi].contains_key(&ds) {
-                                out.push((req.fi, ds, loc));
+                                for &loc in locs {
+                                    out.push((req.fi, ds, loc));
+                                }
                             }
                         }
-                    } else if let Some(&loc) = visible[req.target_fi].get(&ns) {
+                    } else if let Some(locs) = visible[req.target_fi].get(&ns) {
                         let export_as = c.child_sym(C::Alias).unwrap_or(ns);
                         if !visible[req.fi].contains_key(&export_as) {
-                            out.push((req.fi, export_as, loc));
+                            for &loc in locs {
+                                out.push((req.fi, export_as, loc));
+                            }
                         }
                     }
                 }
@@ -424,16 +454,20 @@ fn propagate_reexports(
             .collect();
 
         for &(fi, source_sym) in &visible_from_directives {
-            if let Some(&loc) = visible
+            if let Some(locs) = visible
                 .iter()
                 .enumerate()
                 .filter(|&(tfi, _)| tfi != fi)
                 .find_map(|(_, v)| v.get(&source_sym))
             {
-                let source_fi = loc.fi;
-                for (&ds, &dloc) in &visible[source_fi] {
-                    if !visible[fi].contains_key(&ds) {
-                        new_exports.push((fi, ds, dloc));
+                if let Some(&first_loc) = locs.first() {
+                    let source_fi = first_loc.fi;
+                    for (&ds, dlocs) in &visible[source_fi] {
+                        if !visible[fi].contains_key(&ds) {
+                            for &dloc in dlocs {
+                                new_exports.push((fi, ds, dloc));
+                            }
+                        }
                     }
                 }
             }
@@ -443,13 +477,19 @@ fn propagate_reexports(
             break;
         }
         for (fi, ns, loc) in new_exports {
-            if let Some(&existing) = visible[fi].get(&ns) {
-                if existing != loc {
-                    ambiguous.insert((fi, ns));
+            if let Some(existing) = visible[fi].get(&ns) {
+                if !existing.contains(&loc) {
+                    if existing
+                        .iter()
+                        .any(|e| e.fi != loc.fi || e.node != loc.node)
+                    {
+                        ambiguous.insert((fi, ns));
+                    }
                 }
+                visible[fi].entry(ns).or_default().push(loc);
                 continue;
             }
-            visible[fi].insert(ns, loc);
+            visible[fi].entry(ns).or_default().push(loc);
         }
     }
     ambiguous
@@ -464,15 +504,15 @@ fn name_targets(ctx: &ResolveCtx, tfi: usize, c: Cursor) -> Vec<Loc> {
             ctx.visible[tfi]
                 .iter()
                 .filter(|&(&dn, _)| !ctx.ambiguous.contains(&(tfi, dn)))
-                .map(|(_, &loc)| loc)
+                .flat_map(|(_, locs)| locs.iter().copied())
                 .collect()
         };
     }
     if ctx.ambiguous.contains(&(tfi, ns)) {
         return vec![];
     }
-    if let Some(&loc) = ctx.visible[tfi].get(&ns) {
-        return vec![loc];
+    if let Some(locs) = ctx.visible[tfi].get(&ns) {
+        return locs.to_vec();
     }
     let target_path = ctx.lang.syms.resolve(ctx.corpus.jump(tfi as u32, 0).sym());
     resolve_submodule(
@@ -530,15 +570,17 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     {
         let caller = ctx.corpus.jump(fi as u32, edge.from_node);
         for (_, m) in caller.member_calls() {
-            let Some(&loc) = target_files
+            let Some(locs) = target_files
                 .iter()
                 .find_map(|&t| ctx.visible[t].get(&m.sym()))
             else {
                 continue;
             };
-            let tgt = ctx.corpus.jump(loc.fi as u32, loc.node);
-            if tgt.has_tag(ctx.callable_key) {
-                edges.push(caller.edge_to(tgt, EdgeKind::Calls));
+            for &loc in locs {
+                let tgt = ctx.corpus.jump(loc.fi as u32, loc.node);
+                if tgt.has_tag(ctx.callable_key) {
+                    edges.push(caller.edge_to(tgt, EdgeKind::Calls));
+                }
             }
         }
     }
@@ -668,8 +710,8 @@ fn resolve_type(
     visible: &VisibleMap,
     imports_by_from: &[Vec<&Edge>],
 ) -> Option<Loc> {
-    if let Some(&loc) = visible[target_fi].get(&ret_sym) {
-        return Some(loc);
+    if let Some(locs) = visible[target_fi].get(&ret_sym) {
+        return locs.first().copied();
     }
     for ce in &imports_by_from[target_fi] {
         if corpus.follow(ce).child_sym(C::DefName) == Some(ret_sym) {
@@ -686,9 +728,8 @@ fn build_file_index(
     labels: &[&str],
     support_lang: SupportLang,
     index_names: &[String],
-) -> FxHashMap<String, usize> {
-    let mut idx: FxHashMap<String, usize> =
-        FxHashMap::with_capacity_and_hasher(labels.len() * 3, Default::default());
+) -> FileIndex {
+    let mut idx = FileIndex::default();
     for (fi, &path) in labels.iter().enumerate() {
         let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
         let stem = file_lang.strip_extension(path);
@@ -716,20 +757,35 @@ fn is_external(source_str: &str, external: &[String]) -> bool {
         .any(|e| e == source_str.split(PATH_SEP).next().unwrap_or(source_str))
 }
 
-fn resolve_path(
-    target: &str,
-    file_index: &FxHashMap<String, usize>,
-    prefixes: &[String],
-) -> Option<usize> {
-    file_index.get(target).copied().or_else(|| {
+fn resolve_path(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Option<usize> {
+    file_index.get(target).or_else(|| {
         prefixes.iter().find_map(|p| {
             if p.is_empty() {
-                file_index.get(target).copied()
+                file_index.get(target)
             } else {
-                file_index.get(&format!("{p}{PATH_SEP}{target}")).copied()
+                file_index.get(&format!("{p}{PATH_SEP}{target}"))
             }
         })
     })
+}
+
+fn resolve_glob(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Vec<usize> {
+    if let Some(dir) = target.strip_suffix("/*") {
+        for candidate in std::iter::once(dir.to_string()).chain(
+            prefixes
+                .iter()
+                .filter(|p| !p.is_empty())
+                .map(|p| format!("{p}{PATH_SEP}{dir}")),
+        ) {
+            if let Some(files) = file_index.dirs.get(&candidate) {
+                return files.clone();
+            }
+        }
+        return vec![];
+    }
+    resolve_path(target, file_index, prefixes)
+        .into_iter()
+        .collect()
 }
 
 fn resolve_submodule(
@@ -737,14 +793,14 @@ fn resolve_submodule(
     name: &str,
     support_lang: SupportLang,
     index_names: &[String],
-    file_index: &FxHashMap<String, usize>,
+    file_index: &FileIndex,
 ) -> Option<usize> {
     let stem = support_lang.strip_extension(target_path);
     let dir = index_names.iter().find_map(|idx| {
         stem.strip_suffix(idx.as_str())
             .and_then(|s| s.strip_suffix(PATH_SEP))
     })?;
-    file_index.get(&format!("{dir}{PATH_SEP}{name}")).copied()
+    file_index.get(&format!("{dir}{PATH_SEP}{name}"))
 }
 
 fn apply_aliases(path: &str, aliases: &[(String, String)]) -> String {

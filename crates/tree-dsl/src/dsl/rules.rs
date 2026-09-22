@@ -22,7 +22,10 @@
 use std::collections::HashMap;
 
 use crate::intern::Lang;
-use crate::pattern::{Out, Rewrite, TagEntry, Tf};
+use crate::pattern::{Out, Pat, Rewrite, TagEntry, Tf};
+
+use super::parser::parse;
+use super::types::Ctx;
 
 pub enum ResolveStage {
     Rules(Vec<Rewrite>),
@@ -136,6 +139,8 @@ struct Rule {
     tag: Option<HashMap<String, String>>,
     #[serde(default, rename = "where")]
     where_clause: Option<String>,
+    #[serde(default)]
+    unique: Option<String>,
 }
 
 /// Compile a YAML rule file into stages of rewrites.
@@ -271,6 +276,13 @@ fn compile_tags(tag_map: &HashMap<String, String>, ctx: &mut crate::pattern::Ctx
         .collect()
 }
 
+fn unique_guard(lang: &Lang, spec: &str) -> (Pat, u16, usize) {
+    let kind = lang.intern_kind(spec);
+    let mut ctx = Ctx::new(lang);
+    ctx.slot("ROOT");
+    (parse(&mut ctx, "(__def)"), kind, ctx.slots.len())
+}
+
 fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
     let pat = &rule.pattern;
 
@@ -285,6 +297,7 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
         if let Some(ref wc) = rule.where_clause {
             rw.guards = parse_where_clause(wc, &rw.slots);
         }
+        rw.unique = rule.unique.as_deref().map(|u| unique_guard(lang, u));
         return vec![rw];
     }
 

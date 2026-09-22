@@ -181,6 +181,7 @@ pub struct Rewrite {
     pub filters: Vec<Vec<u16>>,
     pub guards: Vec<(u16, u16, bool)>,
     pub slots: HashMap<Box<str>, u16>,
+    pub unique: Option<(Pat, u16, usize)>,
 }
 
 pub struct Ctx<'l> {
@@ -257,6 +258,7 @@ impl Rewrite {
             slots: ctx.slots.clone(),
             filters: ctx.filters,
             guards: vec![],
+            unique: None,
         }
     }
 

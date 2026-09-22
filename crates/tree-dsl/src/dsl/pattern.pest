@@ -9,7 +9,7 @@ Element  = _{ Node | Variadic | CapRef | Spread | Capture | Negation | Descendan
 
 // ── S-expression node ──────────────────────────────────────────────
 
-Node     =  { "(" ~ SP? ~ Ident ~ Opt? ~ (SP? ~ Content)* ~ SP? ~ ")" }
+Node     =  { "(" ~ SP? ~ (Ident | Quoted) ~ Opt? ~ (SP? ~ Content)* ~ SP? ~ ")" }
 Content  = _{ Quoted | TextField | FieldChild | Negation | Descendant | Element }
 
 FieldChild = { Ident ~ ":" ~ Opt? ~ SP? ~ Element }

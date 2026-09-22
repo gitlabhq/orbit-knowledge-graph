@@ -49,8 +49,7 @@ struct Fold<'t> {
     tree: &'t Tree,
     ssa: SsaEngine,
     cur: BlockId,
-    def_count: u32,
-    import_count: u32,
+    predeclared: rustc_hash::FxHashMap<u32, u32>,
     defs: Vec<u32>,
     imports: Vec<u32>,
     import_names: Vec<u32>,
@@ -159,20 +158,45 @@ impl<'t> Fold<'t> {
     fn handle_import(&mut self, c: Cursor<'t>) {
         for n in c.names() {
             let sym = n.sym();
-            self.import_count += 1;
+            let local = n
+                .child_sym(C::Alias)
+                .or(n.child_sym(C::SsaHint))
+                .unwrap_or(sym);
+            if self
+                .ssa
+                .read_variable(local, self.cur)
+                .iter()
+                .any(|pv| matches!(pv, ParseValue::LocalDef(_)))
+            {
+                continue;
+            }
+            let import_idx = self.imports.len() as u32;
             self.imports.push(n.index());
             self.import_names.push(sym);
             self.ssa
-                .write_variable(sym, self.cur, Value::ImportRef(self.import_count - 1));
+                .write_variable(sym, self.cur, Value::ImportRef(import_idx));
             for kind in [C::Alias, C::SsaHint] {
                 if let Some(alias) = n.child_sym(kind)
                     && alias != sym
                 {
-                    self.ssa.write_variable(
-                        alias,
-                        self.cur,
-                        Value::ImportRef(self.import_count - 1),
-                    );
+                    self.ssa
+                        .write_variable(alias, self.cur, Value::ImportRef(import_idx));
+                }
+            }
+        }
+    }
+
+    fn predeclare(&mut self, scope: Cursor<'t>) {
+        for d in scope.children().filter(|d| d.is(C::Def)) {
+            if let Some(name) = d.child_sym(C::DefName) {
+                let def_idx = self.defs.len() as u32;
+                self.defs.push(d.index());
+                self.predeclared.insert(d.index(), def_idx);
+                self.ssa
+                    .write_variable(name, self.cur, Value::LocalDef(def_idx));
+                for alias in d.children_of(C::Alias) {
+                    self.ssa
+                        .write_variable(alias.sym(), self.cur, Value::LocalDef(def_idx));
                 }
             }
         }
@@ -183,11 +207,15 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
+        let def_idx = if let Some(di) = self.predeclared.remove(&idx) {
+            di
+        } else {
+            let di = self.defs.len() as u32;
+            self.defs.push(idx);
+            di
+        };
         let parent_block = self.cur;
         self.cur = self.ssa.add_sealed_successor(parent_block);
-        let def_idx = self.def_count;
-        self.def_count += 1;
-        self.defs.push(idx);
         self.ssa
             .write_variable(name, parent_block, Value::LocalDef(def_idx));
         for alias in c.children_of(C::Alias) {
@@ -599,8 +627,7 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         tree,
         ssa,
         cur: entry,
-        def_count: 0,
-        import_count: 0,
+        predeclared: rustc_hash::FxHashMap::default(),
         defs: Vec::new(),
         imports: Vec::new(),
         import_names: Vec::new(),
@@ -612,6 +639,7 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
     };
 
     let root = tree.root();
+    f.predeclare(root);
     let mut stack = Vec::new();
     Fold::push_children(root, &mut stack);
     f.run(stack);
