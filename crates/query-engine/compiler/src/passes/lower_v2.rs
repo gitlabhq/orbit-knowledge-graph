@@ -102,7 +102,11 @@ fn emit(op: PhysOp, input: &Input) -> Query {
             let filter_alias = on.left.0.clone();
             let filter_column = on.left.1.clone();
             if !cte_name.is_empty() {
-                consumer_q.ctes.insert(0, Cte::new(&cte_name, body_q));
+                let mut cte_q = body_q;
+                if cte_q.select.is_empty() {
+                    cte_q.select.push(SelectExpr::star());
+                }
+                consumer_q.ctes.insert(0, Cte::new(&cte_name, cte_q));
                 if !filter_column.is_empty() {
                     let in_pred = Expr::InSubquery {
                         expr: Box::new(Expr::col(&filter_alias, &filter_column)),
@@ -289,7 +293,18 @@ fn value_ch_type(values: &[Value]) -> ChType {
 
 fn emit_column(alias: &str, col: ProjectedColumn, input: &Input) -> SelectExpr {
     match col {
-        ProjectedColumn::Ref { column, alias: a } => SelectExpr::new(Expr::col(alias, &column), a),
+        ProjectedColumn::Ref {
+            table,
+            column,
+            alias: a,
+        } => {
+            let tbl = if table.is_empty() {
+                alias
+            } else {
+                table.as_str()
+            };
+            SelectExpr::new(Expr::col(tbl, &column), a)
+        }
         ProjectedColumn::NodeProperty { property } => {
             let node = input.nodes.iter().find(|n| n.id == alias);
             let needs_excerpt = node.is_some_and(|n| n.excerpt_columns.contains(&property));

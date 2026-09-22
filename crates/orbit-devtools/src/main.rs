@@ -36,7 +36,9 @@ fn main() {
             let raw = match query.as_deref() {
                 Some("-") | None => {
                     let mut buf = String::new();
-                    std::io::stdin().read_to_string(&mut buf).expect("read stdin");
+                    std::io::stdin()
+                        .read_to_string(&mut buf)
+                        .expect("read stdin");
                     buf
                 }
                 Some(q) => {
@@ -95,9 +97,21 @@ fn main() {
 
 fn format_sql(sql: &str) -> String {
     let keywords = [
-        "SELECT", "FROM", "WHERE", "INNER JOIN", "LEFT JOIN", "CROSS JOIN", "JOIN",
-        "GROUP BY", "ORDER BY", "LIMIT", "UNION ALL", "WITH", "SETTINGS",
-        "AND", "OR",
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "INNER JOIN",
+        "LEFT JOIN",
+        "CROSS JOIN",
+        "JOIN",
+        "GROUP BY",
+        "ORDER BY",
+        "LIMIT",
+        "UNION ALL",
+        "WITH",
+        "SETTINGS",
+        "AND",
+        "OR",
     ];
 
     let mut out = sql.to_string();

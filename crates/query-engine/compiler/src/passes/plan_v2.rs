@@ -165,9 +165,18 @@ pub enum Value {
 #[derive(Serialize)]
 #[serde(tag = "kind")]
 pub enum ProjectedColumn {
-    Ref { column: String, alias: String },
-    NodeProperty { property: String },
-    Computed { expr: ColumnExpr, alias: String },
+    Ref {
+        table: String,
+        column: String,
+        alias: String,
+    },
+    NodeProperty {
+        property: String,
+    },
+    Computed {
+        expr: ColumnExpr,
+        alias: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -377,11 +386,19 @@ impl Value {
 impl ProjectedColumn {
     fn to_sexpr(&self) -> String {
         match self {
-            ProjectedColumn::Ref { column, alias } => {
-                if column == alias {
-                    column.clone()
+            ProjectedColumn::Ref {
+                table,
+                column,
+                alias,
+            } => {
+                if table.is_empty() {
+                    if column == alias {
+                        column.clone()
+                    } else {
+                        format!("{column}:{alias}")
+                    }
                 } else {
-                    format!("{column}:{alias}")
+                    format!("{table}.{column}:{alias}")
                 }
             }
             ProjectedColumn::NodeProperty { property } => format!("@{property}"),
@@ -807,17 +824,20 @@ impl<'a> PlanCtx<'a> {
                 let prefix = format!("hop_{ea}");
                 for (col, suffix) in crate::constants::EDGE_ALIAS_SUFFIXES.iter().enumerate() {
                     columns.push(ProjectedColumn::Ref {
-                        column: format!("{ea}_{}", ontology::constants::EDGE_RESERVED_COLUMNS[col]),
+                        table: ea.clone(),
+                        column: ontology::constants::EDGE_RESERVED_COLUMNS[col].to_string(),
                         alias: format!("{prefix}_{suffix}"),
                     });
                 }
                 columns.push(ProjectedColumn::Ref {
-                    column: format!("{ea}_{}", crate::constants::PATH_NODES_COLUMN),
+                    table: ea.clone(),
+                    column: crate::constants::PATH_NODES_COLUMN.to_string(),
                     alias: format!("{prefix}_{}", crate::constants::PATH_NODES_COLUMN),
                 });
             } else {
                 for (col_idx, suffix) in crate::constants::EDGE_ALIAS_SUFFIXES.iter().enumerate() {
                     columns.push(ProjectedColumn::Ref {
+                        table: ea.clone(),
                         column: ontology::constants::EDGE_RESERVED_COLUMNS[col_idx].to_string(),
                         alias: format!("{ea}_{suffix}"),
                     });
@@ -1271,16 +1291,20 @@ impl<'a> PlanCtx<'a> {
         }
 
         let _last = format!("e{depth}");
+        let last = format!("e{depth}");
         let proj_cols = vec![
             ProjectedColumn::Ref {
+                table: "e1".to_string(),
                 column: start_col.to_string(),
                 alias: start_col.to_string(),
             },
             ProjectedColumn::Ref {
+                table: last.clone(),
                 column: end_col.to_string(),
                 alias: end_col.to_string(),
             },
             ProjectedColumn::Ref {
+                table: "e1".to_string(),
                 column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
                 alias: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
             },
@@ -1303,10 +1327,12 @@ impl<'a> PlanCtx<'a> {
                 alias: crate::constants::DEPTH_COLUMN.to_string(),
             },
             ProjectedColumn::Ref {
+                table: "e1".to_string(),
                 column: "_deleted".to_string(),
                 alias: "_deleted".to_string(),
             },
             ProjectedColumn::Ref {
+                table: "e1".to_string(),
                 column: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
                 alias: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
             },
@@ -1395,14 +1421,17 @@ impl<'a> PlanCtx<'a> {
 
             let columns = vec![
                 ProjectedColumn::Ref {
+                    table: "e".to_string(),
                     column: neighbor_id.to_string(),
                     alias: crate::constants::neighbor_id_column().to_string(),
                 },
                 ProjectedColumn::Ref {
+                    table: "e".to_string(),
                     column: neighbor_kind.to_string(),
                     alias: crate::constants::neighbor_type_column().to_string(),
                 },
                 ProjectedColumn::Ref {
+                    table: "e".to_string(),
                     column: ontology::constants::RELATIONSHIP_KIND_COLUMN.to_string(),
                     alias: crate::constants::relationship_type_column().to_string(),
                 },
@@ -1411,6 +1440,7 @@ impl<'a> PlanCtx<'a> {
                     alias: crate::constants::neighbor_is_outgoing_column().to_string(),
                 },
                 ProjectedColumn::Ref {
+                    table: "e".to_string(),
                     column: center_col.to_string(),
                     alias: crate::constants::redaction_id_column(&center.id),
                 },
@@ -1697,6 +1727,7 @@ impl<'a> PlanCtx<'a> {
                 let entity = n.entity.as_deref().unwrap_or("");
                 let columns = vec![
                     ProjectedColumn::Ref {
+                        table: n.id.clone(),
                         column: n.id_property.clone(),
                         alias: format!("{}_{}", n.id, n.id_property),
                     },
