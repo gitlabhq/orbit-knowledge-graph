@@ -48,7 +48,6 @@ pub struct AppConfig {
     pub indexer_health_bind_address: SocketAddr,
     pub dispatcher_health_bind_address: SocketAddr,
     pub metrics: MetricsConfig,
-    #[serde(default)]
     pub probe_server: ProbeServerConfig,
     pub tls: TlsConfig,
     pub query: QuerySettings,

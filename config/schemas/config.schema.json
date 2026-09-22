@@ -63,10 +63,7 @@
       "$ref": "#/$defs/ObjectStorageConfig"
     },
     "probe_server": {
-      "$ref": "#/$defs/ProbeServerConfig",
-      "default": {
-        "bind_address": null
-      }
+      "$ref": "#/$defs/ProbeServerConfig"
     },
     "query": {
       "$ref": "#/$defs/QuerySettings"
@@ -96,6 +93,7 @@
     "indexer_health_bind_address",
     "dispatcher_health_bind_address",
     "metrics",
+    "probe_server",
     "tls",
     "query",
     "grpc",
@@ -1100,8 +1098,7 @@
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         }
       },
       "additionalProperties": false
@@ -1146,7 +1143,6 @@
             "null"
           ],
           "format": "uint16",
-          "default": null,
           "maximum": 65535,
           "minimum": 0
         }

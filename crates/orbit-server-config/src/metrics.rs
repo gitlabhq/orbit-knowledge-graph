@@ -22,6 +22,5 @@ pub struct OtelConfig {
 #[schemars(deny_unknown_fields)]
 pub struct PrometheusConfig {
     pub enabled: bool,
-    #[serde(default)]
     pub port: Option<u16>,
 }

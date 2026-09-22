@@ -5,10 +5,9 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PROBE_SERVER_PORT: u16 = 9394;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ProbeServerConfig {
-    #[serde(default)]
     pub bind_address: Option<SocketAddr>,
 }
 
