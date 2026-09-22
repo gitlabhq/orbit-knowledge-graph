@@ -7,10 +7,13 @@ pub struct ProjectInfo {
 #[derive(Debug, Clone)]
 pub struct CloudConnectorToken {
     pub token: String,
-    /// Unix epoch seconds (UTC) after which gkg should refresh the token.
-    /// Derived from the token's `exp` claim minus a safety buffer — not the
-    /// literal `exp`.
-    pub expires_at: i64,
+    pub exp: i64,
+}
+
+impl CloudConnectorToken {
+    pub fn expires_at(&self) -> i64 {
+        self.exp - crate::client::CC_TOKEN_EXPIRY_BUFFER_SECS
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

@@ -11,10 +11,6 @@ use crate::client::GitlabClient;
 use crate::error::GitlabClientError;
 use crate::types::CloudConnectorToken;
 
-/// Random lead time subtracted from `expires_at` (itself already buffered
-/// against the real `exp`, see `CC_TOKEN_EXPIRY_BUFFER_SECS` in `client.rs`),
-/// so a fleet with identical `expires_at` values doesn't stampede the Rails
-/// route at once.
 const REFRESH_JITTER_MAX_SECS: i64 = 30;
 
 pub trait CloudConnectorTokenFetcher: Send + Sync {
@@ -63,9 +59,9 @@ impl CloudConnectorTokenCache {
         }
 
         let fetched = self.fetcher.fetch().await?;
-        let refresh_at = compute_refresh_at(fetched.expires_at, jitter_secs());
+        let refresh_at = compute_refresh_at(fetched.expires_at(), jitter_secs());
         info!(
-            expires_at = fetched.expires_at,
+            expires_at = fetched.expires_at(),
             refresh_at, "cloud connector token refreshed"
         );
         let token = fetched.token.clone();
@@ -102,14 +98,14 @@ mod tests {
 
     struct StubFetcher {
         calls: AtomicUsize,
-        expires_at: AtomicI64,
+        exp: AtomicI64,
     }
 
     impl StubFetcher {
-        fn new(expires_at: i64) -> Self {
+        fn new(exp: i64) -> Self {
             Self {
                 calls: AtomicUsize::new(0),
-                expires_at: AtomicI64::new(expires_at),
+                exp: AtomicI64::new(exp),
             }
         }
     }
@@ -120,11 +116,11 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<CloudConnectorToken, GitlabClientError>> + Send + '_>>
         {
             let n = self.calls.fetch_add(1, Ordering::SeqCst);
-            let expires_at = self.expires_at.load(Ordering::SeqCst);
+            let exp = self.exp.load(Ordering::SeqCst);
             Box::pin(async move {
                 Ok(CloudConnectorToken {
                     token: format!("token-{n}"),
-                    expires_at,
+                    exp,
                 })
             })
         }
@@ -149,11 +145,15 @@ mod tests {
         )
         .unwrap();
 
-        let expires_at = crate::client::decode_token_expiry_with_buffer(&token).unwrap();
-        assert_eq!(expires_at, real_exp - 60);
+        let exp = crate::client::decode_token_exp(&token).unwrap();
+        let fetched = CloudConnectorToken {
+            token: "t".into(),
+            exp,
+        };
+        assert_eq!(fetched.expires_at(), real_exp - 60);
 
         for jitter in [0, REFRESH_JITTER_MAX_SECS] {
-            let refresh_at = compute_refresh_at(expires_at, jitter);
+            let refresh_at = compute_refresh_at(fetched.expires_at(), jitter);
             let lead_time = real_exp - refresh_at;
             assert!(
                 (60..=90).contains(&lead_time),
@@ -192,7 +192,7 @@ mod tests {
 
         let first = cache.token().await.unwrap();
         fetcher
-            .expires_at
+            .exp
             .store(Utc::now().timestamp() + 3_600, Ordering::SeqCst);
         let second = cache.token().await.unwrap();
 

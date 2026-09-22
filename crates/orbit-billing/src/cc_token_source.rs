@@ -64,7 +64,7 @@ mod tests {
             Box::pin(async {
                 Ok(CloudConnectorToken {
                     token: "cc-token-abc".into(),
-                    expires_at: chrono_now() + 3_600,
+                    exp: chrono_now() + 3_600,
                 })
             })
         }

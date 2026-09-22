@@ -176,7 +176,7 @@ mod tests {
             Box::pin(async {
                 Ok(CloudConnectorToken {
                     token: "t".into(),
-                    expires_at: i64::MAX,
+                    exp: i64::MAX,
                 })
             })
         }

@@ -33,7 +33,7 @@ const JWT_EXPIRY_SECONDS: i64 = 300;
 
 /// Safety margin subtracted from the token's `exp` claim so it doesn't lapse
 /// in flight to the collector.
-const CC_TOKEN_EXPIRY_BUFFER_SECS: i64 = 60;
+pub(crate) const CC_TOKEN_EXPIRY_BUFFER_SECS: i64 = 60;
 
 fn into_byte_stream(response: reqwest::Response) -> ByteStream {
     let stream = futures::stream::unfold(Some(response), |state| async {
@@ -158,11 +158,13 @@ impl GitlabClient {
         Self::check_token_response_status(&response)?;
 
         let raw: CloudConnectorTokenResponse = response.json().await?;
-        let expires_at = decode_token_expiry_with_buffer(&raw.token)?;
-        Ok(CloudConnectorToken {
+        let exp = decode_token_exp(&raw.token)?;
+        let token = CloudConnectorToken {
             token: raw.token,
-            expires_at,
-        })
+            exp,
+        };
+        validate_not_already_expired(&token)?;
+        Ok(token)
     }
 
     pub async fn download_archive(
@@ -423,20 +425,25 @@ impl GitlabClient {
     }
 }
 
-pub(crate) fn decode_token_expiry_with_buffer(token: &str) -> Result<i64, GitlabClientError> {
+pub(crate) fn decode_token_exp(token: &str) -> Result<i64, GitlabClientError> {
     let data = insecure_decode::<CloudConnectorTokenClaims>(token)
         .map_err(|e| GitlabClientError::JwtDecoding(e.to_string()))?;
-    let expires_at = data.claims.exp - CC_TOKEN_EXPIRY_BUFFER_SECS;
+    Ok(data.claims.exp)
+}
 
+pub(crate) fn validate_not_already_expired(
+    token: &CloudConnectorToken,
+) -> Result<(), GitlabClientError> {
     let now = chrono::Utc::now().timestamp();
+    let expires_at = token.expires_at();
     if expires_at <= now {
         return Err(GitlabClientError::JwtDecoding(format!(
             "token already within its expiry buffer: exp={}, buffered expires_at={expires_at}, now={now}",
-            data.claims.exp
+            token.exp
         )));
     }
 
-    Ok(expires_at)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -473,22 +480,19 @@ mod tests {
     }
 
     #[test]
-    fn decode_token_expiry_subtracts_buffer() {
-        let key = EncodingKey::from_secret(b"any-secret");
-        let now = chrono::Utc::now().timestamp();
-        let token = encode(
-            &Header::new(Algorithm::HS256),
-            &serde_json::json!({ "exp": now + 3600 }),
-            &key,
-        )
-        .unwrap();
-
-        let expires_at = decode_token_expiry_with_buffer(&token).unwrap();
-        assert_eq!(expires_at, now + 3600 - CC_TOKEN_EXPIRY_BUFFER_SECS);
+    fn cloud_connector_token_expires_at_subtracts_buffer() {
+        let token = CloudConnectorToken {
+            token: "t".into(),
+            exp: 1_700_000_000,
+        };
+        assert_eq!(
+            token.expires_at(),
+            1_700_000_000 - CC_TOKEN_EXPIRY_BUFFER_SECS
+        );
     }
 
     #[test]
-    fn decode_token_expiry_ignores_signature() {
+    fn decode_token_exp_ignores_signature() {
         let key = EncodingKey::from_secret(b"some-other-key-entirely");
         let now = chrono::Utc::now().timestamp();
         let token = encode(
@@ -498,54 +502,48 @@ mod tests {
         )
         .unwrap();
 
-        assert!(decode_token_expiry_with_buffer(&token).is_ok());
+        assert!(decode_token_exp(&token).is_ok());
     }
 
     #[test]
-    fn decode_token_expiry_rejects_malformed_token() {
-        let err = decode_token_expiry_with_buffer("not-a-jwt").unwrap_err();
+    fn decode_token_exp_rejects_malformed_token() {
+        let err = decode_token_exp("not-a-jwt").unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 
     #[test]
-    fn decode_token_expiry_rejects_missing_exp_claim() {
+    fn decode_token_exp_rejects_missing_exp_claim() {
         let key = EncodingKey::from_secret(b"any-secret");
         let token = encode(&Header::new(Algorithm::HS256), &serde_json::json!({}), &key).unwrap();
 
-        let err = decode_token_expiry_with_buffer(&token).unwrap_err();
+        let err = decode_token_exp(&token).unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 
     #[test]
-    fn decode_token_expiry_rejects_a_token_already_within_its_buffer() {
-        let key = EncodingKey::from_secret(b"any-secret");
+    fn validate_not_already_expired_rejects_a_token_already_within_its_buffer() {
         let now = chrono::Utc::now().timestamp();
 
         // exp is in the future, but not far enough to survive the buffer subtraction.
-        let token = encode(
-            &Header::new(Algorithm::HS256),
-            &serde_json::json!({ "exp": now + 10 }),
-            &key,
-        )
-        .unwrap();
+        let token = CloudConnectorToken {
+            token: "t".into(),
+            exp: now + 10,
+        };
 
-        let err = decode_token_expiry_with_buffer(&token).unwrap_err();
+        let err = validate_not_already_expired(&token).unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 
     #[test]
-    fn decode_token_expiry_rejects_an_already_expired_token() {
-        let key = EncodingKey::from_secret(b"any-secret");
+    fn validate_not_already_expired_rejects_an_already_expired_token() {
         let now = chrono::Utc::now().timestamp();
 
-        let token = encode(
-            &Header::new(Algorithm::HS256),
-            &serde_json::json!({ "exp": now - 3600 }),
-            &key,
-        )
-        .unwrap();
+        let token = CloudConnectorToken {
+            token: "t".into(),
+            exp: now - 3600,
+        };
 
-        let err = decode_token_expiry_with_buffer(&token).unwrap_err();
+        let err = validate_not_already_expired(&token).unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 
@@ -668,6 +666,9 @@ mod tests {
             GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
         let result = client.cloud_connector_token().await.unwrap();
 
-        assert_eq!(result.expires_at, now + 3600 - CC_TOKEN_EXPIRY_BUFFER_SECS);
+        assert_eq!(
+            result.expires_at(),
+            now + 3600 - CC_TOKEN_EXPIRY_BUFFER_SECS
+        );
     }
 }
