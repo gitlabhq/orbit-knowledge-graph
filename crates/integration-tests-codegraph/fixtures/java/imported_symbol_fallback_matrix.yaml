@@ -66,7 +66,7 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "com.example.app.WildcardMain.wildcardImport", path: "java.time", name: null, import_type: "WildcardImport" } }
+      - { row: { caller: "com.example.app.WildcardMain.wildcardImport", path: "java.time", name: "*", import_type: "WildcardImport" } }
 
   - name: "println does not target wildcard imports"
     query: |

@@ -1,0 +1,157 @@
+# Bash rewrite rules.
+# Handles: source/. as wildcard imports, function definitions, commands as
+# calls, variable assignments, control flow. Definitions hang off the file
+# stem (stem.name).
+
+stages:
+  - name: imports
+    rules:
+      - match: '(command name: (command_name (word "source")) argument: $P:word)'
+        replace: '(__import (__source @$P) (__source_path @$P) (__name "*"))'
+      - match: '(command name: (command_name (word ".")) argument: $P:word)'
+        replace: '(__import (__source @$P) (__source_path @$P) (__name "*"))'
+      - match: '(command name: (command_name (word "source")) argument: (string $P:string_content))'
+        replace: '(__import (__source @$P) (__source_path @$P) (__name "*"))'
+
+  - name: normalize
+    rules:
+      - match: '(program $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+
+  - name: retag-calls
+    rules:
+      - match: '(command name: (command_name $W:word) $$$A)'
+        replace: '(__call (__callee @$W) $$$A)'
+
+  - name: classify
+    rules:
+      - match: '(variable_assignment name: $N:variable_name value: $V:__call)'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(variable_assignment name: $N:variable_name value: $V)'
+        replace: '(__binding @$N (__rhs @$V))'
+      - match: '(if_statement $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(case_statement value: $V $$$X:case_item)'
+        replace: '(__ssa_branch $V $$$X->__ssa_arm)'
+      - match: '(for_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(c_style_for_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(while_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(function_definition name: $N:word body: $B)'
+        replace: '(__def (__defname @$N) (__function) $B)'
+
+  - name: tag-defs
+    rules:
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true" }
+      - match: '(__def (__struct))'
+        tag: { scoped: "true" }
+      - match: '(__def (__impl))'
+        tag: { scoped: "true" }
+      - match: '(__def (__trait))'
+        tag: { scoped: "true" }
+      - match: '(__def (__enum))'
+        tag: { scoped: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+
+resolve:
+  display_source: original
+  stages: []
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          fqn: '@$M|stem|split_last("/")'
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("sh:bash", "bash:bash", "zsh:bash")'
+      - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__impl))'
+        tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__method) (__constructor))'
+        tag: { def_type: Constructor }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__import)'
+        tag: { import_type: Source }
+      - match: '(__name "*")'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'

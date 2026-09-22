@@ -171,13 +171,14 @@ tests:
 
   # ── Promoted method via embedding ──
 
+  # corrected: cross-file Calls rows are unique per caller and target
   - name: "admin.Greet resolves via User embedding"
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Greet'
       RETURN callee.fqn AS callee
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   # ── Intra-service method calls ──
 

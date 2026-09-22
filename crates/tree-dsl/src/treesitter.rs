@@ -63,6 +63,20 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
             Some(include_str!("../langs/typescript.yaml"))
         }
         SupportLang::Rust => Some(include_str!("../langs/rust.yaml")),
+        SupportLang::Go => Some(include_str!("../langs/go.yaml")),
+        SupportLang::Php => Some(include_str!("../langs/php.yaml")),
+        SupportLang::Java => Some(include_str!("../langs/java.yaml")),
+        SupportLang::Kotlin => Some(include_str!("../langs/kotlin.yaml")),
+        SupportLang::Ruby => Some(include_str!("../langs/ruby.yaml")),
+        SupportLang::CSharp => Some(include_str!("../langs/csharp.yaml")),
+        SupportLang::C => Some(include_str!("../langs/c.yaml")),
+        SupportLang::Cpp => Some(include_str!("../langs/cpp.yaml")),
+        SupportLang::Scala => Some(include_str!("../langs/scala.yaml")),
+        SupportLang::Bash => Some(include_str!("../langs/bash.yaml")),
+        SupportLang::Elixir => Some(include_str!("../langs/elixir.yaml")),
+        SupportLang::Lua => Some(include_str!("../langs/lua.yaml")),
+        SupportLang::Swift => Some(include_str!("../langs/swift.yaml")),
+        SupportLang::Zig => Some(include_str!("../langs/zig.yaml")),
         _ => None,
     }
 }

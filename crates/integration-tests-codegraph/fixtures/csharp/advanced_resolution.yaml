@@ -157,7 +157,6 @@ tests:
 
   # ── base.Method() ────────────────────────────────────────────
   - name: "base.Eat() in Dog.Fetch resolves to Animal.Eat"
-    skip: true  # base is anonymous in C# tree-sitter
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Zoo.Models.Dog.Fetch'

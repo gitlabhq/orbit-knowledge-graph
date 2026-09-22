@@ -1,0 +1,233 @@
+# Swift rewrite rules.
+# Handles: import as a wildcard import, classes, structs, enums, extensions
+# (as __impl wrappers), protocols, properties with self.x typing, functions,
+# init, self./super. calls, control flow.
+
+stages:
+  - name: imports
+    rules:
+      - match: '(import_declaration $I:identifier)'
+        replace: '(__import (__source @$I) (__source_path @$I|replace(".", "/")) (__name @$I|split_last(".")))'
+
+  - name: normalize
+    rules:
+      - match: '(source_file $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(control_transfer_statement (return) $$$V)'
+        replace: '(__ssa_return $$$V)'
+      - match: '(user_type $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+      - match: '(optional_type $T:type_identifier)'
+        replace: '(type_identifier @$T)'
+      - match: '(inheritance_specifier $T:type_identifier)'
+        replace: '(__supertype @$T)'
+      - match: '(navigation_expression target: (self_expression) suffix: (navigation_suffix suffix: $N:simple_identifier))'
+        replace: '(__ivar @$N)'
+      - match: '(parameter name: $N:simple_identifier $T:type_identifier)'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+      - match: '(parameter name: $N:simple_identifier)'
+        replace: '(__binding @$N)'
+
+  - name: retag-refs
+    rules:
+      - match: '(navigation_expression target: $O:__ivar suffix: (navigation_suffix suffix: $M:simple_identifier))'
+        replace: '(__member @$M (__object $O))'
+      - match: '(navigation_expression target: $O:__member suffix: (navigation_suffix suffix: $M:simple_identifier))'
+        replace: '(__member @$M (__object $O))'
+      - match: '(navigation_expression target: $O:call_expression suffix: (navigation_suffix suffix: $M:simple_identifier))'
+        replace: '(__member @$M (__object $O))'
+      - match: '(navigation_expression target: (super_expression) suffix: (navigation_suffix suffix: $M:simple_identifier))'
+        replace: '(__member @$M (__object (__ivar "super")))'
+      - match: '(navigation_expression target: $O suffix: (navigation_suffix suffix: $M:simple_identifier))'
+        replace: '(__member @$M (__object @$O))'
+
+  - name: retag-calls
+    rules:
+      - match: '(call_expression $F:__ivar (call_suffix $$$A))'
+        replace: '(__call (__callee $F) $$$A)'
+      - match: '(call_expression $F:__member (call_suffix $$$A))'
+        replace: '(__call (__callee $F) $$$A)'
+      - match: '(call_expression $F:simple_identifier (call_suffix $$$A))'
+        replace: '(__call (__callee @$F) $$$A)'
+      - match: '(call_expression $F (call_suffix $$$A))'
+        replace: '(__call (__callee @$F) $$$A)'
+
+  - name: classify
+    rules:
+      - match: '(property_declaration (pattern name: $N:simple_identifier) (type_annotation $T:type_identifier) $V:__call)'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(property_declaration (pattern name: $N:simple_identifier) (type_annotation $T:type_identifier))'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(property_declaration (pattern name: $N:simple_identifier) value: $V:__call)'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
+      - match: '(property_declaration (pattern name: $N:simple_identifier) value: $V)'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs @$V)))'
+      - match: '(property_declaration (pattern name: $N:simple_identifier) $$$R)'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N) $$$R)'
+      - match: '(assignment target: (directly_assignable_expression $T:__ivar) result: $R:__call)'
+        replace: '(__binding $T (__rhs $R))'
+      - match: '(assignment target: (directly_assignable_expression $T:__ivar) result: $R)'
+        replace: '(__binding $T (__rhs @$R))'
+      - match: '(assignment target: (directly_assignable_expression $T:simple_identifier) result: $R:__call)'
+        replace: '(__binding @$T (__rhs $R))'
+      - match: '(assignment target: (directly_assignable_expression $T:simple_identifier) result: $R)'
+        replace: '(__binding @$T (__rhs @$R))'
+      - match: '(if_statement $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(guard_statement $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(switch_statement $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(for_statement $$$X)'
+        replace: '(__ssa_loop $$$X)'
+      - match: '(while_statement $$$X)'
+        replace: '(__ssa_loop $$$X)'
+      - match: '(repeat_while_statement $$$X)'
+        replace: '(__ssa_loop $$$X)'
+      - match: '(enum_entry name: $N:simple_identifier $$$R)'
+        replace: '(__def (__defname @$N) (__enum_variant) $$$R)'
+      - match: '(protocol_function_declaration name: $N:simple_identifier $$$P:__binding $RT?:type_identifier)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $$$P)'
+      - match: '(init_declaration $$$P:__binding body: $B:function_body)'
+        replace: '(__def (__defname "init") (__method) (__constructor) $$$P $B)'
+      - match: '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding $RT:type_identifier body: $B:function_body)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type @$RT) $M $$$P $B)'
+      - match: '(function_declaration $M?:modifiers name: $N:simple_identifier $$$P:__binding body: $B:function_body)'
+        replace: '(__def (__defname @$N) (__function) $M $$$P $B)'
+      - match: '(class_declaration (struct) name: $N:type_identifier $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__struct) $$$ANN $$$B)'
+      - match: '(class_declaration (enum) name: $N:type_identifier $$$ANN body: (enum_class_body $$$B))'
+        replace: '(__def (__defname @$N) (__enum) $$$ANN $$$B)'
+      - match: '(class_declaration (extension) name: $N:type_identifier $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__impl) $$$ANN $$$B)'
+      - match: '(class_declaration name: $N:type_identifier $S:__supertype $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__class) $S $$$ANN (__binding (__ivar "super") (__rhs (__call (__callee @$S)))) $$$B)'
+      - match: '(class_declaration name: $N:type_identifier $$$ANN body: (class_body $$$B))'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $$$B)'
+      - match: '(protocol_declaration name: $N:type_identifier $$$ANN body: (protocol_body $$$B))'
+        replace: '(__def (__defname @$N) (__interface) $$$ANN $$$B)'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:simple_identifier)'
+        replace: '(__ssa_return (__rhs @$V))'
+
+  - name: tag-defs
+    rules:
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true" }
+      - match: '(__def (__struct))'
+        tag: { scoped: "true" }
+      - match: '(__def (__impl))'
+        tag: { scoped: "true" }
+      - match: '(__def (__trait))'
+        tag: { scoped: "true" }
+      - match: '(__def (__enum))'
+        tag: { scoped: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+
+resolve:
+  display_source: original
+  lookup_from:
+    - __source_root
+  stages:
+    - name: roots
+      rules:
+        - match: '(__dir "Sources" $$$REST)'
+          replace: '(__dir "Sources" (__source_root) $$$REST)'
+        - match: '(__dir "src" $$$REST)'
+          replace: '(__dir "src" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("swift:swift")'
+      - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__impl))'
+        tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__method) (__constructor))'
+        tag: { def_type: Constructor }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__name "*")'
+        tag:
+          import_type: WildcardImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'

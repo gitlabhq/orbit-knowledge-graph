@@ -131,7 +131,7 @@ tests:
   - name: "Enum cases indexed under the enum"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumCase'
+      WHERE d.definition_type = 'EnumVariant'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Enums\Status\Active' } }

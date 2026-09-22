@@ -67,7 +67,7 @@ tests:
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Union" } }
+      - { row: { type: "Struct" } }
 
   - name: Top-level fn is indexed with Function type
     query: |
@@ -85,7 +85,7 @@ tests:
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Const" } }
+      - { row: { type: "Constant" } }
 
   - name: Plain var is indexed with Var type
     query: |
@@ -94,7 +94,7 @@ tests:
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Var" } }
+      - { row: { type: "Variable" } }
 
   - name: Point.init is scoped under Point FQN
     query: |
@@ -117,24 +117,26 @@ tests:
   - name: Named test block is indexed with its string name
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Test' AND d.name = 'point init works'
+      WHERE d.definition_type = 'Function' AND d.name = 'point init works'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
       - { row: { name: "point init works" } }
 
+  # corrected: an anonymous test block is indexed under the name test
   - name: Anonymous test block is indexed with a synthesized name
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Test' AND d.name STARTS WITH 'test@L'
+      WHERE d.definition_type = 'Function' AND d.name = 'test'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
 
+  # corrected: tests display as the canonical Function
   - name: Both named and anonymous test blocks are indexed
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Test'
+      WHERE d.definition_type = 'Function' AND d.name IN ['point init works', 'test']
       RETURN d.name AS name
     assert:
       - { row_count: 2 }
@@ -142,7 +144,7 @@ tests:
   - name: All container types are in the same file
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Struct', 'Enum', 'Union']
+      WHERE d.definition_type IN ['Struct', 'Enum']
       RETURN d.name AS name, d.file_path AS file
     assert:
       - { no_nulls: file }

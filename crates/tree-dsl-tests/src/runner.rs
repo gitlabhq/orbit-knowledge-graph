@@ -6,18 +6,23 @@ use super::config::make_graph_config;
 use super::export::export;
 use super::validator::{Failure, run_suite};
 
-fn detect_lang(suite: &TestSuite) -> SupportLang {
+fn detect_lang(suite: &TestSuite, fixtures: &[(String, String)]) -> SupportLang {
     if let Some(ref p) = suite.pipeline
         && let Some(lang) = SupportLang::from_alias(p)
     {
         return lang;
     }
-    for f in &suite.fixtures {
-        if let Some(lang) = SupportLang::from_path(&f.path) {
-            return lang;
-        }
-    }
-    SupportLang::Python
+    let counts = fixtures
+        .iter()
+        .filter_map(|(path, _)| SupportLang::from_path(path))
+        .fold(std::collections::HashMap::new(), |mut m, l| {
+            *m.entry(l).or_insert(0usize) += 1;
+            m
+        });
+    counts
+        .iter()
+        .max_by_key(|&(l, n)| (*n, std::cmp::Reverse(format!("{l:?}"))))
+        .map_or(SupportLang::Python, |(&l, _)| l)
 }
 
 async fn build_and_check(env: &Env, state: &mut State, suite: &TestSuite) -> Vec<Failure> {
@@ -39,12 +44,12 @@ pub async fn run_yaml_suite(yaml: &str) {
         return;
     }
 
-    let lang_id = detect_lang(&suite);
     let fixtures: Vec<(String, String)> = suite
         .fixtures
         .iter()
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
+    let lang_id = detect_lang(&suite, &fixtures);
 
     let (env, mut state) = tree_dsl::index(lang_id, &fixtures);
 

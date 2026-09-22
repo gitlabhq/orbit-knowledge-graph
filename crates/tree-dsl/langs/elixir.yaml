@@ -1,0 +1,194 @@
+# Elixir rewrite rules.
+# Handles: alias/import/require/use as imports (module names map to
+# lib/snake_case paths), defmodule as class-like scopes, def/defp/defmacro,
+# Module.fun calls, implicit-module calls, if/case/cond/for.
+
+stages:
+  - name: imports
+    rules:
+      - match: '(call target: (identifier "alias") (arguments (dot left: $L:alias right: (tuple $$$M:alias))))'
+        replace: '(__import (__import_kind "alias") (__source @$L) (__source_path @$L|replace(".", "/")) $$$M->__name)'
+      - match: '(call target: (identifier "alias") (arguments $A:alias (keywords (pair value: $T:alias))))'
+        replace: '(__import (__import_kind "alias") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".") (__alias @$T)))'
+      - match: '(call target: (identifier "alias") (arguments $A:alias))'
+        replace: '(__import (__import_kind "alias") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+      - match: '(call target: (identifier "import") (arguments $A:alias $$$R))'
+        replace: '(__import (__import_kind "import") (__source @$A) (__source_path @$A|replace(".", "/")) (__name @$A (__ssa_hint "*")))'
+      - match: '(call target: (identifier "require") (arguments $A:alias $$$R))'
+        replace: '(__import (__import_kind "require") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+      - match: '(call target: (identifier "use") (arguments $A:alias $$$R))'
+        replace: '(__import (__import_kind "use") (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
+
+  - name: defs
+    rules:
+      - match: '(source $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(call target: (identifier "defmodule") (arguments $A:alias) $B:do_block)'
+        replace: '(__def (__defname @$A) (__class) $B)'
+      - match: '(call target: (identifier "def") (arguments (call target: $N:identifier $P:arguments)) $B:do_block)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(call target: (identifier "def") (arguments (call target: $N:identifier $P:arguments) $K:keywords))'
+        replace: '(__def (__defname @$N) (__function) $P $K)'
+      - match: '(call target: (identifier "def") (arguments (binary_operator left: (call target: $N:identifier $P:arguments))) $B:do_block)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(call target: (identifier "defp") (arguments (binary_operator left: (call target: $N:identifier $P:arguments))) $B:do_block)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(call target: (identifier "def") (arguments $N:identifier) $B:do_block)'
+        replace: '(__def (__defname @$N) (__function) $B)'
+      - match: '(call target: (identifier "def") (arguments $N:identifier $K:keywords))'
+        replace: '(__def (__defname @$N) (__function) $K)'
+      - match: '(call target: (identifier "defp") (arguments (call target: $N:identifier $P:arguments)) $B:do_block)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(call target: (identifier "defp") (arguments (call target: $N:identifier $P:arguments) $K:keywords))'
+        replace: '(__def (__defname @$N) (__function) $P $K)'
+      - match: '(call target: (identifier "defp") (arguments $N:identifier) $B:do_block)'
+        replace: '(__def (__defname @$N) (__function) $B)'
+      - match: '(call target: (identifier "defp") (arguments $N:identifier $K:keywords))'
+        replace: '(__def (__defname @$N) (__function) $K)'
+      - match: '(call target: (identifier "defmacro") (arguments (call target: $N:identifier $P:arguments)) $B:do_block)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(call target: (identifier "if") $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(call target: (identifier "unless") $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(call target: (identifier "case") $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(call target: (identifier "cond") $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(call target: (identifier "with") $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(call target: (identifier "for") $$$X)'
+        replace: '(__ssa_loop $$$X)'
+
+  - name: retag-calls
+    rules:
+      - match: '(call target: (dot left: $M:alias right: $F:identifier) $A:arguments)'
+        replace: '(ex_ref (__import (__import_kind "module") (__source @$M) (__source_path @$M|replace(".", "/")) (__name @$M|split_last("."))) (__call (__callee (__member @$F (__object @$M|split_last(".")))) $A))'
+      - match: '(call target: (dot left: $M:identifier right: $F:identifier) $A:arguments)'
+        replace: '(__call (__callee (__member @$F (__object @$M))) $A)'
+      - match: '(call target: $F:identifier $A:arguments $$$B)'
+        replace: '(__call (__callee @$F) $A $$$B)'
+
+  - name: tag-defs
+    rules:
+      - match: '(__def (__class))'
+        tag:
+          exports: '@$ROOT|child_sym("__defname")|split_last(".")'
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { scoped: "true", hoisted: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true" }
+      - match: '(__def (__struct))'
+        tag: { scoped: "true" }
+      - match: '(__def (__impl))'
+        tag: { scoped: "true" }
+      - match: '(__def (__trait))'
+        tag: { scoped: "true" }
+      - match: '(__def (__enum))'
+        tag: { scoped: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+
+resolve:
+  display_source: original
+  lookup_from:
+    - __source_root
+  stages:
+    - name: roots
+      rules:
+        - match: '(__dir "lib" $$$REST)'
+          replace: '(__dir "lib" (__source_root) $$$REST)'
+        - match: '(__dir "test" $$$REST)'
+          replace: '(__dir "test" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("ex:elixir", "exs:elixir")'
+      - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__impl))'
+        tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__method) (__constructor))'
+        tag: { def_type: Constructor }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+          import_type: Alias
+      - match: '(__import (__import_kind "import"))'
+        tag: { import_type: Import }
+      - match: '(__import (__import_kind "require"))'
+        tag: { import_type: Require }
+      - match: '(__import (__import_kind "use"))'
+        tag: { import_type: Use }
+      - match: '(__import (__import_kind "module"))'
+        tag: { import_type: Module }
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'

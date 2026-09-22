@@ -1,0 +1,190 @@
+# Zig rewrite rules.
+# Handles: const/var declarations (structs, enums, unions, constants,
+# variables), container fields, functions, tests, member and struct
+# initializer calls, control flow.
+
+stages:
+  - name: mark
+    rules:
+      - match: '(enum_declaration $$$F:container_field)'
+        replace: '(enum_declaration $$$F->zig_enum_member)'
+
+  - name: normalize
+    rules:
+      - match: '(source_file $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(return_expression $$$V)'
+        replace: '(__ssa_return $$$V)'
+      - match: '(parameter name: $N:identifier type: $T:identifier)'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+      - match: '(parameter name: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(zig_enum_member name: $N:identifier)'
+        replace: '(__def (__defname @$N) (__enum_variant))'
+      - match: '(container_field name: $N:identifier)'
+        replace: '(__def (__defname @$N) (__field_def))'
+
+  - name: retag-calls
+    rules:
+      - match: '(call_expression (field_expression object: $O:identifier member: $M:identifier) $A:arguments)'
+        replace: '(__call (__callee (__member @$M (__object @$O))) $A)'
+      - match: '(call_expression $F:identifier $A:arguments)'
+        replace: '(__call (__callee @$F) $A)'
+      - match: '(struct_initializer $T:identifier $L:initializer_list)'
+        replace: '(__call (__callee @$T) $L)'
+
+  - name: classify
+    rules:
+      - match: '(variable_declaration $N:identifier $D:struct_declaration)'
+        replace: '(__def (__defname @$N) (__struct) $D)'
+      - match: '(variable_declaration $N:identifier $D:enum_declaration)'
+        replace: '(__def (__defname @$N) (__enum) $D)'
+      - match: '(variable_declaration $N:identifier $D:union_declaration)'
+        replace: '(__def (__defname @$N) (__struct) $D)'
+      - match: '(variable_declaration (const) $N:identifier $$$V:__call)'
+        replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__rhs $$$V)))'
+      - match: '(variable_declaration (const) $N:identifier $$$V)'
+        replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N $$$V))'
+      - match: '(variable_declaration (var) $N:identifier $$$V:__call)'
+        replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N (__rhs $$$V)))'
+      - match: '(variable_declaration (var) $N:identifier $$$V)'
+        replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N $$$V))'
+      - match: '(if_expression $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(switch_expression $$$X)'
+        replace: '(__ssa_branch (__ssa_arm $$$X))'
+      - match: '(while_statement $$$X)'
+        replace: '(__ssa_loop $$$X)'
+      - match: '(for_statement $$$X)'
+        replace: '(__ssa_loop $$$X)'
+      - match: '(function_declaration name: $N:identifier $P:parameters type:? $RT:identifier body: $B:block)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $P $B)'
+      - match: '(function_declaration name: $N:identifier $P:parameters $$$R)'
+        replace: '(__def (__defname @$N) (__function) $P)'
+      - match: '(test_declaration (string $S:string_content) $B:block)'
+        replace: '(__def (__defname @$S) (__function) $B)'
+      - match: '(test_declaration $B:block)'
+        replace: '(__def (__defname "test") (__function) $B)'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:identifier)'
+        replace: '(__ssa_return (__rhs @$V))'
+
+  - name: tag-defs
+    rules:
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true" }
+      - match: '(__def (__struct))'
+        tag: { scoped: "true" }
+      - match: '(__def (__impl))'
+        tag: { scoped: "true" }
+      - match: '(__def (__trait))'
+        tag: { scoped: "true" }
+      - match: '(__def (__enum))'
+        tag: { scoped: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+
+resolve:
+  display_source: original
+  lookup_from:
+    - __source_root
+  stages:
+    - name: roots
+      rules:
+        - match: '(__dir "src" $$$REST)'
+          replace: '(__dir "src" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("zig:zig")'
+      - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__impl))'
+        tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__method) (__constructor))'
+        tag: { def_type: Constructor }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__name "*")'
+        tag:
+          import_type: WildcardImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'

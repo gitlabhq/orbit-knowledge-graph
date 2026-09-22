@@ -57,6 +57,7 @@ fixtures:
       end
 
 tests:
+  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "gem requires target side-effect imported symbols"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
@@ -65,8 +66,9 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::fetch", path: "faraday", name: null, import_type: "Require" } }
+      - { row: { caller: "ApiRunner::fetch", path: "Faraday", name: "Faraday", import_type: "Autoload" } }
 
+  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "underscored requires target side-effect imported symbols"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
@@ -75,8 +77,9 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::connect", path: "external_client", name: null, import_type: "Require" } }
+      - { row: { caller: "ApiRunner::connect", path: "ExternalClient", name: "ExternalClient", import_type: "Autoload" } }
 
+  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "observed acronym constants match require paths without path-derived names"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
@@ -85,8 +88,9 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::parse", path: "json", name: null, import_type: "Require" } }
+      - { row: { caller: "ApiRunner::parse", path: "JSON", name: "JSON", import_type: "Autoload" } }
 
+  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "require_relative target imported symbols"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
@@ -95,7 +99,7 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "RelativeRunner::connect", path: "services/external_client", name: null, import_type: "RequireRelative" } }
+      - { row: { caller: "RelativeRunner::connect", path: "ExternalClient", name: "ExternalClient", import_type: "Autoload" } }
 
   - name: "locally resolved require constants do not emit imported-symbol fallback"
     queries:

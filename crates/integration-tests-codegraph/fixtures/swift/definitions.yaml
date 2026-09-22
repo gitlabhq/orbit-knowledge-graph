@@ -128,7 +128,7 @@ tests:
   - name: Direction enum entries are indexed
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumEntry'
+      WHERE d.definition_type = 'EnumVariant'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 6 }

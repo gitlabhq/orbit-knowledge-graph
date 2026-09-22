@@ -1,0 +1,201 @@
+# Lua rewrite rules.
+# Handles: require as an aliased wildcard import, functions, table-scoped
+# functions (M.f and M:f as members of the table definition), tables as
+# class-like definitions, calls, locals, control flow.
+
+stages:
+  - name: imports
+    rules:
+      - match: '(function_call name: (identifier "require") arguments: (arguments (string content: $S:string_content)))'
+        replace: '(lua_require @$S)'
+
+  - name: imports-bind
+    rules:
+      - match: '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $R:lua_require)))'
+        replace: '(__import (__source @$R) (__source_path @$R|replace(".", "/")) (__name @$R|split_last(".") (__alias @$N)))'
+      - match: '(assignment_statement (variable_list $N:identifier) (expression_list $R:lua_require))'
+        replace: '(__import (__source @$R) (__source_path @$R|replace(".", "/")) (__name @$R|split_last(".") (__alias @$N)))'
+
+  - name: imports-bare
+    rules:
+      - match: '(lua_require)'
+        replace: '(__import (__source @$ROOT) (__source_path @$ROOT|replace(".", "/")) (__name @$ROOT|split_last(".")))'
+
+  - name: normalize
+    rules:
+      - match: '(chunk $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(return_statement $$$V)'
+        replace: '(__ssa_return $$$V)'
+      - match: '(parameters $$$P)'
+        replace: '(parameters $$$P=>__binding)'
+
+  - name: retag-calls
+    rules:
+      - match: '(function_call name: (dot_index_expression table: $T:identifier field: $F:identifier) arguments: $A)'
+        replace: '(__call (__callee (__member @$F (__object @$T))) $A)'
+      - match: '(function_call name: (method_index_expression table: $T:identifier method: $F:identifier) arguments: $A)'
+        replace: '(__call (__callee (__member @$F (__object @$T))) $A)'
+      - match: '(function_call name: $F:identifier arguments: $A)'
+        replace: '(__call (__callee @$F) $A)'
+
+  - name: classify
+    rules:
+      - match: '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $V:table_constructor)))'
+        replace: '(__def (__defname @$N) (__class) $V)'
+      - match: '(assignment_statement (variable_list $N:identifier) (expression_list $V:table_constructor))'
+        replace: '(__def (__defname @$N) (__class) $V)'
+      - match: '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $V:__call)))'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $V)))'
+        replace: '(__binding @$N (__rhs @$V))'
+      - match: '(assignment_statement (variable_list $N:identifier) (expression_list $V:__call))'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(assignment_statement (variable_list $N:identifier) (expression_list $V))'
+        replace: '(__binding @$N (__rhs @$V))'
+      - match: '(if_statement condition: $C $$$X)'
+        replace: '(__ssa_branch $C (__ssa_arm $$$X))'
+      - match: '(for_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(while_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(repeat_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(function_declaration name: (dot_index_expression table: $T:identifier field: $F:identifier) parameters: $P body:? $B)'
+        replace: '(__def (__defname @$T) (__impl) (__def (__defname @$F) (__function) $P $B))'
+      - match: '(function_declaration name: (method_index_expression table: $T:identifier method: $F:identifier) parameters: $P body:? $B)'
+        replace: '(__def (__defname @$T) (__impl) (__def (__defname @$F) (__method) (__binding "self" (__ssa_typed @$T)) $P $B))'
+      - match: '(function_declaration name: $N:identifier parameters: $P body:? $B)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(function_definition parameters: $P body: $B)'
+        replace: '(function_definition $P $B)'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return (expression_list $V:identifier))'
+        replace: '(__ssa_return (__rhs @$V))'
+
+  - name: tag-defs
+    rules:
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true" }
+      - match: '(__def (__struct))'
+        tag: { scoped: "true" }
+      - match: '(__def (__impl))'
+        tag: { scoped: "true" }
+      - match: '(__def (__trait))'
+        tag: { scoped: "true" }
+      - match: '(__def (__enum))'
+        tag: { scoped: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+
+resolve:
+  display_source: original
+  lookup_from:
+    - __source_root
+  stages:
+    - name: roots
+      rules:
+        - match: '(__dir "src" $$$REST)'
+          replace: '(__dir "src" (__source_root) $$$REST)'
+        - match: '(__dir "lua" $$$REST)'
+          replace: '(__dir "lua" (__source_root) $$$REST)'
+        - match: '(__dir "lib" $$$REST)'
+          replace: '(__dir "lib" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("lua:lua")'
+      - match: '(__def (__impl))'
+        tag:
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+      - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__impl))'
+        tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__method) (__constructor))'
+        tag: { def_type: Constructor }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__name "*")'
+        tag:
+          import_type: WildcardImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'

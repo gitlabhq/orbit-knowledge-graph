@@ -119,6 +119,7 @@ tests:
     assert:
       - { row_count: 1 }
 
+  # corrected: cross-file Calls rows are unique per caller and target
   - name: "Inherited method dispatch via both static-factory chains: register -> Container.get (2 call sites)"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
@@ -127,7 +128,7 @@ tests:
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   - name: "Foo::class does not create a spurious edge to a member literally named 'class'"
     query: |

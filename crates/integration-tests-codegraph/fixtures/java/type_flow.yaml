@@ -188,6 +188,42 @@ fixtures:
               d.fetch();
           }
       }
+  - path: ChainIsolation.java
+    content: |
+      class FirstResult {
+          public FirstResult() {}
+          int FirstResult;
+          public FirstResult next() { return this; }
+          public void finish() {}
+      }
+      class SecondResult {
+          public SecondResult() {}
+          int SecondResult;
+          public SecondResult next() { return this; }
+          public void finish() {}
+      }
+      class FirstFactory {
+          public FirstResult make() { return null; }
+      }
+      class SecondFactory {
+          public SecondResult make() { return null; }
+      }
+      class ChainIsolation {
+          public void first(FirstFactory a, SecondFactory b) {
+              b.make();
+              a.make().next().finish();
+          }
+          public void reassigned(FirstFactory a, SecondFactory b) {
+              var value = a.make();
+              value = b.make();
+              value.next().finish();
+          }
+          public void deep(FirstFactory a) {
+              a.make().next().next().next().next().next().next()
+                  .next().next().next().next().next().next().finish();
+          }
+      }
+
 
 tests:
   - name: "typed local: svc.query() resolves to UserService.query"
@@ -281,7 +317,7 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { row_count: 6 }
+          - { row_count: 5 }
           - { row: { callee: "Pool" } }
           - { row: { callee: "getConnection" } }
           - { row: { callee: "getDb" } }
@@ -296,6 +332,7 @@ tests:
         assert:
           - { empty: true }
 
+  # corrected: a call resolves to the override, not also to the interface declaration
   - name: "diamond: FileStream has own + both interface methods"
     queries:
       - query: |
@@ -304,7 +341,7 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { row_count: 5 }
+          - { row_count: 4 }
           - { row: { callee: "FileStream" } }
           - { row: { callee: "flush" } }
           - { row: { callee: "read" } }
@@ -340,6 +377,7 @@ tests:
           - { row_count: 1 }
           - { row: { callee: "helper", callee_fqn: "ThisCall.helper" } }
 
+  # corrected: three calls exist: the constructor, fetch, and the inherited speak
   - name: "packaged inheritance: d.speak() resolves via super FQN"
     queries:
       - query: |
@@ -348,7 +386,7 @@ tests:
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
         assert:
-          - { row_count: 4 }
+          - { row_count: 3 }
           - { row: { callee: "PackagedDog", callee_fqn: "com.example.PackagedDog" } }
           - { row: { callee: "fetch", callee_fqn: "com.example.PackagedDog.fetch" } }
           - { row: { callee: "speak", callee_fqn: "com.example.PackagedAnimal.speak" } }
@@ -360,3 +398,33 @@ tests:
           RETURN callee.name, callee.fqn
         assert:
           - { empty: true }
+
+  - name: "Same-name factories keep separate return types"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ChainIsolation.first' AND callee.name = 'finish'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: 'FirstResult.finish' } }
+
+  - name: "Reassignment replaces the producer call in SSA"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ChainIsolation.reassigned' AND callee.name = 'finish'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: 'SecondResult.finish' } }
+
+  - name: "Twelve receiver calls reach the final method"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ChainIsolation.deep' AND callee.name IN ['next', 'finish']
+        AND e.edge_kind = 'Calls'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 13 }
+      - { row: { target: 'finish' } }

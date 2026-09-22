@@ -159,7 +159,7 @@ tests:
   - name: "Backed string enum cases get EnumCase + namespace-qualified FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumCase'
+      WHERE d.definition_type = 'EnumVariant'
         AND d.fqn IN ['App\Domain\Status\Active', 'App\Domain\Status\Inactive', 'App\Domain\Status\Archived']
       RETURN d.fqn AS fqn
     assert:
@@ -169,7 +169,7 @@ tests:
   - name: "Backed int enum cases get EnumCase definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumCase'
+      WHERE d.definition_type = 'EnumVariant'
         AND d.fqn IN ['App\Domain\Priority\Low', 'App\Domain\Priority\Medium', 'App\Domain\Priority\High']
       RETURN d.fqn AS fqn
     assert:
@@ -178,7 +178,7 @@ tests:
   - name: "Pure enum cases (no backing) are still indexed as EnumCase"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumCase'
+      WHERE d.definition_type = 'EnumVariant'
         AND d.fqn IN ['App\Domain\Direction\North', 'App\Domain\Direction\South',
                       'App\Domain\Direction\East', 'App\Domain\Direction\West']
       RETURN d.fqn AS fqn

@@ -191,7 +191,7 @@ tests:
   - name: "Enum cases survive when enum body contains match"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumCase'
+      WHERE d.definition_type = 'EnumVariant'
         AND d.fqn IN ['App\Domain\Status\Active', 'App\Domain\Status\Archived']
       RETURN d.fqn AS fqn
     assert:

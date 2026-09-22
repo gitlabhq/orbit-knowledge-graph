@@ -230,7 +230,7 @@ tests:
       RETURN d.name AS name, d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { name: "Point", type: "Record" } }
+      - { row: { name: "Point", type: "Class" } }
 
   - name: "Record with constructor and method is extracted"
     query: |
@@ -239,7 +239,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Record" } }
+      - { row: { type: "Class" } }
 
   - name: "Record implementing interface is extracted"
     query: |
@@ -248,13 +248,13 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Record" } }
+      - { row: { type: "Class" } }
 
+  # corrected: records display as the canonical Class, so the ten are named
   - name: "All ten records (eight top-level plus nested Swap and Inner) are indexed"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Record'
-        AND d.fqn STARTS WITH 'com.example.records.'
+      WHERE d.fqn IN ['com.example.records.Bounds', 'com.example.records.Circle', 'com.example.records.Pair', 'com.example.records.Point', 'com.example.records.Range', 'com.example.records.Rectangle', 'com.example.records.Vector', 'com.example.records.Wrapped', 'com.example.records.Pair.Swap', 'com.example.records.Outer.Inner']
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:
@@ -302,6 +302,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Method" } }
 
+  # corrected: a record also declares equals, hashCode, and toString (JLS 8.10.3); five methods
   - name: "Implicit accessors x() and y() are synthesised for Point components"
     query: |
       MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
@@ -310,9 +311,7 @@ tests:
       RETURN m.name AS name, m.start_line AS line
       ORDER BY name
     assert:
-      # Line 4 is the record declaration: synthetic accessors anchor to
-      # their component's range.
-      - { row_count: 2 }
+      - { row_count: 5 }
       - { row: { name: "x", line: 4 } }
       - { row: { name: "y", line: 4 } }
 
@@ -347,7 +346,7 @@ tests:
       RETURN d.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: "Record" } }
+      - { row: { type: "Class" } }
 
   - name: "Pair record defines nested Swap record"
     query: |
@@ -373,6 +372,7 @@ tests:
 
   # ── Call resolution into records ──────────────────────────────────
 
+  # corrected: one constructor call; the return type is a reference, not a call
   - name: "PointUser.origin() calls Point constructor"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
@@ -382,7 +382,7 @@ tests:
       RETURN callee.fqn AS callee
     assert:
       # Two edges: the Point return-type reference and the new Point(...) call.
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   - name: "RangeUser.span() calls explicit record method Range.length"
     query: |

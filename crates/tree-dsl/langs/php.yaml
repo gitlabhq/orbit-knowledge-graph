@@ -1,0 +1,373 @@
+# PHP rewrite rules.
+# Handles: namespace, use imports (single, grouped, aliased, function, const),
+# class/interface/trait/enum defs, properties (typed and promoted), constants,
+# methods, $this-> and self::/static:: calls, member/static/function calls,
+# new, control flow, bindings.
+#
+# Import resolution is path-based. Namespaces map to files with the PSR-4
+# convention: drop the vendor root segment and look the rest up under a
+# source root (src, app, lib). A fully qualified reference (\Vendor\X\Y::f())
+# acts as an inline import of Vendor\X\Y.
+#
+# Known gaps (engine, not rules):
+# - Same-namespace siblings resolve only through `use`; the resolver is
+#   import-driven and has no namespace scope.
+# - `use function` / `use const` resolve only when the namespace path is a
+#   file; functions and constants usually live in helper files.
+
+stages:
+  - name: imports
+    rules:
+      # use A\B\C as D;  /  use function A\B\f;  /  use const A\B\K;
+      - match: '(namespace_use_clause $Q:(qualified_name $N:name) alias: $A:name)'
+        replace: '(__import (__source @$Q) (__source_path @$Q|replace("\", "/")) (__name @$N (__alias @$A)))'
+      - match: '(namespace_use_clause $Q:(qualified_name $N:name))'
+        replace: '(__import (__source @$Q) (__source_path @$Q|replace("\", "/")) (__name @$N))'
+
+      # Grouped clause entries: keep the name, carry the alias
+      - match: '(namespace_use_clause $N:name alias: $A:name)'
+        replace: '(namespace_use_clause @$N (__alias @$A))'
+      - match: '(namespace_use_clause $N:name)'
+        replace: '(namespace_use_clause @$N)'
+
+      # use A\B\{C, D as E};
+      - match: '(namespace_use_declaration $P:namespace_name body: (namespace_use_group $$$CLAUSES:namespace_use_clause))'
+        replace: '(__import (__source @$P) (__source_path @$P|replace("\", "/")) $$$CLAUSES->__name)'
+
+      # \Vendor\X\Y::f() and new \Vendor\X\Y() — a fully qualified reference imports Y
+      - match: '(scoped_call_expression scope: $Q:(qualified_name $N:name) name: $M arguments: $A)'
+        replace: '(php_fqn_ref (__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/", "")) (__name @$N)) (scoped_call_expression scope: (name @$N) name: (name @$M) $A))'
+      - match: '(object_creation_expression $Q:(qualified_name $N:name) $A:arguments)'
+        replace: '(php_fqn_ref (__import (__source @$Q) (__source_path @$Q|replace("\", "/")|regex_replace("^/", "")) (__name @$N)) (object_creation_expression (name @$N) $A))'
+
+  - name: normalize
+    rules:
+      - match: '(program $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(namespace_definition name: $N:namespace_name body: (compound_statement $$$B))'
+        replace: '(namespace_definition (php_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace("\", "/")|regex_replace("$", "/*")) (__name "*")))) $$$B)'
+      - match: '(namespace_definition name: $N:namespace_name)'
+        replace: '(php_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace("\", "/")|regex_replace("$", "/*")) (__name "*"))))'
+      - match: '(return_statement $$$V)'
+        replace: '(__ssa_return $$$V)'
+
+      # Types collapse to a bare name: ?T, \A\B\T, T
+      - match: '(qualified_name $N:name)'
+        replace: '(name @$N)'
+      - match: '(named_type $N:name)'
+        replace: '(named_type @$N)'
+      - match: '(optional_type $T:named_type)'
+        replace: '(named_type @$T)'
+      - match: '(union_type $T:named_type $$$R)'
+        replace: '(named_type @$T)'
+      - match: '(intersection_type $T:named_type $$$R)'
+        replace: '(named_type @$T)'
+      - match: '(disjunctive_normal_form_type $T:named_type $$$R)'
+        replace: '(named_type @$T)'
+
+      # Attributes → decorators
+      - match: '(attribute $N:name parameters:? $P)'
+        replace: '(__decorator @$N $P)'
+
+      # $this->x → __ivar
+      - match: '(member_access_expression object: (variable_name (name "this")) name: $N:name)'
+        replace: '(__ivar @$N)'
+
+      # extends / implements / trait use → __supertype
+      - match: '(base_clause $$$S:name)'
+        replace: '(base_clause $$$S=>__supertype)'
+      - match: '(class_interface_clause $$$S:name)'
+        replace: '(class_interface_clause $$$S=>__supertype)'
+      - match: '(use_declaration $$$S:name)'
+        replace: '(use_declaration $$$S=>__supertype)'
+
+      # Parameters
+      - match: '(property_promotion_parameter type: $T:named_type name: (variable_name $N:name))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(property_promotion_parameter name: (variable_name $N:name))'
+        replace: '(__def (__defname @$N) (__property))'
+      - match: '(simple_parameter type: $T:named_type name: $N:variable_name)'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+      - match: '(simple_parameter name: $N:variable_name)'
+        replace: '(__binding @$N)'
+      - match: '(variadic_parameter name: $N:variable_name)'
+        replace: '(__binding @$N)'
+
+      # catch (T $e)
+      - match: '(catch_clause type: (type_list $T:named_type) name: $N:variable_name body: $B)'
+        replace: '(catch_clause (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) $B)'
+
+      # $x instanceof T references T
+      - match: '(binary_expression left: $L (instanceof) right: $T:name)'
+        replace: '(binary_expression $L (__member (__object @$T)))'
+
+  - name: retag-expressions
+    rules:
+      - match: '(member_access_expression object: $O:__ivar name: $M:name)'
+        replace: '(__member @$M (__object $O))'
+      - match: '(member_access_expression object: $O:__member name: $M:name)'
+        replace: '(__member @$M (__object $O))'
+      - match: '(member_access_expression object: $O:__call name: $M:name)'
+        replace: '(__member @$M (__object $O))'
+      - match: '(member_access_expression object: $O name: $M:name)'
+        replace: '(__member @$M (__object @$O))'
+      - match: '(nullsafe_member_access_expression object: $O:__ivar name: $M:name)'
+        replace: '(__member @$M (__object $O))'
+      - match: '(nullsafe_member_access_expression object: $O name: $M:name)'
+        replace: '(__member @$M (__object @$O))'
+      - match: '(class_constant_access_expression $S:name $C:name)'
+        replace: '(__member @$C (__object @$S))'
+      - match: '(scoped_property_access_expression scope: $S:name name: $P:variable_name)'
+        replace: '(__member @$P (__object @$S))'
+
+      # $this->m() / self::m() / static::m()
+      - match: '(member_call_expression object: (variable_name (name "this")) name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__ivar @$M)) $A)'
+      - match: '(nullsafe_member_call_expression object: (variable_name (name "this")) name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__ivar @$M)) $A)'
+      - match: '(scoped_call_expression scope: (relative_scope "parent") name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object (__ivar "parent")))) $A)'
+      - match: '(object_creation_expression (relative_scope "parent") $A:arguments)'
+        replace: '(__call (__callee "parent") $A)'
+      - match: '(object_creation_expression $C:relative_scope $A:arguments)'
+        replace: '(__call (__callee @$C) $A)'
+      - match: '(scoped_call_expression scope: (relative_scope) name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__ivar @$M)) $A)'
+
+      # $x->m() / $this->p->m() / $a->b->m() / f()->m()
+      - match: '(member_call_expression object: $O:__call name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object $O))) $A)'
+      - match: '(nullsafe_member_call_expression object: $O:__call name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object $O))) $A)'
+      - match: '(member_call_expression object: $O:__ivar name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object $O))) $A)'
+      - match: '(member_call_expression object: $O:__member name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object $O))) $A)'
+      - match: '(member_call_expression object: $O name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object @$O))) $A)'
+      - match: '(nullsafe_member_call_expression object: $O:__ivar name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object $O))) $A)'
+      - match: '(nullsafe_member_call_expression object: $O:__member name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object $O))) $A)'
+      - match: '(nullsafe_member_call_expression object: $O name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object @$O))) $A)'
+
+      # Foo::m()
+      - match: '(scoped_call_expression scope: $S:name name: $M:name arguments: $A)'
+        replace: '(__call (__callee (__member @$M (__object @$S))) $A)'
+
+      # f() / new Foo()
+      - match: '(function_call_expression function: $F:name arguments: $A)'
+        replace: '(__call (__callee @$F) $A)'
+      - match: '(object_creation_expression $C:name $A:arguments)'
+        replace: '(__call (__callee @$C) $A)'
+      - match: '(object_creation_expression $C:name)'
+        replace: '(__call (__callee @$C))'
+
+  - name: classify
+    rules:
+      # Bindings
+      - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
+        replace: '(__binding $N (__rhs $R))'
+      - match: '(assignment_expression left: $N:__ivar right: $R)'
+        replace: '(__binding $N (__rhs @$R))'
+      - match: '(assignment_expression left: $N:variable_name right: $R:__call)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:variable_name right: $R:php_fqn_ref)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:variable_name right: $R:__ssa_branch)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:variable_name right: $R:anonymous_function)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:variable_name right: $R:arrow_function)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:variable_name right: $R)'
+        replace: '(__binding @$N (__rhs @$R))'
+      - match: '(static_variable_declaration name: $N:variable_name value: $V:__call)'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(static_variable_declaration name: $N:variable_name value: $V)'
+        replace: '(__binding @$N (__rhs @$V))'
+
+      # Control flow
+      - match: '(if_statement condition: $C body: $B $$$ALTS:else_if_clause|else_clause)'
+        replace: '(__ssa_branch $C (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - match: '(switch_statement condition: $C body: $B)'
+        replace: '(__ssa_branch $C $B)'
+      - match: '(match_expression condition: $C body: (match_block $$$ARMS:match_conditional_expression|match_default_expression))'
+        replace: '(__ssa_branch $C $$$ARMS->__ssa_arm)'
+      - match: '(try_statement body: $B $$$ALTS:catch_clause|finally_clause)'
+        replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - match: '(conditional_expression condition: $C body: $B alternative: $A)'
+        replace: '(__ssa_branch $C (__ssa_arm $B) (__ssa_arm $A))'
+      - match: '(foreach_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(for_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(while_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(do_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+
+      # Members
+      - match: '(const_element $N:name)'
+        replace: '(__def (__defname @$N) (__constant))'
+      - match: '(property_declaration type: $T:named_type (property_element name: (variable_name $N:name)))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(property_declaration (property_element name: (variable_name $N:name)))'
+        replace: '(__def (__defname @$N) (__property))'
+      - match: '(enum_case name: $N:name)'
+        replace: '(__def (__defname @$N) (__enum_variant))'
+
+      # Methods (with and without body) and functions
+      - match: '(method_declaration $$$PRE name: $N:name parameters: $P return_type:? $R:named_type body: $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$PRE $P $B)'
+      - match: '(method_declaration $$$PRE name: $N:name parameters: $P return_type:? $R:named_type)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$PRE $P)'
+      - match: '(function_definition $$$PRE name: $N:name parameters: $P return_type:? $R:named_type body: $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$PRE $P $B)'
+
+      # Class-likes (after members)
+      - match: '(class_declaration $$$PRE name: $N:name (base_clause $S:__supertype) $$$ANN body: (declaration_list $$$B))'
+        replace: '(__def (__defname @$N) (__class @$N) (__alias "self") (__alias "static") $$$PRE $S $$$ANN (__binding "parent" (__rhs (__call (__callee @$S)))) (__binding (__ivar "parent") (__rhs (__call (__callee @$S)))) $$$B)'
+      - match: '(class_declaration $$$PRE name: $N:name $$$ANN body: (declaration_list $$$B))'
+        replace: '(__def (__defname @$N) (__class @$N) (__alias "self") (__alias "static") $$$PRE $$$ANN $$$B)'
+      - match: '(interface_declaration $$$PRE name: $N:name $$$ANN body: (declaration_list $$$B))'
+        replace: '(__def (__defname @$N) (__interface) $$$PRE $$$ANN $$$B)'
+      - match: '(trait_declaration $$$PRE name: $N:name body: (declaration_list $$$B))'
+        replace: '(__def (__defname @$N) (__trait) (__alias "self") (__alias "static") $$$PRE $$$B)'
+      - match: '(enum_declaration $$$PRE name: $N:name $$$ANN body: (enum_declaration_list $$$B))'
+        replace: '(__def (__defname @$N) (__enum) (__alias "self") (__alias "static") $$$PRE $$$ANN $$$B)'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '$R:(__ssa_return_type "self")'
+        replace: '(__ssa_return_type @$R|ancestor_sym("__class"))'
+      - match: '(__ssa_return $V:variable_name)'
+        replace: '(__ssa_return (__rhs @$V))'
+
+  - name: tag-defs
+    rules:
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true" }
+      - match: '(__def (__struct))'
+        tag: { scoped: "true" }
+      - match: '(__def (__impl))'
+        tag: { scoped: "true" }
+      - match: '(__def (__trait))'
+        tag: { scoped: "true" }
+      - match: '(__def (__enum))'
+        tag: { scoped: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+
+resolve:
+  display_source: original
+  lookup_from:
+    - __source_root
+  stages:
+    - name: roots
+      rules:
+        - match: '(__dir "src" $$$REST)'
+          replace: '(__dir "src" (__source_root) $$$REST)'
+        - match: '(__dir "app" $$$REST)'
+          replace: '(__dir "app" (__source_root) $$$REST)'
+        - match: '(__dir "lib" $$$REST)'
+          replace: '(__dir "lib" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          fqn: '@$M|child_sym("__package")'
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("php:php", "phtml:php")'
+      - match: '(__def)'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat("\", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__class))'
+        tag:
+          class_fqn: '@$ROOT|tag("fqn")'
+      - match: '(__def (__trait))'
+        tag:
+          class_fqn: '@$ROOT|tag("fqn")'
+      - match: '(__def (__enum))'
+        tag:
+          class_fqn: '@$ROOT|tag("fqn")'
+      # Promoted constructor parameters are properties of the class
+      - match: '(__def (__property))'
+        tag:
+          fqn: '@$ROOT|concat("\", "ancestor_tag:class_fqn", "child_sym:__defname")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          import_type: Import
+          resolved: '@$ROOT|has_incoming("Imports")'

@@ -1,0 +1,233 @@
+# C rewrite rules.
+# Handles: #include as wildcard imports (quoted paths relative to the file),
+# functions and prototypes, structs, unions, enums, typedefs, calls, locals,
+# control flow. Definitions hang off the file stem (stem::name).
+#
+# Known gaps (engine, not rules):
+# - A file has one wildcard slot, so with several includes only the last
+#   include receives unresolved calls.
+
+stages:
+  - name: imports
+    rules:
+      - match: '(preproc_include path: $S:string_literal)'
+        replace: '(__import (__source @$S) (__source_path @$S|regex_replace("^.", "")|regex_replace(".$", "")|prepend("./")) (__name "*"))'
+      - match: '(preproc_include path: $S:system_lib_string)'
+        replace: '(__import (__source @$S) (__source_path @$S|strip=<|strip_suffix(">")) (__name "*"))'
+
+  - name: normalize
+    rules:
+      - match: '(translation_unit $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(return_statement $$$V)'
+        replace: '(__ssa_return $$$V)'
+      - match: '(parameter_declaration declarator: $N:identifier)'
+        replace: '(__binding @$N)'
+      - match: '(parameter_declaration declarator: (pointer_declarator declarator: $N:identifier))'
+        replace: '(__binding @$N)'
+      - match: '(enumerator name: $N:identifier)'
+        replace: '(__def (__defname @$N) (__enum_variant))'
+      - match: '(field_declaration type: $T:struct_specifier declarator: $N:field_identifier)'
+        replace: '(field_declaration $T (__def (__defname @$N) (__field_def)))'
+      - match: '(field_declaration type: $T:union_specifier declarator: $N:field_identifier)'
+        replace: '(field_declaration $T (__def (__defname @$N) (__field_def)))'
+      - match: '(field_declaration type: $T:enum_specifier declarator: $N:field_identifier)'
+        replace: '(field_declaration $T (__def (__defname @$N) (__field_def)))'
+      - match: '(field_declaration declarator: $N:field_identifier)'
+        replace: '(__def (__defname @$N) (__field_def))'
+      - match: '(field_declaration declarator: (pointer_declarator declarator: $N:field_identifier))'
+        replace: '(__def (__defname @$N) (__field_def))'
+      - match: '(field_declaration declarator: (array_declarator declarator: $N:field_identifier))'
+        replace: '(__def (__defname @$N) (__field_def))'
+
+  - name: retag-calls
+    rules:
+      - match: '(call_expression function: (field_expression argument: $O field: $F:field_identifier) arguments: $A)'
+        replace: '(__call (__callee (__member @$F (__object @$O))) $A)'
+      - match: '(call_expression function: $F:identifier arguments: $A)'
+        replace: '(__call (__callee @$F) $A)'
+
+  - name: classify
+    rules:
+      - match: '(declaration declarator: (function_declarator declarator: $N:identifier))'
+        replace: '(__decl (__defname @$N))'
+      - match: '(declaration declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier)))'
+        replace: '(__decl (__defname @$N))'
+      # Definitions (prototypes stay declarations)
+      - match: '(function_definition declarator: (function_declarator declarator: (parenthesized_declarator (pointer_declarator (function_declarator declarator: $N:identifier parameters: $P)))) body: $B)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(function_definition declarator: (pointer_declarator declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier parameters: $P))) body: $B)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(function_definition declarator: (function_declarator declarator: (parenthesized_declarator $N:identifier) parameters: $P) body: $B)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(function_definition declarator: (attributed_declarator (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(function_definition declarator: (function_declarator declarator: $N:identifier parameters: $P) body: $B)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(function_definition declarator: (pointer_declarator declarator: (function_declarator declarator: $N:identifier parameters: $P)) body: $B)'
+        replace: '(__def (__defname @$N) (__function) $P $B)'
+      - match: '(declaration declarator: (init_declarator declarator: $N:identifier value: $V:__call))'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:__call))'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(declaration declarator: (init_declarator declarator: $N:identifier value: $V))'
+        replace: '(__binding @$N (__rhs @$V))'
+      - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V))'
+        replace: '(__binding @$N (__rhs @$V))'
+      - match: '(assignment_expression left: $N:identifier right: $R:__call)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:identifier right: $R)'
+        replace: '(__binding @$N (__rhs @$R))'
+      - match: '(if_statement condition: $C consequence: $Q alternative:? $A)'
+        replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm? $A))'
+      - match: '(switch_statement condition: $C body: $B)'
+        replace: '(__ssa_branch $C $B)'
+      - match: '(conditional_expression condition: $C consequence: $Q alternative: $A)'
+        replace: '(__ssa_branch $C (__ssa_arm $Q) (__ssa_arm $A))'
+      - match: '(for_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(while_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(do_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      # Types
+      - match: '(struct_specifier name: $N:type_identifier body: $B)'
+        replace: '(__def (__defname @$N) (__struct) $B)'
+      - match: '(union_specifier name: $N:type_identifier body: $B)'
+        replace: '(__def (__defname @$N) (__struct) $B)'
+      - match: '(enum_specifier name: $N:type_identifier body: $B)'
+        replace: '(__def (__defname @$N) (__enum) $B)'
+      - match: '(type_definition type: $T declarator: $N:type_identifier)'
+        replace: '(type_definition (__def (__defname @$N) (__type_alias)) $T)'
+      - match: '(type_definition type: $T declarator: (pointer_declarator declarator: $N:type_identifier))'
+        replace: '(type_definition (__def (__defname @$N) (__type_alias)) $T)'
+      - match: '(type_definition type: $T declarator: (array_declarator declarator: $N:type_identifier))'
+        replace: '(type_definition (__def (__defname @$N) (__type_alias)) $T)'
+      - match: '(type_definition type: $T declarator: (function_declarator declarator: (parenthesized_declarator (pointer_declarator declarator: $N:type_identifier))))'
+        replace: '(type_definition (__def (__defname @$N) (__type_alias)) $T)'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:identifier)'
+        replace: '(__ssa_return (__rhs @$V))'
+
+  - name: tag-defs
+    rules:
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true" }
+      - match: '(__def (__struct))'
+        tag: { scoped: "true" }
+      - match: '(__def (__impl))'
+        tag: { scoped: "true" }
+      - match: '(__def (__trait))'
+        tag: { scoped: "true" }
+      - match: '(__def (__enum))'
+        tag: { scoped: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+
+resolve:
+  display_source: original
+  lookup_from:
+    - __source_root
+  stages:
+    - name: roots
+      rules:
+        - match: '(__dir "src" $$$REST)'
+          replace: '(__dir "src" (__source_root) $$$REST)'
+        - match: '(__dir "include" $$$REST)'
+          replace: '(__dir "include" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          fqn: '@$M|stem|split_last("/")'
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("c:c", "h:c")'
+      - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat("::", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__impl))'
+        tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__method) (__constructor))'
+        tag: { def_type: Constructor }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__name "*")'
+        tag:
+          import_type: WildcardImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'
