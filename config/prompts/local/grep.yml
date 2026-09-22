@@ -2,20 +2,8 @@ name: grep
 version: 1.12.0
 short: Search local definition names, paths, and bodies
 description: >-
-  Search local definition names, paths, and bodies.
-
-
-  One query per call. Quote `a|b|c` for OR alternatives. DuckDB FTS requires all
-  searchable terms in each alternative. A single-token alternative such as
-  `get_ia_record` must also appear literally, case-insensitively, in the
-  definition's name, path, or body. This is not regex syntax; each alternative
-  needs search terms.
-
-
-  Returns `Definition:<id>` references with names, kinds, file ranges, and match
-  labels. Exact-name hits list first, then name/path hits, then body-only
-  mentions, BM25 within each group. Body-only rows add a mention count and
-  the first matching line. Identifier alternatives report
-  case-insensitive exact symbol-name hits and misses within the selected scope.
-  Pass a `path:start-end` range or a Definition ID to `context` for source and
-  relationships. Narrow with --path/--kind or raise --limit.
+  Search local definition names, paths, and bodies with one query: quote `a|b|c` for OR
+  alternatives, each requiring all searchable terms.
+  Single tokens must also match literally, ignoring case; this is FTS, not regex.
+  Results rank exact names before name/path hits and body mentions; pass
+  `Definition:<id>` or `path:start-end` to `context` for source and relationships.

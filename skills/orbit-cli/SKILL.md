@@ -37,31 +37,18 @@ Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 orbit index .
 orbit grep "rate limit" --path src --kind Method,Function
 orbit grep 'query_arrow|insert_batch|execute' --path crates/duckdb-client
-orbit context Definition:<id> [Definition:<id>...]
-orbit context src/lib.rs File:<id> Definition:<id>
-orbit context src/lib.rs:120-180 crates/duckdb-client
+orbit context Definition:<id> src/lib.rs:120-180 crates/duckdb-client
 ```
 
-One query per call. Quote `a|b|c` for OR alternatives with a shared result limit.
-Different questions need separate calls. DuckDB FTS requires all searchable terms
-in each alternative. A single-token alternative such as `get_ia_record` must also
-appear literally, case-insensitively, in the definition's name, path, or body.
-Results list exact-name hits first, then name/path hits, then body-only mentions,
-ordered by BM25 within each group. Each row carries the definition's file range;
-body-only rows add a mention count and the first matching line.
-Identifier alternatives report case-insensitive exact symbol-name hits and misses
-within the selected scope. Narrow with `--path`/`--kind` or raise `--limit`.
+Quote `a|b|c` for OR alternatives. Each alternative uses conjunctive FTS, and a
+single token must also match literally, ignoring case. Results rank exact names,
+then name/path hits, then body mentions. Rows include Definition IDs and ranges;
+body mentions also show the count and first matching line.
 
-`grep` returns `Definition:<id>` references. Pass them to `context`, which
-also accepts exact FQNs but not short names or globs. A path is shorthand for
-its indexed `File:<id>`. File targets return a compact definition map with kinds,
-line ranges, and every followable ID. Connections are bounded to ten per section
-with clear omitted counts; choose a Definition ID for complete source and its
-indexed connections. `<--` is a caller, `-->` is a callee. Connections from test,
-fixture, and generated files appear in their own section. `path:start-end`
-returns those numbered lines with the definitions they touch. A directory lists
-its indexed files with definition counts, fifty at a time. Reuse the returned
-source.
+Pass Definition IDs, exact FQNs, paths, ranges, or directories to `context`.
+Definition targets show full source and indexed relationships. File targets show
+a compact map and at most ten connections per section, with omitted counts.
+`<--` is a caller and `-->` is a callee. Reuse the returned source.
 
 <!-- orbit:section quick-start -->
 ## Query and map
