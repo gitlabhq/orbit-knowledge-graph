@@ -230,9 +230,13 @@ impl Resolver {
 
         let mut type_uses: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
         let mut producers: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
+        let mut extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>> = FxHashMap::default();
         let mut edges_by_tree: Vec<Vec<&Edge>> = vec![vec![]; trees.len()];
         for e in edges {
             edges_by_tree[e.from_fi()].push(e);
+            if e.kind == EdgeKind::Extends {
+                extends_of.entry(e.from()).or_default().push(e.to());
+            }
             if e.kind == EdgeKind::TypeFlow {
                 type_uses.entry((e.to_tree, e.to_node)).or_default().push(e);
                 if let Some(site) = e.site {
@@ -261,7 +265,7 @@ impl Resolver {
             })
             .collect();
         let mut ctx = ResolveCtx {
-            extends: &[],
+            extends_of,
             corpus: Cursor::new(trees, 0, 0),
             edges_by_tree: &edges_by_tree,
             type_uses,
@@ -282,8 +286,7 @@ impl Resolver {
             imports: &imports,
         };
 
-        let inherit =
-            |&fi: &usize| [resolve_inheritance(&ctx, fi), resolve_receivers(&ctx, fi)].concat();
+        let inherit = |&fi: &usize| resolve_file(&ctx, fi);
         let wave1: Vec<Edge> = self
             .reqs
             .par_iter()
@@ -297,7 +300,9 @@ impl Resolver {
                     && ctx.corpus.follow(e).is_class())
             })
             .collect();
-        ctx.extends = &wave1;
+        for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
+            ctx.extends_of.entry(e.from()).or_default().push(e.to());
+        }
         cross_edges.extend(&wave1);
 
         let wave2: Vec<Edge> = ctx
@@ -344,7 +349,7 @@ impl Resolver {
 }
 
 struct ResolveCtx<'a> {
-    extends: &'a [Edge],
+    extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
     corpus: Cursor<'a>,
     edges_by_tree: &'a [Vec<&'a Edge>],
     type_uses: FxHashMap<(u32, u32), Vec<&'a Edge>>,
@@ -687,35 +692,6 @@ fn call_edges<'a>(
     targets.into_iter().map(move |t| call_edge(from, t, site))
 }
 
-fn resolve_inheritance(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
-    let mut out = Vec::new();
-    let root = ctx.corpus.jump(fi as u32, 0);
-    for child in root.descendants().filter(|d| d.is(C::Def)) {
-        for s in child.children().filter(|s| s.is(C::SuperType)) {
-            if let Some(parent) = resolve_chain(ctx, s).filter(|p| p.fi() != fi as u32) {
-                out.push(child.edge_to(parent, EdgeKind::Extends));
-                for call in child.calls() {
-                    let owner = call.enclosing(|e| e.is_class());
-                    let owned = owner.is_some_and(|o| o.index() == child.index());
-                    let callee = call.child(C::Callee).and_then(|k| {
-                        k.child_sym(C::Ivar)
-                            .or_else(|| call.has_tag(ctx.tags.implicit_self).then(|| k.sym()))
-                    });
-                    let from = call.enclosing(|e| e.is(C::Def)).filter(|_| owned);
-                    let Some((from, name)) = from.zip(callee) else {
-                        continue;
-                    };
-                    if find_method_in(child, name).is_none() {
-                        let site = Some(call.index());
-                        out.extend(call_edges(from, method_up(ctx, parent, name, fi), site));
-                    }
-                }
-            }
-        }
-    }
-    out
-}
-
 fn resolve_type_edges(ctx: &ResolveCtx, ce: &Edge) -> Vec<Edge> {
     let uses = |site| Some((site, ctx.type_uses.get(&(ce.from_tree, site))?));
     let Some((site, uses)) = ce.site.and_then(uses) else {
@@ -911,22 +887,12 @@ fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
 }
 
 fn supertypes<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> Vec<(u32, u32)> {
+    let linked = ctx.extends_of.get(&(cls.fi(), cls.index()));
     cls.children()
         .filter(|s| s.is(C::SuperType))
         .filter_map(|s| resolve_chain(ctx, s))
         .map(|c| (c.fi(), c.index()))
-        .chain(
-            ctx.edges_by_tree[cls.fi() as usize]
-                .iter()
-                .copied()
-                .chain(ctx.extends)
-                .filter(|e| {
-                    e.kind == EdgeKind::Extends
-                        && e.from_tree == cls.fi()
-                        && e.from_node == cls.index()
-                })
-                .map(|e| (e.to_tree, e.to_node)),
-        )
+        .chain(linked.into_iter().flatten().copied())
         .collect()
 }
 
@@ -1030,7 +996,9 @@ fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Optio
         .find_map(|b| find_method_in(b, name))
 }
 
-fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
+/// Cross-file edges for one file that the import pass cannot produce:
+/// inheritance, decorators, destructuring, and member calls on imported types.
+fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
     let mut out = Vec::new();
     let root = ctx.corpus.jump(fi as u32, 0);
     let local = |n: Cursor| {
@@ -1051,74 +1019,133 @@ fn resolve_receivers(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
         wild.map(|&w| from.edge_to(from.jump(fi as u32, w), EdgeKind::Imports))
             .collect()
     };
-    for d in root.descendants().filter(|d| d.is(C::Def)) {
-        for dec in d.children_of(C::Decorator) {
-            match resolve_chain(ctx, dec) {
-                Some(t) if t.fi() != fi as u32 => out.push(d.edge_to(t, EdgeKind::Calls)),
-                Some(_) => {}
-                None => out.extend(unbound(d, dec.sym())),
+    let cross = |c: Cursor| c.fi() != fi as u32;
+
+    for node in root.descendants() {
+        let Some(from) = Some(node)
+            .filter(|n| n.is(C::Def))
+            .or_else(|| node.enclosing(|e| e.is(C::Def)))
+        else {
+            continue;
+        };
+        if node.is(C::Def) {
+            for dec in node.children_of(C::Decorator) {
+                match resolve_chain(ctx, dec) {
+                    Some(t) if cross(t) => out.push(node.edge_to(t, EdgeKind::Calls)),
+                    Some(_) => {}
+                    None => out.extend(unbound(node, dec.sym())),
+                }
             }
-        }
-    }
-    for d in root.descendants().filter(|d| d.is(C::Destructure)) {
-        let Some(from) = d.enclosing(|e| e.is(C::Def)) else {
-            continue;
-        };
-        let typed_local = |k: Cursor| {
-            let s = k.sym_opt()?;
-            let binding = from
-                .descendants()
-                .find(|b| b.is(C::Binding) && b.sym_opt() == Some(s))?;
-            resolve_chain(ctx, binding.typed()?)
-        };
-        let class = match (d.child(C::Call), d.child(C::Rhs)) {
-            (Some(pattern), _) => pattern.child(C::Callee).and_then(|k| resolve_chain(ctx, k)),
-            (None, Some(value)) => match value.child(C::Call) {
-                Some(call) => producer_class(ctx, call),
-                None => typed_local(value),
-            },
-            (None, None) => None,
-        };
-        let Some(class) = class else {
-            continue;
-        };
-        let slots: Vec<Cursor> = d
-            .children()
-            .filter(|s| s.is(C::Binding) || s.is(C::Destructure))
-            .collect();
-        let components: Vec<Cursor> = class
-            .child(C::Positional)
-            .map(|p| p.children().filter(|c| c.is(C::Binding)).collect())
-            .unwrap_or_default();
-        if components.len() != slots.len() {
-            continue;
-        }
-        for (slot, component) in slots.iter().zip(components) {
-            let members = method_up(ctx, class, component.sym(), fi);
-            out.extend(call_edges(from, members, Some(slot.index())));
-        }
-    }
-    for (call, m) in root.member_calls() {
-        let Some(from) = call.enclosing(|c| c.is(C::Def)) else {
-            continue;
-        };
-        let bound = |s: u32| from.any_desc(|b| b.is(C::Binding) && b.sym_opt() == Some(s));
-        let Some(object) = m.child(C::Object) else {
-            continue;
-        };
-        let Some(obj) = object.reference().chain_root().sym_opt() else {
-            continue;
-        };
-        match resolve_chain(ctx, object) {
-            Some(target) if target.fi() != fi as u32 && target.is_class() => {
-                let members = method_up(ctx, target, m.sym(), fi);
-                out.extend(call_edges(from, members, Some(call.index())));
+            for parent in node
+                .children_of(C::SuperType)
+                .filter_map(|s| resolve_chain(ctx, s))
+            {
+                if !cross(parent) {
+                    continue;
+                }
+                out.push(node.edge_to(parent, EdgeKind::Extends));
+                out.extend(inherited_calls(ctx, node, parent, fi));
             }
-            None if !bound(obj) => out.extend(unbound(from, obj)),
-            _ => {}
+        } else if node.is(C::Destructure) {
+            out.extend(destructure_calls(ctx, node, from, fi));
+        } else if let Some(m) = node.member().filter(|m| m.sym_opt().is_some()) {
+            let Some(object) = m.child(C::Object) else {
+                continue;
+            };
+            let Some(obj) = object.reference().chain_root().sym_opt() else {
+                continue;
+            };
+            let bound = |s: u32| from.any_desc(|b| b.is(C::Binding) && b.sym_opt() == Some(s));
+            match resolve_chain(ctx, object) {
+                Some(target) if cross(target) && target.is_class() => {
+                    let members = method_up(ctx, target, m.sym(), fi);
+                    out.extend(call_edges(from, members, Some(node.index())));
+                }
+                None if !bound(obj) => out.extend(unbound(from, obj)),
+                _ => {}
+            }
         }
     }
     out
+}
+
+/// Unqualified and self calls inside `class` that reach a member `class` does
+/// not declare itself, resolved on a cross-file `parent`.
+fn inherited_calls<'a>(
+    ctx: &'a ResolveCtx,
+    class: Cursor<'a>,
+    parent: Cursor<'a>,
+    fi: usize,
+) -> Vec<Edge> {
+    let mut out = Vec::new();
+    for call in class.calls() {
+        let owned = call
+            .enclosing(|e| e.is_class())
+            .is_some_and(|o| o.index() == class.index());
+        let callee = call.child(C::Callee).and_then(|k| {
+            k.child_sym(C::Ivar)
+                .or_else(|| call.has_tag(ctx.tags.implicit_self).then(|| k.sym()))
+        });
+        let from = call.enclosing(|e| e.is(C::Def)).filter(|_| owned);
+        let Some((from, name)) = from.zip(callee) else {
+            continue;
+        };
+        if find_method_in(class, name).is_none() {
+            let site = Some(call.index());
+            out.extend(call_edges(from, method_up(ctx, parent, name, fi), site));
+        }
+    }
+    out
+}
+
+/// Each slot of a destructuring pattern reads the matching positional
+/// component of the destructured type.
+fn destructure_calls<'a>(
+    ctx: &'a ResolveCtx,
+    d: Cursor<'a>,
+    from: Cursor<'a>,
+    fi: usize,
+) -> Vec<Edge> {
+    let typed_local = |k: Cursor| {
+        let s = k.sym_opt()?;
+        let binding = from
+            .descendants()
+            .find(|b| b.is(C::Binding) && b.sym_opt() == Some(s))?;
+        resolve_chain(ctx, binding.typed()?)
+    };
+    let class = match (d.child(C::Call), d.child(C::Rhs)) {
+        (Some(pattern), _) => pattern.child(C::Callee).and_then(|k| resolve_chain(ctx, k)),
+        (None, Some(value)) => match value.child(C::Call) {
+            Some(call) => producer_class(ctx, call),
+            None => typed_local(value),
+        },
+        (None, None) => None,
+    };
+    let Some(class) = class else {
+        return vec![];
+    };
+    let slots: Vec<Cursor> = d
+        .children()
+        .filter(|s| s.is(C::Binding) || s.is(C::Destructure))
+        .collect();
+    let components: Vec<Cursor> = class
+        .child(C::Positional)
+        .map(|p| p.children().filter(|c| c.is(C::Binding)).collect())
+        .unwrap_or_default();
+    if components.len() != slots.len() {
+        return vec![];
+    }
+    slots
+        .iter()
+        .zip(components)
+        .flat_map(|(slot, component)| {
+            call_edges(
+                from,
+                method_up(ctx, class, component.sym(), fi),
+                Some(slot.index()),
+            )
+        })
+        .collect()
 }
 
 fn build_file_index(
