@@ -2,6 +2,14 @@
 # Handles: use declarations, struct/enum/trait/impl/fn defs,
 # method calls, field access, self.x, control flow, bindings.
 
+config:
+  parse_files:
+    - name: "Cargo.toml"
+      format: toml
+  lookup_from:
+    - __source_root
+    - __crate_root
+
 stages:
   - name: normalize
     rules:
@@ -180,12 +188,6 @@ stages:
           resolved_source: '@$ROOT|child_sym("__source_path")'
 
 resolve:
-  parse_files:
-    - name: "Cargo.toml"
-      format: toml
-  lookup_from:
-    - __source_root
-    - __crate_root
   stages:
     - name: crate_roots
       rules:

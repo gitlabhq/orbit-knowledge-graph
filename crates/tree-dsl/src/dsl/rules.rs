@@ -45,37 +45,96 @@ pub enum ParseFormat {
     Raw(regex::Regex),
 }
 
-pub struct ResolveConfig {
-    pub stages: Vec<ResolveStage>,
-    pub parse_files: Vec<ParseFileSpec>,
-    pub lookup_from: Vec<u16>,
+/// Whole-language settings from the YAML `config:` section.
+pub struct Config {
+    /// Names the language defines everywhere without an import. An unresolved
+    /// call to one does not fall back to wildcard imports.
+    pub builtins: rustc_hash::FxHashSet<u32>,
+    /// Whether an import may rebind a name already defined in the same scope.
+    /// Ruby autoloads must not; a local class always wins.
+    pub imports_shadow_locals: bool,
+    /// Module roots that never resolve to project files (a stdlib list).
     pub external: Vec<String>,
-    pub display_source: DisplaySource,
-    pub aliases: Vec<(String, String)>,
+    /// Directory-tree marker kinds that import paths are looked up from.
+    pub lookup_from: Vec<u16>,
+    /// Manifest files parsed into the directory tree before resolve stages run.
+    pub parse_files: Vec<ParseFileSpec>,
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub enum DisplaySource {
-    #[default]
-    Original,
-    Resolved,
-}
-
-impl Default for ResolveConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
-            stages: vec![],
-            parse_files: vec![],
-            lookup_from: vec![],
+            builtins: Default::default(),
+            imports_shadow_locals: true,
             external: vec![],
-            display_source: DisplaySource::Original,
-            aliases: vec![],
+            lookup_from: vec![],
+            parse_files: vec![],
         }
     }
 }
 
 #[derive(serde::Deserialize)]
+struct ConfigSection {
+    #[serde(default)]
+    builtins: Vec<String>,
+    #[serde(default = "default_true")]
+    imports_shadow_locals: bool,
+    #[serde(default)]
+    external: Vec<String>,
+    #[serde(default)]
+    lookup_from: Vec<String>,
+    #[serde(default)]
+    parse_files: Vec<ParseFileEntry>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Config {
+    let Some(section) = section else {
+        return Config::default();
+    };
+    let parse_files = section
+        .parse_files
+        .iter()
+        .map(|pf| ParseFileSpec {
+            name: pf.name.clone(),
+            format: match pf.format.as_str() {
+                "json" => ParseFormat::Json,
+                "toml" => ParseFormat::Toml,
+                "raw" => {
+                    let pattern = pf
+                        .extract
+                        .as_deref()
+                        .expect("raw format requires extract pattern");
+                    ParseFormat::Raw(regex::Regex::new(pattern).expect("invalid extract regex"))
+                }
+                other => panic!("unknown parse_files format: {other}"),
+            },
+        })
+        .collect();
+    Config {
+        builtins: section
+            .builtins
+            .iter()
+            .map(|b| lang.syms.intern(b))
+            .collect(),
+        imports_shadow_locals: section.imports_shadow_locals,
+        external: section.external.clone(),
+        lookup_from: section
+            .lookup_from
+            .iter()
+            .map(|name| lang.intern_kind(name))
+            .collect(),
+        parse_files,
+    }
+}
+
+#[derive(serde::Deserialize)]
 struct RuleFile {
+    #[serde(default)]
+    config: Option<ConfigSection>,
     stages: Vec<Stage>,
     #[serde(default)]
     resolve: Option<ResolveSection>,
@@ -85,14 +144,6 @@ struct RuleFile {
 
 #[derive(serde::Deserialize)]
 struct ResolveSection {
-    #[serde(default)]
-    parse_files: Vec<ParseFileEntry>,
-    #[serde(default)]
-    lookup_from: Vec<String>,
-    #[serde(default)]
-    external: Vec<String>,
-    #[serde(default)]
-    display_source: Option<String>,
     stages: Vec<ResolveStageSpec>,
 }
 
@@ -168,23 +219,28 @@ pub fn load_rules(yaml: &str, lang: &Lang) -> Vec<Vec<Rewrite>> {
 
 pub struct LangConfig {
     pub rewrite_stages: Vec<Vec<Rewrite>>,
-    pub resolve: ResolveConfig,
+    pub resolve_stages: Vec<ResolveStage>,
+    pub config: Config,
     pub display_rules: Vec<Rewrite>,
 }
 
-/// Load both rewrite stages and resolve config from a language YAML file.
-pub fn load_lang(yaml: &str, lang: &Lang) -> (Vec<Vec<Rewrite>>, ResolveConfig) {
+/// Load rewrite stages, resolve stages, and whole-language config from a language YAML file.
+pub fn load_lang(yaml: &str, lang: &Lang) -> (Vec<Vec<Rewrite>>, Vec<ResolveStage>, Config) {
     let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
     let rewrites = file
         .stages
         .iter()
         .map(|stage| compile_stage(stage, lang))
         .collect();
-    let resolve = match file.resolve {
-        Some(section) => compile_resolve(&section, lang),
-        None => ResolveConfig::default(),
-    };
-    (rewrites, resolve)
+    let resolve = file
+        .resolve
+        .as_ref()
+        .map_or_else(Vec::new, |section| compile_resolve(section, lang));
+    (
+        rewrites,
+        resolve,
+        compile_config(file.config.as_ref(), lang),
+    )
 }
 
 pub fn load_lang_full(yaml: &str, lang: &Lang) -> LangConfig {
@@ -194,10 +250,10 @@ pub fn load_lang_full(yaml: &str, lang: &Lang) -> LangConfig {
         .iter()
         .map(|stage| compile_stage(stage, lang))
         .collect();
-    let resolve = match file.resolve {
-        Some(section) => compile_resolve(&section, lang),
-        None => ResolveConfig::default(),
-    };
+    let resolve_stages = file
+        .resolve
+        .as_ref()
+        .map_or_else(Vec::new, |section| compile_resolve(section, lang));
     let display_rules = file
         .display
         .unwrap_or_default()
@@ -206,69 +262,34 @@ pub fn load_lang_full(yaml: &str, lang: &Lang) -> LangConfig {
         .collect();
     LangConfig {
         rewrite_stages,
-        resolve,
+        resolve_stages,
+        config: compile_config(file.config.as_ref(), lang),
         display_rules,
     }
 }
 
-fn compile_resolve(section: &ResolveSection, lang: &Lang) -> ResolveConfig {
-    let parse_files = section
-        .parse_files
-        .iter()
-        .map(|pf| ParseFileSpec {
-            name: pf.name.clone(),
-            format: match pf.format.as_str() {
-                "json" => ParseFormat::Json,
-                "toml" => ParseFormat::Toml,
-                "raw" => {
-                    let pattern = pf
-                        .extract
-                        .as_deref()
-                        .expect("raw format requires extract pattern");
-                    ParseFormat::Raw(regex::Regex::new(pattern).expect("invalid extract regex"))
-                }
-                other => panic!("unknown parse_files format: {other}"),
-            },
-        })
-        .collect();
-    let stages = section
+fn compile_resolve(section: &ResolveSection, lang: &Lang) -> Vec<ResolveStage> {
+    section
         .stages
         .iter()
         .map(|spec| {
             if let Some(climb) = &spec.climb {
-                let while_kind = lang.intern_kind(&climb.r#while);
-                let mark_kind = lang.intern_kind(&climb.mark);
                 ResolveStage::Climb {
-                    while_kind,
-                    mark_kind,
+                    while_kind: lang.intern_kind(&climb.r#while),
+                    mark_kind: lang.intern_kind(&climb.mark),
                 }
             } else if let Some(rules) = &spec.rules {
-                let compiled = rules
-                    .iter()
-                    .flat_map(|rule| compile_rule(rule, lang))
-                    .collect();
-                ResolveStage::Rules(compiled)
+                ResolveStage::Rules(
+                    rules
+                        .iter()
+                        .flat_map(|rule| compile_rule(rule, lang))
+                        .collect(),
+                )
             } else {
                 panic!("resolve stage must have either `rules` or `climb`");
             }
         })
-        .collect();
-    let lookup_from = section
-        .lookup_from
-        .iter()
-        .map(|name| lang.intern_kind(name))
-        .collect();
-    ResolveConfig {
-        stages,
-        parse_files,
-        lookup_from,
-        external: section.external.clone(),
-        display_source: match section.display_source.as_deref() {
-            Some("resolved") => DisplaySource::Resolved,
-            _ => DisplaySource::Original,
-        },
-        aliases: vec![],
-    }
+        .collect()
 }
 
 fn compile_stage(stage: &Stage, lang: &Lang) -> Vec<Rewrite> {

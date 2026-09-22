@@ -25,8 +25,6 @@ pub struct ReservedTags {
     /// On a node: names from the given source path become visible in this
     /// file as if imported, as with Kotlin extension receivers.
     pub visible_from: u32,
-    /// On an import: it must not shadow a local definition of the same name.
-    pub non_shadowing: u32,
     /// On a call with a bare callee: an unresolved name may be a member of the
     /// enclosing class or its supertypes. The value orders the lookup:
     /// `members` first, or `locals` first.
@@ -44,7 +42,6 @@ impl ReservedTags {
             exports: k("exports"),
             resolved_source: k("resolved_source"),
             visible_from: k("visible_from"),
-            non_shadowing: k("non_shadowing"),
             implicit_self: k("implicit_self"),
             implicit_self_locals: k("locals"),
         }

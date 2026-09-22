@@ -10,6 +10,15 @@
 # - The DSL cannot see a node's parent, so local `val`/`var` declarations
 #   get the same treatment as properties: a __def plus SSA bindings.
 
+config:
+  builtins: [
+    println, print, readLine, require, requireNotNull, check, checkNotNull, error,
+    TODO, lazy, run, with, repeat, arrayOf, listOf, setOf, mapOf, mutableListOf,
+    mutableSetOf, mutableMapOf, emptyList, emptySet, emptyMap
+  ]
+  lookup_from:
+    - __source_root
+
 stages:
   - name: imports
     rules:
@@ -117,8 +126,6 @@ stages:
         replace: '(__call (__callee $F) $$$A)'
       - match: '(call_expression $F:__member (call_suffix $$$A))'
         replace: '(__call (__callee $F) $$$A)'
-      - match: '(call_expression $F:(simple_identifier "/^(println|print|readLine|require|requireNotNull|check|checkNotNull|error|TODO|lazy|run|with|repeat|arrayOf|listOf|setOf|mapOf|mutableListOf|mutableSetOf|mutableMapOf|emptyList|emptySet|emptyMap)$/") (call_suffix $$$A))'
-        replace: '(__call (__callee @$F (__predeclared)) $$$A)'
       - match: '(call_expression $F:simple_identifier (call_suffix $$$A))'
         replace: '(__call (__callee @$F) $$$A)'
       - match: '(call_expression $F (call_suffix $$$A))'
@@ -251,9 +258,6 @@ stages:
           resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
-  display_source: original
-  lookup_from:
-    - __source_root
   stages:
     - name: roots
       rules:

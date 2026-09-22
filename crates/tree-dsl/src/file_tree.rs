@@ -4,7 +4,7 @@ use crate::canonical::Canonical as C;
 use crate::constants::PATH_SEP;
 use crate::intern::Lang;
 use crate::pattern;
-use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
+use crate::rules::{Config, ParseFormat, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tree};
 
 pub struct WalkResult {
@@ -14,7 +14,8 @@ pub struct WalkResult {
 
 pub struct ProjectTree<'a> {
     lang: &'a Lang,
-    config: &'a ResolveConfig,
+    config: &'a Config,
+    stages: &'a [ResolveStage],
     paths: &'a [&'a str],
     files: Option<&'a [(String, String)]>,
     tree: Tree,
@@ -25,13 +26,15 @@ pub struct ProjectTree<'a> {
 impl<'a> ProjectTree<'a> {
     pub fn build(
         lang: &'a Lang,
-        config: &'a ResolveConfig,
+        config: &'a Config,
+        stages: &'a [ResolveStage],
         paths: &'a [&'a str],
         files: Option<&'a [(String, String)]>,
     ) -> WalkResult {
         let mut pt = Self {
             lang,
             config,
+            stages,
             paths,
             files,
             tree: Tree::new(Node {
@@ -42,7 +45,7 @@ impl<'a> ProjectTree<'a> {
             prefixes: vec![],
             aliases: vec![],
         };
-        if config.stages.is_empty() && config.lookup_from.is_empty() {
+        if stages.is_empty() && config.lookup_from.is_empty() {
             return WalkResult {
                 prefixes: vec![],
                 aliases: vec![],
@@ -141,7 +144,7 @@ impl<'a> ProjectTree<'a> {
     }
 
     fn run_stages(&mut self) {
-        for stage in &self.config.stages {
+        for stage in self.stages {
             match stage {
                 ResolveStage::Rules(rules) => {
                     pattern::apply_rewrites(&mut self.tree, self.lang, rules);

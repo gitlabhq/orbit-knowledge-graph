@@ -12,6 +12,10 @@
 # - Wildcard imports (`import a.b.*`) name a directory; the resolver resolves
 #   only files and index files.
 
+config:
+  lookup_from:
+    - __source_root
+
 stages:
   - name: imports
     rules:
@@ -316,9 +320,6 @@ stages:
           resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
-  display_source: original
-  lookup_from:
-    - __source_root
   stages:
     - name: roots
       rules:

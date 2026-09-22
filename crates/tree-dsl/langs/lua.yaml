@@ -3,6 +3,10 @@
 # functions (M.f and M:f as members of the table definition), tables as
 # class-like definitions, calls, locals, control flow.
 
+config:
+  lookup_from:
+    - __source_root
+
 stages:
   - name: imports
     rules:
@@ -112,9 +116,6 @@ stages:
           resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
-  display_source: original
-  lookup_from:
-    - __source_root
   stages:
     - name: roots
       rules:

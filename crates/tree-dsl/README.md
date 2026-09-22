@@ -132,9 +132,11 @@ stages:
       - match: '(pattern)'
         replace: '(template)'
 
-resolve:
+config:
   lookup_from:
     - __source_root
+
+resolve:
   stages:
     - name: packages
       rules:
@@ -269,15 +271,24 @@ call-site and target pair remains. Class calls produce their class type.
 Edges retain call-site identities in saved snapshots. Rebuild snapshots saved
 with the earlier edge layout.
 
-### Resolve config reference
+### Language config reference
+
+`config:` holds every whole-language setting. It applies to the language as a
+whole, not to a rule, a stage, or an indexed file. `resolve:` holds only the
+file-tree rewrite stages.
 
 ```yaml
-resolve:
-  display_source: resolved     # "resolved" or "original"
-  lookup_from:
-    - __source_root             # Synthetic kinds marking resolution prefixes
+config:
+  builtins: [println, listOf]  # Names defined everywhere without an import
+  imports_shadow_locals: false # Default true; Ruby autoloads never rebind a local
   external:
     - flask                     # Module names that never resolve to local files
+  lookup_from:
+    - __source_root             # Synthetic kinds marking resolution prefixes
+  parse_files:
+    - { name: Cargo.toml, format: toml }
+
+resolve:
   stages:
     - name: packages
       rules:
@@ -291,10 +302,12 @@ resolve:
 
 | Field | Purpose |
 |-------|---------|
-| `display_source` | How `__source_path` is presented downstream. `resolved` converts via `fqn_separator`; `original` keeps the raw text. |
-| `lookup_from` | Synthetic marker kinds whose directories become import resolution prefixes. |
+| `builtins` | Callee names the linker never falls back to wildcard imports for. A local definition still shadows them. |
+| `imports_shadow_locals` | Whether an import may rebind a name already defined in the same scope. |
 | `external` | Root module names to skip (stdlib, third-party). Imports to these never resolve. |
-| `stages` | Ordered list of file-tree rewrite stages. Each is either `rules:` or `climb:`. |
+| `lookup_from` | Synthetic marker kinds whose directories become import resolution prefixes. |
+| `parse_files` | Manifest files parsed into the directory tree before resolve stages run. Formats: `json`, `toml`, `raw` with `extract`. |
+| `resolve.stages` | Ordered list of file-tree rewrite stages. Each is either `rules:` or `climb:`. |
 
 ## Canonical Alphabet
 

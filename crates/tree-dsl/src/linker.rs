@@ -4,6 +4,7 @@ use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::resolver::CLASS_LIKE;
+use crate::rules::Config;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tags::ReservedTags;
 use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, members_by_level};
@@ -30,6 +31,7 @@ struct Fold<'t> {
     imports: Vec<u32>,
     wildcards: Vec<u32>,
     tags: ReservedTags,
+    config: &'t Config,
     def_stack: Vec<(Option<u32>, BlockId)>,
     wildcard: u32,
     edges: Vec<Edge>,
@@ -153,7 +155,7 @@ impl<'t> Fold<'t> {
                 .child_sym(C::Alias)
                 .or(n.child_sym(C::SsaHint))
                 .unwrap_or(sym);
-            if c.has_tag(self.tags.non_shadowing)
+            if !self.config.imports_shadow_locals
                 && self
                     .lookup(local)
                     .iter()
@@ -288,7 +290,7 @@ impl<'t> Fold<'t> {
             if let Some(mode) = c.tag(self.tags.implicit_self) {
                 self.resolve_implicit(sym, from, mode == self.tags.implicit_self_locals);
             } else {
-                self.resolve_name(sym, from, !callee.has(C::Predeclared));
+                self.resolve_name(sym, from, !self.config.builtins.contains(&sym));
             }
         }
         for edge in &mut self.edges[first..] {
@@ -627,7 +629,7 @@ impl<'t> Fold<'t> {
     }
 }
 
-pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
+pub fn link(tree: &Tree, lang: &Lang, config: &Config) -> Vec<Edge> {
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
     ssa.seal_block(entry);
@@ -642,6 +644,7 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         imports: Vec::new(),
         wildcards: Vec::new(),
         tags: ReservedTags::new(lang),
+        config,
         def_stack: vec![(None, entry)],
         wildcard: lang.syms.intern(WILDCARD),
         edges: Vec::new(),

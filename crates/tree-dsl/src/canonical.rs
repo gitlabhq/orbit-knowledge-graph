@@ -203,8 +203,6 @@ pub enum Canonical {
 
     #[strum(serialize = "__ssa_hint")]
     SsaHint,
-    #[strum(serialize = "__predeclared")]
-    Predeclared,
     #[strum(serialize = "__companion")]
     Companion,
     #[strum(serialize = "__partial")]

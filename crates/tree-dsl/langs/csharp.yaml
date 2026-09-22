@@ -8,6 +8,10 @@
 # - `using Ns;` imports a namespace, not a file; the resolver resolves files.
 # - Same-namespace siblings without a using need a namespace scope.
 
+config:
+  lookup_from:
+    - __source_root
+
 stages:
   - name: imports
     rules:
@@ -257,9 +261,6 @@ stages:
           resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
-  display_source: original
-  lookup_from:
-    - __source_root
   stages:
     - name: roots
       rules:

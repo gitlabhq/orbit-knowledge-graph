@@ -10,6 +10,12 @@
 #   var/const declarations get the same treatment: every var/const is a
 #   __def plus an SSA __binding.
 
+config:
+  builtins: [
+    append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
+    new, panic, print, println, real, recover
+  ]
+
 stages:
   - name: normalize
     rules:
@@ -51,8 +57,6 @@ stages:
       - match: '(selector_expression operand: $O field: $F)'
         replace: '(__member @$F (__object @$O))'
 
-      - match: '(call_expression function: $F:(identifier "/^(append|cap|clear|close|complex|copy|delete|imag|len|make|max|min|new|panic|print|println|real|recover)$/") arguments: $A)'
-        replace: '(__call (__callee @$F (__predeclared)) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'
@@ -189,7 +193,6 @@ stages:
           resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
-  display_source: original
   stages: []
 
 display:
