@@ -1,9 +1,8 @@
 name: "Neighbors outgoing — single edge scan, no FINAL"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"outgoing"},"limit":20}
-expected:
-  op: TopN
-  input:
-    op: Scan
-    table: gl_edge
-    dedup: false
-    select: [_gkg_neighbor_id, _gkg_neighbor_type, _gkg_relationship_type, _gkg_neighbor_is_outgoing, _gkg_mr_id, _gkg_mr_type]
+expected: |
+  (Limit 21
+    (Sort []
+      (Project [target_id:_gkg_neighbor_id target_kind:_gkg_neighbor_type relationship_kind:_gkg_relationship_type (1):_gkg_neighbor_is_outgoing source_id:_gkg_mr_id ("MergeRequest"):_gkg_mr_type]
+        (Filter [source_kind="MergeRequest" source_id∈[1] relationship_kind∈["CLOSES","DEPLOYED_TO","FIXES","HAS_DIFF","HAS_HEAD_PIPELINE","HAS_LABEL","HAS_LATEST_DIFF","HAS_NOTE","IN_MILESTONE","IN_PROJECT","MENTIONS","MERGED_AT_COMMIT","SOURCE_PROJECT","TRIGGERED"] _deleted=false]
+          (Scan gl_edge e)))))

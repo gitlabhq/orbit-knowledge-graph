@@ -1,10 +1,11 @@
 name: "AUTHORED has FK — no edge table"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
-expected:
-  op: TopN
-  select: [mr_id, mr_title, u_id, u_username]
-  input:
-    op: Join
-    left: {op: Scan, table: gl_merge_request, dedup: true}
-    right: {op: Scan, table: gl_user, dedup: true}
-absent: [{table: gl_edge}]
+expected: |
+  (Limit 11
+    (Project [traversal_path:e0_path relationship_kind:e0_type source_id:e0_src source_kind:e0_src_type target_id:e0_dst target_kind:e0_dst_type @id @iid @title @state @source_branch @target_branch @id @username @name @state]
+      (Sort []
+        (Join Inner (mr.author_id = u.id)
+          (Filter [_deleted=false]
+            (Scan gl_merge_request mr FINAL))
+          (Filter [id∈[1] _deleted=false]
+            (Scan gl_user u FINAL))))))

@@ -1,14 +1,29 @@
 name: "Multi-edge chain uses FINAL on each edge scan with narrowing CTEs"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"p","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
-expected:
-  op: Aggregate
-  select: ['n']
-  input:
-    op: Cte
-    name: _nf_mr
-    consumer:
-      op: Cte
-      name: _nf_label
-      consumer:
-        op: Cte
-        name: _nf_p
+expected: |
+  (Limit 2
+    (Sort []
+      (Agg [group: ] [metrics: COUNT(mr.*):n]
+        (Join Semi/mat (. = _nf_mr.id)
+          (Join Semi/mat (. = _nf_label.id)
+            (Join Semi/mat (. = _nf_p.id)
+              (Join Inner (e1.target_id = p.id)
+                (Join Inner (e0.target_id = label.id)
+                  (Join Inner (e0.source_id = mr.id)
+                    (Join Inner (e0.target_id = e1.source_id)
+                      (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" _deleted=false scope(…) source_id∈[1]]
+                        (Scan gl_edge e0 FINAL))
+                      (Filter [relationship_kind="IN_PROJECT" source_kind="MergeRequest" target_kind="Project" _deleted=false source_id∈[1]]
+                        (Scan gl_edge e1 FINAL)))
+                    (Filter [id∈[1] _deleted=false]
+                      (Scan gl_merge_request mr FINAL)))
+                  (Filter [title:eq _deleted=false]
+                    (Scan gl_label label FINAL)))
+                (Filter [full_path:eq _deleted=false]
+                  (Scan gl_project p FINAL)))
+              (Filter [full_path:eq _deleted=false]
+                (Scan gl_project p FINAL)))
+            (Filter [title:eq _deleted=false]
+              (Scan gl_label label FINAL)))
+          (Filter [id∈[1] _deleted=false]
+            (Scan gl_merge_request mr FINAL))))))

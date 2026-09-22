@@ -1,11 +1,20 @@
 name: "HAS_LABEL has no FK — edge table with narrowing CTEs"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
-expected:
-  op: TopN
-  select: [e0_type, e0_src, e0_src_type, e0_dst, e0_dst_type]
-  input:
-    op: Cte
-    name: _nf_mr
-    consumer:
-      op: Cte
-      name: _nf_label
+expected: |
+  (Limit 11
+    (Project [traversal_path:e0_path relationship_kind:e0_type source_id:e0_src source_kind:e0_src_type target_id:e0_dst target_kind:e0_dst_type @id @iid @title @state @source_branch @target_branch @id @title @color]
+      (Sort []
+        (Join Semi/mat (. = _nf_mr.id)
+          (Join Semi/mat (. = _nf_label.id)
+            (Join Inner (e0.target_id = label.id)
+              (Join Inner (e0.source_id = mr.id)
+                (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" _deleted=false scope(…) source_id∈[1]]
+                  (Scan gl_edge e0))
+                (Filter [id∈[1] _deleted=false]
+                  (Scan gl_merge_request mr FINAL)))
+              (Filter [title:eq _deleted=false]
+                (Scan gl_label label FINAL)))
+            (Filter [title:eq _deleted=false]
+              (Scan gl_label label FINAL)))
+          (Filter [id∈[1] _deleted=false]
+            (Scan gl_merge_request mr FINAL))))))

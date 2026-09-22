@@ -1,23 +1,19 @@
 name: "Depth 2 — forward + backward + intersection"
 input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]},"limit":10}
-expected:
-  op: TopN
-  input:
-    op: Cte
-    name: _nf_start
-    consumer:
-      op: Cte
-      name: forward
-      consumer:
-        op: Cte
-        name: _nf_end
-        consumer:
-          op: Cte
-          name: backward
-          consumer:
-            op: Union
-            arms:
-              - {op: Scan, table: forward}
-              - op: Join
-                left: {op: Scan, table: forward}
-                right: {op: Scan, table: backward}
+expected: |
+  (Limit 11
+    (Join Semi/mat (_nf_start)
+      (Join Semi/mat (forward)
+        (Join Semi/mat (_nf_end)
+          (Join Semi/mat (backward)
+            (Union
+              (Scan forward f)
+              (Join Inner (f.end_id = b.end_id)
+                (Scan forward f)
+                (Scan backward b)))
+            (Scan gl_edge e1))
+          (Filter [id∈[100] _deleted=false]
+            (Scan gl_project end FINAL)))
+        (Scan gl_edge e1))
+      (Filter [id∈[1] _deleted=false]
+        (Scan gl_merge_request start FINAL))))

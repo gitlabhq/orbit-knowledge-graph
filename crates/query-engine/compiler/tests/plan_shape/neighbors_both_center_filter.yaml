@@ -1,13 +1,18 @@
 name: "Both + center filter = Union of two Joins"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"both"},"limit":20}
-expected:
-  op: TopN
-  input:
-    op: Union
-    arms:
-      - op: Join
-        left: {op: Scan, table: gl_edge}
-        right: {op: Scan, table: gl_merge_request, dedup: true}
-      - op: Join
-        left: {op: Scan, table: gl_edge}
-        right: {op: Scan, table: gl_merge_request, dedup: true}
+expected: |
+  (Limit 21
+    (Sort []
+      (Union
+        (Project [target_id:_gkg_neighbor_id target_kind:_gkg_neighbor_type relationship_kind:_gkg_relationship_type (1):_gkg_neighbor_is_outgoing source_id:_gkg_mr_id ("MergeRequest"):_gkg_mr_type]
+          (Join Inner (e.source_id = mr.id)
+            (Filter [source_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED","CLOSED","CLOSES","CREATED_FOR_MR","DEPLOYED_TO","FIXES","HAS_DIFF","HAS_HEAD_PIPELINE","HAS_LABEL","HAS_LATEST_DIFF","HAS_NOTE","IN_MILESTONE","IN_PROJECT","LAST_EDITED_BY","MENTIONS","MERGED","MERGED_AT_COMMIT","REOPENED","REVIEWER","SOURCE_PROJECT","TRIGGERED","UPDATED_BY"] _deleted=false]
+              (Scan gl_edge e))
+            (Filter [title:contains _deleted=false]
+              (Scan gl_merge_request mr FINAL))))
+        (Project [source_id:_gkg_neighbor_id source_kind:_gkg_neighbor_type relationship_kind:_gkg_relationship_type (0):_gkg_neighbor_is_outgoing target_id:_gkg_mr_id ("MergeRequest"):_gkg_mr_type]
+          (Join Inner (e.target_id = mr.id)
+            (Filter [target_kind="MergeRequest" relationship_kind∈["APPROVED","ASSIGNED","AUTHORED","CLOSED","CLOSES","CREATED_FOR_MR","DEPLOYED_TO","FIXES","HAS_DIFF","HAS_HEAD_PIPELINE","HAS_LABEL","HAS_LATEST_DIFF","HAS_NOTE","IN_MILESTONE","IN_PROJECT","LAST_EDITED_BY","MENTIONS","MERGED","MERGED_AT_COMMIT","REOPENED","REVIEWER","SOURCE_PROJECT","TRIGGERED","UPDATED_BY"] _deleted=false]
+              (Scan gl_edge e))
+            (Filter [title:contains _deleted=false]
+              (Scan gl_merge_request mr FINAL)))))))

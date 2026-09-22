@@ -1,8 +1,23 @@
 name: "User->Project — User has no traversal_path"
 input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}
-expected:
-  op: TopN
-  input:
-    op: Cte
-    name: _nf_start
-    body: {op: Scan, table: gl_user}
+expected: |
+  (Limit 11
+    (Join Semi/mat (_nf_start)
+      (Join Semi/mat (forward)
+        (Join Semi/mat (_nf_end)
+          (Join Semi/mat (backward)
+            (Union
+              (Scan forward f)
+              (Join Inner (f.end_id = b.end_id)
+                (Scan forward f)
+                (Scan backward b)))
+            (Scan gl_edge e1))
+          (Filter [id∈[100] _deleted=false]
+            (Scan gl_project end FINAL)))
+        (Union
+          (Scan gl_edge e1)
+          (Join Inner (e1.target_id = e2.source_id)
+            (Scan gl_edge e1)
+            (Scan gl_edge e2))))
+      (Filter [id∈[1] _deleted=false]
+        (Scan gl_user start FINAL))))

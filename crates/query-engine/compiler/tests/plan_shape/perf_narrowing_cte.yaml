@@ -1,7 +1,17 @@
 name: "Narrowing CTE — selective Label wrapped in Cte, edge has IN-subquery"
 input: {"query_type":"traversal","nodes":[{"id":"label","entity":"Label","filters":{"title":"bug"}},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
-expected:
-  op: TopN
-  input:
-    op: Cte
-    name: _nf_label
+expected: |
+  (Limit 11
+    (Project [traversal_path:e0_path relationship_kind:e0_type source_id:e0_src source_kind:e0_src_type target_id:e0_dst target_kind:e0_dst_type @id @title @color @id @iid @title @state @source_branch @target_branch]
+      (Sort []
+        (Join Semi/mat (. = _nf_label.id)
+          (Join Inner (e0.target_id = label.id)
+            (Join Inner (e0.source_id = mr.id)
+              (Filter [relationship_kind="HAS_LABEL" source_kind="MergeRequest" target_kind="Label" _deleted=false]
+                (Scan gl_edge e0))
+              (Filter [_deleted=false]
+                (Scan gl_merge_request mr FINAL)))
+            (Filter [title:eq _deleted=false]
+              (Scan gl_label label FINAL)))
+          (Filter [title:eq _deleted=false]
+            (Scan gl_label label FINAL))))))

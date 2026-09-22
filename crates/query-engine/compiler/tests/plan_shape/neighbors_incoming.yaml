@@ -1,9 +1,8 @@
 name: "Neighbors incoming"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"incoming"},"limit":20}
-expected:
-  op: TopN
-  input:
-    op: Scan
-    table: gl_edge
-    dedup: false
-    select: [_gkg_neighbor_id, _gkg_neighbor_type, _gkg_relationship_type, _gkg_neighbor_is_outgoing, _gkg_mr_id, _gkg_mr_type]
+expected: |
+  (Limit 21
+    (Sort []
+      (Project [source_id:_gkg_neighbor_id source_kind:_gkg_neighbor_type relationship_kind:_gkg_relationship_type (0):_gkg_neighbor_is_outgoing target_id:_gkg_mr_id ("MergeRequest"):_gkg_mr_type]
+        (Filter [target_kind="MergeRequest" target_id∈[1] relationship_kind∈["APPROVED","ASSIGNED","AUTHORED","CLOSED","CREATED_FOR_MR","LAST_EDITED_BY","MENTIONS","MERGED","REOPENED","REVIEWER","UPDATED_BY"] _deleted=false]
+          (Scan gl_edge e)))))

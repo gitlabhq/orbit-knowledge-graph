@@ -5,10 +5,6 @@ fn scenario_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/plan_shape")
 }
 
-fn snapshot_dir() -> PathBuf {
-    scenario_dir().join("snapshots")
-}
-
 fn load_scenarios() -> Vec<(String, serde_json::Value)> {
     let dir = scenario_dir();
     let mut scenarios = Vec::new();
@@ -27,18 +23,6 @@ fn load_scenarios() -> Vec<(String, serde_json::Value)> {
     scenarios
 }
 
-fn snapshot_filename(name: &str) -> String {
-    let fname: String = name.to_lowercase()
-        .replace(' ', "_")
-        .replace('—', "")
-        .replace('\'', "")
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '_')
-        .take(60)
-        .collect();
-    fname
-}
-
 fn security_ctx() -> compiler::types::SecurityContext {
     compiler::types::SecurityContext::new(1, vec!["1/".into()]).unwrap()
 }
@@ -47,7 +31,6 @@ fn security_ctx() -> compiler::types::SecurityContext {
 fn plan_shape_scenarios() {
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology"));
     let ctx = security_ctx();
-    let snap_dir = snapshot_dir();
     let mut failures = Vec::new();
     let update = std::env::var("UPDATE_SNAPSHOTS").is_ok();
 
@@ -74,39 +57,26 @@ fn plan_shape_scenarios() {
             Err(e) => { failures.push(format!("{name}: plan failed: {e}")); continue; }
         };
 
-        let actual = serde_json::to_value(&phys_op).unwrap();
-        let actual_pretty = serde_json::to_string_pretty(&actual).unwrap();
+        let actual = phys_op.to_sexpr();
 
-        let snap_file = snap_dir.join(format!("{}.json", snapshot_filename(&name)));
-
-        if update || !snap_file.exists() {
-            std::fs::write(&snap_file, format!("{actual_pretty}\n")).unwrap();
-            if !update {
-                failures.push(format!("{name}: snapshot created at {snap_file:?} — rerun to verify"));
-            }
+        if update {
+            eprintln!("=== {name} ===\n{actual}\n");
             continue;
         }
 
-        let expected_str = std::fs::read_to_string(&snap_file).unwrap();
-        let expected: serde_json::Value = serde_json::from_str(&expected_str)
-            .unwrap_or_else(|e| panic!("{name}: bad snapshot {snap_file:?}: {e}"));
-
-        if actual != expected {
+        let expected = doc["expected"].as_str().unwrap_or("").trim();
+        if actual.trim() != expected {
             failures.push(format!(
-                "{name}: snapshot mismatch ({snap_file:?})\nTo update: UPDATE_SNAPSHOTS=1 cargo test --test plan_shape_test\n\nexpected:\n{expected_str}\nactual:\n{actual_pretty}",
+                "{name}: plan mismatch\n\nexpected:\n{expected}\n\nactual:\n{actual}",
             ));
         }
-    }
-
-    if let Some(absent) = load_scenarios().iter().find_map(|(_, doc)| doc.get("absent")) {
-        // absent checks from YAML still work if present
     }
 
     if !failures.is_empty() {
         panic!(
             "\n{} scenario(s) failed:\n\n{}",
             failures.len(),
-            failures.join("\n\n")
+            failures.join("\n\n---\n\n")
         );
     }
 }
