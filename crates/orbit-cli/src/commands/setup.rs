@@ -97,8 +97,11 @@ pub(crate) fn uninstall(options: Options, target: Target) -> Result<()> {
 
     let mut report = Report::default();
     let removed = components::remove(&selection, &target, &mut report);
-    show_every_file(&report)?;
+    if options.verbose {
+        show_every_file(&report)?;
+    }
     removed?;
+    tui::card("Removed", summary::removed_rows(&report))?;
     tui::outro("Done. Backups stay only for files you edited after setup.")?;
     Ok(())
 }

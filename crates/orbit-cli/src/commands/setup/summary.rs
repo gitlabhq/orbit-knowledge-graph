@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::Component;
-use super::components::Report;
+use super::components::{Outcome, Report};
 use super::detect::Machine;
 use super::plan::Plan;
 use super::spec::{self, Agent};
@@ -86,16 +86,54 @@ pub(super) fn paths_rows(plan: &Plan) -> String {
 }
 
 pub(super) fn report_cards(report: &Report) -> Vec<(String, String)> {
-    let mut cards: Vec<(String, Vec<String>)> = Vec::new();
+    by_component(report)
+        .into_iter()
+        .map(|(component, outcomes)| {
+            let lines: Vec<String> = outcomes
+                .iter()
+                .map(|outcome| format!("{}  {}", outcome.label, outcome.action))
+                .collect();
+            (component.to_string(), lines.join("\n"))
+        })
+        .collect()
+}
+
+pub(super) fn removed_rows(report: &Report) -> String {
+    let groups = by_component(report);
+    if groups.is_empty() {
+        return "nothing was installed".to_string();
+    }
+    let width = groups
+        .iter()
+        .map(|(component, _)| component.len())
+        .max()
+        .unwrap_or_default();
+    groups
+        .iter()
+        .map(|(component, outcomes)| {
+            let mut files: Vec<String> = Vec::new();
+            for outcome in outcomes {
+                let file = match outcome.action.starts_with("kept") {
+                    true => format!("{} (kept)", outcome.label),
+                    false => outcome.label.clone(),
+                };
+                if !files.iter().any(|known| known.starts_with(&outcome.label)) {
+                    files.push(file);
+                }
+            }
+            format!("{component:<width$}   {}", files.join(", "))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn by_component(report: &Report) -> Vec<(&str, Vec<&Outcome>)> {
+    let mut groups: Vec<(&str, Vec<&Outcome>)> = Vec::new();
     for outcome in &report.outcomes {
-        let line = format!("{}  {}", outcome.label, outcome.action);
-        match cards.last_mut() {
-            Some((group, lines)) if *group == outcome.group => lines.push(line),
-            _ => cards.push((outcome.group.clone(), vec![line])),
+        match groups.last_mut() {
+            Some((component, outcomes)) if *component == outcome.group => outcomes.push(outcome),
+            _ => groups.push((outcome.group.as_str(), vec![outcome])),
         }
     }
-    cards
-        .into_iter()
-        .map(|(group, lines)| (group, lines.join("\n")))
-        .collect()
+    groups
 }
