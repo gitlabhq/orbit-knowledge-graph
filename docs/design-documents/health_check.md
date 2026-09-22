@@ -2,12 +2,26 @@
 
 ## Overview
 
-Orbit separates local pod probes from dependency health. The Webserver, Indexer, and Dispatcher
-expose local-only liveness and readiness endpoints for Kubernetes. The HealthCheck runtime performs
+Orbit separates local pod probes from dependency health. Every mode runs the labkit probe server
+with local-only liveness and readiness endpoints for Kubernetes. The Webserver, Indexer, and
+Dispatcher also keep their own `/live` and `/ready` endpoints. The HealthCheck runtime performs
 networked infrastructure checks, while the Webserver presents those results together with migration
 and GitLab diagnostics through the `GetClusterHealth` gRPC method.
 
 ## Pod probes
+
+Every mode runs the labkit probe server on `probe_server.bind_address` (default `0.0.0.0:9394`). It serves
+`/-/liveness`, `/-/readiness`, and, when Prometheus metrics are enabled, `/-/metrics`. The probe
+server binds whether or not metrics are enabled. `/-/liveness` returns `200` while the process
+runs. `/-/readiness` returns `200` when every registered check passes and `503` otherwise, with a
+JSON body that names each check and its result. The Webserver registers a `schema` check that reads
+the active schema snapshot. The Indexer and Dispatcher register a `schema_gate` check that reads
+their in-memory serving flag. The HealthCheck runtime registers no check, so its readiness is
+always `200`.
+
+The `/live` and `/ready` endpoints below read the same state. The Helm chart probes them today.
+Once the chart can probe `/-/liveness` and `/-/readiness` on the probe server port, they are
+deprecated and a later release removes them.
 
 ### `/live`
 
@@ -67,8 +81,8 @@ GitLab ─────────── connectivity/JWT check ────┘ 
 
 NATS JetStream ─► HealthChecker.queue_depth() ─► HealthCheck /queue-depth ─► KEDA
 
-Local ActiveSchema/serving flag ─► pod /ready
-Local HTTP process response ───────► pod /live
+Local ActiveSchema/serving flag ─► pod /-/readiness (and legacy /ready)
+Local process response ────────────► pod /-/liveness (and legacy /live)
 ```
 
 ## GitLab diagnostic
