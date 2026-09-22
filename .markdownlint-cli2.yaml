@@ -38,3 +38,13 @@ config:
   # Disable this rule in the CLI project, because 1. 1. 1. 1. numbering
   # is rendered verbatim in CLI output
   ol-prefix: false                  # MD029
+
+  # Keep this item last due to length
+  proper-names:                     # MD044
+    code_blocks: false
+    html_elements: false
+    names: [
+      # This repository stores this list of items in .vale/case/Case.yml
+      # Any updates to the .markdownlint-cli2.yaml list from other repos
+      # should be applied there, too.
+    ]
