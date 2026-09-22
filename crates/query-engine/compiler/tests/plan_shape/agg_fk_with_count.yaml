@@ -3,8 +3,8 @@ input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},
 expected: |
   (Limit 11
     (Agg [group: p.id:p p.name:p p.full_path:p p.visibility_level:p] [metrics: COUNT(mr.*):total_mrs]
-      (Join Inner (e0.target_id = p.id)
-        (Filter [relationship_kind="IN_PROJECT" source_kind="MergeRequest" target_kind="Project" !deleted scope(…) target_id∈[278964]]
-          (Scan gl_edge e0))
+      (Join Inner (mr.project_id = p.id)
+        (Filter [!deleted]
+          (Scan gl_merge_request mr FINAL))
         (Filter [id∈[278964] !deleted]
           (Scan gl_project p FINAL)))))

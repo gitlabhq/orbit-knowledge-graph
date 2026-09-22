@@ -1,5 +1,6 @@
 use super::plan_v2::*;
 use crate::input::*;
+use ontology::constants as ontology_constants;
 
 pub struct RuleCtx<'a> {
     pub input: &'a Input,
@@ -20,8 +21,13 @@ pub fn optimize(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
 
 fn apply_rules(tree: PhysOp, ctx: &RuleCtx) -> PhysOp {
     let tree = map_children(tree, |child| apply_rules(child, ctx));
-    let rules: &[fn(&PhysOp, &RuleCtx) -> Option<PhysOp>] =
-        &[rule_elide_empty_sort, rule_merge_filters, rule_edge_dedup];
+    let rules: &[fn(&PhysOp, &RuleCtx) -> Option<PhysOp>] = &[
+        rule_elide_empty_sort,
+        rule_merge_filters,
+        rule_edge_dedup,
+        rule_fk_elision,
+        rule_prune_duplicate_node_join,
+    ];
     for rule in rules {
         if let Some(rewritten) = rule(&tree, ctx) {
             return rewritten;
@@ -161,5 +167,155 @@ fn set_edge_dedup(op: PhysOp, dedup_val: bool) -> PhysOp {
             dedup: dedup_val,
         },
         other => map_children(other, |child| set_edge_dedup(child, dedup_val)),
+    }
+}
+
+// ── Rule 4: FK elision ──────────────────────────────────────────────────────
+// Replace edge scans with FK joins when the relationship has an FK column.
+// Only fires when ALL edge scans in the tree can be FK-elided.
+
+// ── Rule 4: FK elision (per-hop, bottom-up) ─────────────────────────────────
+// Replaces Filter(Scan(edge_table)) with Join(node_a, node_b, on: fk)
+
+fn rule_fk_elision(op: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
+    let PhysOp::Filter {
+        predicates: _,
+        input,
+    } = op
+    else {
+        return None;
+    };
+    let PhysOp::Scan { table, alias, .. } = input.as_ref() else {
+        return None;
+    };
+    if !table.contains("edge") {
+        return None;
+    }
+    let idx = alias_to_rel_index(alias)?;
+    let rel = ctx.input.relationships.get(idx)?;
+    let fk_col = rel.fk_column.as_ref()?;
+    if rel.hops.max != 1 || matches!(rel.direction, Direction::Both) || !rel.filters.is_empty() {
+        return None;
+    }
+
+    let (fk_alias, tgt_alias) = fk_sides(rel, fk_col, ctx);
+    let fk_node = ctx.input.nodes.iter().find(|n| n.id == fk_alias)?;
+    let tgt_node = ctx.input.nodes.iter().find(|n| n.id == tgt_alias)?;
+
+    Some(PhysOp::Join {
+        left: Box::new(filtered_node_scan(fk_node)),
+        right: Box::new(filtered_node_scan(tgt_node)),
+        on: JoinOn {
+            left: (fk_alias.to_string(), fk_col.clone()),
+            right: (
+                tgt_alias.to_string(),
+                ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+            ),
+        },
+        kind: JoinKind::Inner,
+    })
+}
+
+// ── Rule 5: Prune duplicate node joins ──────────────────────────────────────
+// After FK elision, the naive plan's node joins become redundant
+
+fn rule_prune_duplicate_node_join(op: &PhysOp, _ctx: &RuleCtx) -> Option<PhysOp> {
+    let PhysOp::Join {
+        left,
+        right,
+        kind: JoinKind::Inner,
+        ..
+    } = op
+    else {
+        return None;
+    };
+    let right_alias = scan_alias(right)?;
+    if has_alias(left, &right_alias) {
+        Some(*left.clone())
+    } else {
+        None
+    }
+}
+
+fn scan_alias(op: &PhysOp) -> Option<String> {
+    match op {
+        PhysOp::Scan { alias, .. } => Some(alias.clone()),
+        PhysOp::Filter { input, .. } => scan_alias(input),
+        _ => None,
+    }
+}
+
+fn has_alias(op: &PhysOp, target: &str) -> bool {
+    match op {
+        PhysOp::Scan { alias, .. } => alias == target,
+        PhysOp::Filter { input, .. } => has_alias(input, target),
+        PhysOp::Join { left, right, .. } => has_alias(left, target) || has_alias(right, target),
+        PhysOp::Project { input, .. }
+        | PhysOp::Sort { input, .. }
+        | PhysOp::Limit { input, .. }
+        | PhysOp::Aggregate { input, .. } => has_alias(input, target),
+        PhysOp::Union { arms } => arms.iter().any(|a| has_alias(a, target)),
+    }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+fn alias_to_rel_index(alias: &str) -> Option<usize> {
+    alias.strip_prefix('e')?.parse().ok()
+}
+
+fn fk_sides<'a>(rel: &'a InputRelationship, fk_col: &str, ctx: &'a RuleCtx) -> (&'a str, &'a str) {
+    let from_has = ctx
+        .input
+        .nodes
+        .iter()
+        .find(|n| n.id == rel.from)
+        .and_then(|n| n.table.as_deref())
+        .and_then(|t| ctx.input.compiler.table_columns.get(t))
+        .is_some_and(|cols| cols.contains(fk_col));
+    if from_has {
+        (&rel.from, &rel.to)
+    } else {
+        (&rel.to, &rel.from)
+    }
+}
+
+fn filtered_node_scan(n: &InputNode) -> PhysOp {
+    let mut preds = Vec::new();
+    let mut props: Vec<_> = n.filters.iter().collect();
+    props.sort_unstable_by_key(|(k, _)| *k);
+    for (prop, fs) in props {
+        for f in fs {
+            preds.push(Predicate::NodeFilter {
+                property: prop.clone(),
+                filter: f.clone(),
+            });
+        }
+    }
+    if !n.node_ids.is_empty() {
+        preds.push(Predicate::In {
+            column: ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+            values: n.node_ids.iter().map(|&id| Value::Int(id)).collect(),
+        });
+    }
+    if let Some(ref r) = n.id_range {
+        preds.push(Predicate::Range {
+            column: ontology_constants::DEFAULT_PRIMARY_KEY.to_string(),
+            start: r.start,
+            end: r.end,
+        });
+    }
+    preds.push(Predicate::Eq {
+        column: "_deleted".to_string(),
+        value: Value::Bool(false),
+    });
+
+    PhysOp::Filter {
+        input: Box::new(PhysOp::Scan {
+            table: n.table.as_deref().unwrap_or("").to_string(),
+            alias: n.id.clone(),
+            dedup: true,
+        }),
+        predicates: preds,
     }
 }
