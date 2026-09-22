@@ -152,7 +152,7 @@ pub(crate) fn run(
     tui::intro("Orbit index")?;
     let mut reporter = TuiReporter::new(indexer.db_path.clone());
     match indexer.index_all(&mut reporter) {
-        Ok(_) => tui::outro(reporter.closing_line()),
+        Ok(_) => reporter.close(),
         Err(error) => {
             tui::outro_cancel(&error)?;
             Err(error)
@@ -254,11 +254,11 @@ impl TuiReporter {
         }
     }
 
-    fn closing_line(&self) -> String {
-        match &self.suggested_grep {
-            Some(name) => format!("Try it:  {}", grep_command_line(name)),
-            None => "Done.".to_string(),
+    fn close(&self) -> Result<()> {
+        if let Some(name) = &self.suggested_grep {
+            tui::card("Try it", grep_command_line(name))?;
         }
+        tui::outro("Done.")
     }
 }
 
