@@ -197,6 +197,11 @@ regardless of definition order. Wildcard imports bind unbound names only while
 their lexical scope is active. An `__ssa_hint "*"` imports the target's visible
 names; an alias keeps a namespace binding.
 
+The reserved `linearize` tag on a class declares how a same-depth conflict
+between inherited members resolves: `left` (first declared supertype wins),
+`right` (last wins), `class` (a class beats interface defaults; two defaults
+stay ambiguous). Without it the conflict yields no edge.
+
 ### Phase 1: File tree walk
 
 The resolver builds a synthetic tree from all file paths:

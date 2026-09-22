@@ -7,7 +7,8 @@ use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
 use crate::intern::Lang;
 use crate::tree::{
-    Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, reachable, unique_by_level,
+    Cursor, Edge, EdgeKind, LinearizeKeys, Tree, find_method_in, infer_return_type, pick_member,
+    reachable, unique_by_level,
 };
 use crate::treesitter::SupportLang;
 
@@ -251,6 +252,7 @@ impl Resolver {
             index_names,
             wildcard_sym: self.wildcard_sym,
             callable_key: lang.syms.intern("callable"),
+            linearize: LinearizeKeys::new(lang),
             partials: &partials,
         };
 
@@ -324,6 +326,7 @@ struct ResolveCtx<'a> {
     index_names: &'a [String],
     wildcard_sym: u32,
     callable_key: u32,
+    linearize: LinearizeKeys,
     partials: &'a FxHashMap<(u32, u32), Vec<Loc>>,
 }
 
@@ -897,10 +900,12 @@ fn branch_type<'a>(ctx: &'a ResolveCtx, branch: Cursor<'a>) -> Option<Cursor<'a>
 
 fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, fi: usize) -> Option<Cursor<'a>> {
     let jump = |(sf, n): (u32, u32)| ctx.corpus.jump(sf, n);
+    let mode = ctx.linearize.of(cls);
     let inherited = unique_by_level(
         vec![(cls.fi(), cls.index())],
         |id| supertypes(ctx, jump(id)),
         |id| declared_member(ctx, jump(id), name).map(|m| (m.fi(), m.index())),
+        |found| pick_member(mode, |id| jump(id).has(C::Class), found),
     );
     if let Some(id) = inherited {
         return Some(jump(id));

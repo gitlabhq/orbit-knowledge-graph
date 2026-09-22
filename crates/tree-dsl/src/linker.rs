@@ -5,7 +5,9 @@ use crate::constants::WILDCARD;
 use crate::intern::Lang;
 use crate::resolver::CLASS_LIKE;
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
-use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, unique_by_level};
+use crate::tree::{
+    Cursor, Edge, EdgeKind, LinearizeKeys, Step, Tree, find_method_in, pick_member, unique_by_level,
+};
 
 enum Linked {
     Def(u32),
@@ -36,6 +38,7 @@ struct Fold<'t> {
     hoisted_key: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
+    linearize: LinearizeKeys,
 }
 
 impl<'t> Fold<'t> {
@@ -555,8 +558,10 @@ impl<'t> Fold<'t> {
             let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
             supers.flat_map(wrappers).collect::<Vec<_>>()
         };
-        unique_by_level(wrappers(container), supers, |dn| {
-            find_method_in(self.tree.cursor(dn), name).map(|m| m.index())
+        let mode = self.linearize.of(self.tree.cursor(container));
+        let found = |dn| find_method_in(self.tree.cursor(dn), name).map(|m| m.index());
+        unique_by_level(wrappers(container), supers, found, |found| {
+            pick_member(mode, |dn| self.tree.cursor(dn).has(C::Class), found)
         })
     }
 }
@@ -583,6 +588,7 @@ pub fn link(tree: &Tree, lang: &Lang) -> Vec<Edge> {
         hoisted_key: lang.syms.intern("hoisted"),
         edges: Vec::new(),
         value_sink: FxHashMap::default(),
+        linearize: LinearizeKeys::new(lang),
     };
 
     let root = tree.root();

@@ -1,0 +1,23 @@
+name: "Scala: trait linearization, the rightmost trait wins"
+fixtures:
+  - path: Shapes.scala
+    content: |
+      trait A { def m(): Unit = () }
+      trait B { def m(): Unit = () }
+      class D extends A with B
+      object Use {
+        def run(): Unit = {
+          val d = new D()
+          d.m()
+        }
+      }
+
+tests:
+  - name: "d.m() on a D resolves to the rightmost trait B.m"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND e.edge_kind = 'Calls' AND callee.name = 'm'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "B.m" } }

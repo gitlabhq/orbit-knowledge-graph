@@ -97,9 +97,16 @@ canonical nodes named here.
   that call's identity, so `x.foo()` later dispatches on the accessor's
   return type. Arity must match; otherwise nothing is emitted.
 - Level-order member lookup. Inherited members are searched one supertype
-  level at a time. A member that two types provide at the same depth is
-  ambiguous and yields no edge (Go spec Selectors, JLS 9.4.1.3). There is no
-  depth cap; the linker and the resolver share the search.
+  level at a time, in declared supertype order, with no depth cap; the linker
+  and the resolver share the search. When one level yields two different
+  members, the class's reserved `linearize` tag decides: absent, the call is
+  ambiguous and yields no edge (Go spec Selectors, Kotlin, C++, Rust, Swift,
+  PHP traits); `left`, the first declared supertype wins (Python C3 for the
+  diamond shape); `right`, the last wins (Ruby include order, Scala trait
+  linearization); `class`, the unique class-kind supertype wins over interface
+  defaults and two interfaces stay ambiguous (JLS 8.4.8.4 and 9.4.1.3, C#).
+  Full C3 over deeper hierarchies and Java's superclass-chain precedence over a
+  shallower default are outside this rule.
 - Module-object members. An Imports edge whose call site is a member call on
   the import's own local name (`import * as ns; ns.foo()`, `import m as ml;
   ml.f()`) resolves that member in the import target's visible names.
