@@ -2,5 +2,6 @@
 //! engine branches on, and the sentinel that bounds their work.
 
 pub mod canonical;
+pub mod error;
 pub mod sentinel;
 pub mod tags;

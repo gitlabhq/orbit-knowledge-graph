@@ -1,6 +1,7 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::error::LoadError;
 use crate::file_tree::ProjectTree;
 use crate::pattern::EdgeCtx;
 use crate::sentinel::{Killed, Sentinel};
@@ -85,11 +86,11 @@ pub fn resolve(
     Ok(result.killed)
 }
 
-pub fn display(env: &Env, state: &mut State) {
+pub fn display(env: &Env, state: &mut State) -> Result<(), LoadError> {
     let Some(yaml) = treesitter::lang_yaml(env.lang_id) else {
-        return;
+        return Ok(());
     };
-    let config = crate::rules::load_lang_full(yaml, &env.lang);
+    let config = crate::rules::load_lang_full(yaml, &env.lang)?;
     for (fi, tree) in state.trees.iter_mut().enumerate() {
         let ctx = EdgeCtx {
             tree_index: fi as u32,
@@ -104,6 +105,7 @@ pub fn display(env: &Env, state: &mut State) {
             &[],
         );
     }
+    Ok(())
 }
 
 pub fn remap(

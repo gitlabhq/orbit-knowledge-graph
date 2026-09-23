@@ -138,7 +138,7 @@ fn cmd_parse(
             print_tree(&tree, &lang);
         }
         Stage::Ast => {
-            let env = tree_dsl::Env::for_lang(lang_id);
+            let env = tree_dsl::Env::for_lang(lang_id)?;
             let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &env.lang, &path)?;
             for stage in &env.rewrite_stages {
                 let _ = tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]);
@@ -146,18 +146,18 @@ fn cmd_parse(
             print_tree(&tree, &env.lang);
         }
         Stage::Ssa => {
-            let (env, tree, edges) = tree_dsl::parse_single(lang_id, &path, &source);
+            let (env, tree, edges) = tree_dsl::parse_single(lang_id, &path, &source)?;
             print_tree(&tree, &env.lang);
             print_edges(&tree, &edges, &env.lang);
         }
         Stage::Display => {
-            let (env, tree, edges) = tree_dsl::parse_single(lang_id, &path, &source);
+            let (env, tree, edges) = tree_dsl::parse_single(lang_id, &path, &source)?;
             let mut state = tree_dsl::State {
                 trees: vec![tree],
                 edges,
                 resolver: tree_dsl::resolver::Resolver::new(&env.lang),
             };
-            tree_dsl::phases::display(&env, &mut state);
+            tree_dsl::phases::display(&env, &mut state)?;
             print_tree(&state.trees[0], &env.lang);
             print_edges(&state.trees[0], &state.edges, &env.lang);
         }
@@ -192,7 +192,7 @@ fn cmd_rewrite(
     };
 
     let lang_id = resolve_lang(lang_override.as_deref(), Some(&path));
-    let env = tree_dsl::Env::for_lang(lang_id);
+    let env = tree_dsl::Env::for_lang(lang_id)?;
     let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &env.lang, &path)?;
 
     if let Some(ref stop) = after {
@@ -212,10 +212,14 @@ fn cmd_rewrite(
         .map(|(pat, tpl)| {
             let tpl = tpl.clone();
             tree_dsl::pattern::Rewrite::new(&env.lang, pat, move |c| {
-                tree_dsl::pattern::Out::Replace(c.template(&tpl), None, None)
+                Ok(tree_dsl::pattern::Out::Replace(
+                    c.template(&tpl)?,
+                    None,
+                    None,
+                ))
             })
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
     let _ = tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, &rules, &[]);
 
     print_tree(&tree, &env.lang);
@@ -346,7 +350,7 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
         .map(|(name, lang_id, files)| {
             let t_lang = Instant::now();
             let tree_dsl::Indexed { env, state, killed } =
-                tree_dsl::index(lang_id, &files).map_err(|k| anyhow::anyhow!("{k}"))?;
+                tree_dsl::index(lang_id, &files).map_err(|e| anyhow::anyhow!("{e}"))?;
             for k in &killed {
                 eprintln!("skipped:      {k}");
             }

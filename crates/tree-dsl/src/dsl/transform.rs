@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use indextree::NodeId;
 
+use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::{EdgeKind, Tree};
 
@@ -24,7 +25,17 @@ fn nonempty(lang: &Lang, sym: u32) -> Option<u32> {
     Some(sym)
 }
 
-fn parse_nested_tf(spec: &str, ctx: Option<&mut Ctx>) -> Tf {
+fn need_ctx<'a, 'l>(
+    name: &str,
+    ctx: &'a mut Option<&mut Ctx<'l>>,
+) -> Result<&'a mut Ctx<'l>, LoadError> {
+    match ctx {
+        Some(c) => Ok(c),
+        None => Err(LoadError(format!("{name} needs a rule context"))),
+    }
+}
+
+fn parse_nested_tf(spec: &str, ctx: Option<&mut Ctx>) -> Result<Tf, LoadError> {
     if let Some((name, arg)) = spec.split_once(':') {
         Tf::from_func(name, &[arg], ctx)
     } else {
@@ -33,22 +44,32 @@ fn parse_nested_tf(spec: &str, ctx: Option<&mut Ctx>) -> Tf {
 }
 
 impl Tf {
-    pub(crate) fn from_func(name: &str, args: &[&str], mut ctx: Option<&mut Ctx>) -> Tf {
-        let s = |i: usize| -> Box<str> { args[i].into() };
-        let kind =
-            |c: &mut Option<&mut Ctx>, a: &str| c.as_mut().expect("needs context").intern_kind(a);
+    pub(crate) fn from_func(
+        name: &str,
+        args: &[&str],
+        mut ctx: Option<&mut Ctx>,
+    ) -> Result<Tf, LoadError> {
+        let arg = |i: usize| -> Result<&str, LoadError> {
+            args.get(i).copied().ok_or_else(|| {
+                LoadError(format!(
+                    "{name} needs {} argument(s), got {}",
+                    i + 1,
+                    args.len()
+                ))
+            })
+        };
+        let s = |i: usize| -> Result<Box<str>, LoadError> { Ok(arg(i)?.into()) };
+        let re = |i: usize| -> Result<regex::Regex, LoadError> { Ok(regex::Regex::new(arg(i)?)?) };
 
-        match name {
-            "lowercase" | "stem" => match name {
-                "lowercase" => Tf::Lowercase,
-                _ => Tf::Stem,
-            },
-            "strip_prefix" | "strip" => Tf::Strip(s(0)),
-            "strip_suffix" => Tf::StripSuffix(s(0)),
-            "prepend" => Tf::Prepend(s(0)),
-            "split_last" => Tf::SplitLast(s(0)),
-            "split_first" => Tf::SplitFirst(s(0)),
-            "replace" => Tf::Replace(s(0), s(1)),
+        Ok(match name {
+            "lowercase" => Tf::Lowercase,
+            "stem" => Tf::Stem,
+            "strip_prefix" | "strip" => Tf::Strip(s(0)?),
+            "strip_suffix" => Tf::StripSuffix(s(0)?),
+            "prepend" => Tf::Prepend(s(0)?),
+            "split_last" => Tf::SplitLast(s(0)?),
+            "split_first" => Tf::SplitFirst(s(0)?),
+            "replace" => Tf::Replace(s(0)?, s(1)?),
 
             "collapse_index" => Tf::CollapseIndex(args.iter().map(|a| (*a).into()).collect()),
             "map" => Tf::Map(
@@ -57,46 +78,19 @@ impl Tf {
                     .map(|(k, v)| (k.into(), v.into()))
                     .collect(),
             ),
-            "field" => Tf::Field(ctx.as_mut().expect("needs context").intern_field(args[0])),
-            "child_sym" => Tf::Child(kind(&mut ctx, args[0])),
-            "parent_sym" => Tf::ParentSym(kind(&mut ctx, args[0])),
-            "regex_replace" => {
-                let re = regex::Regex::new(args[0]).expect("invalid regex");
-                Tf::Regex(re, s(1))
-            }
-            "regex_first" => {
-                let re = regex::Regex::new(args[0]).expect("invalid regex");
-                Tf::RegexFirst(re, s(1))
-            }
-            "regex_loop" => {
-                let re = regex::Regex::new(args[0]).expect("invalid regex");
-                Tf::RegexLoop(re, s(1))
-            }
-            "regex_match" => {
-                let re = regex::Regex::new(args[0]).expect("invalid regex");
-                Tf::RegexMatch(re)
-            }
-            "ancestor_sym" => Tf::AncestorSym(kind(&mut ctx, args[0])),
-            "ancestor_tag" => {
-                let key = ctx
-                    .as_mut()
-                    .expect("needs context")
-                    .lang
-                    .syms
-                    .intern(args[0]);
-                Tf::AncestorTag(key)
-            }
-            "tag" => {
-                let key = ctx
-                    .as_mut()
-                    .expect("needs context")
-                    .lang
-                    .syms
-                    .intern(args[0]);
-                Tf::Tag(key)
-            }
+            "field" => Tf::Field(need_ctx(name, &mut ctx)?.intern_field(arg(0)?)),
+            "child_sym" => Tf::Child(need_ctx(name, &mut ctx)?.intern_kind(arg(0)?)),
+            "parent_sym" => Tf::ParentSym(need_ctx(name, &mut ctx)?.intern_kind(arg(0)?)),
+            "regex_replace" => Tf::Regex(re(0)?, s(1)?),
+            "regex_first" => Tf::RegexFirst(re(0)?, s(1)?),
+            "regex_loop" => Tf::RegexLoop(re(0)?, s(1)?),
+            "regex_match" => Tf::RegexMatch(re(0)?),
+            "ancestor_sym" => Tf::AncestorSym(need_ctx(name, &mut ctx)?.intern_kind(arg(0)?)),
+            "ancestor_tag" => Tf::AncestorTag(need_ctx(name, &mut ctx)?.lang.syms.intern(arg(0)?)),
+            "tag" => Tf::Tag(need_ctx(name, &mut ctx)?.lang.syms.intern(arg(0)?)),
             "has_incoming" | "has_outgoing" => {
-                let ek = EdgeKind::from_str(args[0]).expect("unknown edge kind");
+                let ek = EdgeKind::from_str(arg(0)?)
+                    .map_err(|_| LoadError(format!("unknown edge kind: {}", args[0])))?;
                 let dir = if name == "has_incoming" {
                     EdgeDir::Incoming
                 } else {
@@ -105,12 +99,12 @@ impl Tf {
                 Tf::HasEdge(ek, dir)
             }
             "concat" => {
-                let a = parse_nested_tf(args[1], ctx.as_deref_mut());
-                let b = parse_nested_tf(args[2], ctx);
-                Tf::Concat(s(0), Box::new(a), Box::new(b))
+                let a = parse_nested_tf(arg(1)?, ctx.as_deref_mut())?;
+                let b = parse_nested_tf(arg(2)?, ctx)?;
+                Tf::Concat(s(0)?, Box::new(a), Box::new(b))
             }
-            _ => panic!("unknown transform: {name}"),
-        }
+            _ => return Err(LoadError(format!("unknown transform: {name}"))),
+        })
     }
 
     pub(crate) fn apply_to_str<'a>(&self, s: &'a str) -> Cow<'a, str> {

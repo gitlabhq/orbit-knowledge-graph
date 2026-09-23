@@ -4,6 +4,7 @@ pub mod types;
 
 use rustc_hash::FxHashSet;
 
+use crate::error::Error;
 use crate::sentinel::{Killed, Limits};
 use crate::tree::{Edge, Tree};
 use crate::treesitter::SupportLang;
@@ -18,11 +19,11 @@ pub struct Indexed {
     pub killed: Vec<Killed>,
 }
 
-pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> Result<Indexed, Killed> {
-    index_with(Env::for_lang(lang_id), files)
+pub fn index(lang_id: SupportLang, files: &[(String, String)]) -> Result<Indexed, Error> {
+    index_with(Env::for_lang(lang_id)?, files)
 }
 
-pub fn index_with(env: Env, files: &[(String, String)]) -> Result<Indexed, Killed> {
+pub fn index_with(env: Env, files: &[(String, String)]) -> Result<Indexed, Error> {
     let mut state = State::new(&env);
     let mut killed = parse(&env, &mut state, files.to_vec());
     let all_fis: FxHashSet<usize> = (0..state.trees.len()).collect();
@@ -36,7 +37,7 @@ pub fn reindex(
     added: &[(String, String)],
     modified: &[(String, String)],
     removed: &[String],
-) -> Result<(State, Vec<Killed>), Killed> {
+) -> Result<(State, Vec<Killed>), Error> {
     let old_labels: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
     let dirty: FxHashSet<&str> = removed
         .iter()
@@ -54,12 +55,16 @@ pub fn reindex(
 }
 
 /// One file with no budgets, for inspection tools.
-pub fn parse_single(lang_id: SupportLang, path: &str, source: &str) -> (Env, Tree, Vec<Edge>) {
-    let env = Env::with_limits(lang_id, Limits::UNLIMITED);
-    let (tree, edges) = process_file(&env, path, source).expect("disabled sentinel never kills");
+pub fn parse_single(
+    lang_id: SupportLang,
+    path: &str,
+    source: &str,
+) -> Result<(Env, Tree, Vec<Edge>), Error> {
+    let env = Env::with_limits(lang_id, Limits::UNLIMITED)?;
+    let (tree, edges) = process_file(&env, path, source)?;
     let mut state = State::new(&env);
     state.trees.push(tree);
     state.edges = edges;
-    let _ = resolve(&env, &mut state, FxHashSet::from_iter([0]), None);
-    (env, state.trees.remove(0), state.edges)
+    resolve(&env, &mut state, FxHashSet::from_iter([0]), None)?;
+    Ok((env, state.trees.remove(0), state.edges))
 }

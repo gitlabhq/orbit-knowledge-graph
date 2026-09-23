@@ -256,7 +256,7 @@ impl State {
         zstd::Decoder::new(std::fs::File::open(path)?)?.read_to_end(&mut bytes)?;
         let snap: FullSnapshot = rkyv::from_bytes::<FullSnapshot, rkyv::rancor::BoxedError>(&bytes)
             .map_err(io::Error::other)?;
-        let mut env = Env::for_lang(lang_id);
+        let mut env = Env::for_lang(lang_id).map_err(io::Error::other)?;
         env.lang = Lang::from(snap.lang);
         let state = State {
             trees: snap.trees.into_iter().map(|t| t.into()).collect(),

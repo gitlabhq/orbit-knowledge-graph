@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use indextree::NodeId;
 use smallvec::SmallVec;
 
+use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::{Edge, EdgeKind};
 
@@ -201,19 +202,19 @@ impl<'l> Ctx<'l> {
         }
     }
 
-    pub fn slot(&mut self, n: &str) -> u16 {
+    pub fn slot(&mut self, n: &str) -> Result<u16, LoadError> {
         if self.is_template {
-            *self
-                .slots
+            self.slots
                 .get(n)
-                .unwrap_or_else(|| panic!("template references unknown slot: {n}"))
+                .copied()
+                .ok_or_else(|| LoadError(format!("template references unknown capture ${n}")))
         } else {
             let next = self.slots.len() as u16;
             let s = *self.slots.entry(n.into()).or_insert(next);
             if self.filters.len() <= s as usize {
                 self.filters.resize(s as usize + 1, Vec::new());
             }
-            s
+            Ok(s)
         }
     }
 
@@ -236,7 +237,7 @@ impl<'l> Ctx<'l> {
         self
     }
 
-    pub fn template(&mut self, src: &str) -> Pat {
+    pub fn template(&mut self, src: &str) -> Result<Pat, LoadError> {
         self.is_template = true;
         parse(self, src)
     }
@@ -245,13 +246,17 @@ impl<'l> Ctx<'l> {
 pub(crate) type Cap = SmallVec<[NodeId; 1]>;
 
 impl Rewrite {
-    pub fn new(lang: &Lang, src: &str, out: impl FnOnce(&mut Ctx) -> Out) -> Rewrite {
+    pub fn new(
+        lang: &Lang,
+        src: &str,
+        out: impl FnOnce(&mut Ctx) -> Result<Out, LoadError>,
+    ) -> Result<Rewrite, LoadError> {
         let mut ctx = Ctx::new(lang);
-        ctx.slot("ROOT");
-        let pat = parse(&mut ctx, src);
-        let out = out(ctx.as_template());
+        ctx.slot("ROOT")?;
+        let pat = parse(&mut ctx, src)?;
+        let out = out(ctx.as_template())?;
         let nslots = ctx.slots.len();
-        Rewrite {
+        Ok(Rewrite {
             pat,
             out,
             nslots,
@@ -259,7 +264,7 @@ impl Rewrite {
             filters: ctx.filters,
             guards: vec![],
             unique: None,
-        }
+        })
     }
 
     pub fn with_guards(mut self, guards: Vec<(u16, u16, bool)>) -> Self {

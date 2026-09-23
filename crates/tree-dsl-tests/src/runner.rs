@@ -67,7 +67,7 @@ fn suite_fixtures(suite: &TestSuite) -> Vec<(String, String)> {
 }
 
 async fn build_and_check(env: &Env, state: &mut State, suite: &TestSuite) -> Vec<Failure> {
-    tree_dsl::phases::display(env, state);
+    tree_dsl::phases::display(env, state).expect("display rules compile");
     let datasets = export(&state.trees, &state.edges, &env.lang).expect("Failed to build datasets");
     let graph_config = make_graph_config().expect("Failed to build graph config");
     run_suite(suite, &datasets, &graph_config).await

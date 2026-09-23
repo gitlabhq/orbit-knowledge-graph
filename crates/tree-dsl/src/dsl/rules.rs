@@ -21,6 +21,7 @@
 
 use std::collections::HashMap;
 
+use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::pattern::{Out, Rewrite, TagEntry, Tf};
 
@@ -116,9 +117,9 @@ fn default_true() -> bool {
     true
 }
 
-fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Config {
+fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config, LoadError> {
     let Some(section) = section else {
-        return Config::default();
+        return Ok(Config::default());
     };
     let link = section
         .link
@@ -127,40 +128,49 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Config {
             builtins: l.builtins.iter().map(|b| lang.syms.intern(b)).collect(),
             imports_shadow_locals: l.imports_shadow_locals,
         });
-    let resolve = section
-        .resolve
-        .as_ref()
-        .map_or_else(ResolveConfig::default, |r| ResolveConfig {
-            external: r.external.clone(),
-            lookup_from: r
-                .lookup_from
-                .iter()
-                .map(|name| lang.intern_kind(name))
-                .collect(),
-            parse_files: r
-                .parse_files
-                .iter()
-                .map(|pf| ParseFileSpec {
-                    name: pf.name.clone(),
-                    format: match pf.format.as_str() {
-                        "json" => ParseFormat::Json,
-                        "toml" => ParseFormat::Toml,
-                        "raw" => {
-                            let pattern = pf
-                                .extract
-                                .as_deref()
-                                .expect("raw format requires extract pattern");
-                            ParseFormat::Raw(
-                                regex::Regex::new(pattern).expect("invalid extract regex"),
-                            )
-                        }
-                        other => panic!("unknown parse_files format: {other}"),
-                    },
-                })
-                .collect(),
-            merge_same_named_types: r.merge_same_named_types,
+    let Some(r) = section.resolve.as_ref() else {
+        return Ok(Config {
+            link,
+            resolve: ResolveConfig::default(),
         });
-    Config { link, resolve }
+    };
+    let parse_file = |pf: &ParseFileEntry| -> Result<ParseFileSpec, LoadError> {
+        let format = match pf.format.as_str() {
+            "json" => ParseFormat::Json,
+            "toml" => ParseFormat::Toml,
+            "raw" => {
+                let pattern = pf.extract.as_deref().ok_or_else(|| {
+                    LoadError(format!("parse_files {}: raw format needs extract", pf.name))
+                })?;
+                ParseFormat::Raw(regex::Regex::new(pattern)?)
+            }
+            other => {
+                return Err(LoadError(format!(
+                    "parse_files {}: unknown format {other}",
+                    pf.name
+                )));
+            }
+        };
+        Ok(ParseFileSpec {
+            name: pf.name.clone(),
+            format,
+        })
+    };
+    let resolve = ResolveConfig {
+        external: r.external.clone(),
+        lookup_from: r
+            .lookup_from
+            .iter()
+            .map(|name| lang.intern_kind(name))
+            .collect(),
+        parse_files: r
+            .parse_files
+            .iter()
+            .map(parse_file)
+            .collect::<Result<_, _>>()?,
+        merge_same_named_types: r.merge_same_named_types,
+    };
+    Ok(Config { link, resolve })
 }
 
 #[derive(serde::Deserialize)]
@@ -228,25 +238,29 @@ struct Rule {
     tag_on: Option<String>,
 }
 
-fn unique_guard(lang: &Lang, spec: &str) -> (Pat, u16, usize) {
+fn unique_guard(lang: &Lang, spec: &str) -> Result<(Pat, u16, usize), LoadError> {
     let pattern = spec.starts_with('(');
     let kind = lang.intern_kind(if pattern { "__defname" } else { spec });
     let mut ctx = Ctx::new(lang);
-    ctx.slot("ROOT");
-    (
-        parse(&mut ctx, if pattern { spec } else { "(__def)" }),
-        kind,
-        ctx.slots.len(),
-    )
+    ctx.slot("ROOT")?;
+    let pat = parse(&mut ctx, if pattern { spec } else { "(__def)" })?;
+    Ok((pat, kind, ctx.slots.len()))
 }
 
-/// Compile a YAML rule file into stages of rewrites.
-pub fn load_rules(yaml: &str, lang: &Lang) -> Vec<Vec<Rewrite>> {
-    let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
-    file.stages
+fn read(yaml: &str) -> Result<RuleFile, LoadError> {
+    Ok(serde_yaml::from_str(yaml)?)
+}
+
+fn compile_stages(stages: &[Stage], lang: &Lang) -> Result<Vec<Vec<Rewrite>>, LoadError> {
+    stages
         .iter()
         .map(|stage| compile_stage(stage, lang))
         .collect()
+}
+
+/// Compile a YAML rule file into stages of rewrites.
+pub fn load_rules(yaml: &str, lang: &Lang) -> Result<Vec<Vec<Rewrite>>, LoadError> {
+    compile_stages(&read(yaml)?.stages, lang)
 }
 
 pub struct LangConfig {
@@ -257,154 +271,155 @@ pub struct LangConfig {
 }
 
 /// Load rewrite stages, resolve stages, and whole-language config from a language YAML file.
-pub fn load_lang(yaml: &str, lang: &Lang) -> (Vec<Vec<Rewrite>>, Vec<ResolveStage>, Config) {
-    let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
-    let rewrites = file
-        .stages
-        .iter()
-        .map(|stage| compile_stage(stage, lang))
-        .collect();
-    let resolve = file
-        .resolve
-        .as_ref()
-        .map_or_else(Vec::new, |section| compile_resolve(section, lang));
-    (
+pub fn load_lang(
+    yaml: &str,
+    lang: &Lang,
+) -> Result<(Vec<Vec<Rewrite>>, Vec<ResolveStage>, Config), LoadError> {
+    let file = read(yaml)?;
+    let rewrites = compile_stages(&file.stages, lang)?;
+    let resolve = match &file.resolve {
+        Some(section) => compile_resolve(section, lang)?,
+        None => vec![],
+    };
+    Ok((
         rewrites,
         resolve,
-        compile_config(file.config.as_ref(), lang),
-    )
+        compile_config(file.config.as_ref(), lang)?,
+    ))
 }
 
-pub fn load_lang_full(yaml: &str, lang: &Lang) -> LangConfig {
-    let file: RuleFile = serde_yaml::from_str(yaml).expect("failed to parse rule YAML");
-    let rewrite_stages = file
-        .stages
-        .iter()
-        .map(|stage| compile_stage(stage, lang))
+pub fn load_lang_full(yaml: &str, lang: &Lang) -> Result<LangConfig, LoadError> {
+    let file = read(yaml)?;
+    let rewrite_stages = compile_stages(&file.stages, lang)?;
+    let resolve_stages = match &file.resolve {
+        Some(section) => compile_resolve(section, lang)?,
+        None => vec![],
+    };
+    let display_rules = compile_stages(file.display.as_deref().unwrap_or_default(), lang)?
+        .into_iter()
+        .flatten()
         .collect();
-    let resolve_stages = file
-        .resolve
-        .as_ref()
-        .map_or_else(Vec::new, |section| compile_resolve(section, lang));
-    let display_rules = file
-        .display
-        .unwrap_or_default()
-        .iter()
-        .flat_map(|stage| compile_stage(stage, lang))
-        .collect();
-    LangConfig {
+    Ok(LangConfig {
         rewrite_stages,
         resolve_stages,
-        config: compile_config(file.config.as_ref(), lang),
+        config: compile_config(file.config.as_ref(), lang)?,
         display_rules,
-    }
+    })
 }
 
-fn compile_resolve(section: &ResolveSection, lang: &Lang) -> Vec<ResolveStage> {
+fn compile_resolve(section: &ResolveSection, lang: &Lang) -> Result<Vec<ResolveStage>, LoadError> {
     section
         .stages
         .iter()
         .map(|spec| {
             if let Some(climb) = &spec.climb {
-                ResolveStage::Climb {
+                Ok(ResolveStage::Climb {
                     while_kind: lang.intern_kind(&climb.r#while),
                     mark_kind: lang.intern_kind(&climb.mark),
-                }
+                })
             } else if let Some(rules) = &spec.rules {
-                ResolveStage::Rules(
-                    rules
-                        .iter()
-                        .flat_map(|rule| compile_rule(rule, lang))
-                        .collect(),
-                )
+                let rules = rules
+                    .iter()
+                    .map(|rule| compile_rule(rule, lang))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(ResolveStage::Rules(rules))
             } else {
-                panic!("resolve stage must have either `rules` or `climb`");
+                Err(LoadError(format!(
+                    "resolve stage {:?} needs rules or climb",
+                    spec.name
+                )))
             }
         })
         .collect()
 }
 
-fn compile_stage(stage: &Stage, lang: &Lang) -> Vec<Rewrite> {
+fn compile_stage(stage: &Stage, lang: &Lang) -> Result<Vec<Rewrite>, LoadError> {
     stage
         .rules
         .iter()
-        .flat_map(|rule| compile_rule(rule, lang))
+        .map(|rule| compile_rule(rule, lang))
         .collect()
 }
 
-fn compile_tags(tag_map: &HashMap<String, String>, ctx: &mut crate::pattern::Ctx) -> Vec<TagEntry> {
+fn compile_tags(
+    tag_map: &HashMap<String, String>,
+    ctx: &mut crate::pattern::Ctx,
+) -> Result<Vec<TagEntry>, LoadError> {
     tag_map
         .iter()
         .map(|(k, v)| {
             let key = ctx.lang.syms.intern(k);
-            let (slot, val) = compile_tag_value(v, ctx);
-            TagEntry { key, slot, val }
+            let (slot, val) = compile_tag_value(v, ctx)?;
+            Ok(TagEntry { key, slot, val })
         })
         .collect()
 }
 
-fn compile_rule(rule: &Rule, lang: &Lang) -> Vec<Rewrite> {
+fn compile_rule(rule: &Rule, lang: &Lang) -> Result<Rewrite, LoadError> {
     let pat = &rule.pattern;
-
-    if let Some(ref tpl) = rule.replace {
+    let mut rw = if let Some(ref tpl) = rule.replace {
         let tpl = tpl.clone();
         let tags = rule.tag.clone();
         let tag_on = rule.tag_on.as_deref().map(|k| lang.intern_kind(k));
         let mut rw = Rewrite::new(lang, pat, move |c| {
-            let replace = c.template(&tpl);
-            let tag_entries = tags.as_ref().map(|t| compile_tags(t, c));
-            Out::Replace(replace, tag_entries, tag_on)
-        });
-        if let Some(ref wc) = rule.where_clause {
-            rw.guards = parse_where_clause(wc, &rw.slots);
-        }
-        rw.unique = rule.unique.as_deref().map(|u| unique_guard(lang, u));
-        return vec![rw];
-    }
-
-    if let Some(ref appends) = rule.append {
+            let replace = c.template(&tpl)?;
+            let tag_entries = tags.as_ref().map(|t| compile_tags(t, c)).transpose()?;
+            Ok(Out::Replace(replace, tag_entries, tag_on))
+        })?;
+        rw.unique = rule
+            .unique
+            .as_deref()
+            .map(|u| unique_guard(lang, u))
+            .transpose()?;
+        rw
+    } else if let Some(ref appends) = rule.append {
         let appends = appends.clone();
-        let mut rw = Rewrite::new(lang, pat, move |c| {
-            Out::Append(appends.iter().map(|tpl| c.template(tpl)).collect())
-        });
-        if let Some(ref wc) = rule.where_clause {
-            rw.guards = parse_where_clause(wc, &rw.slots);
-        }
-        return vec![rw];
-    }
-
-    if let Some(ref tag_map) = rule.tag {
+        Rewrite::new(lang, pat, move |c| {
+            let pats = appends
+                .iter()
+                .map(|tpl| c.template(tpl))
+                .collect::<Result<_, _>>()?;
+            Ok(Out::Append(pats))
+        })?
+    } else if let Some(ref tag_map) = rule.tag {
         let tag_map = tag_map.clone();
-        let mut rw = Rewrite::new(lang, pat, move |c| Out::Tag(compile_tags(&tag_map, c)));
-        if let Some(ref wc) = rule.where_clause {
-            rw.guards = parse_where_clause(wc, &rw.slots);
-        }
-        return vec![rw];
+        Rewrite::new(lang, pat, move |c| Ok(Out::Tag(compile_tags(&tag_map, c)?)))?
+    } else {
+        return Err(LoadError(format!(
+            "rule {pat:?} has no replace, append, or tag"
+        )));
+    };
+    if let Some(ref wc) = rule.where_clause {
+        rw.guards = parse_where_clause(wc, &rw.slots)?;
     }
-
-    panic!("rule has no action: {:?}", pat);
+    Ok(rw)
 }
 
-fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> (u16, Tf) {
-    if let Some(rest) = val.strip_prefix("@$") {
-        let (slot_name, pipeline) = match rest.find('|') {
-            Some(i) => (&rest[..i], Some(&rest[i + 1..])),
-            None => (rest, None),
-        };
-        let slot = ctx.slot(slot_name);
-        match pipeline {
-            Some(pipe) => (slot, crate::dsl::parser::parse_pipeline(ctx, pipe)),
-            None => (slot, Tf::Id),
-        }
-    } else {
-        (0, Tf::LitSym(ctx.lang.syms.intern(val)))
-    }
+fn compile_tag_value(val: &str, ctx: &mut crate::pattern::Ctx) -> Result<(u16, Tf), LoadError> {
+    let Some(rest) = val.strip_prefix("@$") else {
+        return Ok((0, Tf::LitSym(ctx.lang.syms.intern(val))));
+    };
+    let (slot_name, pipeline) = match rest.find('|') {
+        Some(i) => (&rest[..i], Some(&rest[i + 1..])),
+        None => (rest, None),
+    };
+    let slot = ctx.slot(slot_name)?;
+    Ok(match pipeline {
+        Some(pipe) => (slot, crate::dsl::parser::parse_pipeline(ctx, pipe)?),
+        None => (slot, Tf::Id),
+    })
 }
 
 fn parse_where_clause(
     clause: &str,
     slots: &std::collections::HashMap<Box<str>, u16>,
-) -> Vec<(u16, u16, bool)> {
+) -> Result<Vec<(u16, u16, bool)>, LoadError> {
+    let slot = |name: &str| {
+        slots
+            .get(name.trim_start_matches('$'))
+            .copied()
+            .ok_or_else(|| LoadError(format!("where clause names unknown capture {name}")))
+    };
     clause
         .split("&&")
         .map(|part| {
@@ -414,15 +429,9 @@ fn parse_where_clause(
             } else if let Some((l, r)) = part.split_once("!=") {
                 (l.trim(), r.trim(), false)
             } else {
-                panic!("invalid where clause: {part}");
+                return Err(LoadError(format!("where clause {part:?} needs == or !=")));
             };
-            let sa = slots
-                .get(a.trim_start_matches('$'))
-                .unwrap_or_else(|| panic!("unknown capture in where: {a}"));
-            let sb = slots
-                .get(b.trim_start_matches('$'))
-                .unwrap_or_else(|| panic!("unknown capture in where: {b}"));
-            (*sa, *sb, eq)
+            Ok((slot(a)?, slot(b)?, eq))
         })
         .collect()
 }
@@ -441,7 +450,7 @@ stages:
         replace: '(__ivar @$A)'
 "#;
         let lang = Lang::new();
-        let stages = load_rules(yaml, &lang);
+        let stages = load_rules(yaml, &lang).unwrap();
         assert_eq!(stages.len(), 1);
         assert_eq!(stages[0].len(), 1);
     }
@@ -470,7 +479,55 @@ stages:
         replace: '(__def (__defname @$N) (__deftype "Class") (__scope) $B)'
 "#;
         let lang = Lang::new();
-        let stages = load_rules(yaml, &lang);
+        let stages = load_rules(yaml, &lang).unwrap();
         assert_eq!(stages.len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod load_tests {
+    use super::*;
+    use crate::treesitter::SupportLang;
+
+    /// Every compiled-in rule file goes through the same path a user file
+    /// would, so a broken one fails here rather than at index time.
+    #[test]
+    fn every_embedded_rule_file_compiles() {
+        for (lang_id, _) in crate::treesitter::all_languages() {
+            let Some(yaml) = crate::treesitter::lang_yaml(lang_id) else {
+                continue;
+            };
+            let lang = Lang::new();
+            load_lang_full(yaml, &lang).unwrap_or_else(|e| panic!("{lang_id:?}: {e}"));
+            let _ = lang_id.ts_language();
+        }
+        let _ = SupportLang::from_extension("py");
+    }
+
+    #[test]
+    fn malformed_rule_files_are_errors_not_panics() {
+        let lang = Lang::new();
+        let bad = |yaml: &str| match load_lang(yaml, &lang) {
+            Err(e) => e.0,
+            Ok(_) => panic!("{yaml:?} loaded"),
+        };
+        assert!(bad("stages: [").contains("yaml"));
+        assert!(
+            bad("stages:\n  - rules:\n      - match: '(a'\n        tag: {x: y}")
+                .contains("pattern")
+        );
+        assert!(
+            bad("stages:\n  - rules:\n      - match: '(a)'\n        replace: '(b @$Z)'")
+                .contains("unknown capture $Z")
+        );
+        assert!(
+            bad("stages:\n  - rules:\n      - match: '(a)'\n        replace: '(b @$ROOT|nope)'")
+                .contains("unknown transform")
+        );
+        assert!(bad("stages:\n  - rules:\n      - match: '(a)'\n        replace: '(b @$ROOT|regex_replace(\"(\", \"\"))'").contains("regex"));
+        assert!(
+            bad("stages:\n  - rules:\n      - match: '(a)'").contains("no replace, append, or tag")
+        );
+        assert!(bad("stages:\n  - rules:\n      - match: '(a $X)'\n        tag: {k: v}\n        where: '$X == $Q'").contains("unknown capture $Q"));
     }
 }

@@ -10,7 +10,8 @@ pub mod ssa;
 pub mod tree;
 pub mod treesitter;
 
-pub use shared::{canonical, sentinel, tags};
+pub use shared::error::{Error, LoadError};
+pub use shared::{canonical, error, sentinel, tags};
 
 pub mod pattern {
     pub use crate::dsl::rewrite::*;

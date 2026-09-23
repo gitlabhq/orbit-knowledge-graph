@@ -34,7 +34,7 @@ pub enum SupportLang {
 }
 
 #[derive(serde::Deserialize)]
-struct LangEntry {
+pub struct LangEntry {
     extensions: Vec<String>,
     #[serde(default)]
     aliases: Vec<String>,
@@ -52,6 +52,12 @@ struct LangEntry {
 #[derive(serde::Deserialize)]
 struct LangConfig {
     languages: std::collections::HashMap<SupportLang, LangEntry>,
+}
+
+/// Every configured language and its rule-file name, for tests that must
+/// touch all compiled-in data.
+pub fn all_languages() -> impl Iterator<Item = (SupportLang, &'static LangEntry)> {
+    LANG_CONFIG.languages.iter().map(|(l, e)| (*l, e))
 }
 
 static LANG_CONFIG: std::sync::LazyLock<LangConfig> = std::sync::LazyLock::new(|| {

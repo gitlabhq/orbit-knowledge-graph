@@ -1,3 +1,4 @@
+use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::pattern::Rewrite;
 use crate::resolver::Resolver;
@@ -19,18 +20,18 @@ pub struct Env {
 }
 
 impl Env {
-    pub fn for_lang(lang_id: SupportLang) -> Self {
+    pub fn for_lang(lang_id: SupportLang) -> Result<Self, LoadError> {
         Self::with_limits(lang_id, Limits::default())
     }
 
-    pub fn with_limits(lang_id: SupportLang, limits: Limits) -> Self {
+    pub fn with_limits(lang_id: SupportLang, limits: Limits) -> Result<Self, LoadError> {
         let sentinel = Sentinel::new("run", "", limits.total_ms);
         let lang = Lang::new();
         let (rewrite_stages, resolve_stages, config) = match treesitter::lang_yaml(lang_id) {
-            Some(yaml) => rules::load_lang(yaml, &lang),
+            Some(yaml) => rules::load_lang(yaml, &lang)?,
             None => (vec![], vec![], Config::default()),
         };
-        Self {
+        Ok(Self {
             lang,
             lang_id,
             rewrite_stages,
@@ -38,7 +39,7 @@ impl Env {
             config,
             limits,
             sentinel,
-        }
+        })
     }
 }
 
