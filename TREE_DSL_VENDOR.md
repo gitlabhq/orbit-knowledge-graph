@@ -4,7 +4,7 @@ This branch tracks the tree-dsl rewrite experiment from orbit-next.
 
 ## Source MR
 
-https://gitlab.com/gitlab-org/orbit/experiments/orbit-next/-/merge_requests/219
+<https://gitlab.com/gitlab-org/orbit/experiments/orbit-next/-/merge_requests/219>
 
 ## Summary
 
