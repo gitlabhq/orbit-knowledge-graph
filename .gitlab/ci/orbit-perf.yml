@@ -8,8 +8,12 @@
 #   4. port-forward gkg gRPC + run the gRPC load test (cargo xtask loadtest)
 #
 # Synthetic bulk-load deliberately bypasses siphon CDC / project seeding / code
-# indexing (those only exist to populate the graph the slow way). Manual +
-# allow_failure because it is heavy (~30-45 min) and pulls up a full cluster.
+# indexing (those only exist to populate the graph the slow way).
+#
+# Runs automatically on the default branch (so every merge produces a perf
+# datapoint without anyone remembering to press a button) and stays available
+# as a manual opt-in on MRs. allow_failure everywhere because it is heavy
+# (~30-45 min) and pulls up a full cluster, so a perf blip must not break main.
 #
 # Splitting the xtask build into a per-release prebuilt artifact is a follow-up.
 orbit-perf:
@@ -18,7 +22,12 @@ orbit-perf:
     - .sccache-template  # shared sccache (fast xtask build)
   stage: benchmark
   needs: []
-  interruptible: true
+  # Not interruptible: on the default branch the next merge would otherwise
+  # auto-cancel an in-flight run and we would lose the datapoint.
+  interruptible: false
+  # One run at a time, so a burst of merges queues instead of standing up
+  # several full clusters on large runners concurrently.
+  resource_group: orbit-perf
   timeout: 2h
   tags: [saas-linux-large-amd64]
   services:
@@ -26,8 +35,14 @@ orbit-perf:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
-    # Auto-run on MR pipelines (canonical only). allow_failure keeps this heavy
-    # job from blocking the MR.
+    # Solo scheduled pipelines run exactly one named job; this heavy one must
+    # drop out of them (it now matches the default branch, which schedules use).
+    - !reference [.skip-on-solo-schedule, rules]
+    # Post-merge on the default branch: merging an MR pushes to main, which
+    # fires this automatically. This is the tracked signal.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      allow_failure: true
+    # Still runnable on demand from an MR, opt-in because it is heavy.
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       allow_failure: true
       when: manual
