@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
+use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig, ProgressObserver};
 use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
@@ -19,6 +19,7 @@ use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::locking::LockGuard;
+use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
 use orbit_utils::traversal_path::TraversalPath;
 
@@ -29,6 +30,20 @@ pub struct IndexingRequest {
     pub task_id: i64,
     pub commit_sha: Option<String>,
     pub had_prior_checkpoint: bool,
+}
+
+/// Keeps the NATS message alive during long pipeline runs so it is not redelivered.
+struct NatsHeartbeat {
+    runtime: tokio::runtime::Handle,
+    notifier: ProgressNotifier,
+}
+
+impl ProgressObserver for NatsHeartbeat {
+    fn family_finished(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.runtime.block_on(self.notifier.notify_in_progress());
+        }));
+    }
 }
 
 pub enum IndexOutcome {
@@ -513,14 +528,10 @@ impl CodeIndexer {
         cancel: CancellationToken,
     ) -> PipelineConfig {
         let to_timeout = |ms: u64| (ms > 0).then(|| std::time::Duration::from_millis(ms));
-        let handle = tokio::runtime::Handle::current();
-        let progress = context.progress.clone();
-        let on_progress: Option<std::sync::Arc<dyn Fn() + Send + Sync>> =
-            Some(std::sync::Arc::new(move || {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    handle.block_on(progress.notify_in_progress());
-                }));
-            }));
+        let progress = Arc::new(NatsHeartbeat {
+            runtime: tokio::runtime::Handle::current(),
+            notifier: context.progress.clone(),
+        });
         let phase_cpu_metrics = self.metrics.clone();
         let on_phase_cpu: Option<code_graph::v2::PhaseCpuObserver> =
             Some(std::sync::Arc::new(move |language, cpu| {
@@ -538,7 +549,7 @@ impl CodeIndexer {
             cross_file_resolve_timeout: to_timeout(
                 self.pipeline_config.cross_file_resolve_timeout_ms,
             ),
-            on_progress,
+            progress,
             on_phase_cpu,
             ..Default::default()
         }

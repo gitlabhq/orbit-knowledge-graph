@@ -183,8 +183,10 @@ orbit setup
 A picker lists the detected agents, all pre-selected. Press Enter to apply,
 or pass `--yes` to skip the picker. Name an agent to add it even when it is
 not detected, for example `orbit setup claude codex`. Add `--mcp` to also register
-the `orbit` MCP server. Run `orbit setup --help` for the other options.
-Supported agents are GitLab Duo, Claude Code, Codex, OpenCode, and Pi.
+the `orbit` MCP server. Inside a Git repository, setup then indexes it so
+your agents have a graph to query; `--no-index` skips that. Run
+`orbit setup --help` for the other options. Supported agents are GitLab Duo,
+Claude Code, Codex, OpenCode, and Pi.
 
 ### What it changes
 

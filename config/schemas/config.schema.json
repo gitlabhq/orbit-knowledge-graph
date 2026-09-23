@@ -50,6 +50,9 @@
     "metrics": {
       "$ref": "#/$defs/MetricsConfig"
     },
+    "probe_server": {
+      "$ref": "#/$defs/ProbeServerConfig"
+    },
     "tls": {
       "$ref": "#/$defs/TlsConfig"
     },
@@ -90,6 +93,7 @@
     "indexer_health_bind_address",
     "dispatcher_health_bind_address",
     "metrics",
+    "probe_server",
     "tls",
     "query",
     "grpc",
@@ -1012,7 +1016,10 @@
           "type": "boolean"
         },
         "port": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint16",
           "minimum": 0,
           "maximum": 65535
@@ -1020,9 +1027,20 @@
       },
       "additionalProperties": false,
       "required": [
-        "enabled",
-        "port"
+        "enabled"
       ]
+    },
+    "ProbeServerConfig": {
+      "type": "object",
+      "properties": {
+        "bind_address": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "TlsConfig": {
       "type": "object",
@@ -1034,6 +1052,40 @@
           ]
         },
         "key_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "internal": {
+          "description": "The internal listeners: the probe server in every mode and the\nhealth-check API.",
+          "$ref": "#/$defs/ListenerTlsConfig",
+          "default": {
+            "enabled": false,
+            "cert_path": null,
+            "key_path": null
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ListenerTlsConfig": {
+      "description": "TLS for a group of listeners.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "cert_path": {
+          "description": "Overrides `tls.cert_path` for this group. Must be set with `key_path`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key_path": {
+          "description": "Overrides `tls.key_path` for this group. Must be set with `cert_path`.",
           "type": [
             "string",
             "null"

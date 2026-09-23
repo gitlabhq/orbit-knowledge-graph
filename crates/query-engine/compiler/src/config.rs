@@ -140,6 +140,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
             phases: [gql_parse, validate_local, normalize, plan, lower, enforce, duckdb_codegen]
         }
+        validate_normalize_gql {
+            env: [ontology]
+            state: [raw, input]
+            phases: [gql_parse, validate, normalize]
+        }
         validate_normalize {
             env: [ontology]
             state: [raw, input]

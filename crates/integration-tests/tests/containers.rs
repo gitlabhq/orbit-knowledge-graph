@@ -15,9 +15,11 @@ mod server {
     pub mod graph_formatter;
     pub mod graph_status;
     pub mod grpc_tls;
+    pub mod http_tls;
     pub mod hydration;
     pub mod performance;
     pub mod redaction;
     pub mod schema_readiness;
     pub mod telemetry;
+    pub mod tls_fixtures;
 }

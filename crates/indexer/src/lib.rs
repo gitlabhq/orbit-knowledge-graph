@@ -82,6 +82,7 @@ use tracing::{info, warn};
 pub async fn run(
     config: &IndexerConfig,
     ontology: Arc<ontology::Ontology>,
+    serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
     let resources = orbit_server_config::ContainerResources::detect();
@@ -117,7 +118,6 @@ pub async fn run(
     // Start the health server before waiting for schema readiness so that the
     // Kubernetes liveness probe is answered during the (potentially long) schema
     // wait phase. Readiness stays `503` until the gate clears (`serving`).
-    let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;
@@ -245,6 +245,7 @@ pub async fn run(
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
     archive: &ontology::archive::OntologyArchive,
+    serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
@@ -275,7 +276,6 @@ pub async fn run_dispatcher(
     // Start the health server before migration so that the Kubernetes liveness
     // probe is answered during the (potentially long) DDL phase. Readiness stays
     // `503` until migration completes (`serving`).
-    let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;

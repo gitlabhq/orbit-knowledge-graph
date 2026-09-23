@@ -161,6 +161,25 @@ The current implementation uses ClickHouse for remote graph storage and query ex
 
 Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline. Release binaries statically link DuckDB's full-text search extension from a pinned source archive; development builds load the pinned extension artifact at runtime. Regenerate the source archive with `mise vendor -- duckdb`.
 
+Local `grep` binds each complete OR alternative to DuckDB FTS `match_bm25` with
+`conjunctive := true` across definition names, FQNs/paths, and indexed source.
+Query preparation uses the index's FTS tokenizer and removes only empty tokens
+before conjunction, retaining every real term, including tokens absent from the
+index. Index-time identifier tokenization retains whole CamelCase names
+and split words. There is no query-time vocabulary removal or fallback matching.
+Single-token alternatives must also appear literally, case-insensitively, in the
+definition's FQN, path, or source. This removes matches that share only the
+underscore-split words of an identifier. Results order exact-name hits first, then
+name/path hits, then body-only mentions. Within each group, the best alternative's
+BM25 score orders results and definition ID breaks ties. SQL applies scopes and the
+result limit before Rust hydrates definitions. Exact status compares raw symbol names
+case-insensitively within scope before limiting. A second conjunctive FTS match
+restricted to name/path fields, with the same literal requirement, marks name/path
+hits. Search output contains IDs,
+names, kinds, file ranges, and match labels. Body-only rows add a mention count and the
+first matching source line. Explicit Definition context returns complete
+source.
+
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 
 View the [Graph Query Engine](querying/graph_engine.md) design document for more details.
