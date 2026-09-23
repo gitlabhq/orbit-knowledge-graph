@@ -29,7 +29,10 @@ pub fn readiness_checks(
     match mode {
         Mode::Webserver => {
             let active = active.clone();
-            vec![("schema", Box::new(move || schema_installed(&active)))]
+            let serving = serving.clone();
+            let schema: Check = Box::new(move || schema_installed(&active));
+            let startup: Check = Box::new(move || gate_cleared(&serving));
+            vec![("schema", schema), ("startup", startup)]
         }
         Mode::Indexer | Mode::DispatchIndexing => {
             let serving = serving.clone();
@@ -100,7 +103,7 @@ mod tests {
                 .collect()
         };
 
-        assert_eq!(names(Mode::Webserver), ["schema"]);
+        assert_eq!(names(Mode::Webserver), ["schema", "startup"]);
         assert_eq!(names(Mode::Indexer), ["schema_gate"]);
         assert_eq!(names(Mode::DispatchIndexing), ["schema_gate"]);
         assert!(names(Mode::HealthCheck).is_empty());
@@ -131,8 +134,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn probe_server_readiness_follows_the_webserver_schema() {
+    async fn webserver_readiness_waits_for_startup_after_the_schema_loads() {
         let serving = Arc::new(AtomicBool::new(false));
+        let base = probe_server(readiness_checks(
+            Mode::Webserver,
+            &pinned_schema(),
+            &serving,
+        ))
+        .await;
+
+        let (status, body) = get(&format!("{base}/-/readiness")).await;
+        assert_eq!(status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["checks"]["schema"], "ok");
+        assert_eq!(json["checks"]["startup"], "startup gate not cleared");
+
+        serving.store(true, Ordering::Relaxed);
+
+        let (status, _) = get(&format!("{base}/-/readiness")).await;
+        assert_eq!(status, reqwest::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn probe_server_readiness_follows_the_webserver_schema() {
+        let serving = Arc::new(AtomicBool::new(true));
 
         let pending = probe_server(readiness_checks(
             Mode::Webserver,

@@ -1,11 +1,11 @@
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
+use tokio::net::TcpListener;
 use tonic::transport::Server as TonicServer;
-use tonic::transport::server::ServerTlsConfig;
+use tonic::transport::server::{ServerTlsConfig, TcpIncoming};
 use tracing::info;
 
 use crate::active_schema::ActiveSchema;
@@ -18,7 +18,6 @@ use orbit_billing::{BillingTracker, QuotaService};
 use super::service::OrbitServiceImpl;
 
 pub struct GrpcServer {
-    addr: SocketAddr,
     service: OrbitServiceImpl,
     tls_config: Option<ServerTlsConfig>,
     grpc_config: GrpcConfig,
@@ -27,7 +26,6 @@ pub struct GrpcServer {
 impl GrpcServer {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        addr: SocketAddr,
         validator: Arc<JwtValidator>,
         active_schema: Arc<ActiveSchema>,
         clickhouse_config: &ClickHouseConfiguration,
@@ -45,7 +43,6 @@ impl GrpcServer {
             analytics_config,
         );
         Self {
-            addr,
             service,
             tls_config,
             grpc_config,
@@ -85,20 +82,19 @@ impl GrpcServer {
         self
     }
 
-    pub fn addr(&self) -> SocketAddr {
-        self.addr
-    }
-
-    pub async fn run(self) -> Result<(), tonic::transport::Error> {
+    pub async fn run(self, listener: TcpListener) -> Result<(), tonic::transport::Error> {
         let tls_enabled = self.tls_config.is_some();
-        info!(addr = %self.addr, tls = tls_enabled, "Starting gRPC server");
+        info!(tls = tls_enabled, "Starting gRPC server");
 
         let service = Arc::new(self.service);
         let gc = &self.grpc_config;
+        // Tonic ignores the builder's TCP settings for a pre-bound listener.
+        let incoming = TcpIncoming::from(listener)
+            .with_nodelay(Some(true))
+            .with_keepalive(Some(Duration::from_secs(gc.tcp_keepalive_secs)));
         let mut builder = TonicServer::builder()
             .http2_keepalive_interval(Some(Duration::from_secs(gc.keepalive_interval_secs)))
             .http2_keepalive_timeout(Some(Duration::from_secs(gc.keepalive_timeout_secs)))
-            .tcp_keepalive(Some(Duration::from_secs(gc.tcp_keepalive_secs)))
             .initial_connection_window_size(gc.connection_window_size)
             .initial_stream_window_size(gc.stream_window_size)
             .concurrency_limit_per_connection(gc.concurrency_limit)
@@ -123,35 +119,7 @@ impl GrpcServer {
             .add_service(super::legacy::LegacyGkgService::new(
                 OrbitServiceServer::from_arc(service),
             ))
-            .serve(self.addr)
+            .serve_with_incoming(incoming)
             .await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ontology::Ontology;
-    use std::net::{IpAddr, Ipv4Addr};
-
-    #[test]
-    fn test_server_creation() {
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50054);
-        let validator =
-            Arc::new(JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap());
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let clickhouse_config = orbit_server_config::AppConfig::embedded_defaults().graph;
-        let cluster_health = ClusterHealthChecker::default().into_arc();
-        let server = GrpcServer::new(
-            addr,
-            validator,
-            ActiveSchema::pinned(ontology),
-            &clickhouse_config,
-            cluster_health,
-            None,
-            orbit_server_config::AppConfig::embedded_defaults().grpc,
-            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-        );
-        assert_eq!(server.addr(), addr);
     }
 }

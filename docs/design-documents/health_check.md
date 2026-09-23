@@ -15,9 +15,10 @@ Every mode runs the labkit probe server on `probe_server.bind_address` (default 
 server binds whether or not metrics are enabled. `/-/liveness` returns `200` while the process
 runs. `/-/readiness` returns `200` when every registered check passes and `503` otherwise, with a
 JSON body that names each check and its result. The Webserver registers a `schema` check that reads
-the active schema snapshot. The Indexer and Dispatcher register a `schema_gate` check that reads
-their in-memory serving flag. The HealthCheck runtime registers no check, so its readiness is
-always `200`.
+the active schema snapshot and a `startup` check that reads its in-memory serving flag. The
+Webserver sets that flag when startup is complete and its HTTP and gRPC listeners are bound. Thus
+Kubernetes does not send traffic to a port that is not open. The Indexer and Dispatcher a `schema_gate` check that reads their in-memory serving flag. The HealthCheck runtime registers no
+check, so its readiness is always `200`.
 
 The `/live` and `/ready` endpoints below read the same state. The Helm chart probes them today.
 Once the chart can probe `/-/liveness` and `/-/readiness` on the probe server port, they are
