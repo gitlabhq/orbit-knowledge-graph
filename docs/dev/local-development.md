@@ -89,11 +89,13 @@ ClickHouse from your GDK installation.
    clickhouse client --host localhost --port 9001 --query "CREATE DATABASE IF NOT EXISTS \`gkg-development\`"
    ```
 
-   Apply the graph schema using the helper script (it applies each
-   statement individually since ClickHouse does not support
-   multi-statement DDL execution):
+   From the knowledge-graph repository root (not `$GDK_ROOT/gitlab`), apply
+   the graph schema with the helper script. ClickHouse does not support
+   multi-statement DDL execution, so the script applies each statement
+   individually:
 
    ```shell
+   cd /path/to/knowledge-graph
    scripts/apply-graph-schema.sh
    ```
 
@@ -178,35 +180,38 @@ ClickHouse from your GDK installation.
        - gitlab/config/gitlab.yml
    ```
 
-   Restart Rails to auto-generate the JWT secret file:
+   Enable the feature flags, then restart Rails with the updated config:
 
    ```shell
+   cd $GDK_ROOT/gitlab
+   bundle exec rails runner "Feature.enable(:knowledge_graph); Feature.enable(:knowledge_graph_infra)"
+   cd $GDK_ROOT
    gdk restart rails-web rails-background-jobs
    ```
 
-   This creates `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret` which the
-   dev script reads automatically to configure the GKG webserver's JWT
-   verifying key. Verify the file was created:
+   The JWT secret is created when Rails boots with
+   `Gitlab.config.knowledge_graph['enabled']` set to true (including the Rails
+   runner above), not by enabling the feature flags. The dev script reads
+   `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret` to configure the GKG
+   webserver's JWT verifying key. Verify the file was created:
 
    ```shell
    ls $GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret
    ```
 
-   If the file does not exist, restart Rails again. It may take a second
-   restart for the secret to be generated.
-
-   Enable the feature flags:
+   If it is missing, check that the setting is effective in the development
+   environment before restarting again:
 
    ```shell
    cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Feature.enable(:knowledge_graph); Feature.enable(:knowledge_graph_infra)"
+   bundle exec rails runner 'puts Gitlab.config.knowledge_graph["enabled"]'
    ```
 
-   Enable namespaces for indexing:
+   Enable non-excluded namespaces for indexing:
 
    ```shell
    cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Namespace.where(type: 'Group', parent_id: nil).find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
+   bundle exec rails runner "Namespace.where(type: 'Group', parent_id: nil).find_each { |ns| next if Analytics::KnowledgeGraph::ExcludedNamespace.for_root_namespace_id(ns.id).exists?; Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
    ```
 
    The Orbit UI is available at
@@ -352,14 +357,20 @@ per-query budget. GDK sets it from `clickhouse.max_server_memory_usage` in
 that cap. So even a trivial `SELECT` fails with
 `(total) memory limit exceeded ... (MEMORY_LIMIT_EXCEEDED)`.
 
-GDK generates `$GDK_ROOT/clickhouse/config.d/gdk.xml` from `gdk.yml`, so editing
-that file directly is overwritten on the next `gdk reconfigure`. Raise the limit
-through `gdk.yml` instead:
+GDK generates `$GDK_ROOT/clickhouse/config.d/gdk.xml` from `gdk.yml`. Editing
+that file directly is overwritten on the next `gdk reconfigure`. Measure
+ClickHouse's baseline RSS on your machine (for example, with `ps`). Set
+`clickhouse.max_server_memory_usage` in `gdk.yml` above that baseline, leaving
+enough RAM for GitLab and other services. An 8 GB cap is too low for a
+12 GiB baseline. If the host has enough headroom, a higher cap could be:
 
 ```yaml
 clickhouse:
-  max_server_memory_usage: 8000000000
+  max_server_memory_usage: 16000000000
 ```
+
+Choose the value based on your own measurements and available RAM, rather than
+copying this example.
 
 Then apply it and restart:
 
@@ -394,6 +405,14 @@ rustup toolchain install stable
 ```
 
 Then re-run `mise install`.
+
+**Siphon `mise install` fails with Python attestation errors:**
+
+If `gdk reconfigure` fails in Siphon's `mise install` with
+`No GitHub artifact attestations found` for `python@3.11.9`, update Siphon's
+Python pin. The fix is in [Siphon !589](https://gitlab.com/gitlab-org/analytics-section/siphon/-/merge_requests/589).
+Until it lands in your checkout, locally pin a newer 3.11.x release in
+`$GDK_ROOT/siphon/.tool-versions`, then rerun `gdk reconfigure`.
 
 **Datalake connection errors in the indexer:**
 
