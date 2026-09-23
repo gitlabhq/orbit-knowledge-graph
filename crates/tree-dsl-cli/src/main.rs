@@ -3,8 +3,11 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
+use tree_dsl::pipeline::{self, Display, Each, ItemPhase, Parse, Rewrite, SourceFile, Workset};
+use tree_dsl::sentinel::Limits;
 use tree_dsl::tree::EdgeKind;
 use tree_dsl::treesitter::SupportLang;
+use tree_dsl::{Context, Env, Pipeline, State};
 
 #[derive(Parser)]
 #[command(name = "tree-dsl", about = "Code indexing CLI")]
@@ -133,38 +136,60 @@ fn cmd_parse(
 
     let lang_id = resolve_lang(lang_override.as_deref(), Some(&path));
 
+    let env = Env::with_limits(lang_id, Limits::UNLIMITED)?;
+    let source = SourceFile {
+        path: path.clone(),
+        content: source,
+    };
+    let context = Context::new(&env);
     match stage {
         Stage::Cst => {
-            let lang = tree_dsl::intern::Lang::new();
-            let tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path)?;
-            print_tree(&tree, &lang);
+            let parsed = inspect(context, source, Parse)?;
+            print_tree(&parsed.0, &env.lang);
         }
         Stage::Ast => {
-            let env = tree_dsl::Env::for_lang(lang_id)?;
-            let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &env.lang, &path)?;
-            for stage in &env.rewrite_stages {
-                let _ = tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]);
-            }
-            print_tree(&tree, &env.lang);
+            let rewritten = inspect(context, source, Parse.pipe(Rewrite))?;
+            print_tree(&rewritten.0, &env.lang);
         }
         Stage::Ssa => {
-            let (env, tree, edges) = tree_dsl::parse_single(lang_id, &path, &source)?;
-            print_tree(&tree, &env.lang);
-            print_edges(&tree, &edges, &env.lang);
+            let state = pipeline::index(context, vec![source])?.into_value().state;
+            print_graph(&state, &env.lang);
         }
         Stage::Display => {
-            let (env, tree, edges) = tree_dsl::parse_single(lang_id, &path, &source)?;
-            let mut state = tree_dsl::State {
-                trees: vec![tree],
-                edges,
-                resolver: tree_dsl::resolver::Resolver::new(&env.lang),
-            };
-            tree_dsl::phases::display(&env, &mut state)?;
-            print_tree(&state.trees[0], &env.lang);
-            print_edges(&state.trees[0], &state.edges, &env.lang);
+            let state = pipeline::index(context, vec![source])?
+                .then(Display)?
+                .into_value()
+                .state;
+            print_graph(&state, &env.lang);
         }
     }
     Ok(())
+}
+
+fn print_graph(state: &State, lang: &tree_dsl::intern::Lang) {
+    print_tree(&state.trees[0], lang);
+    print_edges(&state.trees[0], &state.edges, lang);
+}
+
+/// One file through the given per-file steps, with no corpus filtering: the
+/// user named this file, so it is parsed with the language they chose.
+fn inspect<P>(context: Context<'_>, source: SourceFile, steps: P) -> anyhow::Result<P::Output>
+where
+    P: ItemPhase<SourceFile> + Sync,
+    P::Output: Send,
+{
+    let workset = Workset {
+        state: State::new(context.env),
+        items: vec![source],
+        dirty: Default::default(),
+        configs: Vec::new(),
+    };
+    let (context, workset) = Pipeline::new(context, workset).then(Each(steps))?.finish();
+    workset
+        .items
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("{}", context.report.skipped[0]))
 }
 
 fn cmd_rewrite(
@@ -357,9 +382,13 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
         .into_par_iter()
         .map(|(name, lang_id, files)| {
             let t_lang = Instant::now();
-            let tree_dsl::Indexed { env, state, killed } =
-                tree_dsl::index(lang_id, &files).map_err(|e| anyhow::anyhow!("{e}"))?;
-            for k in &killed {
+            let env = Env::for_lang(lang_id)?;
+            let sources = files.into_iter().map(Into::into).collect();
+            let (context, resolved) = pipeline::index(Context::new(&env), sources)
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .finish();
+            let state = resolved.state;
+            for k in &context.report.skipped {
                 eprintln!("skipped:      {k}");
             }
             let (mut defs, mut imports) = (0usize, 0usize);

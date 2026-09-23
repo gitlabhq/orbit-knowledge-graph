@@ -2,9 +2,11 @@
 //! the graph while the rest of the run completes, and a run that overruns
 //! the total budget stops.
 
-use tree_dsl::sentinel::Limits;
+use tree_dsl::error::Error;
+use tree_dsl::pipeline;
+use tree_dsl::sentinel::{Killed, Limits};
 use tree_dsl::treesitter::SupportLang;
-use tree_dsl::{Env, Indexed, index_with};
+use tree_dsl::{Context, Env, State};
 
 fn small() -> (String, String) {
     (
@@ -27,6 +29,12 @@ fn env(limits: Limits) -> Env {
     Env::with_limits(SupportLang::Python, limits).expect("python rules compile")
 }
 
+fn index(env: &Env) -> Result<(State, Vec<Killed>), Error> {
+    let sources = vec![small().into(), big().into()];
+    let (context, resolved) = pipeline::index(Context::new(env), sources)?.finish();
+    Ok((resolved.state, context.report.skipped))
+}
+
 #[test]
 fn file_over_budget_is_dropped_and_the_rest_indexes() {
     // Wide enough for a four-line file even unoptimised, far too tight for 2MB.
@@ -34,7 +42,7 @@ fn file_over_budget_is_dropped_and_the_rest_indexes() {
         file_rewrite_ms: 50,
         ..Limits::UNLIMITED
     };
-    let Indexed { state, killed, .. } = index_with(env(limits), &[small(), big()]).unwrap();
+    let (state, killed) = index(&env(limits)).unwrap();
 
     let labels: Vec<&str> = state.trees.iter().map(|t| t.label.as_str()).collect();
     assert!(labels.contains(&"small.py"), "{labels:?}");
@@ -57,7 +65,7 @@ fn generous_budget_keeps_every_file() {
         file_resolve_ms: 120_000,
         total_ms: 600_000,
     };
-    let Indexed { state, killed, .. } = index_with(env(limits), &[small(), big()]).unwrap();
+    let (state, killed) = index(&env(limits)).unwrap();
     assert!(killed.is_empty(), "{killed:?}");
     assert_eq!(state.trees.len(), 2);
 }
@@ -68,6 +76,6 @@ fn total_budget_ends_the_run() {
         total_ms: 0,
         ..Limits::UNLIMITED
     };
-    let err = index_with(env(limits), &[small(), big()]).err();
+    let err = index(&env(limits)).err();
     assert!(err.is_some(), "a zero total budget must end the run");
 }

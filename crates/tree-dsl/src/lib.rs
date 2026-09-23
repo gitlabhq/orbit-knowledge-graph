@@ -1,5 +1,7 @@
 pub mod constants;
 pub mod dsl;
+pub mod env;
+pub mod export;
 pub mod file_tree;
 pub mod intern;
 pub mod linker;
@@ -21,6 +23,6 @@ pub mod rules {
     pub use crate::dsl::rules::*;
 }
 
-pub use pipeline::phases;
-pub use pipeline::types::{Env, State};
-pub use pipeline::{Envelope, Indexed, Scalar, export, index, index_with, parse_single, reindex};
+pub use env::Env;
+pub use export::{Envelope, Scalar, export};
+pub use pipeline::{Context, Pipeline, State};

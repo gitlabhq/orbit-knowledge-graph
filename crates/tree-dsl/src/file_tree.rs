@@ -4,6 +4,7 @@ use crate::canonical::Canonical as C;
 use crate::constants::PATH_SEP;
 use crate::intern::Lang;
 use crate::pattern;
+use crate::pipeline::SourceFile;
 use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tree};
 
@@ -17,7 +18,7 @@ pub struct ProjectTree<'a> {
     config: &'a ResolveConfig,
     stages: &'a [ResolveStage],
     paths: &'a [&'a str],
-    files: Option<&'a [(String, String)]>,
+    files: Option<&'a [SourceFile]>,
     tree: Tree,
     prefixes: Vec<String>,
     aliases: Vec<(String, String)>,
@@ -52,7 +53,7 @@ impl<'a> ProjectTree<'a> {
         config: &'a ResolveConfig,
         stages: &'a [ResolveStage],
         paths: &'a [&'a str],
-        files: Option<&'a [(String, String)]>,
+        files: Option<&'a [SourceFile]>,
     ) -> WalkResult {
         let mut pt = Self {
             lang,
@@ -89,7 +90,7 @@ impl<'a> ProjectTree<'a> {
             .files
             .unwrap_or(&[])
             .iter()
-            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .map(|f| (f.path.as_str(), f.content.as_str()))
             .collect();
 
         let mut children_map: FxHashMap<String, Vec<(String, bool)>> = FxHashMap::default();

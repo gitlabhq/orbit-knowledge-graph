@@ -4,7 +4,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
-use crate::pipeline::Env;
+use crate::env::Env;
 use crate::resolver::CLASS_LIKE;
 use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
@@ -688,7 +688,7 @@ impl<'t> Fold<'t> {
     }
 }
 
-pub fn link(tree: &Tree, env: &Env) -> Result<Vec<Edge>, Killed> {
+pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed> {
     let (lang, config) = (&env.lang, &env.config.link);
     let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms);
     let mut ssa = SsaEngine::new();
@@ -709,7 +709,7 @@ pub fn link(tree: &Tree, env: &Env) -> Result<Vec<Edge>, Killed> {
         wildcards: Vec::new(),
         tags: ReservedTags::new(lang),
         config,
-        run: &env.sentinel,
+        run,
         file,
         killed: None,
         def_stack: vec![(None, entry)],

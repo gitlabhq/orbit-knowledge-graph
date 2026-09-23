@@ -1,16 +1,36 @@
+//! The graph a pipeline builds: one tree per file, the edges between them,
+//! and the resolver's memory of how it linked them; and how it is saved
+//! to disk and loaded back.
+
 use std::io::{self, Read, Write};
 use std::path::Path;
 
+use lasso::Key;
 use smallvec::SmallVec;
 
-use lasso::Key;
-
+use crate::env::Env;
 use crate::intern::{Interner, Lang};
 use crate::resolver::{ImportReq, Loc, Resolver};
 use crate::tree::{Edge, Node, Tag, Tree};
 use crate::treesitter::SupportLang;
 
-use super::types::{Env, State};
+pub struct State {
+    pub trees: Vec<Tree>,
+    pub edges: Vec<Edge>,
+    pub resolver: Resolver,
+}
+
+impl State {
+    pub fn new(env: &Env) -> Self {
+        Self {
+            trees: Vec::new(),
+            edges: Vec::new(),
+            resolver: Resolver::new(&env.lang),
+        }
+    }
+}
+
+// ── snapshot ──
 
 // ── Interner ──
 

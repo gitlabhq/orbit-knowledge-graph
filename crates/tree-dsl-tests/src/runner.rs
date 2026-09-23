@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use integration_tests_codegraph::assertions::{Severity, TestCase, TestSuite};
+use integration_tests_codegraph::assertions::{FixtureFile, Severity, TestCase, TestSuite};
 use integration_tests_codegraph::{Failure, create_test_db, run_suite};
 use ontology::Ontology;
+use tree_dsl::pipeline::{self, Changes, Display, Export, Resolved, SourceFile};
 use tree_dsl::treesitter::SupportLang;
-use tree_dsl::{Env, Envelope, Scalar, State};
+use tree_dsl::{Context, Env, Envelope, Pipeline, Scalar, State};
 
 fn detect_lang(suite: &TestSuite, fixtures: &[(String, String)]) -> SupportLang {
     if let Some(ref p) = suite.pipeline
@@ -66,22 +67,36 @@ fn suite_fixtures(suite: &TestSuite) -> Vec<(String, String)> {
     files
 }
 
-/// Export the graph into a fresh DuckDB and run the suite's queries against it.
+pub fn sources(files: &[FixtureFile]) -> Vec<SourceFile> {
+    files
+        .iter()
+        .map(|f| SourceFile {
+            path: f.path.clone(),
+            content: f.content.clone(),
+        })
+        .collect()
+}
+
+/// Export the graph into a fresh DuckDB and run the suite's queries against
+/// it. The state comes back for the next incremental step.
 fn check(
-    env: &Env,
-    state: &mut State,
+    graph: Pipeline<'_, Resolved>,
     ontology: &Arc<Ontology>,
     tests: &[TestCase],
-) -> Vec<Failure> {
-    tree_dsl::phases::display(env, state).expect("display rules compile");
+) -> (State, Vec<Failure>) {
     let envelope = Envelope::new([
         ("project_id", Scalar::Int(1)),
         ("branch", Scalar::Str("main")),
         ("commit_sha", Scalar::Str("test")),
     ]);
-    let tables = tree_dsl::export(state, &env.lang, ontology, &envelope).expect("export");
+    let exported = graph
+        .then(Display)
+        .expect("display rules compile")
+        .then(Export { ontology, envelope })
+        .expect("export")
+        .into_value();
     let db = create_test_db().expect("in-memory DuckDB");
-    for (table, batch) in &tables {
+    for (table, batch) in &exported.tables {
         db.insert_batch(table, batch)
             .unwrap_or_else(|e| panic!("insert into {table}: {e}"));
     }
@@ -94,7 +109,8 @@ fn check(
         tests: tests.to_vec(),
         steps: Vec::new(),
     };
-    run_suite(&suite, &db, ontology)
+    let failures = run_suite(&suite, &db, ontology);
+    (exported.state, failures)
 }
 
 pub fn run_yaml_suite(yaml: &str) {
@@ -112,33 +128,34 @@ pub fn run_yaml_suite(yaml: &str) {
     let fixtures = suite_fixtures(&suite);
     let lang_id = detect_lang(&suite, &fixtures);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
+    let env = Env::for_lang(lang_id).expect("rules compile");
 
-    let tree_dsl::Indexed {
-        env,
-        mut state,
-        killed,
-    } = tree_dsl::index(lang_id, &fixtures).expect("suite exceeded the total budget");
-    assert!(killed.is_empty(), "files exceeded their budget: {killed:?}");
+    let graph = pipeline::index(
+        Context::new(&env),
+        fixtures.into_iter().map(Into::into).collect(),
+    )
+    .expect("suite exceeded the total budget");
+    let skipped = &graph.context().report.skipped;
+    assert!(
+        skipped.is_empty(),
+        "files exceeded their budget: {skipped:?}"
+    );
 
-    let mut all_failures = check(&env, &mut state, &ontology, &suite.tests);
+    let (mut state, mut all_failures) = check(graph, &ontology, &suite.tests);
     let mut total_tests = suite.tests.len();
     let mut total_skipped = suite.tests.iter().filter(|t| t.skip).count();
 
     for step in &suite.steps {
-        let added: Vec<(String, String)> = step
-            .add
-            .iter()
-            .map(|f| (f.path.clone(), f.content.clone()))
-            .collect();
-        let modified: Vec<(String, String)> = step
-            .modify
-            .iter()
-            .map(|f| (f.path.clone(), f.content.clone()))
-            .collect();
-        state = tree_dsl::reindex(&env, state, &added, &modified, &step.remove)
-            .expect("suite exceeded the total budget")
-            .0;
-        all_failures.extend(check(&env, &mut state, &ontology, &step.tests));
+        let changes = Changes {
+            added: sources(&step.add),
+            modified: sources(&step.modify),
+            removed: step.remove.clone(),
+        };
+        let graph = pipeline::reindex(Context::new(&env), state, changes)
+            .expect("suite exceeded the total budget");
+        let (next, failures) = check(graph, &ontology, &step.tests);
+        state = next;
+        all_failures.extend(failures);
         total_tests += step.tests.len();
         total_skipped += step.tests.iter().filter(|t| t.skip).count();
     }

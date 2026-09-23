@@ -124,22 +124,24 @@ tests:
 
 ## Architecture
 
-All commands route through the same library functions in `tree-dsl`:
+Every command composes phases from `tree_dsl::pipeline`. A `Pipeline<T>`
+carries one artifact; `then(phase)` swaps it for the next, and the artifact's
+type decides which phases may follow.
 
-| Command | Library function | Resolver |
-|---|---|---|
-| `parse` | `tree_dsl::parse(lang_id, path, source)` | No |
-| `index` | `tree_dsl::index(lang_id, files)` | Yes |
-| `test` | `tree_dsl::index(lang_id, files)` + query/assert | Yes |
+| Command | Pipeline |
+|---|---|
+| `parse --stage cst` | `Each(Parse)` |
+| `parse --stage ast` | `Each(Parse.pipe(Rewrite))` |
+| `parse --stage ssa` | `pipeline::index` |
+| `parse --stage display` | `pipeline::index` then `Display` |
+| `index` | `pipeline::index` |
+| `test` | `pipeline::index` then `Display`, `Export`; `pipeline::reindex` per step |
 
-Pipeline stages per file:
-
-1. **Parse** -- tree-sitter CST to indextree arena
-2. **Rewrite** -- YAML rules transform CST nodes into canonical `__def`, `__call`, `__import`, etc.
-3. **Link** -- SSA-based value flow emits Defines/Calls/Imports/Extends edges
-4. **Prune** -- remove non-canonical nodes, promote their children
-5. **Compact** -- rebuild dense arena for cache-friendly resolution
-6. **Resolve** (index/test only) -- parallel cross-file import and call resolution
+`pipeline::index` is `Prepare`, then `Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link))`,
+then `Insert`, then `Resolve`. The per-file steps run fused, one file at a
+time per worker, so a file's source and raw tree are gone before the next
+file starts. `pipeline::reindex` swaps `Prepare` for `Remap` and runs the
+same tail over the changed files only.
 
 ## Supported languages
 

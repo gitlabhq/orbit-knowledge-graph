@@ -5,8 +5,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
+use crate::env::Env;
 use crate::intern::Lang;
-use crate::pipeline::Env;
 use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
@@ -172,8 +172,8 @@ impl Resolver {
         config: &ResolveConfig,
         aliases: &[(String, String)],
         env: &Env,
+        run: &Sentinel,
     ) -> Result<ResolveResult, Killed> {
-        let run = &env.sentinel;
         let index_names = support_lang.index_names();
         self.file_index = build_file_index(trees, lang, support_lang, index_names);
 

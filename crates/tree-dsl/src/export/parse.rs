@@ -11,7 +11,7 @@ use crate::error::LoadError;
 use crate::intern::Lang;
 use crate::tree::EdgeKind;
 
-static EXPORT_YAML: &str = include_str!("../../../config/export.yaml");
+static EXPORT_YAML: &str = include_str!("../../config/export.yaml");
 
 // ── export.yaml ──
 

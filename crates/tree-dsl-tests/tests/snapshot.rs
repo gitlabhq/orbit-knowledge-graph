@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
-use integration_tests_codegraph::assertions::TestSuite;
+use integration_tests_codegraph::assertions::{IncrementalStep, TestSuite};
+use tree_dsl::pipeline::{self, Changes};
 use tree_dsl::treesitter::SupportLang;
+use tree_dsl::{Context, Env, State};
+use tree_dsl_tests::runner::sources;
 
 fn load_suite() -> TestSuite {
     let yaml = std::fs::read_to_string(concat!(
@@ -10,6 +13,25 @@ fn load_suite() -> TestSuite {
     ))
     .expect("fixture not found");
     orbit_utils::yaml::from_str(&yaml).expect("bad yaml")
+}
+
+fn index(env: &Env, suite: &TestSuite) -> State {
+    pipeline::index(Context::new(env), sources(&suite.fixtures))
+        .unwrap()
+        .into_value()
+        .state
+}
+
+fn reindex(env: &Env, state: State, step: &IncrementalStep) -> State {
+    let changes = Changes {
+        added: sources(&step.add),
+        modified: sources(&step.modify),
+        removed: step.remove.clone(),
+    };
+    pipeline::reindex(Context::new(env), state, changes)
+        .unwrap()
+        .into_value()
+        .state
 }
 
 fn count_defs(state: &tree_dsl::State) -> usize {
@@ -43,15 +65,9 @@ fn def_names(state: &tree_dsl::State, env: &tree_dsl::Env) -> Vec<String> {
 #[test]
 fn round_trip_save_load() {
     let suite = load_suite();
-    let fixtures: Vec<(String, String)> = suite
-        .fixtures
-        .iter()
-        .map(|f| (f.path.clone(), f.content.clone()))
-        .collect();
-
-    let tree_dsl::Indexed { env, state, .. } =
-        tree_dsl::index(SupportLang::Python, &fixtures).unwrap();
-    assert_eq!(state.trees.len(), fixtures.len());
+    let env = Env::for_lang(SupportLang::Python).unwrap();
+    let state = index(&env, &suite);
+    assert_eq!(state.trees.len(), suite.fixtures.len());
     assert!(!state.edges.is_empty());
 
     let dir = tempfile::tempdir().unwrap();
@@ -83,14 +99,8 @@ fn round_trip_save_load() {
 #[test]
 fn incremental_via_snapshot_and_reindex() {
     let suite = load_suite();
-    let fixtures: Vec<(String, String)> = suite
-        .fixtures
-        .iter()
-        .map(|f| (f.path.clone(), f.content.clone()))
-        .collect();
-
-    let tree_dsl::Indexed { env, state, .. } =
-        tree_dsl::index(SupportLang::Python, &fixtures).unwrap();
+    let env = Env::for_lang(SupportLang::Python).unwrap();
+    let state = index(&env, &suite);
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
     state.save(&env, &snap).unwrap();
@@ -102,19 +112,7 @@ fn incremental_via_snapshot_and_reindex() {
     );
 
     for step in &suite.steps {
-        let added: Vec<(String, String)> = step
-            .add
-            .iter()
-            .map(|f| (f.path.clone(), f.content.clone()))
-            .collect();
-        let modified: Vec<(String, String)> = step
-            .modify
-            .iter()
-            .map(|f| (f.path.clone(), f.content.clone()))
-            .collect();
-        current = tree_dsl::reindex(&env, current, &added, &modified, &step.remove)
-            .unwrap()
-            .0;
+        current = reindex(&env, current, step);
     }
 
     assert_eq!(
@@ -129,14 +127,8 @@ fn incremental_via_snapshot_and_reindex() {
 #[test]
 fn modify_preserves_resolution_after_reindex() {
     let suite = load_suite();
-    let fixtures: Vec<(String, String)> = suite
-        .fixtures
-        .iter()
-        .map(|f| (f.path.clone(), f.content.clone()))
-        .collect();
-
-    let tree_dsl::Indexed { env, state, .. } =
-        tree_dsl::index(SupportLang::Python, &fixtures).unwrap();
+    let env = Env::for_lang(SupportLang::Python).unwrap();
+    let state = index(&env, &suite);
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
     state.save(&env, &snap).unwrap();
@@ -145,15 +137,12 @@ fn modify_preserves_resolution_after_reindex() {
     let initial_edges = loaded.edges.len();
     assert!(initial_edges > 0);
 
-    let step = &suite.steps[0];
-    let modified: Vec<(String, String)> = step
-        .modify
-        .iter()
-        .map(|f| (f.path.clone(), f.content.clone()))
-        .collect();
-    let updated = tree_dsl::reindex(&env, loaded, &[], &modified, &[])
-        .unwrap()
-        .0;
+    let step = IncrementalStep {
+        add: Vec::new(),
+        remove: Vec::new(),
+        ..suite.steps[0].clone()
+    };
+    let updated = reindex(&env, loaded, &step);
 
     assert_eq!(updated.trees.len(), 2);
     assert!(updated.edges.len() >= initial_edges);
