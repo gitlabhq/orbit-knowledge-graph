@@ -505,6 +505,11 @@ async fn main() -> Result<()> {
         eprintln!("{}", remote.message);
         std::process::exit(remote.exit_code);
     }
+    if let Err(err) = &result
+        && tui::is_cancelled(err)
+    {
+        std::process::exit(130);
+    }
     result
 }
 

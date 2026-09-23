@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 
 use super::{
     Installer, Report, backup_once, drop_backup_when_restored, file_mentions,
-    remove_file_and_empty_parents, write_file,
+    remove_file_and_empty_parents, write_unless_unchanged,
 };
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent};
@@ -80,9 +80,7 @@ fn upsert_block_in_file(path: &Path, label: &str, report: &mut Report) -> Result
         }
         Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
     };
-    write_file(path, updated)?;
-    report.note(label, action);
-    Ok(())
+    write_unless_unchanged(path, label, &updated, action, report)
 }
 
 fn strip_block_from_file(

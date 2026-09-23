@@ -39,10 +39,6 @@ pub(crate) fn card(title: impl Display, body: impl Display) -> Result<()> {
     Ok(cliclack::note(title, body)?)
 }
 
-pub(crate) fn warn(message: impl Display) {
-    let _ = cliclack::log::warning(message);
-}
-
 pub(crate) fn error(message: impl Display) {
     let _ = cliclack::log::error(message);
 }
@@ -118,6 +114,12 @@ impl Spinner {
     }
 }
 
+pub(crate) fn is_cancelled(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|io| io.kind() == std::io::ErrorKind::Interrupted)
+}
+
 pub(crate) fn multiselect(
     prompt: &str,
     choices: &[Choice],
@@ -144,13 +146,13 @@ struct CompactCards;
 impl Theme for CompactCards {
     fn format_note(&self, prompt: &str, message: &str) -> String {
         let card = Stock.format_note(prompt, message);
-        let mut lines: Vec<&str> = card.lines().collect();
+        let mut lines: Vec<&str> = card.split_inclusive('\n').collect();
         if let Some(box_top) = lines.iter().position(|line| line.contains('╮'))
             && box_top + 1 < lines.len()
         {
             lines.remove(box_top + 1);
         }
-        lines.join("\n") + "\n"
+        lines.concat()
     }
 }
 

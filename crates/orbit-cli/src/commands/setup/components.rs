@@ -121,9 +121,25 @@ fn write_file(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
     std::fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
+fn write_unless_unchanged(
+    path: &Path,
+    label: &str,
+    contents: &str,
+    action: &str,
+    report: &mut Report,
+) -> Result<()> {
+    if std::fs::read(path).is_ok_and(|current| current == contents.as_bytes()) {
+        report.note(label, "unchanged");
+        return Ok(());
+    }
+    write_file(path, contents)?;
+    report.note(label, action);
+    Ok(())
+}
+
 fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let backup = backup_path(path);
-    if backup.exists() {
+    if backup.exists() || !path.exists() {
         return Ok(());
     }
     std::fs::copy(path, &backup)
