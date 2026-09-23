@@ -263,7 +263,11 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
                 .etag
                 .ok_or_else(|| anyhow!("Orbit skill response has no ETag"))?;
             let tree = validate_remote_envelope(name, &etag, &response.body)?;
-            publish_cache(&origin, &tree)?;
+            if let Err(error) = publish_cache(&origin, &tree) {
+                eprintln!(
+                    "warning: could not cache the validated Orbit skill ({error:#}); using the downloaded tree"
+                );
+            }
             Ok(Some(tree))
         }
         304 => {
@@ -309,7 +313,8 @@ fn validate_remote_envelope(name: &str, etag: &str, body: &[u8]) -> Result<Valid
         );
     }
     validate_component("skill version", &envelope.version)?;
-    if etag != format!("\"{}\"", envelope.version) {
+    let expected_etag = format!("\"{}\"", envelope.version);
+    if etag.strip_prefix("W/").unwrap_or(etag) != expected_etag {
         bail!("Orbit skill ETag does not match its version");
     }
     if envelope.files.is_empty() {
@@ -347,7 +352,7 @@ fn validate_remote_envelope(name: &str, etag: &str, body: &[u8]) -> Result<Valid
     Ok(ValidatedTree {
         name: envelope.name,
         version: envelope.version,
-        etag: etag.to_string(),
+        etag: expected_etag,
         files,
         file_hashes,
     })
@@ -640,21 +645,26 @@ fn sync_directory(_path: &Path) -> Result<()> {
 }
 
 struct CacheLock {
-    path: PathBuf,
+    _file: File,
 }
 
 impl CacheLock {
     fn acquire(root: &Path) -> Result<Self> {
-        let path = root.join(".populate.lock");
+        // Keep the lock inode in place: unlinking it allows two processes to
+        // lock different inodes under the same path. The OS releases the lock
+        // on process exit, including a kill without running Drop.
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join(".populate.lock"))
+            .context("opening Orbit skill cache lock")?;
         let deadline = std::time::Instant::now() + LOCK_WAIT;
         loop {
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(mut file) => {
-                    writeln!(file, "{}", std::process::id())?;
-                    file.sync_all()?;
-                    return Ok(Self { path });
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            match file.try_lock() {
+                Ok(()) => return Ok(Self { _file: file }),
+                Err(std::fs::TryLockError::WouldBlock) => {
                     if std::time::Instant::now() >= deadline {
                         bail!("timed out waiting for concurrent Orbit skill cache writer");
                     }
@@ -663,12 +673,6 @@ impl CacheLock {
                 Err(error) => return Err(error).context("locking Orbit skill cache"),
             }
         }
-    }
-}
-
-impl Drop for CacheLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
     }
 }
 
