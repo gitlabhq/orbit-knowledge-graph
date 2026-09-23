@@ -3,7 +3,9 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
-use tree_dsl::pipeline::{self, Display, Each, ItemPhase, Parse, Rewrite, SourceFile, Workset};
+use tree_dsl::pipeline::{
+    self, Display, Each, ItemPhase, Observer, Parse, Rewrite, SourceFile, Workset,
+};
 use tree_dsl::sentinel::Limits;
 use tree_dsl::tree::EdgeKind;
 use tree_dsl::treesitter::SupportLang;
@@ -182,7 +184,7 @@ where
         state: State::new(context.env),
         items: vec![source],
         dirty: Default::default(),
-        configs: Vec::new(),
+        manifests: Default::default(),
     };
     let (context, workset) = Pipeline::new(context, workset).then(Each(steps))?.finish();
     workset
@@ -336,120 +338,162 @@ fn edge_name(kind: EdgeKind) -> &'static str {
 
 fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow::Result<()> {
     let t0 = Instant::now();
-
-    let p = Path::new(path);
-    let files: Vec<(String, String)> = if p.is_dir() {
-        collect_files(p)
-    } else {
-        let content = std::fs::read_to_string(p)?;
-        let rel = p
-            .file_name()
-            .ok_or_else(|| anyhow::anyhow!("{path} has no file name"))?
-            .to_string_lossy()
-            .to_string();
-        vec![(rel, content)]
-    };
+    let root = Path::new(path);
+    let paths = collect_paths(root);
 
     // One graph per pipeline; a repo mixing Python and TypeScript gets two.
-    let mut by_lang: std::collections::BTreeMap<String, (SupportLang, Vec<(String, String)>)> =
+    let mut by_lang: std::collections::BTreeMap<String, (SupportLang, Vec<String>)> =
         Default::default();
-    for (rel, content) in files {
+    for rel in paths {
         let lang = resolve_lang(lang_override.as_deref(), Some(&rel)).pipeline();
         by_lang
             .entry(format!("{lang:?}"))
             .or_insert_with(|| (lang, Vec::new()))
             .1
-            .push((rel, content));
+            .push(rel);
     }
 
     let graphs_dir = dirs::home_dir()
         .unwrap_or_else(|| Path::new(".").to_path_buf())
         .join(".orbit/var/graphs");
-    let repo = Path::new(path)
+    let repo = root
         .file_name()
-        .unwrap_or(std::ffi::OsStr::new("graph"))
+        .ok_or_else(|| anyhow::anyhow!("{path} has no file name"))?
         .to_string_lossy()
         .to_string();
+    let base = if root.is_dir() {
+        root.to_path_buf()
+    } else {
+        root.parent().unwrap_or(Path::new(".")).to_path_buf()
+    };
 
     // Pipelines are independent graphs; one pipeline's serial resolve phases
     // overlap another's parallel parse.
     use rayon::prelude::*;
-    let groups: Vec<(String, SupportLang, Vec<(String, String)>)> = by_lang
-        .into_iter()
-        .map(|(name, (lang, files))| (name, lang, files))
-        .collect();
-    let reports: Vec<anyhow::Result<(String, usize, usize, usize, usize)>> = groups
+    let reports: Vec<anyhow::Result<Summary>> = by_lang
         .into_par_iter()
-        .map(|(name, lang_id, files)| {
-            let t_lang = Instant::now();
+        .map(|(name, (lang_id, paths))| {
             let env = Env::for_lang(lang_id)?;
-            let sources = files.into_iter().map(Into::into).collect();
-            let (context, resolved) = pipeline::index(Context::new(&env), sources)
+            let base = base.clone();
+            let sources = paths.into_iter().filter_map(move |rel| {
+                let content = std::fs::read_to_string(base.join(&rel)).ok()?;
+                Some(SourceFile { path: rel, content })
+            });
+            let context = Context::new(&env).observe(Progress(name.clone()));
+            let (context, resolved) = pipeline::index(context, sources)
                 .map_err(|e| anyhow::anyhow!("{e}"))?
                 .finish();
             let state = resolved.state;
-            for k in &context.report.skipped {
-                eprintln!("skipped:      {k}");
-            }
-            let (mut defs, mut imports) = (0usize, 0usize);
-            for tree in &state.trees {
-                for c in tree.root().descendants() {
-                    if c.is(tree_dsl::canonical::Canonical::Def) {
-                        defs += 1;
-                    } else if c.is(tree_dsl::canonical::Canonical::Import)
-                        || c.is(tree_dsl::canonical::Canonical::ImportType)
-                    {
-                        imports += 1;
-                    }
-                }
-            }
-            let mut line = format!(
-                "{name:<12} files {:>6}  defs {:>7}  imports {:>7}  edges {:>7}  {:.2}s",
-                state.trees.len(),
-                defs,
-                imports,
-                state.edges.len(),
-                t_lang.elapsed().as_secs_f64()
-            );
+            let mut summary = Summary::of(&name, &state, &context.report);
             if !no_save {
                 std::fs::create_dir_all(&graphs_dir)?;
                 let snap_path = graphs_dir.join(format!("{repo}.{}.bin", name.to_lowercase()));
                 let t_save = Instant::now();
                 state.save(&env, &snap_path)?;
                 let size_mb = std::fs::metadata(&snap_path)?.len() as f64 / (1024.0 * 1024.0);
-                line.push_str(&format!(
+                summary.line.push_str(&format!(
                     "\nsaved:        {} ({size_mb:.1} MB, {:.2}s)",
                     snap_path.display(),
                     t_save.elapsed().as_secs_f64()
                 ));
             }
-            Ok((line, state.trees.len(), defs, imports, state.edges.len()))
+            Ok(summary)
         })
         .collect();
 
-    let (mut total_files, mut total_defs, mut total_imports, mut total_edges) = (0, 0, 0, 0);
+    let mut total = Summary::default();
     for report in reports {
-        let (line, files, defs, imports, edges) = report?;
-        eprintln!("{line}");
-        total_files += files;
-        total_defs += defs;
-        total_imports += imports;
-        total_edges += edges;
+        let summary = report?;
+        eprintln!("{}", summary.line);
+        total.files += summary.files;
+        total.defs += summary.defs;
+        total.imports += summary.imports;
+        total.edges += summary.edges;
     }
 
     eprintln!();
-    eprintln!("--- stats ---");
-    eprintln!("files:        {total_files}");
-    eprintln!("definitions:  {total_defs}");
-    eprintln!("imports:      {total_imports}");
-    eprintln!("edges:        {total_edges}");
+    eprintln!("files:        {}", total.files);
+    eprintln!("defs:         {}", total.defs);
+    eprintln!("imports:      {}", total.imports);
+    eprintln!("edges:        {}", total.edges);
     eprintln!("total:        {:.2}s", t0.elapsed().as_secs_f64());
     Ok(())
 }
 
-fn collect_files(dir: &Path) -> Vec<(String, String)> {
-    use rayon::prelude::*;
-    let paths: Vec<std::path::PathBuf> = walkdir::WalkDir::new(dir)
+/// Phase boundaries and skipped files on stderr while a pipeline runs.
+struct Progress(String);
+
+impl Observer for Progress {
+    fn started(&mut self, phase: &str) {
+        eprintln!("{:<12} {phase}...", self.0);
+    }
+
+    fn skipped(&mut self, killed: &tree_dsl::sentinel::Killed) {
+        eprintln!("{:<12} skipped: {killed}", self.0);
+    }
+
+    fn failed(&mut self, phase: &str, error: &tree_dsl::error::Error) {
+        eprintln!("{:<12} {phase} failed: {error}", self.0);
+    }
+}
+
+#[derive(Default)]
+struct Summary {
+    line: String,
+    files: usize,
+    defs: usize,
+    imports: usize,
+    edges: usize,
+}
+
+impl Summary {
+    /// One line per pipeline: counts, then how long each phase took.
+    fn of(name: &str, state: &State, report: &tree_dsl::pipeline::Report) -> Self {
+        let (mut defs, mut imports) = (0usize, 0usize);
+        for tree in &state.trees {
+            for c in tree.root().descendants() {
+                if c.is(tree_dsl::canonical::Canonical::Def) {
+                    defs += 1;
+                } else if c.is(tree_dsl::canonical::Canonical::Import)
+                    || c.is(tree_dsl::canonical::Canonical::ImportType)
+                {
+                    imports += 1;
+                }
+            }
+        }
+        let phases: Vec<String> = report
+            .phases
+            .iter()
+            .map(|p| format!("{} {:.2}s", p.name, p.elapsed.as_secs_f64()))
+            .collect();
+        Self {
+            line: format!(
+                "{name:<12} files {:>6}  defs {:>7}  imports {:>7}  edges {:>7}\n              {}",
+                state.trees.len(),
+                defs,
+                imports,
+                state.edges.len(),
+                phases.join(", ")
+            ),
+            files: state.trees.len(),
+            defs,
+            imports,
+            edges: state.edges.len(),
+        }
+    }
+}
+
+/// Relative paths of every parseable file under `root`, or `root` itself.
+fn collect_paths(root: &Path) -> Vec<String> {
+    if root.is_file() {
+        return vec![
+            root.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+        ];
+    }
+    walkdir::WalkDir::new(root)
         .into_iter()
         .filter_map(|e| e.ok())
         .map(|e| e.into_path())
@@ -460,17 +504,11 @@ fn collect_files(dir: &Path) -> Vec<(String, String)> {
                     .and_then(SupportLang::from_extension)
                     .is_some()
         })
-        .collect();
-    paths
-        .par_iter()
-        .filter_map(|path| {
-            let content = std::fs::read_to_string(path).ok()?;
-            let rel = path
-                .strip_prefix(dir)
-                .unwrap_or(path)
+        .map(|p| {
+            p.strip_prefix(root)
+                .unwrap_or(&p)
                 .to_string_lossy()
-                .to_string();
-            Some((rel, content))
+                .to_string()
         })
         .collect()
 }

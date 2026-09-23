@@ -17,12 +17,15 @@ use crate::env::Env;
 use crate::error::Error;
 use crate::sentinel::{Killed, Sentinel};
 
-/// Every parseable source through parse, rewrite, link and cross-file resolution.
-pub fn index<'e>(
-    context: Context<'e>,
-    sources: Vec<SourceFile>,
-) -> Result<Pipeline<'e, Resolved>, Error> {
-    Pipeline::new(context, sources)
+/// Every parseable source through parse, rewrite, link and cross-file
+/// resolution. Sources are pulled as workers free up, so a lazy iterator
+/// keeps only the files in flight in memory.
+pub fn index<'e, S>(context: Context<'e>, sources: S) -> Result<Pipeline<'e, Resolved>, Error>
+where
+    S: IntoIterator<Item = SourceFile>,
+    S::IntoIter: Send + 'static,
+{
+    Pipeline::new(context, sources.into_iter())
         .then(Prepare)?
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
         .then(Insert)?
@@ -127,53 +130,56 @@ pub struct Context<'e> {
     pub env: &'e Env,
     pub run: Sentinel,
     pub report: Report,
-    observer: Box<dyn Observer>,
+    observers: Vec<Box<dyn Observer>>,
 }
 
 impl<'e> Context<'e> {
     pub fn new(env: &'e Env) -> Self {
-        Self::with_observer(env, Box::new(NoOpObserver))
-    }
-
-    pub fn with_observer(env: &'e Env, observer: Box<dyn Observer>) -> Self {
         Self {
             env,
             run: Sentinel::new("run", "", env.limits.total_ms),
             report: Report::default(),
-            observer,
+            observers: Vec::new(),
         }
+    }
+
+    pub fn observe(mut self, observer: impl Observer + 'static) -> Self {
+        self.observers.push(Box::new(observer));
+        self
     }
 
     /// A file that overran its own budget: left out, and reported.
     pub fn skip(&mut self, killed: Killed) {
-        self.observer.skipped(&killed);
+        self.observers.iter_mut().for_each(|o| o.skipped(&killed));
         self.report.skipped.push(killed);
     }
 
     pub(super) fn run<I, P: Phase<I>>(&mut self, phase: P, input: I) -> Result<P::Output, Error> {
         let name = phase.name();
-        self.observer.started(&name);
+        self.observers.iter_mut().for_each(|o| o.started(&name));
         let started = Instant::now();
         let result = self
             .run
             .check()
             .map_err(Error::from)
             .and_then(|()| phase.run(self, input));
-        match result {
-            Ok(output) => {
+        match &result {
+            Ok(_) => {
                 let elapsed = started.elapsed();
-                self.observer.finished(&name, elapsed);
+                self.observers
+                    .iter_mut()
+                    .for_each(|o| o.finished(&name, elapsed));
                 self.report.phases.push(PhaseReport {
                     name: name.into_owned(),
                     elapsed,
                 });
-                Ok(output)
             }
-            Err(error) => {
-                self.observer.failed(&name, &error);
-                Err(error)
-            }
+            Err(error) => self
+                .observers
+                .iter_mut()
+                .for_each(|o| o.failed(&name, error)),
         }
+        result
     }
 }
 
@@ -195,31 +201,6 @@ pub trait Observer: Send {
     fn finished(&mut self, _phase: &str, _elapsed: Duration) {}
     fn skipped(&mut self, _killed: &Killed) {}
     fn failed(&mut self, _phase: &str, _error: &Error) {}
-}
-
-pub struct NoOpObserver;
-
-impl Observer for NoOpObserver {}
-
-/// Several observers on one run: progress output, tracing, metrics.
-pub type MultiObserver = orbit_utils::observability::MultiObserver<dyn Observer>;
-
-impl Observer for MultiObserver {
-    fn started(&mut self, phase: &str) {
-        self.iter_mut().for_each(|o| o.started(phase));
-    }
-
-    fn finished(&mut self, phase: &str, elapsed: Duration) {
-        self.iter_mut().for_each(|o| o.finished(phase, elapsed));
-    }
-
-    fn skipped(&mut self, killed: &Killed) {
-        self.iter_mut().for_each(|o| o.skipped(killed));
-    }
-
-    fn failed(&mut self, phase: &str, error: &Error) {
-        self.iter_mut().for_each(|o| o.failed(phase, error));
-    }
 }
 
 #[cfg(test)]
@@ -255,11 +236,9 @@ mod tests {
     fn every_observer_sees_every_phase_boundary() {
         let env = crate::Env::for_lang(SupportLang::Python).unwrap();
         let (a, b) = (Default::default(), Default::default());
-        let observers = MultiObserver::new(vec![
-            Box::new(Log(std::sync::Arc::clone(&a))),
-            Box::new(Log(std::sync::Arc::clone(&b))),
-        ]);
-        let context = Context::with_observer(&env, Box::new(observers));
+        let context = Context::new(&env)
+            .observe(Log(std::sync::Arc::clone(&a)))
+            .observe(Log(std::sync::Arc::clone(&b)));
         let (context, value) = Pipeline::new(context, 3).then(Double).unwrap().finish();
         assert_eq!(value, 6);
         assert_eq!(*a.lock().unwrap(), ["start double", "finish double"]);

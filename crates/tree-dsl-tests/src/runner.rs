@@ -3,7 +3,7 @@ use std::sync::Arc;
 use integration_tests_codegraph::assertions::{FixtureFile, Severity, TestCase, TestSuite};
 use integration_tests_codegraph::{Failure, create_test_db, run_suite};
 use ontology::Ontology;
-use tree_dsl::pipeline::{self, Changes, Display, Export, Resolved, SourceFile};
+use tree_dsl::pipeline::{self, Changes, Display, Emit, Export, Resolved, SourceFile};
 use tree_dsl::treesitter::SupportLang;
 use tree_dsl::{Context, Env, Envelope, Pipeline, Scalar, State};
 
@@ -89,17 +89,15 @@ fn check(
         ("branch", Scalar::Str("main")),
         ("commit_sha", Scalar::Str("test")),
     ]);
-    let exported = graph
+    let db = create_test_db().expect("in-memory DuckDB");
+    let displayed = graph
         .then(Display)
         .expect("display rules compile")
         .then(Export { ontology, envelope })
         .expect("export")
+        .then(Emit(|table: &str, batch| db.insert_batch(table, &batch)))
+        .expect("insert into DuckDB")
         .into_value();
-    let db = create_test_db().expect("in-memory DuckDB");
-    for (table, batch) in &exported.tables {
-        db.insert_batch(table, batch)
-            .unwrap_or_else(|e| panic!("insert into {table}: {e}"));
-    }
     let suite = TestSuite {
         name: String::new(),
         pipeline: None,
@@ -110,7 +108,7 @@ fn check(
         steps: Vec::new(),
     };
     let failures = run_suite(&suite, &db, ontology);
-    (exported.state, failures)
+    (displayed.state, failures)
 }
 
 pub fn run_yaml_suite(yaml: &str) {
@@ -132,7 +130,7 @@ pub fn run_yaml_suite(yaml: &str) {
 
     let graph = pipeline::index(
         Context::new(&env),
-        fixtures.into_iter().map(Into::into).collect(),
+        fixtures.into_iter().map(SourceFile::from),
     )
     .expect("suite exceeded the total budget");
     let skipped = &graph.context().report.skipped;

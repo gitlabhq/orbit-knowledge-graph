@@ -10,6 +10,7 @@ use smallvec::SmallVec;
 
 use crate::env::Env;
 use crate::intern::{Interner, Lang};
+use crate::pipeline::SourceFile;
 use crate::resolver::{ImportReq, Loc, Resolver};
 use crate::tree::{Edge, Node, Tag, Tree};
 use crate::treesitter::SupportLang;
@@ -18,6 +19,8 @@ pub struct State {
     pub trees: Vec<Tree>,
     pub edges: Vec<Edge>,
     pub resolver: Resolver,
+    /// Manifest files (`parse_files`) the resolver reads for module roots.
+    pub configs: Vec<SourceFile>,
 }
 
 impl State {
@@ -26,6 +29,7 @@ impl State {
             trees: Vec::new(),
             edges: Vec::new(),
             resolver: Resolver::new(&env.lang),
+            configs: Vec::new(),
         }
     }
 }
@@ -252,6 +256,7 @@ struct FullSnapshot {
     edges: Vec<Edge>,
     lang: LangSnapshot,
     resolver: ResolverSnapshot,
+    configs: Vec<(String, String)>,
 }
 
 impl State {
@@ -261,6 +266,11 @@ impl State {
             edges: self.edges.clone(),
             lang: LangSnapshot::from(&env.lang),
             resolver: self.resolver.to_snapshot(),
+            configs: self
+                .configs
+                .iter()
+                .map(|c| (c.path.clone(), c.content.clone()))
+                .collect(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::BoxedError>(&snap).map_err(io::Error::other)?;
         // rkyv output is highly regular and carries each file's source text;
@@ -282,6 +292,7 @@ impl State {
             trees: snap.trees.into_iter().map(|t| t.into()).collect(),
             edges: snap.edges,
             resolver: Resolver::from_snapshot(snap.resolver, &env.lang),
+            configs: snap.configs.into_iter().map(Into::into).collect(),
         };
         Ok((env, state))
     }

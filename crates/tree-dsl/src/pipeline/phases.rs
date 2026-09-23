@@ -44,13 +44,35 @@ pub struct ReindexInput {
 }
 
 /// The graph so far plus the items still moving through the per-item
-/// phases. `dirty` is every file the resolver must revisit; `configs` are
-/// the manifest files (`parse_files`) the resolver reads for module roots.
-pub struct Workset<F> {
+/// phases. `items` is a `Vec` once a phase has run; before that it can be a
+/// lazy source so files are read only as workers take them. `dirty` is
+/// every file the resolver must revisit.
+pub struct Workset<C> {
     pub state: State,
-    pub items: Vec<F>,
+    pub items: C,
     pub dirty: FxHashSet<usize>,
-    pub configs: Vec<SourceFile>,
+    pub manifests: Manifests,
+}
+
+/// Sources not yet read into memory.
+pub type Lazy<T> = Box<dyn Iterator<Item = T> + Send>;
+
+/// Manifest files (`parse_files`) seen while the lazy source streams past;
+/// `Insert` moves them onto the graph for the resolver.
+#[derive(Clone, Default)]
+pub struct Manifests(std::sync::Arc<std::sync::Mutex<Vec<SourceFile>>>);
+
+impl Manifests {
+    fn keep(&self, file: &SourceFile) {
+        self.0.lock().unwrap().push(SourceFile {
+            path: file.path.clone(),
+            content: file.content.clone(),
+        });
+    }
+
+    fn drain(&self) -> Vec<SourceFile> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
 }
 
 /// The tree-sitter tree, source attached.
@@ -70,7 +92,6 @@ pub struct LinkedFile {
 pub struct DirtyGraph {
     pub state: State,
     pub dirty: FxHashSet<usize>,
-    pub configs: Vec<SourceFile>,
 }
 
 pub struct Resolved {
@@ -88,22 +109,20 @@ pub struct Exported {
 
 pub struct Prepare;
 
-impl Phase<Vec<SourceFile>> for Prepare {
-    type Output = Workset<SourceFile>;
+impl<S: Iterator<Item = SourceFile> + Send + 'static> Phase<S> for Prepare {
+    type Output = Workset<Lazy<SourceFile>>;
 
     fn name(&self) -> Cow<'static, str> {
         "prepare".into()
     }
 
-    fn run(self, context: &mut Context, sources: Vec<SourceFile>) -> Result<Self::Output, Error> {
-        let env = context.env;
-        let (files, configs) = split_sources(env, sources);
-        Ok(Workset {
-            state: State::new(env),
-            items: files,
-            dirty: FxHashSet::default(),
-            configs,
-        })
+    fn run(self, context: &mut Context, sources: S) -> Result<Self::Output, Error> {
+        Ok(workset(
+            context.env,
+            State::new(context.env),
+            sources,
+            FxHashSet::default(),
+        ))
     }
 }
 
@@ -113,7 +132,7 @@ impl Phase<Vec<SourceFile>> for Prepare {
 pub struct Remap;
 
 impl Phase<ReindexInput> for Remap {
-    type Output = Workset<SourceFile>;
+    type Output = Workset<Lazy<SourceFile>>;
 
     fn name(&self) -> Cow<'static, str> {
         "remap".into()
@@ -129,48 +148,44 @@ impl Phase<ReindexInput> for Remap {
             .chain(changes.modified.iter().map(|f| f.path.as_str()))
             .collect();
         let dirty = remap(&mut state, &old_labels, &dirty_labels);
-        let sources: Vec<SourceFile> = changes.modified.into_iter().chain(changes.added).collect();
-        let (files, configs) = split_sources(context.env, sources);
-        Ok(Workset {
-            state,
-            items: files,
-            dirty,
-            configs,
-        })
+        state
+            .configs
+            .retain(|c| !dirty_labels.contains(c.path.as_str()));
+        let changed = changes.modified.into_iter().chain(changes.added);
+        Ok(workset(context.env, state, changed, dirty))
     }
 }
 
-/// Parseable sources go through the pipeline; manifest files named in
-/// `parse_files` are kept for the resolver. A file can be both.
-fn split_sources(env: &Env, sources: Vec<SourceFile>) -> (Vec<SourceFile>, Vec<SourceFile>) {
-    let is_config = |path: &str| {
-        let name = path.rsplit('/').next().unwrap_or(path);
-        env.config
-            .resolve
-            .parse_files
-            .iter()
-            .any(|pf| pf.name == name)
-    };
-    let mut files = Vec::new();
-    let mut configs = Vec::new();
-    for source in sources {
-        match (
-            is_config(&source.path),
-            SupportLang::from_path(&source.path).is_some(),
-        ) {
-            (true, true) => {
-                configs.push(SourceFile {
-                    path: source.path.clone(),
-                    content: source.content.clone(),
-                });
-                files.push(source);
-            }
-            (true, false) => configs.push(source),
-            (false, true) => files.push(source),
-            (false, false) => {}
+/// Parseable sources become the lazy workset; manifests are kept as they
+/// stream past. A file can be both.
+fn workset(
+    env: &Env,
+    state: State,
+    sources: impl Iterator<Item = SourceFile> + Send + 'static,
+    dirty: FxHashSet<usize>,
+) -> Workset<Lazy<SourceFile>> {
+    let manifest_names: Vec<String> = env
+        .config
+        .resolve
+        .parse_files
+        .iter()
+        .map(|pf| pf.name.clone())
+        .collect();
+    let manifests = Manifests::default();
+    let keep = manifests.clone();
+    let items = sources.filter(move |file| {
+        let name = file.path.rsplit('/').next().unwrap_or(&file.path);
+        if manifest_names.iter().any(|m| m == name) {
+            keep.keep(file);
         }
+        SupportLang::from_path(&file.path).is_some()
+    });
+    Workset {
+        state,
+        items: Box::new(items),
+        dirty,
+        manifests,
     }
-    (files, configs)
 }
 
 /// Drops the dirty trees, renumbers what remains, and returns the retained
@@ -226,26 +241,28 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
 /// overruns its budget is skipped and reported; the rest continue.
 pub struct Each<P>(pub P);
 
-impl<I: Send, P: ItemPhase<I> + Sync> Phase<Workset<I>> for Each<P>
+impl<C, P> Phase<Workset<C>> for Each<P>
 where
+    C: IntoParallel,
+    P: ItemPhase<C::Item> + Sync,
     P::Output: Send,
 {
-    type Output = Workset<P::Output>;
+    type Output = Workset<Vec<P::Output>>;
 
     fn name(&self) -> Cow<'static, str> {
         self.0.name()
     }
 
-    fn run(self, context: &mut Context, input: Workset<I>) -> Result<Self::Output, Error> {
+    fn run(self, context: &mut Context, input: Workset<C>) -> Result<Self::Output, Error> {
         let Workset {
             state,
             items,
             dirty,
-            configs,
+            manifests,
         } = input;
         let (env, run, phase) = (context.env, &context.run, &self.0);
         let (items, killed): (Vec<_>, Vec<_>) = items
-            .into_par_iter()
+            .into_parallel()
             .map(|item| phase.run(env, run, item))
             .partition_map(|r| match r {
                 Ok(v) => rayon::iter::Either::Left(v),
@@ -259,8 +276,29 @@ where
             state,
             items,
             dirty,
-            configs,
+            manifests,
         })
+    }
+}
+
+/// What `Each` can fan out over: a `Vec` of items already in memory, or a
+/// lazy source pulled one item at a time as workers free up.
+pub trait IntoParallel {
+    type Item: Send;
+    fn into_parallel(self) -> impl ParallelIterator<Item = Self::Item>;
+}
+
+impl<T: Send> IntoParallel for Vec<T> {
+    type Item = T;
+    fn into_parallel(self) -> impl ParallelIterator<Item = T> {
+        self.into_par_iter()
+    }
+}
+
+impl<T: Send> IntoParallel for Lazy<T> {
+    type Item = T;
+    fn into_parallel(self) -> impl ParallelIterator<Item = T> {
+        self.par_bridge()
     }
 }
 
@@ -353,20 +391,28 @@ impl ItemPhase<Canonical> for Link {
 
 pub struct Insert;
 
-impl Phase<Workset<LinkedFile>> for Insert {
+impl Phase<Workset<Vec<LinkedFile>>> for Insert {
     type Output = DirtyGraph;
 
     fn name(&self) -> Cow<'static, str> {
         "insert".into()
     }
 
-    fn run(self, _context: &mut Context, input: Workset<LinkedFile>) -> Result<DirtyGraph, Error> {
+    fn run(
+        self,
+        _context: &mut Context,
+        input: Workset<Vec<LinkedFile>>,
+    ) -> Result<DirtyGraph, Error> {
         let Workset {
             mut state,
             items,
             mut dirty,
-            configs,
+            manifests,
         } = input;
+        for manifest in manifests.drain() {
+            state.configs.retain(|c| c.path != manifest.path);
+            state.configs.push(manifest);
+        }
         for file in items {
             let fi = state.trees.len();
             dirty.insert(fi);
@@ -377,11 +423,7 @@ impl Phase<Workset<LinkedFile>> for Insert {
                 e
             }));
         }
-        Ok(DirtyGraph {
-            state,
-            dirty,
-            configs,
-        })
+        Ok(DirtyGraph { state, dirty })
     }
 }
 
@@ -398,24 +440,20 @@ impl Phase<DirtyGraph> for Resolve {
     }
 
     fn run(self, context: &mut Context, input: DirtyGraph) -> Result<Resolved, Error> {
-        let DirtyGraph {
-            mut state,
-            dirty,
-            configs,
-        } = input;
+        let DirtyGraph { mut state, dirty } = input;
         let env = context.env;
         let paths: Vec<&str> = state
             .trees
             .iter()
             .map(|t| t.label.as_str())
-            .chain(configs.iter().map(|f| f.path.as_str()))
+            .chain(state.configs.iter().map(|f| f.path.as_str()))
             .collect();
         let walk = ProjectTree::build(
             &env.lang,
             &env.config.resolve,
             &env.resolve_stages,
             &paths,
-            Some(&configs),
+            Some(&state.configs),
         );
         let result = state.resolver.resolve(
             &state.trees,
@@ -496,5 +534,33 @@ impl Phase<Displayed> for Export<'_> {
     fn run(self, context: &mut Context, Displayed { state }: Displayed) -> Result<Exported, Error> {
         let tables = export::export(&state, &context.env.lang, self.ontology, &self.envelope)?;
         Ok(Exported { state, tables })
+    }
+}
+
+/// Hands each exported table to `sink` as the graph leaves the pipeline:
+/// DuckDB, ClickHouse, a channel. The graph stays for the next step.
+pub struct Emit<F>(pub F);
+
+impl<F, E> Phase<Exported> for Emit<F>
+where
+    F: FnMut(&str, RecordBatch) -> Result<(), E>,
+    E: std::fmt::Display,
+{
+    type Output = Displayed;
+
+    fn name(&self) -> Cow<'static, str> {
+        "emit".into()
+    }
+
+    fn run(mut self, _context: &mut Context, input: Exported) -> Result<Displayed, Error> {
+        let Exported { state, tables } = input;
+        for (table, batch) in tables {
+            (self.0)(&table, batch).map_err(|e| {
+                Error::Export(arrow::error::ArrowError::ExternalError(
+                    e.to_string().into(),
+                ))
+            })?;
+        }
+        Ok(Displayed { state })
     }
 }
