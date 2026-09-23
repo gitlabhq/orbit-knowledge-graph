@@ -1,3 +1,26 @@
+## [0.129.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.128.0...v0.129.0) (2026-09-23)
+
+### Features
+
+* **server:** serve deployed Orbit skill contract ([42b5d71](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/42b5d71ef82ff28448529f2145c47387f21f7641)) by Dmitry Gruzd
+
+### Fixes
+
+* **cli:** handle Ctrl-C and ignored nested repositories in orbit index ([3a63b51](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3a63b51dfd808338d7e58ed08fa78fed34407e6d)) by Jean-Gabriel Doyon
+* **cli:** smooth the setup and uninstall TUI rough edges ([309b7d5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/309b7d5cced4dcc8d8046f70a1775ddf55f787ba)) by Jean-Gabriel Doyon
+* **health:** hold webserver readiness until startup completes ([30c924b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/30c924b22e3e7924851770cc8952014c27109ad1)) by Bohdan Parkhomchuk
+* **server:** correct the deployed skill contract ([379d594](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/379d5946698e1df6ab463980883407041737bb55)) by Dmitry Gruzd
+
+### Performance
+
+* performance testing for orbit with synthetic data seeding using xtask ([7d314f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7d314f26a7d7125469da6c68dfac10ed6532cd98)) by Vishal Patel
+
+### Other
+
+* **deps:** update rust crate async-trait to v0.1.92 ([8f07c44](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f07c443f1ff8f8764e7d5eb54190af0c07d5106)) by GitLab Renovate Bot
+* **deps:** update rust crate cc to v1.4.6 ([02b8cbf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02b8cbf434d130a81dc360cf0e7c5f183837fa2b)) by GitLab Renovate Bot
+* **deps:** update rust crate clap to v4.6.7 ([a1198ee](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a1198eeebbaaae3c20a161664226b42d629d5ec2)) by GitLab Renovate Bot
+
 ## [0.128.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.127.0...v0.128.0) (2026-09-23)
 
 ### Features
