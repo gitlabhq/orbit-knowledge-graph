@@ -17,3 +17,7 @@ variants:
   - from_node: { type: Definition, id: id }
     to_node: { type: ImportedSymbol, id: id }
     description: "Definition calls an imported symbol whose target is not yet resolved to a concrete definition."
+
+  - from_node: { type: File, id: id }
+    to_node: { type: ImportedSymbol, id: id }
+    description: "File contains a top-level call to an imported symbol whose target is not yet resolved to a concrete definition."

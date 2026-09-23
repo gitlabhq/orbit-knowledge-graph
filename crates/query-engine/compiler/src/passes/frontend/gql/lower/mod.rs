@@ -163,6 +163,18 @@ impl Lowering {
             scope_prefix: None,
             scope_preserving: false,
         };
+        if relationship.types.is_empty()
+            && let Some(alias) = &relationship.variable
+            && is_type_shaped(&alias.value)
+        {
+            return Err(invalid(
+                alias.span,
+                &format!(
+                    "[{0}] declares a variable, not a relationship type; write [:{0}] for the type, or use a lowercase variable",
+                    alias.value
+                ),
+            ));
+        }
         if let Some(alias) = relationship.variable
             && (self.input.nodes.iter().any(|n| n.id == alias.value)
                 || self.path.as_ref() == Some(&alias.value)
@@ -283,6 +295,14 @@ fn hop_range(range: Range<'_>) -> Result<HopRange> {
         ));
     }
     Ok(HopRange { min, max })
+}
+
+fn is_type_shaped(name: &str) -> bool {
+    name.len() > 1
+        && name.starts_with(|c: char| c.is_ascii_uppercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }
 
 #[cfg(test)]
