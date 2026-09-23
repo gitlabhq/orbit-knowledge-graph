@@ -59,7 +59,7 @@ struct ListedSkill {
 struct RemoteEnvelope {
     name: String,
     version: String,
-    tree_sha256: String,
+    compatibility: String,
     files: Vec<RemoteFile>,
 }
 
@@ -74,7 +74,6 @@ struct RemoteFile {
 struct ValidatedTree {
     name: String,
     version: String,
-    tree_sha256: String,
     etag: String,
     files: BTreeMap<String, String>,
     file_hashes: BTreeMap<String, String>,
@@ -85,7 +84,6 @@ struct CacheManifest {
     origin: String,
     name: String,
     version: String,
-    tree_sha256: String,
     etag: String,
     file_hashes: BTreeMap<String, String>,
     validated_at: u64,
@@ -265,15 +263,6 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
                 .etag
                 .ok_or_else(|| anyhow!("Orbit skill response has no ETag"))?;
             let tree = validate_remote_envelope(name, &etag, &response.body)?;
-            if let Some(cached) = &cached
-                && cached.tree.version == tree.version
-                && cached.tree.tree_sha256 != tree.tree_sha256
-            {
-                eprintln!(
-                    "warning: Orbit skill version {} changed tree hash; replacing the colliding cache entry",
-                    tree.version
-                );
-            }
             publish_cache(&origin, &tree)?;
             Ok(Some(tree))
         }
@@ -320,7 +309,9 @@ fn validate_remote_envelope(name: &str, etag: &str, body: &[u8]) -> Result<Valid
         );
     }
     validate_component("skill version", &envelope.version)?;
-    validate_sha256("tree_sha256", &envelope.tree_sha256)?;
+    if etag != format!("\"{}\"", envelope.version) {
+        bail!("Orbit skill ETag does not match its version");
+    }
     if envelope.files.is_empty() {
         bail!("Orbit skill response contains no files");
     }
@@ -343,25 +334,19 @@ fn validate_remote_envelope(name: &str, etag: &str, body: &[u8]) -> Result<Valid
         }
         file_hashes.insert(file.path, file.sha256);
     }
-    let actual_tree = tree_sha256(&files);
-    if actual_tree != envelope.tree_sha256 {
-        bail!(
-            "Orbit skill tree hash mismatch: expected {}, got {actual_tree}",
-            envelope.tree_sha256
-        );
-    }
     let manifest = files
         .get(MANIFEST)
         .ok_or_else(|| anyhow!("Orbit skill response is missing {MANIFEST}"))?;
-    let frontmatter = orbit_prompts::parse_skill_frontmatter(manifest)
+    let frontmatter = orbit_prompts::parse_skill_frontmatter(manifest, &envelope.name)
         .map_err(|error| anyhow!("remote {error}"))?;
-    if frontmatter.name != envelope.name || frontmatter.version.to_string() != envelope.version {
+    if frontmatter.version.to_string() != envelope.version
+        || frontmatter.compatibility != envelope.compatibility
+    {
         bail!("Orbit skill envelope metadata does not match {MANIFEST} frontmatter");
     }
     Ok(ValidatedTree {
         name: envelope.name,
         version: envelope.version,
-        tree_sha256: envelope.tree_sha256,
         etag: etag.to_string(),
         files,
         file_hashes,
@@ -458,17 +443,6 @@ fn validate_sha256(kind: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn tree_sha256(files: &BTreeMap<String, String>) -> String {
-    let mut hasher = Sha256::new();
-    for (path, content) in files {
-        hasher.update(path.as_bytes());
-        hasher.update([0]);
-        hasher.update((content.len() as u64).to_be_bytes());
-        hasher.update(content.as_bytes());
-    }
-    hex_digest(hasher.finalize())
-}
-
 fn sha256_hex(bytes: &[u8]) -> String {
     hex_digest(Sha256::digest(bytes))
 }
@@ -538,14 +512,20 @@ fn read_cached_tree(directory: &Path, origin: &str, name: &str) -> Result<Cached
         }
         files.insert(path.clone(), content);
     }
-    if tree_sha256(&files) != manifest.tree_sha256 {
-        bail!("cached Orbit skill tree hash mismatch");
+    let skill_manifest = files
+        .get(MANIFEST)
+        .ok_or_else(|| anyhow!("cached Orbit skill is missing {MANIFEST}"))?;
+    let frontmatter = orbit_prompts::parse_skill_frontmatter(skill_manifest, name)
+        .map_err(|error| anyhow!("cached {error}"))?;
+    if frontmatter.version.to_string() != manifest.version
+        || manifest.etag != format!("\"{}\"", manifest.version)
+    {
+        bail!("cached Orbit skill version or ETag does not match its frontmatter");
     }
     Ok(CachedTree {
         tree: ValidatedTree {
             name: manifest.name,
             version: manifest.version,
-            tree_sha256: manifest.tree_sha256,
             etag: manifest.etag,
             files,
             file_hashes: manifest.file_hashes,
@@ -587,7 +567,6 @@ fn stage_tree(stage: &Path, origin: &str, tree: &ValidatedTree) -> Result<()> {
         origin: origin.to_string(),
         name: tree.name.clone(),
         version: tree.version.clone(),
-        tree_sha256: tree.tree_sha256.clone(),
         etag: tree.etag.clone(),
         file_hashes: tree.file_hashes.clone(),
         validated_at: SystemTime::now()
@@ -760,8 +739,7 @@ mod tests {
         ValidatedTree {
             name: DEFAULT_SKILL.to_string(),
             version: version.to_string(),
-            tree_sha256: tree_sha256(&files),
-            etag: format!("\"{version}:etag\""),
+            etag: format!("\"{version}\""),
             files,
             file_hashes,
         }
@@ -810,25 +788,13 @@ mod tests {
     }
 
     #[test]
-    fn canonical_tree_hash_matches_server_contract_vector() {
-        let files = BTreeMap::from([
-            ("SKILL.md".to_string(), "alpha\n".to_string()),
-            ("references/guide.md".to_string(), "beta".to_string()),
-        ]);
-        assert_eq!(
-            tree_sha256(&files),
-            "7966df3b2283aa44b6d29826c89044f1739aa99f25fc84f44a775eaa41ba7817"
-        );
-    }
-
-    #[test]
-    fn envelope_validation_checks_file_and_tree_hashes() {
-        let manifest = "---\nname: orbit\nversion: 1.0.0\ndescription: Test\n---\nbody\n";
-        let mut tree = remote_tree("1.0.0", manifest);
+    fn envelope_validation_checks_file_hash_etag_and_frontmatter() {
+        let manifest = "---\nname: orbit\nversion: 1.0.0\ndescription: Test\ncompatibility: Requires Orbit CLI\nmetadata: {}\n---\nbody\n";
+        let tree = remote_tree("1.0.0", manifest);
         let envelope = RemoteEnvelope {
             name: tree.name.clone(),
             version: tree.version.clone(),
-            tree_sha256: tree.tree_sha256.clone(),
+            compatibility: "Requires Orbit CLI".to_string(),
             files: tree
                 .files
                 .iter()
@@ -842,19 +808,26 @@ mod tests {
         let body = serde_json::to_vec(&serde_json::json!({
             "name": envelope.name,
             "version": envelope.version,
-            "tree_sha256": envelope.tree_sha256,
+            "compatibility": envelope.compatibility,
             "files": envelope.files.iter().map(|file| serde_json::json!({
                 "path": file.path, "sha256": file.sha256, "content": file.content
             })).collect::<Vec<_>>()
         }))
         .unwrap();
-        validate_remote_envelope("orbit", "\"etag\"", &body).unwrap();
-
-        tree.tree_sha256.replace_range(..1, "0");
-        let bad = String::from_utf8(body)
-            .unwrap()
-            .replace(&envelope.tree_sha256, &tree.tree_sha256);
-        assert!(validate_remote_envelope("orbit", "\"etag\"", bad.as_bytes()).is_err());
+        validate_remote_envelope("orbit", "\"1.0.0\"", &body).unwrap();
+        assert!(validate_remote_envelope("orbit", "\"wrong\"", &body).is_err());
+        let mut bad: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        bad["files"][0]["sha256"] = serde_json::json!("0".repeat(64));
+        assert!(
+            validate_remote_envelope("orbit", "\"1.0.0\"", &serde_json::to_vec(&bad).unwrap())
+                .is_err()
+        );
+        let mut bad: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        bad["compatibility"] = serde_json::json!("different");
+        assert!(
+            validate_remote_envelope("orbit", "\"1.0.0\"", &serde_json::to_vec(&bad).unwrap())
+                .is_err()
+        );
     }
 
     #[test]
@@ -912,7 +885,7 @@ mod tests {
     fn cache_round_trip_contains_remote_bytes_only() {
         let root = tempfile::tempdir().unwrap();
         let origin = "https://gitlab.example.com:8443";
-        let manifest = "---\nname: orbit\nversion: 1.0.0\ndescription: Test\n---\nremote\n";
+        let manifest = "---\nname: orbit\nversion: 1.0.0\ndescription: Test\ncompatibility: Requires Orbit CLI\nmetadata: {}\n---\nremote\n";
         let tree = remote_tree("1.0.0", manifest);
         let stage = root.path().join(".stage");
         fs::create_dir(&stage).unwrap();
@@ -961,7 +934,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let root_path = root.path().to_path_buf();
         let origin = "https://gitlab.example.com";
-        let manifest = "---\nname: orbit\nversion: 1.0.0\ndescription: Test\n---\nremote\n";
+        let manifest = "---\nname: orbit\nversion: 1.0.0\ndescription: Test\ncompatibility: Requires Orbit CLI\nmetadata: {}\n---\nremote\n";
         let tree = remote_tree("1.0.0", manifest);
         let mut writers = Vec::new();
         for index in 0..2 {
@@ -997,12 +970,12 @@ mod tests {
             let body = serde_json::to_vec(&serde_json::json!({
                 "name": "orbit",
                 "version": "1.0.0",
-                "tree_sha256": "0".repeat(64),
+                "compatibility": "Requires Orbit CLI",
                 "files": [{"path": path, "sha256": hash, "content": content}]
             }))
             .unwrap();
             assert!(
-                validate_remote_envelope("orbit", "\"etag\"", &body).is_err(),
+                validate_remote_envelope("orbit", "\"1.0.0\"", &body).is_err(),
                 "{path}"
             );
         }

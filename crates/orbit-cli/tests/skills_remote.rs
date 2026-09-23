@@ -107,7 +107,7 @@ fn run_orbit(base_url: Option<&str>, cache: &tempfile::TempDir, args: &[&str]) -
 
 fn tree_reply(version: &str, body_text: &str) -> Reply {
     let manifest = format!(
-        "---\nname: orbit\nversion: {version}\ndescription: Remote Orbit skill\n---\n# {body_text}\n"
+        "---\nname: orbit\nversion: {version}\ndescription: Remote Orbit skill\ncompatibility: Requires Orbit CLI\nmetadata: {{}}\n---\n# {body_text}\n"
     );
     tree_reply_with_manifest(version, &manifest, body_text)
 }
@@ -118,11 +118,11 @@ fn tree_reply_with_manifest(version: &str, manifest: &str, body_text: &str) -> R
         ("SKILL.md", manifest),
         ("references/remote.md", reference.as_str()),
     ]);
-    let tree_hash = tree_hash(&files);
     let body = serde_json::json!({
         "name": "orbit",
         "version": version,
-        "tree_sha256": tree_hash,
+        "compatibility": "Requires Orbit CLI",
+        "server_version": "0.1.0",
         "files": files.iter().map(|(path, content)| serde_json::json!({
             "path": path,
             "sha256": hex(Sha256::digest(content.as_bytes())),
@@ -133,20 +133,9 @@ fn tree_reply_with_manifest(version: &str, manifest: &str, body_text: &str) -> R
     Reply {
         status: 200,
         reason: "OK",
-        etag: Some(format!("\"{version}:{tree_hash}\"")),
+        etag: Some(format!("\"{version}\"")),
         body,
     }
-}
-
-fn tree_hash(files: &BTreeMap<&str, &str>) -> String {
-    let mut hasher = Sha256::new();
-    for (path, content) in files {
-        hasher.update(path.as_bytes());
-        hasher.update([0]);
-        hasher.update((content.len() as u64).to_be_bytes());
-        hasher.update(content.as_bytes());
-    }
-    hex(hasher.finalize())
 }
 
 fn hex(digest: impl AsRef<[u8]>) -> String {
@@ -230,7 +219,7 @@ fn remote_listing_uses_collection_and_authentication() {
         status: 200,
         reason: "OK",
         etag: None,
-        body: r#"{"skills":[{"name":"orbit","version":"1.0.0","tree_sha256":"abc","description":"Remote description"}]}"#.to_string(),
+        body: r#"{"skills":[{"name":"orbit","version":"1.0.0","compatibility":"Requires Orbit CLI","description":"Remote description"}]}"#.to_string(),
     };
     let (url, server) = mock_server(vec![reply]);
     let output = run_orbit(Some(&url), &cache, &["skills"]);
@@ -406,19 +395,23 @@ fn server_error_without_cache_is_returned() {
 }
 
 #[test]
-fn same_version_different_hash_warns_and_replaces() {
+fn version_bump_refreshes_cached_skill() {
     let cache = tempfile::tempdir().unwrap();
     let (url, server) = mock_server(vec![
         tree_reply("1.0.0", "First tree"),
-        tree_reply("1.0.0", "Replacement tree"),
+        tree_reply("1.0.1", "Replacement tree"),
     ]);
     let first = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
     let second = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
-    server.join().unwrap();
     assert!(first.status.success(), "{}", stderr(&first));
     assert!(second.status.success(), "{}", stderr(&second));
-    assert!(stderr(&second).contains("changed tree hash"));
+    assert!(String::from_utf8_lossy(&second.stdout).contains("version: 1.0.1"));
     assert!(String::from_utf8_lossy(&second.stdout).contains("Replacement tree"));
+    let requests = server.join().unwrap();
+    assert_eq!(
+        requests[1].headers.get("if-none-match").map(String::as_str),
+        Some("\"1.0.0\"")
+    );
 }
 
 #[test]
@@ -428,7 +421,7 @@ fn unsafe_remote_path_fails_without_populating_cache() {
     let body = serde_json::json!({
         "name": "orbit",
         "version": "1.0.0",
-        "tree_sha256": "0".repeat(64),
+        "compatibility": "Requires Orbit CLI",
         "files": [{
             "path": "../secret",
             "sha256": hex(Sha256::digest(content.as_bytes())),
@@ -439,7 +432,7 @@ fn unsafe_remote_path_fails_without_populating_cache() {
     let (url, server) = mock_server(vec![Reply {
         status: 200,
         reason: "OK",
-        etag: Some("\"unsafe\"".to_string()),
+        etag: Some("\"1.0.0\"".to_string()),
         body,
     }]);
     let output = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
