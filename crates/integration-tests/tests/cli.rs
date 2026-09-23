@@ -415,6 +415,77 @@ fn reindex_nested_doesnt_affect_parent() {
     );
 }
 
+#[test]
+fn index_skips_nested_repositories_the_parent_ignores() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+
+    let parent = workspace.path().join("parent");
+    init_repo_at(
+        &parent,
+        &[
+            (".gitignore", "vendor/\n"),
+            ("src/app.py", "def app(): pass\n"),
+        ],
+    );
+    init_repo_at(
+        &parent.join("vendor/dependency"),
+        &[("dep.py", "def dep(): pass\n")],
+    );
+    init_repo_at(
+        &parent.join("libs/utils"),
+        &[("helper.py", "def helper(): pass\n")],
+    );
+
+    assert!(orbit_index(&parent, data_dir.path()));
+
+    let indexed = indexed_repo_paths(data_dir.path());
+    assert!(
+        indexed.iter().any(|path| path.ends_with("/parent")),
+        "{indexed:?}"
+    );
+    assert!(
+        indexed.iter().any(|path| path.ends_with("/libs/utils")),
+        "{indexed:?}"
+    );
+    assert!(
+        !indexed.iter().any(|path| path.contains("/vendor/")),
+        "{indexed:?}"
+    );
+}
+
+#[test]
+fn index_defaults_to_the_current_directory() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(&repo, &[("main.py", "def main(): pass\n")]);
+
+    let indexed = orbit_cmd()
+        .arg("index")
+        .current_dir(&repo)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .status()
+        .unwrap();
+
+    assert!(indexed.success());
+    let indexed = indexed_repo_paths(data_dir.path());
+    assert!(
+        indexed.iter().any(|path| path.ends_with("/repo")),
+        "{indexed:?}"
+    );
+}
+
+fn indexed_repo_paths(data_dir: &std::path::Path) -> Vec<String> {
+    let (stdout, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir);
+    assert!(ok, "orbit list failed: {stderr}");
+    let listed: Vec<Value> = serde_json::from_str(&stdout).unwrap();
+    listed
+        .iter()
+        .map(|repo| repo["repo_path"].as_str().unwrap().to_string())
+        .collect()
+}
+
 fn run_cmd(args: &[&str], data_dir: &std::path::Path) -> (String, String, bool) {
     let out = orbit_cmd()
         .args(args)

@@ -1,3 +1,5 @@
+mod summary;
+
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -6,7 +8,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use arrow::array::{Array, StringArray};
-use code_graph::v2::{PipelineConfig, ProgressObserver, ProgressPhase, SilentProgress};
+use code_graph::v2::{
+    CancellationToken, FamilyFileCount, PipelineConfig, ProgressObserver, ProgressPhase,
+    SilentProgress,
+};
 use ontology::Ontology;
 use serde::Serialize;
 use tracing::{Level, info};
@@ -140,7 +145,8 @@ pub(crate) fn run(
 ) -> Result<()> {
     let person_is_watching = std::io::stdout().is_terminal();
     install_tracing(verbose, person_is_watching);
-    let indexer = LocalIndexer::open(path, threads, show_stats, db)?;
+    let mut indexer = LocalIndexer::open(path, threads, show_stats, db)?;
+    indexer.pipeline_config.cancel = cancel_on_ctrl_c();
 
     if !person_is_watching {
         for output in indexer.index_all(&mut LogReporter)? {
@@ -150,14 +156,31 @@ pub(crate) fn run(
     }
 
     tui::intro("Orbit index")?;
+    let _control_echo_off = tui::turn_off_control_echo();
     let mut reporter = TuiReporter::new(indexer.db_path.clone());
     match indexer.index_all(&mut reporter) {
         Ok(_) => reporter.close(),
+        Err(error) if tui::is_cancelled(&error) => Err(error),
         Err(error) => {
             tui::outro_cancel(&error)?;
             Err(error)
         }
     }
+}
+
+fn cancel_on_ctrl_c() -> CancellationToken {
+    let cancel = CancellationToken::new();
+    let token = cancel.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            token.cancel();
+        }
+        if tokio::signal::ctrl_c().await.is_ok() {
+            tui::restore_control_echo();
+            std::process::exit(130);
+        }
+    });
+    cancel
 }
 
 /// Synchronous (the pipeline and DuckDB driver both block), so async callers
@@ -283,7 +306,7 @@ impl IndexReporter for TuiReporter {
         }
 
         if let Some(detailed) = &output.detailed {
-            let _ = tui::card("Timings", format_timings(detailed));
+            let _ = tui::card("Timings", summary::format_timings(detailed));
         }
 
         if self.suggested_grep.is_none()
@@ -323,10 +346,10 @@ impl RepositoryBars {
         if let Some(phases) = self.phases.get() {
             phases
                 .parse
-                .finish(count_noun(output.graph.definitions, "definition"));
+                .finish(summary::count_noun(output.graph.definitions, "definition"));
             phases.resolve.finish(format!(
                 "{} · {:.1} s",
-                count_noun(output.graph.relationships, "relationship"),
+                summary::count_noun(output.graph.relationships, "relationship"),
                 output.time_seconds
             ));
         }
@@ -334,7 +357,19 @@ impl RepositoryBars {
     }
 
     fn fail(&self, error: &anyhow::Error) {
-        self.group.fail(format!("{error:#}"));
+        let cancelled = tui::is_cancelled(error);
+        if let Some(phases) = self.phases.get() {
+            for bar in [&phases.parse, &phases.resolve] {
+                match cancelled {
+                    true => bar.cancel_at_current_count(),
+                    false => bar.fail_at_current_count(),
+                }
+            }
+        }
+        match cancelled {
+            true => self.group.cancel(),
+            false => self.group.fail(format!("{error:#}")),
+        }
     }
 }
 
@@ -343,14 +378,14 @@ impl ProgressObserver for RepositoryBars {
         &self,
         total_files: usize,
         parseable_files: usize,
-        files_per_family: &[(String, usize)],
+        files_per_family: &[FamilyFileCount],
     ) {
-        self.group.note(format!(
-            "{} · {} parseable · {}",
-            count_noun(total_files, "file"),
-            tui::format_with_thousands(parseable_files),
-            count_noun(files_per_family.len(), "language")
+        self.group.note(summary::format_discovery_summary(
+            total_files,
+            parseable_files,
+            files_per_family,
         ));
+
         self.phases.get_or_init(|| PhaseBars {
             parse: self.group.bar("Parse  ", parseable_files),
             resolve: self.group.bar("Resolve", parseable_files),
@@ -366,32 +401,6 @@ impl ProgressObserver for RepositoryBars {
             ProgressPhase::Resolve => phases.resolve.advance(count),
         }
     }
-}
-
-fn count_noun(count: usize, noun: &str) -> String {
-    let plural = match count {
-        1 => "",
-        _ => "s",
-    };
-    format!("{} {noun}{plural}", tui::format_with_thousands(count))
-}
-
-fn format_timings(detailed: &DetailedStats) -> String {
-    let phases = &detailed.phase_timings;
-    let mut rows = vec![format!(
-        "discovery {:.0} ms · structure {:.0} ms · languages {:.0} ms · total {:.0} ms",
-        phases.file_discovery_ms,
-        phases.structural_graph_ms,
-        phases.language_processing_ms,
-        phases.total_ms
-    )];
-    rows.extend(detailed.language_timings.iter().map(|timing| {
-        format!(
-            "{:<12} {:>6} files  parse {:>7.0} ms  resolve {:>7.0} ms",
-            timing.language, timing.file_count, timing.parse_ms, timing.resolve_ms
-        )
-    }));
-    rows.join("\n")
 }
 
 fn repository_name(git: &GitInfo) -> String {
@@ -449,6 +458,10 @@ impl LocalIndexer {
                 Ok(output) => {
                     reporter.repository_indexed(&output);
                     outputs.push(output);
+                }
+                Err(error) if tui::is_cancelled(&error) => {
+                    reporter.repository_failed(repo_path, &error);
+                    return Err(error);
                 }
                 Err(error) => reporter.repository_failed(repo_path, &error),
             }
@@ -563,34 +576,7 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
-
-    let node_tables: Vec<String> = ontology
-        .local_entity_names()
-        .iter()
-        .map(|name| {
-            ontology
-                .get_node(name)
-                .expect("local entity must exist")
-                .destination_table
-                .clone()
-        })
-        .collect();
-    let edge_table = ontology
-        .local_edge_table_name()
-        .context("local_db.edge_table.name must be configured")?;
-
-    client
-        .delete_project(git.project_id, &node_tables, edge_table)
-        .context("failed to clear existing project data")?;
-    client
-        .execute(
-            &format!(
-                "DROP TABLE IF EXISTS {}",
-                duckdb_client::search::def_doc_table(git.project_id)
-            ),
-            &[],
-        )
-        .context("failed to clear existing search index")?;
+    clear_project(&client, git, ontology)?;
 
     let converter: std::sync::Arc<dyn code_graph::v2::GraphConverter> =
         std::sync::Arc::new(duckdb_client::DuckDbConverter {
@@ -613,14 +599,21 @@ fn index_repo(
         },
     );
 
+    let cancel = pipeline_config.cancel.clone();
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
         std::path::Path::new(&root_path),
         file_inventory,
-        pipeline_config.clone(),
+        pipeline_config,
         tracer,
         converter,
         on_batch,
     );
+    if cancel.is_cancelled() {
+        let client = duckdb_client::DuckDbClient::open(db_path)
+            .context("failed to open DuckDB to discard a cancelled run")?;
+        clear_project(&client, git, ontology)?;
+        return Err(tui::cancelled("indexing cancelled"));
+    }
 
     for err in &v2_result.errors {
         tracing::warn!(stage = err.stage, error = %err.error, file = %err.file_path, "pipeline error");
@@ -686,6 +679,41 @@ fn index_repo(
         language_timings: v2_result.stats.language_timings,
         phase_timings: v2_result.stats.phase_timings,
     })
+}
+
+fn clear_project(
+    client: &duckdb_client::DuckDbClient,
+    git: &GitInfo,
+    ontology: &Ontology,
+) -> Result<()> {
+    let node_tables: Vec<String> = ontology
+        .local_entity_names()
+        .iter()
+        .map(|name| {
+            ontology
+                .get_node(name)
+                .expect("local entity must exist")
+                .destination_table
+                .clone()
+        })
+        .collect();
+    let edge_table = ontology
+        .local_edge_table_name()
+        .context("local_db.edge_table.name must be configured")?;
+
+    client
+        .delete_project(git.project_id, &node_tables, edge_table)
+        .context("failed to clear existing project data")?;
+    client
+        .execute(
+            &format!(
+                "DROP TABLE IF EXISTS {}",
+                duckdb_client::search::def_doc_table(git.project_id)
+            ),
+            &[],
+        )
+        .context("failed to clear existing search index")?;
+    Ok(())
 }
 
 fn build_index_output(
