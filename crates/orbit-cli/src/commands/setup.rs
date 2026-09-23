@@ -19,7 +19,6 @@ use anyhow::{Context, Result};
 
 use components::Report;
 use detect::Machine;
-use index_repo::Indexed;
 use plan::{Plan, Selection};
 use spec::ScopedPath;
 
@@ -63,7 +62,7 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
 
     let indexed = match options.index {
-        true => index_current_repository(),
+        true => index_repo::index_current_repository()?,
         false => None,
     };
     if let Some(command) = summary::format_try_it_command(indexed.as_ref()) {
@@ -71,23 +70,6 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     }
     tui::outro(summary::format_closing_line(indexed.as_ref()))?;
     Ok(())
-}
-
-fn index_current_repository() -> Option<Indexed> {
-    let repo_root = index_repo::current_repository_root()?;
-    let command = index_repo::index_command_line();
-
-    let spinner = tui::spinner(&command);
-    match index_repo::index_repository(&repo_root) {
-        Ok(indexed) => {
-            spinner.stop(format!("{command}  {}", indexed.summary));
-            Some(indexed)
-        }
-        Err(error) => {
-            spinner.error(format!("{command}  {error}"));
-            None
-        }
-    }
 }
 
 pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> Result<()> {
