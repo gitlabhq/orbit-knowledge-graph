@@ -92,8 +92,8 @@ GITLAB_BASE_URL="$GDK_GITLAB_URL"
 # GDK templates its Siphon stream name in layout.yml, not the generated CDC config.
 SIPHON_STREAM_NAME="$(yq '.stream_name' "$GDK_ROOT/siphon/layout.yml" 2>/dev/null || true)"
 if [[ -z "$SIPHON_STREAM_NAME" || "$SIPHON_STREAM_NAME" == "null" ]]; then
-  printf 'Warning: Siphon stream name missing from %s; using fallback siphon_stream_main_db\n' "$GDK_ROOT/siphon/layout.yml" >&2
-  SIPHON_STREAM_NAME="siphon_stream_main_db"
+  printf 'Warning: Siphon stream name missing from %s; using fallback siphon_stream\n' "$GDK_ROOT/siphon/layout.yml" >&2
+  SIPHON_STREAM_NAME="siphon_stream"
 fi
 
 GITALY_TCP_ADDR="$(python3 - "$GDK_ROOT/gitaly/gitaly.config.toml" <<'PY'

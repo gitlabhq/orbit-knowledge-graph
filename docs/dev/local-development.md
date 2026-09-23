@@ -89,8 +89,9 @@ ClickHouse from your GDK installation.
    clickhouse client --host localhost --port 9001 --query "CREATE DATABASE IF NOT EXISTS \`gkg-development\`"
    ```
 
-   From the knowledge-graph repository root (not `$GDK_ROOT/gitlab`), apply
-   the graph schema with the helper script. ClickHouse does not support
+   Clone this repository first (see [Setup](#setup)). From its root (not
+   `$GDK_ROOT/gitlab`), apply the graph schema with the helper script.
+   ClickHouse does not support
    multi-statement DDL execution, so the script applies each statement
    individually:
 
@@ -111,10 +112,10 @@ ClickHouse from your GDK installation.
 
    The set of replicated tables is driven by per-table YAML files in
    `$GDK_ROOT/gitlab/db/siphon/tables/`. GDK reads them on `gdk reconfigure` and
-   generates the entire Siphon config (`$GDK_ROOT/siphon/config.yml`), both the
-   producer and consumer sides, from that single source. In general you do
-   **not** hand-write `config.yml`; add or remove table files and let GDK
-   regenerate it. (One exception, the hardcoded Prometheus port, is covered under
+   generates Siphon's CDC config (`$GDK_ROOT/siphon/cdc-config.yml`) using
+   `$GDK_ROOT/siphon/layout.yml`. In general you do **not** hand-write the
+   generated config; add or remove table files and let GDK regenerate it.
+   (One exception, the hardcoded Prometheus port in `config.yml`, is covered under
    [Siphon Prometheus port conflict](#siphon-prometheus-port-conflict).)
 
    The GitLab repo already ships the tables the live indexing path needs.
@@ -180,18 +181,17 @@ ClickHouse from your GDK installation.
        - gitlab/config/gitlab.yml
    ```
 
-   Enable the feature flags, then restart Rails with the updated config:
+   Restart Rails with the updated config:
 
    ```shell
-   cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Feature.enable(:knowledge_graph); Feature.enable(:knowledge_graph_infra)"
    cd $GDK_ROOT
    gdk restart rails-web rails-background-jobs
    ```
 
    The JWT secret is created when Rails boots with
-   `Gitlab.config.knowledge_graph['enabled']` set to true (including the Rails
-   runner above), not by enabling the feature flags. The dev script reads
+   `Gitlab.config.knowledge_graph['enabled']` set to true. Wait for Rails to
+   finish starting before checking: `gdk restart` returns before Puma and
+   Sidekiq finish booting. The dev script reads
    `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret` to configure the GKG
    webserver's JWT verifying key. Verify the file was created:
 
@@ -199,19 +199,30 @@ ClickHouse from your GDK installation.
    ls $GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret
    ```
 
-   If it is missing, check that the setting is effective in the development
-   environment before restarting again:
+   If it is missing, check the effective setting in the development environment
+   and search the Rails logs for a secret-file permission error:
 
    ```shell
    cd $GDK_ROOT/gitlab
    bundle exec rails runner 'puts Gitlab.config.knowledge_graph["enabled"]'
+   grep -F 'Could not write Knowledge Graph secret file' log/*.log
    ```
 
-   Enable non-excluded namespaces for indexing:
+   To enroll existing and future top-level groups automatically, select
+   **Index root namespaces automatically** under **Admin > Orbit > Orbit
+   settings** and save. Or enable the same setting in the Rails console:
 
    ```shell
    cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Namespace.where(type: 'Group', parent_id: nil).find_each { |ns| next if Analytics::KnowledgeGraph::ExcludedNamespace.for_root_namespace_id(ns.id).exists?; Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
+   bundle exec rails runner 'ApplicationSetting.current.update!(orbit_auto_index_root_namespace: true)'
+   ```
+
+   This enqueues a Sidekiq job to enroll groups that are not already enrolled
+   or excluded. An hourly job handles new groups. After Sidekiq processes the
+   job, verify enrollment:
+
+   ```shell
+   bundle exec rails runner 'puts Analytics::KnowledgeGraph::EnabledNamespace.count'
    ```
 
    The Orbit UI is available at
@@ -405,14 +416,6 @@ rustup toolchain install stable
 ```
 
 Then re-run `mise install`.
-
-**Siphon `mise install` fails with Python attestation errors:**
-
-If `gdk reconfigure` fails in Siphon's `mise install` with
-`No GitHub artifact attestations found` for `python@3.11.9`, update Siphon's
-Python pin. The fix is in [Siphon !589](https://gitlab.com/gitlab-org/analytics-section/siphon/-/merge_requests/589).
-Until it lands in your checkout, locally pin a newer 3.11.x release in
-`$GDK_ROOT/siphon/.tool-versions`, then rerun `gdk reconfigure`.
 
 **Datalake connection errors in the indexer:**
 
