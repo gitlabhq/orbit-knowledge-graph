@@ -2,6 +2,7 @@
 name = "orbit-devtools"
 version.workspace = true
 edition = "2024"
+license = "MIT"
 
 [[bin]]
 name = "orbit-devtools"
