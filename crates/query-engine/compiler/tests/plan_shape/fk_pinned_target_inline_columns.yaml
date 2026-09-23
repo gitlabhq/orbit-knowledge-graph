@@ -1,0 +1,7 @@
+name: "FK-joined node tables project their columns inline (no hydration query)"
+input: {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed","source":"push"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}
+expect:
+  - (Project excerpt(pipe.ref) AS pipe_ref, excerpt(j.name) AS j_name, p.id AS p_id, ... (_))
+  - (Filter p.id = 278964, !deleted(p) (Scan gl_project AS p FINAL))
+reject:
+  - (Scan gl_edge ...)

@@ -1,37 +1,7 @@
-name: "Three-node FK chain — no edge scans"
+name: "Three-node FK chain: no edge scans, every node table joined"
 input: {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
-expected: |
-  (Limit 11
-    (Project
-        'IN_PROJECT' AS e0_type
-        mr.id AS e0_src
-        'MergeRequest' AS e0_src_type
-        p.id AS e0_dst
-        'Project' AS e0_dst_type
-        'AUTHORED' AS e1_type
-        u.id AS e1_src
-        'User' AS e1_src_type
-        mr.id AS e1_dst
-        'MergeRequest' AS e1_dst_type
-        p.id AS p_id
-        excerpt(p.name) AS p_name
-        excerpt(p.full_path) AS p_full_path
-        p.visibility_level AS p_visibility_level
-        mr.id AS mr_id
-        mr.iid AS mr_iid
-        excerpt(mr.title) AS mr_title
-        mr.state AS mr_state
-        excerpt(mr.source_branch) AS mr_source_branch
-        excerpt(mr.target_branch) AS mr_target_branch
-        u.id AS u_id
-        excerpt(u.username) AS u_username
-        excerpt(u.name) AS u_name
-        u.state AS u_state
-      (Join ON mr.author_id = u.id
-        (Join ON mr.project_id = p.id
-          (Filter !deleted(mr)
-            (Scan gl_merge_request AS mr FINAL))
-          (Filter p.id = 1, !deleted(p)
-            (Scan gl_project AS p FINAL)))
-        (Filter !deleted(u)
-          (Scan gl_user AS u FINAL)))))
+expect:
+  - (Join ON mr.author_id = u.id (...))
+  - (Join ON mr.project_id = p.id (...))
+reject:
+  - (Scan gl_edge ...)

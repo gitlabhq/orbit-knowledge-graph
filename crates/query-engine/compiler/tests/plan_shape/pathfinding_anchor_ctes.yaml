@@ -1,0 +1,7 @@
+name: "Filtered endpoints become _nf_ anchor CTEs the first hop is semi-joined against, plus a scope CTE"
+input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]},"limit":10}
+expect:
+  - (_nf_start = (Limit 500 (_)))
+  - (_nf_end = (Limit 500 (_)))
+  - (_path_scope_traversal_paths = (Union AS _path_scope (_) (_)))
+  - (SemiJoin e1.source_id IN _nf_start.id (_) (Scan _nf_start AS _nf_start))

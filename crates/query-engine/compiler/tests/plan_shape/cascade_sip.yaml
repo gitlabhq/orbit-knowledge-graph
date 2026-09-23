@@ -1,0 +1,9 @@
+name: "Cascade SIP: hop e1 is anchored to the pinned hop e0 by an IN-subquery"
+input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}},{"id":"p","entity":"Project"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"limit":10}
+expect:
+  - |
+    (SemiJoin e1.source_id IN _sip_e0.source_id
+      (...)
+      (Project _sip_e0.source_id AS source_id
+        (Filter ..., _sip_e0.source_id = 1
+          (Scan gl_edge AS _sip_e0 ...))))

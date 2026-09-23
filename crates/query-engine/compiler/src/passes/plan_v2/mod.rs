@@ -29,7 +29,7 @@
 
 mod chain;
 mod ctx;
-mod explain;
+pub mod explain;
 mod expr;
 mod hops;
 mod hydration;

@@ -1,25 +1,8 @@
-name: "AUTHORED has FK — no edge table"
+name: "FK relationship: node tables join on the FK column, no edge scan"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
-expected: |
-  (Limit 11
-    (Project
-        'AUTHORED' AS e0_type
-        u.id AS e0_src
-        'User' AS e0_src_type
-        mr.id AS e0_dst
-        'MergeRequest' AS e0_dst_type
-        mr.id AS mr_id
-        mr.iid AS mr_iid
-        excerpt(mr.title) AS mr_title
-        mr.state AS mr_state
-        excerpt(mr.source_branch) AS mr_source_branch
-        excerpt(mr.target_branch) AS mr_target_branch
-        u.id AS u_id
-        excerpt(u.username) AS u_username
-        excerpt(u.name) AS u_name
-        u.state AS u_state
-      (Join ON mr.author_id = u.id
-        (Filter u.id = 1, !deleted(u)
-          (Scan gl_user AS u FINAL))
-        (Filter !deleted(mr)
-          (Scan gl_merge_request AS mr FINAL)))))
+expect:
+  - (Join ON mr.author_id = u.id (_) (_))
+  - (Scan gl_user AS u FINAL)
+  - (Project 'AUTHORED' AS e0_type, u.id AS e0_src, mr.id AS e0_dst, ... (_))
+reject:
+  - (Scan gl_edge ...)

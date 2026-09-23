@@ -22,16 +22,32 @@ use ontology::constants::DELETED_COLUMN;
 /// Predicate or column lists longer than this go one per line.
 const INLINE_WIDTH: usize = 90;
 
+/// One operator as text: `(head items children)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanNode {
+    /// Operator label, e.g. `Join`, then its inline arguments, e.g. `ON a.x = b.y`.
+    pub label: String,
+    pub head: String,
+    /// Predicates, columns, or keys, one string each.
+    pub items: Vec<String>,
+    pub children: Vec<PlanNode>,
+}
+
 impl PhysOp {
     pub fn explain(&self) -> String {
-        self.node(0)
+        self.to_node().render(0)
     }
 
-    /// `(Label items` on the first line, children indented below, closing
-    /// paren on the last child's line.
-    fn node(&self, depth: usize) -> String {
-        let pad = "  ".repeat(depth);
-        let (head, items, children): (String, Vec<String>, Vec<String>) = match self {
+    pub fn to_node(&self) -> PlanNode {
+        let node =
+            |label: &str, head: String, items: Vec<String>, children: Vec<PlanNode>| PlanNode {
+                label: label.into(),
+                head,
+                items,
+                children,
+            };
+        let child = |op: &PhysOp| vec![op.to_node()];
+        match self {
             PhysOp::Scan {
                 table,
                 alias,
@@ -42,17 +58,19 @@ impl PhysOp {
                     Dedup::Final => " FINAL",
                     Dedup::LimitBy => " LIMIT 1 BY sort key",
                 };
-                (format!("Scan {table} AS {alias}{d}"), vec![], vec![])
+                node("Scan", format!("{table} AS {alias}{d}"), vec![], vec![])
             }
-            PhysOp::Filter { input, predicates } => (
-                "Filter".into(),
+            PhysOp::Filter { input, predicates } => node(
+                "Filter",
+                String::new(),
                 predicates.iter().map(PExpr::explain).collect(),
-                vec![input.node(depth + 1)],
+                child(input),
             ),
-            PhysOp::Project { input, columns } => (
-                "Project".into(),
+            PhysOp::Project { input, columns } => node(
+                "Project",
+                String::new(),
                 columns.iter().map(|(e, a)| named(e, a)).collect(),
-                vec![input.node(depth + 1)],
+                child(input),
             ),
             PhysOp::Join {
                 left,
@@ -60,84 +78,87 @@ impl PhysOp {
                 on,
                 kind,
             } => {
-                let head = match kind {
-                    JoinKind::Inner => {
-                        let conds: Vec<String> = on
-                            .iter()
-                            .map(|(x, y)| format!("{}.{} = {}.{}", x.0, x.1, y.0, y.1))
-                            .collect();
-                        format!("Join ON {}", conds.join(" AND "))
-                    }
+                let eq = |(x, y): &(Col, Col)| format!("{}.{} = {}.{}", x.0, x.1, y.0, y.1);
+                let (label, head) = match kind {
+                    JoinKind::Inner => (
+                        "Join",
+                        format!("ON {}", on.iter().map(eq).collect::<Vec<_>>().join(" AND ")),
+                    ),
                     JoinKind::Semi => {
                         let (x, y) = &on[0];
-                        format!("SemiJoin {}.{} IN {}.{}", x.0, x.1, y.0, y.1)
+                        ("SemiJoin", format!("{}.{} IN {}.{}", x.0, x.1, y.0, y.1))
                     }
                 };
-                (
-                    head,
-                    vec![],
-                    vec![left.node(depth + 1), right.node(depth + 1)],
-                )
+                node(label, head, vec![], vec![left.to_node(), right.to_node()])
             }
             PhysOp::Aggregate {
                 input,
                 group_by,
                 metrics,
-            } => (
-                "Aggregate".into(),
+            } => node(
+                "Aggregate",
+                String::new(),
                 group_by
                     .iter()
                     .map(|(e, a)| format!("group {}", named(e, a)))
                     .chain(metrics.iter().map(|(e, a)| named(e, a)))
                     .collect(),
-                vec![input.node(depth + 1)],
+                child(input),
             ),
-            PhysOp::Union { arms, alias } => (
-                format!("Union AS {alias}"),
+            PhysOp::Union { arms, alias } => node(
+                "Union",
+                format!("AS {alias}"),
                 vec![],
-                arms.iter().map(|a| a.node(depth + 1)).collect(),
+                arms.iter().map(PhysOp::to_node).collect(),
             ),
-            PhysOp::Sort { input, keys } => {
-                let keys: Vec<String> = keys
-                    .iter()
+            PhysOp::Sort { input, keys } => node(
+                "Sort",
+                keys.iter()
                     .map(|(e, desc)| format!("{}{}", e.explain(), if *desc { " DESC" } else { "" }))
-                    .collect();
-                (
-                    format!("Sort {}", keys.join(", ")),
-                    vec![],
-                    vec![input.node(depth + 1)],
-                )
-            }
-            PhysOp::Limit { input, count } => (
-                format!("Limit {count}"),
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 vec![],
-                vec![input.node(depth + 1)],
+                child(input),
             ),
-            PhysOp::With { ctes, input } => {
-                let mut children: Vec<String> = ctes
-                    .iter()
-                    .map(|(name, body)| format!("{pad}  ({name} =\n{})", body.node(depth + 2)))
-                    .collect();
-                children.push(input.node(depth + 1));
-                ("With".into(), vec![], children)
+            PhysOp::Limit { input, count } => {
+                node("Limit", count.to_string(), vec![], child(input))
             }
-        };
+            PhysOp::With { ctes, input } => {
+                let mut children: Vec<PlanNode> = ctes
+                    .iter()
+                    .map(|(name, body)| node(name, "=".into(), vec![], child(body)))
+                    .collect();
+                children.push(input.to_node());
+                node("With", String::new(), vec![], children)
+            }
+        }
+    }
+}
 
-        let mut out = format!("{pad}({head}");
-        let inline = items.join(", ");
-        if items.len() <= 3 && inline.len() <= INLINE_WIDTH {
+impl PlanNode {
+    /// `(Label head` on the first line; items one per line when the list is
+    /// long; children indented; closing paren on the last line.
+    pub fn render(&self, depth: usize) -> String {
+        let pad = "  ".repeat(depth);
+        let mut out = format!("{pad}({}", self.label);
+        if !self.head.is_empty() {
+            out.push(' ');
+            out.push_str(&self.head);
+        }
+        let inline = self.items.join(", ");
+        if self.items.len() <= 3 && inline.len() <= INLINE_WIDTH {
             if !inline.is_empty() {
                 out.push(' ');
                 out.push_str(&inline);
             }
         } else {
-            for i in &items {
+            for i in &self.items {
                 out.push_str(&format!("\n{pad}    {i}"));
             }
         }
-        for c in &children {
+        for c in &self.children {
             out.push('\n');
-            out.push_str(c);
+            out.push_str(&c.render(depth + 1));
         }
         out.push(')');
         out
@@ -154,7 +175,7 @@ fn named(e: &PExpr, alias: &str) -> String {
 }
 
 impl PExpr {
-    fn explain(&self) -> String {
+    pub fn explain(&self) -> String {
         if let Some(inner) = self.as_excerpt() {
             return format!("excerpt({})", inner.explain());
         }

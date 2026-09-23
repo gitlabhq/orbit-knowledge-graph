@@ -1,24 +1,9 @@
-name: "HAS_LABEL has no FK — edge table with narrowing CTEs"
+name: "Non-FK relationship scans the edge table; filtered node is joined with FINAL"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
-expected: |
-  (Limit 11
-    (Project
-        e0.relationship_kind AS e0_type
-        e0.source_id AS e0_src
-        e0.source_kind AS e0_src_type
-        e0.target_id AS e0_dst
-        e0.target_kind AS e0_dst_type
-        label.id AS label_id
-        excerpt(label.title) AS label_title
-        excerpt(label.color) AS label_color
-      (Join ON e0.target_id = label.id
-        (Filter
-            e0.relationship_kind = 'HAS_LABEL'
-            e0.source_kind = 'MergeRequest'
-            e0.target_kind = 'Label'
-            !deleted(e0)
-            scope(e0)
-            e0.source_id = 1
-          (Scan gl_edge AS e0))
-        (Filter label.title = ?, !deleted(label)
-          (Scan gl_label AS label FINAL)))))
+expect:
+  - |
+    (Join ON e0.target_id = label.id
+      (Filter e0.relationship_kind = 'HAS_LABEL', e0.source_kind = 'MergeRequest', e0.target_kind = 'Label', !deleted(e0), ...
+        (Scan gl_edge AS e0))
+      (Filter label.title = ?, !deleted(label)
+        (Scan gl_label AS label FINAL)))

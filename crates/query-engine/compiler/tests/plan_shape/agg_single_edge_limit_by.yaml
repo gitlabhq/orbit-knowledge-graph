@@ -1,0 +1,6 @@
+name: "Aggregation over one edge scan dedups with LIMIT BY, not FINAL"
+input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"group_by":["label"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
+expect:
+  - (Scan gl_edge AS e0 LIMIT 1 BY sort key)
+reject:
+  - (Scan gl_edge AS e0 FINAL)
