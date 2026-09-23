@@ -6,7 +6,6 @@ description: >-
 
 
   Pass a repository path, or a directory that holds several repositories.
-  Each one is indexed into the workspace DuckDB. Indexing takes seconds to
-  minutes, so call it sparingly. `SELECT * FROM _orbit_manifest` via `run_sql`
-  shows what is already indexed. A terminal shows progress; other output is
-  JSON graph statistics.
+  Indexing takes seconds to minutes, so call it sparingly. `SELECT * FROM
+  _orbit_manifest` via `run_sql` shows what is already indexed. Returns JSON
+  graph statistics.

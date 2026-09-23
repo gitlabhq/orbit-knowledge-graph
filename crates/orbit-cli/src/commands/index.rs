@@ -1,3 +1,5 @@
+mod summary;
+
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -7,7 +9,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use arrow::array::{Array, StringArray};
 use code_graph::v2::{
-    CancellationToken, PipelineConfig, ProgressObserver, ProgressPhase, SilentProgress,
+    CancellationToken, FamilyFileCount, PipelineConfig, ProgressObserver, ProgressPhase,
+    SilentProgress,
 };
 use ontology::Ontology;
 use serde::Serialize;
@@ -303,7 +306,7 @@ impl IndexReporter for TuiReporter {
         }
 
         if let Some(detailed) = &output.detailed {
-            let _ = tui::card("Timings", format_timings(detailed));
+            let _ = tui::card("Timings", summary::format_timings(detailed));
         }
 
         if self.suggested_grep.is_none()
@@ -343,10 +346,10 @@ impl RepositoryBars {
         if let Some(phases) = self.phases.get() {
             phases
                 .parse
-                .finish(count_noun(output.graph.definitions, "definition"));
+                .finish(summary::count_noun(output.graph.definitions, "definition"));
             phases.resolve.finish(format!(
                 "{} · {:.1} s",
-                count_noun(output.graph.relationships, "relationship"),
+                summary::count_noun(output.graph.relationships, "relationship"),
                 output.time_seconds
             ));
         }
@@ -375,19 +378,13 @@ impl ProgressObserver for RepositoryBars {
         &self,
         total_files: usize,
         parseable_files: usize,
-        files_per_family: &[(String, usize)],
+        files_per_family: &[FamilyFileCount],
     ) {
-        let mut summary = vec![count_noun(total_files, "file")];
-        if parseable_files != total_files {
-            summary.push(format!(
-                "{} parseable",
-                tui::format_with_thousands(parseable_files)
-            ));
-        }
-        if !files_per_family.is_empty() {
-            summary.push(name_largest_languages(files_per_family));
-        }
-        self.group.note(summary.join(" · "));
+        self.group.note(summary::format_discovery_summary(
+            total_files,
+            parseable_files,
+            files_per_family,
+        ));
 
         self.phases.get_or_init(|| PhaseBars {
             parse: self.group.bar("Parse  ", parseable_files),
@@ -404,49 +401,6 @@ impl ProgressObserver for RepositoryBars {
             ProgressPhase::Resolve => phases.resolve.advance(count),
         }
     }
-}
-
-fn name_largest_languages(files_per_family: &[(String, usize)]) -> String {
-    const SHOWN: usize = 3;
-    let mut largest_first = files_per_family.to_vec();
-    largest_first.sort_by(|(a_name, a_files), (b_name, b_files)| {
-        b_files.cmp(a_files).then(a_name.cmp(b_name))
-    });
-    let names: Vec<&str> = largest_first
-        .iter()
-        .take(SHOWN)
-        .map(|(name, _)| name.as_str())
-        .collect();
-    match largest_first.len().saturating_sub(SHOWN) {
-        0 => names.join(", "),
-        hidden => format!("{} +{hidden} more", names.join(", ")),
-    }
-}
-
-fn count_noun(count: usize, noun: &str) -> String {
-    let plural = match count {
-        1 => "",
-        _ => "s",
-    };
-    format!("{} {noun}{plural}", tui::format_with_thousands(count))
-}
-
-fn format_timings(detailed: &DetailedStats) -> String {
-    let phases = &detailed.phase_timings;
-    let mut rows = vec![format!(
-        "discovery {:.0} ms · structure {:.0} ms · languages {:.0} ms · total {:.0} ms",
-        phases.file_discovery_ms,
-        phases.structural_graph_ms,
-        phases.language_processing_ms,
-        phases.total_ms
-    )];
-    rows.extend(detailed.language_timings.iter().map(|timing| {
-        format!(
-            "{:<12} {:>6} files  parse {:>7.0} ms  resolve {:>7.0} ms",
-            timing.language, timing.file_count, timing.parse_ms, timing.resolve_ms
-        )
-    }));
-    rows.join("\n")
 }
 
 fn repository_name(git: &GitInfo) -> String {
