@@ -354,8 +354,8 @@ fixtures:
 tests:
   - name: "run() calls helper()"
     query: |
-      MATCH (a:Definition)-[r:DefinitionToDefinition]->(b:Definition)
-      WHERE a.name = 'run' AND r.edge_kind = 'Calls'
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.name = 'run'
       RETURN b.fqn AS target
     assert:
       - { row: { target: "util.helper" } }

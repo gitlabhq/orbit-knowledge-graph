@@ -94,7 +94,9 @@ tree-dsl test fixtures/python/simple_call.yaml
 tree-dsl test --inline '<yaml>'
 ```
 
-YAML format:
+Suites use the shared fixture format (Cypher queries against the exported
+graph); the full vocabulary is in the
+[fixtures README](../integration-tests-codegraph/README.md).
 
 ```yaml
 name: "example test"
@@ -107,17 +109,17 @@ fixtures:
       foo()
 tests:
   - name: foo is defined
-    entity: Definition
-    expect:
-      - fqn: main.foo
-        name: foo
-        definition_type: Function
-  - name: foo is called
-    entity: DefinitionToDefinition
-    expect:
-      - caller: main.foo
-        callee: main.foo
-        edge_kind: Calls
+    query: |
+      MATCH (d:Definition) WHERE d.fqn = 'main.foo'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row: { name: foo, type: Function } }
+  - name: foo is called from the file
+    query: |
+      MATCH (f:File)-[:CALLS]->(d:Definition) WHERE d.fqn = 'main.foo'
+      RETURN f.path AS path
+    assert:
+      - { row: { path: main.py } }
 ```
 
 ## Architecture

@@ -10092,7 +10092,6 @@ dependencies = [
  "rayon",
  "serde_json",
  "serde_yaml",
- "tokio",
  "tree-dsl",
  "tree-dsl-tests",
  "walkdir",

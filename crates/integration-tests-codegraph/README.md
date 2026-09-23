@@ -29,7 +29,7 @@ tests:
     severity: error            # "error" (default) or "warning"
     skip: false                # skip this test
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'run'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

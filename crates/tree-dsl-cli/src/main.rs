@@ -454,10 +454,7 @@ fn cmd_test(file: Option<String>, inline: Option<String>) -> anyhow::Result<()> 
         (None, None) => anyhow::bail!("provide a YAML file path or --inline"),
     };
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    rt.block_on(tree_dsl_tests::runner::run_yaml_suite(&yaml));
+    tree_dsl_tests::runner::run_yaml_suite(&yaml);
     Ok(())
 }
 
