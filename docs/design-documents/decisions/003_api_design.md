@@ -110,8 +110,10 @@ The Orbit agent surface adds a lazy command catalog on top of the structured RPC
 | `InvokeAgentCommand` | Unary | Executes non-intercepted commands such as schema, DSL, and response-format discovery |
 | `GetQueryDsl` | Unary | Direct API helper for the query DSL JSON Schema and `QUERY_DSL_VERSION` |
 | `GetResponseFormat` | Unary | Direct API helper for the query response JSON Schema and `RAW_OUTPUT_FORMAT_VERSION` |
+| `ListSkills` | Unary | Lists embedded Orbit Remote skills with identity and cache metadata |
+| `GetSkill` | Unary | Returns one complete embedded skill tree or metadata only |
 
-MCP agents normally access DSL and response-format discovery through `ListAgentCommands` and `InvokeAgentCommand`. The direct `GetQueryDsl` and `GetResponseFormat` RPCs exist for REST/API consumers that need stable structured endpoints without going through the agent command wrapper.
+MCP agents normally access DSL and response-format discovery through `ListAgentCommands` and `InvokeAgentCommand`. The direct `GetQueryDsl` and `GetResponseFormat` RPCs exist for REST/API consumers that need stable structured endpoints without going through the agent command wrapper. `ListSkills` and `GetSkill` back typed Rails REST endpoints and stay outside the agent command catalog because skills are CLI artifacts, not MCP capabilities.
 
 ### Unified `ResponseFormat` across all data RPCs
 

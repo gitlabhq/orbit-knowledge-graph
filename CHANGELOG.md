@@ -1,3 +1,16 @@
+## [0.128.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.127.0...v0.128.0) (2026-09-23)
+
+### Features
+
+* **cli:** draw index progress with the setup wizard widgets ([8f5ef0c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f5ef0cf888a3d16daaa6193637e80f8ab15b2f4)) by Jean-Gabriel Doyon
+* **health:** serve readiness on the labkit probe server ([b7468e8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b7468e816df145cc91a8de8e5c364c24c7970f33)) by Bohdan Parkhomchuk
+* **query:** add GQL spellings to named queries ([a073e38](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a073e380cea06db26ca1ed568a5356c5f4023132)) by Aaron Algutifan
+* **tls:** serve the internal HTTP listeners over TLS ([f67985a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f67985a6e7b621fdf3d80f251de40af3ed43a204)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **ci:** bump cargo-zigbuild so the arm64 musl CLI build links ([b88a75f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b88a75f6d5c557b5843aec032a9f63aae0fd14fc)) by Jean-Gabriel Doyon
+
 ## [0.127.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.126.0...v0.127.0) (2026-09-22)
 
 ### Features
