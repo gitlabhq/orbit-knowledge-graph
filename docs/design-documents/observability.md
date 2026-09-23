@@ -187,7 +187,7 @@ The quota gate instruments every decision made by the CDot-backed quota check. A
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `gkg.billing.quota.decisions` | Counter | count | `decision` (allow/deny/fail_open), `cache` (hit/miss), `source_type` (mcp/rest) | Quota gate decisions per request |
+| `gkg.billing.quota.decisions` | Counter | count | `decision` (allow/deny/fail_open/skipped), `cache` (hit/miss), `source_type` (mcp/rest) | Quota gate decisions per request |
 | `gkg.billing.quota.cdot.duration` | Histogram | s | `outcome` (allow/deny/fail_open) | Latency of upstream CDot HEAD requests; count gives actual CDot call rate |
 | `gkg.billing.quota.bypassed` | Counter | count | `source_type` (frontend/core/dws) | Requests that skipped the quota gate because their source type is not metered |
 | `gkg.billing.quota.cache.entries` | Gauge | count | | Current number of entries in the per-pod quota decision cache |

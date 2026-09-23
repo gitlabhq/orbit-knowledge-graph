@@ -40,6 +40,8 @@ impl From<&Claims> for QuotaCheckInputs {
             root_namespace_id: c.root_namespace_id,
             instance_id: c.instance_id.clone(),
             unique_instance_id: c.unique_instance_id.clone(),
+            instance_version: c.instance_version.clone(),
+            license_checksum: c.license_checksum.clone(),
         }
     }
 }

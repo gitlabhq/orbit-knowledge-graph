@@ -93,6 +93,7 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            license_checksum: None,
         };
 
         let token = encode(
@@ -144,5 +145,45 @@ mod tests {
             err.contains("source_type"),
             "error should mention source_type, got: {err}"
         );
+    }
+
+    #[test]
+    fn license_checksum_claim_survives_validation_and_malformed_values_do_not_fail_auth() {
+        use secrecy::ExposeSecret;
+
+        let raw_secret = b"test-secret-that-is-at-least-32-bytes-long";
+        let validator = JwtValidator::new(&STANDARD.encode(raw_secret), 0).unwrap();
+        let checksum = "0123456789abcdef".repeat(4);
+        let now = chrono::Utc::now().timestamp();
+        let token_with = |license_checksum: serde_json::Value| {
+            let claims = serde_json::json!({
+                "sub": "user",
+                "iss": EXPECTED_ISSUER,
+                "aud": EXPECTED_AUDIENCE,
+                "iat": now,
+                "exp": now + 3600,
+                "user_id": 1,
+                "username": "testuser",
+                "source_type": "mcp",
+                "license_checksum": license_checksum,
+            });
+            encode(
+                &Header::new(Algorithm::HS256),
+                &claims,
+                &EncodingKey::from_secret(raw_secret),
+            )
+            .unwrap()
+        };
+
+        let valid = validator
+            .validate(&token_with(checksum.clone().into()))
+            .unwrap();
+        assert_eq!(
+            valid.license_checksum.as_ref().map(|c| c.expose_secret()),
+            Some(checksum.as_str())
+        );
+
+        let malformed = validator.validate(&token_with("NOT-HEX".into())).unwrap();
+        assert!(malformed.license_checksum.is_none());
     }
 }

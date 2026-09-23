@@ -199,6 +199,7 @@ axum = { version = "0.8.8", features = ["macros"] }
 jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
 semver = { version = "1.0", features = ["serde"] }
+secrecy = "0.10.3"
 
 # Formatter test dependencies
 insta = { version = "1.40", features = ["yaml"] }

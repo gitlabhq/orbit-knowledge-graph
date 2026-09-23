@@ -29,6 +29,7 @@ pub fn extract_request_context<T>(
         unique_instance_id = claims.unique_instance_id.as_deref().unwrap_or(""),
         instance_version = claims.instance_version.as_deref().unwrap_or(""),
         global_user_id = claims.global_user_id.as_deref().unwrap_or(""),
+        license_checksum_present = claims.license_checksum.is_some(),
         correlation_id = %labkit::correlation::current()
             .as_deref()
             .unwrap_or_default(),
@@ -125,6 +126,7 @@ mod tests {
                 deployment_type: None,
                 realm: None,
                 is_gitlab_team_member: None,
+                license_checksum: None,
             },
             user_agent: user_agent.map(Into::into),
         }

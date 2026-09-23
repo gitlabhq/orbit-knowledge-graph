@@ -536,10 +536,13 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `billing.quota.enabled` | `false` | Enable the CDot quota gate |
-| `billing.quota.customers_dot_url` | `""` | CDot base URL (e.g. `https://customers.gitlab.com`) |
+| `billing.quota.customers_dot_url` | `http://localhost:5000` | CDot base URL (e.g. `https://customers.gitlab.com`) |
+| `billing.quota.auth_mode` | `admin_token` | How the gate authenticates to CDot: `admin_token` (GitLab.com) or `license_checksum` (self-managed and Dedicated) |
 | `billing.quota.request_timeout_ms` | `1000` | CDot request timeout in milliseconds |
-| `billing.quota.api_user` | None | CDot admin email. Mounted from `/etc/secrets/billing/quota/api_user`. |
-| `billing.quota.api_token` | None | CDot admin token. Mounted from `/etc/secrets/billing/quota/api_token`. |
+| `billing.quota.api_user` | None | CDot admin email, required in `admin_token` mode. Mounted from `/etc/secrets/billing/quota/api_user`. |
+| `billing.quota.api_token` | None | CDot admin token, required in `admin_token` mode. Mounted from `/etc/secrets/billing/quota/api_token`. |
+
+In `license_checksum` mode the gate sends the instance's license checksum as `X-License-Token`. GitLab adds it to the Orbit JWT as the `license_checksum` claim when the instance has an online cloud license. No CDot credentials are deployed. Requests without the claim, or whose `realm` claim is not `self-managed`, skip the check and are allowed (`decision=skipped` on `gkg.billing.quota.decisions`). A CDot `401` (offline, expired, or unknown license) fails open and is not cached. Cached decisions are not keyed on the license, so a renewal can take up to one cache TTL to take effect. Orbit pods need egress to `customers_dot_url`. The claim travels inside the JWT, so use TLS between GitLab and Orbit when that traffic leaves a trusted network.
 
 ## Object storage
 

@@ -1,3 +1,5 @@
+use secrecy::SecretString;
+
 use super::inputs::QuotaCheckInputs;
 use crate::constants;
 
@@ -12,9 +14,13 @@ pub(crate) struct CacheKey {
     pub feature_qualified_name: String,
 }
 
+// `license_checksum` stays out of `CacheKey`: key fields are logged, and one
+// self-managed instance holds one license, so it adds no cache discrimination.
 pub(crate) struct CdotRequest {
     pub key: CacheKey,
     pub global_user_id: String,
+    pub instance_version: String,
+    pub license_checksum: Option<SecretString>,
 }
 
 impl CdotRequest {
@@ -41,6 +47,8 @@ impl CdotRequest {
                 feature_qualified_name: constants::feature_qualified_name(&inputs.source_type),
             },
             global_user_id: inputs.global_user_id.clone().unwrap_or_default(),
+            instance_version: inputs.instance_version.clone().unwrap_or_default(),
+            license_checksum: inputs.license_checksum.clone(),
         })
     }
 
@@ -52,6 +60,7 @@ impl CdotRequest {
             ("root_namespace_id", &self.key.root_namespace_id),
             ("instance_id", &self.key.instance_id),
             ("unique_instance_id", &self.key.unique_instance_id),
+            ("instance_version", &self.instance_version),
             ("event_type", &self.key.event_type),
             ("feature_qualified_name", &self.key.feature_qualified_name),
         ]
@@ -76,6 +85,8 @@ mod tests {
             root_namespace_id: rnid,
             instance_id: None,
             unique_instance_id: uiid.map(Into::into),
+            instance_version: None,
+            license_checksum: None,
         }
     }
 
@@ -119,6 +130,7 @@ mod tests {
     fn query_params_map_to_cdot_field_names() {
         let mut inputs = inputs_with(Some("SaaS"), Some("guid-1"), Some("uid-1"), Some(9970));
         inputs.instance_id = Some("inst-1".into());
+        inputs.instance_version = Some("19.5.0".into());
         let req = CdotRequest::from_inputs(&inputs).unwrap();
         let params = req.as_query_params();
 
@@ -130,7 +142,31 @@ mod tests {
         assert_eq!(get("root_namespace_id"), Some("9970"));
         assert_eq!(get("instance_id"), Some("inst-1"));
         assert_eq!(get("unique_instance_id"), Some("uid-1"));
+        assert_eq!(get("instance_version"), Some("19.5.0"));
         assert_eq!(get("event_type"), Some(constants::EVENT_TYPE));
         assert_eq!(get("feature_qualified_name"), Some("orbit_mcp"));
+    }
+
+    // See `constants::is_cdot_self_managed_realm`: Orbit's internal "SM" would be a 402.
+    #[test]
+    fn self_managed_realm_claim_is_sent_verbatim() {
+        let inputs = inputs_with(Some("self-managed"), Some("guid-1"), Some("uid-1"), None);
+        let req = CdotRequest::from_inputs(&inputs).unwrap();
+        let params = req.as_query_params();
+        let realm = params.iter().find(|(k, _)| *k == "realm").map(|(_, v)| *v);
+        assert_eq!(realm, Some("self-managed"));
+    }
+
+    #[test]
+    fn license_checksum_is_excluded_from_cache_key_and_debug_output() {
+        let checksum = "a".repeat(64);
+        let mut inputs = inputs_with(Some("self-managed"), None, Some("uid-1"), None);
+        inputs.license_checksum = Some(checksum.clone().into());
+        let req = CdotRequest::from_inputs(&inputs).unwrap();
+
+        assert!(req.license_checksum.is_some());
+        assert!(!format!("{:?}", req.key).contains(&checksum));
+        assert!(!format!("{inputs:?}").contains(&checksum));
+        assert!(req.as_query_params().iter().all(|(_, v)| *v != checksum));
     }
 }

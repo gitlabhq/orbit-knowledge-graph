@@ -5,16 +5,17 @@ mod key;
 mod metrics;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use orbit_server_config::BillingConfig;
+use orbit_server_config::{BillingConfig, QuotaAuthMode};
 use tonic::{Code, Status};
 use tonic_types::{ErrorDetails, StatusExt};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
-use crate::constants::QUOTA_MAX_CACHE_ENTRIES;
+use crate::constants::{QUOTA_MAX_CACHE_ENTRIES, is_cdot_self_managed_realm};
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
-use client::QuotaClient;
+use client::{FailOpenReason, QuotaAuth, QuotaClient};
 pub use inputs::QuotaCheckInputs;
 use key::CdotRequest;
 
@@ -33,6 +34,8 @@ pub struct QuotaService {
 
 struct QuotaServiceInner {
     cache: QuotaCache,
+    auth_mode: QuotaAuthMode,
+    realm_mismatch_warned: AtomicBool,
 }
 
 impl QuotaService {
@@ -43,25 +46,35 @@ impl QuotaService {
 
         let cfg = &billing.quota;
 
-        if cfg.api_user.is_none() || cfg.api_token.is_none() {
-            warn!(
-                "quota.enabled=true but api_user or api_token is not set; \
-                 disabling quota gate to avoid silent fail-open on 401"
-            );
-            return Ok(Self { inner: None });
-        }
+        let auth = match cfg.auth_mode {
+            QuotaAuthMode::AdminToken => {
+                let (Some(user), Some(token)) = (cfg.api_user.clone(), cfg.api_token.clone())
+                else {
+                    warn!(
+                        "quota.enabled=true but api_user or api_token is not set; \
+                         disabling quota gate to avoid silent fail-open on 401"
+                    );
+                    return Ok(Self { inner: None });
+                };
+                QuotaAuth::AdminToken { user, token }
+            }
+            QuotaAuthMode::LicenseChecksum => QuotaAuth::LicenseChecksum,
+        };
 
         let client = QuotaClient::new(
             cfg.customers_dot_url.clone(),
-            cfg.api_user.as_deref().unwrap_or(""),
-            cfg.api_token.as_deref().unwrap_or(""),
+            auth,
             Duration::from_millis(cfg.request_timeout_ms),
             Duration::from_secs(cfg.fallback_cache_ttl_secs),
         )?;
         let cache = QuotaCache::new(Arc::new(client), QUOTA_MAX_CACHE_ENTRIES);
 
         Ok(Self {
-            inner: Some(QuotaServiceInner { cache }),
+            inner: Some(QuotaServiceInner {
+                cache,
+                auth_mode: cfg.auth_mode,
+                realm_mismatch_warned: AtomicBool::new(false),
+            }),
         })
     }
 
@@ -78,6 +91,11 @@ impl QuotaService {
             .as_ref()
             .map(|id| id.as_str().to_string())
             .unwrap_or_default();
+
+        if inner.auth_mode == QuotaAuthMode::LicenseChecksum && !inner.license_auth_usable(inputs) {
+            record_skipped(&inputs.source_type);
+            return Ok(());
+        }
 
         let Some(request) = CdotRequest::from_inputs(inputs) else {
             warn!(
@@ -115,7 +133,18 @@ impl QuotaService {
                 );
                 Ok(())
             }
-            QuotaGateDecision::FailOpen => {
+            QuotaGateDecision::FailOpen(FailOpenReason::LicenseRejected) => {
+                debug!(
+                    user_id = inputs.user_id,
+                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
+                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
+                    source_type = %inputs.source_type,
+                    correlation_id = %correlation_id,
+                    "quota gate decision: fail_open (CustomersDot rejected the license checksum)"
+                );
+                Ok(())
+            }
+            QuotaGateDecision::FailOpen(FailOpenReason::Upstream) => {
                 warn!(
                     user_id = inputs.user_id,
                     realm = inputs.realm.as_deref().unwrap_or(""),
@@ -159,20 +188,57 @@ impl QuotaService {
     }
 }
 
+impl QuotaServiceInner {
+    // Without a checksum (older Rails, offline or legacy license, no license) or a
+    // realm CDot accepts for license auth, CDot can only answer 401 or 402
+    // `realm_mismatch`, so the query is allowed without asking.
+    fn license_auth_usable(&self, inputs: &QuotaCheckInputs) -> bool {
+        if inputs.license_checksum.is_none() {
+            debug!(
+                user_id = inputs.user_id,
+                source_type = %inputs.source_type,
+                "quota check skipped: no license_checksum claim"
+            );
+            return false;
+        }
+        let realm = inputs.realm.as_deref().unwrap_or("");
+        if !is_cdot_self_managed_realm(realm) {
+            if !self.realm_mismatch_warned.swap(true, Ordering::Relaxed) {
+                warn!(
+                    realm,
+                    "quota.auth_mode=license_checksum but the realm claim is not \
+                     self-managed; skipping quota checks for such requests"
+                );
+            }
+            return false;
+        }
+        true
+    }
+}
+
+fn record_skipped(source_type: &str) {
+    use orbit_observability::billing::quota::values::{MISS, SKIPPED};
+    record(SKIPPED, MISS, source_type);
+}
+
 fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &str) {
-    use orbit_observability::billing::quota::labels::{
-        CACHE as CACHE_LABEL, DECISION, SOURCE_TYPE,
-    };
     use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_OPEN, HIT, MISS};
 
     let decision_label = match gate {
         QuotaGateDecision::Allow => ALLOW,
         QuotaGateDecision::Deny(_) => DENY,
-        QuotaGateDecision::FailOpen => FAIL_OPEN,
+        QuotaGateDecision::FailOpen(_) => FAIL_OPEN,
     };
     let cache_label = match cache {
         CacheOutcome::Hit => HIT,
         CacheOutcome::Miss => MISS,
+    };
+    record(decision_label, cache_label, source_type);
+}
+
+fn record(decision_label: &'static str, cache_label: &'static str, source_type: &str) {
+    use orbit_observability::billing::quota::labels::{
+        CACHE as CACHE_LABEL, DECISION, SOURCE_TYPE,
     };
 
     metrics::QUOTA_METRICS.decisions.add(
@@ -222,7 +288,29 @@ mod tests {
             root_namespace_id: Some(1),
             instance_id: None,
             unique_instance_id: Some("u".into()),
+            instance_version: Some("19.5.0".into()),
+            license_checksum: None,
         }
+    }
+
+    const CHECKSUM: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn license_inputs(source_type: &str) -> QuotaCheckInputs {
+        QuotaCheckInputs {
+            realm: Some("self-managed".into()),
+            root_namespace_id: None,
+            instance_id: Some("i".into()),
+            license_checksum: Some(CHECKSUM.into()),
+            ..inputs_with_source(source_type)
+        }
+    }
+
+    fn license_service_for(url: String) -> QuotaService {
+        let mut cfg = enabled_billing(url);
+        cfg.quota.auth_mode = QuotaAuthMode::LicenseChecksum;
+        cfg.quota.api_user = None;
+        cfg.quota.api_token = None;
+        QuotaService::from_config(&cfg).unwrap()
     }
 
     async fn counting_server(status: AxumStatus) -> (String, Arc<AtomicUsize>) {
@@ -253,6 +341,7 @@ mod tests {
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url,
+                auth_mode: QuotaAuthMode::AdminToken,
                 api_user: Some("test@example.com".into()),
                 api_token: Some("test-token".into()),
                 request_timeout_ms: 5_000,
@@ -281,6 +370,7 @@ mod tests {
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url: url,
+                auth_mode: QuotaAuthMode::AdminToken,
                 api_user: Some("test@example.com".into()),
                 api_token: Some("test-token".into()),
                 request_timeout_ms: 5_000,
@@ -319,6 +409,7 @@ mod tests {
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url: url,
+                auth_mode: QuotaAuthMode::AdminToken,
                 api_user: None,
                 api_token: None,
                 request_timeout_ms: 5_000,
@@ -414,5 +505,81 @@ mod tests {
             after > before,
             "record_decision must fire on fail-open (before={before}, after={after})"
         );
+    }
+
+    #[tokio::test]
+    async fn license_mode_enables_gate_without_admin_credentials() {
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
+        let svc = license_service_for(url);
+
+        for _ in 0..2 {
+            let err = svc.check(&license_inputs("mcp")).await.unwrap_err();
+            assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn license_mode_caches_allow() {
+        let (url, counter) = counting_server(AxumStatus::OK).await;
+        let svc = license_service_for(url);
+
+        assert!(svc.check(&license_inputs("rest")).await.is_ok());
+        assert!(svc.check(&license_inputs("rest")).await.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn license_mode_401_fails_open_uncached() {
+        let (url, counter) = counting_server(AxumStatus::UNAUTHORIZED).await;
+        let svc = license_service_for(url);
+
+        assert!(svc.check(&license_inputs("mcp")).await.is_ok());
+        assert!(svc.check(&license_inputs("mcp")).await.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn license_mode_without_checksum_allows_without_calling_cdot() {
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
+        let svc = license_service_for(url);
+        let inputs = QuotaCheckInputs {
+            license_checksum: None,
+            ..license_inputs("mcp")
+        };
+
+        assert!(svc.check(&inputs).await.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn license_mode_with_non_self_managed_realm_allows_without_calling_cdot() {
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
+        let svc = license_service_for(url);
+
+        for realm in [Some("SM"), Some("SaaS"), None] {
+            let inputs = QuotaCheckInputs {
+                realm: realm.map(Into::into),
+                ..license_inputs("mcp")
+            };
+            assert!(svc.check(&inputs).await.is_ok(), "realm {realm:?}");
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+        let inner = svc.inner.as_ref().unwrap();
+        assert!(inner.realm_mismatch_warned.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn admin_mode_ignores_license_checksum() {
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
+        let svc = service_for(url);
+        let inputs = QuotaCheckInputs {
+            license_checksum: Some(CHECKSUM.into()),
+            ..inputs_with_source("mcp")
+        };
+
+        let err = svc.check(&inputs).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 }

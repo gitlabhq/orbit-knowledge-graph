@@ -363,6 +363,7 @@ fn mint_token(secret_b64: &str, admin: bool) -> Result<String> {
         deployment_type: None,
         realm: None,
         is_gitlab_team_member: None,
+        license_checksum: None,
     };
     // Rails base64-decodes the secret before signing; mirror that so the
     // server's JwtValidator accepts the token. Fall back to raw bytes if the

@@ -241,19 +241,10 @@ async fn run_webserver(
     }
 
     if config.billing.quota.enabled {
-        if config.billing.quota.customers_dot_url.trim().is_empty() {
-            return Err(anyhow::anyhow!(
-                "billing.quota.enabled=true but billing.quota.customers_dot_url is empty"
-            ));
-        }
-        if config.billing.quota.api_user.is_none() || config.billing.quota.api_token.is_none() {
-            return Err(anyhow::anyhow!(
-                "billing.quota.enabled=true but billing.quota.api_user or api_token is not set \
-                 (mount them at /etc/secrets/billing/quota/)"
-            ));
-        }
+        config.billing.quota.validate()?;
         info!(
             customers_dot_url = %config.billing.quota.customers_dot_url,
+            auth_mode = ?config.billing.quota.auth_mode,
             "initializing usage quota gate"
         );
         let quota = QuotaService::from_config(&config.billing)

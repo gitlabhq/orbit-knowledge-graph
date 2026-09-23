@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue};
+use secrecy::ExposeSecret;
 use tracing::warn;
 
 use super::key::CdotRequest;
@@ -9,6 +10,12 @@ use crate::constants::CDOT_QUOTA_PATH;
 
 const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
 const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
+const X_LICENSE_TOKEN: HeaderName = HeaderName::from_static("x-license-token");
+
+pub(crate) enum QuotaAuth {
+    AdminToken { user: String, token: String },
+    LicenseChecksum,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum QuotaDecision {
@@ -35,31 +42,47 @@ pub(crate) enum QuotaOutcome {
         decision: QuotaDecision,
         ttl: Duration,
     },
-    FailOpen,
+    FailOpen(FailOpenReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailOpenReason {
+    /// CDot was unreachable or returned an unexpected status.
+    Upstream,
+    /// CDot answered 401 to `X-License-Token`: an expired, offline, or unknown license.
+    /// Routine on self-managed, and fail-open results are not cached, so it recurs on
+    /// every query and must not be logged at warn.
+    LicenseRejected,
 }
 
 pub(crate) struct QuotaClient {
     http: reqwest::Client,
     base_url: String,
     default_ttl: Duration,
+    license_auth: bool,
 }
 
 impl QuotaClient {
     pub(crate) fn new(
         base_url: String,
-        api_user: &str,
-        api_token: &str,
+        auth: QuotaAuth,
         request_timeout: Duration,
         default_ttl: Duration,
     ) -> Result<Self, reqwest::Error> {
         let mut headers = HeaderMap::new();
-        if let Ok(v) = HeaderValue::from_str(api_user) {
-            headers.insert(X_ADMIN_EMAIL, v);
-        }
-        if let Ok(mut v) = HeaderValue::from_str(api_token) {
-            v.set_sensitive(true);
-            headers.insert(X_ADMIN_TOKEN, v);
-        }
+        let license_auth = match auth {
+            QuotaAuth::AdminToken { user, token } => {
+                if let Ok(v) = HeaderValue::from_str(&user) {
+                    headers.insert(X_ADMIN_EMAIL, v);
+                }
+                if let Ok(mut v) = HeaderValue::from_str(&token) {
+                    v.set_sensitive(true);
+                    headers.insert(X_ADMIN_TOKEN, v);
+                }
+                false
+            }
+            QuotaAuth::LicenseChecksum => true,
+        };
 
         let http = reqwest::Client::builder()
             .timeout(request_timeout)
@@ -69,6 +92,7 @@ impl QuotaClient {
             http,
             base_url,
             default_ttl,
+            license_auth,
         })
     }
 
@@ -76,7 +100,20 @@ impl QuotaClient {
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), CDOT_QUOTA_PATH);
         let params = request.as_query_params();
 
-        let response = match self.http.head(&url).query(&params).send().await {
+        let mut builder = self.http.head(&url).query(&params);
+        // `QuotaService` never sends a license-mode request without a checksum, and the
+        // claim is validated hex, so the header is always present in license mode.
+        if self.license_auth
+            && let Some(mut token) = request
+                .license_checksum
+                .as_ref()
+                .and_then(|c| HeaderValue::from_str(c.expose_secret()).ok())
+        {
+            token.set_sensitive(true);
+            builder = builder.header(X_LICENSE_TOKEN, token);
+        }
+
+        let response = match builder.send().await {
             Ok(r) => r,
             Err(e) => {
                 warn!(
@@ -90,7 +127,7 @@ impl QuotaClient {
                     feature_qualified_name = %request.key.feature_qualified_name,
                     "quota check request failed; failing open"
                 );
-                return QuotaOutcome::FailOpen;
+                return QuotaOutcome::FailOpen(FailOpenReason::Upstream);
             }
         };
 
@@ -106,6 +143,9 @@ impl QuotaClient {
                 decision: QuotaDecision::Deny(DenyReason::QuotaExhausted),
                 ttl,
             },
+            StatusCode::UNAUTHORIZED if self.license_auth => {
+                QuotaOutcome::FailOpen(FailOpenReason::LicenseRejected)
+            }
             other => {
                 warn!(
                     status = %other,
@@ -118,7 +158,7 @@ impl QuotaClient {
                     feature_qualified_name = %request.key.feature_qualified_name,
                     "unexpected quota check response; failing open"
                 );
-                QuotaOutcome::FailOpen
+                QuotaOutcome::FailOpen(FailOpenReason::Upstream)
             }
         }
     }
@@ -143,9 +183,10 @@ fn parse_max_age(header: Option<&HeaderValue>) -> Option<Duration> {
 mod tests {
     use super::*;
     use axum::Router;
-    use axum::http::{HeaderMap as AxumHeaderMap, StatusCode as AxumStatus};
+    use axum::http::{HeaderMap as AxumHeaderMap, StatusCode as AxumStatus, Uri};
     use axum::routing::head;
     use reqwest::header::HeaderMap;
+    use std::sync::{Arc, Mutex};
     use tokio::net::TcpListener;
 
     fn hv(s: &str) -> HeaderValue {
@@ -164,7 +205,60 @@ mod tests {
                 feature_qualified_name: "orbit_mcp".into(),
             },
             global_user_id: "g".into(),
+            instance_version: "19.5.0".into(),
+            license_checksum: None,
         }
+    }
+
+    fn admin_auth() -> QuotaAuth {
+        QuotaAuth::AdminToken {
+            user: "test@example.com".into(),
+            token: "test-token".into(),
+        }
+    }
+
+    const CHECKSUM: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    async fn recording_server(
+        status: AxumStatus,
+    ) -> (String, Arc<Mutex<Vec<(AxumHeaderMap, String)>>>) {
+        install_crypto();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorder = seen.clone();
+        let app = Router::new().route(
+            crate::constants::CDOT_QUOTA_PATH,
+            head(move |headers: AxumHeaderMap, uri: Uri| {
+                let recorder = recorder.clone();
+                async move {
+                    let query = uri.query().unwrap_or_default().to_string();
+                    recorder.lock().unwrap().push((headers, query));
+                    status
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("http://{addr}"), seen)
+    }
+
+    fn license_request() -> CdotRequest {
+        let mut request = sample_request();
+        request.key.realm = "self-managed".into();
+        request.key.root_namespace_id = String::new();
+        request.key.instance_id = "inst-1".into();
+        request.license_checksum = Some(CHECKSUM.into());
+        request
+    }
+
+    fn license_client(url: String) -> QuotaClient {
+        QuotaClient::new(
+            url,
+            QuotaAuth::LicenseChecksum,
+            Duration::from_secs(5),
+            Duration::from_secs(3600),
+        )
+        .unwrap()
     }
 
     fn install_crypto() {
@@ -218,8 +312,7 @@ mod tests {
         let url = stub_server(AxumStatus::OK, Some("max-age=60")).await;
         let client = QuotaClient::new(
             url,
-            "test@example.com",
-            "test-token",
+            admin_auth(),
             Duration::from_secs(5),
             Duration::from_secs(3600),
         )
@@ -239,8 +332,7 @@ mod tests {
         let url = stub_server(AxumStatus::PAYMENT_REQUIRED, None).await;
         let client = QuotaClient::new(
             url,
-            "test@example.com",
-            "test-token",
+            admin_auth(),
             Duration::from_secs(5),
             Duration::from_secs(42),
         )
@@ -260,15 +352,14 @@ mod tests {
         let url = stub_server(AxumStatus::FORBIDDEN, None).await;
         let client = QuotaClient::new(
             url,
-            "test@example.com",
-            "test-token",
+            admin_auth(),
             Duration::from_secs(5),
             Duration::from_secs(3600),
         )
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen
+            QuotaOutcome::FailOpen(FailOpenReason::Upstream)
         );
     }
 
@@ -278,15 +369,82 @@ mod tests {
         install_crypto();
         let client = QuotaClient::new(
             "http://127.0.0.1:1".into(),
-            "test@example.com",
-            "test-token",
+            admin_auth(),
             Duration::from_millis(500),
             Duration::from_secs(3600),
         )
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen
+            QuotaOutcome::FailOpen(FailOpenReason::Upstream)
+        );
+    }
+
+    #[tokio::test]
+    async fn license_mode_sends_license_token_and_no_admin_headers() {
+        let (url, seen) = recording_server(AxumStatus::OK).await;
+        let outcome = license_client(url).check(&license_request()).await;
+        assert!(matches!(outcome, QuotaOutcome::Decided { .. }));
+
+        let seen = seen.lock().unwrap();
+        let (headers, query) = &seen[0];
+        assert_eq!(headers.get("x-license-token").unwrap(), CHECKSUM);
+        assert!(headers.get("x-admin-email").is_none());
+        assert!(headers.get("x-admin-token").is_none());
+        for param in [
+            "realm=self-managed",
+            "instance_id=inst-1",
+            "unique_instance_id=u",
+            "instance_version=19.5.0",
+        ] {
+            assert!(
+                query.split('&').any(|p| p == param),
+                "{param} missing from {query}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_mode_sends_admin_headers_and_ignores_license_checksum() {
+        let (url, seen) = recording_server(AxumStatus::OK).await;
+        let client = QuotaClient::new(
+            url,
+            admin_auth(),
+            Duration::from_secs(5),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+        client.check(&license_request()).await;
+
+        let seen = seen.lock().unwrap();
+        let (headers, _) = &seen[0];
+        assert_eq!(headers.get("x-admin-email").unwrap(), "test@example.com");
+        assert_eq!(headers.get("x-admin-token").unwrap(), "test-token");
+        assert!(headers.get("x-license-token").is_none());
+    }
+
+    #[tokio::test]
+    async fn license_mode_401_fails_open_as_license_rejected() {
+        let (url, _) = recording_server(AxumStatus::UNAUTHORIZED).await;
+        assert_eq!(
+            license_client(url).check(&license_request()).await,
+            QuotaOutcome::FailOpen(FailOpenReason::LicenseRejected)
+        );
+    }
+
+    #[tokio::test]
+    async fn admin_mode_401_fails_open_as_upstream() {
+        let (url, _) = recording_server(AxumStatus::UNAUTHORIZED).await;
+        let client = QuotaClient::new(
+            url,
+            admin_auth(),
+            Duration::from_secs(5),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+        assert_eq!(
+            client.check(&sample_request()).await,
+            QuotaOutcome::FailOpen(FailOpenReason::Upstream)
         );
     }
 }

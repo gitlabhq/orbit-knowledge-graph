@@ -4,7 +4,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 use orbit_observability::billing::quota as spec;
 use orbit_observability::billing::quota::labels::{CACHE, DECISION, SOURCE_TYPE};
-use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_OPEN, HIT, MISS};
+use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_OPEN, HIT, MISS, SKIPPED};
 
 pub(super) static QUOTA_METRICS: LazyLock<QuotaMetrics> = LazyLock::new(QuotaMetrics::new);
 
@@ -57,15 +57,17 @@ pub fn register() {
             }
         }
     }
-    // fail_open is only ever observed on cache=miss (never cached).
-    for source_type in metered_types {
-        QUOTA_METRICS.decisions.add(
-            0,
-            &[
-                KeyValue::new(DECISION, FAIL_OPEN),
-                KeyValue::new(CACHE, MISS),
-                KeyValue::new(SOURCE_TYPE, source_type),
-            ],
-        );
+    // fail_open and skipped are only ever observed on cache=miss (never cached).
+    for decision in [FAIL_OPEN, SKIPPED] {
+        for source_type in metered_types {
+            QUOTA_METRICS.decisions.add(
+                0,
+                &[
+                    KeyValue::new(DECISION, decision),
+                    KeyValue::new(CACHE, MISS),
+                    KeyValue::new(SOURCE_TYPE, source_type),
+                ],
+            );
+        }
     }
 }

@@ -1,3 +1,5 @@
+use secrecy::SecretString;
+
 #[derive(Clone, Debug)]
 pub struct QuotaCheckInputs {
     pub source_type: String,
@@ -7,4 +9,6 @@ pub struct QuotaCheckInputs {
     pub root_namespace_id: Option<i64>,
     pub instance_id: Option<String>,
     pub unique_instance_id: Option<String>,
+    pub instance_version: Option<String>,
+    pub license_checksum: Option<SecretString>,
 }
