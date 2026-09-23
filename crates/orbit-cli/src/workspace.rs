@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
@@ -58,7 +58,8 @@ impl Workspace {
     pub fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let canonical = dunce::canonicalize(path)?;
 
-        let discovered = discover_repos(&canonical);
+        let mut discovered = discover_repos(&canonical);
+        discovered.retain(|repo| *repo == canonical || !is_ignored_by_enclosing_repo(repo));
         if discovered.is_empty() && is_git_repo(&canonical) {
             Ok(vec![canonical])
         } else {
@@ -110,6 +111,24 @@ pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
     absolutize(path)
 }
 
+pub fn describe_graph_lock_conflict(error: &anyhow::Error) -> Option<String> {
+    static HOLDER: OnceLock<regex::Regex> = OnceLock::new();
+    let holder = HOLDER.get_or_init(|| {
+        regex::Regex::new(r"Conflicting lock is held in (.+?) \(PID (\d+)\)")
+            .expect("lock holder pattern is valid")
+    });
+    let chain = format!("{error:#}");
+    let captures = holder.captures(&chain)?;
+    let program = Path::new(&captures[1])
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| captures[1].to_string());
+    Some(format!(
+        "The local graph is busy: {program} (PID {}) is using it. Wait for it to finish, then try again.",
+        &captures[2]
+    ))
+}
+
 pub struct IndexedRepo {
     pub git: GitInfo,
     pub client: DuckDbClient,
@@ -123,33 +142,33 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     let git = git_info(&top_level)
         .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
 
-    let indexed_count = |client: &DuckDbClient| -> Result<i64> {
-        let batches = client.query_arrow_json(
-            "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
-            &[git.project_id.into(), git.commit_sha.clone().into()],
-        )?;
-        Ok(duckdb_client::scalar_i64(&batches))
-    };
-
-    let mut client = crate::sql::open_graph(Some(db.clone()))?;
-    if indexed_count(&client)? == 0 {
-        eprintln!(
-            "current commit {} is not indexed — indexing {} first",
-            git.short_sha(),
-            git.repo_path.display()
-        );
-        drop(client);
-        crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
+    if graph_lacks_commit(&db, &git)? {
+        crate::commands::index::index_before_first_query(git.repo_path.clone(), Some(db.clone()))
             .context("failed to index the repository")?;
-        client = crate::sql::open_graph(Some(db))?;
-        if indexed_count(&client)? == 0 {
+        if graph_lacks_commit(&db, &git)? {
             anyhow::bail!(
                 "indexing finished but commit {} still has no rows in the local graph",
                 git.commit_sha
             );
         }
     }
+    let client = crate::sql::open_graph(Some(db))?;
     Ok(IndexedRepo { git, client })
+}
+
+fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
+    if !db.exists() {
+        return Ok(true);
+    }
+    let client = crate::sql::open_graph(Some(db.to_path_buf()))?;
+    if stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() != Some(CODE_INDEX_REVISION) {
+        return Ok(true);
+    }
+    let files = client.query_arrow_json(
+        "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
+        &[git.project_id.into(), git.commit_sha.clone().into()],
+    )?;
+    Ok(duckdb_client::scalar_i64(&files) == 0)
 }
 
 fn absolutize(path: PathBuf) -> Result<PathBuf> {
@@ -163,10 +182,14 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
 }
 
 const LOCAL_DDL_META_KEY: &str = "local_ddl";
+const CODE_INDEX_META_KEY: &str = "code_index_revision";
+const CODE_INDEX_REVISION: &str = "1";
 
 pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     let client = DuckDbClient::open(db_path).context("failed to open DuckDB")?;
-    if stored_local_ddl(&client)?.as_deref() == Some(ddl) {
+    if stored_meta(&client, LOCAL_DDL_META_KEY)?.as_deref() == Some(ddl)
+        && stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() == Some(CODE_INDEX_REVISION)
+    {
         return Ok(());
     }
     let had_data = table_exists(&client, "_orbit_manifest")?;
@@ -174,7 +197,7 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
 
     if had_data {
         tracing::warn!(
-            "local graph schema changed; rebuilding {} (previously indexed repositories must be re-indexed)",
+            "local graph schema or code index changed; rebuilding {} (previously indexed repositories must be re-indexed)",
             db_path.display()
         );
     }
@@ -186,21 +209,26 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
         .context("failed to create schema")?;
     client
         .execute(
-            "INSERT INTO _orbit_meta (key, value) VALUES (?1, ?2)",
-            &[json!(LOCAL_DDL_META_KEY), json!(ddl)],
+            "INSERT INTO _orbit_meta (key, value) VALUES (?1, ?2), (?3, ?4)",
+            &[
+                json!(LOCAL_DDL_META_KEY),
+                json!(ddl),
+                json!(CODE_INDEX_META_KEY),
+                json!(CODE_INDEX_REVISION),
+            ],
         )
         .context("failed to record schema fingerprint")?;
     Ok(())
 }
 
-fn stored_local_ddl(client: &DuckDbClient) -> Result<Option<String>> {
+fn stored_meta(client: &DuckDbClient, key: &str) -> Result<Option<String>> {
     if !table_exists(client, "_orbit_meta")? {
         return Ok(None);
     }
     let batches = client
         .query_arrow_json(
             "SELECT value FROM _orbit_meta WHERE key = ?1",
-            &[json!(LOCAL_DDL_META_KEY)],
+            &[json!(key)],
         )
         .context("failed to read _orbit_meta")?;
     Ok(duckdb_client::string_column(&batches, "value")
@@ -298,6 +326,7 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     }
 }
 
+#[derive(Clone)]
 pub struct GitInfo {
     pub repo_path: PathBuf,
     /// Deterministic project ID derived from `repo_path`.
@@ -388,6 +417,19 @@ pub fn project_id_from_path(path: &str) -> i64 {
 fn is_git_repo(path: &Path) -> bool {
     let git = path.join(".git");
     git.is_dir() || git.is_file()
+}
+
+fn is_ignored_by_enclosing_repo(repo: &Path) -> bool {
+    let Some(enclosing) = repo.parent().and_then(|parent| git_toplevel(parent).ok()) else {
+        return false;
+    };
+    Command::new("git")
+        .args(["check-ignore", "--quiet"])
+        .arg(repo)
+        .current_dir(enclosing)
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
@@ -564,7 +606,7 @@ mod tests {
         assert!(!table_exists(&client, "old_table").unwrap());
         assert!(table_exists(&client, "gl_definition").unwrap());
         assert_eq!(
-            stored_local_ddl(&client).unwrap().as_deref(),
+            stored_meta(&client, LOCAL_DDL_META_KEY).unwrap().as_deref(),
             Some(LOCAL_DDL)
         );
     }

@@ -2,7 +2,6 @@ use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};
 use crate::v2::error::FileReason;
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
-use indicatif::{ProgressBar, ProgressStyle};
 use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -122,6 +121,33 @@ impl CancellationToken {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProgressPhase {
+    Parse,
+    Resolve,
+}
+
+pub struct FamilyFileCount {
+    pub family: String,
+    pub files: usize,
+}
+
+pub trait ProgressObserver: Send + Sync {
+    fn discovery_finished(
+        &self,
+        _total_files: usize,
+        _parseable_files: usize,
+        _files_per_family: &[FamilyFileCount],
+    ) {
+    }
+    fn files_advanced(&self, _phase: ProgressPhase, _count: usize) {}
+    fn family_finished(&self) {}
+}
+
+pub struct SilentProgress;
+
+impl ProgressObserver for SilentProgress {}
+
 type EdgeTriple = (NodeIndex, NodeIndex, GraphEdge);
 
 /// A chain reference that failed resolution in Phase 2, stored for
@@ -169,25 +195,6 @@ fn add_edge_if_missing(
 
 /// Per-file inferred return types keyed by the graph node indices of definitions.
 type InferredReturns = (Vec<petgraph::graph::NodeIndex>, Vec<(u32, String)>);
-
-fn progress_bar(len: u64, prefix: &str) -> ProgressBar {
-    let pb = ProgressBar::new(len);
-    pb.set_style(
-        ProgressStyle::with_template("{prefix} [{bar:40}] {pos}/{len} ({per_sec}, {eta})")
-            .unwrap()
-            .progress_chars("█▓░"),
-    );
-    pb.set_prefix(prefix.to_string());
-    pb
-}
-
-fn spinner(msg: &str) -> ProgressBar {
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
-    pb.set_message(msg.to_string());
-    pb.enable_steady_tick(std::time::Duration::from_millis(100));
-    pb
-}
 
 fn panic_payload_message(payload: &Box<dyn Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&'static str>() {
@@ -566,10 +573,7 @@ pub struct PipelineConfig {
     /// emit parsed nodes and relationships while a separate structural graph
     /// owns repository file/directory rows.
     pub emit_file_inventory_graph: bool,
-    /// Called after each language family finishes processing. The indexer
-    /// uses this to send NATS progress heartbeats so the message is not
-    /// redelivered during long pipeline runs.
-    pub on_progress: Option<Arc<dyn Fn() + Send + Sync>>,
+    pub progress: Arc<dyn ProgressObserver>,
     /// Called once per successfully-parsed file with its per-phase CPU time, so
     /// the consumer can record a distribution. Fires from parallel workers.
     pub on_phase_cpu: Option<PhaseCpuObserver>,
@@ -591,7 +595,7 @@ impl Default for PipelineConfig {
             per_file_ssa_timeout: None,
             cross_file_resolve_timeout: None,
             emit_file_inventory_graph: false,
-            on_progress: None,
+            progress: Arc::new(SilentProgress),
             on_phase_cpu: None,
         }
     }
@@ -755,20 +759,21 @@ impl Pipeline {
         //    parser selection; the family determines which files share a
         //    CodeGraph for cross-language resolution.
         let t_discovery = std::time::Instant::now();
-        let pb_discover = spinner("Preparing file inventory...");
         let (files_by_family, parsed_file_languages) =
             group_parseable_inventory(&file_inventory, config.max_files);
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.total_bytes();
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
-        let lang_summary: Vec<String> = files_by_family
+        let files_per_family: Vec<FamilyFileCount> = files_by_family
             .iter()
-            .map(|(fam, f)| format!("{fam}: {}", f.len()))
+            .map(|(family, files)| FamilyFileCount {
+                family: family.to_string(),
+                files: files.len(),
+            })
             .collect();
-        pb_discover.finish_with_message(format!(
-            "Found {total_files} files, {parsable_files} parseable ({})",
-            lang_summary.join(", ")
-        ));
+        config
+            .progress
+            .discovery_finished(total_files, parsable_files, &files_per_family);
 
         let ctx = Arc::new(PipelineContext {
             config,
@@ -969,9 +974,7 @@ impl Pipeline {
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
                         }
                     }
-                    if let Some(cb) = &ctx.config.on_progress {
-                        cb();
-                    }
+                    ctx.config.progress.family_finished();
                     sem_tx.send(()).ok();
                 });
             }
@@ -1175,7 +1178,7 @@ impl FamilyPipeline {
                 })
                 .collect();
 
-        let pb = progress_bar(file_count as u64, "parse + graph");
+        let progress = ctx.config.progress.as_ref();
 
         use crate::v2::dsl::engine::ParseFullResult;
         use crate::v2::error::{FaultedFile, FileFault, FileSkip, SkippedFile};
@@ -1211,7 +1214,7 @@ impl FamilyPipeline {
             .enumerate()
             .map(|(idx, f)| {
                 if ctx.is_cancelled() {
-                    pb.inc(1);
+                    progress.files_advanced(ProgressPhase::Parse, 1);
                     return None;
                 }
                 let lctx = &member_ctxs[&f.language];
@@ -1220,7 +1223,7 @@ impl FamilyPipeline {
                     && let Ok(metadata) = std::fs::metadata(&abs_path)
                     && metadata.len() > limit
                 {
-                    pb.inc(1);
+                    progress.files_advanced(ProgressPhase::Parse, 1);
                     return Some(ParseOutcome::Skip(SkippedFile {
                         path: f.path.clone(),
                         kind: FileSkip::ParserOversize,
@@ -1236,7 +1239,7 @@ impl FamilyPipeline {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::debug!(path = f.path, error = %e, "failed to read file");
-                        pb.inc(1);
+                        progress.files_advanced(ProgressPhase::Parse, 1);
                         return Some(ParseOutcome::Err(FaultedFile {
                             path: f.path.to_string(),
                             kind: FileFault::FileRead,
@@ -1267,7 +1270,7 @@ impl FamilyPipeline {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
                         tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
-                        pb.inc(1);
+                        progress.files_advanced(ProgressPhase::Parse, 1);
                         return Some(ParseOutcome::Skip(SkippedFile {
                             path: f.path.clone(),
                             kind: FileSkip::Timeout(phase),
@@ -1276,7 +1279,7 @@ impl FamilyPipeline {
                     }
                     Err(crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err)) => {
                         tracing::debug!(path = f.path, error = %err, "failed to parse file");
-                        pb.inc(1);
+                        progress.files_advanced(ProgressPhase::Parse, 1);
                         return Some(ParseOutcome::Err(FaultedFile {
                             path: f.path.to_string(),
                             kind: FileFault::InvalidUtf8,
@@ -1302,7 +1305,7 @@ impl FamilyPipeline {
                     .unwrap_or("")
                     .to_string();
                 let file_size = source.len() as u64;
-                pb.inc(1);
+                progress.files_advanced(ProgressPhase::Parse, 1);
                 Some(ParseOutcome::Ok(Box::new(ParsedFile {
                     path_idx: idx,
                     language: f.language,
@@ -1404,10 +1407,12 @@ impl FamilyPipeline {
             });
         }
 
-        pb.finish_with_message(format!(
-            "{total_defs} defs, {total_imports} imports in {:.2?}",
-            t0.elapsed()
-        ));
+        tracing::debug!(
+            total_defs,
+            total_imports,
+            elapsed = ?t0.elapsed(),
+            "parse phase finished"
+        );
 
         graph.finalize(tracer);
         graph.drop_construction_indexes();
@@ -1453,7 +1458,6 @@ impl FamilyPipeline {
             .map(|build| Arc::new(build(&graph, expected_sep)));
 
         let t2 = std::time::Instant::now();
-        let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
 
         type Phase2Result = (
@@ -1469,11 +1473,11 @@ impl FamilyPipeline {
             .enumerate()
             .map(|(file_idx, fwr_opt)| -> Phase2Result {
                 if ctx.is_cancelled() {
-                    pb2.inc(1);
+                    progress.files_advanced(ProgressPhase::Resolve, 1);
                     return Default::default();
                 }
                 let Some(fwr) = fwr_opt else {
-                    pb2.inc(1);
+                    progress.files_advanced(ProgressPhase::Resolve, 1);
                     return Default::default();
                 };
 
@@ -1550,7 +1554,7 @@ impl FamilyPipeline {
                 edges.shrink_to_fit();
                 failed_chains.shrink_to_fit();
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
-                pb2.inc(1);
+                progress.files_advanced(ProgressPhase::Resolve, 1);
                 (
                     edges,
                     fwr.inferred_returns,
@@ -1561,11 +1565,11 @@ impl FamilyPipeline {
             })
             .collect();
 
-        pb2.finish_with_message(format!(
-            "{} edges in {:.2?}",
-            total_edges.load(std::sync::atomic::Ordering::Relaxed),
-            t2.elapsed()
-        ));
+        tracing::debug!(
+            total_edges = total_edges.load(std::sync::atomic::Ordering::Relaxed),
+            elapsed = ?t2.elapsed(),
+            "resolve phase finished"
+        );
 
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
         let mut all_failed: Vec<(FileInfo, Language, Vec<FailedChain>)> = Vec::new();
@@ -2415,5 +2419,75 @@ namespace MyApp {
         assert_eq!(faults.len(), 1);
         assert_eq!(faults[0].kind, crate::v2::error::FileFault::OxcPanic);
         assert_eq!(faults[0].path, "src/bad.js");
+    }
+
+    #[derive(Default)]
+    struct RecordingProgress {
+        discoveries: std::sync::Mutex<Vec<(usize, usize)>>,
+        parsed: AtomicUsize,
+        resolved: AtomicUsize,
+    }
+
+    impl ProgressObserver for RecordingProgress {
+        fn discovery_finished(
+            &self,
+            total_files: usize,
+            parseable_files: usize,
+            _files_per_family: &[FamilyFileCount],
+        ) {
+            self.discoveries
+                .lock()
+                .unwrap()
+                .push((total_files, parseable_files));
+        }
+
+        fn files_advanced(&self, phase: ProgressPhase, count: usize) {
+            match phase {
+                ProgressPhase::Parse => self.parsed.fetch_add(count, Ordering::Relaxed),
+                ProgressPhase::Resolve => self.resolved.fetch_add(count, Ordering::Relaxed),
+            };
+        }
+    }
+
+    #[test]
+    fn progress_observer_sees_the_inventory_once_and_each_parseable_file_per_phase() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let sources = [
+            ("a.py", "def a():\n    pass\n"),
+            ("b.py", "from a import a\n\ndef b():\n    a()\n"),
+            ("c.rs", "pub fn c() {}\n"),
+            ("d.js", "export function d() {\n    return 1;\n}\n"),
+            ("notes.txt", "not code\n"),
+        ];
+        for (name, content) in sources {
+            std::fs::write(root.join(name), content).unwrap();
+        }
+        let inventory = sources
+            .iter()
+            .map(|(name, content)| FileInventoryEntry {
+                path: name.to_string(),
+                size: content.len() as u64,
+                decision: Decision::Parse,
+                label: Default::default(),
+            })
+            .collect();
+        let progress = Arc::new(RecordingProgress::default());
+
+        Pipeline::run_with_tracer(
+            root,
+            Arc::new(FileInventory::new(inventory)),
+            PipelineConfig {
+                progress: progress.clone(),
+                ..Default::default()
+            },
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
+        );
+
+        assert_eq!(*progress.discoveries.lock().unwrap(), vec![(5, 4)]);
+        assert_eq!(progress.parsed.load(Ordering::Relaxed), 4);
+        assert_eq!(progress.resolved.load(Ordering::Relaxed), 4);
     }
 }

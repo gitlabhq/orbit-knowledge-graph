@@ -160,6 +160,7 @@ pub enum ImportedName {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsImportedBinding {
+    pub import_byte_offset: u32,
     pub specifier: String,
     pub imported_name: ImportedName,
     pub fallback_imported_name: ImportedName,

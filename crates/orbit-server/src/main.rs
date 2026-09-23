@@ -2,6 +2,7 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -17,13 +18,14 @@ use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::content;
 use orbit_server::grpc::GrpcServer;
 use orbit_server::health_check as health_check_mode;
+use orbit_server::probes;
 use orbit_server::shutdown;
 use orbit_server::webserver::Server as HttpServer;
 use orbit_server_config::AppConfig;
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -60,10 +62,23 @@ async fn main() -> anyhow::Result<()> {
     if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
         builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
     }
+    let internal_tls = orbit_server::tls::load_internal(&config.tls)?;
+    let probe_bind_address = config.probe_server_bind_address()?;
+    builder = builder.health_bind(probe_bind_address);
     if config.metrics.prometheus.enabled {
-        builder = builder.prometheus_metrics_port(config.metrics.prometheus.port);
+        builder = builder.prometheus_metrics(probe_bind_address);
     }
+    let active_schema = Arc::new(ActiveSchema::default());
+    let serving = Arc::new(AtomicBool::new(false));
+    for (name, check) in probes::readiness_checks(args.mode, &active_schema, &serving) {
+        builder = builder.add_readiness_check(name, check);
+    }
+    builder = builder.probe_tls(internal_tls.clone());
     let _guard = builder.init().expect("labkit init");
+
+    if config.metrics.prometheus.port.is_some() {
+        warn!("metrics.prometheus.port is deprecated, use probe_server.bind_address");
+    }
 
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     ontology::constants::validate_ontology_constants(&ontology);
@@ -86,20 +101,22 @@ async fn main() -> anyhow::Result<()> {
             schema::version::init(&graph).await?;
 
             let dispatcher_config = DispatcherConfig::from(&config);
-            indexer::run_dispatcher(&dispatcher_config, &archive, shutdown)
+            indexer::run_dispatcher(&dispatcher_config, &archive, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
-        Mode::HealthCheck => health_check_mode::run(&config).await.map_err(Into::into),
+        Mode::HealthCheck => health_check_mode::run(&config, internal_tls)
+            .await
+            .map_err(Into::into),
         Mode::Indexer => {
             let indexer_config = IndexerConfig::from(&config);
-            indexer::run(&indexer_config, ontology, shutdown)
+            indexer::run(&indexer_config, ontology, serving, shutdown)
                 .await
                 .map_err(Into::into)
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, shutdown.clone()).await
+            run_webserver(&config, active_schema, serving, shutdown.clone()).await
         }
     };
 
@@ -108,7 +125,12 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyhow::Result<()> {
+async fn run_webserver(
+    config: &AppConfig,
+    active_schema: Arc<ActiveSchema>,
+    serving: Arc<AtomicBool>,
+    shutdown: CancellationToken,
+) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
         config.jwt_clock_skew_secs,
@@ -150,7 +172,8 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
         include_bytes!(env!("ONTOLOGY_ARCHIVE_PATH")),
     )?;
     let catalog = orbit_migrations::catalog::OntologyCatalog::open(nats.clone()).await?;
-    let active_schema = ActiveSchema::spawn(
+    ActiveSchema::spawn(
+        &active_schema,
         Arc::new(config.graph.build_client()),
         archive,
         catalog,
@@ -160,11 +183,12 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
 
     let http_server = HttpServer::bind(config.bind_address, active_schema.clone()).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
+    let grpc_listener = tokio::net::TcpListener::bind(config.grpc_bind_address).await?;
+    info!(addr = %config.grpc_bind_address, "gRPC server bound");
 
     let tls_config = orbit_server::tls::load_tls_config(&config.tls).await?;
 
     let mut grpc_server = GrpcServer::new(
-        config.grpc_bind_address,
         validator,
         active_schema,
         &config.graph,
@@ -252,10 +276,11 @@ async fn run_webserver(config: &AppConfig, shutdown: CancellationToken) -> anyho
     }
 
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
+    serving.store(true, Ordering::Relaxed);
 
     tokio::select! {
         res = http_server.run() => res.map_err(Into::into),
-        res = grpc_server.run() => res.map_err(Into::into),
+        res = grpc_server.run(grpc_listener) => res.map_err(Into::into),
         _ = shutdown.cancelled() => Ok(()),
     }
 }

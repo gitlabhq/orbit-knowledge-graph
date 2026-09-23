@@ -9,6 +9,7 @@ pub trait AnalyticsTracker: Send + Sync {
     fn track(&self, event: StructuredEvent);
 }
 
+#[derive(Clone)]
 pub struct SnowplowAnalyticsTracker {
     tracker: Arc<labkit_events::Tracker>,
 }

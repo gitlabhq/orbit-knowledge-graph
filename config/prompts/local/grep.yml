@@ -1,10 +1,9 @@
 name: grep
-version: 1.5.0
+version: 1.12.0
 short: Search local definition names, paths, and bodies
 description: >-
-  Search local definition names, paths, and bodies.
-
-
-  Returns ranked `Definition:<id>` references and source for the top three.
-  Use `--path` or `--kind` to narrow results, then pass a reference to context
-  for its body and relationships.
+  Search local definition names, paths, and bodies with one query: quote `a|b|c` for OR
+  alternatives, each requiring all searchable terms.
+  Single tokens must also match literally, ignoring case; this is FTS, not regex.
+  Results rank exact names before name/path hits and body mentions; pass
+  `Definition:<id>` or `path:start-end` to `context` for source and relationships.

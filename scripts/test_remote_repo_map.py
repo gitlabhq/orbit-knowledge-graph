@@ -5,18 +5,21 @@ These cover the partition / hop-bound logic without touching the network: the
 helpers are exercised against canned `nodes`/`edges` payloads shaped like a
 `glab orbit query --response-format raw` response.
 
-Run with: python3 -m unittest skills.orbit.scripts.test_remote_repo_map
-      or:  python3 skills/orbit/scripts/test_remote_repo_map.py
+Run with: python3 scripts/test_remote_repo_map.py
 """
 from __future__ import annotations
 
 import importlib.util
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
 
+sys.dont_write_bytecode = True
+
 _SPEC = importlib.util.spec_from_file_location(
-    "remote_repo_map", Path(__file__).with_name("remote_repo_map.py")
+    "remote_repo_map",
+    Path(__file__).resolve().parent.parent / "skills/orbit/scripts/remote_repo_map.py",
 )
 rrm = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(rrm)

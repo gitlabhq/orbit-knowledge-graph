@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
+use orbit_analytics::SnowplowAnalyticsTracker;
 use rmcp::{
     ErrorData, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -11,8 +12,9 @@ use rmcp::{
 };
 use serde::Deserialize;
 use std::path::PathBuf;
+use std::time::Instant;
 
-use crate::{descriptions, index_collect, sql, sql_format};
+use crate::{descriptions, sql, sql_format, telemetry};
 
 const MAX_RESULT_ARROW_BYTES: usize = 1_000_000;
 
@@ -53,6 +55,8 @@ pub struct IndexArgs {
 #[derive(Clone)]
 pub struct OrbitLocalServer {
     tool_router: ToolRouter<Self>,
+    tracker: Option<SnowplowAnalyticsTracker>,
+    coding_agent: Option<String>,
 }
 
 async fn blocking_tool<F>(f: F) -> Result<CallToolResult, ErrorData>
@@ -70,13 +74,41 @@ where
 
 #[tool_router]
 impl OrbitLocalServer {
-    pub fn new() -> Self {
+    pub fn new(tracker: Option<SnowplowAnalyticsTracker>, coding_agent: Option<String>) -> Self {
         let mut tool_router = ToolRouter::new();
         for mut route in Self::tool_router() {
             route.attr.description = Some(descriptions::long(route.name()).into());
             tool_router.add_route(route);
         }
-        Self { tool_router }
+        Self {
+            tool_router,
+            tracker,
+            coding_agent,
+        }
+    }
+
+    async fn timed_tool<F>(&self, tool_name: &str, f: F) -> Result<CallToolResult, ErrorData>
+    where
+        F: FnOnce() -> Result<String> + Send + 'static,
+    {
+        let started = Instant::now();
+        let result = blocking_tool(f).await;
+        if let Some(tracker) = &self.tracker {
+            let success = result
+                .as_ref()
+                .is_ok_and(|call| call.is_error != Some(true));
+            telemetry::emit_tool_call_event(
+                tracker,
+                tool_name,
+                success,
+                started.elapsed(),
+                self.coding_agent.as_deref(),
+            );
+            // The client may kill the server without closing stdin, so each
+            // event is sent now rather than at shutdown.
+            tracker.flush();
+        }
+        result
     }
 
     #[tool]
@@ -84,7 +116,7 @@ impl OrbitLocalServer {
         &self,
         Parameters(args): Parameters<RunSqlArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        blocking_tool(move || run_sql_impl(args)).await
+        self.timed_tool("run_sql", move || run_sql_impl(args)).await
     }
 
     #[tool]
@@ -92,7 +124,7 @@ impl OrbitLocalServer {
         &self,
         Parameters(args): Parameters<GetGraphSchemaArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        blocking_tool(move || {
+        self.timed_tool("get_graph_schema", move || {
             batches_to_json(&sql::query(
                 &sql::open_graph(args.db)?,
                 &sql::schema_introspection_sql(),
@@ -106,17 +138,12 @@ impl OrbitLocalServer {
         &self,
         Parameters(args): Parameters<IndexArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        blocking_tool(move || {
-            let outputs = index_collect(args.path, args.threads, args.stats, args.db)?;
+        self.timed_tool("index", move || {
+            let outputs =
+                crate::commands::index::collect(args.path, args.threads, args.stats, args.db)?;
             serde_json::to_string_pretty(&outputs).context("failed to serialise index output")
         })
         .await
-    }
-}
-
-impl Default for OrbitLocalServer {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -170,8 +197,11 @@ fn run_sql_impl(args: RunSqlArgs) -> Result<String> {
     Ok(format!("[{}]", results.join(",")))
 }
 
-pub async fn serve() -> Result<()> {
-    let service = OrbitLocalServer::new()
+pub async fn serve(
+    tracker: Option<SnowplowAnalyticsTracker>,
+    coding_agent: Option<String>,
+) -> Result<()> {
+    let service = OrbitLocalServer::new(tracker, coding_agent)
         .serve(stdio())
         .await
         .context("failed to start MCP stdio server")?;
@@ -188,7 +218,7 @@ mod tests {
 
     #[test]
     fn tools_carry_shared_descriptions() {
-        let tools = OrbitLocalServer::new().tool_router.list_all();
+        let tools = OrbitLocalServer::new(None, None).tool_router.list_all();
         assert_eq!(tools.len(), 3);
         for tool in &tools {
             assert_eq!(

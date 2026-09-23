@@ -44,15 +44,15 @@ The remote manifest uses line-oriented HTML placeholders to show where the local
 
 ### Named Queries
 
-Named queries are server-defined query templates for preset consumers (the Orbit dashboard). Clients invoke a stable name instead of authoring a Query DSL string. That string can drift from the server's grammar and ontology. Templates live as YAML under `config/named_queries/`. They are validated against `config/schemas/named_query.schema.json` and compiled against the ontology by `orbit-server`'s build script. A template that no longer matches the DSL or ontology fails the build.
+Named queries are server-defined queries for consumers such as the Orbit dashboard. Clients invoke a stable name instead of authoring query text. The 12 YAML definitions under `config/named_queries/` carry JSON Query DSL and GQL spellings of the same graph shape.
 
-At runtime the same files are embedded into the binary (via the `named-queries` crate). A client executes one by sending `ExecuteQuery` with `query_type = QUERY_TYPE_NAMED`. In the `query` field, it passes a JSON envelope `{"name": ..., "parameters": {...}}` (`parameters` may be omitted for templates that declare none). The server renders two placeholder kinds and runs the result through the standard pipeline. Quota, security context, redaction, and response formatting behave exactly as for client-authored queries:
+The `named-queries` crate validates and embeds both spellings. JSON templates use `$binding` for trusted caller values and `$param` for client values. GQL templates use `binding`, `param`, `identifier`, and `integer` lookup functions. Each parameter has one JSON Schema and one example shared by both spellings.
 
-- `{ "$binding": ... }`: identity values resolved from trusted request context (currently only `current_user_id`, taken from the caller's JWT claims). Never client-supplied.
-- `{ "$param": ... }`: selection values supplied by the client (e.g. the entity and ids of a node clicked in the graph explorer). They are validated against a JSON Schema each template declares per parameter. Authorization never depends on these: the compiler security pass and redaction filter results regardless of which ids the client asks for. Each parameter also declares an `example` value used to compile the template at build time.
+Templates are trusted, checked-in code. The build compiles both rendered examples against the ontology. Compiler parity tests require both spellings to produce the same SQL, parameters, and query type. Grammar, ontology, or parity drift fails before deployment.
 
-Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. Clients discover the catalog through the `ListNamedQueries` RPC (surfaced as `GET /api/v4/orbit/templates`). It returns each parameterless query's name, description, and DSL rendered for the caller with bindings resolved from the JWT claims. So the returned DSL is executable as-is and can populate a query editor.
-Queries that declare parameters are executed by name only and do not appear in the catalog. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side. Parameters carry only values. A string parameter may also fill an object key, written `"$param:<name>": ...`, so a template can take the property name to filter on. This preserves the drift-by-construction guarantee.
+Unknown names, missing values, and invalid parameters return client-safe errors. A JSON `"$param:name"` key lets a string parameter select a property. The catalog lists parameterless queries with caller bindings resolved, so clients can execute the returned text as-is.
+
+Runtime callers can keep using the existing JSON methods. Language-aware methods let the query transport select a spelling without changing the named-query envelope or caller bindings.
 
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails. Three factors decide it: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 

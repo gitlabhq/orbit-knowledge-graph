@@ -11,6 +11,7 @@ set -euo pipefail
 # Extra arguments are forwarded to cargo nextest (e.g. --profile ci).
 
 args=(cargo nextest run --workspace \
+  --features orbit-prompts/skill-validation \
   --exclude integration-tests \
   --exclude integration-tests-codegraph \
   --exclude orbit-fuzz \

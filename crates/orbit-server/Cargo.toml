@@ -40,6 +40,7 @@ tower = { workspace = true }
 opentelemetry = { workspace = true }
 prost = { workspace = true }
 reqwest = { workspace = true }
+rust-embed = { workspace = true }
 rustls = { workspace = true, features = ["fips"] }
 aws-lc-rs = { workspace = true, features = ["fips"] }
 query-engine = { path = "../query-engine" }
@@ -52,6 +53,7 @@ serde = { workspace = true }
 semver = { workspace = true }
 strum = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util.workspace = true

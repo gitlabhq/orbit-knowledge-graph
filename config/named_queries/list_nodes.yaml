@@ -2,13 +2,19 @@ name: list_nodes
 description: A sample of nodes of one entity type
 parameters:
   entity:
-    schema: { type: string }
+    schema: { type: string, maxLength: 64 }
     example: MergeRequest
 query:
-  query_type: traversal
-  nodes:
-    - id: n
-      entity: { $param: entity }
-      filters:
-        id: { is_not_null: true }
-  limit: 50
+  json:
+    query_type: traversal
+    nodes:
+      - id: n
+        entity: { $param: entity }
+        filters:
+          id: { is_not_null: true }
+    limit: 50
+  gql: |
+    MATCH (n:{{ identifier("entity") }})
+    WHERE n.id IS NOT NULL
+    RETURN n
+    LIMIT 50

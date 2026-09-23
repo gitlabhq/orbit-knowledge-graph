@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::v2::error::AnalyzerError;
 use crate::v2::pipeline::{
     BatchTx, FileInput, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext,
-    PipelineError,
+    PipelineError, ProgressPhase,
 };
 use crate::v2::sentinel;
 use rustc_hash::FxHashMap;
@@ -35,8 +35,15 @@ impl LanguagePipeline for JsPipeline {
             .and_then(sentinel::spawn_sentinel);
         let sentinel_handle = sentinel.as_ref().map(|(h, _)| h);
 
-        let (analyzed_files, errors) =
-            analyze_files(files, root_path, sentinel_handle, &ctx.config.cancel);
+        let progress = ctx.config.progress.as_ref();
+        let (analyzed_files, errors) = analyze_files(
+            files,
+            root_path,
+            sentinel_handle,
+            &ctx.config.cancel,
+            progress,
+        );
+        progress.files_advanced(ProgressPhase::Resolve, errors.len());
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         // Route per-file outcomes to the typed collections regardless of
