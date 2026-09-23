@@ -12,7 +12,7 @@ use orbit_utils::arrow::BatchBuilder;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::dsl::types::Tf;
-use crate::error::Error;
+use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
 use crate::pipeline::State;
@@ -25,22 +25,75 @@ use plan::{
     EdgeSource, EntityColumn, EntityPlan, HeaderSource, IdPart, On, Position, Source, SpanCandidate,
 };
 
-/// Values every row carries and the seed for stable ids; the same envelope
-/// code-graph writes, so both pipelines land in the same tables with the
-/// same ids.
-pub struct Envelope<'a> {
-    pub project_id: i64,
-    pub branch: &'a str,
-    pub commit_sha: &'a str,
+/// A value the caller hands in with every export.
+#[derive(Clone, Copy)]
+pub enum Scalar<'a> {
+    Int(i64),
+    Str(&'a str),
 }
 
-impl Envelope<'_> {
-    fn id(&self, seed: &str, parts: &[&str]) -> i64 {
+impl Scalar<'_> {
+    fn text(&self) -> Cow<'_, str> {
+        match self {
+            Scalar::Int(n) => Cow::Owned(n.to_string()),
+            Scalar::Str(s) => Cow::Borrowed(s),
+        }
+    }
+}
+
+/// Named values every row carries, such as the project and branch being
+/// indexed. `export.yaml` binds them to header columns and picks the ones
+/// that seed row ids, so ids match code-graph's for the same inputs.
+pub struct Envelope<'a> {
+    values: Vec<(&'a str, Scalar<'a>)>,
+}
+
+impl<'a> Envelope<'a> {
+    pub fn new(values: impl IntoIterator<Item = (&'a str, Scalar<'a>)>) -> Self {
+        Self {
+            values: values.into_iter().collect(),
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<Scalar<'a>> {
+        self.values
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| *v)
+    }
+
+    /// Confirms every name the plan refers to was handed in.
+    fn check(&self, plan: &ExportPlan) -> Result<(), Error> {
+        for name in plan.envelope_names() {
+            if self.get(name).is_none() {
+                let given: Vec<&str> = self.values.iter().map(|(n, _)| *n).collect();
+                return Err(LoadError::new(format!(
+                    "export.yaml refers to envelope value '{name}' but the caller gave {given:?}"
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    /// `FxHash` over `[prefix values.., seed, parts..]`, sign bit cleared: the
+    /// same computation as code-graph's `compute_id`, so the same inputs give
+    /// the same id in both pipelines.
+    fn id(&self, plan: &ExportPlan, seed: &str, parts: &[&str]) -> i64 {
+        let prefix: Vec<Cow<str>> = plan
+            .id_prefix
+            .iter()
+            .filter_map(|name| self.get(name))
+            .map(|v| v.text().into_owned().into())
+            .collect();
+        let components: Vec<&str> = prefix
+            .iter()
+            .map(Cow::as_ref)
+            .chain(std::iter::once(seed))
+            .chain(parts.iter().copied())
+            .collect();
         let mut hasher = FxHasher::default();
-        self.project_id.to_string().hash(&mut hasher);
-        self.branch.hash(&mut hasher);
-        seed.hash(&mut hasher);
-        parts.hash(&mut hasher);
+        components.hash(&mut hasher);
         (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
     }
 }
@@ -199,6 +252,7 @@ pub fn export(
     envelope: &Envelope,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     let plan = ExportPlan::load(ontology, lang)?;
+    envelope.check(&plan)?;
     let forest = Forest::new(&state.trees, lang);
     let mut ids: FxHashMap<(u32, u32), (i64, usize)> = FxHashMap::default();
     let mut tables = Vec::new();
@@ -263,18 +317,18 @@ fn write_entity(
                     })
                     .collect();
                 let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
-                let id = envelope.id(&entity.id_seed, &parts);
+                let id = envelope.id(plan, &entity.id_seed, &parts);
                 for column in &plan.header {
-                    match &column.source {
-                        HeaderSource::Id => b.col(&column.name)?.push_int(id)?,
-                        HeaderSource::ProjectId => {
-                            b.col(&column.name)?.push_int(envelope.project_id)?
-                        }
-                        HeaderSource::Branch => b.col(&column.name)?.push_str(envelope.branch)?,
-                        HeaderSource::CommitSha => {
-                            b.col(&column.name)?.push_str(envelope.commit_sha)?
-                        }
-                        HeaderSource::Const(v) => b.col(&column.name)?.push_str(v)?,
+                    let value = match &column.source {
+                        HeaderSource::RowId => Scalar::Int(id),
+                        HeaderSource::Envelope(name) => envelope
+                            .get(name)
+                            .expect("Envelope::check ran before any row was written"),
+                        HeaderSource::Const(v) => Scalar::Str(v),
+                    };
+                    match value {
+                        Scalar::Int(n) => b.col(&column.name)?.push_int(n)?,
+                        Scalar::Str(s) => b.col(&column.name)?.push_str(s)?,
                     }
                 }
                 for column in &entity.columns {
@@ -388,6 +442,17 @@ fn write_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_envelope_value_is_a_named_error() {
+        let ontology = Ontology::load_embedded().expect("embedded ontology");
+        let lang = Lang::new();
+        let plan = ExportPlan::load(&ontology, &lang).expect("export.yaml loads");
+        let envelope = Envelope::new([("project_id", Scalar::Int(1))]);
+        let message = envelope.check(&plan).unwrap_err().to_string();
+        assert!(message.contains("'branch'"), "{message}");
+        assert!(message.contains("[\"project_id\"]"), "{message}");
+    }
 
     #[test]
     fn export_yaml_agrees_with_the_ontology() {

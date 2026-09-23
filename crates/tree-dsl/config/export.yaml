@@ -25,9 +25,15 @@
 # `on: expanded` runs the column on the child produced by `expand:` (the node
 # itself when there was nothing to expand).
 #
-# `id` names the seed and the columns hashed into the row id after project
-# and branch; `span` adds the node's byte range. This mirrors the code-graph
+# The caller hands in an envelope of named values (project id, branch,
+# commit); `header` binds them to the columns every row starts with, and
+# `ids.prefix` says which of them seed every row id. `from: id` is the row's
+# own id. An entity's `id` names its seed and the columns hashed after the
+# prefix; `span` adds the node's byte range. This mirrors the code-graph
 # scheme so both pipelines agree on ids.
+
+ids:
+  prefix: [project_id, branch]
 
 header:
   - { name: id, type: Int64, from: id }

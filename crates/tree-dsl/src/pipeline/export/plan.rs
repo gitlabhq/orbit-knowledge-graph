@@ -18,6 +18,7 @@ static EXPORT_YAML: &str = include_str!("../../../config/export.yaml");
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExportYaml {
+    ids: IdsYaml,
     header: Vec<ColumnYaml>,
     entities: indexmap::IndexMap<String, EntityYaml>,
     edges: EdgesYaml,
@@ -33,6 +34,11 @@ struct EntityYaml {
     expand: Option<String>,
     id: IdYaml,
     columns: Vec<ColumnYaml>,
+}
+
+#[derive(serde::Deserialize)]
+struct IdsYaml {
+    prefix: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -127,13 +133,12 @@ pub(super) struct EntityColumn {
     pub(super) source: Source,
 }
 
-/// Where a header column's value comes from.
+/// Where a header column's value comes from: the row's own id, a named
+/// envelope value, or a literal.
 #[derive(Clone)]
 pub(super) enum HeaderSource {
-    Id,
-    ProjectId,
-    Branch,
-    CommitSha,
+    RowId,
+    Envelope(String),
     Const(String),
 }
 
@@ -187,6 +192,7 @@ pub(super) struct GraphEdge {
 
 /// `export.yaml` checked against the ontology and interned for one `Lang`.
 pub struct ExportPlan {
+    pub(super) id_prefix: Vec<String>,
     pub(super) header: Vec<Column<HeaderSource>>,
     pub(super) entities: Vec<EntityPlan>,
     pub(super) edge_table: String,
@@ -281,6 +287,7 @@ impl ExportPlan {
             .collect::<Result<_, LoadError>>()?;
 
         Ok(Self {
+            id_prefix: yaml.ids.prefix.clone(),
             header,
             entities,
             edge_table: ontology
@@ -474,17 +481,22 @@ fn header_source(column: &ColumnYaml) -> Result<HeaderSource, LoadError> {
         return Ok(HeaderSource::Const(value.clone()));
     }
     Ok(match column.from.as_deref().unwrap_or_default() {
-        "id" => HeaderSource::Id,
-        "project_id" => HeaderSource::ProjectId,
-        "branch" => HeaderSource::Branch,
-        "commit_sha" => HeaderSource::CommitSha,
-        other => {
-            return Err(LoadError::new(format!(
-                "export.yaml: header.{}: unknown source '{other}'",
-                column.name
-            )));
-        }
+        "id" => HeaderSource::RowId,
+        name => HeaderSource::Envelope(name.to_string()),
     })
+}
+
+impl ExportPlan {
+    /// Every envelope name the header and id prefix refer to.
+    pub(super) fn envelope_names(&self) -> impl Iterator<Item = &str> {
+        self.header
+            .iter()
+            .filter_map(|c| match &c.source {
+                HeaderSource::Envelope(name) => Some(name.as_str()),
+                _ => None,
+            })
+            .chain(self.id_prefix.iter().map(String::as_str))
+    }
 }
 
 fn edge_source(column: &ColumnYaml) -> Result<EdgeSource, LoadError> {

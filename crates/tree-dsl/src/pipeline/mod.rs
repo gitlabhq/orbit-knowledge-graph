@@ -10,7 +10,7 @@ use crate::sentinel::{Killed, Limits};
 use crate::tree::{Edge, Tree};
 use crate::treesitter::SupportLang;
 
-pub use export::{Envelope, export};
+pub use export::{Envelope, Scalar, export};
 pub use phases::{display, parse, process_file, remap, resolve};
 pub use types::{Env, State};
 

@@ -4,7 +4,7 @@ use integration_tests_codegraph::assertions::{Severity, TestCase, TestSuite};
 use integration_tests_codegraph::{Failure, create_test_db, run_suite};
 use ontology::Ontology;
 use tree_dsl::treesitter::SupportLang;
-use tree_dsl::{Env, Envelope, State};
+use tree_dsl::{Env, Envelope, Scalar, State};
 
 fn detect_lang(suite: &TestSuite, fixtures: &[(String, String)]) -> SupportLang {
     if let Some(ref p) = suite.pipeline
@@ -74,11 +74,11 @@ fn check(
     tests: &[TestCase],
 ) -> Vec<Failure> {
     tree_dsl::phases::display(env, state).expect("display rules compile");
-    let envelope = Envelope {
-        project_id: 1,
-        branch: "main",
-        commit_sha: "test",
-    };
+    let envelope = Envelope::new([
+        ("project_id", Scalar::Int(1)),
+        ("branch", Scalar::Str("main")),
+        ("commit_sha", Scalar::Str("test")),
+    ]);
     let tables = tree_dsl::export(state, &env.lang, ontology, &envelope).expect("export");
     let db = create_test_db().expect("in-memory DuckDB");
     for (table, batch) in &tables {
