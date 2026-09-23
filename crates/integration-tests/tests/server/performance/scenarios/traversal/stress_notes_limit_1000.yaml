@@ -1,0 +1,10 @@
+description: Stress - wide Note scan at the DSL limit cap (1000)
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000]}],
+      "limit": 1000
+    }
+expect:
+  compile_only: true
