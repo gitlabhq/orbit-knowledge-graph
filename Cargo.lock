@@ -3983,6 +3983,7 @@ dependencies = [
  "code-graph",
  "compiler",
  "comrak",
+ "duckdb-client",
  "flate2",
  "futures",
  "gitaly-protos",

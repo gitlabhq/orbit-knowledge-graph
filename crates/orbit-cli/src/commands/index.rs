@@ -146,9 +146,9 @@ pub(crate) fn run(
     let person_is_watching = std::io::stdout().is_terminal();
     install_tracing(verbose, person_is_watching);
     let mut indexer = LocalIndexer::open(path, threads, show_stats, db)?;
-    indexer.pipeline_config.cancel = cancel_on_ctrl_c();
 
     if !person_is_watching {
+        indexer.pipeline_config.cancel = cancel_on_ctrl_c();
         for output in indexer.index_all(&mut LogReporter)? {
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -156,15 +156,33 @@ pub(crate) fn run(
     }
 
     tui::intro("Orbit index")?;
-    let _control_echo_off = tui::turn_off_control_echo();
-    let mut reporter = TuiReporter::new(indexer.db_path.clone());
-    match indexer.index_all(&mut reporter) {
-        Ok(_) => reporter.close(),
-        Err(error) if tui::is_cancelled(&error) => Err(error),
-        Err(error) => {
+    if let Some(name) = close_screen_on_failure(indexer.index_showing_progress())? {
+        tui::card("Try it", grep_command_line(&name))?;
+    }
+    tui::outro("Done.")
+}
+
+/// Returns a definition name worth a first grep.
+pub(crate) fn index_with_progress(path: PathBuf, db: Option<PathBuf>) -> Result<Option<String>> {
+    LocalIndexer::open(path, 0, false, db)?.index_showing_progress()
+}
+
+pub(crate) fn index_before_first_query(path: PathBuf, db: Option<PathBuf>) -> Result<()> {
+    if !std::io::stderr().is_terminal() {
+        return collect(path, 0, false, db).map(drop);
+    }
+    tui::intro("Orbit index")?;
+    close_screen_on_failure(index_with_progress(path, db))?;
+    tui::outro("Indexed.")
+}
+
+fn close_screen_on_failure<T>(outcome: Result<T>) -> Result<T> {
+    match outcome {
+        Err(error) if !tui::is_cancelled(&error) => {
             tui::outro_cancel(&error)?;
             Err(error)
         }
+        outcome => outcome,
     }
 }
 
@@ -205,7 +223,7 @@ pub(crate) fn grep_command_line(definition_name: &str) -> String {
     format!("{} grep {argument}", spec::launcher())
 }
 
-pub(crate) fn most_referenced_definition(git: &GitInfo, db: Option<PathBuf>) -> Option<String> {
+fn most_referenced_definition(git: &GitInfo, db: Option<PathBuf>) -> Option<String> {
     let batches = crate::sql::open_graph(db)
         .ok()?
         .query_arrow_json(
@@ -276,13 +294,6 @@ impl TuiReporter {
             git: None,
             suggested_grep: None,
         }
-    }
-
-    fn close(&self) -> Result<()> {
-        if let Some(name) = &self.suggested_grep {
-            tui::card("Try it", grep_command_line(name))?;
-        }
-        tui::outro("Done.")
     }
 }
 
@@ -449,6 +460,14 @@ impl LocalIndexer {
             pipeline_config,
             show_stats,
         })
+    }
+
+    fn index_showing_progress(mut self) -> Result<Option<String>> {
+        self.pipeline_config.cancel = cancel_on_ctrl_c();
+        let _control_echo_off = tui::turn_off_control_echo();
+        let mut reporter = TuiReporter::new(self.db_path.clone());
+        self.index_all(&mut reporter)?;
+        Ok(reporter.suggested_grep)
     }
 
     fn index_all(&self, reporter: &mut dyn IndexReporter) -> Result<Vec<IndexOutput>> {

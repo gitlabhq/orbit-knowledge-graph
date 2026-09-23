@@ -476,6 +476,47 @@ fn index_defaults_to_the_current_directory() {
     );
 }
 
+#[test]
+fn first_grep_on_a_new_machine_indexes_the_repository() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(&repo, &[("greeter.py", "def greet_visitor(): pass\n")]);
+
+    let out = orbit_cmd()
+        .args(["grep", "greet_visitor"])
+        .current_dir(&repo)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("greeter.py"), "{stdout}");
+}
+
+#[test]
+fn a_busy_graph_is_reported_in_one_line() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+
+    let _writer = duckdb_client::DuckDbClient::open(&data_dir.path().join("graph.duckdb")).unwrap();
+    let (_, stderr, ok) = run_cmd(&["sql", "--all", "SELECT 1"], data_dir.path());
+
+    assert!(!ok);
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(stderr.starts_with("The local graph is busy:"), "{stderr}");
+    assert!(
+        stderr.contains(&format!("(PID {})", std::process::id())),
+        "{stderr}"
+    );
+}
+
 fn indexed_repo_paths(data_dir: &std::path::Path) -> Vec<String> {
     let (stdout, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir);
     assert!(ok, "orbit list failed: {stderr}");

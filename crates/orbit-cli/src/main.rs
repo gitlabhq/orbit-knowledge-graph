@@ -510,6 +510,12 @@ async fn main() -> Result<()> {
     {
         std::process::exit(130);
     }
+    if let Err(err) = &result
+        && let Some(message) = workspace::describe_graph_lock_conflict(err)
+    {
+        eprintln!("{message}");
+        std::process::exit(1);
+    }
     result
 }
 
