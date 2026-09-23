@@ -564,7 +564,12 @@ mod tests {
             ("version: 1.0.0\n", "", "missing field `version`"),
             (
                 "metadata:\n  audience: developers",
-                "metadata:\n  version: \"1.0.0\"\n  audience: developers",
+                "metadata:\n  audience: [developers]",
+                "metadata key \"audience\" must have a string value",
+            ),
+            (
+                "metadata:\n  audience: developers",
+                "metadata:\n  version: 1.0\n  audience: developers",
                 "version must be a top-level",
             ),
         ] {
@@ -575,9 +580,29 @@ mod tests {
                 manifest.replacen(original, replacement, 1),
             )
             .unwrap();
-            let error = validate(root.path()).unwrap_err();
+            let result = validate(root.path());
+            assert!(result.is_err(), "accepted replacement {replacement:?}");
+            let error = result.unwrap_err();
             assert!(error.contains(expected_error), "{error}");
         }
+    }
+
+    #[test]
+    fn frontmatter_parser_rejects_nested_version_without_top_level() {
+        let manifest = remote_manifest("body\n")
+            .replace("version: 1.0.0\n", "")
+            .replace("metadata:\n", "metadata:\n  version: 1.0\n");
+        let error = parse_skill_frontmatter(&manifest, "orbit").unwrap_err();
+        assert!(error.contains("version must be a top-level"), "{error}");
+    }
+
+    #[test]
+    fn frontmatter_parser_accepts_missing_metadata_block() {
+        let manifest = remote_manifest("body\n").replace("metadata:\n  audience: developers\n", "");
+        assert_eq!(
+            parse_skill_frontmatter(&manifest, "orbit").unwrap().name,
+            "orbit"
+        );
     }
 
     #[test]
