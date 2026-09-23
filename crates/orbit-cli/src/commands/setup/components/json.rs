@@ -5,11 +5,32 @@ use serde_json::{Value, json};
 
 use super::{Report, drop_backup_when_restored, remove_file_and_empty_parents, write_file};
 use crate::commands::setup::Target;
+use crate::commands::setup::spec::{Agent, McpFormat};
 
-pub(super) fn read_object(path: &Path) -> Result<Value> {
+pub(super) fn read_agent_object(path: &Path, agent: Agent) -> Result<Value> {
+    read_object(
+        path,
+        matches!(
+            agent.mcp.as_ref().map(|entry| entry.format),
+            Some(McpFormat::Opencode)
+        ),
+    )
+}
+
+pub(super) fn read_mcp_object(path: &Path, format: McpFormat) -> Result<Value> {
+    read_object(path, matches!(format, McpFormat::Opencode))
+}
+
+fn read_object(path: &Path, jsonc: bool) -> Result<Value> {
     match std::fs::read_to_string(path) {
         Ok(raw) => {
-            let value: Value = serde_json::from_str(&raw).with_context(|| {
+            let value: Value = if jsonc {
+                jsonc_parser::parse_to_serde_value(&raw, &Default::default())
+                    .map_err(anyhow::Error::from)
+            } else {
+                serde_json::from_str(&raw).map_err(anyhow::Error::from)
+            }
+            .with_context(|| {
                 format!(
                     "{} is not valid JSON; fix or remove it and re-run",
                     path.display()

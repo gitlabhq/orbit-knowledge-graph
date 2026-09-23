@@ -53,7 +53,7 @@ fn validate_prompts() {
 fn validate_skills() {
     let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let remote = repository.join("skills/orbit");
-    let local = std::path::Path::new(env!("SKILLS_DIR")).join("orbit-cli");
+    let local = std::path::Path::new(env!("LOCAL_SKILLS_DIR")).join("orbit-cli");
     let commands = repository.join("crates/orbit-cli/src/main.rs");
     println!("cargo:rerun-if-changed={}", remote.display());
     println!("cargo:rerun-if-changed={}", local.display());
