@@ -125,7 +125,9 @@ fn cmd_parse(
         let name = file.as_deref().unwrap_or("<stdin>");
         (name.to_string(), buf)
     } else {
-        let p = file.as_deref().unwrap();
+        let p = file
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("no file given"))?;
         (p.to_string(), std::fs::read_to_string(p)?)
     };
 
@@ -187,7 +189,9 @@ fn cmd_rewrite(
         let name = file.as_deref().unwrap_or("<stdin>");
         (name.to_string(), buf)
     } else {
-        let p = file.as_deref().unwrap();
+        let p = file
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("no file given"))?;
         (p.to_string(), std::fs::read_to_string(p)?)
     };
 
@@ -313,7 +317,11 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
         collect_files(p)
     } else {
         let content = std::fs::read_to_string(p)?;
-        let rel = p.file_name().unwrap().to_string_lossy().to_string();
+        let rel = p
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("{path} has no file name"))?
+            .to_string_lossy()
+            .to_string();
         vec![(rel, content)]
     };
 

@@ -132,39 +132,23 @@ impl Table {
     }
 
     fn row(&mut self, vals: &[Val]) {
+        // export.yaml declares each column's type and the builders were made
+        // from it, so a mismatch here is a broken config, not a data error.
+        fn col<B: 'static>(cols: &mut [Box<dyn ArrayBuilder>], i: usize) -> &mut B {
+            cols[i]
+                .as_any_mut()
+                .downcast_mut::<B>()
+                .expect("column builder matches the type export.yaml declares")
+        }
         for (i, v) in vals.iter().enumerate() {
             match v {
-                Val::I(n) => self.cols[i]
-                    .as_any_mut()
-                    .downcast_mut::<Int64Builder>()
-                    .unwrap()
-                    .append_value(*n),
-                Val::S(s) => self.cols[i]
-                    .as_any_mut()
-                    .downcast_mut::<StringBuilder>()
-                    .unwrap()
-                    .append_value(s),
-                Val::B(b) => self.cols[i]
-                    .as_any_mut()
-                    .downcast_mut::<BooleanBuilder>()
-                    .unwrap()
-                    .append_value(*b),
+                Val::I(n) => col::<Int64Builder>(&mut self.cols, i).append_value(*n),
+                Val::S(s) => col::<StringBuilder>(&mut self.cols, i).append_value(s),
+                Val::B(b) => col::<BooleanBuilder>(&mut self.cols, i).append_value(*b),
                 Val::Null => match self.schema[i].1 {
-                    DataType::Utf8 => self.cols[i]
-                        .as_any_mut()
-                        .downcast_mut::<StringBuilder>()
-                        .unwrap()
-                        .append_null(),
-                    DataType::Int64 => self.cols[i]
-                        .as_any_mut()
-                        .downcast_mut::<Int64Builder>()
-                        .unwrap()
-                        .append_null(),
-                    DataType::Boolean => self.cols[i]
-                        .as_any_mut()
-                        .downcast_mut::<BooleanBuilder>()
-                        .unwrap()
-                        .append_null(),
+                    DataType::Utf8 => col::<StringBuilder>(&mut self.cols, i).append_null(),
+                    DataType::Int64 => col::<Int64Builder>(&mut self.cols, i).append_null(),
+                    DataType::Boolean => col::<BooleanBuilder>(&mut self.cols, i).append_null(),
                     _ => {}
                 },
             }
