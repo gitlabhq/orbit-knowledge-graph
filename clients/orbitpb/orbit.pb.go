@@ -1526,7 +1526,7 @@ func (*ListSkillsRequest) Descriptor() ([]byte, []int) {
 type ListSkillsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Skills        []*SkillSummary        `protobuf:"bytes,1,rep,name=skills,proto3" json:"skills,omitempty"`
-	ServerVersion string                 `protobuf:"bytes,2,opt,name=server_version,json=serverVersion,proto3" json:"server_version,omitempty"` // deployment provenance, not skill identity
+	ServerVersion string                 `protobuf:"bytes,2,opt,name=server_version,json=serverVersion,proto3" json:"server_version,omitempty"` // Not part of skill identity.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1575,7 +1575,6 @@ func (x *ListSkillsResponse) GetServerVersion() string {
 	return ""
 }
 
-// Identity and discovery metadata for an embedded skill.
 type SkillSummary struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -1697,7 +1696,6 @@ func (x *GetSkillRequest) GetMetadataOnly() bool {
 	return false
 }
 
-// Complete identity, deployment provenance, and optionally the files for one skill.
 type GetSkillResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`

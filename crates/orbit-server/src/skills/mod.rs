@@ -1,11 +1,5 @@
-//! Catalog of skills embedded in the deployed server.
-//!
-//! A skill is identified by its frontmatter `name` and top-level `version`.
-//! The merge request check requires a bump when its tree changes, but concurrent
-//! identical bumps or the check's explicit skip can still reuse a version for
-//! different content. Each file carries a SHA-256 digest for verification.
-//! Skills are passive artifacts rather than invokable capabilities, so this
-//! catalog intentionally remains outside the agent command registry.
+//! Skills stay outside the agent command registry because they are passive artifacts.
+//! Version is not a content hash: concurrent bumps or an explicit skip can reuse it.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -19,8 +13,6 @@ const SKILL_NAME: &str = "orbit";
 const MANIFEST: &str = "SKILL.md";
 
 #[derive(Embed)]
-// Serve skills/orbit byte-for-byte so this tree matches the artifact installed by
-// `glab skills install orbit`.
 #[folder = "$SKILLS_DIR/orbit"]
 struct SkillAssets;
 
@@ -73,7 +65,6 @@ struct SkillCatalog {
 impl SkillCatalog {
     fn load_embedded() -> Result<Self, String> {
         let mut files = Vec::new();
-        // build.rs rejects paths that are not normalized and relative before rust-embed runs.
         for path in SkillAssets::iter() {
             let asset = SkillAssets::get(&path)
                 .ok_or_else(|| format!("embedded skill file {path:?} is unreadable"))?;
@@ -91,7 +82,6 @@ impl SkillCatalog {
             .iter()
             .find(|file| file.path == MANIFEST)
             .ok_or_else(|| format!("embedded {SKILL_NAME} skill is missing {MANIFEST}"))?;
-        // Keep runtime validation as defense in depth against embedding drift.
         let frontmatter = orbit_prompts::parse_skill_frontmatter(&manifest.content, SKILL_NAME)
             .map_err(|error| format!("embedded {error}"))?;
 

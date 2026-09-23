@@ -238,11 +238,10 @@ pub struct ListSkillsRequest {}
 pub struct ListSkillsResponse {
     #[prost(message, repeated, tag = "1")]
     pub skills: ::prost::alloc::vec::Vec<SkillSummary>,
-    /// deployment provenance, not skill identity
+    /// Not part of skill identity.
     #[prost(string, tag = "2")]
     pub server_version: ::prost::alloc::string::String,
 }
-/// Identity and discovery metadata for an embedded skill.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SkillSummary {
     #[prost(string, tag = "1")]
@@ -263,7 +262,6 @@ pub struct GetSkillRequest {
     #[prost(bool, tag = "2")]
     pub metadata_only: bool,
 }
-/// Complete identity, deployment provenance, and optionally the files for one skill.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetSkillResponse {
     #[prost(string, tag = "1")]
