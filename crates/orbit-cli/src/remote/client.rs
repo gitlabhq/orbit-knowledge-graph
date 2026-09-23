@@ -44,9 +44,7 @@ impl OrbitClient {
         Self::new(endpoint)
     }
 
-    /// Skills intentionally use only the complete tuple exported by glab.
-    /// Missing or partial tuples are a silent local-only mode and must not
-    /// invoke the credential helper.
+    /// Missing or partial glab tuples must not invoke the credential helper.
     pub(crate) fn from_skill_env() -> Result<Option<Self>, RemoteError> {
         let Some(endpoint) = resolve_skill_endpoint(|key| std::env::var(key).ok()) else {
             return Ok(None);
