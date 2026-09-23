@@ -1381,6 +1381,9 @@
         "collector_url": {
           "type": "string"
         },
+        "auth_mode": {
+          "$ref": "#/$defs/BillingAuthMode"
+        },
         "quota": {
           "$ref": "#/$defs/QuotaConfig"
         }
@@ -1389,7 +1392,22 @@
       "required": [
         "enabled",
         "collector_url",
+        "auth_mode",
         "quota"
+      ]
+    },
+    "BillingAuthMode": {
+      "oneOf": [
+        {
+          "description": "GCP workload-identity OIDC. Only works on GitLab.com (SaaS).",
+          "type": "string",
+          "const": "oidc"
+        },
+        {
+          "description": "Cloud Connector instance token, pulled from Rails and cached in memory.\nUsed on Self-Managed / Dedicated.",
+          "type": "string",
+          "const": "cloud_connector"
+        }
       ]
     },
     "QuotaConfig": {
