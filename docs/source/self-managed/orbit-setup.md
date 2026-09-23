@@ -356,7 +356,7 @@ indexing, because both pass long before the first index finishes.
 
 ## Related topics
 
-- [What GitLab Orbit indexes](../remote/indexing.md)
+- [What GitLab Orbit indexes](../indexed-data.md)
 - [Schema reference](../remote/schema.md)
 - [Cookbook](../remote/cookbook.md)
 - [Query language](../remote/queries/_index.md)
