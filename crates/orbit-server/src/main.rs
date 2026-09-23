@@ -2,7 +2,7 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -116,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Mode::Webserver => {
             config.schema.validate()?;
-            run_webserver(&config, active_schema, shutdown.clone()).await
+            run_webserver(&config, active_schema, serving, shutdown.clone()).await
         }
     };
 
@@ -128,6 +128,7 @@ async fn main() -> anyhow::Result<()> {
 async fn run_webserver(
     config: &AppConfig,
     active_schema: Arc<ActiveSchema>,
+    serving: Arc<AtomicBool>,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
@@ -182,11 +183,12 @@ async fn run_webserver(
 
     let http_server = HttpServer::bind(config.bind_address, active_schema.clone()).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
+    let grpc_listener = tokio::net::TcpListener::bind(config.grpc_bind_address).await?;
+    info!(addr = %config.grpc_bind_address, "gRPC server bound");
 
     let tls_config = orbit_server::tls::load_tls_config(&config.tls).await?;
 
     let mut grpc_server = GrpcServer::new(
-        config.grpc_bind_address,
         validator,
         active_schema,
         &config.graph,
@@ -274,10 +276,11 @@ async fn run_webserver(
     }
 
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
+    serving.store(true, Ordering::Relaxed);
 
     tokio::select! {
         res = http_server.run() => res.map_err(Into::into),
-        res = grpc_server.run() => res.map_err(Into::into),
+        res = grpc_server.run(grpc_listener) => res.map_err(Into::into),
         _ = shutdown.cancelled() => Ok(()),
     }
 }
