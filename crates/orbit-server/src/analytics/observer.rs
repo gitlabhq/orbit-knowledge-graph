@@ -185,6 +185,7 @@ mod tests {
             "33".to_string(),
         );
         obs.set_compiled(&CompiledQueryContext {
+            plan: String::new(),
             query_type: query_engine::compiler::input::QueryType::Traversal,
             base: query_engine::compiler::passes::codegen::ParameterizedQuery {
                 sql: String::new(),

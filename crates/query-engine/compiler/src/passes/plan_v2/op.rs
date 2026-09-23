@@ -111,6 +111,12 @@ impl PhysOp {
                 p => vec![p],
             })
             .collect();
+        let predicates = predicates.into_iter().fold(Vec::new(), |mut unique, predicate| {
+            if !unique.contains(&predicate) {
+                unique.push(predicate);
+            }
+            unique
+        });
         if predicates.is_empty() {
             return self;
         }
@@ -120,7 +126,11 @@ impl PhysOp {
             predicates: mut existing,
         } = self
         {
-            existing.extend(predicates);
+            for predicate in predicates {
+                if !existing.contains(&predicate) {
+                    existing.push(predicate);
+                }
+            }
             return PhysOp::Filter {
                 input,
                 predicates: existing,
@@ -255,7 +265,7 @@ impl PhysOp {
         }
     }
 
-    pub fn map_children(self, f: &mut dyn FnMut(PhysOp) -> PhysOp) -> PhysOp {
+    pub fn map_children(self, mut f: &mut dyn FnMut(PhysOp) -> PhysOp) -> PhysOp {
         match self {
             PhysOp::Scan { .. } => self,
             PhysOp::Filter { input, predicates } => PhysOp::Filter {
@@ -287,7 +297,7 @@ impl PhysOp {
                 metrics,
             },
             PhysOp::Union { arms, alias } => PhysOp::Union {
-                arms: arms.into_iter().map(|a| f(a)).collect(),
+                arms: arms.into_iter().map(&mut f).collect(),
                 alias,
             },
             PhysOp::Sort { input, keys } => PhysOp::Sort {

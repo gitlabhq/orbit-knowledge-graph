@@ -655,6 +655,7 @@ mod tests {
             query_type: "traversal".to_string(),
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
+                plan: String::new(),
                 query_type: QueryType::Traversal,
                 base: ParameterizedQuery {
                     sql: String::new(),
@@ -701,6 +702,7 @@ mod tests {
             query_type: "aggregation".to_string(),
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
+                plan: String::new(),
                 query_type: QueryType::Aggregation,
                 base: ParameterizedQuery {
                     sql: String::new(),
@@ -862,6 +864,7 @@ mod tests {
             query_type: "traversal".to_string(),
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
+                plan: String::new(),
                 query_type: QueryType::Traversal,
                 base: ParameterizedQuery {
                     sql: String::new(),
@@ -988,6 +991,7 @@ mod tests {
             query_type: "path_finding".to_string(),
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
+                plan: String::new(),
                 query_type: QueryType::PathFinding,
                 base: ParameterizedQuery {
                     sql: String::new(),
@@ -1084,6 +1088,7 @@ mod tests {
             query_type: "path_finding".to_string(),
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
+                plan: String::new(),
                 query_type: QueryType::PathFinding,
                 base: ParameterizedQuery {
                     sql: String::new(),

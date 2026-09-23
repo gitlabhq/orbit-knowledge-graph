@@ -251,7 +251,10 @@ fn emit(op: PhysOp, input: &Input) -> Query {
 /// The block already projects, groups, or limits: further filters and
 /// projections apply to its result.
 fn is_closed(q: &Query) -> bool {
-    !q.select.is_empty() || !q.group_by.is_empty() || q.limit.is_some()
+    !q.select.is_empty()
+        || !q.group_by.is_empty()
+        || q.limit_by.is_some()
+        || q.limit.is_some()
 }
 
 fn close(q: Query) -> Query {

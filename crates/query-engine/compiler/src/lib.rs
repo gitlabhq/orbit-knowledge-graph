@@ -120,6 +120,28 @@ pub fn compile(
     }
 }
 
+#[must_use = "the compiled query context should be used"]
+pub fn compile_naive(
+    raw: &str,
+    fe: Frontend,
+    ontology: &Arc<Ontology>,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    match fe {
+        Frontend::JsonDsl => {
+            let mut ctx =
+                config::ClickhouseJsonDslNaiveCtx::new(Arc::clone(ontology), ctx.clone());
+            ctx.set_raw(raw.to_string());
+            finish(&mut ctx, config::run_clickhouse_json_dsl_naive)
+        }
+        Frontend::Gql => {
+            let mut ctx = config::ClickhouseGqlNaiveCtx::new(Arc::clone(ontology), ctx.clone());
+            ctx.set_raw(raw.to_string());
+            finish(&mut ctx, config::run_clickhouse_gql_naive)
+        }
+    }
+}
+
 /// Compile a graph query into DuckDB SQL for local execution.
 ///
 /// Collapses edge tables to the local single-table layout before compiling.

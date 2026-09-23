@@ -3,7 +3,7 @@
 
 use super::prelude::*;
 
-pub(crate) struct PlanCtx<'a> {
+pub struct PlanCtx<'a> {
     pub input: &'a Input,
     pub graph: &'a JoinGraph,
 }

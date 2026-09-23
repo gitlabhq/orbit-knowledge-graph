@@ -21,6 +21,7 @@ rustls = { workspace = true }
 sqlparser = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde-saphyr = { workspace = true }
 testcontainers = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }

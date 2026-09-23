@@ -22,9 +22,8 @@ enum Command {
         /// Print the PhysOp plan as an S-expression.
         #[arg(long)]
         plan: bool,
-        /// Also print the SQL the legacy plan/lower passes produce (pre-enforce, pre-security).
         #[arg(long)]
-        legacy: bool,
+        no_optimize: bool,
         /// Schema version prefix applied to every table name (e.g. `v1_`).
         #[arg(long)]
         prefix: Option<String>,
@@ -36,8 +35,6 @@ enum Command {
         columns: String,
         #[arg(long)]
         plan: bool,
-        #[arg(long)]
-        legacy: bool,
     },
 }
 
@@ -48,7 +45,7 @@ fn main() {
             query,
             format,
             plan: show_plan,
-            legacy,
+            no_optimize,
             prefix,
         } => {
             let raw = match query.as_deref() {
@@ -81,7 +78,11 @@ fn main() {
                 _ => compiler::Frontend::JsonDsl,
             };
 
-            let compiled = match compiler::compile(&raw, fe, &ontology, &ctx) {
+            let compiled = match if no_optimize {
+                compiler::compile_naive(&raw, fe, &ontology, &ctx)
+            } else {
+                compiler::compile(&raw, fe, &ontology, &ctx)
+            } {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("compile error: {e}");
@@ -98,27 +99,12 @@ fn main() {
             println!("{}", format_sql(&rendered));
             println!();
 
-            if legacy {
-                let mut input = compiled.input.clone();
-                match compiler::passes::lower::lower(&mut input).and_then(|node| {
-                    compiler::passes::codegen::clickhouse::emit_simple_query(&node)
-                }) {
-                    Ok((sql, _)) => {
-                        println!("--- legacy sql (plan+lower only) ---");
-                        println!("{}", format_sql(&sql));
-                        println!();
-                    }
-                    Err(e) => eprintln!("legacy error: {e}"),
-                }
-            }
-
             print_params(&compiled.base.params);
         }
         Command::Hydrate {
             groups,
             columns,
             plan: show_plan,
-            legacy,
         } => {
             use compiler::input::{ColumnSelection, Input, InputNode, QueryType};
             use orbit_utils::traversal_path::TraversalPath;
@@ -156,15 +142,6 @@ fn main() {
                     .insert(node.destination_table.clone(), node.sort_key.clone());
             }
             let show_plan_after = show_plan;
-            if legacy {
-                let mut legacy_input = input.clone();
-                match compiler::passes::lower::lower(&mut legacy_input).and_then(|node| {
-                    compiler::passes::codegen::clickhouse::emit_simple_query(&node)
-                }) {
-                    Ok((sql, _)) => println!("--- legacy sql ---\n{}\n", format_sql(&sql)),
-                    Err(e) => eprintln!("legacy error: {e}"),
-                }
-            }
             match compiler::compile_input(input, &ontology, &ctx) {
                 Ok(c) => {
                     if show_plan_after {

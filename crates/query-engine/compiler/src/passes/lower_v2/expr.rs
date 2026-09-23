@@ -7,7 +7,7 @@ use crate::passes::shared::filter_to_expr;
 pub fn expr(e: &PExpr) -> Expr {
     match e {
         PExpr::Col(a, c) => Expr::col(a, c),
-        PExpr::Ident(name) => Expr::ident(name),
+        PExpr::Ident(name) => name.parse::<i64>().map_or_else(|_| Expr::ident(name), Expr::int),
         PExpr::Lit(Lit::Int(i)) => Expr::int(*i),
         PExpr::Lit(Lit::Str(s)) => Expr::string(s),
         PExpr::Lit(Lit::Bool(b)) => Expr::param(ChType::Bool, *b),

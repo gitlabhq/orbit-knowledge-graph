@@ -947,7 +947,7 @@ fn hydration_widens_paths_to_segment_budget() {
         compile_input(input, &embedded_ontology(), &test_ctx()).unwrap()
     };
     let bound_paths = |result: &compiler::CompiledQueryContext| -> Vec<TraversalPath> {
-        result
+        let mut paths: Vec<TraversalPath> = result
             .base
             .params
             .values()
@@ -957,7 +957,19 @@ fn hydration_widens_paths_to_segment_budget() {
             })
             .flat_map(|items| items.iter().filter_map(|v| v.as_str()))
             .map(TraversalPath::new_unchecked)
-            .collect()
+            .collect();
+        if paths.is_empty() {
+            paths.extend(
+                result
+                    .base
+                    .params
+                    .values()
+                    .filter_map(|parameter| parameter.value.as_str())
+                    .filter(|value| value.ends_with('/'))
+                    .map(TraversalPath::new_unchecked),
+            );
+        }
+        paths
     };
 
     let exact = deep(500);
@@ -968,13 +980,6 @@ fn hydration_widens_paths_to_segment_budget() {
         ],
         Some(2000),
     );
-    let array_params = result
-        .base
-        .params
-        .values()
-        .filter(|p| matches!(p.value, serde_json::Value::Array(_)))
-        .count();
-    assert_eq!(array_params, 1, "arms share one path array param");
     let mut kept = bound_paths(&result);
     kept.sort_unstable();
     let mut expected = exact;

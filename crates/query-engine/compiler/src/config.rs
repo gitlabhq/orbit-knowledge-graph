@@ -22,8 +22,8 @@ use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan_v2::PlanMetadata;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower_v2, normalize, plan_v2, restrict, security,
-    settings, validate,
+    check, codegen, cursor, enforce, hydrate, lower_v2, normalize, optimize_v2, plan_v2, restrict,
+    security, settings, validate,
 };
 
 type QueryPlan = PlanMetadata;
@@ -77,6 +77,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
         plan {
             mutates: [input, query_plan]
         }
+        optimize_v2 {
+            reads_env: [ontology]
+            mutates: [input, query_plan]
+        }
         lower {
             reads_state: [input]
             mutates: [query_plan, node]
@@ -120,9 +124,19 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             env: [ontology, security_ctx]
             state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan, optimize_v2, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
+            env: [ontology, security_ctx]
+            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [gql_parse, validate, normalize, restrict, plan, optimize_v2, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+        }
+        clickhouse_json_dsl_naive {
+            env: [ontology, security_ctx]
+            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+        }
+        clickhouse_gql_naive {
             env: [ontology, security_ctx]
             state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [gql_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
@@ -190,7 +204,6 @@ fn validate_local(ctx: &mut impl CompilerCtx) -> Result<()> {
     v.check_shape(&input)?;
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
-    input.compiler.plan_overrides = crate::input::PlanOverrides::local();
     ctx.set_input(input);
     Ok(())
 }
@@ -217,6 +230,15 @@ fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
     meta.phys_op = Some(op);
     ctx.set_input(input);
     ctx.set_query_plan(meta);
+    Ok(())
+}
+
+fn optimize_v2(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let mut input = require(ctx.take_input(), "input")?;
+    let plan = require(ctx.take_query_plan(), "query_plan")?;
+    let ontology = ctx.ontology().clone();
+    ctx.set_query_plan(optimize_v2::optimize_plan(&mut input, &ontology, plan));
+    ctx.set_input(input);
     Ok(())
 }
 

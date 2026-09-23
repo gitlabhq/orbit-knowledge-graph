@@ -1,8 +1,8 @@
-use crate::compiler::setup::{compile_pair, compile_to_ast, test_ctx, test_ontology};
+use crate::compiler::setup::{compile_pair, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
 use compiler::gql::{PreparedStatement, prepare};
 use compiler::input::DynamicColumnMode;
-use compiler::{Frontend, Node, QueryError, compile};
+use compiler::{Frontend, QueryError, compile};
 use ontology::introspection::{
     IntrospectionScope::{All, Local},
     build_schema_response,
@@ -17,17 +17,9 @@ fn compile_to_ast_works() {
         "limit": 10
     }"#;
 
-    compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
-    let node = compile_to_ast(json, &test_ontology()).unwrap();
-    let Node::Query(ref q) = node else {
-        unreachable!()
-    };
-    assert_eq!(
-        q.limit,
-        Some(11),
-        "fetch limit is the requested limit plus the has_more probe row"
-    );
-    assert!(!q.select.is_empty());
+    let compiled = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
+    assert!(compiled.base.sql.starts_with("SELECT "));
+    assert!(compiled.base.sql.contains("LIMIT 11"));
 }
 
 #[test]
@@ -624,8 +616,6 @@ fn multi_table_wildcard_scans_all_tables() {
 fn multi_table_mixed_types_scans_both_tables() {
     let orbit_query =
         "MATCH (u:User {id: 1})-[:AUTHORED|DEFINES]->(p:Project) RETURN u, p LIMIT 25";
-    // v2 planner routes a single hop to one table (the first matched).
-    // Mixed edge types in a single relationship entry go to one table.
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -638,8 +628,8 @@ fn multi_table_mixed_types_scans_both_tables() {
     let result = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
-        rendered.contains("gl_edge"),
-        "mixed types should route to first matched table (gl_edge): {rendered}"
+        rendered.contains("gl_code_edge"),
+        "mixed types should route to the first requested type's table: {rendered}"
     );
     assert!(
         rendered.contains("AUTHORED") && rendered.contains("DEFINES"),
@@ -716,10 +706,7 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
         gl_file_refs, 2,
         "expected one gl_file scan per direction arm; got {gl_file_refs}\nSQL:\n{rendered}"
     );
-    assert!(
-        rendered.contains("f.project_id AS project_id"),
-        "dedup subquery must surface redaction id column: {rendered}"
-    );
+    assert!(rendered.contains("f.project_id AS _gkg_f_id"), "{rendered}");
 }
 
 #[test]
@@ -805,16 +792,14 @@ fn scoped_count_condition_excludes_the_scope_lookup() {
         "aggregations": [{"count": "u", "as": "n"}],
         "limit": 5
     }"#;
-    let sql = render_scoped(json, orbit_query);
-    let count_arg = sql
-        .split("countIf(")
-        .nth(1)
-        .unwrap()
-        .split(" AS n")
-        .next()
-        .unwrap();
-    assert!(!count_arg.contains("_scope"), "{sql}");
-    assert!(sql.contains("FROM gl_group AS _scope WHERE"), "{sql}");
+    let compiled = compile_pair(json, orbit_query, &embedded_ontology(), &test_ctx()).unwrap();
+    assert!(compiled.plan.contains("COUNT() AS n"), "{}", compiled.plan);
+    assert!(!compiled.plan.contains("_scope"), "{}", compiled.plan);
+    assert!(
+        compiled.base.render().contains("FROM gl_group AS _scope WHERE"),
+        "{}",
+        compiled.base.render()
+    );
 }
 
 #[test]
@@ -835,13 +820,19 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     }"#;
     let ontology = embedded_ontology();
     let compiled = compile_pair(json, orbit_query, &ontology, &admin_ctx()).unwrap();
-    let sql = compiled.base.render();
-
-    let before_related = sql.split("RELATED_TO").next().unwrap();
-    assert!(before_related.contains(SCOPED_LOOKUP), "{sql}");
-
-    let after_related = sql.split("RELATED_TO").nth(1).unwrap();
-    assert!(!after_related.contains(SCOPED_LOOKUP), "{sql}");
+    let in_project = compiled
+        .plan
+        .find("e0.relationship_kind = 'IN_PROJECT'")
+        .expect("IN_PROJECT filter");
+    let related = compiled
+        .plan
+        .find("e1.relationship_kind = 'RELATED_TO'")
+        .expect("RELATED_TO filter");
+    let e0_scope = compiled.plan[in_project..]
+        .find("scope(e0)")
+        .expect("IN_PROJECT is scoped");
+    assert!(in_project + e0_scope < related, "{}", compiled.plan);
+    assert!(!compiled.plan[related..].contains("scope(e1)"), "{}", compiled.plan);
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");
@@ -1517,15 +1508,11 @@ fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
         "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username";
     let compiled = compile_pair(json, orbit_query, &embedded_ontology(), &test_ctx()).unwrap();
     assert!(
-        compiled.base.sql.contains("_narrow_u"),
+        compiled.plan.contains("Join ON n.author_id = u.id"),
         "AUTHORED should resolve to the FK plan: {}",
-        compiled.base.sql
+        compiled.plan
     );
-    assert!(
-        compiled.base.sql.contains("n.author_id AS e0_src"),
-        "edge source must be the User side: {}",
-        compiled.base.sql
-    );
+    assert!(compiled.plan.contains("u.id AS e0_src"), "{}", compiled.plan);
 }
 
 #[test]

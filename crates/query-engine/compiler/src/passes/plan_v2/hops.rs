@@ -12,6 +12,8 @@
 
 use super::prelude::*;
 
+type JoinConditions = Vec<(Col, Col)>;
+
 /// A chain `e1 -> e2 -> ... -> eN` over one edge table, each hop joined on
 /// the previous hop's end id. Shared by variable-length hops and pathfinding
 /// frontiers; callers project what they need from `e1` and `eN`.
@@ -20,7 +22,7 @@ pub fn hop_chain(
     depth: u32,
     (start_col, end_col): (&str, &str),
     hop_preds: &dyn Fn(&str, bool) -> Vec<PExpr>,
-    hop_on: &dyn Fn(&str, &str) -> Vec<(Col, Col)>,
+    hop_on: &dyn Fn(&str, &str) -> JoinConditions,
 ) -> PhysOp {
     let mut chain = edge("e1").filter(hop_preds("e1", true));
     for i in 2..=depth {

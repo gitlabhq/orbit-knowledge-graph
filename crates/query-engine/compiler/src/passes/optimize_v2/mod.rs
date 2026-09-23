@@ -32,6 +32,54 @@ pub(crate) mod prelude {
 }
 use prelude::*;
 
+pub fn optimize_plan(
+    input: &mut Input,
+    ontology: &ontology::Ontology,
+    mut plan: PlanMetadata,
+) -> PlanMetadata {
+    let op = plan.phys_op.take().expect("plan phase sets phys_op");
+    if !matches!(input.query_type, QueryType::Traversal | QueryType::Aggregation) {
+        plan.has_semi_joins = has_semi_join(&op);
+        plan.phys_op = Some(op);
+        return plan;
+    }
+    let graph = JoinGraph::build(ontology);
+    let ctx = RuleCtx {
+        input,
+        graph: &graph,
+    };
+    let mut op = if input.query_type == QueryType::Traversal {
+        ctx.plan_ctx().defer_hydration_columns(op)
+    } else {
+        op
+    };
+    op = optimize(op, &ctx);
+    if input.query_type == QueryType::Traversal {
+        op = ctx.plan_ctx().project_joined_columns(op);
+    }
+    plan.node_edge_mappings = ctx.plan_ctx().node_edge_mappings(&op);
+    plan.has_semi_joins = has_semi_join(&op);
+    if input.query_type == QueryType::Aggregation {
+        let kept: HashSet<&String> = plan.node_edge_mappings.keys().collect();
+        input.nodes.retain(|n| kept.contains(&n.id));
+        input
+            .relationships
+            .retain(|r| kept.contains(&r.from) && kept.contains(&r.to));
+    }
+    plan.phys_op = Some(op);
+    plan
+}
+
+fn has_semi_join(op: &PhysOp) -> bool {
+    matches!(
+        op,
+        PhysOp::Join {
+            kind: JoinKind::Semi,
+            ..
+        }
+    ) || op.children().into_iter().any(has_semi_join)
+}
+
 type Rule = fn(&PhysOp, &RuleCtx) -> Option<PhysOp>;
 
 const LOCAL_RULES: &[Rule] = &[

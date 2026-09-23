@@ -12,8 +12,8 @@
 //! LIMIT 11
 //! ```
 //!
-//! `plan_chain_query` builds that, hands it to `optimize`, and for traversal
-//! adds inline columns for node tables the optimizer joined.
+//! `plan_chain_query` builds the naive plan. `optimize_v2` rewrites it for
+//! ClickHouse before lowering.
 
 use super::prelude::*;
 
@@ -30,19 +30,9 @@ const EDGE_OUTPUT: [(&str, &str); 5] = [
 
 impl<'a> PlanCtx<'a> {
     pub fn plan_chain_query(&self, limit: u32) -> PhysOp {
-        let naive = match self.input.query_type {
+        match self.input.query_type {
             QueryType::Traversal => self.plan_traversal(limit),
             _ => self.plan_aggregation(limit),
-        };
-        let ctx = crate::passes::optimize::RuleCtx {
-            input: self.input,
-            graph: self.graph,
-        };
-        let op = crate::passes::optimize::optimize(naive, &ctx);
-        if self.input.query_type == QueryType::Traversal {
-            self.inline_joined_columns(op)
-        } else {
-            op
         }
     }
 }
@@ -66,11 +56,8 @@ impl<'a> PlanCtx<'a> {
                 columns.push(pn!("{ea}.path_nodes AS {prefix}_path_nodes"));
             }
         }
-        let single = self.input.relationships.is_empty();
         for n in &self.input.nodes {
-            if single || self.reads_node(n) {
-                columns.extend(self.requested(n));
-            }
+            columns.extend(self.requested(n));
         }
         let mut keys = self.sort_keys();
         if self.input.cursor.is_some() {
@@ -79,9 +66,7 @@ impl<'a> PlanCtx<'a> {
         self.plan_chain().sort(keys).project(columns).limit(limit)
     }
 
-    /// FK elision joins node tables the naive plan left to hydration; once a
-    /// table is in the query its requested columns come from it directly.
-    fn inline_joined_columns(&self, op: PhysOp) -> PhysOp {
+    pub fn project_joined_columns(&self, op: PhysOp) -> PhysOp {
         let PhysOp::Limit { input, count } = op else {
             return op;
         };
@@ -96,6 +81,21 @@ impl<'a> PlanCtx<'a> {
                 }
             }
         }
+        input.project(columns).limit(count)
+    }
+
+    pub fn defer_hydration_columns(&self, op: PhysOp) -> PhysOp {
+        let PhysOp::Limit { input, count } = op else {
+            return op;
+        };
+        let PhysOp::Project { input, mut columns } = *input else {
+            return input.limit(count);
+        };
+        columns.retain(|(_, alias)| {
+            !self.input.nodes.iter().any(|node| {
+                !self.reads_node(node) && alias.starts_with(&format!("{}_", node.id))
+            })
+        });
         input.project(columns).limit(count)
     }
 
@@ -133,7 +133,7 @@ impl<'a> PlanCtx<'a> {
                     let expr = match truncate {
                         None => pe!("{node}.{property}"),
                         Some(unit @ (TruncateUnit::Minute | TruncateUnit::Hour)) => {
-                            pe!("toDateTime64({}({node}.{property}), 0)", unit.ch_function())
+                            pe!("{}({node}.{property})", unit.ch_function())
                         }
                         Some(unit) => pe!("toDate32({}({node}.{property}))", unit.ch_function()),
                     };
@@ -310,11 +310,10 @@ impl<'a> PlanCtx<'a> {
         p
     }
 
-    /// Joined when read or range-filtered. Pinned ids live on the edge
-    /// columns; requested columns come from hydration unless the table is
-    /// in the query anyway.
     fn needs_node_join(&self, node: &InputNode) -> bool {
-        node.id_range.is_some() || self.reads_node(node)
+        node.id_range.is_some()
+            || self.reads_node(node)
+            || !crate::passes::shared::requested_columns(&node.columns).is_empty()
     }
 
     /// Something reads the node table: property filters, group-by, a

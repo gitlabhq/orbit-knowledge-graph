@@ -39,7 +39,7 @@ mod op;
 pub mod parse;
 mod pathfinding;
 
-pub(crate) use ctx::PlanCtx;
+pub use ctx::PlanCtx;
 pub use expr::*;
 pub use join_graph::JoinGraph;
 pub use op::*;
@@ -67,7 +67,6 @@ pub struct PlanMetadata {
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub hop_count: usize,
     pub phys_op: Option<PhysOp>,
-    /// The plan has `IN (SELECT ...)` predicates; settings cap their index use.
     pub has_semi_joins: bool,
     /// Filled by lowering, after the optimizer has run.
     pub explain: String,
@@ -103,27 +102,8 @@ pub fn plan(
         node_edge_mappings: ctx.node_edge_mappings(&op),
         hop_count: input.relationships.len(),
         phys_op: None,
-        has_semi_joins: has_semi_join(&op),
+        has_semi_joins: false,
         explain: String::new(),
     };
-    // A scope anchor the optimizer elided has no representation in the
-    // query; later passes must not expect it in the result.
-    if input.query_type == QueryType::Aggregation {
-        let kept: HashSet<&String> = meta.node_edge_mappings.keys().collect();
-        input.nodes.retain(|n| kept.contains(&n.id));
-        input
-            .relationships
-            .retain(|r| kept.contains(&r.from) && kept.contains(&r.to));
-    }
     Ok((meta, op))
-}
-
-fn has_semi_join(op: &PhysOp) -> bool {
-    matches!(
-        op,
-        PhysOp::Join {
-            kind: JoinKind::Semi,
-            ..
-        }
-    ) || op.children().into_iter().any(has_semi_join)
 }
