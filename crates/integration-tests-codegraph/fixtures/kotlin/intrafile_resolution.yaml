@@ -26,7 +26,7 @@ fixtures:
 tests:
   - name: "run() calls helper()"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'helper'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -35,19 +35,18 @@ tests:
 
   - name: "caller() calls topLevel()"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'caller' AND callee.name = 'topLevel'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
       - { row: { caller: "com.example.caller", callee: "com.example.topLevel" } }
 
-  # corrected: create nests under Companion; the class has three direct members
   - name: "App methods have correct FQN"
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.name = 'App' AND cls.definition_type = 'Class'
       RETURN m.fqn AS fqn
     assert:
-      - { row_count: 3 }
+      - { row_count: 4 }
       - { match: { field: fqn, pattern: "com.example.App*" } }

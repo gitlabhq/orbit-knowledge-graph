@@ -102,7 +102,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp'
-        AND d.definition_type = 'Class'
+        AND d.definition_type = 'Module'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -128,7 +128,6 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Instance method run uses :: separator"
     query: |
       MATCH (d:Definition)
@@ -136,55 +135,50 @@ tests:
         AND d.definition_type = 'Method'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
-  # corrected: instance and singleton run share the canonical Method FQN
   - name: "Singleton method uses :: separator"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'WeatherApp::CLI::run'
-        AND d.definition_type = 'Method'
+        AND d.definition_type = 'SingletonMethod'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   # ── Containment edges ─────────────────────────────────────────
   - name: "Module defines Class"
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'WeatherApp'
         AND child.fqn = 'WeatherApp::Forecast'
-        AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
 
   - name: "Class defines instance method"
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'WeatherApp::Forecast'
         AND child.fqn = 'WeatherApp::Forecast::temperature_f'
-        AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
 
   - name: "Class defines methods named run (instance + singleton)"
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'WeatherApp::CLI'
         AND child.fqn = 'WeatherApp::CLI::run'
-        AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 2 }
 
   - name: "File defines top-level module"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'lib/weather_app/forecast.rb'
         AND d.fqn = 'WeatherApp::Forecast'
-        AND e.edge_kind = 'Defines'
       RETURN f.path AS file, d.fqn AS def
     assert:
       - { row_count: 1 }
@@ -193,7 +187,7 @@ tests:
   - name: "attr_reader generates Attribute definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Property'
+      WHERE d.definition_type = 'Attribute'
         AND d.fqn IN ['WeatherApp::Forecast::city',
                        'WeatherApp::Forecast::temperature_c',
                        'WeatherApp::Forecast::condition',

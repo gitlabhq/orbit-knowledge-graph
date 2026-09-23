@@ -1,0 +1,43 @@
+name: "Rust: semantic impl alias resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_impl_alias_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub trait Runner {
+          fn run(&self);
+      }
+
+      pub mod domain {
+          pub struct Service;
+      }
+
+      use crate::domain::Service as Alias;
+
+      impl Runner for Alias {
+          fn run(&self) {}
+      }
+
+tests:
+  - name: "trait impl methods attach to the underlying ADT rather than the import alias"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'run'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'Runner::run' } }
+      - { row: { fqn: 'domain::Service::run' } }
+
+  - name: "alias-based impl container names are not emitted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Alias::run'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 0 }

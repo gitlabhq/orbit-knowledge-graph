@@ -1,5 +1,4 @@
 name: "C/C++ cross-language resolution — .cpp calling through .h to .c definitions"
-pipeline: cpp
 
 fixtures:
   - path: math/ops.h
@@ -102,32 +101,32 @@ tests:
 
   - name: "C++ engine.cxx calls C add() via ops.h -> ops.c"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'ops::add'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+      RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: "engine.cxx", tgt: "math/ops.c", kind: Calls } }
+      - { row: { src: "engine.cxx", tgt: "math/ops.c" } }
 
   - name: "C++ engine.cxx calls C multiply() via ops.h -> ops.c"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'ops::multiply'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+      RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: "engine.cxx", tgt: "math/ops.c", kind: Calls } }
+      - { row: { src: "engine.cxx", tgt: "math/ops.c" } }
 
   - name: "C++ engine.cxx calls C log_result() via format.hh -> format.cc"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
         AND callee.fqn = 'format::log_result'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+      RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
-      - { row: { src: "engine.cxx", tgt: "util/format.cc", kind: Calls } }
+      - { row: { src: "engine.cxx", tgt: "util/format.cc" } }
 
   # ══════════════════════════════════════════════════════════════
   # CROSS-EXTENSION: .cpp calling through .hxx -> .cpp
@@ -135,23 +134,23 @@ tests:
 
   - name: "main.cpp calls record_sum via data.hxx -> data.cpp"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
         AND callee.fqn = 'data::record_sum'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+      RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: "main.cpp", tgt: "alt/data.cpp", kind: Calls } }
+      - { row: { src: "main.cpp", tgt: "alt/data.cpp" } }
 
   - name: "main.cpp calls add via ops.h -> ops.c"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
         AND callee.fqn = 'ops::add'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+      RETURN caller.file_path AS src, callee.file_path AS tgt
     assert:
       - { row_count: 1 }
-      - { row: { src: "main.cpp", tgt: "math/ops.c", kind: Calls } }
+      - { row: { src: "main.cpp", tgt: "math/ops.c" } }
 
   # ══════════════════════════════════════════════════════════════
   # STRUCT FROM .hxx HEADER

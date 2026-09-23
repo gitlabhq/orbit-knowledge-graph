@@ -1,0 +1,48 @@
+name: "Go: init and main special functions"
+fixtures:
+  - path: app.go
+    content: |
+      package main
+
+      import "fmt"
+
+      var initialized bool
+
+      func init() {
+          initialized = true
+          fmt.Println("first init")
+      }
+
+      func init() {
+          fmt.Println("second init")
+      }
+
+      func main() {
+          fmt.Println("running")
+      }
+
+tests:
+  - name: "main() is extracted as Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'main' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "main" } }
+
+  - name: "Both init() functions are extracted as distinct Definition nodes"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'init' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 2 }
+
+  - name: "Both init() functions share the package-scoped FQN main.init"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'init' AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { column_values: { field: fqn, values: ["main.init"] } }
+

@@ -1,7 +1,7 @@
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let root = std::path::Path::new(&manifest_dir)
-        .join("../integration-tests-codegraph/fixtures")
+        .join("../integration-tests-codegraph/fixtures_new")
         .canonicalize()
         .unwrap();
     let root = root.to_str().unwrap();

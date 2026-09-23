@@ -57,82 +57,70 @@ fixtures:
       end
 
 tests:
-  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "gem requires target side-effect imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ApiRunner::fetch'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::fetch", path: "Faraday", name: "Faraday", import_type: "Autoload" } }
+      - { row: { caller: "ApiRunner::fetch", path: "faraday", name: null, import_type: "Require" } }
 
-  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "underscored requires target side-effect imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ApiRunner::connect'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::connect", path: "ExternalClient", name: "ExternalClient", import_type: "Autoload" } }
+      - { row: { caller: "ApiRunner::connect", path: "external_client", name: null, import_type: "Require" } }
 
-  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "observed acronym constants match require paths without path-derived names"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ApiRunner::parse'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::parse", path: "JSON", name: "JSON", import_type: "Autoload" } }
+      - { row: { caller: "ApiRunner::parse", path: "json", name: null, import_type: "Require" } }
 
-  # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "require_relative target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'RelativeRunner::connect'
-        AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "RelativeRunner::connect", path: "ExternalClient", name: "ExternalClient", import_type: "Autoload" } }
+      - { row: { caller: "RelativeRunner::connect", path: "services/external_client", name: null, import_type: "RequireRelative" } }
 
   - name: "locally resolved require constants do not emit imported-symbol fallback"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
           WHERE caller.fqn = 'ShadowRunner::connect'
             AND callee.fqn = 'LocalExternalClient::connect'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'ShadowRunner::connect'
-            AND e.edge_kind = 'Calls'
-          RETURN sym.path AS path
+          RETURN sym.import_path AS path
         assert:
           - { empty: true }
 
   - name: "resolved same-class calls do not emit imported-symbol fallback"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
           WHERE caller.fqn = 'LocalRunner::run'
             AND callee.fqn = 'LocalRunner::helper'
-            AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
           WHERE caller.fqn = 'LocalRunner::run'
-            AND e.edge_kind = 'Calls'
-          RETURN sym.path AS path
+          RETURN sym.import_path AS path
         assert:
           - { empty: true }

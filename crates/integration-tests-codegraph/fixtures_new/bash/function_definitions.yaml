@@ -1,0 +1,40 @@
+name: "Bash function definitions — both posix and `function` keyword forms"
+
+fixtures:
+  - path: scripts/deploy.sh
+    content: |
+      #!/usr/bin/env bash
+
+      greet() {
+        echo "hello"
+      }
+
+      function helper {
+        echo "helping"
+      }
+
+      build_and_deploy() {
+        greet
+        helper
+      }
+
+tests:
+  - name: "Both function syntaxes are indexed as Function definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "greet" } }
+      - { row: { name: "helper" } }
+      - { row: { name: "build_and_deploy" } }
+
+  - name: "Functions are FQN-scoped under the filename (file_scope)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.name = 'greet'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "deploy.greet" } }

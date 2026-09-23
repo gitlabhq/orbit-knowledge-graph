@@ -54,8 +54,7 @@ tests:
   - name: "Embedding hierarchy defined"
     queries:
       - query: |
-          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
-          WHERE e.edge_kind = 'Extends'
+          MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
           RETURN child.name AS child, parent.name AS parent
           ORDER BY child, parent
         assert:
@@ -67,8 +66,8 @@ tests:
   - name: "useRWC calls Read, Write, Close via promoted methods"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.fqn = 'main.useRWC' AND e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'main.useRWC'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -82,12 +81,11 @@ tests:
   # the FQN main.Dup (Go methods are package-scoped) but have distinct
   # byte ranges, so each gets a unique id and the query join produces
   # 2 rows (2 edges × 1 matching Definition row each).
-  # Both shallowest-depth candidates are emitted; picking by the language's rule is a follow-up (GAPS.md)
   - name: "Diamond ambiguity: resolver finds Dup from both ancestors"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.fqn = 'main.useDiamond' AND e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'main.useDiamond'
             AND callee.name = 'Dup'
           RETURN callee.fqn AS callee
         assert:

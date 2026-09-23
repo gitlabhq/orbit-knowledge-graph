@@ -40,13 +40,13 @@ tests:
       - { row: { name: "Point", type: "Struct" } }
       - { row: { name: "distance", type: "Method" } }
       - { row: { name: "main", type: "Function" } }
-      - { row: { name: "new", type: "Function" } }
-      - { row: { name: "origin", type: "Function" } }
+      - { row: { name: "new", type: "AssociatedFunction" } }
+      - { row: { name: "origin", type: "AssociatedFunction" } }
 
   - name: origin calls new (associated function calling associated function)
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'origin' AND callee.name = 'new' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'origin' AND callee.name = 'new'
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }

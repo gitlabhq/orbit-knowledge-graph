@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 mod dashboards;
 mod ddl;
 mod integration_lanes;
+mod loadtest;
 mod metrics_catalog;
 mod migration_ledger;
 mod query_docs;
@@ -93,6 +94,42 @@ enum Command {
         /// non-zero exit if they differ.
         #[arg(long)]
         check: bool,
+    },
+    /// Run a gRPC load test against a running Orbit server, replaying the
+    /// performance query corpus and reporting latency percentiles.
+    ///
+    /// Requires GKG_JWT_SECRET (base64-encoded HMAC key, same as the server).
+    Loadtest {
+        /// gRPC endpoint of the Orbit server (plaintext HTTP/2).
+        #[arg(long, env = "ORBIT_ENDPOINT", default_value = "http://127.0.0.1:50054")]
+        endpoint: String,
+
+        /// Maximum in-flight requests per query.
+        #[arg(long, default_value_t = 20)]
+        concurrency: usize,
+
+        /// Number of rounds; total requests per query = concurrency * rounds.
+        #[arg(long, default_value_t = 5)]
+        rounds: usize,
+
+        /// Directory of scenario YAML files to replay (recursively).
+        #[arg(
+            long,
+            default_value = "crates/integration-tests/tests/server/performance/scenarios"
+        )]
+        scenarios: std::path::PathBuf,
+
+        /// Run a single scenario whose label contains this substring.
+        #[arg(long)]
+        query: Option<String>,
+
+        /// Sign the JWT as a non-admin user (admin bypasses path scoping).
+        #[arg(long)]
+        no_admin: bool,
+
+        /// Per-request gRPC deadline, in seconds.
+        #[arg(long, default_value_t = 30)]
+        timeout: u64,
     },
 }
 
@@ -300,5 +337,25 @@ async fn main() -> Result<()> {
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
         Command::IntegrationLanes { check } => integration_lanes::run(check),
         Command::QueryDocs { doc, check } => query_docs::run(doc, check),
+        Command::Loadtest {
+            endpoint,
+            concurrency,
+            rounds,
+            scenarios,
+            query,
+            no_admin,
+            timeout,
+        } => {
+            loadtest::run(loadtest::Options {
+                endpoint,
+                concurrency,
+                rounds,
+                scenarios,
+                query,
+                admin: !no_admin,
+                per_call_timeout: std::time::Duration::from_secs(timeout),
+            })
+            .await
+        }
     }
 }

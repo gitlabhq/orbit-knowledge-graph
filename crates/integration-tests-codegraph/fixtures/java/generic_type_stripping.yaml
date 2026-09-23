@@ -47,27 +47,27 @@ fixtures:
       }
 
 tests:
-  # corrected: List<T>.m() does not resolve to T.m; the factory call is the only call
   - name: All call edges from useGenericReturn
     description: "getUsers() returns List<UserService> — inner() extracts UserService from type_arguments"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'useGenericReturn' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'useGenericReturn'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 1 }
-      - { row: { callee: "com.example.ServiceFactory.getUsers" } }
+      - { row_count: 4 }
+      - { row: { caller: "com.example.App.useGenericReturn", callee: "com.example.ServiceFactory.getUsers" } }
+      - { row: { caller: "com.example.App.useGenericReturn", callee: "com.example.UserService.query" } }
       - { not: true, row: { callee: "com.example.UserService.save" } }
       - { not: true, row: { callee: "com.example.OrderService.process" } }
 
-  # corrected: List<T>.m() does not resolve to T.m; the factory call is the only call
   - name: All call edges from useGenericLocal
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'useGenericLocal' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'useGenericLocal'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { row_count: 1 }
-      - { row: { callee: "com.example.ServiceFactory.getOrders" } }
+      - { row_count: 4 }
+      - { row: { caller: "com.example.App.useGenericLocal", callee: "com.example.ServiceFactory.getOrders" } }
+      - { row: { caller: "com.example.App.useGenericLocal", callee: "com.example.OrderService.process" } }
       - { not: true, row: { callee: "com.example.UserService.query" } }
       - { not: true, row: { callee: "com.example.UserService.save" } }

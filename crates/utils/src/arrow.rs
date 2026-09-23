@@ -67,6 +67,17 @@ impl FromColumnValue for bool {
 }
 
 impl ColumnValue {
+    pub fn datetime(dt: Option<chrono::NaiveDateTime>) -> Self {
+        dt.map(|d| Self::String(d.format("%Y-%m-%dT%H:%M:%S%.fZ").to_string()))
+            .unwrap_or(Self::Null)
+    }
+
+    pub fn parse_datetime(s: &str) -> Option<Self> {
+        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
+            .ok()
+            .map(|d| Self::datetime(Some(d)))
+    }
+
     /// Extract as the requested type, parsing from string if needed.
     ///
     /// ```
@@ -258,16 +269,16 @@ impl ArrowUtils {
         downcast!(BooleanArray, v => ColumnValue::Bool(v));
 
         if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
-            return timestamp_to_string(arr.value_as_datetime(idx));
+            return ColumnValue::datetime(arr.value_as_datetime(idx));
         }
         if let Some(arr) = array.as_any().downcast_ref::<TimestampMillisecondArray>() {
-            return timestamp_to_string(arr.value_as_datetime(idx));
+            return ColumnValue::datetime(arr.value_as_datetime(idx));
         }
         if let Some(arr) = array.as_any().downcast_ref::<TimestampMicrosecondArray>() {
-            return timestamp_to_string(arr.value_as_datetime(idx));
+            return ColumnValue::datetime(arr.value_as_datetime(idx));
         }
         if let Some(arr) = array.as_any().downcast_ref::<TimestampNanosecondArray>() {
-            return timestamp_to_string(arr.value_as_datetime(idx));
+            return ColumnValue::datetime(arr.value_as_datetime(idx));
         }
         if let Some(arr) = array.as_any().downcast_ref::<Date32Array>() {
             return date_to_string(arr.value_as_date(idx));
@@ -690,11 +701,6 @@ pub trait AsRecordBatch<Ctx = ()>: Sized {
     }
 }
 
-fn timestamp_to_string(dt: Option<chrono::NaiveDateTime>) -> ColumnValue {
-    dt.map(|d| ColumnValue::String(d.format("%Y-%m-%dT%H:%M:%SZ").to_string()))
-        .unwrap_or(ColumnValue::Null)
-}
-
 fn date_to_string(d: Option<chrono::NaiveDate>) -> ColumnValue {
     d.map(|d| ColumnValue::String(d.format("%Y-%m-%d").to_string()))
         .unwrap_or(ColumnValue::Null)
@@ -1017,6 +1023,24 @@ mod tests {
             vec![1_704_067_200_000_000_000].into(),
             None,
         )));
+    }
+
+    #[test]
+    fn datetime_keeps_subsecond_precision_on_both_paths() {
+        let arr = TimestampMicrosecondArray::new(vec![1_704_067_200_123_456].into(), None);
+        let batch = make_batch(vec![("ts", Arc::new(arr))]);
+        let inline = ArrowUtils::extract_row(&batch, 0).remove("ts");
+        let hydrated = ColumnValue::parse_datetime("2024-01-01 00:00:00.123456");
+        assert_eq!(
+            inline,
+            Some(ColumnValue::String("2024-01-01T00:00:00.123456Z".into()))
+        );
+        assert_eq!(inline, hydrated);
+        assert_eq!(
+            ColumnValue::parse_datetime("2024-01-01 00:00:00"),
+            Some(ColumnValue::String("2024-01-01T00:00:00Z".into()))
+        );
+        assert_eq!(ColumnValue::parse_datetime("not a date"), None);
     }
 
     #[test]

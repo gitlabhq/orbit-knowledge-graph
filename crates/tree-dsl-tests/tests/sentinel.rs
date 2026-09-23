@@ -24,7 +24,7 @@ fn big() -> (String, String) {
 }
 
 fn env(limits: Limits) -> Env {
-    Env::with_limits(SupportLang::Python, limits)
+    Env::with_limits(SupportLang::Python, limits).expect("python rules compile")
 }
 
 #[test]

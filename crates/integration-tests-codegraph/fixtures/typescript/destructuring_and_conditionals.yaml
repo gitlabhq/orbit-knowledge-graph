@@ -40,10 +40,10 @@ tests:
 
   - name: process calls getCoords, makeDefault, and makeAlt
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'process' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'process'
       RETURN callee.name AS callee
       ORDER BY callee
     assert:
-      - { row_count: 5 }
-      - { column_values: { field: callee, values: ["getCoords", "makeAlt", "makeAlt", "makeDefault", "makeDefault"] } }
+      - { row_count: 3 }
+      - { column_values: { field: callee, values: ["getCoords", "makeAlt", "makeDefault"] } }

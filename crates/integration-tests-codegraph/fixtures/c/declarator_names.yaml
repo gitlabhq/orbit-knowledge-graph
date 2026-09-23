@@ -95,7 +95,7 @@ tests:
   - name: "Pointer / function-pointer / array typedefs extract the bare name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'TypeAlias'
+      WHERE d.definition_type = 'Typedef'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 3 }

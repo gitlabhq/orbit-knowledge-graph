@@ -1,8 +1,9 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.30.0
+version: 0.31.0
 license: MIT
+compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, gkg, graph, query, glab
@@ -94,7 +95,7 @@ For code-structure orientation before you plan a change, use `glab orbit repo-ma
 
 ## Managed CLI
 
-`glab orbit` downloads, verifies, and runs the Orbit binary from the `orbit-local` package (macOS, Linux, and Windows). The command selects the backend. `index`, `grep`, `context`, `sql`, `schema`, `list`, `mcp`, and `repo-map` use the local graph. `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` use Orbit Remote.
+`glab orbit` downloads, verifies, and runs the Orbit binary from the `orbit-cli` package (macOS, Linux, and Windows). The command selects the backend. `index`, `grep`, `context`, `sql`, `schema`, `list`, `mcp`, and `repo-map` use the local graph. `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` use Orbit Remote.
 
 glab handles `--install`, `--update`, and `--yes` itself and forwards everything else to the binary. `--install` and `--update` are mutually exclusive. `--yes` skips the confirmation prompts, so pass it in scripts and agent runs. `glab orbit --help` shows the wrapper help. `glab orbit help` and `glab orbit <command> --help` show the binary's.
 
@@ -103,7 +104,7 @@ glab orbit --install --yes   # install without running
 glab orbit --update          # install the latest compatible version
 ```
 
-Skip the confirmation prompts for good with `glab config set orbit_local_auto_run true` and `glab config set orbit_local_auto_download true`. Point glab at your own build with `glab config set orbit_local_binary_path /path/to/orbit` or the `GLAB_ORBIT_LOCAL_BINARY_PATH` env var. That skips download, version checks, and updates. glab records `orbit_local_binary_version`, `orbit_local_binary_checksum`, and `orbit_local_last_update_check` itself. Do not set them by hand.
+Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run true` and `glab config set orbit_cli_auto_download true`. Point glab at your own build with `glab config set orbit_cli_binary_path /path/to/orbit` or the `GLAB_ORBIT_CLI_BINARY_PATH` env var. That skips download, version checks, and updates. glab records `orbit_cli_binary_version`, `orbit_cli_binary_checksum`, and `orbit_cli_last_update_check` itself. Do not set them by hand.
 
 ## References
 

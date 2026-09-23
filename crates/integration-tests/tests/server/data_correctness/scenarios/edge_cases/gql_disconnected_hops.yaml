@@ -1,0 +1,9 @@
+description: Each relationship must extend the connected pattern
+
+query:
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(n:Note), (p:Project)-[:CONTAINS]->(g:Group)
+    RETURN u, n, p, g
+
+expect:
+  compile_error: "disconnected hops"

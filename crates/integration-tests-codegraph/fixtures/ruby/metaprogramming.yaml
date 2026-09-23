@@ -145,8 +145,8 @@ tests:
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
       - { row_count: 2 }
-      - { row: { fqn: "Model::name", type: Property } }
-      - { row: { fqn: "Model::email", type: Property } }
+      - { row: { fqn: "Model::name", type: Attribute } }
+      - { row: { fqn: "Model::email", type: Attribute } }
 
   - name: "delegate generates synthetic method defs"
     query: |
@@ -177,19 +177,18 @@ tests:
 
   - name: "Model.update calls name (attr_accessor)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Model::name'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Model::update", callee: "Model::name", kind: Calls } }
+      - { row: { caller: "Model::update", callee: "Model::name" } }
 
   - name: "Model extends Base"
     query: |
-      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
       WHERE child.fqn = 'Model'
-        AND e.edge_kind = 'Extends'
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
@@ -197,27 +196,27 @@ tests:
 
   - name: "Model.update calls save! (inherited from Base via Extends)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Base::save!'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Model::update", callee: "Base::save!", kind: Calls } }
+      - { row: { caller: "Model::update", callee: "Base::save!" } }
 
   - name: "Model.update calls greet (define_method)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Model::update'
         AND callee.fqn = 'Model::greet'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Model::update", callee: "Model::greet", kind: Calls } }
+      - { row: { caller: "Model::update", callee: "Model::greet" } }
 
   - name: "Presenter.display calls delegated methods"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'Presenter::display'
         AND callee.fqn IN ['Presenter::name', 'Presenter::email', 'Presenter::greet']
       RETURN callee.fqn AS callee
@@ -250,8 +249,8 @@ tests:
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
       - { row_count: 2 }
-      - { row: { fqn: "Post::published", type: Method } }
-      - { row: { fqn: "Post::recent", type: Method } }
+      - { row: { fqn: "Post::published", type: StaticMethod } }
+      - { row: { fqn: "Post::recent", type: StaticMethod } }
 
   # ══════════════════════════════════════════════════════════════
   # CLASS ATTRIBUTES
@@ -261,7 +260,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Post::max_length'
-        AND d.definition_type = 'Property'
+        AND d.definition_type = 'Attribute'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -276,23 +275,23 @@ tests:
 
   - name: "send(:notify) resolves to Dispatcher::notify"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Dispatcher::dispatch'
         AND callee.fqn = 'Dispatcher::notify'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::notify", kind: Calls } }
+      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::notify" } }
 
   - name: "public_send(:alert) resolves to Dispatcher::alert"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Dispatcher::dispatch'
         AND callee.fqn = 'Dispatcher::alert'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::alert", kind: Calls } }
+      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::alert" } }
 
   # ══════════════════════════════════════════════════════════════
   # CALLS TO GENERATED METHODS
@@ -304,33 +303,33 @@ tests:
 
   - name: "PostsController.index calls Post.published (qualified receiver chain)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'PostsController::index'
         AND callee.fqn = 'Post::published'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "PostsController::index", callee: "Post::published", kind: Calls } }
+      - { row: { caller: "PostsController::index", callee: "Post::published" } }
 
   - name: "UpdateWorker.perform calls Model.update via constructor chain"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'UpdateWorker::perform'
         AND callee.fqn = 'Model::update'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "UpdateWorker::perform", callee: "Model::update", kind: Calls } }
+      - { row: { caller: "UpdateWorker::perform", callee: "Model::update" } }
 
   - name: "PostsController.index calls Post.recent (qualified receiver chain)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'PostsController::index'
         AND callee.fqn = 'Post::recent'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "PostsController::index", callee: "Post::recent", kind: Calls } }
+      - { row: { caller: "PostsController::index", callee: "Post::recent" } }
 
   # ══════════════════════════════════════════════════════════════
   # CALLS TO GENERATED METHODS
@@ -338,9 +337,8 @@ tests:
 
   - name: "Post.summarize calls association and scope methods"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Post::summarize'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "Post::published" } }
@@ -372,10 +370,10 @@ tests:
 
   - name: "__send__(:notify) resolves to Dynamic::notify"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Dynamic::dispatch'
         AND callee.fqn = 'Dynamic::notify'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "Dynamic::dispatch", callee: "Dynamic::notify", kind: Calls } }
+      - { row: { caller: "Dynamic::dispatch", callee: "Dynamic::notify" } }

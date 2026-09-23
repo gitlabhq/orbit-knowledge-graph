@@ -51,7 +51,7 @@ use crate::v2::sentinel;
 
 use crate::v2::pipeline::{
     BatchTx, CancellationToken, FileInput, FileTimingEntry, LanguagePipeline, LanguageTimings,
-    PipelineContext, PipelineError,
+    PipelineContext, PipelineError, ProgressObserver, ProgressPhase,
 };
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, ImportBindingKind, NodeKind,
@@ -229,6 +229,7 @@ impl LanguagePipeline for RustPipeline {
             workspaces.as_ref(),
             sentinel_handle,
             &ctx.config.cancel,
+            ctx.config.progress.as_ref(),
         );
         // Nothing past the parse reads the rust-analyzer databases, and they are
         // the largest thing this pipeline holds.
@@ -266,6 +267,11 @@ impl LanguagePipeline for RustPipeline {
             .cross_file_resolve_timeout
             .map(|d| std::time::Instant::now() + d);
         let mut edge_timed_out = false;
+        let progress = ctx.config.progress.as_ref();
+        progress.files_advanced(
+            ProgressPhase::Resolve,
+            files.len().saturating_sub(parsed.len()),
+        );
 
         'edge_resolve: for file in &parsed {
             if ctx.is_cancelled() {
@@ -314,6 +320,7 @@ impl LanguagePipeline for RustPipeline {
                 total_ms: file.parse_ms + resolve_ms,
                 language: "rust".to_string(),
             });
+            progress.files_advanced(ProgressPhase::Resolve, 1);
         }
         if !edge_timed_out {
             add_unresolved_imported_call_edges(&mut graph, &parsed);
@@ -355,12 +362,15 @@ fn parse_rust_files(
     workspaces: Option<&WorkspacePlan>,
     sentinel: Option<&sentinel::SentinelHandle>,
     cancel: &CancellationToken,
+    progress: &dyn ProgressObserver,
 ) -> RustParseOutput {
     if let Some(workspaces) = workspaces {
-        return parse_rust_files_with_workspaces(files, root_path, workspaces, sentinel, cancel);
+        return parse_rust_files_with_workspaces(
+            files, root_path, workspaces, sentinel, cancel, progress,
+        );
     }
 
-    parse_rust_files_standalone(files, root_path, sentinel, cancel)
+    parse_rust_files_standalone(files, root_path, sentinel, cancel, progress)
 }
 
 fn parse_rust_files_with_workspaces(
@@ -369,6 +379,7 @@ fn parse_rust_files_with_workspaces(
     plan: &WorkspacePlan,
     sentinel: Option<&sentinel::SentinelHandle>,
     cancel: &CancellationToken,
+    progress: &dyn ProgressObserver,
 ) -> RustParseOutput {
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
@@ -433,6 +444,7 @@ fn parse_rust_files_with_workspaces(
                     parse_workspace_file(file, root_path, workspace)
                 });
                 let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
+                progress.files_advanced(ProgressPhase::Parse, 1);
                 if guard.as_ref().is_some_and(|g| g.is_killed()) {
                     return Some(Err((
                         file.to_string(),
@@ -476,6 +488,7 @@ fn parse_rust_files_with_workspaces(
                 parse_rust_file_standalone(file_path, root_path)
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
+            progress.files_advanced(ProgressPhase::Parse, 1);
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
                 return Some(Err((
                     file_path.to_string(),
@@ -507,6 +520,7 @@ fn parse_rust_files_standalone(
     root_path: &str,
     sentinel: Option<&sentinel::SentinelHandle>,
     cancel: &CancellationToken,
+    progress: &dyn ProgressObserver,
 ) -> RustParseOutput {
     let results = files
         .par_iter()
@@ -520,6 +534,7 @@ fn parse_rust_files_standalone(
                 parse_rust_file_standalone(file_path, root_path)
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
+            progress.files_advanced(ProgressPhase::Parse, 1);
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
                 return Some(Err((
                     file_path.to_string(),
@@ -1610,6 +1625,7 @@ mod tests {
             &root.to_string_lossy(),
             None,
             &cancel,
+            &crate::v2::pipeline::SilentProgress,
         );
 
         assert!(

@@ -8,17 +8,23 @@ parameters:
     schema: { type: string, minLength: 1, maxLength: 1024 }
     example: app/models/user.rb
 query:
-  query_type: traversal
-  nodes:
-    - id: caller
-      entity: Definition
-    - id: def
-      entity: Definition
-      filters:
-        project_id: { $param: project_id }
-        file_path: { $param: file_path }
-  relationships:
-    - type: CALLS
-      from: caller
-      to: def
-  limit: 500
+  json:
+    query_type: traversal
+    nodes:
+      - id: caller
+        entity: Definition
+      - id: def
+        entity: Definition
+        filters:
+          project_id: { $param: project_id }
+          file_path: { $param: file_path }
+    relationships:
+      - type: CALLS
+        from: caller
+        to: def
+    limit: 500
+  gql: |
+    MATCH (caller:Definition)-[:CALLS]->(def:Definition)
+    WHERE def.project_id = {{ param("project_id") }} AND def.file_path = {{ param("file_path") }}
+    RETURN caller, def
+    LIMIT 500

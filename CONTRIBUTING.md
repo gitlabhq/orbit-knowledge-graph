@@ -67,6 +67,9 @@ Run `mise lint:docs` before pushing any documentation changes.
   byte-identical `AGENTS.md` and `CLAUDE.md` files.
 - Use the canonical terms in `CONTEXT.md`. Add a term only when a new domain
   concept could confuse a new contributor.
+- Follow the GitLab documentation principles in `.ai/principles/distilled/` when
+  writing pages under `docs/source/`. A green `mise lint:docs` run does not mean
+  a page follows them.
 
 ## Issue conventions
 

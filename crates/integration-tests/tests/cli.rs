@@ -1266,7 +1266,7 @@ fn repo_map_omitted_subcommand_runs_overview() {
 }
 
 #[test]
-fn grep_loads_bundled_extension_and_matches_definition_body() {
+fn grep_loads_bundled_extension_and_returns_discovery_results() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let dd = data_dir.path();
@@ -1285,9 +1285,61 @@ fn grep_loads_bundled_extension_and_matches_definition_body() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("Definition:") && stdout.contains("return open"),
+        stdout.contains("Definition:")
+            && stdout.contains("src/utils.py:3-4  body-only ×1")
+            && stdout.contains("4| return open(path).read()"),
         "{stdout}"
     );
+    let reference = stdout
+        .split_whitespace()
+        .find(|s| s.starts_with("Definition:"))
+        .unwrap();
+    let repo_arg = repo.path.to_str().unwrap();
+    let fqn = "src.utils.read_file";
+    let (file, err, ok) = run_cmd(&["context", "src/utils.py", "--repo", repo_arg], dd);
+    assert!(
+        ok && file.starts_with("File:") && !file.contains("return open"),
+        "{err}\n{file}"
+    );
+    let file_id = file.split_whitespace().next().unwrap();
+    let args = ["context", file_id, fqn, reference, fqn, "--repo", repo_arg];
+    let (context, err, ok) = run_cmd(&args, dd);
+    assert!(ok && context.contains(&file), "{err}\n{context}");
+    assert_eq!(context.matches("return open(path).read()").count(), 1);
+    for (command, query, expected) in [
+        (
+            "grep",
+            "App|read_file|READ_FILE",
+            "exact: App | read_file\n",
+        ),
+        ("grep", "App|missing_symbol", "exact-miss: missing_symbol"),
+        ("context", "src/utils.py:3-4", "3|def read_file(path):"),
+        (
+            "context",
+            "src/utils.py:4",
+            "4|    return open(path).read()",
+        ),
+        ("context", "src", "Dir:  src  (2 files,"),
+    ] {
+        let (out, err, ok) = run_cmd(&[command, query, "--repo", repo_arg], dd);
+        assert!(ok && out.contains(expected), "{query}: {err}\n{out}");
+    }
+    for missing in [
+        "src.utils.read",
+        "' OR true --",
+        "../outside.py",
+        "src/utils.py:40",
+    ] {
+        let (out, err, ok) = run_cmd(&["context", fqn, missing, "--repo", repo_arg], dd);
+        assert!(!ok && out.is_empty(), "{out}\n{err}");
+    }
+    for invalid in ["|", "read_file|", "read_file||App", "!!!"] {
+        let (out, err, ok) = run_cmd(&["grep", invalid, "--repo", repo_arg], dd);
+        assert!(
+            !ok && err.contains("no usable search terms"),
+            "{out}\n{err}"
+        );
+    }
 }
 
 #[test]
@@ -1321,19 +1373,23 @@ fn context_relationship_order_is_stable_across_overloads() {
 
     let repo_arg = repo.to_str().unwrap();
     for (fqn, section) in [
-        ("Target.ping", "Connections (7):"),
-        ("Target", "Used via members (5)"),
+        ("Target.ping", "Connections (5 indexed):"),
+        ("Target", "Used via members (5 indexed):"),
     ] {
         let (matches, stderr, ok) = run_cmd(&["grep", fqn, "--repo", repo_arg], dd);
         assert!(ok, "grep {fqn} failed: {stderr}");
         let reference = matches
             .lines()
+            .filter(|line| line.trim_start().starts_with("Definition:"))
             .find(|line| line.split_whitespace().nth(1) == Some(fqn))
             .and_then(|line| line.split_whitespace().next())
             .unwrap();
         let args = ["context", reference, "--repo", repo_arg];
         let (first, stderr, ok) = run_cmd(&args, dd);
         assert!(ok, "context {reference} failed: {stderr}");
+        let (by_name, stderr, ok) = run_cmd(&["context", fqn, "--repo", repo_arg], dd);
+        assert!(ok, "context {fqn} failed: {stderr}");
+        assert_eq!(first, by_name);
         assert!(
             first.find("public void ping() {}").unwrap() < first.find(section).unwrap(),
             "{first}"
@@ -1344,10 +1400,14 @@ fn context_relationship_order_is_stable_across_overloads() {
             assert_eq!(first, run_cmd(&args, dd).0, "{reference} output changed");
         }
     }
+    let args = ["context", "Caller.run", "Caller.run", "--repo", repo_arg];
+    let (by_name, stderr, ok) = run_cmd(&args, dd);
+    assert!(ok, "{stderr}");
+    assert_eq!(by_name.matches("|    public void run(").count(), 3);
     let (file, stderr, ok) = run_cmd(&["context", "src/Target.java", "--repo", repo_arg], dd);
     assert!(ok, "{stderr}");
     assert!(
-        file.contains("public class Target") && !file.contains("Connections ("),
+        !file.contains("public class Target") && file.contains("via ping"),
         "{file}"
     );
 }
@@ -1373,4 +1433,81 @@ fn repo_map_api_empty_prefix_succeeds() {
         !stderr.contains("No files found"),
         "must not leak DuckDB glob error: {stderr}"
     );
+}
+
+#[test]
+fn file_context_bounds_connections_and_keeps_full_definition_followups() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    let models = (0..67)
+        .map(|i| format!("def entry_{i}():\n    return {i}\n\n"))
+        .collect::<String>();
+    let callers = (0..25).map(|i| format!(
+        "import dependency_{i}\nfrom models import entry_0\ndef caller_{i}():\n    return entry_0()\n\n"
+    )).collect::<String>();
+    init_repo_at(
+        &repo,
+        &[
+            ("src/models.py", &models),
+            ("src/callers.py", &callers),
+            ("tests/callers.py", &callers),
+        ],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+    let repo_arg = repo.to_str().unwrap();
+    let (out, err, ok) = run_cmd(&["context", "src/models.py", "--repo", repo_arg], dd);
+    assert!(ok && !out.contains("return 0"), "{err}\n{out}");
+    assert_eq!(out.matches("\n  Definition:").count(), 67, "{out}");
+    assert_eq!(out.matches("connections omitted").count(), 2, "{out}");
+    assert!(out.lines().count() < 110, "{out}");
+    let (body, err, ok) = run_cmd(&["context", "src.models.entry_0", "--repo", repo_arg], dd);
+    assert!(ok && body.contains("return 0"), "{err}\n{body}");
+    assert_eq!(body.matches("<-- ").count(), 50, "{body}");
+    assert!(!body.contains("connections omitted"), "{body}");
+    for path in ["src/callers.py", "tests/callers.py"] {
+        let (out, err, ok) = run_cmd(&["context", path, "--repo", repo_arg], dd);
+        assert!(
+            ok && out.contains("connections omitted; list all file edges:"),
+            "{err}\n{out}"
+        );
+        let sql = out
+            .lines()
+            .find_map(|line| line.split_once("sql \""))
+            .unwrap()
+            .1
+            .trim_end_matches('"');
+        let edges = orbit_sql(sql, dd);
+        assert_eq!(rows_where(&edges, "relationship_kind", "IMPORTS").len(), 50);
+    }
+}
+
+#[test]
+fn piped_index_prints_one_json_document_per_repository() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+
+    let out = orbit_cmd()
+        .args(["index", repo.path.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let documents: Vec<Value> = serde_json::Deserializer::from_slice(&out.stdout)
+        .into_iter()
+        .collect::<Result<_, _>>()
+        .expect("stdout is a stream of JSON documents");
+    assert_eq!(documents.len(), 1);
+    let document = &documents[0];
+    let repository_name = repo.path.file_name().unwrap().to_str().unwrap();
+    assert_eq!(document["repository"], json!(repository_name));
+    assert!(document["graph"]["files"].as_u64().unwrap() >= 2);
+    assert!(document["graph"]["definitions"].as_u64().unwrap() >= 1);
+    assert!(document["processing"].is_object());
 }

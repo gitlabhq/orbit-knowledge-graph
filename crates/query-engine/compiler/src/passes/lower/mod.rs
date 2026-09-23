@@ -15,6 +15,7 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::plan::{self, Plan, PlanBody, Strategy};
+use super::shared;
 
 impl Plan {
     pub fn emit_edge_chain(&self) -> Result<EmitOutput> {
@@ -63,7 +64,7 @@ impl EmitOutput {
 }
 
 pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
-    match &plan.body {
+    let mut node = match &plan.body {
         PlanBody::Traversal => traversal::emit_traversal(plan),
         PlanBody::Aggregation {
             aggregations,
@@ -95,7 +96,26 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
             input.hydration_dynamic,
             input.path_segment_budget,
         ),
+    }?;
+
+    if !input.join_predicates.is_empty()
+        && let Node::Query(q) = &mut node
+    {
+        for jp in &input.join_predicates {
+            let filter = InputFilter {
+                op: Some(jp.op),
+                rhs_column: Some((jp.rhs_node.clone(), jp.rhs_prop.clone())),
+                ..Default::default()
+            };
+            let pred = shared::filter_to_expr(&jp.lhs_node, &jp.lhs_prop, &filter);
+            q.where_clause = Some(match q.where_clause.take() {
+                Some(existing) => Expr::and(existing, pred),
+                None => pred,
+            });
+        }
     }
+
+    Ok(node)
 }
 
 pub fn lower(input: &mut Input) -> Result<Node> {

@@ -16,19 +16,6 @@ fixtures:
       export { Widget, WidgetImpl } from './widget';
 
 tests:
-  - name: Re-export barrels still synthesize ModuleExport proxies for cross-file wiring
-    skip: true
-    query: |
-      MATCH (d:Definition)
-      WHERE d.file_path = 'lib/barrel.ts'
-        AND d.definition_type = 'ModuleExport'
-      RETURN d.name AS name
-      ORDER BY name
-    assert:
-      - { row_count: 2 }
-      - { row: { name: "Widget" } }
-      - { row: { name: "WidgetImpl" } }
-
   - name: Each exported local symbol is a single definition row
     query: |
       MATCH (d:Definition)
@@ -59,4 +46,14 @@ tests:
     assert:
       - { empty: true }
 
-
+  - name: Re-export barrels still synthesize ModuleExport proxies for cross-file wiring
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/barrel.ts'
+        AND d.definition_type = 'ModuleExport'
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Widget" } }
+      - { row: { name: "WidgetImpl" } }

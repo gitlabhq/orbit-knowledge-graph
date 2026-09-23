@@ -1,0 +1,12 @@
+description: >
+  Cross-node property comparisons are rejected in aggregation queries.
+  The join predicate would reference an alias not in the outer FROM.
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+    WHERE u.state <> mr.title
+    RETURN count(mr) AS n
+
+expect:
+  compile_error: "only supported in traversal"

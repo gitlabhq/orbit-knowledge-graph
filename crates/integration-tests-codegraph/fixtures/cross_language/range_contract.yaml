@@ -1,5 +1,4 @@
 name: "Range contract — bytes 0-indexed, lines + chars 1-indexed, every language"
-pipeline: python
 
 fixtures:
   - path: pkg/user.py
@@ -66,7 +65,7 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'pkg/imports.py'
-      RETURN i.path AS path, i.name AS name, i.start_line AS sl, i.end_line AS el, i.start_char AS sc, i.start_byte AS sb
+      RETURN i.import_path AS path, i.identifier_name AS name, i.start_line AS sl, i.end_line AS el, i.start_char AS sc, i.start_byte AS sb
       ORDER BY sl
     assert:
       - { row_count: 2 }

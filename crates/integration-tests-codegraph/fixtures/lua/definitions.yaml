@@ -67,11 +67,10 @@ tests:
     assert:
       - { row: { name: "outer" } }
 
-  # corrected: impl wrappers are containers; the nested local inner is a definition
   - name: "Total definitions from defs.lua"
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path ENDS WITH 'defs.lua' AND d.definition_type <> 'Impl'
+      WHERE d.file_path ENDS WITH 'defs.lua'
       RETURN d.name AS name
     assert:
-      - { row_count: 7 }
+      - { row_count: 6 }

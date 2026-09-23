@@ -1,0 +1,65 @@
+name: "C++: template classes and functions"
+fixtures:
+  - path: templates.cpp
+    content: |
+      // Single-parameter template class
+      template<typename T>
+      class Stack {
+      public:
+          void push(const T& item);
+          T pop();
+          bool empty() const;
+      };
+
+      // Multi-parameter template class
+      template<typename K, typename V>
+      class HashMap {
+      public:
+          void insert(const K& key, const V& value);
+          V get(const K& key) const;
+      };
+
+      // Free template function
+      template<typename T>
+      T max(T a, T b) {
+          return a > b ? a : b;
+      }
+
+      // Non-template class with a template method
+      class Serializer {
+      public:
+          template<typename T>
+          std::string serialize(const T& value);
+      };
+
+tests:
+  - name: "Template class Stack extracted as Class"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Stack' AND d.definition_type = 'Class'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "Stack" } }
+
+  - name: "Multi-parameter template class HashMap extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'HashMap' AND d.definition_type = 'Class'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "HashMap" } }
+
+  - name: "Free template function max extracted as Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'max' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "max" } }
+
+  - name: "Template method serialize inside non-template class extracted as Method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'serialize' AND d.definition_type = 'Method'
+      RETURN d.name AS name
+    assert: []

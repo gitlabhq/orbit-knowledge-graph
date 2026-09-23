@@ -1,21 +1,24 @@
 # yaml-language-server: $schema=../schemas/setup.schema.json
 # Every string `orbit setup` writes into an assistant's files: the managed instruction block, the
-# two hook nudges, and the `template_vars` that fill `{{name}}` placeholders in the templates
-# assistants declare.
+# two hook nudges, the MCP server entry, and the `template_vars` that fill `{{name}}` placeholders
+# in the templates assistants declare.
+mcp_server:
+  name: orbit
+  command: "{{orbit}} mcp serve"
 instructions: |
   ## Orbit
 
-  Use Orbit for code.
+  Prefer Orbit for code search and callers/callees. Grep means `{{orbit}} grep`.
 
-  - Find: `{{orbit}} grep "<words>"`. Searches definition names/paths/bodies. Narrow with `--path <glob>` or `--kind Class,Method`; retry misses once with identifiers.
-  - Reuse returned source. Edit when enough.
-  - Need more? `{{orbit}} context Definition:<id> [Definition:<id>...]` or `{{orbit}} context <path>`. Batch needed references. Known targets skip grep.
-  - Definition context includes relationships; `--tests` shows hidden test connections.
-  - Raw Read/shell reads only for non-code or unavailable Orbit source. Never truncate Orbit output.
+  - Unknown code? `{{orbit}} grep 'words'`. FTS, not regex. Terms AND; `a|b` OR.
+  - grep shows IDs and file:lines. Source? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context Definition:123`.
+  - Do not reread unchanged files. Reuse shown source.
+  - Need file map? `{{orbit}} context path`. Directory? `{{orbit}} context dir`.
+  - Too broad? Add `--path`/`--kind`.
 
 nudge_search: |
-  Known target? `{{orbit}} context <path>` or `{{orbit}} context Definition:<id>`. Otherwise `{{orbit}} grep "<words>"` searches definition names/paths/bodies. Reuse returned source; edit when enough.
+  Grep means `{{orbit}} grep 'words'`. FTS, not regex. Terms AND; `a|b` OR. Add --path/--kind.
 nudge_read: |
-  Reuse source already returned. Missing code? `{{orbit}} context Definition:<id> [Definition:<id>...]` or `{{orbit}} context <path>`. Raw Read/shell reads only for non-code or unavailable Orbit source.
+  Do not reread unchanged files. Reuse shown source. Callers/callees? `{{orbit}} context Definition:123`.
 template_vars:
-  reminder: "[orbit] when a graph lookup would help, run {{orbit}} grep"
+  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. FTS, not regex."

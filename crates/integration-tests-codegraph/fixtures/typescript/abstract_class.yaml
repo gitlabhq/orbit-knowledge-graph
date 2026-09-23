@@ -47,10 +47,10 @@ tests:
       - { row: { fqn: "Animal::move", type: "Method" } }
   # static abstract is illegal in TS (TS1243), so is_static is exercised via a
   # concrete static method, which shares the JsDef construction with the abstract path.
-  - name: "Concrete static method maps to Method"
+  - name: "Concrete static method maps to StaticMethod"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Dog::create'
       RETURN d.fqn AS fqn, d.definition_type AS type
     assert:
-      - { row: { fqn: "Dog::create", type: "Method" } }
+      - { row: { fqn: "Dog::create", type: "StaticMethod" } }

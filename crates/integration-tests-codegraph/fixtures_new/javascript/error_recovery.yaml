@@ -1,0 +1,52 @@
+name: "JavaScript: graceful OXC error recovery for unparseable files"
+
+pipeline: js
+
+fixtures:
+  - path: broken.js
+    content: |
+      function incomplete( {
+        const x = ;
+        return @@@@;
+      }
+
+  - path: valid.js
+    content: |
+      export function processOrder(id) {
+        return { id, status: 'pending' };
+      }
+
+      export class OrderService {
+        constructor() {}
+        create(order) { return processOrder(order.id); }
+      }
+
+tests:
+  - name: "broken.js is skipped and contributes no definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'broken.js'
+      RETURN d.name AS name
+    assert:
+      - { empty: true }
+
+  - name: "valid.js sibling is still fully indexed despite broken.js"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'valid.js'
+        AND d.name IN ['processOrder', 'OrderService', 'create']
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "processOrder", fqn: "processOrder", type: "Function" } }
+      - { row: { name: "OrderService", fqn: "OrderService", type: "Class" } }
+      - { row: { name: "create", fqn: "OrderService::create", type: "Method" } }
+
+  - name: "broken.js never reaches the File table"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "valid.js" } }
+      - { not: true, row: { path: "broken.js" } }

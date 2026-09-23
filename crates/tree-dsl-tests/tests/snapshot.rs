@@ -28,7 +28,7 @@ struct Suite {
 fn load_suite() -> Suite {
     let yaml = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../integration-tests-codegraph/fixtures/python/incremental/basic.yaml"
+        "/../integration-tests-codegraph/fixtures_new/python/incremental/basic.yaml"
     ))
     .expect("fixture not found");
     serde_yaml::from_str(&yaml).expect("bad yaml")

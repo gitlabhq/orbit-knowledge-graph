@@ -1,0 +1,50 @@
+name: "Ruby start_line is 1-indexed"
+
+fixtures:
+  - path: app/models/merge_request.rb
+    content: |
+      # frozen_string_literal: true
+
+      class MergeRequest < ApplicationRecord
+        attr_accessor :title
+
+        def mergeable?
+          true
+        end
+
+        def self.batch_mark_as_unchecked(ids)
+          ids
+        end
+      end
+
+tests:
+  - name: Top-level Ruby class reports the file line its `class` keyword sits on
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'app/models/merge_request.rb'
+        AND d.name = 'MergeRequest'
+        AND d.definition_type = 'Class'
+      RETURN d.start_line AS start_line
+    assert:
+      - { row_count: 1 }
+      - { row: { start_line: 3 } }
+
+  - name: Instance method reports the file line its `def` keyword sits on
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'app/models/merge_request.rb'
+        AND d.name = 'mergeable?'
+      RETURN d.start_line AS start_line
+    assert:
+      - { row_count: 1 }
+      - { row: { start_line: 6 } }
+
+  - name: Singleton method reports the file line its `def self.` sits on
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'app/models/merge_request.rb'
+        AND d.name = 'batch_mark_as_unchecked'
+      RETURN d.start_line AS start_line
+    assert:
+      - { row_count: 1 }
+      - { row: { start_line: 10 } }

@@ -1188,7 +1188,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
         "MATCH (u:User) RETURN u.username AS renamed",
-        "MATCH (u:User) RETURN u{.username}, count(u)",
         "MATCH (u:User) RETURN u{.username}, u.state",
         "MATCH (u:User) RETURN u.username, u{.state}",
         "MATCH (u:User) RETURN date_trunc('month', u.created_at)",
@@ -1527,6 +1526,17 @@ fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
         "edge source must be the User side: {}",
         compiled.base.sql
     );
+}
+
+#[test]
+fn orbit_query_repeated_node_projections_ignore_property_order() {
+    let json = r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username","name"]},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":[{"key":"u","as":"author"},{"key":"u","as":"owner"}],"aggregations":[{"count":"mr","as":"mr_count"}]}"#;
+    for properties in [".username, .name", ".name, .username"] {
+        let query = format!(
+            "MATCH (u:User {{id: 1}})-[:AUTHORED]->(mr:MergeRequest) RETURN u{{.username, .name}} AS author, u{{{properties}}} AS owner, count(mr) AS mr_count"
+        );
+        compile_pair(json, &query, &embedded_ontology(), &test_ctx()).unwrap();
+    }
 }
 
 #[test]

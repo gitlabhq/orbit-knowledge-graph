@@ -191,9 +191,9 @@ table and column in it: `gl_definition`, `gl_file`, `gl_directory`,
 Next:
 
 - Run a real query: [Use GitLab Orbit Local with glab](access/glab.md).
-- Wire it into your AI agent: run `glab orbit setup` to install the GitLab Orbit
-  skill, or [connect via MCP](access/mcp.md). Setup edits your agent's
-  instruction file and hook configuration;
+- Wire it into your AI agent: run `orbit setup` to configure every detected
+  agent, or [connect via MCP](access/mcp.md) by hand. Setup edits your agent's
+  instruction file, MCP configuration, skills, and hooks;
   [see what it changes](access/cli.md#what-it-changes) before you run it.
 - Browse the table layout: [Schema reference](schema.md).
 

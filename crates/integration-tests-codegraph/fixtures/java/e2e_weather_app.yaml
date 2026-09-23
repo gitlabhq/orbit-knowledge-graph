@@ -115,7 +115,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.weather.model.Forecast'
-        AND d.definition_type = 'Class'
+        AND d.definition_type = 'Record'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -152,40 +152,36 @@ tests:
   # ── Containment edges ─────────────────────────────────────────
   - name: "Class defines method"
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'com.example.weather.Main'
         AND child.fqn = 'com.example.weather.Main.run'
-        AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
 
   - name: "Enum defines enum constant"
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'com.example.weather.formatter.Formatter.Format'
         AND child.fqn = 'com.example.weather.formatter.Formatter.Format.JSON'
-        AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
 
   - name: "File defines top-level class"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'src/main/java/com/example/weather/Main.java'
         AND d.fqn = 'com.example.weather.Main'
-        AND e.edge_kind = 'Defines'
       RETURN f.path AS file, d.fqn AS def
     assert:
       - { row_count: 1 }
 
   - name: "File defines record"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'src/main/java/com/example/weather/model/Forecast.java'
         AND d.fqn = 'com.example.weather.model.Forecast'
-        AND e.edge_kind = 'Defines'
       RETURN f.path AS file, d.fqn AS def
     assert:
       - { row_count: 1 }
@@ -193,44 +189,40 @@ tests:
   # ── Imports ────────────────────────────────────────────────────
   - name: "Cli imports PrintStream"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(i:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(i:ImportedSymbol)
       WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
-        AND i.path = 'java.io'
-        AND i.name = 'PrintStream'
-        AND e.edge_kind = 'Imports'
-      RETURN f.path AS file, i.name AS import
+        AND i.import_path = 'java.io'
+        AND i.identifier_name = 'PrintStream'
+      RETURN f.path AS file, i.identifier_name AS import
     assert:
       - { row_count: 1 }
 
   - name: "Cli imports Arrays"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(i:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(i:ImportedSymbol)
       WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
-        AND i.path = 'java.util'
-        AND i.name = 'Arrays'
-        AND e.edge_kind = 'Imports'
-      RETURN f.path AS file, i.name AS import
+        AND i.import_path = 'java.util'
+        AND i.identifier_name = 'Arrays'
+      RETURN f.path AS file, i.identifier_name AS import
     assert:
       - { row_count: 1 }
 
   - name: "WeatherService imports Collectors"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(i:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(i:ImportedSymbol)
       WHERE f.path = 'src/main/java/com/example/weather/service/WeatherService.java'
-        AND i.path = 'java.util.stream'
-        AND i.name = 'Collectors'
-        AND e.edge_kind = 'Imports'
-      RETURN f.path AS file, i.name AS import
+        AND i.import_path = 'java.util.stream'
+        AND i.identifier_name = 'Collectors'
+      RETURN f.path AS file, i.identifier_name AS import
     assert:
       - { row_count: 1 }
 
   - name: "Main imports Forecast"
     query: |
-      MATCH (f:File)-[e:FileToImportedSymbol]->(i:ImportedSymbol)
+      MATCH (f:File)-[e:IMPORTS]->(i:ImportedSymbol)
       WHERE f.path = 'src/main/java/com/example/weather/Main.java'
-        AND i.path = 'com.example.weather.model'
-        AND i.name = 'Forecast'
-        AND e.edge_kind = 'Imports'
-      RETURN f.path AS file, i.name AS import
+        AND i.import_path = 'com.example.weather.model'
+        AND i.identifier_name = 'Forecast'
+      RETURN f.path AS file, i.identifier_name AS import
     assert:
       - { row_count: 1 }

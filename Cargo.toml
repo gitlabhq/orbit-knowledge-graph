@@ -50,9 +50,9 @@ members = [
 
 [workspace.dependencies]
 orbit-observability = { path = "crates/orbit-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.4.0" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "58826ceb0e7c7519b65e0e18a73b1db080897ad5" }
 # No bundled ring provider: every binary installs its rustls provider before building a Tracker.
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.4.0", default-features = false }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "58826ceb0e7c7519b65e0e18a73b1db080897ad5", default-features = false }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
@@ -64,6 +64,7 @@ enum-as-inner = "0.7.0"
 either = "1.15.0"
 datafusion = { version = "54.1.0", default-features = false, features = ["sql", "nested_expressions"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
+cliclack = "0.5"
 comrak = { version = "0.53.0", default-features = false }
 dirs = "6"
 dunce = "1.0.5"
@@ -84,7 +85,6 @@ rmcp = { version = "1.7", features = ["server", "macros", "transport-io"] }
 schemars = "1.2.1"
 rkyv = { version = "0.8.18", features = ["alloc"] }
 serde = { version = "1.0.228", features = ["derive"] }
-stop-words = { version = "0.10.0", default-features = false, features = ["nltk"] }
 serde_json = "1.0.149"
 serde_yaml = "0.9"
 serde-saphyr = "1.1.0"
@@ -107,6 +107,8 @@ tokio-util = { version = "0.7.18", features = ["io-util"] }
 ignore = "0.4.25"
 rayon = "1.11.0"
 zstd = "0.13.3"
+arrow_56 = { package = "arrow", version = "56" }
+lance-graph = { version = "0.5.4", default-features = false }
 walkdir = "2.5.0"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
@@ -118,6 +120,7 @@ siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.g
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
 toml = "1.0.0"
+toml_edit = "0.25"
 toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
@@ -169,11 +172,6 @@ oxc_resolver = "11.24.2"
 rand = "0.10"
 sqlformat = "0.5"
 tabled = "0.21"
-indicatif = "0.18"
-
-# Codegraph integration tests dependencies
-arrow_56 = { package = "arrow", version = "56" }
-lance-graph = { version = "0.5.4", default-features = false }
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"

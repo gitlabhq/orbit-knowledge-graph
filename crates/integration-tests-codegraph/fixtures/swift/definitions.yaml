@@ -128,7 +128,7 @@ tests:
   - name: Direction enum entries are indexed
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumVariant'
+      WHERE d.definition_type = 'EnumEntry'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 6 }
@@ -145,8 +145,8 @@ tests:
 
   - name: Classes and structs contain expected method definitions
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
-      WHERE e.edge_kind = 'Defines' AND parent.name = 'Animal'
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
+      WHERE parent.name = 'Animal'
       RETURN child.name AS name
     assert:
       - { no_nulls: name }
