@@ -276,15 +276,9 @@ fn plan_shape_scenarios() {
                 continue;
             }
         };
-        let mut input = compiled.input.clone();
-        let (_, op) = match compiler::passes::plan_v2::plan(&mut input, &ontology) {
-            Ok(p) => p,
-            Err(e) => {
-                failures.push(format!("{name}: plan failed: {e}"));
-                continue;
-            }
-        };
-        let tree = op.to_node();
+        // The compile's own optimized plan; re-planning from `compiled.input`
+        // would see the nodes the aggregation path pruned.
+        let tree = parse_pattern(&compiled.plan);
         let text = tree.render(0);
         if show {
             eprintln!("=== {name} ===\n{text}\n");

@@ -67,6 +67,10 @@ pub struct PlanMetadata {
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub hop_count: usize,
     pub phys_op: Option<PhysOp>,
+    /// The plan has `IN (SELECT ...)` predicates; settings cap their index use.
+    pub has_semi_joins: bool,
+    /// Filled by lowering, after the optimizer has run.
+    pub explain: String,
 }
 
 pub fn plan(
@@ -99,6 +103,8 @@ pub fn plan(
         node_edge_mappings: ctx.node_edge_mappings(&op),
         hop_count: input.relationships.len(),
         phys_op: None,
+        has_semi_joins: has_semi_join(&op),
+        explain: String::new(),
     };
     // A scope anchor the optimizer elided has no representation in the
     // query; later passes must not expect it in the result.
@@ -110,4 +116,14 @@ pub fn plan(
             .retain(|r| kept.contains(&r.from) && kept.contains(&r.to));
     }
     Ok((meta, op))
+}
+
+fn has_semi_join(op: &PhysOp) -> bool {
+    matches!(
+        op,
+        PhysOp::Join {
+            kind: JoinKind::Semi,
+            ..
+        }
+    ) || op.children().into_iter().any(has_semi_join)
 }

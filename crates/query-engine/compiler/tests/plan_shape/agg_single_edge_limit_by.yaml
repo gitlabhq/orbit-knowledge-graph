@@ -1,6 +1,11 @@
 name: "Aggregation over one edge scan dedups with LIMIT BY, not FINAL"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"group_by":["label"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
+# Legacy also emitted countIf(<edge predicates>) for ClickHouse projection
+# routing; that is not ported. COUNT() must stay bare: COUNT(e0.source_id)
+# would force an unnecessary column read.
 expect:
   - (Scan gl_edge AS e0 LIMIT 1 BY sort key)
+  - (Aggregate ..., COUNT() AS n (_))
 reject:
   - (Scan gl_edge AS e0 FINAL)
+  - (Aggregate ..., COUNT(e0.source_id) AS n (_))

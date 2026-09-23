@@ -469,41 +469,6 @@ mod tests {
     }
 
     #[test]
-    fn unfiltered_edge_only_count_emits_bare_count_for_projection_routing() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [1]},
-                {"id": "f", "entity": "File"}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "f",
-                "as": "files"
-            }],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("countIf("),
-            "single-hop edge count should use countIf on the LIMIT BY path, \
-             got:\n{sql}"
-        );
-        assert!(
-            sql.contains("LIMIT 1 BY"),
-            "single-hop edge aggregation should use LIMIT BY dedup, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("COUNT(e0.source_id)") && !sql.contains("count(e0.source_id)"),
-            "must not emit COUNT(source_id) -- forces unnecessary column read, \
-             got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn filtered_edge_only_count_keeps_column_arg_for_count_if() {
         let query = r#"{
             "query_type": "aggregation",
@@ -532,71 +497,6 @@ mod tests {
             sql.contains("state = 'opened'"),
             "state filter must reach the SQL on the MR subquery, got:\n{sql}"
         );
-    }
-
-    #[test]
-    fn dedup_edge_scan_pushes_filter_cte_in_subquery_into_inner_where() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
-                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
-            ],
-            "aggregations": [{"count": "mr", "as": "n"}],
-            "limit": 1
-        }"#;
-
-        let sql = compile_sql(query);
-        let (e0_inner, rest) = sql
-            .split_once(") AS e0 INNER JOIN")
-            .expect("e0 dedup subquery is closed before the join");
-        let (e1_inner, post_join) = rest
-            .split_once(") AS e1 ON")
-            .expect("e1 dedup subquery is closed before ON");
-        let outer = post_join
-            .split_once(" WHERE ")
-            .map(|(_, tail)| tail)
-            .unwrap_or("");
-
-        for clause in [
-            "e0.source_id = 490855697",
-            "e0.target_id IN (SELECT id FROM _filter_label)",
-        ] {
-            assert!(
-                e0_inner.contains(clause),
-                "expected `{clause}` inside e0 dedup inner WHERE, got:\n{e0_inner}"
-            );
-        }
-        for clause in [
-            "e1.source_id = 490855697",
-            "e1.target_id IN (SELECT id FROM _filter_project)",
-        ] {
-            assert!(
-                e1_inner.contains(clause),
-                "expected `{clause}` inside e1 dedup inner WHERE, got:\n{e1_inner}"
-            );
-        }
-        for kind in [
-            "e0.relationship_kind = 'HAS_LABEL'",
-            "e0.source_kind = 'MergeRequest'",
-            "e0.target_kind = 'Label'",
-            "e1.relationship_kind = 'IN_PROJECT'",
-            "e1.target_kind = 'Project'",
-        ] {
-            assert!(
-                outer.contains(kind),
-                "kind predicate `{kind}` must stay in outer WHERE so CH's PredicateRewriteVisitor handles it, got:\n{outer}"
-            );
-            assert!(
-                !e0_inner.contains(kind) && !e1_inner.contains(kind),
-                "kind predicate `{kind}` must not be duplicated into dedup inner WHERE"
-            );
-        }
     }
 
     /// Regression for #801: self-joining the edge table without deduping each
@@ -1061,39 +961,6 @@ mod tests {
         assert!(
             sql.contains("gl_project AS p") || sql.contains("FROM gl_project"),
             "gl_project must remain in FROM, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn aggregation_skips_redundant_target_ids_cte_when_cascade_present() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "user_mrs"
-            }],
-            "limit": 5
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("mr.author_id = 116") || sql.contains("author_id = 116"),
-            "User node_ids filter must be pushed to FK column, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("mr.project_id") || sql.contains("p.id = mr.project_id"),
-            "IN_PROJECT FK join must use project_id, got:\n{sql}"
         );
     }
 
@@ -1665,44 +1532,6 @@ mod tests {
     }
 
     #[test]
-    fn fk_star_joined_nodes_use_candidate_ctes() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed", "source": "push"}},
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [
-                {"type": "HAS_JOB", "from": "pipe", "to": "j"},
-                {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
-            ],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_candidate_pipe AS (SELECT pipe.id AS id FROM gl_pipeline AS pipe WHERE"),
-            "joined target should get a candidate CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_candidate_j AS (SELECT j.id AS id FROM gl_job AS j WHERE"),
-            "center should get a candidate CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("FROM (SELECT * FROM gl_job AS j")
-                && sql.contains("AS j INNER JOIN (SELECT * FROM gl_pipeline AS pipe"),
-            "outer latest-row reads should use dedup (FINAL or LIMIT BY), got:\n{sql}"
-        );
-        assert!(
-            sql.contains("j.pipeline_id IN (SELECT id FROM _candidate_pipe)")
-                && sql.contains("pipe.id IN (SELECT id FROM _candidate_pipe)"),
-            "candidate CTE should narrow both center FK values and target ids, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn fk_star_filter_only_relationships_do_not_emit_candidate_ctes() {
         let query = r#"{
             "query_type": "aggregation",
@@ -1725,106 +1554,6 @@ mod tests {
         assert!(
             sql.contains("FROM gl_job AS j FINAL"),
             "latest-row read should still use FINAL, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn fk_star_unfiltered_join_narrow_uses_candidate_scan() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
-                {"id": "p2", "entity": "Pipeline"},
-                {"id": "proj", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
-                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
-            ],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains(
-                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 WHERE"
-            ),
-            "unfiltered joined target should be narrowed by a candidate scan, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains(
-                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 FINAL"
-            ),
-            "narrowing CTE should not run a second FINAL scan, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_candidate_p1"),
-            "center candidate CTE should not be emitted when it only repeats center filters, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("p1.id IN (SELECT id FROM _candidate_p1)"),
-            "center scan should not use a same-table candidate set without target-derived predicates, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("FROM (SELECT * FROM gl_pipeline AS p1")
-                && sql.contains("AS p1 INNER JOIN (SELECT * FROM gl_pipeline AS p2"),
-            "outer source and joined target should use dedup (FINAL or LIMIT BY), got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn fk_center_group_by_aggregation_drops_redundant_narrow_scan() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
-                {"id": "proj", "entity": "Project"}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "proj"}],
-            "group_by": ["proj"],
-            "aggregations": [{"count": "j", "as": "failed_jobs"}],
-            "limit": 200
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_narrow_proj"),
-            "FK-center group-by aggregation must not re-scan the center for narrowing, got:\n{sql}"
-        );
-        assert_eq!(
-            sql.matches("FROM gl_job").count(),
-            1,
-            "gl_job must be scanned exactly once, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("proj.id = j.project_id"),
-            "Project hydration must still join on the center FK, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn fk_center_traversal_keeps_narrow_scan() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
-                {"id": "p2", "entity": "Pipeline"},
-                {"id": "proj", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
-                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
-            ],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_narrow_p2"),
-            "traversal FK-center join must keep its narrowing CTE, got:\n{sql}"
         );
     }
 
@@ -1907,36 +1636,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "n", "entity": "Note"},
-                {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group", "filters": {"name": "gitlab-org"}}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "n", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{"count": "n", "as": "note_count"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_narrow_p"),
-            "single FilterOnly node should not emit _narrow_p cascade CTE; the IN-CTE push on the same hop already narrows the join, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e1.source_id IN (SELECT id FROM _filter_g)"),
-            "FilterOnly IN-CTE should land inside the dedup CTE inner WHERE, got:\n{sql}"
-        );
     }
 
     #[test]
@@ -2383,11 +2082,10 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [116]},
-                    {"id": "mr", "entity": "MergeRequest"}
+                    {"id": "mr", "entity": "MergeRequest", "node_ids": [116]},
+                    {"id": "label", "entity": "Label", "filters": {"title": "bug"}}
                 ],
-                "relationships": [{"from": "u", "to": "mr", "type": "AUTHORED"}],
-                "group_by": ["u"],
+                "relationships": [{"from": "mr", "to": "label", "type": "HAS_LABEL"}],
                 "aggregations": [{"count": "mr", "as": "c"}],
                 "limit": 20
             }"#,

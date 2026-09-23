@@ -1,7 +1,8 @@
-//! A node table nothing reads is only a filter on the edge column that
-//! joins it. It becomes a semi-join (`IN (SELECT id ...)`, which never
-//! multiplies rows), or disappears when it has no filters, or an edge still
-//! in the spine carries all its filters as denorm tags.
+//! A node table nothing reads is only a filter on the column that joins it.
+//! It becomes a semi-join (`IN (SELECT id ...)`, which never multiplies
+//! rows); or its pinned ids become a predicate on that column directly; or
+//! it disappears when it has no filters, or an edge still in the spine
+//! carries all its filters as denorm tags.
 
 use super::prelude::*;
 
@@ -54,9 +55,24 @@ pub fn rule_unreferenced_nodes(tree: &PhysOp, ctx: &RuleCtx) -> Option<PhysOp> {
                             && ctx.plan_ctx().denorm_covers(node, prop, rel)
                     })
                 });
+            // Pinned by ids and nothing else: the ids constrain the other
+            // side's column directly (`mr.author_id = 116`), no scan needed.
+            let ids_only =
+                node.filters.is_empty() && node.id_range.is_none() && !node.node_ids.is_empty();
             changed = true;
             if covered {
                 sp.remove(&a);
+            } else if ids_only {
+                let other = if x.0 == a { y.clone() } else { x.clone() };
+                let pred = id_in(&other.0, &other.1, &node.node_ids);
+                sp.remove(&a);
+                if let Some((leaf, _)) = sp
+                    .leaves
+                    .iter_mut()
+                    .find(|(l, _)| l.alias() == Some(other.0.as_str()))
+                {
+                    *leaf = std::mem::replace(leaf, scan("", "", Dedup::None)).filter(vec![pred]);
+                }
             } else {
                 sp.leaves[i].1 = JoinKind::Semi;
                 i += 1;

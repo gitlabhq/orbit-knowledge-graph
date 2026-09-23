@@ -107,11 +107,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [query_plan, query_config]
         }
         codegen {
-            reads_state: [node, input]
+            reads_state: [node, input, query_plan]
             mutates: [result_ctx, query_config, hydration_plan, output]
         }
         duckdb_codegen {
-            reads_state: [node, input]
+            reads_state: [node, input, query_plan]
             mutates: [result_ctx, hydration_plan, output]
         }
     }
@@ -227,6 +227,7 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
         .phys_op
         .take()
         .ok_or_else(|| QueryError::PipelineInvariant("phys_op not set".into()))?;
+    query_plan.explain = op.explain();
     let node = lower_v2::lower(op, &input)?;
     ctx.set_query_plan(query_plan);
     ctx.set_node(node);
@@ -283,19 +284,19 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_type: &str = input.query_type.into();
     let mut config = settings::resolve(query_type);
 
+    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let node = require(ctx.node().clone(), "node")?;
     if let Node::Query(q) = &node {
         let derived = &mut config.compiler_derived;
         derived.enable_materialized_cte = q.ctes.iter().any(|c| c.materialized);
         derived.optimize_move_to_prewhere_if_final =
             scans_final(q) || q.ctes.iter().any(|c| scans_final(&c.query));
-        if !q.ctes.is_empty() {
+        if !q.ctes.is_empty() || query_plan.has_semi_joins {
             derived.use_index_for_in_with_subqueries_max_values =
                 Some(IN_SUBQUERY_INDEX_MAX_VALUES);
         }
     }
 
-    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     if query_plan.hop_count >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
@@ -331,11 +332,17 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.input().clone(), "input")?;
     let base = codegen::codegen(&node, result_context, query_config)?;
     let query_type = input.query_type;
+    let plan = ctx
+        .query_plan()
+        .as_ref()
+        .map(|p| p.explain.clone())
+        .unwrap_or_default();
     ctx.set_output(CompiledQueryContext {
         query_type,
         base,
         hydration,
         input,
+        plan,
     });
     Ok(())
 }
@@ -347,11 +354,17 @@ fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.input().clone(), "input")?;
     let base = codegen::duckdb::codegen(&node, result_context)?;
     let query_type = input.query_type;
+    let plan = ctx
+        .query_plan()
+        .as_ref()
+        .map(|p| p.explain.clone())
+        .unwrap_or_default();
     ctx.set_output(CompiledQueryContext {
         query_type,
         base,
         hydration,
         input,
+        plan,
     });
     Ok(())
 }

@@ -1,0 +1,8 @@
+name: "A pinned FK target nothing reads becomes a predicate on the FK column, no User scan"
+input: {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[116]},{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"user_mrs"}],"limit":5}
+expect:
+  - (Filter ..., mr.author_id = 116 (Scan gl_merge_request AS mr FINAL))
+  - (Join ON mr.project_id = p.id (_) (_))
+reject:
+  - (Scan gl_user ...)
+  - (SemiJoin ...)

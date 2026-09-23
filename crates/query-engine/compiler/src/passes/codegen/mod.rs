@@ -41,6 +41,8 @@ pub struct CompiledQueryContext {
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
     pub input: Input,
+    /// The optimized physical plan as text (`PhysOp::explain`).
+    pub plan: String,
 }
 
 impl ParameterizedQuery {

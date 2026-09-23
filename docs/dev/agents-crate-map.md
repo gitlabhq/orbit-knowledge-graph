@@ -14,6 +14,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `orbit-prompts` | Embeds and validates the versioned YAML prompts under `config/prompts/`, and validates the standalone remote and local Orbit skill trees at build time: matching placeholders and sections, unique combined paths, relative links, and documented CLI commands against the clap source inventory |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
 | `query-engine/compiler` | JSON DSL and typed Input -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
+| `orbit-devtools` | Compiler devtools CLI: `compile --plan` prints the optimized physical plan and SQL for a JSON DSL or GQL query, `hydrate` compiles a hydration input |
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
 | `query-engine/types` | Type-safe result schema for redaction processing |
 | `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |

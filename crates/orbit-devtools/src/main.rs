@@ -90,15 +90,7 @@ fn main() {
             };
 
             if show_plan {
-                let mut input = compiled.input.clone();
-                match compiler::passes::plan_v2::plan(&mut input, &ontology) {
-                    Ok((_, op)) => {
-                        println!("--- plan ---");
-                        println!("{}", op.explain());
-                        println!();
-                    }
-                    Err(e) => eprintln!("plan error: {e}"),
-                }
+                println!("--- plan ---\n{}\n", compiled.plan);
             }
 
             let rendered = compiled.base.render();
@@ -163,13 +155,7 @@ fn main() {
                     .table_sort_keys
                     .insert(node.destination_table.clone(), node.sort_key.clone());
             }
-            if show_plan {
-                let mut planned = input.clone();
-                match compiler::passes::plan_v2::plan(&mut planned, &ontology) {
-                    Ok((_, op)) => println!("--- plan ---\n{}\n", op.explain()),
-                    Err(e) => eprintln!("plan error: {e}"),
-                }
-            }
+            let show_plan_after = show_plan;
             if legacy {
                 let mut legacy_input = input.clone();
                 match compiler::passes::lower::lower(&mut legacy_input).and_then(|node| {
@@ -181,6 +167,9 @@ fn main() {
             }
             match compiler::compile_input(input, &ontology, &ctx) {
                 Ok(c) => {
+                    if show_plan_after {
+                        println!("--- plan ---\n{}\n", c.plan);
+                    }
                     println!("--- sql ---\n{}\n", format_sql(&c.base.render()));
                     print_params(&c.base.params);
                 }

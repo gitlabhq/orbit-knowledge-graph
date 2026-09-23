@@ -234,7 +234,8 @@ impl PExpr {
                 } else {
                     String::new()
                 };
-                format!("{} IN ({}{more})", x.explain(), shown.join(", "))
+                // Brackets, not parens: in plan text `(` after a space starts a child.
+                format!("{} IN [{}{more}]", x.explain(), shown.join(", "))
             }
             PExpr::Lambda(p, b) => format!("{p} -> {}", b.explain()),
             PExpr::NodeFilter {

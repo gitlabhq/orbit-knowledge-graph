@@ -1,4 +1,4 @@
-name: "Single-node aggregation groups by the property expression"
+name: "Group by a property; the pinned FK target becomes a predicate on the FK column"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
 expect:
-  - (Aggregate group mr.state AS mr_state, COUNT() AS n (Filter mr.state = ?, !deleted(mr) (Scan gl_merge_request AS mr FINAL)))
+  - (Aggregate group mr.state AS mr_state, COUNT() AS n (Filter mr.state = ?, !deleted(mr), mr.project_id = 1 (Scan gl_merge_request AS mr FINAL)))
