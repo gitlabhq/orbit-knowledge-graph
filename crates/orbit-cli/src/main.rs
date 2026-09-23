@@ -17,7 +17,7 @@ mod workspace;
 use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{Level, debug};
 
 /// Only bounds commands too fast to hide a round trip behind their own work.
@@ -436,20 +436,6 @@ enum Commands {
     },
 }
 
-impl Commands {
-    fn targets_remote(&self) -> bool {
-        matches!(
-            self,
-            Commands::Query { .. }
-                | Commands::Status
-                | Commands::Ontology { .. }
-                | Commands::Dsl
-                | Commands::Tools
-                | Commands::GraphStatus { .. }
-        )
-    }
-}
-
 #[derive(Subcommand)]
 enum ConfigCommands {
     /// Print the saved value of a setting.
@@ -484,39 +470,43 @@ async fn main() -> Result<()> {
     // labkit-events ships no TLS provider; the tracker below builds an HTTPS client.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let tracker = telemetry::resolve_from_env().build_tracker();
+
+    let started = Instant::now();
+    let result = dispatch(cli.command).await;
+    let exit_code = result.as_ref().map_or_else(exit_code_for, |()| 0);
+
     if let Some(tracker) = &tracker {
         telemetry::emit_command_event(
             tracker,
             &subcommand_path(&matches),
-            cli.command.targets_remote(),
+            exit_code,
+            started.elapsed(),
             coding_agent.as_deref(),
         );
-        // One event never reaches labkit's batch threshold, so without this the
-        // round trip would not start until shutdown.
-        tracker.flush();
     }
-
-    let result = dispatch(cli.command).await;
-
     flush_telemetry(tracker.as_ref()).await;
-    if let Err(err) = &result
-        && let Some(remote) = err.downcast_ref::<remote::error::RemoteError>()
-    {
+
+    let Err(err) = &result else {
+        return result;
+    };
+    if let Some(remote) = err.downcast_ref::<remote::error::RemoteError>() {
         eprintln!("{}", remote.message);
-        std::process::exit(remote.exit_code);
-    }
-    if let Err(err) = &result
-        && tui::is_cancelled(err)
-    {
-        std::process::exit(130);
-    }
-    if let Err(err) = &result
-        && let Some(message) = workspace::describe_graph_lock_conflict(err)
-    {
+    } else if let Some(message) = workspace::describe_graph_lock_conflict(err) {
         eprintln!("{message}");
-        std::process::exit(1);
+    } else if !tui::is_cancelled(err) {
+        return result;
     }
-    result
+    std::process::exit(exit_code);
+}
+
+fn exit_code_for(err: &anyhow::Error) -> i32 {
+    if let Some(remote) = err.downcast_ref::<remote::error::RemoteError>() {
+        remote.exit_code
+    } else if tui::is_cancelled(err) {
+        130
+    } else {
+        1
+    }
 }
 
 fn subcommand_path(matches: &clap::ArgMatches) -> String {
@@ -771,28 +761,6 @@ mod tests {
         assert_eq!(action_for(&["orbit", "config", "set", "k", "v"]), "config");
         assert_eq!(action_for(&["orbit", "repo-map", "tree"]), "repo_map");
         assert_eq!(action_for(&["orbit", "mcp", "serve"]), "mcp");
-    }
-
-    #[test]
-    fn only_remote_api_verbs_target_remote() {
-        for argv in [
-            ["orbit", "query"].as_slice(),
-            &["orbit", "status"],
-            &["orbit", "ontology", "User"],
-            &["orbit", "dsl"],
-            &["orbit", "tools"],
-            &["orbit", "graph-status", "--project-id", "1"],
-        ] {
-            assert!(Cli::parse_from(argv).command.targets_remote(), "{argv:?}");
-        }
-        for argv in [
-            ["orbit", "grep", "x"].as_slice(),
-            &["orbit", "schema"],
-            &["orbit", "sql", "SELECT 1"],
-            &["orbit", "version"],
-        ] {
-            assert!(!Cli::parse_from(argv).command.targets_remote(), "{argv:?}");
-        }
     }
 
     #[test]
