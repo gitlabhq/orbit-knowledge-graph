@@ -1,6 +1,3 @@
-//! Resolves the instance-matched Orbit skill, validates and atomically caches
-//! its remote tree, then composes it with the binary's embedded local tree.
-
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -182,7 +179,6 @@ async fn list_skills() -> Result<()> {
         Ok(response) if matches!(response.status, 401 | 403) => {
             Err(map_http_error(response.status, body_text(&response)).into())
         }
-        // Collection responses are not cached, so there is no validated remote listing to reuse.
         Ok(response) if response.status >= 500 => {
             Err(map_http_error(response.status, body_text(&response)).into())
         }
@@ -274,8 +270,7 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             let cached = cached.ok_or_else(|| {
                 anyhow!("Orbit skill server returned 304 but no validated cache entry exists")
             })?;
-            // The request always revalidates the newest entry, so refreshing its
-            // timestamp cannot affect prune order and would rewrite the whole tree.
+            // A 304 does not change the tree; rewriting the cache would only alter its timestamp.
             Ok(Some(cached.tree))
         }
         404 => {
@@ -650,9 +645,8 @@ struct CacheLock {
 
 impl CacheLock {
     fn acquire(root: &Path) -> Result<Self> {
-        // Keep the lock inode in place: unlinking it allows two processes to
-        // lock different inodes under the same path. The OS releases the lock
-        // on process exit, including a kill without running Drop.
+        // Never unlink the inode: another writer could lock its replacement.
+        // The kernel releases this lock when the process dies.
         let file = OpenOptions::new()
             .read(true)
             .write(true)

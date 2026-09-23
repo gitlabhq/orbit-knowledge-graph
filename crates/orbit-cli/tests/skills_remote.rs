@@ -230,7 +230,6 @@ fn leftover_lock_file_does_not_block_a_cached_304() {
         .into_iter()
         .find(|path| path.ends_with(".populate.lock"))
         .expect("advisory lock file persists between reads");
-    // Model a process that exited before cleaning up a PID-based lock.
     std::fs::write(&lock, b"99999999\n").unwrap();
     let second = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
     assert!(second.status.success(), "{}", stderr(&second));
@@ -247,7 +246,7 @@ fn unwritable_cache_does_not_discard_a_valid_download() {
     let cache = tempfile::tempdir().unwrap();
     let cache_parent = cache.path().join("orbit");
     std::fs::create_dir(&cache_parent).unwrap();
-    // A regular file in place of the cache directory fails even when tests run as root.
+    // Use a file instead of chmod so this fails even when run as root.
     std::fs::write(cache_parent.join("skills"), b"blocked").unwrap();
     let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote without cache")]);
     let output = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);

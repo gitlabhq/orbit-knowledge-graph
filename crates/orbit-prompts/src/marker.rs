@@ -39,8 +39,7 @@ pub(crate) fn parse_markers(content: &str, tree: MarkerTree) -> Result<BTreeSet<
         .collect())
 }
 
-/// Composes independently valid remote and local manifests while tolerating
-/// marker-set skew between their release versions.
+/// Missing marker pairs must not fail composition across release versions.
 pub fn compose_skill_manifests(remote: &str, local: &str) -> Result<String, String> {
     let remote = remote.replace("\r\n", "\n");
     let local = local.replace("\r\n", "\n");
