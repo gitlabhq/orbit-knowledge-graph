@@ -72,9 +72,7 @@ chq() { bash -c "$CAP caproni kubectl -n gitlab-dev-stack exec -i gitlab-dev-sta
 # 3. Bulk-load the Parquet into gkg's versioned ClickHouse tables.
 # ---------------------------------------------------------------------------
 log "[3/4] loading synthetic graph into gkg ClickHouse"
-# Pick the newest schema version by NUMBER, not lexically: `ORDER BY name DESC`
-# would rank v9 above v10. Extract the digits after the leading `v` and sort
-# those numerically.
+# Sort by version number, not lexically: a plain DESC ranks v9 above v72.
 PFX="$(chq -q "SELECT name FROM system.tables WHERE database='gkg' AND name LIKE '%gl_file' ORDER BY toInt32OrZero(extract(name, '^v([0-9]+)_')) DESC LIMIT 1" | sed 's/_gl_file$//' | tr -d '[:space:]')"
 [ -n "$PFX" ] || { echo "could not discover gkg table prefix" >&2; exit 1; }
 log "     discovered gkg table prefix: $PFX"
@@ -116,9 +114,7 @@ bash -c "$CAP caproni kubectl -n gitlab port-forward svc/gkg-webserver 50054:500
 PF_PID=$!
 trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
 
-# Wait for the tunnel, failing fast if the port-forward dies or never opens the
-# port. Without this the load test would run against a dead endpoint and the
-# failure would surface only as opaque gRPC connection errors.
+# Fail fast rather than load-testing a dead endpoint.
 ready=0
 for _ in $(seq 1 30); do
   if ! kill -0 "$PF_PID" 2>/dev/null; then
@@ -143,9 +139,6 @@ export GKG_JWT_SECRET
 GKG_JWT_SECRET="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.gitlab-jwt-signing-key}' | base64 -d)"
 [ -n "$GKG_JWT_SECRET" ] || { echo "could not read gkg JWT signing key" >&2; exit 1; }
 
-# The load driver lives in this repo's xtask crate (built in stage 1). It reads
-# the performance scenario corpus, mints a JWT with the server's own claims, and
-# replays the queries over gRPC — no external repo, no vendored proto.
 mise exec -- cargo xtask loadtest \
   --endpoint http://127.0.0.1:50054 \
   --rounds "$ROUNDS" \
