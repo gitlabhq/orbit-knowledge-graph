@@ -263,9 +263,9 @@ orbit config set telemetry.enabled false   # save a setting
 ## Telemetry
 
 The CLI sends usage events to the GitLab product analytics service so the team
-can see how GitLab Orbit is used. Each event records which command ran, whether
-it succeeded, its exit code and duration, the CLI version, and the coding agent
-that ran it. No repository content, file paths, or query text is sent. Telemetry
+can see how GitLab Orbit is used. Each event records which command or MCP tool
+ran, whether it succeeded, its exit code and duration, the CLI version, and the
+coding agent that ran it. No repository content, file paths, or query text is sent. Telemetry
 is on by default.
 
 Turn it off with a saved setting, or with the environment variable in CI:

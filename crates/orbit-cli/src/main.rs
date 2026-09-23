@@ -472,7 +472,7 @@ async fn main() -> Result<()> {
     let tracker = telemetry::resolve_from_env().build_tracker();
 
     let started = Instant::now();
-    let result = dispatch(cli.command).await;
+    let result = dispatch(cli.command, tracker.clone(), coding_agent.clone()).await;
     let exit_code = result.as_ref().map_or_else(exit_code_for, |()| 0);
 
     if let Some(tracker) = &tracker {
@@ -526,7 +526,11 @@ async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTrac
     }
 }
 
-async fn dispatch(command: Commands) -> Result<()> {
+async fn dispatch(
+    command: Commands,
+    tracker: Option<orbit_analytics::SnowplowAnalyticsTracker>,
+    coding_agent: Option<String>,
+) -> Result<()> {
     match command {
         Commands::Version => {
             println!("{}", env!("ORBIT_VERSION"));
@@ -580,7 +584,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                 .finish();
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber failed");
-            mcp::serve().await
+            mcp::serve(tracker, coding_agent).await
         }
         Commands::RepoMap(RepoMapArgs {
             repo,
