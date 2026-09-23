@@ -1,0 +1,14 @@
+description: Path finding - shortest User -> User within 2 hops
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "u1", "entity": "User", "node_ids": [1]},
+        {"id": "u2", "entity": "User", "node_ids": [2]}
+      ],
+      "path": {"type": "shortest", "from": "u1", "to": "u2", "max_depth": 2,
+               "rel_types": ["MEMBER_OF", "CONTAINS", "IN_PROJECT"]}
+    }
+expect:
+  compile_only: true
