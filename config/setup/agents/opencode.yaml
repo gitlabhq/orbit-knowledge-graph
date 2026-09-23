@@ -1,6 +1,4 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
-# OpenCode has no PreToolUse-style context injection, so a tool.execute.before plugin prepends
-# a one-per-session graph reminder to the first bash command.
 name: opencode
 title: OpenCode
 detect: ["$XDG_CONFIG_HOME/opencode", "~/.config/opencode"]
@@ -12,14 +10,13 @@ template_files:
       project: .opencode/plugins/orbit.js
       global: "~/.config/opencode/plugins/orbit.js"
     template: opencode_plugin.js
-registrations:
+json_merges:
   - file:
       project: .opencode/opencode.json
       global: "~/.config/opencode/opencode.json"
     path: [plugin]
-    value:
-      project: .opencode/plugins/orbit.js
-      global: "~/.config/opencode/plugins/orbit.js"
+    marker: plugins/orbit.js
+    entries: ["./plugins/orbit.js"]
 mcp:
   file:
     project: opencode.json

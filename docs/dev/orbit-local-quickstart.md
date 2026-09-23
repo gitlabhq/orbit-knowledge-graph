@@ -99,7 +99,7 @@ For every test layer and where to add a test, see
 
 ## Agent plugins
 
-Claude Code and Codex can install the same Orbit CLI plugin. The package
+Claude Code, Codex, and Pi can install the same Orbit CLI plugin. The package
 reuses the skill embedded in the binary and needs no server services.
 See the [plugin guide](../../plugins/orbit/README.md) for installation, migration
 from `orbit setup`, and local validation.

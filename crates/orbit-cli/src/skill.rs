@@ -15,7 +15,7 @@ use crate::remote::client::{OrbitClient, SkillHttpResponse};
 use crate::remote::error::map_http_error;
 
 #[derive(Embed)]
-#[folder = "$SKILLS_DIR/orbit-cli"]
+#[folder = "$LOCAL_SKILLS_DIR/orbit-cli"]
 struct SkillAssets;
 
 const MANIFEST: &str = "SKILL.md";
