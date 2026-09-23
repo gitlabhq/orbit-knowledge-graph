@@ -1,6 +1,6 @@
 //! `export.yaml` parsed and checked against the ontology. Every table,
 //! column, node kind, tag and transform is named there; the walker in
-//! `mod.rs` only follows the plan.
+//! `mod.rs` only follows the result.
 
 use ontology::{DataType, Ontology};
 use orbit_utils::arrow::{ColumnSpec, ColumnType};

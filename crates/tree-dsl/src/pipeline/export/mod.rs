@@ -18,10 +18,10 @@ use crate::intern::Lang;
 use crate::pipeline::State;
 use crate::tree::{Cursor, EdgeKind, Tree};
 
-mod plan;
+mod parse;
 
-pub use plan::ExportPlan;
-use plan::{
+pub use parse::ExportPlan;
+use parse::{
     EdgeSource, EntityColumn, EntityPlan, HeaderSource, IdPart, On, Position, Source, SpanCandidate,
 };
 
