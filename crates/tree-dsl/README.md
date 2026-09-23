@@ -180,10 +180,15 @@ accessors use the pattern form, so only an explicit zero-argument method
 suppresses the synthesized accessor; the implicit `equals` uses a name-only
 pattern.
 
-Position columns in `config/export.yaml` accept `span:`. The default is the
-definition name range; `span: definition` selects the whole definition; `span:
-tag:<key>` selects the whole definition for nodes carrying that user tag. Java
-methods carry `definition_span`, so annotated methods start at the annotation.
+`config/export.yaml` maps the canonical tree onto the ontology's local tables
+and is checked against the ontology when loaded. Columns are filled with the
+same transform language rule files use (`tag("fqn")`, `child_sym("__defname")`,
+`split_last("/")`, ...). Position columns take `span:`, a list of candidates
+for the node to measure: `tag:<key>` applies when the node carries the tag, a
+kind when it has such a child, and the node itself is the fallback. Definitions
+use `[tag:definition_span, __defname]`, so a Java method tagged
+`definition_span` spans from its annotation while every other definition
+spans its name.
 
 ## Resolution
 

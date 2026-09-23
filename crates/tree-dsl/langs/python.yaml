@@ -289,6 +289,12 @@ display:
         tag:
           import_type: AliasedImport
           resolved: '@$ROOT|has_incoming("Imports")'
+      # `import os`: the name repeats the module, so the whole module is imported.
+      - match: '(__import $S:__source $$$A $N:__name $$$B)'
+        where: '$N == $S'
+        tag_on: __name
+        tag:
+          import_type: Import
       - match: '(__name)'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'

@@ -103,6 +103,13 @@ impl Tf {
                 let b = parse_nested_tf(arg(2)?, ctx)?;
                 Tf::Concat(s(0)?, Box::new(a), Box::new(b))
             }
+            "or" => {
+                let a = parse_nested_tf(arg(0)?, ctx.as_deref_mut())?;
+                let b = parse_nested_tf(arg(1)?, ctx)?;
+                Tf::Or(Box::new(a), Box::new(b))
+            }
+            "default" => Tf::Default(s(0)?),
+            "tree_path" => Tf::TreePath(s(0)?),
             _ => return Err(LoadError(format!("unknown transform: {name}"))),
         })
     }
@@ -154,6 +161,13 @@ impl Tf {
                     owned = step.apply_to_str(&owned).into_owned();
                 }
                 Cow::Owned(owned)
+            }
+            Tf::Default(value) => {
+                if s.is_empty() {
+                    Cow::Owned(value.to_string())
+                } else {
+                    Cow::Borrowed(s)
+                }
             }
             Tf::Stem => {
                 let p = std::path::Path::new(s);
@@ -289,6 +303,19 @@ impl Tf {
                         lang.syms.resolve(b)
                     )),
                 }
+            }
+            Tf::Or(a, b) => match nonempty(lang, a.apply_sym(t, lang, id, edge_ctx)) {
+                Some(sym) => sym,
+                None => b.apply_sym(t, lang, id, edge_ctx),
+            },
+            Tf::TreePath(sep) => {
+                let mut segments: Vec<&str> = id
+                    .ancestors(&t.arena)
+                    .filter(|a| a.parent(&t.arena).is_some())
+                    .map(|a| lang.syms.resolve(t.sym_of(a, lang)))
+                    .collect();
+                segments.reverse();
+                lang.syms.intern(&segments.join(sep))
             }
             Tf::Pipeline(steps) => {
                 let mut s = t.text(id, lang).to_string();

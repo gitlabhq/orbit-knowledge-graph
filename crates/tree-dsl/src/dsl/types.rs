@@ -36,6 +36,9 @@ pub enum Tf {
     AncestorTag(u32),
     Tag(u32),
     LitSym(u32),
+    Or(Box<Tf>, Box<Tf>),
+    Default(Box<str>),
+    TreePath(Box<str>),
     Regex(regex::Regex, Box<str>),
     RegexFirst(regex::Regex, Box<str>),
     RegexLoop(regex::Regex, Box<str>),
@@ -56,6 +59,8 @@ impl Tf {
                 | Tf::Tag(_)
                 | Tf::LitSym(_)
                 | Tf::Concat(_, _, _)
+                | Tf::Or(_, _)
+                | Tf::TreePath(_)
                 | Tf::HasEdge(_, _)
         )
     }
@@ -172,7 +177,7 @@ pub struct TagEntry {
 pub enum Out {
     Replace(Pat, Option<Vec<TagEntry>>, Option<u16>),
     Append(Vec<Pat>),
-    Tag(Vec<TagEntry>),
+    Tag(Vec<TagEntry>, Option<u16>),
 }
 
 pub struct Rewrite {

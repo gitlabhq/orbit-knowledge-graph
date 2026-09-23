@@ -305,8 +305,8 @@ fn apply_rewrites_inner(
             let span = (root_node.start, root_node.end);
 
             match &r.out {
-                Out::Tag(entries) => {
-                    let raw = Tree::to_raw(target);
+                Out::Tag(entries, tag_on) => {
+                    let raw = Tree::to_raw(tag_target(t, target, *tag_on));
                     for entry in entries {
                         let src = caps[entry.slot as usize].first().copied().unwrap_or(target);
                         let val = if entry.val.is_node_tf() {
@@ -364,13 +364,7 @@ fn apply_rewrites_inner(
                         .collect();
                     t.replace(target, built);
                     if let Some(new_root) = first {
-                        let tagged = tag_on
-                            .and_then(|k| {
-                                new_root
-                                    .descendants(&t.arena)
-                                    .find(|&n| t.node(n).kind == k)
-                            })
-                            .unwrap_or(new_root);
+                        let tagged = tag_target(t, new_root, *tag_on);
                         for (key, val) in tags {
                             t.set_tag(Tree::to_raw(tagged), key, val);
                         }
@@ -407,4 +401,11 @@ impl Tree {
         }
         copy
     }
+}
+
+/// The node `tag_on:` selects: the first descendant of that kind, else `root`.
+fn tag_target(t: &Tree, root: NodeId, tag_on: Option<u16>) -> NodeId {
+    tag_on
+        .and_then(|k| root.descendants(&t.arena).find(|&n| t.node(n).kind == k))
+        .unwrap_or(root)
 }

@@ -37,6 +37,7 @@ impl From<regex::Error> for LoadError {
 pub enum Error {
     Load(LoadError),
     Killed(Killed),
+    Export(arrow::error::ArrowError),
 }
 
 impl std::fmt::Display for Error {
@@ -44,6 +45,7 @@ impl std::fmt::Display for Error {
         match self {
             Self::Load(e) => write!(f, "load: {e}"),
             Self::Killed(k) => write!(f, "budget: {k}"),
+            Self::Export(e) => write!(f, "export: {e}"),
         }
     }
 }
@@ -59,5 +61,11 @@ impl From<LoadError> for Error {
 impl From<Killed> for Error {
     fn from(k: Killed) -> Self {
         Self::Killed(k)
+    }
+}
+
+impl From<arrow::error::ArrowError> for Error {
+    fn from(e: arrow::error::ArrowError) -> Self {
+        Self::Export(e)
     }
 }

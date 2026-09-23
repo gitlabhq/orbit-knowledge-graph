@@ -31,6 +31,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 stacker = "0.1"
 rustc-hash = "2"
+indexmap = { workspace = true, features = ["serde"] }
 itertools = "0.14"
 either = { workspace = true }
 indextree = "4.9"

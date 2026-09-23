@@ -24,6 +24,29 @@ pub struct ProjectTree<'a> {
 }
 
 impl<'a> ProjectTree<'a> {
+    /// Just the directory tree: `__root` over `__dir` and `__file` nodes whose
+    /// `sym` is the path segment. The resolver and the exporter both walk it.
+    pub fn directory_tree(lang: &'a Lang, paths: &'a [&'a str]) -> Tree {
+        static NO_CONFIG: std::sync::LazyLock<ResolveConfig> =
+            std::sync::LazyLock::new(ResolveConfig::default);
+        let mut pt = Self {
+            lang,
+            config: &NO_CONFIG,
+            stages: &[],
+            paths,
+            files: None,
+            tree: Tree::new(Node {
+                kind: C::Root.into(),
+                named: true,
+                ..Default::default()
+            }),
+            prefixes: vec![],
+            aliases: vec![],
+        };
+        pt.build_dir_tree();
+        pt.tree
+    }
+
     pub fn build(
         lang: &'a Lang,
         config: &'a ResolveConfig,

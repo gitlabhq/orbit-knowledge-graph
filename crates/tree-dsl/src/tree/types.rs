@@ -17,6 +17,7 @@ pub struct Tag {
     Debug,
     PartialEq,
     Eq,
+    Hash,
     strum::Display,
     strum::EnumString,
     strum::IntoStaticStr,

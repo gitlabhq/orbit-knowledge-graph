@@ -383,7 +383,10 @@ fn compile_rule(rule: &Rule, lang: &Lang) -> Result<Rewrite, LoadError> {
         })?
     } else if let Some(ref tag_map) = rule.tag {
         let tag_map = tag_map.clone();
-        Rewrite::new(lang, pat, move |c| Ok(Out::Tag(compile_tags(&tag_map, c)?)))?
+        let tag_on = rule.tag_on.as_deref().map(|k| lang.intern_kind(k));
+        Rewrite::new(lang, pat, move |c| {
+            Ok(Out::Tag(compile_tags(&tag_map, c)?, tag_on))
+        })?
     } else {
         return Err(LoadError(format!(
             "rule {pat:?} has no replace, append, or tag"

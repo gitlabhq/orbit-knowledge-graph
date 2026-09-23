@@ -10024,6 +10024,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "either",
+ "indexmap 2.14.2",
  "indextree",
  "itertools 0.14.0",
  "lasso",

@@ -1,0 +1,118 @@
+# How the canonical tree becomes the ontology's local tables.
+#
+# Every column carries an explicit type, and loading checks each table
+# against the ontology: a column missing here, a column unknown to the
+# ontology, or a type or nullability the two disagree on is a load error.
+#
+# Entities are node kinds. Directories and files come from the project tree
+# (`__root` over `__dir` and `__file`), and each parsed file's `__source_file`
+# root stands in for its `__file` node, so an ancestor walk from a definition
+# reaches its file, then its directories.
+#
+# A column is filled by one of:
+#   from: <transforms>   the rule-file transform language, run on the row's
+#                        node: tag("k"), ancestor_tag("k"), child_sym("kind"),
+#                        ancestor_sym("kind"), tree_path(sep), split_last(sep),
+#                        or(a, b), default(v), regex_*, ... Omitted: the
+#                        node's own text.
+#   const: <text>        a literal
+#   position: <which>    start_line | end_line | start_byte | end_byte |
+#                        start_col | end_col
+#     span: [...]        which node the position measures: the first candidate
+#                        that applies, else the row's node. `tag:<key>` applies
+#                        when the node carries the tag; `<kind>` when it has
+#                        such a child.
+# `on: expanded` runs the column on the child produced by `expand:` (the node
+# itself when there was nothing to expand).
+#
+# `id` names the seed and the columns hashed into the row id after project
+# and branch; `span` adds the node's byte range. This mirrors the code-graph
+# scheme so both pipelines agree on ids.
+
+header:
+  - { name: id, type: Int64, from: id }
+  - { name: project_id, type: Int64, from: project_id }
+  - { name: branch, type: Utf8, from: branch }
+  - { name: commit_sha, type: Utf8, from: commit_sha }
+  - { name: traversal_path, type: Utf8, const: "" }
+
+entities:
+  Directory:
+    source: __dir
+    id: { seed: dir, columns: [path] }
+    columns:
+      - { name: path, type: Utf8, from: tree_path("/") }
+      - { name: name, type: Utf8 }
+
+  File:
+    source: __source_file
+    id: { seed: file, columns: [path] }
+    columns:
+      - { name: path, type: Utf8 }
+      - { name: name, type: Utf8, from: split_last("/") }
+      - { name: extension, type: Utf8, from: split_last("/")|split_last(".") }
+      - { name: language, type: Utf8, from: tag("language") }
+      - { name: size_bytes, type: Int64, position: end_byte }
+      - { name: reason, type: Utf8, const: "" }
+
+  Definition:
+    source: __def
+    id: { seed: def, columns: [file_path, fqn, span] }
+    columns:
+      - { name: file_path, type: Utf8, from: ancestor_tag("file_path") }
+      - { name: fqn, type: Utf8, from: tag("fqn") }
+      - { name: name, type: Utf8, from: child_sym("__defname") }
+      - { name: definition_type, type: Utf8, from: tag("def_type") }
+      - { name: start_line, type: Int64, position: start_line, span: [tag:definition_span, __defname] }
+      - { name: end_line, type: Int64, position: end_line, span: [tag:definition_span, __defname] }
+      - { name: start_byte, type: Int64, position: start_byte, span: [tag:definition_span, __defname] }
+      - { name: end_byte, type: Int64, position: end_byte, span: [tag:definition_span, __defname] }
+      - { name: start_char, type: Int64, position: start_col, span: [tag:definition_span, __defname] }
+      - { name: end_char, type: Int64, position: end_col, span: [tag:definition_span, __defname] }
+
+  ImportedSymbol:
+    source: __import|__import_type
+    exclude_parent: __module_export
+    expand: __name
+    id: { seed: import, columns: [file_path, import_path, identifier_name, span] }
+    columns:
+      - { name: file_path, type: Utf8, from: ancestor_tag("file_path") }
+      - name: import_type
+        type: Utf8
+        on: expanded
+        from: or("tag:import_type", "ancestor_tag:import_type")|default("NamedImport")
+      - { name: import_path, type: Utf8, from: tag("source_path") }
+      - { name: identifier_name, type: Utf8, on: expanded }
+      - { name: identifier_alias, type: Utf8, on: expanded, from: ancestor_sym("__alias") }
+      - { name: start_line, type: Int64, position: start_line }
+      - { name: end_line, type: Int64, position: end_line }
+      - { name: start_byte, type: Int64, position: start_byte }
+      - { name: end_byte, type: Int64, position: end_byte }
+      - { name: start_char, type: Int64, position: start_col }
+      - { name: end_char, type: Int64, position: end_col }
+
+# The edge table. `containment` rows link each `to` entity to its nearest
+# enclosing `from` entity. `graph` rows come from the resolver, matched on
+# edge kind and the entities at each end; cross-file ones collapse to one
+# row per source, target and kind.
+edges:
+  columns:
+    - { name: source_id, type: Int64, from: source.id }
+    - { name: source_kind, type: Utf8, from: source.entity }
+    - { name: relationship_kind, type: Utf8, from: kind }
+    - { name: target_id, type: Int64, from: target.id }
+    - { name: target_kind, type: Utf8, from: target.entity }
+    - { name: traversal_path, type: Utf8, const: "" }
+  containment:
+    - { from: Directory, to: Directory, kind: CONTAINS }
+    - { from: Directory, to: File, kind: CONTAINS }
+    - { from: File, to: Definition, kind: DEFINES }
+    - { from: File, to: ImportedSymbol, kind: IMPORTS }
+  graph:
+    - { edge: Calls, to: Definition, kind: CALLS }
+    - { edge: Defines, from: Definition, to: Definition, kind: DEFINES }
+    - { edge: Extends, from: Definition, to: Definition, kind: EXTENDS }
+    - { edge: Imports, from: ImportedSymbol, to: Definition, kind: IMPORTS }
+    # An unresolved call to an import counts as a call, unless the caller
+    # already resolved to a definition.
+    - { edge: Imports, from: Definition, to: ImportedSymbol, kind: CALLS, unless_source_has: Calls }
