@@ -238,6 +238,9 @@ impl PExpr {
                 format!("{} IN [{}{more}]", x.explain(), shown.join(", "))
             }
             PExpr::Lambda(p, b) => format!("{p} -> {}", b.explain()),
+            PExpr::DateTrunc(unit, value) => {
+                format!("date_trunc({}, {})", unit.name(), value.explain())
+            }
             PExpr::NodeFilter {
                 alias,
                 property,

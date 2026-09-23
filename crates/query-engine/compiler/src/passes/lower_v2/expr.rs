@@ -50,6 +50,15 @@ pub fn expr(e: &PExpr) -> Expr {
             Expr::col_in(a, c, ch_type, values).unwrap_or_else(|| Expr::param(ChType::Bool, false))
         }
         PExpr::Lambda(param, body) => Expr::lambda(param, expr(body)),
+        PExpr::DateTrunc(unit, value) => {
+            let truncated = Expr::func(unit.ch_function(), vec![expr(value)]);
+            match unit {
+                TruncateUnit::Minute | TruncateUnit::Hour => {
+                    Expr::func("toDateTime64", vec![truncated, Expr::ident("0")])
+                }
+                _ => Expr::func("toDate32", vec![truncated]),
+            }
+        }
         PExpr::NodeFilter {
             alias,
             property,

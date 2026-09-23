@@ -132,10 +132,7 @@ impl<'a> PlanCtx<'a> {
                 } => {
                     let expr = match truncate {
                         None => pe!("{node}.{property}"),
-                        Some(unit @ (TruncateUnit::Minute | TruncateUnit::Hour)) => {
-                            pe!("{}({node}.{property})", unit.ch_function())
-                        }
-                        Some(unit) => pe!("toDate32({}({node}.{property}))", unit.ch_function()),
+                        Some(unit) => PExpr::DateTrunc(*unit, Box::new(pe!("{node}.{property}"))),
                     };
                     group_by.push(named(expr, g.output_name()));
                 }

@@ -43,8 +43,12 @@ fn matches(pattern: &PlanNode, node: &PlanNode) -> bool {
         .iter()
         .filter(|item| *item != "...")
         .collect();
-    if !expected.iter().all(|item| node.items.contains(item)) {
-        return false;
+    let mut remaining = node.items.clone();
+    for item in expected {
+        let Some(index) = remaining.iter().position(|candidate| candidate == item) else {
+            return false;
+        };
+        remaining.remove(index);
     }
     if !open && expected.len() != node.items.len() {
         return false;

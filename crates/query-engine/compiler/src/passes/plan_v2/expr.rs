@@ -26,6 +26,7 @@ pub enum PExpr {
     Or(Vec<PExpr>),
     In(Box<PExpr>, Vec<Lit>),
     Lambda(String, Box<PExpr>),
+    DateTrunc(TruncateUnit, Box<PExpr>),
     /// A user filter on `alias.property`; lowering owns operator and
     /// parameter typing (`filter_to_expr`).
     NodeFilter {
@@ -169,6 +170,7 @@ impl PExpr {
             PExpr::Cmp(op, l, r) => PExpr::Cmp(*op, Box::new(go(l)), Box::new(go(r))),
             PExpr::In(x, vs) => PExpr::In(Box::new(go(x)), vs.clone()),
             PExpr::Lambda(p, b) => PExpr::Lambda(p.clone(), Box::new(go(b))),
+            PExpr::DateTrunc(unit, value) => PExpr::DateTrunc(*unit, Box::new(go(value))),
             other => other.clone(),
         }
     }
@@ -212,7 +214,7 @@ impl PExpr {
                 l.aliases(out);
                 r.aliases(out);
             }
-            PExpr::In(x, _) | PExpr::Lambda(_, x) => x.aliases(out),
+            PExpr::In(x, _) | PExpr::Lambda(_, x) | PExpr::DateTrunc(_, x) => x.aliases(out),
         }
     }
 
