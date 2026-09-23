@@ -170,24 +170,6 @@ impl Bar {
     }
 }
 
-pub(crate) struct Spinner(cliclack::ProgressBar);
-
-pub(crate) fn spinner(label: impl Display) -> Spinner {
-    let bar = cliclack::spinner();
-    bar.start(label);
-    Spinner(bar)
-}
-
-impl Spinner {
-    pub(crate) fn stop(self, message: impl Display) {
-        self.0.stop(message);
-    }
-
-    pub(crate) fn error(self, message: impl Display) {
-        self.0.error(message);
-    }
-}
-
 pub(crate) fn cancelled(message: &str) -> anyhow::Error {
     std::io::Error::new(std::io::ErrorKind::Interrupted, message.to_string()).into()
 }
