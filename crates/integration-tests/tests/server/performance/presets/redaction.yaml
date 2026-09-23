@@ -1,0 +1,6 @@
+# Perf scenarios are compile-only, so redaction is never exercised. This preset
+# exists only because the scenario runner resolves a default `allow_all`
+# redaction preset before the compile-only short-circuit.
+allow_all:
+  allow: {}
+  deny: {}
