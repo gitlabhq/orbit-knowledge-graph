@@ -33,9 +33,9 @@ use crate::proto::{
     GetSkillResponse, InvokeAgentCommandRequest, InvokeAgentCommandResponse,
     ListAgentCommandsRequest, ListAgentCommandsResponse, ListNamedQueriesRequest,
     ListNamedQueriesResponse, ListSkillsRequest, ListSkillsResponse, ListToolsRequest,
-    ListToolsResponse, NamedQueryDefinition, QueryLanguage, QueryMetadata, QueryType, ResponseFormat,
-    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
-    SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary, StructuredSchema,
+    ListToolsResponse, NamedQueryDefinition, QueryLanguage, QueryMetadata, QueryType,
+    ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
+    SchemaNodeStyle, SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
     get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
 };

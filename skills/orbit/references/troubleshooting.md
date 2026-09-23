@@ -104,7 +104,7 @@ Usually the query matched no rows. Confirm with a known-good probe in `/tmp/q-mi
 ```
 
 ```shell
-glab orbit query --response-format raw /tmp/q-min.json
+glab orbit query --response-format raw --file /tmp/q-min.json
 ```
 
 If this returns a row, the connection works and your other query has no matches.

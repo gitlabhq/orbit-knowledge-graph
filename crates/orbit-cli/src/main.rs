@@ -387,12 +387,17 @@ enum Commands {
         mode: Option<String>,
     },
     /// POST a query to the remote Orbit API and stream the response.
+    #[command(group(clap::ArgGroup::new("input").required(true).args(["query", "file"])))]
     Query {
+        #[arg(value_name = "QUERY", help = "Query text")]
+        query: Option<String>,
+
         #[arg(
-            value_name = "QUERY|FILE",
-            help = "Query text or a request-envelope file; '-' or omitted reads an envelope from stdin"
+            long,
+            value_name = "FILE",
+            help = "Read a request envelope from FILE, or from stdin when FILE is '-'"
         )]
-        source: Option<String>,
+        file: Option<String>,
 
         /// Server response format. Overrides the body's `response_format`;
         /// defaults to `llm` when neither is set.
@@ -635,9 +640,17 @@ async fn dispatch(
             Ok(())
         }
         Commands::Query {
-            source,
+            query,
+            file,
             response_format,
-        } => Ok(remote::run_query(source, response_format).await?),
+        } => {
+            let input = match (query, file) {
+                (Some(query), None) => remote::QueryInput::Text(query),
+                (None, Some(path)) => remote::QueryInput::File(path),
+                _ => unreachable!("clap requires exactly one of QUERY or --file"),
+            };
+            Ok(remote::run_query(input, response_format).await?)
+        }
         Commands::Status => Ok(remote::run_status().await?),
         Commands::Ontology { nodes } => Ok(remote::run_ontology(nodes).await?),
         Commands::Dsl => Ok(remote::run_dsl().await?),
@@ -758,7 +771,7 @@ mod tests {
     #[test]
     fn subcommand_path_names_the_top_level_verb() {
         assert_eq!(action_for(&["orbit", "version"]), "version");
-        assert_eq!(action_for(&["orbit", "query"]), "query");
+        assert_eq!(action_for(&["orbit", "query", "CALL db.schema()"]), "query");
         assert_eq!(
             action_for(&["orbit", "graph-status", "--full-path", "a/b"]),
             "graph_status"
@@ -858,13 +871,15 @@ mod tests {
         };
         assert_eq!(nodes, vec!["User".to_string(), "Project".to_string()]);
         let Commands::Query {
-            source,
+            query,
+            file,
             response_format,
-        } = Cli::parse_from(["orbit", "query", "--response-format", "raw", "-"]).command
+        } = Cli::parse_from(["orbit", "query", "--response-format", "raw", "--file", "-"]).command
         else {
             panic!("expected query");
         };
-        assert_eq!(source.as_deref(), Some("-"));
+        assert_eq!(query, None);
+        assert_eq!(file.as_deref(), Some("-"));
         assert_eq!(response_format, Some(super::remote::ResponseFormat::Raw));
         assert!(matches!(
             Cli::parse_from(["orbit", "status"]).command,
@@ -904,6 +919,22 @@ mod tests {
             .err()
             .expect("--language must not be accepted");
         assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn query_rejects_text_with_file() {
+        let err = Cli::try_parse_from(["orbit", "query", "--file", "q.json", "CALL db.schema()"])
+            .err()
+            .expect("text and --file must conflict");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn query_requires_text_or_file() {
+        let err = Cli::try_parse_from(["orbit", "query"])
+            .err()
+            .expect("query must require text or --file");
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 
     #[test]

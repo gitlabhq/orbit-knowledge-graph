@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.31.1
+version: 0.32.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
@@ -39,7 +39,7 @@ When editing Orbit docs or skills, fence executable query JSON as `json orbit-qu
 
 ## Running a query
 
-Write the request body to a file and pass it to `glab orbit query`. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
+Write the request body to a file and pass it to `glab orbit query --file`. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
 Many filters need a numeric project ID. For the repository you are in, let `glab` resolve it from the Git remote.
 
@@ -69,7 +69,7 @@ Put the request body in `/tmp/q.json`.
 ```
 
 ```shell
-glab orbit query /tmp/q.json
+glab orbit query --file /tmp/q.json
 ```
 
 `filters` is an object keyed by property name, not an array. Every query declares its node selectors in the `nodes` array. Filter operators, multi-hop `hops`, and `path_finding` limits are in [`references/query_language.md`](references/query_language.md). Paste-ready shapes for each `query_type` are in [`references/recipes.md`](references/recipes.md).

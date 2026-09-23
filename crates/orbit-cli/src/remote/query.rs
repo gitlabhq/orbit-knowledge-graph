@@ -1,5 +1,4 @@
 use std::io::Read;
-use std::path::Path;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -12,35 +11,34 @@ use super::{ResponseFormat, write_stdout_raw};
 const DEFAULT_QUERY_FORMAT: &str = "llm";
 const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
+pub(crate) enum QueryInput {
+    Text(String),
+    File(String),
+}
+
 pub(crate) async fn run_query(
-    source: Option<String>,
+    input: QueryInput,
     format_override: Option<ResponseFormat>,
 ) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
-    let request_body = match source.as_deref() {
-        Some(query) if query != "-" && !Path::new(query).is_file() => {
-            build_text_request(query, format_override)?
-        }
-        _ => build_query_request(&read_query_body(source.as_deref())?, format_override)?,
+    let request_body = match input {
+        QueryInput::Text(query) => build_text_request(&query, format_override)?,
+        QueryInput::File(path) => build_query_request(&read_query_body(&path)?, format_override)?,
     };
     let response = client.query_raw(request_body).await?;
     write_stdout_raw(&response)
 }
 
-fn read_query_body(source: Option<&str>) -> anyhow::Result<Vec<u8>> {
-    match source {
-        None | Some("-") => {
-            let mut buf = Vec::new();
-            std::io::stdin()
-                .lock()
-                .read_to_end(&mut buf)
-                .context("failed to read query body from stdin")?;
-            Ok(buf)
-        }
-        Some(path) => {
-            std::fs::read(path).with_context(|| format!("failed to read query body from {path}"))
-        }
+fn read_query_body(path: &str) -> anyhow::Result<Vec<u8>> {
+    if path == "-" {
+        let mut buf = Vec::new();
+        std::io::stdin()
+            .lock()
+            .read_to_end(&mut buf)
+            .context("failed to read query body from stdin")?;
+        return Ok(buf);
     }
+    std::fs::read(path).with_context(|| format!("failed to read query body from {path}"))
 }
 
 fn build_text_request(query: &str, format: Option<ResponseFormat>) -> Result<Vec<u8>, RemoteError> {

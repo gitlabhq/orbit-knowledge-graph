@@ -80,7 +80,7 @@ instance, and `--yes` to skip the one-time run confirmation in scripts.
 | `glab orbit ontology [node...]` | `GET orbit/schema` | Graph ontology. Positional args expand specific nodes. |
 | `glab orbit dsl` | `GET orbit/schema/dsl` | Query DSL JSON Schema. The source of truth for the query body shape. |
 | `glab orbit tools` | `GET orbit/tools` | MCP tool manifest with the full DSL JSON Schema. |
-| `glab orbit query [file\|-]` | `POST orbit/query` | Run a query from a file or stdin. |
+| `glab orbit query <query>` | `POST orbit/query` | Run query text, or a request envelope with `--file <file\|->`. |
 | `glab orbit graph-status` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
 
 ### Discover the schema
@@ -117,7 +117,7 @@ Put the request body in `query.json`:
 ```
 
 ```shell
-glab orbit query query.json
+glab orbit query --file query.json
 ```
 
 The `--response-format` flag maps to the body's `response_format`:
