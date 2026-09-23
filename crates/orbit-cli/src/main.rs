@@ -768,6 +768,30 @@ mod tests {
     }
 
     #[test]
+    fn every_subcommand_emits_a_telemetry_event() {
+        let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
+        let actions: Vec<String> = Cli::command()
+            .get_subcommands()
+            .map(|sub| sub.get_name().replace('-', "_"))
+            .collect();
+        for action in &actions {
+            crate::telemetry::emit_command_event(
+                &tracker,
+                action,
+                0,
+                std::time::Duration::ZERO,
+                None,
+            );
+        }
+        let emitted: Vec<String> = tracker
+            .drain()
+            .iter()
+            .map(|event| event.action().to_string())
+            .collect();
+        assert_eq!(emitted, actions);
+    }
+
+    #[test]
     fn former_local_and_remote_verbs_parse_at_top_level() {
         let Commands::Index(index) =
             Cli::parse_from(["orbit", "index", "/tmp/repo", "--threads", "4"]).command
