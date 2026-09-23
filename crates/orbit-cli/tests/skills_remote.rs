@@ -283,6 +283,21 @@ fn weak_etag_is_accepted_and_revalidated_with_the_version() {
 }
 
 #[test]
+fn remote_skill_without_metadata_is_accepted() {
+    let cache = tempfile::tempdir().unwrap();
+    let manifest = "---\nname: orbit\nversion: 1.0.0\ndescription: Remote Orbit skill\ncompatibility: Requires Orbit CLI\n---\n# Remote without metadata\n";
+    let (url, server) = mock_server(vec![tree_reply_with_manifest(
+        "1.0.0",
+        manifest,
+        "Remote without metadata",
+    )]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    server.join().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Remote without metadata"));
+}
+
+#[test]
 fn remote_listing_uses_collection_and_authentication() {
     let cache = tempfile::tempdir().unwrap();
     let reply = Reply {
