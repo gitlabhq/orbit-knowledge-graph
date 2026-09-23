@@ -5386,6 +5386,7 @@ dependencies = [
  "duckdb-client",
  "dunce",
  "gitalisk-core",
+ "jsonschema",
  "labkit-events",
  "mimalloc",
  "ontology",

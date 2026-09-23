@@ -50,5 +50,6 @@ rustix = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tempfile = { workspace = true }

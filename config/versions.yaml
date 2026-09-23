@@ -54,6 +54,7 @@ vendored:
     check_script: scripts/vendored/iglu/check.sh
     pins:
       orbit_query: 2-2-0
-      orbit_common: 1-0-3
+      orbit_common: 1-0-4
+      orbit_cli_command: 1-0-0
       orbit_code_indexing: 2-0-0
       orbit_sdlc_indexing: 3-0-0

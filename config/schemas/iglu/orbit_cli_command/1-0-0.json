@@ -1,0 +1,41 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Outcome of one Orbit CLI command run.",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "orbit_cli_command",
+    "version": "1-0-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command", "success"],
+  "properties": {
+    "command": {
+      "description": "Name of the CLI command that ran, such as `query` or `graph_status`.",
+      "type": "string",
+      "maxLength": 64
+    },
+    "success": {
+      "description": "True when the command finished without an error.",
+      "type": "boolean"
+    },
+    "exit_code": {
+      "description": "Process exit code of the command.",
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 255
+    },
+    "duration_ms": {
+      "description": "Wall-clock time of the command, in milliseconds.",
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "cli_version": {
+      "description": "Version of the Orbit CLI binary, such as `0.42.0`.",
+      "type": ["string", "null"],
+      "maxLength": 32
+    }
+  }
+}
