@@ -7,27 +7,25 @@ use serde::Deserialize;
 use super::spec;
 use crate::commands::index::most_referenced_definition;
 use crate::tui::format_with_thousands;
-use crate::workspace::{Workspace, git_info, git_toplevel};
+use crate::workspace::{git_info, git_toplevel};
 
 pub(super) struct Indexed {
     pub(super) summary: String,
     pub(super) suggested_grep: Option<String>,
 }
 
-pub(super) fn current_repository_dir() -> Result<Option<PathBuf>> {
-    let cwd = std::env::current_dir()?;
-    let repos = Workspace::open_default()?.resolve_repos(&cwd)?;
-    Ok((!repos.is_empty()).then_some(cwd))
+pub(super) fn current_repository_root() -> Option<PathBuf> {
+    git_toplevel(&std::env::current_dir().ok()?).ok()
 }
 
 pub(super) fn index_command_line() -> String {
     format!("{} index .", spec::launcher())
 }
 
-pub(super) fn index_repository(cwd: &Path) -> Result<Indexed> {
+pub(super) fn index_repository(repo_root: &Path) -> Result<Indexed> {
     let output = launcher_command()?
         .args(["index", "."])
-        .current_dir(cwd)
+        .current_dir(repo_root)
         .stderr(Stdio::null())
         .output()?;
     if !output.status.success() {
@@ -52,12 +50,12 @@ pub(super) fn index_repository(cwd: &Path) -> Result<Indexed> {
     };
     Ok(Indexed {
         summary,
-        suggested_grep: suggest_grep(cwd),
+        suggested_grep: suggest_grep(repo_root),
     })
 }
 
-fn suggest_grep(cwd: &Path) -> Option<String> {
-    let git = git_info(&git_toplevel(cwd).ok()?).ok()?;
+fn suggest_grep(repo_root: &Path) -> Option<String> {
+    let git = git_info(repo_root).ok()?;
     most_referenced_definition(&git, None)
 }
 

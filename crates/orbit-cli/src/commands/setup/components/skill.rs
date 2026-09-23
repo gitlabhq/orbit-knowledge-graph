@@ -93,14 +93,20 @@ fn skill_targets(agents: &[Agent], target: &Target) -> Result<Vec<SkillTarget>> 
 }
 
 fn write_skill_files(skill_root: &Path, label: &str, report: &mut Report) -> Result<()> {
+    let mut wrote_any = false;
     for (relative, contents) in embedded_files() {
         let destination = skill_root.join(&relative);
         if std::fs::read(&destination).is_ok_and(|current| current == contents) {
             continue;
         }
         write_file(&destination, contents)?;
+        wrote_any = true;
     }
-    report.note(label, "skill installed");
+    let action = match wrote_any {
+        true => "skill installed",
+        false => "unchanged",
+    };
+    report.note(label, action);
     Ok(())
 }
 
