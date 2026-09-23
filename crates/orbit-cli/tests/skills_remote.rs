@@ -213,6 +213,77 @@ fn cache_miss_then_304_downloads_content_exactly_once() {
 }
 
 #[test]
+fn leftover_lock_file_does_not_block_a_cached_304() {
+    let cache = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![
+        tree_reply("1.0.0", "Cached tree"),
+        Reply {
+            status: 304,
+            reason: "Not Modified",
+            etag: Some("\"1.0.0\"".to_string()),
+            body: String::new(),
+        },
+    ]);
+    let first = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    assert!(first.status.success(), "{}", stderr(&first));
+    let lock = walk_files(cache.path())
+        .into_iter()
+        .find(|path| path.ends_with(".populate.lock"))
+        .expect("advisory lock file persists between reads");
+    // Model a process that exited before cleaning up a PID-based lock.
+    std::fs::write(&lock, b"99999999\n").unwrap();
+    let second = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert_eq!(first.stdout, second.stdout);
+    let requests = server.join().unwrap();
+    assert_eq!(
+        requests[1].headers.get("if-none-match").map(String::as_str),
+        Some("\"1.0.0\"")
+    );
+}
+
+#[test]
+fn unwritable_cache_does_not_discard_a_valid_download() {
+    let cache = tempfile::tempdir().unwrap();
+    let cache_parent = cache.path().join("orbit");
+    std::fs::create_dir(&cache_parent).unwrap();
+    // A regular file in place of the cache directory fails even when tests run as root.
+    std::fs::write(cache_parent.join("skills"), b"blocked").unwrap();
+    let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote without cache")]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    server.join().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stderr(&output).contains("could not cache"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Remote without cache"));
+}
+
+#[test]
+fn weak_etag_is_accepted_and_revalidated_with_the_version() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut first = tree_reply("1.0.0", "Remote with weak ETag");
+    first.etag = Some("W/\"1.0.0\"".to_string());
+    let (url, server) = mock_server(vec![
+        first,
+        Reply {
+            status: 304,
+            reason: "Not Modified",
+            etag: Some("\"1.0.0\"".to_string()),
+            body: String::new(),
+        },
+    ]);
+    let first = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    let second = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(second.status.success(), "{}", stderr(&second));
+    assert_eq!(first.stdout, second.stdout);
+    let requests = server.join().unwrap();
+    assert_eq!(
+        requests[1].headers.get("if-none-match").map(String::as_str),
+        Some("\"1.0.0\"")
+    );
+}
+
+#[test]
 fn remote_listing_uses_collection_and_authentication() {
     let cache = tempfile::tempdir().unwrap();
     let reply = Reply {
