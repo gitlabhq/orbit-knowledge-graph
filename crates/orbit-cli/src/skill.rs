@@ -9,7 +9,7 @@ use rust_embed::Embed;
 use serde::Deserialize;
 
 #[derive(Embed)]
-#[folder = "$SKILLS_DIR/orbit-cli"]
+#[folder = "$LOCAL_SKILLS_DIR/orbit-cli"]
 struct SkillAssets;
 
 const MANIFEST: &str = "SKILL.md";

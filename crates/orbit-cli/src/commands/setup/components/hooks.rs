@@ -63,7 +63,7 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
             .iter()
             .map(substitute_launcher_in_json)
             .collect();
-        let mut root = json::read_object(&path)?;
+        let mut root = json::read_agent_object(&path, agent)?;
         if !file_mentions(&path, &merge.marker) {
             backup_once(&path, &label, report)?;
         }
@@ -87,7 +87,7 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         let (path, label) = target.resolve(&registration.file)?;
         let value = target.registration_value(&registration.value)?;
         let (_, value_label) = target.resolve(&registration.value)?;
-        let mut root = json::read_object(&path)?;
+        let mut root = json::read_agent_object(&path, agent)?;
         if json::append_unique(&mut root, &registration.path, &value)
             .with_context(|| format!("failed to update {}", path.display()))?
         {
@@ -106,7 +106,7 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
         if !path.exists() {
             continue;
         }
-        let mut root = json::read_object(&path)?;
+        let mut root = json::read_agent_object(&path, agent)?;
         if json::remove_marked_entries(&mut root, &merge.path, &merge.marker) {
             json::write_or_delete_when_empty(&path, &root, target, &label, report)?;
         }
@@ -133,7 +133,7 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
             continue;
         }
         let value = target.registration_value(&registration.value)?;
-        let mut root = json::read_object(&path)?;
+        let mut root = json::read_agent_object(&path, agent)?;
         if json::remove_value(&mut root, &registration.path, &value) {
             json::write_or_delete_when_empty(&path, &root, target, &label, report)?;
         }

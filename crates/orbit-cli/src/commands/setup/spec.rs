@@ -339,8 +339,9 @@ mod tests {
     }
 
     #[test]
-    fn opencode_plugins_are_shell_safe() {
+    fn opencode_plugin_uses_default_graph_without_shell_interpolation() {
         let contents = agent_named("opencode").unwrap().template_files[0].render();
+        assert!(contents.contains(r#"join(homedir(), ".gitlab", "orbit")"#));
         assert!(!contents.contains('`'));
         assert!(!contents.contains("$("));
 

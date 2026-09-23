@@ -399,7 +399,11 @@ mod tests {
         std::fs::write(dir.path().join("AGENTS.md"), "# My rules\n").unwrap();
         let opencode_config = dir.path().join(".opencode/opencode.json");
         std::fs::create_dir_all(opencode_config.parent().unwrap()).unwrap();
-        std::fs::write(&opencode_config, r#"{"plugin": ["other.js"]}"#).unwrap();
+        std::fs::write(
+            &opencode_config,
+            "{\n  // existing config\n  \"plugin\": [\"other.js\", \".opencode/plugins/orbit.js\",],\n}\n",
+        )
+        .unwrap();
 
         install_with_mcp(&["codex", "opencode"], dir.path());
 
@@ -409,7 +413,7 @@ mod tests {
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
         assert_eq!(
             read_json(&opencode_config)["plugin"],
-            json!(["other.js", ".opencode/plugins/orbit.js"])
+            json!(["other.js", "./plugins/orbit.js"])
         );
         assert_eq!(
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],

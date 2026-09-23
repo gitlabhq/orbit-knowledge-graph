@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "orbit",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "description": "Find code and read definitions, callers, and callees with Orbit CLI.",
   "author": { "name": "GitLab" },
   "homepage": "https://docs.gitlab.com/orbit/local/",

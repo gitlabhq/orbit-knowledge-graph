@@ -97,7 +97,7 @@ fn install_json(
     let entry = server_json_entry(format, server);
     refuse_commented_sibling(path, key, server.name, &entry)?;
 
-    let mut root = json::read_object(path)?;
+    let mut root = json::read_mcp_object(path, format)?;
     let container = root
         .as_object_mut()
         .expect("read_object returns objects")
@@ -145,7 +145,7 @@ fn remove_json(
     report: &mut Report,
 ) -> Result<()> {
     let key = servers_key(format);
-    let mut root = json::read_object(path)?;
+    let mut root = json::read_mcp_object(path, format)?;
     let map = root.as_object_mut().expect("read_object returns objects");
     let Some(servers) = map.get_mut(key).and_then(Value::as_object_mut) else {
         return Ok(());

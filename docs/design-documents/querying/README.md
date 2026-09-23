@@ -44,16 +44,9 @@ The remote manifest uses line-oriented HTML placeholders to show where the local
 
 ### Agent plugin distribution
 
-The `plugins/orbit/` directory is a self-contained package for Claude Code and
-Codex. The portable `plugin.json` serves Codex; `.claude-plugin/plugin.json`
-adds Claude's hook configuration. Both load the canonical local skill that the
-Orbit binary embeds. Neither installs a binary, starts indexing, or registers
-MCP. Claude's hooks call the existing `orbit hook-guard` command and fail open.
-
-The repository holds a marketplace catalog for each host. Tag releases also
-publish a deterministic ZIP with both catalogs and the plugin. Package tests
-check paths after extraction, version agreement, and hook behavior. See the
-[plugin guide](../../../plugins/orbit/README.md) for installation and migration.
+`plugins/orbit/` shares the CLI skill with Claude Code, Codex, and Pi.
+OpenCode uses `orbit setup`. Tag releases include a self-contained plugin ZIP.
+See the [plugin guide](../../../plugins/orbit/README.md) for installation and migration.
 
 ### Named Queries
 
