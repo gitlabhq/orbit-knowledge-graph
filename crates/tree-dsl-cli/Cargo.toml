@@ -12,7 +12,6 @@ tree-dsl = { path = "../tree-dsl" }
 tree-dsl-tests = { path = "../tree-dsl-tests", optional = true }
 clap = { workspace = true }
 dirs = { workspace = true }
-serde_yaml = { workspace = true }
 anyhow = { workspace = true }
 walkdir = { workspace = true }
 rayon = { workspace = true }

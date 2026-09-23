@@ -62,7 +62,7 @@ pub fn all_languages() -> impl Iterator<Item = (SupportLang, &'static LangEntry)
 
 static LANG_CONFIG: std::sync::LazyLock<LangConfig> = std::sync::LazyLock::new(|| {
     let yaml = include_str!("../config/languages.yaml");
-    serde_yaml::from_str(yaml).expect("failed to parse languages.yaml")
+    orbit_utils::yaml::from_str(yaml).expect("failed to parse languages.yaml")
 });
 
 pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {

@@ -20,8 +20,8 @@ impl std::fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-impl From<serde_yaml::Error> for LoadError {
-    fn from(e: serde_yaml::Error) -> Self {
+impl From<orbit_utils::yaml::Error> for LoadError {
+    fn from(e: orbit_utils::yaml::Error) -> Self {
         Self(format!("yaml: {e}"))
     }
 }

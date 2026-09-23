@@ -86,7 +86,6 @@ schemars = "1.2.1"
 rkyv = { version = "0.8.18", features = ["alloc"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-serde_yaml = "0.9"
 serde-saphyr = "1.1.0"
 sha2 = "0.11.0"
 smallvec = "1.15.1"

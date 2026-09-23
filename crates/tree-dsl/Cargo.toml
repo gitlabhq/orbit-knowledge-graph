@@ -29,7 +29,6 @@ smallvec = "1"
 smol_str = "0.3"
 rkyv = { workspace = true }
 serde = { workspace = true }
-serde_yaml = "0.9"
 stacker = "0.1"
 rustc-hash = "2"
 itertools = "0.14"

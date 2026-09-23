@@ -14,8 +14,8 @@ pub struct Limits {
 }
 
 impl Limits {
-    pub fn load() -> Result<Self, serde_yaml::Error> {
-        serde_yaml::from_str(include_str!("../../config/limits.yaml"))
+    pub fn load() -> Result<Self, orbit_utils::yaml::Error> {
+        orbit_utils::yaml::from_str(include_str!("../../config/limits.yaml"))
     }
 
     pub const UNLIMITED: Self = Self {

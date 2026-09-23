@@ -248,7 +248,7 @@ fn unique_guard(lang: &Lang, spec: &str) -> Result<(Pat, u16, usize), LoadError>
 }
 
 fn read(yaml: &str) -> Result<RuleFile, LoadError> {
-    Ok(serde_yaml::from_str(yaml)?)
+    Ok(orbit_utils::yaml::from_str(yaml)?)
 }
 
 fn compile_stages(stages: &[Stage], lang: &Lang) -> Result<Vec<Vec<Rewrite>>, LoadError> {
