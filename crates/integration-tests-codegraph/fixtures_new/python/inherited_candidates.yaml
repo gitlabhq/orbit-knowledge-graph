@@ -20,8 +20,8 @@ fixtures:
 tests:
   - name: "d.m() on a D emits both shallowest candidates, B.m and C.m"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'use' AND e.edge_kind = 'Calls' AND callee.name = 'm'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use' AND callee.name = 'm'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }

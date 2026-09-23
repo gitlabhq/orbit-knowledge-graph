@@ -19,8 +19,8 @@ fixtures:
 tests:
   - name: "A().show() resolves to the extension on A only"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'com.ex.main' AND e.edge_kind = 'Calls' AND callee.name = 'show'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'com.ex.main' AND callee.name = 'show'
       RETURN callee.fqn AS callee, callee.start_line AS line
     assert:
       - { row_count: 2 }

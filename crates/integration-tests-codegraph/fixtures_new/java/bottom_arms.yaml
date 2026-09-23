@@ -20,8 +20,8 @@ fixtures:
 tests:
   - name: "p.n() dispatches on A after a switch whose other arm throws"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'com.example.bottom.Use.run' AND e.edge_kind = 'Calls' AND callee.name = 'n'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.bottom.Use.run' AND callee.name = 'n'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }

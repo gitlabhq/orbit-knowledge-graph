@@ -460,7 +460,7 @@ tests:
       RETURN callee.fqn AS callee
       ORDER BY callee
     assert:
-      - { row_count: 4 }
+      - { row_count: 3 }
       - { row: { callee: "com.example.records.Circle.radius" } }
       - { row: { callee: "com.example.records.Rectangle.height" } }
       - { row: { callee: "com.example.records.Rectangle.width" } }

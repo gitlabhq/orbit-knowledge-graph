@@ -13,7 +13,7 @@ fixtures:
 tests:
   - name: "initial state: helper import resolves"
     query: |
-      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'main.py'
       RETURN d.fqn AS fqn
     assert:
@@ -49,7 +49,7 @@ steps:
     tests:
       - name: "helper still resolves after modify"
         query: |
-          MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+          MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
           WHERE i.file_path = 'main.py'
           RETURN d.fqn AS fqn
         assert:
@@ -88,7 +88,7 @@ steps:
 
       - name: "consumer import resolves to extra"
         query: |
-          MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+          MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
           WHERE i.file_path = 'consumer.py'
           RETURN d.fqn AS fqn
         assert:
@@ -116,7 +116,7 @@ steps:
 
       - name: "consumer import no longer resolves"
         query: |
-          MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+          MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
           WHERE i.file_path = 'consumer.py'
           RETURN d.fqn AS fqn
         assert:

@@ -403,9 +403,8 @@ tests:
 
   - name: "Same-name factories keep separate return types"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'ChainIsolation.first' AND callee.name = 'finish'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS target
     assert:
       - { row_count: 1 }
@@ -413,9 +412,8 @@ tests:
 
   - name: "Reassignment replaces the producer call in SSA"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'ChainIsolation.reassigned' AND callee.name = 'finish'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS target
     assert:
       - { row_count: 1 }
@@ -423,9 +421,8 @@ tests:
 
   - name: "Twelve receiver calls reach the final method"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'ChainIsolation.deep' AND callee.name IN ['next', 'finish']
-        AND e.edge_kind = 'Calls'
       RETURN callee.name AS target
     assert:
       - { row_count: 13 }

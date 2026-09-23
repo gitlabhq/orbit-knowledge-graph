@@ -15,8 +15,8 @@ fixtures:
 tests:
   - name: "d.m() on a D emits both mixed-in traits' m"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'run' AND e.edge_kind = 'Calls' AND callee.name = 'm'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'm'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }

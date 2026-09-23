@@ -37,8 +37,8 @@ fixtures:
 tests:
   - name: "Run reaches both parts of C and not the method of C<T>"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'App.Runner.Run' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'App.Runner.Run'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }

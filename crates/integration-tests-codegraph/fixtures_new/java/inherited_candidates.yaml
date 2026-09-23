@@ -31,8 +31,8 @@ fixtures:
 tests:
   - name: "C.m() emits the superclass method and the interface default; the JLS pick is a follow-up"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'com.example.lin.Use.viaClass' AND e.edge_kind = 'Calls' AND callee.name = 'm'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.lin.Use.viaClass' AND callee.name = 'm'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }
@@ -40,8 +40,8 @@ tests:
       - { row: { callee: "com.example.lin.I.m" } }
   - name: "D.m() with two inherited defaults emits both candidates"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'com.example.lin.Use.viaTwoDefaults' AND e.edge_kind = 'Calls' AND callee.name = 'm'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.lin.Use.viaTwoDefaults' AND callee.name = 'm'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 2 }

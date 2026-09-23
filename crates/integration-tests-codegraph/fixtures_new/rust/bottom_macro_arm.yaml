@@ -23,8 +23,8 @@ fixtures:
 tests:
   - name: "p.n() dispatches on A after a match whose other arm panics"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'use_it' AND e.edge_kind = 'Calls' AND callee.name = 'n'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'use_it' AND callee.name = 'n'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }

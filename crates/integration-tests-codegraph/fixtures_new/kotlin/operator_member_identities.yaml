@@ -24,9 +24,8 @@ fixtures:
 tests:
   - name: "fromParameter selects the exact operator and result owners"
     query: |
-      MATCH (caller:Definition)-[edge:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[edge:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'operators.fromParameter'
-        AND edge.edge_kind = 'Calls'
         AND callee.name IN ['plus', 'display']
       RETURN callee.fqn AS target
       ORDER BY target
@@ -36,9 +35,8 @@ tests:
       - { row: { target: operators.First.display } }
   - name: "fromConstructor selects the exact operator and result owners"
     query: |
-      MATCH (caller:Definition)-[edge:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[edge:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'operators.fromConstructor'
-        AND edge.edge_kind = 'Calls'
         AND callee.name IN ['plus', 'display']
       RETURN callee.fqn AS target
       ORDER BY target
@@ -48,9 +46,8 @@ tests:
       - { row: { target: operators.First.display } }
   - name: "fromFactory selects the exact operator and result owners"
     query: |
-      MATCH (caller:Definition)-[edge:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[edge:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'operators.fromFactory'
-        AND edge.edge_kind = 'Calls'
         AND callee.name IN ['plus', 'display']
       RETURN callee.fqn AS target
       ORDER BY target
@@ -60,9 +57,8 @@ tests:
       - { row: { target: operators.First.display } }
   - name: "leftAssociative selects the exact operator and result owners"
     query: |
-      MATCH (caller:Definition)-[edge:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[edge:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'operators.leftAssociative'
-        AND edge.edge_kind = 'Calls'
         AND callee.name IN ['plus', 'display']
       RETURN callee.fqn AS target
       ORDER BY target

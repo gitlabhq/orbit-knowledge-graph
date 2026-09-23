@@ -22,15 +22,15 @@ fixtures:
 tests:
   - name: "Log() with a local delegate named Log does not call the method (C# spec 12.8.4)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'Shadow.R.Run' AND e.edge_kind = 'Calls' AND callee.name = 'Log'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'Shadow.R.Run' AND callee.name = 'Log'
       RETURN callee.fqn AS callee
     assert:
       - { empty: true }
   - name: "Log() without a local calls the method"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'Shadow.R.Plain' AND e.edge_kind = 'Calls' AND callee.name = 'Log'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'Shadow.R.Plain' AND callee.name = 'Log'
       RETURN callee.fqn AS callee
     assert:
       - { row_count: 1 }

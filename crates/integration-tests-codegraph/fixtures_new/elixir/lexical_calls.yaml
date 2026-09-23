@@ -33,8 +33,8 @@ fixtures:
 tests:
   - name: "Imported calls bind to functions in the imported module"
     query: |
-      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
-      WHERE e.edge_kind = 'Calls' AND t.fqn = 'Util.dub'
+      MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+      WHERE t.fqn = 'Util.dub'
       RETURN s.fqn AS caller
     assert:
       - { row_count: 3 }
@@ -43,24 +43,23 @@ tests:
       - { row: { caller: Ordered.after_import } }
   - name: "Forward local functions take lexical precedence"
     query: |
-      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
-      WHERE e.edge_kind = 'Calls' AND s.fqn = 'Imported.local'
+      MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+      WHERE s.fqn = 'Imported.local'
       RETURN t.fqn AS callee
     assert:
       - { row_count: 1 }
       - { row: { callee: Imported.internal } }
   - name: "Imports do not enter sibling or earlier scopes"
     query: |
-      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
-      WHERE e.edge_kind = 'Calls'
-        AND s.fqn IN ['Isolated.unresolved', 'Scoped.sibling', 'Ordered.before_import']
+      MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+      WHERE s.fqn IN ['Isolated.unresolved', 'Scoped.sibling', 'Ordered.before_import']
       RETURN t.fqn AS callee
     assert:
       - { empty: true }
   - name: "Modules are not callable values"
     query: |
-      MATCH (s:Definition)-[e:DefinitionToDefinition]->(t:Definition)
-      WHERE e.edge_kind = 'Calls' AND t.definition_type = 'Class'
+      MATCH (s:Definition)-[e:CALLS]->(t:Definition)
+      WHERE t.definition_type = 'Class'
       RETURN t.fqn AS callee
     assert:
       - { empty: true }
