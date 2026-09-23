@@ -36,9 +36,8 @@ use crate::proto::{
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
     get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
 };
-use crate::tools::{
-    AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService, get_skill, list_skills,
-};
+use crate::skills::{get_skill, list_skills};
+use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
