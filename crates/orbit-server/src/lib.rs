@@ -14,6 +14,7 @@ pub mod probes;
 pub mod proto;
 pub mod redaction;
 pub mod shutdown;
+pub mod skills;
 pub mod tls;
 pub mod tools;
 pub mod webserver;

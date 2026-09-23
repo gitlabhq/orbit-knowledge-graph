@@ -36,9 +36,8 @@ use crate::proto::{
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
     get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
 };
-use crate::tools::{
-    AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService, get_skill, list_skills,
-};
+use crate::skills::{get_skill, list_skills};
+use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
@@ -520,13 +519,16 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             .map(|skill| SkillSummary {
                 name: skill.name,
                 version: skill.version,
-                tree_sha256: skill.tree_sha256,
                 description: skill.description,
+                compatibility: skill.compatibility,
             })
             .collect();
 
         info!(count = skills.len(), "Listing embedded skills");
-        Ok(Response::new(ListSkillsResponse { skills }))
+        Ok(Response::new(ListSkillsResponse {
+            skills,
+            server_version: orbit_utils::version::get().to_string(),
+        }))
     }
 
     #[instrument(
@@ -559,8 +561,9 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(GetSkillResponse {
             name: skill.metadata.name,
             version: skill.metadata.version,
-            tree_sha256: skill.metadata.tree_sha256,
             files,
+            compatibility: skill.metadata.compatibility,
+            server_version: orbit_utils::version::get().to_string(),
         }))
     }
 

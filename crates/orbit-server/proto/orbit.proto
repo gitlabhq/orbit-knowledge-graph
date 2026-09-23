@@ -244,14 +244,16 @@ message ListSkillsRequest {}
 // Response listing every skill embedded in the deployed server.
 message ListSkillsResponse {
   repeated SkillSummary skills = 1;
+  string server_version = 2;  // Not part of skill identity.
 }
 
-// Identity and cache metadata for an embedded skill.
 message SkillSummary {
+  reserved 3;
+  reserved "tree_sha256";
   string name = 1;
   string version = 2;
-  string tree_sha256 = 3;
   string description = 4;
+  string compatibility = 5;
 }
 
 // Request for one embedded skill by name.
@@ -260,12 +262,14 @@ message GetSkillRequest {
   bool metadata_only = 2;  // true omits files for a cheap cache revalidation
 }
 
-// Complete identity, cache metadata, and optionally the files for one skill.
 message GetSkillResponse {
+  reserved 3;
+  reserved "tree_sha256";
   string name = 1;
   string version = 2;
-  string tree_sha256 = 3;
   repeated SkillFile files = 4;  // empty when metadata_only is true
+  string compatibility = 5;
+  string server_version = 6;
 }
 
 // One UTF-8 file in an embedded skill tree.

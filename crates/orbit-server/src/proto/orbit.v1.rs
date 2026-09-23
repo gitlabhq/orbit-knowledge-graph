@@ -238,18 +238,20 @@ pub struct ListSkillsRequest {}
 pub struct ListSkillsResponse {
     #[prost(message, repeated, tag = "1")]
     pub skills: ::prost::alloc::vec::Vec<SkillSummary>,
+    /// Not part of skill identity.
+    #[prost(string, tag = "2")]
+    pub server_version: ::prost::alloc::string::String,
 }
-/// Identity and cache metadata for an embedded skill.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SkillSummary {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub version: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub tree_sha256: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
     pub description: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub compatibility: ::prost::alloc::string::String,
 }
 /// Request for one embedded skill by name.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -260,18 +262,19 @@ pub struct GetSkillRequest {
     #[prost(bool, tag = "2")]
     pub metadata_only: bool,
 }
-/// Complete identity, cache metadata, and optionally the files for one skill.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetSkillResponse {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub version: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub tree_sha256: ::prost::alloc::string::String,
     /// empty when metadata_only is true
     #[prost(message, repeated, tag = "4")]
     pub files: ::prost::alloc::vec::Vec<SkillFile>,
+    #[prost(string, tag = "5")]
+    pub compatibility: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub server_version: ::prost::alloc::string::String,
 }
 /// One UTF-8 file in an embedded skill tree.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
