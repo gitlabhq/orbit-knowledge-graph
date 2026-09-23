@@ -23,4 +23,4 @@ pub mod rules {
 
 pub use pipeline::phases;
 pub use pipeline::types::{Env, State};
-pub use pipeline::{Indexed, index, index_with, parse_single, reindex};
+pub use pipeline::{Envelope, Indexed, export, index, index_with, parse_single, reindex};

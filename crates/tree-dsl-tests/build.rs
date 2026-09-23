@@ -23,7 +23,7 @@ fn main() {
         .iter()
         .map(|(name, path)| {
             format!(
-                "#[tokio::test]\nasync fn {name}() {{ run_yaml_suite(&std::fs::read_to_string(\"{path}\").expect(\"fixture not found: {path}\")).await; }}\n"
+                "#[test]\nfn {name}() {{ run_yaml_suite(&std::fs::read_to_string(\"{path}\").expect(\"fixture not found: {path}\")); }}\n"
             )
         })
         .collect();

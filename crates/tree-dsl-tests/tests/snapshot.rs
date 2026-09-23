@@ -1,37 +1,15 @@
 use std::collections::HashSet;
 
+use integration_tests_codegraph::assertions::TestSuite;
 use tree_dsl::treesitter::SupportLang;
 
-#[derive(serde::Deserialize)]
-struct FixtureFile {
-    path: String,
-    content: String,
-}
-
-#[derive(serde::Deserialize)]
-struct Step {
-    #[serde(default)]
-    add: Vec<FixtureFile>,
-    #[serde(default)]
-    modify: Vec<FixtureFile>,
-    #[serde(default)]
-    remove: Vec<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct Suite {
-    fixtures: Vec<FixtureFile>,
-    #[serde(default)]
-    steps: Vec<Step>,
-}
-
-fn load_suite() -> Suite {
+fn load_suite() -> TestSuite {
     let yaml = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../integration-tests-codegraph/fixtures_new/python/incremental/basic.yaml"
     ))
     .expect("fixture not found");
-    serde_yaml::from_str(&yaml).expect("bad yaml")
+    orbit_utils::yaml::from_str(&yaml).expect("bad yaml")
 }
 
 fn count_defs(state: &tree_dsl::State) -> usize {

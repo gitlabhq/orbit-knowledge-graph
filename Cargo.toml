@@ -107,8 +107,6 @@ tokio-util = { version = "0.7.18", features = ["io-util"] }
 ignore = "0.4.25"
 rayon = "1.11.0"
 zstd = "0.13.3"
-arrow_56 = { package = "arrow", version = "56" }
-lance-graph = { version = "0.5.4", default-features = false }
 walkdir = "2.5.0"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }

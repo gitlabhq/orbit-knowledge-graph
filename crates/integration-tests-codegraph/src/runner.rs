@@ -17,7 +17,7 @@ use super::validator::run_suite;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
-fn create_test_db() -> anyhow::Result<DuckDbClient> {
+pub fn create_test_db() -> anyhow::Result<DuckDbClient> {
     let client =
         DuckDbClient::open(Path::new(":memory:")).context("failed to open in-memory DuckDB")?;
     client
@@ -83,6 +83,11 @@ fn copy_dir_recursive(
 
 pub fn run_yaml_suite(yaml: &str) {
     let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
+    assert!(
+        suite.steps.is_empty(),
+        "suite {:?} has incremental steps; only the tree-dsl runner executes them",
+        suite.name
+    );
 
     if suite.tests.iter().all(|t| t.skip) {
         eprintln!(

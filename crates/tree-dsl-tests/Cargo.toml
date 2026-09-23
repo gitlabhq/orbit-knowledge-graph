@@ -6,18 +6,10 @@ publish = false
 
 [dependencies]
 tree-dsl = { path = "../tree-dsl" }
-lance-graph = { workspace = true }
-arrow_56 = { workspace = true }
-arrow = { workspace = true }
-globset = { workspace = true }
-indexmap = { workspace = true, features = ["serde"] }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tabled = { workspace = true }
-anyhow = { workspace = true }
-serde_yaml = { workspace = true }
-tempfile = { workspace = true }
+integration-tests-codegraph = { path = "../integration-tests-codegraph" }
+ontology = { path = "../ontology" }
+orbit-utils = { path = "../utils" }
 walkdir = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tempfile = { workspace = true }

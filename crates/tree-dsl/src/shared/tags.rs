@@ -1,7 +1,7 @@
 //! Tags the engine reads.
 //!
 //! Language YAML may set any tag it likes for its own later rules and for
-//! `export.yaml`; the engine ignores those. The keys below are the only ones
+//! export (`fqn`, `def_type`, `source_path`, ...); the engine ignores those. The keys below are the only ones
 //! the linker and resolver branch on, so adding one here is a deliberate
 //! extension of the engine's contract with every language.
 

@@ -1,10 +1,10 @@
-use tree_dsl::treesitter::SupportLang;
-use tree_dsl::{Env, State};
+use std::sync::Arc;
 
-use super::assertions::{Severity, TestSuite};
-use super::config::make_graph_config;
-use super::export::export;
-use super::validator::{Failure, run_suite};
+use integration_tests_codegraph::assertions::{Severity, TestCase, TestSuite};
+use integration_tests_codegraph::{Failure, create_test_db, run_suite};
+use ontology::Ontology;
+use tree_dsl::treesitter::SupportLang;
+use tree_dsl::{Env, Envelope, State};
 
 fn detect_lang(suite: &TestSuite, fixtures: &[(String, String)]) -> SupportLang {
     if let Some(ref p) = suite.pipeline
@@ -66,15 +66,39 @@ fn suite_fixtures(suite: &TestSuite) -> Vec<(String, String)> {
     files
 }
 
-async fn build_and_check(env: &Env, state: &mut State, suite: &TestSuite) -> Vec<Failure> {
+/// Export the graph into a fresh DuckDB and run the suite's queries against it.
+fn check(
+    env: &Env,
+    state: &mut State,
+    ontology: &Arc<Ontology>,
+    tests: &[TestCase],
+) -> Vec<Failure> {
     tree_dsl::phases::display(env, state).expect("display rules compile");
-    let datasets = export(&state.trees, &state.edges, &env.lang).expect("Failed to build datasets");
-    let graph_config = make_graph_config().expect("Failed to build graph config");
-    run_suite(suite, &datasets, &graph_config).await
+    let envelope = Envelope {
+        project_id: 1,
+        branch: "main",
+        commit_sha: "test",
+    };
+    let tables = tree_dsl::export(state, &env.lang, ontology, &envelope).expect("export");
+    let db = create_test_db().expect("in-memory DuckDB");
+    for (table, batch) in &tables {
+        db.insert_batch(table, batch)
+            .unwrap_or_else(|e| panic!("insert into {table}: {e}"));
+    }
+    let suite = TestSuite {
+        name: String::new(),
+        pipeline: None,
+        fixtures: Vec::new(),
+        fixture_dir: None,
+        trace: false,
+        tests: tests.to_vec(),
+        steps: Vec::new(),
+    };
+    run_suite(&suite, &db, ontology)
 }
 
-pub async fn run_yaml_suite(yaml: &str) {
-    let suite: TestSuite = serde_yaml::from_str(yaml).expect("Failed to parse YAML suite");
+pub fn run_yaml_suite(yaml: &str) {
+    let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
 
     if suite.tests.iter().all(|t| t.skip) && suite.steps.is_empty() {
         eprintln!(
@@ -87,6 +111,7 @@ pub async fn run_yaml_suite(yaml: &str) {
 
     let fixtures = suite_fixtures(&suite);
     let lang_id = detect_lang(&suite, &fixtures);
+    let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
 
     let tree_dsl::Indexed {
         env,
@@ -95,16 +120,9 @@ pub async fn run_yaml_suite(yaml: &str) {
     } = tree_dsl::index(lang_id, &fixtures).expect("suite exceeded the total budget");
     assert!(killed.is_empty(), "files exceeded their budget: {killed:?}");
 
-    let mut all_failures = Vec::new();
-    let mut total_tests = 0usize;
-    let mut total_skipped = 0usize;
-
-    if !suite.tests.is_empty() {
-        let failures = build_and_check(&env, &mut state, &suite).await;
-        total_tests += suite.tests.len();
-        total_skipped += suite.tests.iter().filter(|t| t.skip).count();
-        all_failures.extend(failures);
-    }
+    let mut all_failures = check(&env, &mut state, &ontology, &suite.tests);
+    let mut total_tests = suite.tests.len();
+    let mut total_skipped = suite.tests.iter().filter(|t| t.skip).count();
 
     for step in &suite.steps {
         let added: Vec<(String, String)> = step
@@ -120,22 +138,9 @@ pub async fn run_yaml_suite(yaml: &str) {
         state = tree_dsl::reindex(&env, state, &added, &modified, &step.remove)
             .expect("suite exceeded the total budget")
             .0;
-
-        if !step.tests.is_empty() {
-            let step_suite = TestSuite {
-                name: step.name.clone(),
-                pipeline: suite.pipeline.clone(),
-                fixtures: Vec::new(),
-                fixture_dir: None,
-                _trace: false,
-                tests: step.tests.clone(),
-                steps: Vec::new(),
-            };
-            let failures = build_and_check(&env, &mut state, &step_suite).await;
-            total_tests += step.tests.len();
-            total_skipped += step.tests.iter().filter(|t| t.skip).count();
-            all_failures.extend(failures);
-        }
+        all_failures.extend(check(&env, &mut state, &ontology, &step.tests));
+        total_tests += step.tests.len();
+        total_skipped += step.tests.iter().filter(|t| t.skip).count();
     }
 
     let failed = all_failures.len();

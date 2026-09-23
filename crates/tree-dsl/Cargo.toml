@@ -46,5 +46,8 @@ toml = { workspace = true }
 pest = { workspace = true }
 pest_derive = { workspace = true }
 pest_consume = { workspace = true }
+arrow = { workspace = true }
+ontology = { path = "../ontology" }
+orbit-utils = { path = "../utils" }
 
 
