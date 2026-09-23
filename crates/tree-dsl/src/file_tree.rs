@@ -143,7 +143,7 @@ impl<'a> ProjectTree<'a> {
         for stage in self.stages {
             match stage {
                 ResolveStage::Rules(rules) => {
-                    pattern::apply_rewrites(&mut self.tree, self.lang, rules);
+                    let _ = pattern::apply_rewrites(&mut self.tree, self.lang, rules, &[]);
                 }
                 ResolveStage::Climb {
                     while_kind,

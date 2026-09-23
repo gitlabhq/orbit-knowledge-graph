@@ -1,4 +1,5 @@
 use crate::intern::Lang;
+use crate::sentinel::Killed;
 use crate::tree::{Node, Tree};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize)]
@@ -255,7 +256,7 @@ fn from_tree_sitter(
         let sp = ts.start_position();
         let ep = ts.end_position();
 
-        let parent = *parent_stack.last().unwrap();
+        let parent = *parent_stack.last().expect("root is pushed before the walk");
         let nid = tree.append(
             parent,
             Node {
@@ -316,7 +317,9 @@ impl TsCache {
                     .map(|id| ts.field_name_for_id(id).map_or(0, |s| lang.intern_field(s))),
             )
             .collect();
-        self.parser.set_language(&ts).unwrap();
+        self.parser
+            .set_language(&ts)
+            .expect("compiled-in grammar matches the tree-sitter ABI");
         self.lang = Some(support_lang);
     }
 }
@@ -328,11 +331,22 @@ thread_local! {
     });
 }
 
-pub fn parse(source: &str, support_lang: SupportLang, lang: &Lang, label: &str) -> Tree {
+/// `None` from tree-sitter means its own timeout or cancellation tripped.
+pub fn parse(
+    source: &str,
+    support_lang: SupportLang,
+    lang: &Lang,
+    label: &str,
+) -> Result<Tree, Killed> {
     CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         c.ensure(support_lang, lang);
-        let ts_tree = c.parser.parse(source.as_bytes(), None).unwrap();
-        from_tree_sitter(source, &ts_tree, lang, &c.kinds, &c.fields, label)
+        let ts_tree = c.parser.parse(source.as_bytes(), None).ok_or(Killed {
+            label: "tree-sitter",
+            path: label.to_string(),
+        })?;
+        Ok(from_tree_sitter(
+            source, &ts_tree, lang, &c.kinds, &c.fields, label,
+        ))
     })
 }

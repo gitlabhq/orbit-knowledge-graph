@@ -6,7 +6,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
 use crate::intern::Lang;
+use crate::pipeline::Env;
 use crate::rules::ResolveConfig;
+use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
     Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, members_by_level, reachable,
@@ -46,6 +48,8 @@ pub struct ResolvedSourcePath {
 
 pub struct ResolveResult {
     pub cross_edges: Vec<Edge>,
+    /// Files whose cross-file pass overran its budget; their edges are absent.
+    pub killed: Vec<Killed>,
     pub resolved_source_paths: Vec<ResolvedSourcePath>,
 }
 
@@ -167,7 +171,9 @@ impl Resolver {
         lookup_prefixes: &[String],
         config: &ResolveConfig,
         aliases: &[(String, String)],
-    ) -> ResolveResult {
+        env: &Env,
+    ) -> Result<ResolveResult, Killed> {
+        let run = &env.sentinel;
         let index_names = support_lang.index_names();
         self.file_index = build_file_index(trees, lang, support_lang, index_names);
 
@@ -270,6 +276,9 @@ impl Resolver {
             })
             .collect();
         let mut ctx = ResolveCtx {
+            trees,
+            run,
+            file_resolve_ms: env.limits.file_resolve_ms,
             extends_of,
             imports_to,
             call_at_site,
@@ -292,13 +301,20 @@ impl Resolver {
             exporters: &exporters,
             imports: &imports,
         };
-        let inherit = |&fi: &usize| resolve_file(&ctx, fi);
+        let (per_file, killed): (Vec<Vec<Edge>>, Vec<Killed>) = active_fis
+            .par_iter()
+            .map(|&fi| resolve_file(&ctx, fi))
+            .partition_map(|r| match r {
+                Ok(v) => rayon::iter::Either::Left(v),
+                Err(k) => rayon::iter::Either::Right(k),
+            });
+        run.check()?;
         let wave1: Vec<Edge> = self
             .reqs
             .par_iter()
             .filter(|r| active_fis.contains(&r.fi) || active_fis.contains(&r.target_fi))
             .flat_map(|req| resolve_one_import(&ctx, req))
-            .chain(active_fis.par_iter().flat_map(inherit))
+            .chain(per_file.into_par_iter().flatten())
             .filter(|e| {
                 !(e.kind == EdgeKind::Calls
                     && e.site
@@ -310,6 +326,7 @@ impl Resolver {
             ctx.extends_of.entry(e.from()).or_default().push(e.to());
         }
         cross_edges.extend(&wave1);
+        run.check()?;
 
         let wave2: Vec<Edge> = ctx
             .type_uses
@@ -336,6 +353,7 @@ impl Resolver {
         cross_edges.retain(|e| e.kind != EdgeKind::Calls || seen.insert(key(e)));
         let mut type_edges: Vec<Edge> = Vec::new();
         while !wave.is_empty() {
+            run.check()?;
             wave = wave
                 .par_iter()
                 .flat_map(|ce| resolve_type_edges(&ctx, ce))
@@ -347,14 +365,18 @@ impl Resolver {
         }
         cross_edges.extend(type_edges);
 
-        ResolveResult {
+        Ok(ResolveResult {
             cross_edges,
+            killed,
             resolved_source_paths,
-        }
+        })
     }
 }
 
 struct ResolveCtx<'a> {
+    trees: &'a [Tree],
+    run: &'a Sentinel,
+    file_resolve_ms: u64,
     extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
     imports_to: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     call_at_site: FxHashMap<(u32, u32), &'a Edge>,
@@ -1019,7 +1041,8 @@ fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Optio
 
 /// Cross-file edges for one file that the import pass cannot produce:
 /// inheritance, decorators, destructuring, and member calls on imported types.
-fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
+fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
+    let file = Sentinel::new("resolve", &ctx.trees[fi].label, ctx.file_resolve_ms);
     let mut out = Vec::new();
     let root = ctx.corpus.jump(fi as u32, 0);
     let local = |n: Cursor| {
@@ -1044,6 +1067,7 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
     let mut bound_in: FxHashMap<u32, FxHashSet<u32>> = FxHashMap::default();
 
     for node in root.descendants() {
+        ctx.run.check().and_then(|()| file.check())?;
         let Some(from) = Some(node)
             .filter(|n| n.is(C::Def))
             .or_else(|| node.enclosing(|e| e.is(C::Def)))
@@ -1096,7 +1120,7 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Vec<Edge> {
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Unqualified and self calls inside `class` that reach a member `class` does

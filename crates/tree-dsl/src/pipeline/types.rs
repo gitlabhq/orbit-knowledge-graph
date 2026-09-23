@@ -2,6 +2,7 @@ use crate::intern::Lang;
 use crate::pattern::Rewrite;
 use crate::resolver::Resolver;
 use crate::rules::{Config, ResolveStage};
+use crate::sentinel::{Limits, Sentinel};
 use crate::tree::{Edge, Tree};
 use crate::treesitter::SupportLang;
 use crate::{rules, treesitter};
@@ -12,10 +13,18 @@ pub struct Env {
     pub rewrite_stages: Vec<Vec<Rewrite>>,
     pub resolve_stages: Vec<ResolveStage>,
     pub config: Config,
+    pub limits: Limits,
+    /// The run-wide deadline. Every phase checks it beside its own.
+    pub sentinel: Sentinel,
 }
 
 impl Env {
     pub fn for_lang(lang_id: SupportLang) -> Self {
+        Self::with_limits(lang_id, Limits::default())
+    }
+
+    pub fn with_limits(lang_id: SupportLang, limits: Limits) -> Self {
+        let sentinel = Sentinel::new("run", "", limits.total_ms);
         let lang = Lang::new();
         let (rewrite_stages, resolve_stages, config) = match treesitter::lang_yaml(lang_id) {
             Some(yaml) => rules::load_lang(yaml, &lang),
@@ -27,6 +36,8 @@ impl Env {
             rewrite_stages,
             resolve_stages,
             config,
+            limits,
+            sentinel,
         }
     }
 }

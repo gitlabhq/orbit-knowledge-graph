@@ -159,9 +159,10 @@ impl Tree {
 
     #[inline]
     pub(crate) fn to_id(&self, raw: u32) -> NodeId {
+        let idx = std::num::NonZeroUsize::new(raw as usize + 1).expect("raw + 1 is nonzero");
         self.arena
-            .get_node_id_at(std::num::NonZeroUsize::new(raw as usize + 1).unwrap())
-            .unwrap()
+            .get_node_id_at(idx)
+            .expect("raw ids come from this arena")
     }
 
     #[inline]

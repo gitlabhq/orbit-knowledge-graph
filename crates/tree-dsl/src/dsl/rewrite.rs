@@ -2,6 +2,7 @@ use indextree::NodeId;
 use smallvec::{SmallVec, smallvec};
 
 use crate::intern::Lang;
+use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Node, Tree};
 
 use super::matching::matches;
@@ -163,11 +164,11 @@ pub(crate) fn materialize(
                 }
             };
             let pos_src = match text {
-                Text::From(slot, _) if !caps[*slot as usize].is_empty() => {
-                    caps[*slot as usize].first().copied().unwrap()
-                }
-                _ => caps[0].first().copied().unwrap_or(t.root),
-            };
+                Text::From(slot, _) => caps[*slot as usize].first(),
+                _ => caps[0].first(),
+            }
+            .copied()
+            .unwrap_or(t.root);
             let src = *t.node(pos_src);
             let at = t.append(
                 parent,
@@ -222,12 +223,13 @@ fn build_template(
     built
 }
 
-pub fn apply_rewrites(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
-    apply_rewrites_inner(t, lang, rules, false, None);
-}
-
-pub fn apply_rewrites_preorder(t: &mut Tree, lang: &Lang, rules: &[Rewrite]) {
-    apply_rewrites_inner(t, lang, rules, true, None);
+pub fn apply_rewrites(
+    t: &mut Tree,
+    lang: &Lang,
+    rules: &[Rewrite],
+    sentinels: &[&Sentinel],
+) -> Result<(), Killed> {
+    apply_rewrites_inner(t, lang, rules, false, None, sentinels)
 }
 
 pub fn apply_rewrites_with_edges(
@@ -236,8 +238,9 @@ pub fn apply_rewrites_with_edges(
     rules: &[Rewrite],
     preorder: bool,
     edge_ctx: &EdgeCtx,
-) {
-    apply_rewrites_inner(t, lang, rules, preorder, Some(edge_ctx));
+    sentinels: &[&Sentinel],
+) -> Result<(), Killed> {
+    apply_rewrites_inner(t, lang, rules, preorder, Some(edge_ctx), sentinels)
 }
 
 fn apply_rewrites_inner(
@@ -246,7 +249,8 @@ fn apply_rewrites_inner(
     rules: &[Rewrite],
     preorder: bool,
     edge_ctx: Option<&EdgeCtx>,
-) {
+    sentinels: &[&Sentinel],
+) -> Result<(), Killed> {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
     let mut caps: Vec<Cap> = (0..max_slots).map(|_| SmallVec::new()).collect();
 
@@ -265,6 +269,7 @@ fn apply_rewrites_inner(
     };
 
     for target in candidates {
+        sentinels.iter().try_for_each(|s| s.check())?;
         if target.is_removed(&t.arena) {
             continue;
         }
@@ -385,6 +390,7 @@ fn apply_rewrites_inner(
             }
         }
     }
+    Ok(())
 }
 
 impl Tree {

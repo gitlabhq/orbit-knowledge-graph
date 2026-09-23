@@ -134,14 +134,14 @@ fn cmd_parse(
     match stage {
         Stage::Cst => {
             let lang = tree_dsl::intern::Lang::new();
-            let tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path);
+            let tree = tree_dsl::treesitter::parse(&source, lang_id, &lang, &path)?;
             print_tree(&tree, &lang);
         }
         Stage::Ast => {
             let env = tree_dsl::Env::for_lang(lang_id);
-            let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &env.lang, &path);
+            let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &env.lang, &path)?;
             for stage in &env.rewrite_stages {
-                tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, stage);
+                let _ = tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]);
             }
             print_tree(&tree, &env.lang);
         }
@@ -193,7 +193,7 @@ fn cmd_rewrite(
 
     let lang_id = resolve_lang(lang_override.as_deref(), Some(&path));
     let env = tree_dsl::Env::for_lang(lang_id);
-    let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &env.lang, &path);
+    let mut tree = tree_dsl::treesitter::parse(&source, lang_id, &env.lang, &path)?;
 
     if let Some(ref stop) = after {
         let limit: usize = if stop == "all" {
@@ -202,7 +202,7 @@ fn cmd_rewrite(
             stop.parse().unwrap_or(env.rewrite_stages.len())
         };
         for stage in env.rewrite_stages.iter().take(limit) {
-            tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, stage);
+            let _ = tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]);
         }
     }
 
@@ -216,7 +216,7 @@ fn cmd_rewrite(
             })
         })
         .collect();
-    tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, &rules);
+    let _ = tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, &rules, &[]);
 
     print_tree(&tree, &env.lang);
     Ok(())
@@ -345,7 +345,11 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
         .into_par_iter()
         .map(|(name, lang_id, files)| {
             let t_lang = Instant::now();
-            let (env, state) = tree_dsl::index(lang_id, &files);
+            let tree_dsl::Indexed { env, state, killed } =
+                tree_dsl::index(lang_id, &files).map_err(|k| anyhow::anyhow!("{k}"))?;
+            for k in &killed {
+                eprintln!("skipped:      {k}");
+            }
             let (mut defs, mut imports) = (0usize, 0usize);
             for tree in &state.trees {
                 for c in tree.root().descendants() {

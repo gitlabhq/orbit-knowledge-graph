@@ -434,7 +434,10 @@ impl SsaEngine {
             }
 
             if outer_values.len() == 1 {
-                let replacement = outer_values.into_iter().next().unwrap();
+                let replacement = outer_values
+                    .into_iter()
+                    .next()
+                    .expect("a trivial phi has exactly one outer value");
                 let phi_vals: Vec<Value> = scc.iter().map(|&p| Value::Phi(p)).collect();
                 for &pid in &scc {
                     let variable = self.phis[pid.0].variable;
@@ -564,7 +567,7 @@ fn tarjan_scc(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
         if lowlinks[v] == indices[v] {
             let mut scc = Vec::new();
             loop {
-                let w = stack.pop().unwrap();
+                let w = stack.pop().expect("scc stack holds the current node");
                 on_stack[w] = false;
                 scc.push(w);
                 if w == v {

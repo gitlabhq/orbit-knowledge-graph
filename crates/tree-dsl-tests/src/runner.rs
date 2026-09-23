@@ -88,7 +88,12 @@ pub async fn run_yaml_suite(yaml: &str) {
     let fixtures = suite_fixtures(&suite);
     let lang_id = detect_lang(&suite, &fixtures);
 
-    let (env, mut state) = tree_dsl::index(lang_id, &fixtures);
+    let tree_dsl::Indexed {
+        env,
+        mut state,
+        killed,
+    } = tree_dsl::index(lang_id, &fixtures).expect("suite exceeded the total budget");
+    assert!(killed.is_empty(), "files exceeded their budget: {killed:?}");
 
     let mut all_failures = Vec::new();
     let mut total_tests = 0usize;
@@ -112,7 +117,9 @@ pub async fn run_yaml_suite(yaml: &str) {
             .iter()
             .map(|f| (f.path.clone(), f.content.clone()))
             .collect();
-        state = tree_dsl::reindex(&env, state, &added, &modified, &step.remove);
+        state = tree_dsl::reindex(&env, state, &added, &modified, &step.remove)
+            .expect("suite exceeded the total budget")
+            .0;
 
         if !step.tests.is_empty() {
             let step_suite = TestSuite {

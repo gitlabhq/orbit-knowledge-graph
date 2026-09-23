@@ -71,7 +71,8 @@ fn round_trip_save_load() {
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
 
-    let (env, state) = tree_dsl::index(SupportLang::Python, &fixtures);
+    let tree_dsl::Indexed { env, state, .. } =
+        tree_dsl::index(SupportLang::Python, &fixtures).unwrap();
     assert_eq!(state.trees.len(), fixtures.len());
     assert!(!state.edges.is_empty());
 
@@ -110,7 +111,8 @@ fn incremental_via_snapshot_and_reindex() {
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
 
-    let (env, state) = tree_dsl::index(SupportLang::Python, &fixtures);
+    let tree_dsl::Indexed { env, state, .. } =
+        tree_dsl::index(SupportLang::Python, &fixtures).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
     state.save(&env, &snap).unwrap();
@@ -132,7 +134,9 @@ fn incremental_via_snapshot_and_reindex() {
             .iter()
             .map(|f| (f.path.clone(), f.content.clone()))
             .collect();
-        current = tree_dsl::reindex(&env, current, &added, &modified, &step.remove);
+        current = tree_dsl::reindex(&env, current, &added, &modified, &step.remove)
+            .unwrap()
+            .0;
     }
 
     assert_eq!(
@@ -153,7 +157,8 @@ fn modify_preserves_resolution_after_reindex() {
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
 
-    let (env, state) = tree_dsl::index(SupportLang::Python, &fixtures);
+    let tree_dsl::Indexed { env, state, .. } =
+        tree_dsl::index(SupportLang::Python, &fixtures).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
     state.save(&env, &snap).unwrap();
@@ -168,7 +173,9 @@ fn modify_preserves_resolution_after_reindex() {
         .iter()
         .map(|f| (f.path.clone(), f.content.clone()))
         .collect();
-    let updated = tree_dsl::reindex(&env, loaded, &[], &modified, &[]);
+    let updated = tree_dsl::reindex(&env, loaded, &[], &modified, &[])
+        .unwrap()
+        .0;
 
     assert_eq!(updated.trees.len(), 2);
     assert!(updated.edges.len() >= initial_edges);

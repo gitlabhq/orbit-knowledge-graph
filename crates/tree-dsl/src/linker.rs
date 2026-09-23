@@ -2,9 +2,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
 use crate::constants::WILDCARD;
-use crate::intern::Lang;
+use crate::pipeline::Env;
 use crate::resolver::CLASS_LIKE;
 use crate::rules::LinkConfig;
+use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tags::ReservedTags;
 use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, members_by_level};
@@ -41,6 +42,9 @@ struct Fold<'t> {
     wildcards: Vec<u32>,
     tags: ReservedTags,
     config: &'t LinkConfig,
+    run: &'t Sentinel,
+    file: Sentinel,
+    killed: Option<Killed>,
     def_stack: Vec<(Option<u32>, BlockId)>,
     chain_seen: FxHashSet<u32>,
     obj_seen: FxHashSet<u32>,
@@ -64,8 +68,16 @@ impl<'t> Fold<'t> {
         }
     }
 
+    /// Stops at the first failed check; `link` reports it after the walk.
     fn run(&mut self, mut stack: Vec<WorkItem>) {
         while let Some(item) = stack.pop() {
+            if self.killed.is_some() {
+                return;
+            }
+            if let Err(k) = self.run.check().and_then(|()| self.file.check()) {
+                self.killed = Some(k);
+                return;
+            }
             match item {
                 WorkItem::ExitScope(wildcards) => self.exit_scope(wildcards),
                 WorkItem::Visit(i) => self.dispatch(self.tree.cursor(i), &mut stack),
@@ -644,7 +656,9 @@ impl<'t> Fold<'t> {
     }
 }
 
-pub fn link(tree: &Tree, lang: &Lang, config: &LinkConfig) -> Vec<Edge> {
+pub fn link(tree: &Tree, env: &Env) -> Result<Vec<Edge>, Killed> {
+    let (lang, config) = (&env.lang, &env.config.link);
+    let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms);
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
     ssa.seal_block(entry);
@@ -660,6 +674,9 @@ pub fn link(tree: &Tree, lang: &Lang, config: &LinkConfig) -> Vec<Edge> {
         wildcards: Vec::new(),
         tags: ReservedTags::new(lang),
         config,
+        run: &env.sentinel,
+        file,
+        killed: None,
         def_stack: vec![(None, entry)],
         chain_seen: FxHashSet::default(),
         obj_seen: FxHashSet::default(),
@@ -672,12 +689,16 @@ pub fn link(tree: &Tree, lang: &Lang, config: &LinkConfig) -> Vec<Edge> {
     let root = tree.root();
     f.predeclare(root);
     f.walk_children(root);
+    if let Some(k) = f.killed.take() {
+        return Err(k);
+    }
 
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
 
     f.cur = entry;
     for dn in f.defs.clone() {
+        f.run.check().and_then(|()| f.file.check())?;
         for c in tree.cursor(dn).children().filter(|c| c.is(C::Decorator)) {
             for target in f.lookup_chain(c) {
                 if let Linked::Def(target) = target {
@@ -687,5 +708,5 @@ pub fn link(tree: &Tree, lang: &Lang, config: &LinkConfig) -> Vec<Edge> {
         }
     }
 
-    f.edges
+    Ok(f.edges)
 }
