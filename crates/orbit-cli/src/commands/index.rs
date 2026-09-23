@@ -173,6 +173,7 @@ fn cancel_on_ctrl_c() -> CancellationToken {
             token.cancel();
         }
         if tokio::signal::ctrl_c().await.is_ok() {
+            tui::restore_control_echo();
             std::process::exit(130);
         }
     });
@@ -353,11 +354,16 @@ impl RepositoryBars {
     }
 
     fn fail(&self, error: &anyhow::Error) {
+        let cancelled = tui::is_cancelled(error);
         if let Some(phases) = self.phases.get() {
-            phases.parse.stop_at_current_count();
-            phases.resolve.stop_at_current_count();
+            for bar in [&phases.parse, &phases.resolve] {
+                match cancelled {
+                    true => bar.cancel_at_current_count(),
+                    false => bar.fail_at_current_count(),
+                }
+            }
         }
-        match tui::is_cancelled(error) {
+        match cancelled {
             true => self.group.cancel(),
             false => self.group.fail(format!("{error:#}")),
         }
