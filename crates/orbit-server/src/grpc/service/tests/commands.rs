@@ -127,6 +127,15 @@ async fn unknown_commands_return_not_found() {
 }
 
 #[tokio::test]
+async fn skill_rpcs_are_not_agent_commands() {
+    for command_name in ["list_skills", "get_skill"] {
+        let error = command_response(command_name, "{}").await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::NotFound);
+        assert!(error.message().contains(command_name));
+    }
+}
+
+#[tokio::test]
 async fn commands_reject_malformed_json() {
     let error = command_response("get_graph_schema", "{").await.unwrap_err();
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
