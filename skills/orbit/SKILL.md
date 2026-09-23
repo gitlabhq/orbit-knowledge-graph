@@ -1,9 +1,10 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.30.2
 license: MIT
+compatibility: Requires glab v1.117.0 or later and network access to the GitLab instance for Orbit Remote commands.
 metadata:
+  version: "0.31.0"
   audience: developers
   keywords: orbit, knowledge-graph, gkg, graph, query, glab
   workflow: ai

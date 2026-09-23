@@ -519,13 +519,16 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             .map(|skill| SkillSummary {
                 name: skill.name,
                 version: skill.version,
-                tree_sha256: skill.tree_sha256,
                 description: skill.description,
+                compatibility: skill.compatibility,
             })
             .collect();
 
         info!(count = skills.len(), "Listing embedded skills");
-        Ok(Response::new(ListSkillsResponse { skills }))
+        Ok(Response::new(ListSkillsResponse {
+            skills,
+            server_version: orbit_utils::version::get().to_string(),
+        }))
     }
 
     #[instrument(
@@ -558,8 +561,9 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(GetSkillResponse {
             name: skill.metadata.name,
             version: skill.metadata.version,
-            tree_sha256: skill.metadata.tree_sha256,
             files,
+            compatibility: skill.metadata.compatibility,
+            server_version: orbit_utils::version::get().to_string(),
         }))
     }
 

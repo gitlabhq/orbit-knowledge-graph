@@ -77,12 +77,21 @@ typed `/orbit/skills` endpoints are the only consumer. The methods deliberately
 sit outside `CommandRegistry`, so MCP agents can neither list nor invoke skills.
 
 The server embeds only `skills/orbit`; Orbit Local continues to own
-`skills/orbit-cli`. `ListSkills` returns each skill's name, version, description,
-and canonical tree hash. `GetSkill` returns a complete tree, or no files when
-`metadata_only` is true. Full-tree responses sort normalized relative paths and
-include each UTF-8 file's SHA-256. The tree hash consumes each path, a NUL byte,
-the content byte length as unsigned 64-bit big-endian, and the content. Unknown
-names return `NOT_FOUND` with sorted known names.
+`skills/orbit-cli`. A skill is identified by its frontmatter `name` and
+`metadata.version`. CI requires a version bump for every change under the
+corresponding `skills/<name>/` tree. Both manifests use Agent Skills
+specification fields, including `compatibility` for environment discovery.
+
+`ListSkills` returns each skill's name, version, description, and compatibility.
+`GetSkill` returns the versioned tree, or no files when `metadata_only` is true.
+Full-tree responses sort normalized relative paths and include each UTF-8 file's
+SHA-256 for integrity verification. Both responses include `server_version` as
+deployment provenance; it is not part of skill identity.
+
+Rails uses `"<version>"` as the item ETag. The collection ETag is a digest over
+sorted `(name, version)` pairs. Clients validate every per-file
+SHA-256 before publishing a downloaded tree and key their caches by the skill
+version. Unknown names return `NOT_FOUND` with sorted known names.
 
 This artifact envelope is separate from the query formatter response. Adding or
 changing it does not require a `raw_output_format` pin bump.

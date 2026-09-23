@@ -1526,6 +1526,7 @@ func (*ListSkillsRequest) Descriptor() ([]byte, []int) {
 type ListSkillsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Skills        []*SkillSummary        `protobuf:"bytes,1,rep,name=skills,proto3" json:"skills,omitempty"`
+	ServerVersion string                 `protobuf:"bytes,2,opt,name=server_version,json=serverVersion,proto3" json:"server_version,omitempty"` // deployment provenance, not skill identity
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1567,13 +1568,20 @@ func (x *ListSkillsResponse) GetSkills() []*SkillSummary {
 	return nil
 }
 
-// Identity and cache metadata for an embedded skill.
+func (x *ListSkillsResponse) GetServerVersion() string {
+	if x != nil {
+		return x.ServerVersion
+	}
+	return ""
+}
+
+// Identity and discovery metadata for an embedded skill.
 type SkillSummary struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	TreeSha256    string                 `protobuf:"bytes,3,opt,name=tree_sha256,json=treeSha256,proto3" json:"tree_sha256,omitempty"`
 	Description   string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
+	Compatibility string                 `protobuf:"bytes,5,opt,name=compatibility,proto3" json:"compatibility,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1622,16 +1630,16 @@ func (x *SkillSummary) GetVersion() string {
 	return ""
 }
 
-func (x *SkillSummary) GetTreeSha256() string {
+func (x *SkillSummary) GetDescription() string {
 	if x != nil {
-		return x.TreeSha256
+		return x.Description
 	}
 	return ""
 }
 
-func (x *SkillSummary) GetDescription() string {
+func (x *SkillSummary) GetCompatibility() string {
 	if x != nil {
-		return x.Description
+		return x.Compatibility
 	}
 	return ""
 }
@@ -1689,13 +1697,14 @@ func (x *GetSkillRequest) GetMetadataOnly() bool {
 	return false
 }
 
-// Complete identity, cache metadata, and optionally the files for one skill.
+// Complete identity, deployment provenance, and optionally the files for one skill.
 type GetSkillResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	TreeSha256    string                 `protobuf:"bytes,3,opt,name=tree_sha256,json=treeSha256,proto3" json:"tree_sha256,omitempty"`
 	Files         []*SkillFile           `protobuf:"bytes,4,rep,name=files,proto3" json:"files,omitempty"` // empty when metadata_only is true
+	Compatibility string                 `protobuf:"bytes,5,opt,name=compatibility,proto3" json:"compatibility,omitempty"`
+	ServerVersion string                 `protobuf:"bytes,6,opt,name=server_version,json=serverVersion,proto3" json:"server_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1744,18 +1753,25 @@ func (x *GetSkillResponse) GetVersion() string {
 	return ""
 }
 
-func (x *GetSkillResponse) GetTreeSha256() string {
-	if x != nil {
-		return x.TreeSha256
-	}
-	return ""
-}
-
 func (x *GetSkillResponse) GetFiles() []*SkillFile {
 	if x != nil {
 		return x.Files
 	}
 	return nil
+}
+
+func (x *GetSkillResponse) GetCompatibility() string {
+	if x != nil {
+		return x.Compatibility
+	}
+	return ""
+}
+
+func (x *GetSkillResponse) GetServerVersion() string {
+	if x != nil {
+		return x.ServerVersion
+	}
+	return ""
 }
 
 // One UTF-8 file in an embedded skill tree.
@@ -3723,24 +3739,24 @@ const file_orbit_proto_rawDesc = "" +
 	"\x0fraw_json_schema\x18\x01 \x01(\tH\x00R\rrawJsonSchema\x12'\n" +
 	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedTextB\t\n" +
 	"\acontent\"\x13\n" +
-	"\x11ListSkillsRequest\"D\n" +
+	"\x11ListSkillsRequest\"k\n" +
 	"\x12ListSkillsResponse\x12.\n" +
-	"\x06skills\x18\x01 \x03(\v2\x16.orbit.v1.SkillSummaryR\x06skills\"\x7f\n" +
+	"\x06skills\x18\x01 \x03(\v2\x16.orbit.v1.SkillSummaryR\x06skills\x12%\n" +
+	"\x0eserver_version\x18\x02 \x01(\tR\rserverVersion\"\x8a\x01\n" +
 	"\fSkillSummary\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1f\n" +
-	"\vtree_sha256\x18\x03 \x01(\tR\n" +
-	"treeSha256\x12 \n" +
-	"\vdescription\x18\x04 \x01(\tR\vdescription\"J\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12 \n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12$\n" +
+	"\rcompatibility\x18\x05 \x01(\tR\rcompatibilityJ\x04\b\x03\x10\x04\"J\n" +
 	"\x0fGetSkillRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12#\n" +
-	"\rmetadata_only\x18\x02 \x01(\bR\fmetadataOnly\"\x8c\x01\n" +
+	"\rmetadata_only\x18\x02 \x01(\bR\fmetadataOnly\"\xbe\x01\n" +
 	"\x10GetSkillResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1f\n" +
-	"\vtree_sha256\x18\x03 \x01(\tR\n" +
-	"treeSha256\x12)\n" +
-	"\x05files\x18\x04 \x03(\v2\x13.orbit.v1.SkillFileR\x05files\"Q\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12)\n" +
+	"\x05files\x18\x04 \x03(\v2\x13.orbit.v1.SkillFileR\x05files\x12$\n" +
+	"\rcompatibility\x18\x05 \x01(\tR\rcompatibility\x12%\n" +
+	"\x0eserver_version\x18\x06 \x01(\tR\rserverVersionJ\x04\b\x03\x10\x04\"Q\n" +
 	"\tSkillFile\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
 	"\x06sha256\x18\x02 \x01(\tR\x06sha256\x12\x18\n" +

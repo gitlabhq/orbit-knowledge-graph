@@ -1,3 +1,11 @@
+//! Catalog of skills embedded in the deployed server.
+//!
+//! A skill is identified by its frontmatter `name` and `metadata.version`; CI
+//! requires that version to change whenever its served tree changes. Each file
+//! carries a SHA-256 digest so clients can verify downloaded content.
+//! Skills are passive artifacts rather than invokable capabilities, so this
+//! catalog intentionally remains outside the agent command registry.
+
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
@@ -10,21 +18,22 @@ const SKILL_NAME: &str = "orbit";
 const MANIFEST: &str = "SKILL.md";
 
 #[derive(Embed)]
-// Serve skills/orbit byte-for-byte, including helper scripts and their tests, so this tree and
-// hash match the artifact installed by `glab skills install orbit`.
+// Serve skills/orbit byte-for-byte so this tree matches the artifact installed by
+// `glab skills install orbit`.
 #[folder = "$SKILLS_DIR/orbit"]
 struct SkillAssets;
 
 static CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
-    SkillCatalog::load_embedded().expect("Orbit skills are validated by orbit-server/build.rs")
+    SkillCatalog::load_embedded()
+        .expect("embedded Orbit skill passed full frontmatter and tree validation at build time")
 });
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SkillMetadata {
     pub name: String,
     pub version: String,
-    pub tree_sha256: String,
     pub description: String,
+    pub compatibility: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -82,14 +91,14 @@ impl SkillCatalog {
             .find(|file| file.path == MANIFEST)
             .ok_or_else(|| format!("embedded {SKILL_NAME} skill is missing {MANIFEST}"))?;
         // Keep runtime validation as defense in depth against embedding drift.
-        let frontmatter = orbit_prompts::parse_skill_frontmatter(&manifest.content)
+        let frontmatter = orbit_prompts::parse_skill_frontmatter(&manifest.content, SKILL_NAME)
             .map_err(|error| format!("embedded {error}"))?;
 
         let metadata = SkillMetadata {
             name: frontmatter.name,
             version: frontmatter.version.to_string(),
-            tree_sha256: tree_sha256(&files),
             description: frontmatter.description,
+            compatibility: frontmatter.compatibility,
         };
         let mut skills = BTreeMap::new();
         skills.insert(metadata.name.clone(), EmbeddedSkill { metadata, files });
@@ -129,20 +138,6 @@ fn hex_digest(digest: impl AsRef<[u8]>) -> String {
     encoded
 }
 
-/// Hashes files in path order as `path || NUL || u64_be(content_len) || content`.
-/// Paths are normalized UTF-8 and cannot contain NUL, while the fixed-width
-/// length makes boundaries unambiguous for arbitrary file bytes.
-fn tree_sha256(files: &[SkillFile]) -> String {
-    let mut hasher = Sha256::new();
-    for file in files {
-        hasher.update(file.path.as_bytes());
-        hasher.update([0]);
-        hasher.update((file.content.len() as u64).to_be_bytes());
-        hasher.update(file.content.as_bytes());
-    }
-    hex_digest(hasher.finalize())
-}
-
 pub fn list_skills() -> Vec<SkillMetadata> {
     CATALOG.list()
 }
@@ -156,21 +151,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn list_exposes_manifest_metadata_and_tree_hash() {
+    fn list_exposes_manifest_metadata() {
         let skills = list_skills();
         assert_eq!(skills.len(), 1);
         let skill = &skills[0];
         assert_eq!(skill.name, "orbit");
-        assert_eq!(skill.version, "0.30.2");
+        assert_eq!(skill.version, "0.31.0");
         assert!(skill.description.starts_with("Use the `glab orbit` CLI"));
-        assert_eq!(skill.tree_sha256.len(), 64);
+        assert!(skill.compatibility.contains("glab v1.117.0"));
     }
 
     #[test]
     fn full_tree_is_sorted_and_every_hash_matches_content() {
         let tree = get_skill("orbit", false).unwrap();
         let files = tree.files.unwrap();
-        assert_eq!(files.len(), 10);
+        assert_eq!(files.len(), 9);
         assert!(files.windows(2).all(|pair| pair[0].path < pair[1].path));
         for file in &files {
             assert_eq!(
@@ -180,30 +175,6 @@ mod tests {
                 file.path
             );
         }
-        assert_eq!(tree.metadata.tree_sha256, tree_sha256(&files));
-    }
-
-    #[test]
-    fn canonical_tree_hash_matches_known_answer_vector() {
-        let file = |path: &str, content: &str| SkillFile {
-            path: path.to_string(),
-            sha256: sha256_hex(content.as_bytes()),
-            content: content.to_string(),
-        };
-        let files = [
-            file("SKILL.md", "alpha\n"),
-            file("references/guide.md", "beta"),
-        ];
-        assert_eq!(
-            tree_sha256(&files),
-            "7966df3b2283aa44b6d29826c89044f1739aa99f25fc84f44a775eaa41ba7817"
-        );
-
-        let swapped_contents = [
-            file("SKILL.md", "beta"),
-            file("references/guide.md", "alpha\n"),
-        ];
-        assert_ne!(tree_sha256(&files), tree_sha256(&swapped_contents));
     }
 
     #[test]

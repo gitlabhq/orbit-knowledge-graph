@@ -35,7 +35,8 @@ pub fn validate_skill_pair(
     let local_manifest = local
         .get(MANIFEST)
         .ok_or_else(|| format!("{} is missing {MANIFEST}", local_root.display()))?;
-    parse_skill_frontmatter(remote_manifest)?;
+    parse_skill_frontmatter(remote_manifest, "orbit")?;
+    parse_skill_frontmatter(local_manifest, "orbit-cli")?;
     let slots = parse_markers(remote_manifest, MarkerTree::Remote)?;
     let sections = parse_markers(local_manifest, MarkerTree::Local)?;
     if slots != sections {
@@ -481,8 +482,14 @@ fn to_kebab_case(name: &str) -> String {
 mod tests {
     use super::*;
 
+    fn manifest(name: &str, body: &str) -> String {
+        format!(
+            "---\nname: {name}\ndescription: Orbit skill\ncompatibility: Requires Orbit\nmetadata:\n  version: \"1.0.0\"\n---\n{body}"
+        )
+    }
+
     fn remote_manifest(body: &str) -> String {
-        format!("---\nname: orbit\nversion: 1.0.0\ndescription: Orbit skill\n---\n{body}")
+        manifest("orbit", body)
     }
 
     fn fixture() -> tempfile::TempDir {
@@ -499,7 +506,10 @@ mod tests {
         std::fs::write(root.path().join("remote/references/remote.md"), "remote\n").unwrap();
         std::fs::write(
             root.path().join("local/SKILL.md"),
-            "<!-- orbit:section quick-start -->\n[local](references/local/sql.md)\n<!-- /orbit:section -->\n",
+            manifest(
+                "orbit-cli",
+                "<!-- orbit:section quick-start -->\n[local](references/local/sql.md)\n<!-- /orbit:section -->\n",
+            ),
         )
         .unwrap();
         std::fs::write(root.path().join("local/references/local/sql.md"), "local\n").unwrap();
@@ -538,7 +548,11 @@ mod tests {
     #[test]
     fn build_validation_rejects_invalid_frontmatter() {
         for (original, replacement, expected_error) in [
-            ("version: 1.0.0", "version: not-semver", "not-semver"),
+            (
+                "version: \"1.0.0\"",
+                "version: not-semver",
+                "not valid semver",
+            ),
             (
                 "description: Orbit skill",
                 "description: Orbit skill\nunknown: value",
@@ -546,6 +560,12 @@ mod tests {
             ),
             ("name: orbit", "name: another-skill", "does not match"),
             ("description: Orbit skill", "description: '  '", "empty"),
+            (
+                "compatibility: Requires Orbit",
+                "compatibility: '  '",
+                "empty",
+            ),
+            ("version: \"1.0.0\"", "version: 1.0", "invalid type"),
         ] {
             let root = fixture();
             let manifest = std::fs::read_to_string(root.path().join("remote/SKILL.md")).unwrap();
@@ -562,7 +582,10 @@ mod tests {
     #[test]
     fn frontmatter_parser_tolerates_crlf() {
         let manifest = remote_manifest("body\n").replace('\n', "\r\n");
-        assert_eq!(parse_skill_frontmatter(&manifest).unwrap().name, "orbit");
+        assert_eq!(
+            parse_skill_frontmatter(&manifest, "orbit").unwrap().name,
+            "orbit"
+        );
     }
 
     #[test]
@@ -620,7 +643,10 @@ mod tests {
         let root = fixture();
         std::fs::write(
             root.path().join("local/SKILL.md"),
-            "<!-- orbit:section other -->\n<!-- /orbit:section -->\n",
+            manifest(
+                "orbit-cli",
+                "<!-- orbit:section other -->\n<!-- /orbit:section -->\n",
+            ),
         )
         .unwrap();
         assert!(
