@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use integration_tests_codegraph::assertions::{IncrementalStep, TestSuite};
+use integration_tests_codegraph::assertions::{FixtureFile, IncrementalStep, TestSuite};
 use tree_dsl::pipeline::{self, Changes};
 use tree_dsl::treesitter::SupportLang;
 use tree_dsl::{Context, Env, State};
@@ -151,4 +151,73 @@ fn modify_preserves_resolution_after_reindex() {
     assert!(names.contains(&"helper".to_string()));
     assert!(names.contains(&"extra".to_string()));
     assert_eq!(count_defs(&updated), 2);
+}
+
+/// A manifest is not source, so it never becomes a tree; it lives on the
+/// graph so the resolver still sees it after a snapshot and after reindexes
+/// that do not touch it.
+#[test]
+fn manifests_survive_snapshot_and_reindex() {
+    let file = |path: &str, content: &str| tree_dsl::pipeline::SourceFile {
+        path: path.into(),
+        content: content.into(),
+    };
+    let manifest = |content: &str| FixtureFile {
+        path: "Cargo.toml".into(),
+        content: content.into(),
+    };
+    let env = Env::for_lang(SupportLang::Rust).unwrap();
+    let state = pipeline::index(
+        Context::new(&env),
+        vec![
+            file("Cargo.toml", "[package]\nname = \"one\"\n"),
+            file("src/main.rs", "fn main() {}\n"),
+        ],
+    )
+    .unwrap()
+    .into_value()
+    .state;
+    assert_eq!(state.trees.len(), 1);
+    assert_eq!(state.configs[0].path, "Cargo.toml");
+
+    let dir = tempfile::tempdir().unwrap();
+    let snap = dir.path().join("graph.bin");
+    state.save(&env, &snap).unwrap();
+    let (env, loaded) = State::load(&snap, SupportLang::Rust).unwrap();
+    assert_eq!(loaded.configs.len(), 1);
+
+    let touch_source = IncrementalStep {
+        name: "edit main".into(),
+        add: Vec::new(),
+        modify: vec![FixtureFile {
+            path: "src/main.rs".into(),
+            content: "fn main() { run() }\nfn run() {}\n".into(),
+        }],
+        remove: Vec::new(),
+        tests: Vec::new(),
+    };
+    let state = reindex(&env, loaded, &touch_source);
+    assert_eq!(state.configs[0].content, "[package]\nname = \"one\"\n");
+
+    let edit_manifest = IncrementalStep {
+        name: "edit manifest".into(),
+        add: Vec::new(),
+        modify: vec![manifest("[package]\nname = \"two\"\n")],
+        remove: Vec::new(),
+        tests: Vec::new(),
+    };
+    let state = reindex(&env, state, &edit_manifest);
+    assert_eq!(state.configs.len(), 1);
+    assert_eq!(state.configs[0].content, "[package]\nname = \"two\"\n");
+
+    let drop_manifest = IncrementalStep {
+        name: "drop manifest".into(),
+        add: Vec::new(),
+        modify: Vec::new(),
+        remove: vec!["Cargo.toml".into()],
+        tests: Vec::new(),
+    };
+    let state = reindex(&env, state, &drop_manifest);
+    assert!(state.configs.is_empty());
+    assert_eq!(state.trees.len(), 1);
 }
