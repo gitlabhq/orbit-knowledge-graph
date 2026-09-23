@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
@@ -8,7 +10,7 @@ use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tags::ReservedTags;
-use crate::tree::{Cursor, Edge, EdgeKind, Step, Tree, find_method_in, members_by_level};
+use crate::tree::{Cursor, Edge, EdgeKind, Tree, members_by_level};
 
 #[derive(Clone)]
 enum Linked {
@@ -37,6 +39,10 @@ struct Fold<'t> {
     cur: BlockId,
     predeclared: FxHashMap<u32, u32>,
     defs: Vec<u32>,
+    defs_by_name: FxHashMap<u32, Vec<u32>>,
+    /// Per class: member name to first def, and ivar name to its typed binding.
+    members: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
+    ivars: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     supertypes: FxHashMap<u32, Vec<u32>>,
     imports: Vec<u32>,
     wildcards: Vec<u32>,
@@ -210,10 +216,10 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
-        let def_idx = self.predeclared.remove(&idx).unwrap_or_else(|| {
-            self.defs.push(idx);
-            self.defs.len() as u32 - 1
-        });
+        let def_idx = match self.predeclared.remove(&idx) {
+            Some(i) => i,
+            None => self.register_def(idx),
+        };
         let supers = c
             .children()
             .filter(|s| s.is(C::SuperType))
@@ -246,8 +252,7 @@ impl<'t> Fold<'t> {
     fn predeclare(&mut self, scope: Cursor<'t>) {
         for d in scope.children().filter(|d| d.is(C::Def)) {
             if let Some(name) = d.child_sym(C::DefName) {
-                let def_idx = self.defs.len() as u32;
-                self.defs.push(d.index());
+                let def_idx = self.register_def(d.index());
                 self.predeclared.insert(d.index(), def_idx);
                 self.declare(d, name, def_idx);
             }
@@ -265,10 +270,15 @@ impl<'t> Fold<'t> {
     }
 
     fn defs_named(&self, sym: u32) -> impl Iterator<Item = u32> + '_ {
-        self.defs
-            .iter()
-            .copied()
-            .filter(move |&dn| self.tree.cursor(dn).child_sym(C::DefName) == Some(sym))
+        self.defs_by_name.get(&sym).into_iter().flatten().copied()
+    }
+
+    fn register_def(&mut self, node: u32) -> u32 {
+        self.defs.push(node);
+        if let Some(name) = self.tree.cursor(node).child_sym(C::DefName) {
+            self.defs_by_name.entry(name).or_default().push(node);
+        }
+        self.defs.len() as u32 - 1
     }
 
     fn handle_call(&mut self, c: Cursor<'t>) {
@@ -540,15 +550,37 @@ impl<'t> Fold<'t> {
     }
 
     fn ivar_type(&self, class: u32, attr: u32) -> Option<Cursor<'t>> {
-        self.tree.cursor(class).descend(|n| {
-            if n.is(C::Binding)
-                && n.child(C::Ivar).is_some_and(|iv| iv.sym() == attr)
-                && n.typed().is_some()
-            {
-                return Step::Out(n);
+        let mut ivars = self.ivars.borrow_mut();
+        let index = ivars.entry(class).or_insert_with(|| {
+            let mut m = FxHashMap::default();
+            for n in self.tree.cursor(class).descendants() {
+                if n.is(C::Binding)
+                    && let Some(iv) = n.child_sym(C::Ivar)
+                    && n.typed().is_some()
+                {
+                    m.entry(iv).or_insert(n.index());
+                }
             }
-            Step::Into
-        })
+            m
+        });
+        index.get(&attr).map(|&n| self.tree.cursor(n))
+    }
+
+    /// `find_method_in` for one container, indexed on first use.
+    fn member_of(&self, container: u32, name: u32) -> Option<u32> {
+        let mut members = self.members.borrow_mut();
+        let index = members.entry(container).or_insert_with(|| {
+            let class = self.tree.cursor(container);
+            let mut m = FxHashMap::default();
+            let nested = |n: Cursor| n.index() != container && n.is_class() && !n.has(C::ImplBlock);
+            for n in class.descendants_pruned(nested).filter(|n| n.is(C::Def)) {
+                if let Some(dn) = n.child_sym(C::DefName) {
+                    m.entry(dn).or_insert(n.index());
+                }
+            }
+            m
+        });
+        index.get(&name).copied()
     }
 
     fn chain_is_class(&mut self, c: Cursor) -> bool {
@@ -651,7 +683,7 @@ impl<'t> Fold<'t> {
             let supers = self.supertypes.get(&dn).into_iter().flatten().copied();
             supers.flat_map(wrappers).collect::<Vec<_>>()
         };
-        let found = |dn| find_method_in(self.tree.cursor(dn), name).map(|m| m.index());
+        let found = |dn| self.member_of(dn, name);
         members_by_level(wrappers(container), supers, found)
     }
 }
@@ -669,6 +701,9 @@ pub fn link(tree: &Tree, env: &Env) -> Result<Vec<Edge>, Killed> {
         cur: entry,
         predeclared: FxHashMap::default(),
         defs: Vec::new(),
+        defs_by_name: FxHashMap::default(),
+        members: RefCell::default(),
+        ivars: RefCell::default(),
         supertypes: FxHashMap::default(),
         imports: Vec::new(),
         wildcards: Vec::new(),

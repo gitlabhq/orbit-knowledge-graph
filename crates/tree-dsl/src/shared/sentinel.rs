@@ -41,24 +41,32 @@ impl Default for Limits {
 pub struct Killed {
     pub label: &'static str,
     pub path: String,
+    pub elapsed: Duration,
+    pub budget: Duration,
 }
 
 impl std::fmt::Display for Killed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (e, b) = (self.elapsed.as_millis(), self.budget.as_millis());
         match self.path.is_empty() {
-            true => write!(f, "{} exceeded its budget", self.label),
-            false => write!(f, "{} timed out in {}", self.path, self.label),
+            true => write!(f, "{} ran {e}ms against a {b}ms budget", self.label),
+            false => write!(
+                f,
+                "{} ran {e}ms in {} against a {b}ms budget",
+                self.path, self.label
+            ),
         }
     }
 }
 
 impl std::error::Error for Killed {}
 
-/// One deadline. `check()` is one clock read and a compare; `u64::MAX` means
-/// no deadline.
+/// One labelled deadline. `check()` is one clock read and a compare;
+/// `u64::MAX` means no deadline.
 #[derive(Clone)]
 pub struct Sentinel {
-    deadline: Option<Instant>,
+    started: Instant,
+    budget: Duration,
     label: &'static str,
     path: String,
 }
@@ -66,7 +74,8 @@ pub struct Sentinel {
 impl Sentinel {
     pub fn new(label: &'static str, path: &str, budget_ms: u64) -> Self {
         Self {
-            deadline: Instant::now().checked_add(Duration::from_millis(budget_ms)),
+            started: Instant::now(),
+            budget: Duration::from_millis(budget_ms),
             label,
             path: path.to_string(),
         }
@@ -78,13 +87,16 @@ impl Sentinel {
 
     #[inline]
     pub fn check(&self) -> Result<(), Killed> {
-        match self.deadline {
-            Some(d) if Instant::now() > d => Err(Killed {
+        let elapsed = self.started.elapsed();
+        if elapsed > self.budget {
+            return Err(Killed {
                 label: self.label,
                 path: self.path.clone(),
-            }),
-            _ => Ok(()),
+                elapsed,
+                budget: self.budget,
+            });
         }
+        Ok(())
     }
 }
 

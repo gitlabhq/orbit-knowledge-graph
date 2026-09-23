@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::intern::Lang;
 use crate::sentinel::Killed;
 use crate::tree::{Node, Tree};
@@ -344,6 +346,8 @@ pub fn parse(
         let ts_tree = c.parser.parse(source.as_bytes(), None).ok_or(Killed {
             label: "tree-sitter",
             path: label.to_string(),
+            elapsed: Duration::ZERO,
+            budget: Duration::ZERO,
         })?;
         Ok(from_tree_sitter(
             source, &ts_tree, lang, &c.kinds, &c.fields, label,

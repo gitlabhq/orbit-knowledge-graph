@@ -70,6 +70,10 @@ pub struct SsaEngine {
     current_def: FxHashMap<u32, FxHashMap<BlockId, Value>>,
     incomplete_phis: FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
     read_depth: usize,
+    /// Variables that have ever been written. A read of any other name in a
+    /// fully sealed graph is Opaque without walking the block chain.
+    written: FxHashSet<u32>,
+    unsealed: usize,
 }
 
 impl SsaEngine {
@@ -80,6 +84,8 @@ impl SsaEngine {
             current_def: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             incomplete_phis: FxHashMap::default(),
             read_depth: 0,
+            written: FxHashSet::default(),
+            unsealed: 0,
         }
     }
 
@@ -89,6 +95,7 @@ impl SsaEngine {
             predecessors: SmallVec::new(),
             sealed: false,
         });
+        self.unsealed += 1;
         id
     }
 
@@ -102,7 +109,10 @@ impl SsaEngine {
                 self.add_phi_operands(variable, phi_id);
             }
         }
-        self.blocks[block.0].sealed = true;
+        if !self.blocks[block.0].sealed {
+            self.blocks[block.0].sealed = true;
+            self.unsealed -= 1;
+        }
     }
 
     pub fn seal_remaining(&mut self) {
@@ -176,6 +186,7 @@ impl SsaEngine {
         } else {
             value
         };
+        self.written.insert(variable);
         self.current_def
             .entry(variable)
             .or_default()
@@ -204,6 +215,11 @@ impl SsaEngine {
             && let Some(value) = block_defs.get(&block)
         {
             return value.clone();
+        }
+        // Braun's walk would reach the entry block and cache Opaque at every
+        // block on the way; with no unsealed block there is no phi to create.
+        if self.unsealed == 0 && !self.written.contains(&variable) {
+            return Value::Opaque;
         }
         if self.read_depth >= MAX_READ_DEPTH {
             return Value::Opaque;
