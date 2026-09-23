@@ -25,7 +25,6 @@ either = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }
 magika = { workspace = true, optional = true }
-indicatif = { workspace = true }
 jsonschema = { workspace = true }
 memchr = { workspace = true }
 parking_lot = { workspace = true }
