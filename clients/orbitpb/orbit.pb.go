@@ -3742,21 +3742,21 @@ const file_orbit_proto_rawDesc = "" +
 	"\x11ListSkillsRequest\"k\n" +
 	"\x12ListSkillsResponse\x12.\n" +
 	"\x06skills\x18\x01 \x03(\v2\x16.orbit.v1.SkillSummaryR\x06skills\x12%\n" +
-	"\x0eserver_version\x18\x02 \x01(\tR\rserverVersion\"\x8a\x01\n" +
+	"\x0eserver_version\x18\x02 \x01(\tR\rserverVersion\"\x97\x01\n" +
 	"\fSkillSummary\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12$\n" +
-	"\rcompatibility\x18\x05 \x01(\tR\rcompatibilityJ\x04\b\x03\x10\x04\"J\n" +
+	"\rcompatibility\x18\x05 \x01(\tR\rcompatibilityJ\x04\b\x03\x10\x04R\vtree_sha256\"J\n" +
 	"\x0fGetSkillRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12#\n" +
-	"\rmetadata_only\x18\x02 \x01(\bR\fmetadataOnly\"\xbe\x01\n" +
+	"\rmetadata_only\x18\x02 \x01(\bR\fmetadataOnly\"\xcb\x01\n" +
 	"\x10GetSkillResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12)\n" +
 	"\x05files\x18\x04 \x03(\v2\x13.orbit.v1.SkillFileR\x05files\x12$\n" +
 	"\rcompatibility\x18\x05 \x01(\tR\rcompatibility\x12%\n" +
-	"\x0eserver_version\x18\x06 \x01(\tR\rserverVersionJ\x04\b\x03\x10\x04\"Q\n" +
+	"\x0eserver_version\x18\x06 \x01(\tR\rserverVersionJ\x04\b\x03\x10\x04R\vtree_sha256\"Q\n" +
 	"\tSkillFile\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
 	"\x06sha256\x18\x02 \x01(\tR\x06sha256\x12\x18\n" +

@@ -78,9 +78,11 @@ sit outside `CommandRegistry`, so MCP agents can neither list nor invoke skills.
 
 The server embeds only `skills/orbit`; Orbit Local continues to own
 `skills/orbit-cli`. A skill is identified by its frontmatter `name` and
-`metadata.version`. CI requires a version bump for every change under the
-corresponding `skills/<name>/` tree. Both manifests use Agent Skills
-specification fields, including `compatibility` for environment discovery.
+top-level `version`. The merge request check requires a version bump for changes
+under the corresponding `skills/<name>/` tree. It is not a content-identity
+guarantee: concurrent changes can choose the same next version, and an explicit
+`[skip skill-version-bump-check]` bypass exists. Both manifests include
+`compatibility` for environment discovery.
 
 `ListSkills` returns each skill's name, version, description, and compatibility.
 `GetSkill` returns the versioned tree, or no files when `metadata_only` is true.

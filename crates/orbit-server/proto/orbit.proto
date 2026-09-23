@@ -250,6 +250,7 @@ message ListSkillsResponse {
 // Identity and discovery metadata for an embedded skill.
 message SkillSummary {
   reserved 3;
+  reserved "tree_sha256";
   string name = 1;
   string version = 2;
   string description = 4;
@@ -265,6 +266,7 @@ message GetSkillRequest {
 // Complete identity, deployment provenance, and optionally the files for one skill.
 message GetSkillResponse {
   reserved 3;
+  reserved "tree_sha256";
   string name = 1;
   string version = 2;
   repeated SkillFile files = 4;  // empty when metadata_only is true

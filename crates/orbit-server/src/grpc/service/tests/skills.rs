@@ -21,7 +21,7 @@ async fn list_skills_returns_deployed_skill_metadata() {
     assert_eq!(skill.name, "orbit");
     assert_eq!(skill.version, "0.31.0");
     assert!(skill.description.contains("glab orbit"));
-    assert!(skill.compatibility.contains("glab v1.117.0"));
+    assert!(skill.compatibility.contains("Orbit CLI"));
     assert_eq!(response.server_version, orbit_utils::version::get());
 }
 
@@ -72,7 +72,7 @@ async fn get_skill_metadata_only_omits_files() {
 
     assert_eq!(response.name, "orbit");
     assert_eq!(response.version, "0.31.0");
-    assert!(response.compatibility.contains("glab v1.117.0"));
+    assert!(response.compatibility.contains("Orbit CLI"));
     assert_eq!(response.server_version, orbit_utils::version::get());
     assert!(response.files.is_empty());
 }

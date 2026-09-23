@@ -6,7 +6,7 @@ use serde::de::{self, Visitor};
 const MANIFEST: &str = "SKILL.md";
 
 #[derive(Debug)]
-struct StrictString(String);
+struct StrictString;
 
 impl<'de> serde::Deserialize<'de> for StrictString {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -22,18 +22,18 @@ impl<'de> serde::Deserialize<'de> for StrictString {
                 formatter.write_str("a string")
             }
 
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E>
             where
                 E: de::Error,
             {
-                Ok(StrictString(value.to_string()))
+                Ok(StrictString)
             }
 
-            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            fn visit_string<E>(self, _value: String) -> Result<Self::Value, E>
             where
                 E: de::Error,
             {
-                Ok(StrictString(value))
+                Ok(StrictString)
             }
         }
 
@@ -53,6 +53,7 @@ pub struct SkillFrontmatter {
 #[serde(deny_unknown_fields)]
 struct RawSkillFrontmatter {
     name: String,
+    version: semver::Version,
     description: String,
     #[serde(default, rename = "license")]
     _license: Option<String>,
@@ -73,7 +74,7 @@ pub fn parse_skill_frontmatter(
     let (frontmatter, _) = content
         .split_once("\n---\n")
         .ok_or_else(|| format!("{MANIFEST} has unterminated YAML frontmatter"))?;
-    let mut parsed: RawSkillFrontmatter = orbit_utils::yaml::from_str(frontmatter)
+    let parsed: RawSkillFrontmatter = orbit_utils::yaml::from_str(frontmatter)
         .map_err(|error| format!("parsing {MANIFEST} frontmatter: {error}"))?;
     if parsed.name != expected_name {
         return Err(format!(
@@ -87,17 +88,13 @@ pub fn parse_skill_frontmatter(
     if parsed.compatibility.trim().is_empty() {
         return Err("skill compatibility must not be empty".to_string());
     }
-    let version = parsed
-        .metadata
-        .remove("version")
-        .ok_or_else(|| "skill metadata.version is required".to_string())?
-        .0
-        .parse()
-        .map_err(|error| format!("skill metadata.version is not valid semver: {error}"))?;
+    if parsed.metadata.contains_key("version") {
+        return Err("skill version must be a top-level frontmatter field".to_string());
+    }
 
     Ok(SkillFrontmatter {
         name: parsed.name,
-        version,
+        version: parsed.version,
         description: parsed.description,
         compatibility: parsed.compatibility,
     })

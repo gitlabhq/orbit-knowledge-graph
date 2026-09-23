@@ -1,8 +1,9 @@
 //! Catalog of skills embedded in the deployed server.
 //!
-//! A skill is identified by its frontmatter `name` and `metadata.version`; CI
-//! requires that version to change whenever its served tree changes. Each file
-//! carries a SHA-256 digest so clients can verify downloaded content.
+//! A skill is identified by its frontmatter `name` and top-level `version`.
+//! The merge request check requires a bump when its tree changes, but concurrent
+//! identical bumps or the check's explicit skip can still reuse a version for
+//! different content. Each file carries a SHA-256 digest for verification.
 //! Skills are passive artifacts rather than invokable capabilities, so this
 //! catalog intentionally remains outside the agent command registry.
 
@@ -158,7 +159,7 @@ mod tests {
         assert_eq!(skill.name, "orbit");
         assert_eq!(skill.version, "0.31.0");
         assert!(skill.description.starts_with("Use the `glab orbit` CLI"));
-        assert!(skill.compatibility.contains("glab v1.117.0"));
+        assert!(skill.compatibility.contains("Orbit CLI"));
     }
 
     #[test]

@@ -484,7 +484,7 @@ mod tests {
 
     fn manifest(name: &str, body: &str) -> String {
         format!(
-            "---\nname: {name}\ndescription: Orbit skill\ncompatibility: Requires Orbit\nmetadata:\n  version: \"1.0.0\"\n---\n{body}"
+            "---\nname: {name}\nversion: 1.0.0\ndescription: Orbit skill\ncompatibility: Requires Orbit\nmetadata:\n  audience: developers\n---\n{body}"
         )
     }
 
@@ -548,11 +548,7 @@ mod tests {
     #[test]
     fn build_validation_rejects_invalid_frontmatter() {
         for (original, replacement, expected_error) in [
-            (
-                "version: \"1.0.0\"",
-                "version: not-semver",
-                "not valid semver",
-            ),
+            ("version: 1.0.0", "version: not-semver", "not-semver"),
             (
                 "description: Orbit skill",
                 "description: Orbit skill\nunknown: value",
@@ -565,7 +561,12 @@ mod tests {
                 "compatibility: '  '",
                 "empty",
             ),
-            ("version: \"1.0.0\"", "version: 1.0", "invalid type"),
+            ("version: 1.0.0\n", "", "missing field `version`"),
+            (
+                "metadata:\n  audience: developers",
+                "metadata:\n  version: \"1.0.0\"\n  audience: developers",
+                "version must be a top-level",
+            ),
         ] {
             let root = fixture();
             let manifest = std::fs::read_to_string(root.path().join("remote/SKILL.md")).unwrap();

@@ -115,49 +115,18 @@ def get_changed_skills(changed_files: list[str]) -> dict[str, list[str]]:
     return skills
 
 
-def frontmatter_lines(content: str) -> list[str]:
+def parse_version_from_content(content: str) -> str | None:
     lines = content.splitlines()
     if not lines or lines[0].strip() != "---":
-        return []
-
-    frontmatter: list[str] = []
-    for line in lines[1:]:
-        if line.strip() == "---":
-            return frontmatter
-        frontmatter.append(line)
-    return []
-
-
-def parse_version_from_content(content: str) -> str | None:
-    lines = frontmatter_lines(content)
-    metadata_index = next(
-        (index for index, line in enumerate(lines) if line == "metadata:"), None
-    )
-    if metadata_index is None:
         return None
 
-    child_indent: int | None = None
-    for line in lines[metadata_index + 1 :]:
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip())
-        if indent == 0:
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped == "---":
             break
-        if child_indent is None:
-            child_indent = indent
-        if indent != child_indent:
-            continue
-        key, separator, value = line.strip().partition(":")
-        if separator and key == "version":
-            return value.strip().strip("\"'") or None
+        if not line[:1].isspace() and stripped.startswith("version:"):
+            return stripped.split(":", 1)[1].strip().strip("\"'")
 
-    return None
-
-
-def parse_legacy_top_level_version(content: str) -> str | None:
-    for line in frontmatter_lines(content):
-        if line.startswith("version:"):
-            return line.partition(":")[2].strip().strip("\"'") or None
     return None
 
 
@@ -169,10 +138,6 @@ def get_version_at_ref(skill_name: str, ref: str) -> str | None:
         return None
 
     version = parse_version_from_content(result.stdout)
-    if version is None:
-        # Read the pre-migration shape at the diff base so the first metadata.version
-        # change is still checked as a real version increase.
-        version = parse_legacy_top_level_version(result.stdout)
     log_debug(f"Version for {skill_name} at {ref}: {version}")
     return version
 
@@ -283,8 +248,8 @@ def main() -> int:
 
         if old_version is None and new_version is None:
             print(
-                f"❌ {skill_name}: SKILL.md not found or has no string-valued "
-                f"'metadata.version' field but {len(files)} file(s) changed:\n{changed_list}"
+                f"❌ {skill_name}: SKILL.md not found or has no top-level "
+                f"'version:' field but {len(files)} file(s) changed:\n{changed_list}"
             )
         elif old_version == new_version:
             print(
@@ -300,7 +265,7 @@ def main() -> int:
     if has_errors:
         message = (
             "Some skills have file changes without a version bump. "
-            "Update the string-valued 'metadata.version' field in SKILL.md frontmatter."
+            "Update the top-level 'version' field in SKILL.md frontmatter."
         )
         if args.ci:
             print(f"\nERROR: {message}", file=sys.stderr)
