@@ -1,71 +1,71 @@
 name: "User->Project — User has no traversal_path"
 input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}
 expected: |
-  With
-    forward =
-      Union AS _frontier
-        Project
+  (With
+    (forward =
+      (Union AS _frontier
+        (Project
             e1.source_id AS anchor_id
             e1.target_id AS end_id
             e1.target_kind AS end_kind
             [tuple(e1.target_id, e1.target_kind)] AS path_nodes
             [e1.relationship_kind] AS edge_kinds
             1 AS depth
-          Filter
+          (Filter
               e1.source_id = 1
               e1.relationship_kind IN ('MEMBER_OF', 'CONTAINS')
               e1.source_kind = 'User'
               !deleted(e1)
-            Scan gl_edge AS e1
-        Project
+            (Scan gl_edge AS e1)))
+        (Project
             e1.source_id AS anchor_id
             e2.target_id AS end_id
             e2.target_kind AS end_kind
             [tuple(e1.target_id, e1.target_kind), tuple(e2.target_id, e2.target_kind)] AS path_nodes
             [e1.relationship_kind, e2.relationship_kind] AS edge_kinds
             2 AS depth
-          Join ON e1.target_id = e2.source_id
-            Filter
+          (Join ON e1.target_id = e2.source_id
+            (Filter
                 e1.source_id = 1
                 e1.relationship_kind IN ('MEMBER_OF', 'CONTAINS')
                 e1.source_kind = 'User'
                 !deleted(e1)
-              Scan gl_edge AS e1
-            Filter e2.relationship_kind IN ('MEMBER_OF', 'CONTAINS'), !deleted(e2)
-              Scan gl_edge AS e2
-    backward =
-      Union AS _frontier
-        Project
+              (Scan gl_edge AS e1))
+            (Filter e2.relationship_kind IN ('MEMBER_OF', 'CONTAINS'), !deleted(e2)
+              (Scan gl_edge AS e2))))))
+    (backward =
+      (Union AS _frontier
+        (Project
             e1.target_id AS anchor_id
             e1.source_id AS end_id
             e1.source_kind AS end_kind
             arrayResize([tuple(0, '')], 0) AS path_nodes
             [e1.relationship_kind] AS edge_kinds
             1 AS depth
-          Filter
+          (Filter
               e1.target_id = 100
               e1.relationship_kind IN ('MEMBER_OF', 'CONTAINS')
               e1.target_kind = 'Project'
               !deleted(e1)
-            Scan gl_edge AS e1
-    Limit 11
-      Sort paths.depth
-        Project
+            (Scan gl_edge AS e1)))))
+    (Limit 11
+      (Sort paths.depth
+        (Project
             paths._gkg_path AS _gkg_path
             paths._gkg_edge_kinds AS _gkg_edge_kinds
             paths.depth AS depth
-          Union AS paths
-            Project
+          (Union AS paths
+            (Project
                 f.depth AS depth
                 arrayConcat([tuple(f.anchor_id, 'User')], f.path_nodes) AS _gkg_path
                 f.edge_kinds AS _gkg_edge_kinds
-              Filter f.depth = 1, f.end_kind = 'Project', f.end_id = 100
-                Scan forward AS f
-            Project
+              (Filter f.depth = 1, f.end_kind = 'Project', f.end_id = 100
+                (Scan forward AS f)))
+            (Project
                 plus(f.depth, b.depth) AS depth
                 arrayConcat([tuple(f.anchor_id, 'User')], f.path_nodes, arrayReverse(b.path_nodes), [tuple(b.anchor_id, 'Project')]) AS _gkg_path
                 arrayConcat(f.edge_kinds, arrayReverse(b.edge_kinds)) AS _gkg_edge_kinds
-              Filter plus(f.depth, b.depth) <= 3
-                Join ON f.end_id = b.end_id
-                  Scan forward AS f
-                  Scan backward AS b
+              (Filter plus(f.depth, b.depth) <= 3
+                (Join ON f.end_id = b.end_id
+                  (Scan forward AS f)
+                  (Scan backward AS b)))))))))

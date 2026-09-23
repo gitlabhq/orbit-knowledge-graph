@@ -1,30 +1,30 @@
 name: "Depth 1 — forward CTE only, no backward"
 input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":1,"rel_types":["IN_PROJECT"]},"limit":10}
 expected: |
-  With
-    _nf_start =
-      Limit 500
-        Project start.id AS id, start.traversal_path AS traversal_path
-          Filter !deleted(start)
-            Project start.id AS id, start.traversal_path AS traversal_path, start._deleted AS _deleted
-              Filter start.id = 1
-                Scan gl_merge_request AS start FINAL
-    _nf_end =
-      Limit 500
-        Project end.id AS id, end.traversal_path AS traversal_path
-          Filter !deleted(end)
-            Project end.id AS id, end.traversal_path AS traversal_path, end._deleted AS _deleted
-              Filter end.id = 100
-                Scan gl_project AS end FINAL
-    _path_scope_traversal_paths =
-      Union AS _path_scope
-        Aggregate group _path_scope_start.traversal_path AS traversal_path
-          Scan _nf_start AS _path_scope_start
-        Aggregate group _path_scope_end.traversal_path AS traversal_path
-          Scan _nf_end AS _path_scope_end
-    forward =
-      Union AS _frontier
-        Project
+  (With
+    (_nf_start =
+      (Limit 500
+        (Project start.id AS id, start.traversal_path AS traversal_path
+          (Filter !deleted(start)
+            (Project start.id AS id, start.traversal_path AS traversal_path, start._deleted AS _deleted
+              (Filter start.id = 1
+                (Scan gl_merge_request AS start FINAL)))))))
+    (_nf_end =
+      (Limit 500
+        (Project end.id AS id, end.traversal_path AS traversal_path
+          (Filter !deleted(end)
+            (Project end.id AS id, end.traversal_path AS traversal_path, end._deleted AS _deleted
+              (Filter end.id = 100
+                (Scan gl_project AS end FINAL)))))))
+    (_path_scope_traversal_paths =
+      (Union AS _path_scope
+        (Aggregate group _path_scope_start.traversal_path AS traversal_path
+          (Scan _nf_start AS _path_scope_start))
+        (Aggregate group _path_scope_end.traversal_path AS traversal_path
+          (Scan _nf_end AS _path_scope_end))))
+    (forward =
+      (Union AS _frontier
+        (Project
             e1.source_id AS anchor_id
             e1.target_id AS end_id
             e1.target_kind AS end_kind
@@ -32,24 +32,24 @@ expected: |
             [e1.relationship_kind] AS edge_kinds
             1 AS depth
             e1.traversal_path AS traversal_path
-          Filter e1.relationship_kind = 'IN_PROJECT', e1.source_kind = 'MergeRequest', !deleted(e1)
-            SemiJoin e1.traversal_path IN _path_scope_traversal_paths.traversal_path
-              SemiJoin e1.source_id IN _nf_start.id
-                Scan gl_edge AS e1
-                Scan _nf_start AS _nf_start
-              Scan _path_scope_traversal_paths AS _path_scope_traversal_paths
-    Limit 11
-      Sort paths.depth
-        Project
+          (Filter e1.relationship_kind = 'IN_PROJECT', e1.source_kind = 'MergeRequest', !deleted(e1)
+            (SemiJoin e1.traversal_path IN _path_scope_traversal_paths.traversal_path
+              (SemiJoin e1.source_id IN _nf_start.id
+                (Scan gl_edge AS e1)
+                (Scan _nf_start AS _nf_start))
+              (Scan _path_scope_traversal_paths AS _path_scope_traversal_paths))))))
+    (Limit 11
+      (Sort paths.depth
+        (Project
             paths._gkg_path AS _gkg_path
             paths._gkg_edge_kinds AS _gkg_edge_kinds
             paths.depth AS depth
-          Union AS paths
-            Project
+          (Union AS paths
+            (Project
                 f.depth AS depth
                 arrayConcat([tuple(f.anchor_id, 'MergeRequest')], f.path_nodes) AS _gkg_path
                 f.edge_kinds AS _gkg_edge_kinds
-              SemiJoin f.end_id IN _nf_end.id
-                Filter f.depth = 1, f.end_kind = 'Project'
-                  Scan forward AS f
-                Scan _nf_end AS _nf_end
+              (SemiJoin f.end_id IN _nf_end.id
+                (Filter f.depth = 1, f.end_kind = 'Project'
+                  (Scan forward AS f))
+                (Scan _nf_end AS _nf_end))))))))

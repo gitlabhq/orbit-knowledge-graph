@@ -1,8 +1,8 @@
 name: "Non-denorm center filter joins node table with FINAL"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"outgoing"},"limit":20}
 expected: |
-  Limit 21
-    Project
+  (Limit 21
+    (Project
         e.target_id AS _gkg_neighbor_id
         e.target_kind AS _gkg_neighbor_type
         e.relationship_kind AS _gkg_relationship_type
@@ -10,9 +10,9 @@ expected: |
         e.source_id AS _gkg_mr_id
         'MergeRequest' AS _gkg_mr_type
         e.traversal_path AS _gkg_mr_tp
-      Join ON e.source_id = mr.id
-        Union AS e
-          Project
+      (Join ON e.source_id = mr.id
+        (Union AS e
+          (Project
               _e.traversal_path AS traversal_path
               _e.relationship_kind AS relationship_kind
               _e.source_id AS source_id
@@ -20,12 +20,12 @@ expected: |
               _e.target_id AS target_id
               _e.target_kind AS target_kind
               _e._deleted AS _deleted
-            Filter
+            (Filter
                 _e.source_kind = 'MergeRequest'
                 _e.relationship_kind IN ('CLOSES', 'DEPLOYED_TO', 'FIXES', 'HAS_DIFF', 'HAS_HEAD_PIPELINE', … 9 more)
                 !deleted(_e)
-              Scan gl_ci_edge AS _e
-          Project
+              (Scan gl_ci_edge AS _e)))
+          (Project
               _e.traversal_path AS traversal_path
               _e.relationship_kind AS relationship_kind
               _e.source_id AS source_id
@@ -33,12 +33,12 @@ expected: |
               _e.target_id AS target_id
               _e.target_kind AS target_kind
               _e._deleted AS _deleted
-            Filter
+            (Filter
                 _e.source_kind = 'MergeRequest'
                 _e.relationship_kind IN ('CLOSES', 'DEPLOYED_TO', 'FIXES', 'HAS_DIFF', 'HAS_HEAD_PIPELINE', … 9 more)
                 !deleted(_e)
-              Scan gl_diff_edge AS _e
-          Project
+              (Scan gl_diff_edge AS _e)))
+          (Project
               _e.traversal_path AS traversal_path
               _e.relationship_kind AS relationship_kind
               _e.source_id AS source_id
@@ -46,10 +46,10 @@ expected: |
               _e.target_id AS target_id
               _e.target_kind AS target_kind
               _e._deleted AS _deleted
-            Filter
+            (Filter
                 _e.source_kind = 'MergeRequest'
                 _e.relationship_kind IN ('CLOSES', 'DEPLOYED_TO', 'FIXES', 'HAS_DIFF', 'HAS_HEAD_PIPELINE', … 9 more)
                 !deleted(_e)
-              Scan gl_edge AS _e
-        Filter mr.title CONTAINS ?, !deleted(mr)
-          Scan gl_merge_request AS mr FINAL
+              (Scan gl_edge AS _e))))
+        (Filter mr.title CONTAINS ?, !deleted(mr)
+          (Scan gl_merge_request AS mr FINAL)))))

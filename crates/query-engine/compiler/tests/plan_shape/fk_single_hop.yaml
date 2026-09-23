@@ -1,8 +1,8 @@
 name: "AUTHORED has FK — no edge table"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
 expected: |
-  Limit 11
-    Project
+  (Limit 11
+    (Project
         'AUTHORED' AS e0_type
         u.id AS e0_src
         'User' AS e0_src_type
@@ -18,8 +18,8 @@ expected: |
         excerpt(u.username) AS u_username
         excerpt(u.name) AS u_name
         u.state AS u_state
-      Join ON mr.author_id = u.id
-        Filter u.id = 1, !deleted(u)
-          Scan gl_user AS u FINAL
-        Filter !deleted(mr)
-          Scan gl_merge_request AS mr FINAL
+      (Join ON mr.author_id = u.id
+        (Filter u.id = 1, !deleted(u)
+          (Scan gl_user AS u FINAL))
+        (Filter !deleted(mr)
+          (Scan gl_merge_request AS mr FINAL)))))

@@ -2,15 +2,15 @@
 //! `orbit-devtools compile --plan`:
 //!
 //! ```text
-//! Limit 11
-//!   Project
-//!     e0.source_id AS e0_src
-//!     excerpt(mr.title) AS mr_title
-//!   Join ON e0.target_id = mr.id
-//!     Filter e0.relationship_kind = 'AUTHORED', !deleted(e0)
-//!       Scan gl_edge AS e0
-//!     Filter mr.state = ?, !deleted(mr)
-//!       Scan gl_merge_request AS mr FINAL
+//! (Limit 11
+//!   (Project
+//!       e0.source_id AS e0_src
+//!       excerpt(mr.title) AS mr_title
+//!     (Join ON e0.target_id = mr.id
+//!       (Filter e0.relationship_kind = 'AUTHORED', !deleted(e0)
+//!         (Scan gl_edge AS e0))
+//!       (Filter mr.state = ?, !deleted(mr)
+//!         (Scan gl_merge_request AS mr FINAL)))))
 //! ```
 //!
 //! `?` is a user-supplied filter value; `excerpt(x)` is the text-truncation
@@ -24,19 +24,14 @@ const INLINE_WIDTH: usize = 90;
 
 impl PhysOp {
     pub fn explain(&self) -> String {
-        let mut out = String::new();
-        self.write(0, &mut out);
-        out.trim_end().to_string()
+        self.node(0)
     }
 
-    fn write(&self, depth: usize, out: &mut String) {
+    /// `(Label items` on the first line, children indented below, closing
+    /// paren on the last child's line.
+    fn node(&self, depth: usize) -> String {
         let pad = "  ".repeat(depth);
-        let mut line = |s: String| {
-            out.push_str(&pad);
-            out.push_str(&s);
-            out.push('\n');
-        };
-        match self {
+        let (head, items, children): (String, Vec<String>, Vec<String>) = match self {
             PhysOp::Scan {
                 table,
                 alias,
@@ -47,93 +42,105 @@ impl PhysOp {
                     Dedup::Final => " FINAL",
                     Dedup::LimitBy => " LIMIT 1 BY sort key",
                 };
-                line(format!("Scan {table} AS {alias}{d}"));
+                (format!("Scan {table} AS {alias}{d}"), vec![], vec![])
             }
-            PhysOp::Filter { input, predicates } => {
-                let items: Vec<String> = predicates.iter().map(PExpr::explain).collect();
-                list("Filter", &items, depth, out);
-                input.write(depth + 1, out);
-            }
-            PhysOp::Project { input, columns } => {
-                let items: Vec<String> = columns.iter().map(|(e, a)| named(e, a)).collect();
-                list("Project", &items, depth, out);
-                input.write(depth + 1, out);
-            }
+            PhysOp::Filter { input, predicates } => (
+                "Filter".into(),
+                predicates.iter().map(PExpr::explain).collect(),
+                vec![input.node(depth + 1)],
+            ),
+            PhysOp::Project { input, columns } => (
+                "Project".into(),
+                columns.iter().map(|(e, a)| named(e, a)).collect(),
+                vec![input.node(depth + 1)],
+            ),
             PhysOp::Join {
                 left,
                 right,
                 on,
                 kind,
             } => {
-                let conds: Vec<String> = on
-                    .iter()
-                    .map(|(x, y)| format!("{}.{} = {}.{}", x.0, x.1, y.0, y.1))
-                    .collect();
-                match kind {
-                    JoinKind::Inner => line(format!("Join ON {}", conds.join(" AND "))),
+                let head = match kind {
+                    JoinKind::Inner => {
+                        let conds: Vec<String> = on
+                            .iter()
+                            .map(|(x, y)| format!("{}.{} = {}.{}", x.0, x.1, y.0, y.1))
+                            .collect();
+                        format!("Join ON {}", conds.join(" AND "))
+                    }
                     JoinKind::Semi => {
                         let (x, y) = &on[0];
-                        line(format!("SemiJoin {}.{} IN {}.{}", x.0, x.1, y.0, y.1));
+                        format!("SemiJoin {}.{} IN {}.{}", x.0, x.1, y.0, y.1)
                     }
-                }
-                left.write(depth + 1, out);
-                right.write(depth + 1, out);
+                };
+                (
+                    head,
+                    vec![],
+                    vec![left.node(depth + 1), right.node(depth + 1)],
+                )
             }
             PhysOp::Aggregate {
                 input,
                 group_by,
                 metrics,
-            } => {
-                let items: Vec<String> = group_by
+            } => (
+                "Aggregate".into(),
+                group_by
                     .iter()
                     .map(|(e, a)| format!("group {}", named(e, a)))
                     .chain(metrics.iter().map(|(e, a)| named(e, a)))
-                    .collect();
-                list("Aggregate", &items, depth, out);
-                input.write(depth + 1, out);
-            }
-            PhysOp::Union { arms, alias } => {
-                line(format!("Union AS {alias}"));
-                for a in arms {
-                    a.write(depth + 1, out);
-                }
-            }
+                    .collect(),
+                vec![input.node(depth + 1)],
+            ),
+            PhysOp::Union { arms, alias } => (
+                format!("Union AS {alias}"),
+                vec![],
+                arms.iter().map(|a| a.node(depth + 1)).collect(),
+            ),
             PhysOp::Sort { input, keys } => {
-                let items: Vec<String> = keys
+                let keys: Vec<String> = keys
                     .iter()
                     .map(|(e, desc)| format!("{}{}", e.explain(), if *desc { " DESC" } else { "" }))
                     .collect();
-                line(format!("Sort {}", items.join(", ")));
-                input.write(depth + 1, out);
+                (
+                    format!("Sort {}", keys.join(", ")),
+                    vec![],
+                    vec![input.node(depth + 1)],
+                )
             }
-            PhysOp::Limit { input, count } => {
-                line(format!("Limit {count}"));
-                input.write(depth + 1, out);
-            }
+            PhysOp::Limit { input, count } => (
+                format!("Limit {count}"),
+                vec![],
+                vec![input.node(depth + 1)],
+            ),
             PhysOp::With { ctes, input } => {
-                line("With".to_string());
-                for (name, body) in ctes {
-                    out.push_str(&format!("{pad}  {name} ="));
-                    out.push('\n');
-                    body.write(depth + 2, out);
-                }
-                input.write(depth + 1, out);
+                let mut children: Vec<String> = ctes
+                    .iter()
+                    .map(|(name, body)| format!("{pad}  ({name} =\n{})", body.node(depth + 2)))
+                    .collect();
+                children.push(input.node(depth + 1));
+                ("With".into(), vec![], children)
+            }
+        };
+
+        let mut out = format!("{pad}({head}");
+        let inline = items.join(", ");
+        if items.len() <= 3 && inline.len() <= INLINE_WIDTH {
+            if !inline.is_empty() {
+                out.push(' ');
+                out.push_str(&inline);
+            }
+        } else {
+            for i in &items {
+                out.push_str(&format!("\n{pad}    {i}"));
             }
         }
-    }
-}
-
-/// `label a, b, c` on one line when it fits; otherwise one item per line.
-fn list(label: &str, items: &[String], depth: usize, out: &mut String) {
-    let pad = "  ".repeat(depth);
-    let inline = items.join(", ");
-    if items.len() <= 3 && inline.len() <= INLINE_WIDTH {
-        out.push_str(&format!("{pad}{label} {inline}\n"));
-        return;
-    }
-    out.push_str(&format!("{pad}{label}\n"));
-    for i in items {
-        out.push_str(&format!("{pad}    {i}\n"));
+        for c in &children {
+            out.push('\n');
+            out.push_str(c);
+        }
+        out.push(')');
+        out
     }
 }
 

@@ -1,8 +1,8 @@
 name: "Cascade SIP — e1 gets IN-subquery anchored to e0"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}},{"id":"p","entity":"Project"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"limit":10}
 expected: |
-  Limit 11
-    Project
+  (Limit 11
+    (Project
         e0.relationship_kind AS e0_type
         e0.source_id AS e0_src
         e0.source_kind AS e0_src_type
@@ -16,33 +16,33 @@ expected: |
         label.id AS label_id
         excerpt(label.title) AS label_title
         excerpt(label.color) AS label_color
-      SemiJoin e1.source_id IN _sip_e0.source_id
-        Join ON e0.target_id = label.id
-          Join ON e0.source_id = e1.source_id
-            Filter
+      (SemiJoin e1.source_id IN _sip_e0.source_id
+        (Join ON e0.target_id = label.id
+          (Join ON e0.source_id = e1.source_id
+            (Filter
                 e0.relationship_kind = 'HAS_LABEL'
                 e0.source_kind = 'MergeRequest'
                 e0.target_kind = 'Label'
                 !deleted(e0)
                 scope(e0)
                 e0.source_id = 1
-              Scan gl_edge AS e0 FINAL
-            Filter
+              (Scan gl_edge AS e0 FINAL))
+            (Filter
                 e1.relationship_kind = 'IN_PROJECT'
                 e1.source_kind = 'MergeRequest'
                 e1.target_kind = 'Project'
                 !deleted(e1)
                 scope(e1)
                 e1.source_id = 1
-              Scan gl_edge AS e1 FINAL
-          Filter label.title = ?, !deleted(label)
-            Scan gl_label AS label FINAL
-        Project _sip_e0.source_id AS source_id
-          Filter
+              (Scan gl_edge AS e1 FINAL)))
+          (Filter label.title = ?, !deleted(label)
+            (Scan gl_label AS label FINAL)))
+        (Project _sip_e0.source_id AS source_id
+          (Filter
               _sip_e0.relationship_kind = 'HAS_LABEL'
               _sip_e0.source_kind = 'MergeRequest'
               _sip_e0.target_kind = 'Label'
               !deleted(_sip_e0)
               scope(_sip_e0)
               _sip_e0.source_id = 1
-            Scan gl_edge AS _sip_e0 FINAL
+            (Scan gl_edge AS _sip_e0 FINAL))))))
