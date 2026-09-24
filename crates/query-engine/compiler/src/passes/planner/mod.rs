@@ -1,8 +1,10 @@
 mod bind;
+mod candidate;
 mod explain;
 mod lower;
 mod optimize;
-mod physical;
+mod physical_clickhouse;
+mod physical_duckdb;
 
 use crate::ast;
 use crate::error::Result;
@@ -17,7 +19,8 @@ pub use bind::bind;
 pub use explain::{explain, explain_clickhouse, explain_duckdb};
 pub use lower::{lower_clickhouse, lower_duckdb};
 pub use optimize::optimize;
-pub use physical::{plan_clickhouse, plan_duckdb};
+pub use physical_clickhouse::plan_clickhouse;
+pub use physical_duckdb::plan_duckdb;
 
 pub fn clickhouse(
     input: Input,
@@ -632,9 +635,43 @@ pub struct PropertyKey {
     pub current_relations: BTreeSet<RelationId>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CandidateSet<B: Flavor> {
     pub candidates: Vec<(PropertyKey, Candidate<B>)>,
+}
+
+impl<B: Flavor> Default for CandidateSet<B> {
+    fn default() -> Self {
+        Self { candidates: vec![] }
+    }
+}
+
+impl<B: Flavor> CandidateSet<B> {
+    fn insert(&mut self, candidate: Candidate<B>) {
+        let key = PropertyKey {
+            ordered_by: candidate.properties.ordered_by.clone(),
+            current_relations: candidate.properties.current_relations.clone(),
+        };
+        if let Some((_, current)) = self
+            .candidates
+            .iter_mut()
+            .find(|(current, _)| *current == key)
+        {
+            if candidate.cost < current.cost {
+                *current = candidate;
+            }
+        } else {
+            self.candidates.push((key, candidate));
+        }
+    }
+
+    fn select(self) -> Option<SelectedPlan<B>> {
+        self.candidates
+            .into_iter()
+            .map(|(_, candidate)| candidate)
+            .min_by_key(|candidate| candidate.cost)
+            .map(|candidate| SelectedPlan { candidate })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
