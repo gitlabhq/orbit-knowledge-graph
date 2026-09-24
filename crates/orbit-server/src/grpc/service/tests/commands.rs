@@ -18,6 +18,7 @@ async fn command_response(
 ) -> Result<InvokeAgentCommandResponse, Status> {
     test_service()
         .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+            language: QueryLanguage::Json as i32,
             command_name: command_name.into(),
             parameters_json: parameters_json.into(),
         }))
@@ -148,6 +149,7 @@ async fn static_commands_succeed_without_an_active_schema() {
     for command_name in ["get_query_dsl", "get_response_format"] {
         let response = service
             .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                language: QueryLanguage::Json as i32,
                 command_name: command_name.into(),
                 parameters_json: "{}".into(),
             }))
@@ -173,6 +175,7 @@ async fn graph_schema_commands_validate_before_requiring_an_active_schema() {
     ] {
         let error = service
             .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                language: QueryLanguage::Json as i32,
                 command_name: "get_graph_schema".into(),
                 parameters_json: parameters.into(),
             }))
@@ -382,6 +385,7 @@ async fn schema_rpc_and_command_use_the_supplied_ontology() {
     for format in ["raw", "llm"] {
         let response = service
             .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                language: QueryLanguage::Json as i32,
                 command_name: "get_graph_schema".into(),
                 parameters_json: serde_json::json!({"format": format}).to_string(),
             }))
@@ -413,6 +417,7 @@ async fn list_agent_commands_filters_known_command() {
     let service = test_service();
     let response = service
         .list_agent_commands(authed_request(ListAgentCommandsRequest {
+            language: QueryLanguage::Json as i32,
             command_names: vec!["get_query_dsl".into()],
             format: ResponseFormat::Raw as i32,
         }))
@@ -430,6 +435,7 @@ async fn list_agent_commands_returns_short_command_descriptions() {
     let service = test_service();
     let response = service
         .list_agent_commands(authed_request(ListAgentCommandsRequest {
+            language: QueryLanguage::Json as i32,
             command_names: vec![],
             format: ResponseFormat::Raw as i32,
         }))
@@ -453,6 +459,7 @@ async fn list_agent_commands_returns_toon_for_llm_format() {
     let service = test_service();
     let response = service
         .list_agent_commands(authed_request(ListAgentCommandsRequest {
+            language: QueryLanguage::Json as i32,
             command_names: vec!["get_query_dsl".into()],
             format: ResponseFormat::Llm as i32,
         }))
@@ -471,6 +478,7 @@ async fn list_agent_commands_rejects_unknown_command() {
     let service = test_service();
     let status = service
         .list_agent_commands(authed_request(ListAgentCommandsRequest {
+            language: QueryLanguage::Json as i32,
             command_names: vec!["typo".into()],
             format: ResponseFormat::Raw as i32,
         }))
@@ -486,6 +494,7 @@ async fn invoke_agent_command_maps_intercepted_command_to_failed_precondition() 
     let service = test_service();
     let status = service
         .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+            language: QueryLanguage::Json as i32,
             command_name: "query_graph".into(),
             parameters_json: r#"{"query":{}}"#.into(),
         }))
@@ -500,6 +509,7 @@ async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
     let service = test_service();
     let raw = service
         .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+            language: QueryLanguage::Json as i32,
             command_name: "get_query_dsl".into(),
             parameters_json: r#"{"format":"raw"}"#.into(),
         }))
@@ -518,6 +528,7 @@ async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
 
     let llm = service
         .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+            language: QueryLanguage::Json as i32,
             command_name: "get_query_dsl".into(),
             parameters_json: "{}".into(),
         }))

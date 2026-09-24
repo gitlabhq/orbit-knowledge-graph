@@ -504,10 +504,11 @@
     {
       "otel_name": "gkg.indexer.code.file_faults",
       "prom_name": "gkg_indexer_code_file_faults_total",
-      "description": "Per-file failures during code indexing, by kind. The task itself completes successfully; individual files were excluded from the graph. Kinds: `file_read`, `invalid_utf8`, `syntax_error`, `oxc_panic`, `oxc_semantic`, `analyzer_panic`, `unknown_source_type`, `embedded_script_parse`, `rust_workspace_missing`.",
+      "description": "Per-file failures during code indexing, by kind. The task itself completes successfully; individual files were excluded from the graph. Kinds: `file_read`, `invalid_utf8`, `syntax_error`, `oxc_panic`, `oxc_semantic`, `analyzer_panic`, `unknown_source_type`, `embedded_script_parse`, `rust_workspace_missing`. `language` comes from the file extension, `unknown` when none matches.",
       "kind": "counter",
       "labels": [
-        "kind"
+        "kind",
+        "language"
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -526,10 +527,11 @@
     {
       "otel_name": "gkg.indexer.code.files.skipped",
       "prom_name": "gkg_indexer_code_files_skipped_total",
-      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`.",
+      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`. `language` comes from the file extension, `unknown` when none matches.",
       "kind": "counter",
       "labels": [
-        "reason"
+        "reason",
+        "language"
       ],
       "stability": "stable",
       "domain": "indexer.code"

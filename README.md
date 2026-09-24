@@ -105,7 +105,7 @@ Put the request body in `/tmp/orbit-query.json`:
 ```
 
 ```shell
-glab orbit query /tmp/orbit-query.json
+glab orbit query --file /tmp/orbit-query.json
 ```
 
 The [cookbook](docs/source/remote/cookbook.md) has blast-radius, dependency, pipeline-health, and vulnerability recipes.

@@ -1,8 +1,10 @@
 use std::sync::{LazyLock, OnceLock};
+use std::time::Duration;
 
 use labkit_events::StructuredEvent;
 use orbit_analytics::{
-    AnalyticsTracker, OrbitCommonContext, SnowplowAnalyticsTracker, orbit_common,
+    AnalyticsTracker, OrbitCliCommandContext, OrbitCommonContext, SnowplowAnalyticsTracker,
+    orbit_cli_command, orbit_common,
 };
 use regex::Regex;
 use uuid::Uuid;
@@ -12,6 +14,8 @@ use crate::settings;
 const DEFAULT_COLLECTOR_URL: &str = "https://events.gitlab.net";
 const APP_ID: &str = "orbit";
 const CATEGORY: &str = "orbit_cli";
+const MCP_COMMAND: &str = "mcp";
+const MCP_TOOL_CALL_ACTION: &str = "mcp_tool_call";
 
 const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
@@ -54,27 +58,65 @@ pub fn resolve_from_env() -> TelemetryConfig {
 pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(
     tracker: &T,
     action: &str,
-    targets_remote: bool,
+    exit_code: i32,
+    duration: Duration,
+    coding_agent: Option<&str>,
+) {
+    let Ok(command) = action.parse() else {
+        return;
+    };
+    let outcome = orbit_cli_command::OrbitCliCommand {
+        command,
+        tool_name: None,
+        success: exit_code == 0,
+        exit_code: u8::try_from(exit_code).ok(),
+        duration_ms: i64::try_from(duration.as_millis()).ok(),
+        cli_version: env!("ORBIT_VERSION").parse().ok(),
+    };
+    track_outcome(tracker, action, outcome, coding_agent);
+}
+
+pub fn emit_tool_call_event<T: AnalyticsTracker + ?Sized>(
+    tracker: &T,
+    tool_name: &str,
+    success: bool,
+    duration: Duration,
+    coding_agent: Option<&str>,
+) {
+    let (Ok(command), Ok(tool_name)) = (MCP_COMMAND.parse(), tool_name.parse()) else {
+        return;
+    };
+    let outcome = orbit_cli_command::OrbitCliCommand {
+        command,
+        tool_name: Some(tool_name),
+        success,
+        exit_code: None,
+        duration_ms: i64::try_from(duration.as_millis()).ok(),
+        cli_version: env!("ORBIT_VERSION").parse().ok(),
+    };
+    track_outcome(tracker, MCP_TOOL_CALL_ACTION, outcome, coding_agent);
+}
+
+fn track_outcome<T: AnalyticsTracker + ?Sized>(
+    tracker: &T,
+    action: &str,
+    outcome: orbit_cli_command::OrbitCliCommand,
     coding_agent: Option<&str>,
 ) {
     if let Ok(event) = StructuredEvent::builder(CATEGORY, action)
-        .context(build_common_context(targets_remote, coding_agent))
+        .context(build_common_context(coding_agent))
+        .context(OrbitCliCommandContext::new(outcome))
         .build()
     {
         tracker.track(event);
     }
 }
 
-fn build_common_context(targets_remote: bool, coding_agent: Option<&str>) -> OrbitCommonContext {
-    let targets_saas = targets_remote
-        && crate::remote::client::instance_host()
-            .as_deref()
-            .is_some_and(crate::remote::client::is_gitlab_com);
-    let (deployment_type, environment) = deployment_for(targets_saas);
+fn build_common_context(coding_agent: Option<&str>) -> OrbitCommonContext {
     OrbitCommonContext::new(orbit_common::OrbitCommon {
-        deployment_type,
+        deployment_type: None,
         surface: Some(orbit_common::OrbitCommonSurface::Cli),
-        environment,
+        environment: None,
         coding_agent: coding_agent
             .and_then(|a| a.parse::<orbit_common::OrbitCommonCodingAgent>().ok()),
         correlation_id: invocation_id().parse().ok(),
@@ -123,26 +165,6 @@ pub fn detect_coding_agent(get_env: impl Fn(&str) -> Option<String>) -> Option<S
         Some("zed") => Some("zed-terminal".into()),
         _ => None,
     }
-}
-
-fn deployment_for(
-    targets_saas: bool,
-) -> (
-    orbit_common::OrbitCommonDeploymentType,
-    orbit_common::OrbitCommonEnvironment,
-) {
-    use orbit_common::OrbitCommonDeploymentType as Deployment;
-    let (deployment, environment) = if targets_saas {
-        (Deployment::Com, "production")
-    } else {
-        (Deployment::Unknown, "unknown")
-    };
-    (
-        deployment,
-        environment
-            .parse()
-            .expect("static environment string is valid"),
-    )
 }
 
 fn resolve(
@@ -214,26 +236,100 @@ mod tests {
         assert_eq!(cfg.collector_url, "https://collector.example.test");
     }
 
-    #[test]
-    fn deployment_for_only_asserts_saas() {
-        use orbit_common::OrbitCommonDeploymentType as Deployment;
-        let (dt, env) = deployment_for(true);
-        assert_eq!(dt, Deployment::Com);
-        assert_eq!(env.to_string(), "production");
+    fn emit_one(exit_code: i32, duration: Duration) -> StructuredEvent {
+        let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
+        emit_command_event(&tracker, "query", exit_code, duration, Some("claude-code"));
+        let mut events = tracker.drain();
+        assert_eq!(events.len(), 1);
+        events.remove(0)
+    }
 
-        let (dt, env) = deployment_for(false);
-        assert_eq!(dt, Deployment::Unknown);
-        assert_eq!(env.to_string(), "unknown");
+    fn context_data(event: &StructuredEvent, schema: &str) -> serde_json::Value {
+        event
+            .contexts()
+            .iter()
+            .find(|context| context.schema == schema)
+            .unwrap_or_else(|| panic!("event has no {schema} context"))
+            .data
+            .clone()
     }
 
     #[test]
     fn emit_sends_one_event_with_action() {
+        let event = emit_one(0, Duration::from_millis(5));
+        assert_eq!(event.category(), CATEGORY);
+        assert_eq!(event.action(), "query");
+    }
+
+    #[test]
+    fn emit_reports_command_outcome() {
+        let event = emit_one(3, Duration::from_millis(1500));
+        let command = context_data(&event, orbit_analytics::ORBIT_CLI_COMMAND_SCHEMA);
+        assert_eq!(command["command"], "query");
+        assert_eq!(command["success"], false);
+        assert_eq!(command["exit_code"], 3);
+        assert_eq!(command["duration_ms"], 1500);
+        assert_eq!(command["cli_version"], env!("ORBIT_VERSION"));
+    }
+
+    #[test]
+    fn emit_marks_zero_exit_code_as_success() {
+        let event = emit_one(0, Duration::ZERO);
+        let command = context_data(&event, orbit_analytics::ORBIT_CLI_COMMAND_SCHEMA);
+        assert_eq!(command["success"], true);
+    }
+
+    #[test]
+    fn emit_leaves_deployment_to_the_server() {
+        let event = emit_one(0, Duration::ZERO);
+        let common = context_data(&event, orbit_analytics::ORBIT_COMMON_SCHEMA);
+        assert!(common["deployment_type"].is_null());
+        assert!(common["environment"].is_null());
+        assert_eq!(common["surface"], "cli");
+    }
+
+    #[test]
+    fn emitted_contexts_validate_against_iglu_schemas() {
         let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
-        emit_command_event(&tracker, "query", false, None);
+        emit_command_event(&tracker, "query", 1, Duration::from_millis(42), None);
+        emit_tool_call_event(&tracker, "index", true, Duration::from_millis(9), None);
+        for event in tracker.drain() {
+            assert_contexts_match_iglu_schemas(&event);
+        }
+    }
+
+    fn assert_contexts_match_iglu_schemas(event: &StructuredEvent) {
+        for (name, uri) in [
+            ("orbit_common", orbit_analytics::ORBIT_COMMON_SCHEMA),
+            (
+                "orbit_cli_command",
+                orbit_analytics::ORBIT_CLI_COMMAND_SCHEMA,
+            ),
+        ] {
+            let validator = jsonschema::validator_for(&orbit_analytics::load_schema_json(name))
+                .expect("vendored schema compiles");
+            let data = context_data(event, uri);
+            let errors: Vec<String> = validator
+                .iter_errors(&data)
+                .map(|e| e.to_string())
+                .collect();
+            assert!(errors.is_empty(), "{name} failed validation: {errors:?}");
+        }
+    }
+
+    #[test]
+    fn tool_call_reports_tool_name_under_mcp() {
+        let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
+        emit_tool_call_event(&tracker, "run_sql", false, Duration::from_millis(7), None);
         let events = tracker.drain();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].category(), CATEGORY);
-        assert_eq!(events[0].action(), "query");
+        assert_eq!(events[0].action(), "mcp_tool_call");
+        let command = context_data(&events[0], orbit_analytics::ORBIT_CLI_COMMAND_SCHEMA);
+        assert_eq!(command["command"], "mcp");
+        assert_eq!(command["tool_name"], "run_sql");
+        assert_eq!(command["success"], false);
+        assert_eq!(command["duration_ms"], 7);
+        assert!(command["exit_code"].is_null());
     }
 
     #[test]

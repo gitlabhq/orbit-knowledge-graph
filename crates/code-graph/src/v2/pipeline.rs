@@ -127,12 +127,17 @@ pub enum ProgressPhase {
     Resolve,
 }
 
+pub struct FamilyFileCount {
+    pub family: String,
+    pub files: usize,
+}
+
 pub trait ProgressObserver: Send + Sync {
     fn discovery_finished(
         &self,
         _total_files: usize,
         _parseable_files: usize,
-        _files_per_family: &[(String, usize)],
+        _files_per_family: &[FamilyFileCount],
     ) {
     }
     fn files_advanced(&self, _phase: ProgressPhase, _count: usize) {}
@@ -759,9 +764,12 @@ impl Pipeline {
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.total_bytes();
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
-        let files_per_family: Vec<(String, usize)> = files_by_family
+        let files_per_family: Vec<FamilyFileCount> = files_by_family
             .iter()
-            .map(|(family, files)| (family.to_string(), files.len()))
+            .map(|(family, files)| FamilyFileCount {
+                family: family.to_string(),
+                files: files.len(),
+            })
             .collect();
         config
             .progress
@@ -2425,7 +2433,7 @@ namespace MyApp {
             &self,
             total_files: usize,
             parseable_files: usize,
-            _files_per_family: &[(String, usize)],
+            _files_per_family: &[FamilyFileCount],
         ) {
             self.discoveries
                 .lock()

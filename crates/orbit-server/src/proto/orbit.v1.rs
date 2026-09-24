@@ -23,15 +23,15 @@ pub mod execute_query_message {
 /// Client-sent initial message to start a query.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExecuteQueryRequest {
-    /// JSON DSL query string
     #[prost(string, tag = "1")]
     pub query: ::prost::alloc::string::String,
     /// RAW: tabular JSON rows; LLM: GOON text
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
-    /// defaults to JSON DSL
     #[prost(enumeration = "QueryType", tag = "3")]
     pub query_type: i32,
+    #[prost(enumeration = "QueryLanguage", tag = "4")]
+    pub language: i32,
 }
 /// Server-sent final message with query results.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -208,6 +208,8 @@ pub struct GetQueryDslRequest {
     /// RAW: full JSON Schema; LLM: condensed TOON
     #[prost(enumeration = "ResponseFormat", tag = "1")]
     pub format: i32,
+    #[prost(enumeration = "QueryLanguage", tag = "2")]
+    pub language: i32,
 }
 /// Response carrying the DSL grammar in the requested format.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -323,16 +325,16 @@ pub struct ResponseFormatSchema {
     #[prost(string, tag = "2")]
     pub version: ::prost::alloc::string::String,
 }
-/// Request for the named-query catalog.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListNamedQueriesRequest {}
-/// Response listing every embedded named query.
+pub struct ListNamedQueriesRequest {
+    #[prost(enumeration = "QueryLanguage", tag = "1")]
+    pub language: i32,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNamedQueriesResponse {
     #[prost(message, repeated, tag = "1")]
     pub queries: ::prost::alloc::vec::Vec<NamedQueryDefinition>,
 }
-/// A named query with its DSL rendered for the requesting user.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct NamedQueryDefinition {
     /// stable identifier, e.g. "recent_merges"
@@ -341,7 +343,6 @@ pub struct NamedQueryDefinition {
     /// human-readable summary from the template YAML
     #[prost(string, tag = "2")]
     pub description: ::prost::alloc::string::String,
-    /// rendered query DSL as a JSON string, executable as-is
     #[prost(string, tag = "3")]
     pub raw_query: ::prost::alloc::string::String,
 }
@@ -403,7 +404,10 @@ pub struct ResourceAuthorization {
     pub authorized: ::std::collections::HashMap<i64, bool>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListToolsRequest {}
+pub struct ListToolsRequest {
+    #[prost(enumeration = "QueryLanguage", tag = "1")]
+    pub language: i32,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListToolsResponse {
     #[prost(message, repeated, tag = "1")]
@@ -431,6 +435,8 @@ pub struct ListAgentCommandsRequest {
     /// RAW: command definitions; LLM: TOON command catalog
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
+    #[prost(enumeration = "QueryLanguage", tag = "3")]
+    pub language: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListAgentCommandsResponse {
@@ -447,6 +453,8 @@ pub struct InvokeAgentCommandRequest {
     /// downstream command parameters object as JSON
     #[prost(string, tag = "2")]
     pub parameters_json: ::prost::alloc::string::String,
+    #[prost(enumeration = "QueryLanguage", tag = "3")]
+    pub language: i32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct InvokeAgentCommandResponse {
@@ -674,7 +682,6 @@ impl FormatName {
         }
     }
 }
-/// Query language selector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum QueryType {
@@ -698,6 +705,32 @@ impl QueryType {
         match value {
             "QUERY_TYPE_JSON" => Some(Self::Json),
             "QUERY_TYPE_NAMED" => Some(Self::Named),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum QueryLanguage {
+    Json = 0,
+    Gql = 1,
+}
+impl QueryLanguage {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Json => "QUERY_LANGUAGE_JSON",
+            Self::Gql => "QUERY_LANGUAGE_GQL",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "QUERY_LANGUAGE_JSON" => Some(Self::Json),
+            "QUERY_LANGUAGE_GQL" => Some(Self::Gql),
             _ => None,
         }
     }
@@ -1112,10 +1145,6 @@ pub mod orbit_service_client {
                 .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetSkill"));
             self.inner.unary(req, path, codec).await
         }
-        /// Lists the server-defined named queries with their DSL rendered for the
-        /// caller (bindings resolved from JWT claims, parameters filled with their
-        /// declared examples). Lets clients discover and display named queries
-        /// without owning copies of the query text.
         /// Used by GET /api/v4/orbit/templates.
         pub async fn list_named_queries(
             &mut self,
@@ -1318,10 +1347,6 @@ pub mod orbit_service_server {
             tonic::Response<super::GetSkillResponse>,
             tonic::Status,
         >;
-        /// Lists the server-defined named queries with their DSL rendered for the
-        /// caller (bindings resolved from JWT claims, parameters filled with their
-        /// declared examples). Lets clients discover and display named queries
-        /// without owning copies of the query text.
         /// Used by GET /api/v4/orbit/templates.
         async fn list_named_queries(
             &self,

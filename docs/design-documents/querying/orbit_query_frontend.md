@@ -5,8 +5,9 @@
 The Orbit query frontend accepts a read-only graph language based on openCypher 9 syntax.
 It includes Orbit-specific query restrictions, extensions, and schema discovery.
 
-Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend. Remote query contracts remain JSON-only.
-This implementation does not change MCP tools, protocol messages, Rails, or CLI contracts.
+Queries use the compiler pipeline preset `clickhouse_gql`; schema calls resolve metadata inside the GQL frontend.
+GitLab Rails selects GQL per user with the default-off `orbit_gql_queries` flag and sends text queries. The JSON Query DSL remains the default.
+The modes are mutually exclusive. Mismatched payload shapes reject without syntax inference or parser fallback.
 
 A **Pest pair** is a matched grammar rule and its source span.
 A query's **syntax tree** is its typed Rust form, built from pairs by `pest_consume` in `syntax.rs` and declared in `ast.rs`.
@@ -50,15 +51,16 @@ Lexical checks live here: identifier rules, string escapes, numeric ranges, `dat
 Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.
 Scalar values use the same value type as the compiler's filters.
 
-The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_parse` and `gql_parse`, then share the complete `validate` through `codegen` phases.
+The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_parse` and `gql_parse`, then share the complete `validate` through `codegen` phases. GQL presets add `validate_relationships` after `validate`.
 The `gql_parse` phase parses raw query text when supplied. Preparation supplies parsed Input instead, so the wrapper leaves it unchanged without parsing twice.
 Schema preparation, result types, and resolution belong only to the GQL frontend. Shared compiler contexts have no schema request, response, or introspection scope.
 
-`compiler::gql::prepare` parses once and dispatches by statement kind. MATCH runs the complete graph pipeline; CALL resolves ontology metadata directly.
+`compiler::gql::route` parses once and returns lowered query Input or resolved schema metadata. `compiler::gql::prepare` uses that result to compile MATCH or return CALL metadata.
 `compiler::compile` remains query-only for both frontends. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
+`validate_relationships` checks each single-hop typed relationship between labeled nodes against the ontology's edge endpoints. It rejects a reversed arrow and names the valid direction. It also rejects a type that connects neither label pair. The pass reads only Input, so the JSON DSL pipelines can adopt it without frontend changes.
 JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.
 Retiring the JSON DSL later deletes the `json_dsl` module, its phase, its `Frontend` variant, and the schema file; the shared phases do not change.
 
@@ -88,12 +90,48 @@ CALL db.schema('MergeRequest')
 
 The `db.` prefix follows openCypher 9 procedure naming. `db.schema` is Orbit-defined, not an exact Neo4j builtin or an ISO catalog operation.
 Only case-sensitive `db.schema` is allowed. `resolve_schema` rejects unknown or scope-hidden nodes and `'*'` against the supplied ontology. The grammar rejects extra arguments, parameters, YIELD, and query composition.
-`compiler::compile` remains query-only. A future raw-Cypher endpoint can dispatch both statements through `gql::prepare`, but must authenticate before dispatch; no endpoint or transport is wired here.
+`compiler::compile` remains query-only.
+
+## Remote transport
+
+The gRPC transport separates query source from language:
+
+| Enum | Values | Purpose |
+|---|---|---|
+| `QueryType` | `QUERY_TYPE_JSON=0`, `QUERY_TYPE_NAMED=1` | Select raw query text or a named-query envelope |
+| `QueryLanguage` | `QUERY_LANGUAGE_JSON=0`, `QUERY_LANGUAGE_GQL=1` | Select `Frontend::JsonDsl` or `Frontend::Gql` |
+
+`QUERY_TYPE_JSON` keeps its existing name and value for compatibility. It identifies an ad hoc query; the separate `language` field selects its compiler.
+
+`ExecuteQueryRequest.query_type` remains field 3. Either kind supports either language. NAMED with GQL renders the GQL template and compiles with the GQL frontend; the JSON spelling never enters that path.
+Rails derives `language` from the default-off, per-user `orbit_gql_queries` feature flag. Flag off selects JSON; flag on selects GQL. Both Workhorse streaming and direct Ruby gRPC requests carry it. Request authentication does not select a frontend, and metadata headers cannot override it. There is no language boolean.
+
+| Request | `language` field tag |
+|---|---|
+| `ExecuteQueryRequest` | 4 |
+| `ListToolsRequest` | 1 |
+| `ListAgentCommandsRequest` | 3 |
+| `InvokeAgentCommandRequest` | 3 |
+| `GetQueryDslRequest` | 2 |
+| `ListNamedQueriesRequest` | 1 |
+
+Missing kind defaults to `QUERY_TYPE_JSON` and missing language to JSON, preserving the original zero-valued wire behavior. Unknown kinds and languages reject without fallback. Unary discovery and guidance methods accept only a language, not a source kind, and reject unknown languages with `INVALID_ARGUMENT`.
+Language-neutral RPCs have no mode selector. Each language-sensitive method decodes its request's language through the same helper; there is no process-wide Orbit mode.
+The catalog renders `raw_query` in that mode, without a language field. Tool and command discovery describe only the active mode. Under GQL, `GetQueryDsl` and the `get_query_dsl` command return `NOT_FOUND` and point to `CALL db.schema()`. See [Named Queries](README.md#named-queries).
+REST and MCP `query_graph` have no public language selector. Rails, not agents or public client input, sets the transport language. Payload shape only validates that selected language. Flag off accepts only JSON objects; flag on accepts only GQL strings. Existing JSON callers for opted-in users reject. Discovery results must not cross users or modes in caches.
+Orbit Remote does not evaluate the flag. The CLI sends its argument as the `query` string, for example `orbit query 'CALL db.schema()'`. `--file` reads a request envelope from a file, or from stdin with `--file -`; `query` is an object for JSON or a string for GQL. The CLI has no language selector.
+The server routing stage parses GQL once and returns its result through `PipelineRunner`.
+For MATCH, it carries the lowered Input into path resolution and compilation; the `gql_parse` wrapper leaves that Input unchanged.
+For CALL, it returns schema metadata before security-context construction, path resolution, ClickHouse, row authorization, redaction, hydration, and graph formatting.
+Request authentication and query quota checks happen before this dispatch. Schema calls return raw JSON or TOON in the existing result envelope and do not emit graph-query billing events.
+Successful and failed schema calls each record one query outcome and its elapsed duration, without graph-stage or result-row metric samples.
+The base ClickHouse query's attribution payload records the language alongside the query text.
 
 ## Supported query statement
 
 ```plaintext
 MATCH pattern [WHERE predicates]
+[MATCH pattern [WHERE predicates] ...]
 RETURN projections
 [ORDER BY key [ASC | DESC]]
 [LIMIT rows | PAGE rows [AFTER 'token']]
@@ -101,6 +139,7 @@ RETURN projections
 ```
 
 The pattern can contain a node, a chain, or comma-separated parts that form one connected tree.
+Consecutive MATCH clauses combine into one pattern, and their WHERE predicates combine with AND. The compiler does not enforce openCypher relationship uniqueness, so one pattern and several clauses return the same rows. A shortest path must be the only pattern.
 Declare each node's label and inline properties on its first occurrence. Later parts can refer to that variable without declaring another node. A repeated label must match; repeated inline properties are rejected. Add further predicates with WHERE.
 The first relationship establishes the tree. Each later relationship must attach one new node to it. Disconnected hops and cycles between pattern variables are rejected. Nodes can be declared before their relationships, but every declared node must belong to the final connected pattern.
 The far endpoint of a neighbors query is the exception to the label requirement: it has a variable but no label or predicate.
@@ -118,6 +157,7 @@ Path finding supports outgoing paths from one hop to an explicit maximum.
 Aggregation over shortest paths is unsupported; shared validation rejects it for both JSON and GQL.
 Variable-length traversal accepts exact lengths and bounded ranges. Traversal and path finding share the compiler's three-hop cap.
 Undirected relationships are supported only for neighbors queries. Between labeled nodes, use `->` or `<-`.
+Write a relationship type after a colon, as in `-[:AUTHORED]->`. Without the colon, the name declares a variable that matches any relationship type. The frontend rejects an untyped relationship variable written in type style, such as `-[AUTHORED]->`, and suggests `-[:AUTHORED]->`.
 Relationship property filters, including inline maps, require a maximum of one hop.
 
 ```plaintext
@@ -167,6 +207,7 @@ ID forms preserve the compiler's distinct selector and filter representations:
 The frontend rejects mutations, multiple statements, disconnected patterns, cycles between pattern variables, WITH, OPTIONAL MATCH, UNION, UNWIND, and subqueries.
 It also rejects OR, general NOT, DISTINCT, count(*), arbitrary expressions, and offset pagination. Both `<>` and `!=` express not-equal.
 Unsupported syntax or lowering returns a client-safe error rather than dropping the unsupported part.
+Syntax errors report line, column, and expected tokens without echoing query text; lowering errors name the offending identifier.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
 Existing compiler limits still apply after lowering.

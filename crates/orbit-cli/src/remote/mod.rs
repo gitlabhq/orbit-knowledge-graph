@@ -14,7 +14,7 @@ pub(crate) mod tools;
 pub(crate) use dsl::run_dsl;
 pub(crate) use graph_status::run_graph_status;
 pub(crate) use ontology::run_ontology;
-pub(crate) use query::run_query;
+pub(crate) use query::{QueryInput, run_query};
 pub(crate) use status::run_status;
 pub(crate) use tools::run_tools;
 

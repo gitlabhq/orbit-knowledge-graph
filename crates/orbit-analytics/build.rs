@@ -35,6 +35,7 @@ const SCHEMAS: &[(&str, &str)] = &[
     ("orbit_query", "OrbitQuery"),
     ("orbit_sdlc_indexing", "OrbitSdlcIndexing"),
     ("orbit_code_indexing", "OrbitCodeIndexing"),
+    ("orbit_cli_command", "OrbitCliCommand"),
 ];
 
 fn main() {

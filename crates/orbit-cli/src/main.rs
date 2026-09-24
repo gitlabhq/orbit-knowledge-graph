@@ -17,7 +17,7 @@ mod workspace;
 use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{Level, debug};
 
 /// Only bounds commands too fast to hide a round trip behind their own work.
@@ -35,8 +35,8 @@ struct Cli {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("index"))]
 struct IndexArgs {
-    /// Path to the repository to index
-    #[arg(value_name = "PATH")]
+    /// Repository path, or a directory that holds repositories (default: current directory).
+    #[arg(value_name = "PATH", default_value = ".")]
     path: PathBuf,
 
     /// Number of worker threads (0 = auto-detect based on CPU cores)
@@ -386,11 +386,18 @@ enum Commands {
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
     },
-    /// POST a query envelope to the remote Orbit API and stream the response.
+    /// POST a query to the remote Orbit API and stream the response.
+    #[command(group(clap::ArgGroup::new("input").required(true).args(["query", "file"])))]
     Query {
-        /// Query body file, or `-`/omitted to read from stdin.
-        #[arg(value_name = "FILE")]
-        source: Option<String>,
+        #[arg(value_name = "QUERY", help = "Query text")]
+        query: Option<String>,
+
+        #[arg(
+            long,
+            value_name = "FILE",
+            help = "Read a request envelope from FILE, or from stdin when FILE is '-'"
+        )]
+        file: Option<String>,
 
         /// Server response format. Overrides the body's `response_format`;
         /// defaults to `llm` when neither is set.
@@ -436,20 +443,6 @@ enum Commands {
     },
 }
 
-impl Commands {
-    fn targets_remote(&self) -> bool {
-        matches!(
-            self,
-            Commands::Query { .. }
-                | Commands::Status
-                | Commands::Ontology { .. }
-                | Commands::Dsl
-                | Commands::Tools
-                | Commands::GraphStatus { .. }
-        )
-    }
-}
-
 #[derive(Subcommand)]
 enum ConfigCommands {
     /// Print the saved value of a setting.
@@ -484,33 +477,43 @@ async fn main() -> Result<()> {
     // labkit-events ships no TLS provider; the tracker below builds an HTTPS client.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let tracker = telemetry::resolve_from_env().build_tracker();
+
+    let started = Instant::now();
+    let result = dispatch(cli.command, tracker.clone(), coding_agent.clone()).await;
+    let exit_code = result.as_ref().map_or_else(exit_code_for, |()| 0);
+
     if let Some(tracker) = &tracker {
         telemetry::emit_command_event(
             tracker,
             &subcommand_path(&matches),
-            cli.command.targets_remote(),
+            exit_code,
+            started.elapsed(),
             coding_agent.as_deref(),
         );
-        // One event never reaches labkit's batch threshold, so without this the
-        // round trip would not start until shutdown.
-        tracker.flush();
     }
-
-    let result = dispatch(cli.command).await;
-
     flush_telemetry(tracker.as_ref()).await;
-    if let Err(err) = &result
-        && let Some(remote) = err.downcast_ref::<remote::error::RemoteError>()
-    {
+
+    let Err(err) = &result else {
+        return result;
+    };
+    if let Some(remote) = err.downcast_ref::<remote::error::RemoteError>() {
         eprintln!("{}", remote.message);
-        std::process::exit(remote.exit_code);
+    } else if let Some(message) = workspace::describe_graph_lock_conflict(err) {
+        eprintln!("{message}");
+    } else if !tui::is_cancelled(err) {
+        return result;
     }
-    if let Err(err) = &result
-        && tui::is_cancelled(err)
-    {
-        std::process::exit(130);
+    std::process::exit(exit_code);
+}
+
+fn exit_code_for(err: &anyhow::Error) -> i32 {
+    if let Some(remote) = err.downcast_ref::<remote::error::RemoteError>() {
+        remote.exit_code
+    } else if tui::is_cancelled(err) {
+        130
+    } else {
+        1
     }
-    result
 }
 
 fn subcommand_path(matches: &clap::ArgMatches) -> String {
@@ -530,7 +533,11 @@ async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTrac
     }
 }
 
-async fn dispatch(command: Commands) -> Result<()> {
+async fn dispatch(
+    command: Commands,
+    tracker: Option<orbit_analytics::SnowplowAnalyticsTracker>,
+    coding_agent: Option<String>,
+) -> Result<()> {
     match command {
         Commands::Version => {
             println!("{}", env!("ORBIT_VERSION"));
@@ -584,7 +591,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                 .finish();
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber failed");
-            mcp::serve().await
+            mcp::serve(tracker, coding_agent).await
         }
         Commands::RepoMap(RepoMapArgs {
             repo,
@@ -633,9 +640,17 @@ async fn dispatch(command: Commands) -> Result<()> {
             Ok(())
         }
         Commands::Query {
-            source,
+            query,
+            file,
             response_format,
-        } => Ok(remote::run_query(source, response_format).await?),
+        } => {
+            let input = match (query, file) {
+                (Some(query), None) => remote::QueryInput::Text(query),
+                (None, Some(path)) => remote::QueryInput::File(path),
+                _ => unreachable!("clap requires exactly one of QUERY or --file"),
+            };
+            Ok(remote::run_query(input, response_format).await?)
+        }
         Commands::Status => Ok(remote::run_status().await?),
         Commands::Ontology { nodes } => Ok(remote::run_ontology(nodes).await?),
         Commands::Dsl => Ok(remote::run_dsl().await?),
@@ -756,7 +771,7 @@ mod tests {
     #[test]
     fn subcommand_path_names_the_top_level_verb() {
         assert_eq!(action_for(&["orbit", "version"]), "version");
-        assert_eq!(action_for(&["orbit", "query"]), "query");
+        assert_eq!(action_for(&["orbit", "query", "CALL db.schema()"]), "query");
         assert_eq!(
             action_for(&["orbit", "graph-status", "--full-path", "a/b"]),
             "graph_status"
@@ -768,25 +783,27 @@ mod tests {
     }
 
     #[test]
-    fn only_remote_api_verbs_target_remote() {
-        for argv in [
-            ["orbit", "query"].as_slice(),
-            &["orbit", "status"],
-            &["orbit", "ontology", "User"],
-            &["orbit", "dsl"],
-            &["orbit", "tools"],
-            &["orbit", "graph-status", "--project-id", "1"],
-        ] {
-            assert!(Cli::parse_from(argv).command.targets_remote(), "{argv:?}");
+    fn every_subcommand_emits_a_telemetry_event() {
+        let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
+        let actions: Vec<String> = Cli::command()
+            .get_subcommands()
+            .map(|sub| sub.get_name().replace('-', "_"))
+            .collect();
+        for action in &actions {
+            crate::telemetry::emit_command_event(
+                &tracker,
+                action,
+                0,
+                std::time::Duration::ZERO,
+                None,
+            );
         }
-        for argv in [
-            ["orbit", "grep", "x"].as_slice(),
-            &["orbit", "schema"],
-            &["orbit", "sql", "SELECT 1"],
-            &["orbit", "version"],
-        ] {
-            assert!(!Cli::parse_from(argv).command.targets_remote(), "{argv:?}");
-        }
+        let emitted: Vec<String> = tracker
+            .drain()
+            .iter()
+            .map(|event| event.action().to_string())
+            .collect();
+        assert_eq!(emitted, actions);
     }
 
     #[test]
@@ -854,13 +871,15 @@ mod tests {
         };
         assert_eq!(nodes, vec!["User".to_string(), "Project".to_string()]);
         let Commands::Query {
-            source,
+            query,
+            file,
             response_format,
-        } = Cli::parse_from(["orbit", "query", "--response-format", "raw", "-"]).command
+        } = Cli::parse_from(["orbit", "query", "--response-format", "raw", "--file", "-"]).command
         else {
             panic!("expected query");
         };
-        assert_eq!(source.as_deref(), Some("-"));
+        assert_eq!(query, None);
+        assert_eq!(file.as_deref(), Some("-"));
         assert_eq!(response_format, Some(super::remote::ResponseFormat::Raw));
         assert!(matches!(
             Cli::parse_from(["orbit", "status"]).command,
@@ -892,6 +911,30 @@ mod tests {
                 "{argv:?} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn query_has_no_language_flag() {
+        let err = Cli::try_parse_from(["orbit", "query", "--language", "gql", "CALL db.schema()"])
+            .err()
+            .expect("--language must not be accepted");
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn query_rejects_text_with_file() {
+        let err = Cli::try_parse_from(["orbit", "query", "--file", "q.json", "CALL db.schema()"])
+            .err()
+            .expect("text and --file must conflict");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn query_requires_text_or_file() {
+        let err = Cli::try_parse_from(["orbit", "query"])
+            .err()
+            .expect("query must require text or --file");
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 
     #[test]

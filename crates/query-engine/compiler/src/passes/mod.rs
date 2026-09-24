@@ -11,6 +11,7 @@ pub mod hydrate;
 pub mod lower;
 pub mod normalize;
 pub mod plan;
+pub mod relationships;
 pub mod restrict;
 pub mod security;
 pub mod settings;

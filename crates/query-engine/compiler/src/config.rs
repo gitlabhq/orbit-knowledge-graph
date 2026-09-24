@@ -22,8 +22,8 @@ use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, restrict, security, settings,
-    validate,
+    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, relationships, restrict,
+    security, settings, validate,
 };
 use crate::types::SecurityContext;
 
@@ -55,6 +55,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         gql_parse {
             mutates: [raw, input]
+        }
+        validate_relationships {
+            reads_env: [ontology]
+            reads_state: [input]
         }
         validate {
             reads_env: [ontology]
@@ -123,7 +127,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_gql {
             env: [ontology, security_ctx]
             state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
@@ -138,12 +142,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
         duckdb_gql {
             env: [ontology]
             state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, normalize, plan, lower, enforce, duckdb_codegen]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, plan, lower, enforce, duckdb_codegen]
         }
         validate_normalize_gql {
             env: [ontology]
             state: [raw, input]
-            phases: [gql_parse, validate, normalize]
+            phases: [gql_parse, validate, validate_relationships, normalize]
         }
         validate_normalize {
             env: [ontology]
@@ -164,6 +168,11 @@ fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
         ctx.set_input(frontend::gql::parse(&raw)?);
     }
     Ok(())
+}
+
+fn validate_relationships(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().as_ref(), "input")?;
+    relationships::validate_relationships(input, ctx.ontology())
 }
 
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {

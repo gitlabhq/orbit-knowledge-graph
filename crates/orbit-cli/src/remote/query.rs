@@ -9,39 +9,52 @@ use super::error::{EXIT_GENERIC, RemoteError};
 use super::{ResponseFormat, write_stdout_raw};
 
 const DEFAULT_QUERY_FORMAT: &str = "llm";
+const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+
+pub(crate) enum QueryInput {
+    Text(String),
+    File(String),
+}
 
 pub(crate) async fn run_query(
-    source: Option<String>,
+    input: QueryInput,
     format_override: Option<ResponseFormat>,
 ) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
-    let raw_body = read_query_body(source.as_deref())?;
-    let request_body = build_query_request(&raw_body, format_override)?;
+    let request_body = match input {
+        QueryInput::Text(query) => build_text_request(&query, format_override)?,
+        QueryInput::File(path) => build_query_request(&read_query_body(&path)?, format_override)?,
+    };
     let response = client.query_raw(request_body).await?;
     write_stdout_raw(&response)
 }
 
-fn read_query_body(source: Option<&str>) -> anyhow::Result<Vec<u8>> {
-    match source {
-        None | Some("-") => {
-            let mut buf = Vec::new();
-            std::io::stdin()
-                .lock()
-                .read_to_end(&mut buf)
-                .context("failed to read query body from stdin")?;
-            Ok(buf)
-        }
-        Some(path) => {
-            std::fs::read(path).with_context(|| format!("failed to read query body from {path}"))
-        }
+fn read_query_body(path: &str) -> anyhow::Result<Vec<u8>> {
+    if path == "-" {
+        let mut buf = Vec::new();
+        std::io::stdin()
+            .lock()
+            .read_to_end(&mut buf)
+            .context("failed to read query body from stdin")?;
+        return Ok(buf);
     }
+    std::fs::read(path).with_context(|| format!("failed to read query body from {path}"))
+}
+
+fn build_text_request(query: &str, format: Option<ResponseFormat>) -> Result<Vec<u8>, RemoteError> {
+    if query.trim().is_empty() {
+        return Err(RemoteError::new(EXIT_GENERIC, "query body is empty"));
+    }
+    serialize_request(&serde_json::json!({
+        "query": query,
+        "response_format": format.map_or(DEFAULT_QUERY_FORMAT, ResponseFormat::as_str),
+    }))
 }
 
 fn build_query_request(
     body: &[u8],
     format_override: Option<ResponseFormat>,
 ) -> Result<Vec<u8>, RemoteError> {
-    const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
     let body = body.strip_prefix(BOM).unwrap_or(body);
     if body.is_empty() {
         return Err(RemoteError::new(EXIT_GENERIC, "query body is empty"));
@@ -59,7 +72,7 @@ fn build_query_request(
     let query = envelope.query.ok_or_else(|| {
         RemoteError::new(
             EXIT_GENERIC,
-            "query body must contain a top-level `query` object",
+            "query body must contain a top-level `query` field",
         )
     })?;
 
@@ -76,11 +89,14 @@ fn build_query_request(
         response_format: String,
     }
 
-    serde_json::to_vec(&Request {
+    serialize_request(&Request {
         query: &query,
         response_format,
     })
-    .map_err(|e| {
+}
+
+fn serialize_request(request: &impl Serialize) -> Result<Vec<u8>, RemoteError> {
+    serde_json::to_vec(request).map_err(|e| {
         RemoteError::new(
             EXIT_GENERIC,
             format!("failed to serialize query request: {e}"),

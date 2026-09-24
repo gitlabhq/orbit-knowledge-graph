@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
-use compiler::parse_input;
+use compiler::{Frontend, parse_input};
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
@@ -62,6 +62,7 @@ struct SmokeCase {
     key: String,
     query: String,
     expects_error: bool,
+    frontend: Frontend,
 }
 
 /// Stand-in for the real `AuthorizationStage`, which authorizes resources via
@@ -186,6 +187,7 @@ fn load_corpus() -> Vec<SmokeCase> {
                 key: format!("{file}::{key}"),
                 query: entry.query,
                 expects_error,
+                frontend: Frontend::JsonDsl,
             });
         }
     }
@@ -198,14 +200,21 @@ fn load_named_queries() -> Vec<SmokeCase> {
             .unwrap_or_else(|e| panic!("load named queries from {NAMED_QUERIES_DIR}: {e}"));
 
     let values = named_queries::BindingValues { current_user_id: 1 };
+    let spellings = [
+        (named_queries::Language::Json, Frontend::JsonDsl),
+        (named_queries::Language::Gql, Frontend::Gql),
+    ];
     queries
         .iter()
-        .map(|query| SmokeCase {
-            key: format!("named_query::{}", query.name),
-            query: query
-                .render(&values, &query.example_parameters())
-                .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
-            expects_error: false,
+        .flat_map(|query| {
+            spellings.map(|(language, frontend)| SmokeCase {
+                key: format!("named_query::{}::{language:?}", query.name),
+                query: query
+                    .render_language(language, &values, &query.example_parameters())
+                    .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
+                expects_error: false,
+                frontend,
+            })
         })
         .collect()
 }
@@ -314,6 +323,7 @@ fn handle_doc_code_block(
                     key: format!("{path_label}:{line}"),
                     query,
                     expects_error: false,
+                    frontend: Frontend::JsonDsl,
                 });
             }
             Err(e) => failures.push(format!("{path_label}:{line}: {e}")),
@@ -394,6 +404,7 @@ fn relative_path(path: &Path) -> String {
 async fn run_pipeline(
     db: &TestContext,
     json: &str,
+    frontend: Frontend,
     ontology: &Arc<Ontology>,
     claims: &Claims,
 ) -> Result<(), PipelineError> {
@@ -405,6 +416,7 @@ async fn run_pipeline(
     server_extensions.insert(registry);
 
     let mut ctx = QueryPipelineContext {
+        frontend,
         query_json: json.to_string(),
         compiled: None,
         ontology: Arc::clone(ontology),
@@ -461,7 +473,11 @@ async fn corpus_smoke() {
     smoke_cases.extend(doc_queries);
 
     for case in smoke_cases {
-        let json = match resolve_placeholders(&case.query) {
+        let json = match case.frontend {
+            Frontend::Gql => Ok(case.query.clone()),
+            Frontend::JsonDsl => resolve_placeholders(&case.query),
+        };
+        let json = match json {
             Ok(j) => j,
             Err(e) => {
                 if !case.expects_error {
@@ -471,7 +487,7 @@ async fn corpus_smoke() {
             }
         };
 
-        let outcome = run_pipeline(&ctx, &json, &ontology, &claims).await;
+        let outcome = run_pipeline(&ctx, &json, case.frontend, &ontology, &claims).await;
 
         match (case.expects_error, outcome) {
             (false, Err(e)) => failures.push(format!("{}: {e:?}", case.key)),
