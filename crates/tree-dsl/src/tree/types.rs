@@ -258,27 +258,69 @@ impl Tree {
         self.len() == 0
     }
 
+    /// Rebuilds the arena with only the live nodes, in preorder, so ids are
+    /// dense and traversal is cache-friendly. `moved[old raw id]` is the new id.
     pub fn compact(&mut self) {
         let mut new_arena = Arena::with_capacity(self.root.descendants(&self.arena).count());
-        let mut id_map = rustc_hash::FxHashMap::default();
+        let mut moved: Vec<Option<NodeId>> = vec![None; self.arena.len()];
         for id in self.root.descendants(&self.arena) {
-            let parent: Option<NodeId> =
-                id.parent(&self.arena).and_then(|p| id_map.get(&p).copied());
+            let parent = id
+                .parent(&self.arena)
+                .and_then(|p| moved[Self::to_raw(p) as usize]);
             let new_id = match parent {
                 Some(p) => p.append_value(*self.arena[id].get(), &mut new_arena),
                 None => new_arena.new_node(*self.arena[id].get()),
             };
-            id_map.insert(id, new_id);
+            moved[Self::to_raw(id) as usize] = Some(new_id);
         }
-        let raw_map: FxHashMap<u32, u32> = id_map
-            .iter()
-            .map(|(&old_id, &new_id)| (Self::to_raw(old_id), Self::to_raw(new_id)))
-            .collect();
         self.tags = std::mem::take(&mut self.tags)
             .into_iter()
-            .filter_map(|(old_raw, tags)| Some((*raw_map.get(&old_raw)?, tags)))
+            .filter_map(|(old_raw, tags)| Some((Self::to_raw(moved[old_raw as usize]?), tags)))
             .collect();
-        self.root = id_map[&self.root];
+        self.root = moved[Self::to_raw(self.root) as usize].expect("the root is live");
         self.arena = new_arena;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(kind: u16, sym: u32) -> Node {
+        Node {
+            kind,
+            sym,
+            named: true,
+            ..Default::default()
+        }
+    }
+
+    /// Pruning leaves holes in the arena; compaction must renumber the
+    /// survivors densely and carry every tag to its node's new id.
+    #[test]
+    fn compact_keeps_structure_and_tags_across_removed_nodes() {
+        let mut tree = Tree::new(node(1, 10));
+        let a = tree.append(tree.root, node(2, 20));
+        let dropped = tree.append(tree.root, node(3, 30));
+        let b = tree.append(tree.root, node(4, 40));
+        let under_dropped = tree.append(dropped, node(5, 50));
+        tree.set_tag(Tree::to_raw(a), 7, 70);
+        tree.set_tag(Tree::to_raw(b), 8, 80);
+        tree.set_tag(Tree::to_raw(under_dropped), 9, 90);
+        under_dropped.remove_subtree(&mut tree.arena);
+        dropped.remove(&mut tree.arena);
+
+        tree.compact();
+
+        let root = tree.root();
+        let kids: Vec<(u16, u32, u32)> = root
+            .children()
+            .map(|c| (c.kind(), c.sym(), c.index()))
+            .collect();
+        assert_eq!(kids, [(2, 20, 1), (4, 40, 2)]);
+        assert_eq!(tree.arena.len(), 3);
+        assert_eq!(tree.get_tag(1, 7), Some(70));
+        assert_eq!(tree.get_tag(2, 8), Some(80));
+        assert_eq!(tree.tags.len(), 2, "the removed node's tag is gone");
     }
 }

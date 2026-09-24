@@ -136,7 +136,6 @@ impl From<&Tree> for TreeSnapshot {
         for &id in &ids {
             let n = tree.arena[id].get();
             let parent = id.parent(&tree.arena).map_or(NONE, |p| id_to_pos[&p]);
-            let size = id.descendants(&tree.arena).count() as u32;
             nodes.push(SnapshotNode {
                 kind: n.kind,
                 field: n.field,
@@ -147,7 +146,7 @@ impl From<&Tree> for TreeSnapshot {
                 start_col: n.start_col,
                 end_row: n.end_row,
                 end_col: n.end_col,
-                size,
+                size: 0,
                 synth: n.synth,
                 named: n.named,
                 parent,

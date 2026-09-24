@@ -69,17 +69,15 @@ pub(crate) fn matches(t: &Tree, lang: &Lang, id: NodeId, p: &Pat, caps: &mut [Ca
                         {
                             ci += 1;
                         }
-                        let range: Vec<NodeId> = children[start..ci].to_vec();
-                        if let Some(g) = guard {
-                            let any_match = range.iter().any(|&e| matches(t, lang, e, g, caps));
-                            caps[*slot as usize] = if any_match {
-                                SmallVec::from_vec(range)
-                            } else {
-                                SmallVec::new()
-                            };
+                        let range = &children[start..ci];
+                        let keep = guard
+                            .as_ref()
+                            .is_none_or(|g| range.iter().any(|&e| matches(t, lang, e, g, caps)));
+                        caps[*slot as usize] = if keep {
+                            SmallVec::from_slice(range)
                         } else {
-                            caps[*slot as usize] = SmallVec::from_vec(range);
-                        }
+                            SmallVec::new()
+                        };
                     }
                     Pat::Not(inner) => {
                         for &child in &children {

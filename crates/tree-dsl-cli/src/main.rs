@@ -365,7 +365,7 @@ fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow
     let root = Path::new(path);
     let t_walk = Instant::now();
     let (root, inventory) = if root.is_dir() {
-        (root.to_path_buf(), inventory::walk(root)?.to_vec())
+        (root.to_path_buf(), inventory::walk(root)?.into_inner())
     } else {
         let parent = root.parent().unwrap_or(Path::new(".")).to_path_buf();
         let name = root

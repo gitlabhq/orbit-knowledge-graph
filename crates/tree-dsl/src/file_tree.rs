@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
 use crate::constants::PATH_SEP;
@@ -93,22 +93,26 @@ impl<'a> ProjectTree<'a> {
             .map(|f| (f.path.as_str(), f.content.as_str()))
             .collect();
 
-        let mut children_map: FxHashMap<String, Vec<(String, bool)>> = FxHashMap::default();
+        let mut children: FxHashMap<String, FxHashSet<(String, bool)>> = FxHashMap::default();
         for &path in self.paths {
             let parts: Vec<&str> = path.split(PATH_SEP).filter(|p| !p.is_empty()).collect();
             for i in 0..parts.len() {
                 let parent = parts[..i].join(PATH_SEP);
-                let segment = parts[i].to_string();
                 let is_file = i == parts.len() - 1;
-                let entry = children_map.entry(parent).or_default();
-                if !entry.iter().any(|(s, f)| s == &segment && *f == is_file) {
-                    entry.push((segment, is_file));
-                }
+                children
+                    .entry(parent)
+                    .or_default()
+                    .insert((parts[i].to_string(), is_file));
             }
         }
-        for v in children_map.values_mut() {
-            v.sort();
-        }
+        let children_map: FxHashMap<String, Vec<(String, bool)>> = children
+            .into_iter()
+            .map(|(parent, kids)| {
+                let mut kids: Vec<_> = kids.into_iter().collect();
+                kids.sort();
+                (parent, kids)
+            })
+            .collect();
 
         self.add_children("", self.tree.root, &children_map, &file_contents);
     }
