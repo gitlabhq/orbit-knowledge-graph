@@ -986,7 +986,10 @@ mod tests {
         );
 
         assert!(!response.schema_version.is_empty());
-        assert_eq!(response.graph_schema_api, "1.0.0");
+        assert_eq!(
+            response.graph_schema_api,
+            orbit_versions::VERSIONS.graph_schema_api.to_string()
+        );
         assert!(!response.nodes.is_empty());
         assert!(!response.edges.is_empty());
         assert!(!response.domains.is_empty());
