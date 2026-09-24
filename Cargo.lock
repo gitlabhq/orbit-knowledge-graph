@@ -1408,6 +1408,8 @@ dependencies = [
 name = "code-graph-incremental"
 version = "0.1.0"
 dependencies = [
+ "arrow",
+ "code-graph",
  "indextree",
  "lasso",
  "orbit-utils",

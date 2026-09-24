@@ -1,8 +1,18 @@
 //! `Pipeline<T>` carries one artifact; `then` swaps it for the next by
-//! running a `Phase`. The artifact's type decides which phases apply.
+//! running a `Phase`. The artifact's type decides which phases apply:
+//!
+//! ```text
+//! Sources ─Prepare─> Workset<Lazy<SourceFile>>
+//!   ─Each(Parse+Rewrite+Canonicalize+Link)─> Workset<Vec<LinkedFile>>
+//!   ─Insert─> DirtyGraph ─Resolve─> Resolved ─Display─> Displayed
+//!   ─Export─> Exported ─Emit─> Exported
+//! ReindexInput ─Remap─> Workset<Lazy<SourceFile>> ─(as above)
+//! ```
 
+mod artifacts;
 mod state;
 
+pub use artifacts::*;
 pub use state::{SourceFile, State};
 
 use std::borrow::Cow;
