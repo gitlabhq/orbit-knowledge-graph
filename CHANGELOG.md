@@ -1,3 +1,23 @@
+## [0.130.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.129.0...v0.130.0) (2026-09-24)
+
+### Features
+
+* **cli:** report command outcome in telemetry ([93fdbf4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/93fdbf41952dd95f28f2c928e58db1ca04fc81c5)) by Jean-Gabriel Doyon
+* **cli:** report MCP tool calls in telemetry ([1363a09](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1363a0966724de9205cbe2fab36f9495e8997181)) by Jean-Gabriel Doyon
+* **gql:** reject impossible relationships and accept multiple MATCH ([f7e82f7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f7e82f75164b2adb760f471c4ce079f5c60267bb)) by Aaron Algutifan
+* **observability:** label indexer file faults and skips by language ([ff495bd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ff495bd1db29665a847977a7a176f85cf53f9b23)) by ANBUCHELVAN GANESAN CSE
+* **query:** wire GQL into remote queries ([c6e1fd1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c6e1fd1167d6a0509dba5e9ac8e25947c73c4007)) by Aaron Algutifan
+
+### Fixes
+
+* **cli:** show index progress before the first query and during setup ([aa47e25](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aa47e254b2ff424dd27bc7ee2854bededf1529e7)) by Jean-Gabriel Doyon
+* **dev:** correct local Orbit setup guidance ([d609169](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d609169995e446f18e47f97a868dc4b2ab48480d)) by Dmitry Gruzd
+
+### Other
+
+* clean up docs redirects - 2026-09-23 ([d99bc0d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d99bc0d31cba0209ec1dac7e4a8af4411a551463)) by Roshni Sarangadharan
+* **deps:** update rust crate quote to v1.0.47 ([ceca407](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ceca40758f5b5121d0329616c6e16474f76b4088)) by GitLab Renovate Bot
+
 ## [0.129.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.128.0...v0.129.0) (2026-09-23)
 
 ### Features
