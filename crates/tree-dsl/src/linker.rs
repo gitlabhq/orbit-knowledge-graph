@@ -689,7 +689,7 @@ impl<'t> Fold<'t> {
 }
 
 pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed> {
-    let (lang, config) = (&env.lang, &env.config.link);
+    let (lang, config) = (&env.lang, &env.rules.config.link);
     let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms);
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();

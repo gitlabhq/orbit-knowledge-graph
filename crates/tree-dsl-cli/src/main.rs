@@ -252,11 +252,11 @@ fn cmd_rewrite(
 
     if let Some(ref stop) = after {
         let limit: usize = if stop == "all" {
-            env.rewrite_stages.len()
+            env.rules.rewrite_stages.len()
         } else {
-            stop.parse().unwrap_or(env.rewrite_stages.len())
+            stop.parse().unwrap_or(env.rules.rewrite_stages.len())
         };
-        for stage in env.rewrite_stages.iter().take(limit) {
+        for stage in env.rules.rewrite_stages.iter().take(limit) {
             let _ = tree_dsl::pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]);
         }
     }

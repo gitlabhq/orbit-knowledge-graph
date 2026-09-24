@@ -18,11 +18,11 @@ use crate::export::{self, Envelope};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
 use crate::inventory::{FileFault, FileReason};
+use crate::linker;
 use crate::pattern::{self, EdgeCtx};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Node, Tree};
 use crate::treesitter::{self, SupportLang};
-use crate::{linker, rules};
 
 use super::{Context, ItemPhase, Phase, State};
 
@@ -191,6 +191,7 @@ fn workset(
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
     let manifest_names: Vec<String> = env
+        .rules
         .config
         .resolve
         .parse_files
@@ -391,7 +392,7 @@ impl ItemPhase<Parsed> for Rewrite {
         Parsed(mut tree): Parsed,
     ) -> Result<Rewritten, Killed> {
         let budget = Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms);
-        for stage in &env.rewrite_stages {
+        for stage in &env.rules.rewrite_stages {
             pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
         }
         Ok(Rewritten(tree))
@@ -538,8 +539,8 @@ impl Phase<DirtyGraph> for Resolve {
             .collect();
         let walk = ProjectTree::build(
             &env.lang,
-            &env.config.resolve,
-            &env.resolve_stages,
+            &env.rules.config.resolve,
+            &env.rules.resolve_stages,
             &paths,
             Some(&state.configs),
         );
@@ -550,7 +551,7 @@ impl Phase<DirtyGraph> for Resolve {
             &dirty,
             env.lang_id,
             &walk.prefixes,
-            &env.config.resolve,
+            &env.rules.config.resolve,
             &walk.aliases,
             env,
             &context.run,
@@ -584,10 +585,6 @@ impl Phase<Resolved> for Display {
         Resolved { mut state }: Resolved,
     ) -> Result<Displayed, Error> {
         let env = context.env;
-        let Some(yaml) = treesitter::lang_yaml(env.lang_id) else {
-            return Ok(Displayed { state });
-        };
-        let config = rules::load_lang_full(yaml, &env.lang)?;
         for (fi, tree) in state.trees.iter_mut().enumerate() {
             let ctx = EdgeCtx {
                 tree_index: fi as u32,
@@ -596,7 +593,7 @@ impl Phase<Resolved> for Display {
             let _ = pattern::apply_rewrites_with_edges(
                 tree,
                 &env.lang,
-                &config.display_rules,
+                &env.rules.display_rules,
                 true,
                 &ctx,
                 &[],

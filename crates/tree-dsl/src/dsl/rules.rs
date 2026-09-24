@@ -263,6 +263,7 @@ pub fn load_rules(yaml: &str, lang: &Lang) -> Result<Vec<Vec<Rewrite>>, LoadErro
     compile_stages(&read(yaml)?.stages, lang)
 }
 
+/// Everything a language YAML compiles to.
 pub struct LangConfig {
     pub rewrite_stages: Vec<Vec<Rewrite>>,
     pub resolve_stages: Vec<ResolveStage>,
@@ -270,25 +271,18 @@ pub struct LangConfig {
     pub display_rules: Vec<Rewrite>,
 }
 
-/// Load rewrite stages, resolve stages, and whole-language config from a language YAML file.
-pub fn load_lang(
-    yaml: &str,
-    lang: &Lang,
-) -> Result<(Vec<Vec<Rewrite>>, Vec<ResolveStage>, Config), LoadError> {
-    let file = read(yaml)?;
-    let rewrites = compile_stages(&file.stages, lang)?;
-    let resolve = match &file.resolve {
-        Some(section) => compile_resolve(section, lang)?,
-        None => vec![],
-    };
-    Ok((
-        rewrites,
-        resolve,
-        compile_config(file.config.as_ref(), lang)?,
-    ))
+impl Default for LangConfig {
+    fn default() -> Self {
+        Self {
+            rewrite_stages: Vec::new(),
+            resolve_stages: Vec::new(),
+            config: Config::default(),
+            display_rules: Vec::new(),
+        }
+    }
 }
 
-pub fn load_lang_full(yaml: &str, lang: &Lang) -> Result<LangConfig, LoadError> {
+pub fn load_lang(yaml: &str, lang: &Lang) -> Result<LangConfig, LoadError> {
     let file = read(yaml)?;
     let rewrite_stages = compile_stages(&file.stages, lang)?;
     let resolve_stages = match &file.resolve {
@@ -501,7 +495,7 @@ mod load_tests {
                 continue;
             };
             let lang = Lang::new();
-            load_lang_full(yaml, &lang).unwrap_or_else(|e| panic!("{lang_id:?}: {e}"));
+            load_lang(yaml, &lang).unwrap_or_else(|e| panic!("{lang_id:?}: {e}"));
             let _ = lang_id.ts_language();
         }
         let _ = SupportLang::from_extension("py");
