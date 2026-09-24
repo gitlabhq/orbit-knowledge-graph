@@ -1,7 +1,6 @@
 # config/ontology/nodes/code_review/merge_request_diff_file.yaml
 
 node_type: MergeRequestDiffFile
-introduced_in: "1.0.0"
 domain: code_review
 description: A file changed in a merge request diff
 label: old_path
@@ -19,7 +18,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -27,7 +25,6 @@ properties:
     description: "Synthetic identifier: sipHash64(merge_request_diff_id, relative_order)."
 
   merge_request_id:
-    introduced_in: "1.0.0"
     type: int64
     source: merge_request_id
     nullable: false
@@ -35,7 +32,6 @@ properties:
     description: "Parent merge request ID."
 
   merge_request_diff_id:
-    introduced_in: "1.0.0"
     type: int64
     source: merge_request_diff_id
     nullable: false
@@ -43,7 +39,6 @@ properties:
     description: "Parent merge request diff ID."
 
   project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -51,7 +46,6 @@ properties:
     description: "Owning project ID."
 
   too_large:
-    introduced_in: "1.0.0"
     type: boolean
     source: too_large
     nullable: false
@@ -59,7 +53,6 @@ properties:
     description: "Whether the diff is too large to display."
 
   new_path:
-    introduced_in: "1.0.0"
     type: string
     source: new_path
     nullable: false
@@ -67,7 +60,6 @@ properties:
     description: "File path after the change. Differs from old_path only on renames."
 
   old_path:
-    introduced_in: "1.0.0"
     type: string
     source: old_path
     nullable: false
@@ -75,7 +67,6 @@ properties:
     description: "File path before the change. Preferred for file lookups."
 
   new_file:
-    introduced_in: "1.0.0"
     type: boolean
     source: new_file
     nullable: false
@@ -83,7 +74,6 @@ properties:
     description: "Whether this is a newly added file."
 
   renamed_file:
-    introduced_in: "1.0.0"
     type: boolean
     source: renamed_file
     nullable: false
@@ -91,7 +81,6 @@ properties:
     description: "Whether this file was renamed."
 
   deleted_file:
-    introduced_in: "1.0.0"
     type: boolean
     source: deleted_file
     nullable: false
@@ -99,7 +88,6 @@ properties:
     description: "Whether this file was deleted."
 
   binary:
-    introduced_in: "1.0.0"
     type: boolean
     source: binary
     nullable: true
@@ -107,14 +95,12 @@ properties:
     description: "Whether this is a binary file."
 
   generated:
-    introduced_in: "1.0.0"
     type: boolean
     source: generated
     nullable: true
     description: "Whether auto-generated (e.g. lockfiles, minified bundles)."
 
   a_mode:
-    introduced_in: "1.0.0"
     type: string
     source: a_mode
     nullable: false
@@ -122,7 +108,6 @@ properties:
     selectivity: low
 
   b_mode:
-    introduced_in: "1.0.0"
     type: string
     source: b_mode
     nullable: false
@@ -130,7 +115,6 @@ properties:
     selectivity: low
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false
@@ -138,7 +122,6 @@ properties:
     description: "Namespace path for authz."
 
   diff:
-    introduced_in: "1.0.0"
     type: string
     nullable: true
     virtual:

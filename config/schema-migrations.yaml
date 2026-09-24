@@ -16,11 +16,6 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
-- version: 100
-  scope: none
-  note: >-
-    introduced_in annotations affect introspection metadata only; DDL and indexed
-    rows are byte-identical
 - version: 99
   scope: none
   note: >-

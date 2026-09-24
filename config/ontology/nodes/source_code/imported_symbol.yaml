@@ -1,7 +1,6 @@
 # config/ontology/nodes/source_code/imported_symbol.yaml
 
 node_type: ImportedSymbol
-introduced_in: "1.0.0"
 domain: source_code
 description: An imported symbol or module reference within a source file
 label: identifier_name
@@ -20,7 +19,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -28,7 +26,6 @@ properties:
     description: "Unique ID."
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false
@@ -36,7 +33,6 @@ properties:
     description: "Namespace path for authz."
 
   project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -44,7 +40,6 @@ properties:
     description: "Owning project ID."
 
   branch:
-    introduced_in: "1.0.0"
     type: string
     source: branch
     nullable: false
@@ -52,7 +47,6 @@ properties:
     description: "Git branch."
 
   commit_sha:
-    introduced_in: "1.0.0"
     type: string
     source: commit_sha
     nullable: false
@@ -60,7 +54,6 @@ properties:
     description: "Indexed commit SHA."
 
   file_path:
-    introduced_in: "1.0.0"
     type: string
     source: file_path
     nullable: false
@@ -68,7 +61,6 @@ properties:
     description: "Containing file path."
 
   import_type:
-    introduced_in: "1.0.0"
     type: string
     source: import_type
     nullable: false
@@ -77,7 +69,6 @@ properties:
     selectivity: low
 
   import_path:
-    introduced_in: "1.0.0"
     type: string
     source: import_path
     nullable: false
@@ -85,7 +76,6 @@ properties:
     description: "Source module or path of the import."
 
   identifier_name:
-    introduced_in: "1.0.0"
     type: string
     source: identifier_name
     nullable: false
@@ -93,7 +83,6 @@ properties:
     description: "Imported symbol name."
 
   identifier_alias:
-    introduced_in: "1.0.0"
     type: string
     source: identifier_alias
     nullable: false
@@ -101,7 +90,6 @@ properties:
     description: "Import alias (e.g., 'import numpy as np')."
 
   start_line:
-    introduced_in: "1.0.0"
     type: int64
     source: start_line
     nullable: false
@@ -109,7 +97,6 @@ properties:
     description: "Start line."
 
   end_line:
-    introduced_in: "1.0.0"
     type: int64
     source: end_line
     nullable: false
@@ -117,7 +104,6 @@ properties:
     description: "End line."
 
   start_byte:
-    introduced_in: "1.0.0"
     type: int64
     source: start_byte
     nullable: false
@@ -125,7 +111,6 @@ properties:
     description: "Start byte offset."
 
   end_byte:
-    introduced_in: "1.0.0"
     type: int64
     source: end_byte
     nullable: false
@@ -133,7 +118,6 @@ properties:
     description: "End byte offset."
 
   start_char:
-    introduced_in: "1.0.0"
     type: int64
     source: start_char
     nullable: false
@@ -141,7 +125,6 @@ properties:
     description: "Start column."
 
   end_char:
-    introduced_in: "1.0.0"
     type: int64
     source: end_char
     nullable: false

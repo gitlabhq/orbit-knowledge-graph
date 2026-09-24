@@ -1,7 +1,6 @@
 # config/ontology/nodes/packages/dependency.yaml
 
 node_type: Dependency
-introduced_in: "1.0.0"
 domain: packages
 description: A dependency declared by a package in the GitLab package registry (name and version pattern)
 label: name
@@ -19,35 +18,30 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
     description: "Unique ID."
 
   name:
-    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
     description: "Dependency name."
 
   version_pattern:
-    introduced_in: "1.0.0"
     type: string
     source: version_pattern
     nullable: false
     description: "Declared version pattern (for example, ^1.2.0)."
 
   project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
     description: "Owning project ID."
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false

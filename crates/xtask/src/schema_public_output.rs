@@ -144,8 +144,11 @@ fn git_show(base: &str, path: &str) -> Result<Option<String>> {
     }
 }
 
-fn new_elements_have_current_pin(current: &Ontology, target: &Ontology) -> Result<()> {
-    let pin = current.graph_schema_api();
+fn new_elements_have_current_pin(
+    current: &Ontology,
+    target: &Ontology,
+    pin: &semver::Version,
+) -> Result<()> {
     for node in current.nodes() {
         let previous = target.get_node(&node.name);
         match previous {
@@ -158,7 +161,11 @@ fn new_elements_have_current_pin(current: &Ontology, target: &Ontology) -> Resul
                 );
             }
             None if &node.introduced_in != pin => {
-                bail!("new node {} must have introduced_in {pin}", node.name);
+                bail!(
+                    "new node {} must set introduced_in explicitly to {pin} (defaults to {})",
+                    node.name,
+                    ontology::DEFAULT_INTRODUCED_IN
+                );
             }
             _ => {}
         }
@@ -177,9 +184,10 @@ fn new_elements_have_current_pin(current: &Ontology, target: &Ontology) -> Resul
                 }
                 None if &field.introduced_in != pin => {
                     bail!(
-                        "new property {}.{} must have introduced_in {pin}",
+                        "new property {}.{} must set introduced_in explicitly to {pin} (defaults to {})",
                         node.name,
-                        field.name
+                        field.name,
+                        ontology::DEFAULT_INTRODUCED_IN
                     );
                 }
                 _ => {}
@@ -259,7 +267,11 @@ pub fn run(check: bool, base: &str, skip_pin_check: bool) -> Result<()> {
     if committed != rendered {
         bail!("public schema output snapshot is stale; run cargo xtask schema-public-output");
     }
-    new_elements_have_current_pin(&ontology, &target_ontology(base)?)?;
+    new_elements_have_current_pin(
+        &ontology,
+        &target_ontology(base)?,
+        ontology.graph_schema_api(),
+    )?;
     if !skip_pin_check {
         require_pin_bump(
             &rendered,
@@ -288,52 +300,85 @@ mod tests {
             outputs(&served).unwrap(),
             outputs(&archive.load_ontology().unwrap()).unwrap()
         );
-        let legacy = OntologyArchive::bundled(99).unwrap().unwrap();
-        assert_ne!(
-            outputs(&legacy.load_ontology().unwrap()).unwrap()["raw/summary"],
-            outputs(&Ontology::load_embedded().unwrap()).unwrap()["raw/summary"]
-        );
     }
 
     #[test]
     fn newly_introduced_nodes_and_properties_use_the_current_pin() {
         let target = Ontology::new().with_nodes(["Existing"]);
-        let current = target
+        let current = target.clone().with_nodes(["New"]);
+        let bumped_pin = semver::Version::new(1, 1, 0);
+        let node_error = new_elements_have_current_pin(&current, &target, &bumped_pin)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            node_error.contains("new node New must set introduced_in explicitly to 1.1.0"),
+            "{node_error}"
+        );
+        let only_property = target
             .clone()
-            .with_nodes(["New"])
             .with_fields("Existing", [("new_property", ontology::DataType::String)]);
-        assert!(new_elements_have_current_pin(&current, &target).is_ok());
+        let property_error = new_elements_have_current_pin(&only_property, &target, &bumped_pin)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            property_error.contains(
+                "new property Existing.new_property must set introduced_in explicitly to 1.1.0"
+            ),
+            "{property_error}"
+        );
+
+        let introduced = only_property
+            .modify_field("Existing", "new_property", |field| {
+                field.introduced_in = bumped_pin.clone();
+            })
+            .unwrap();
+        assert!(new_elements_have_current_pin(&introduced, &target, &bumped_pin).is_ok());
 
         let legacy = OntologyArchive::bundled(99)
             .unwrap()
             .unwrap()
             .load_ontology()
             .unwrap();
-        assert!(new_elements_have_current_pin(&legacy, &Ontology::new()).is_err());
+        assert!(new_elements_have_current_pin(&legacy, &Ontology::new(), &bumped_pin).is_err());
         let matching_node = Ontology::new().with_nodes(["User"]);
-        assert!(new_elements_have_current_pin(&legacy, &matching_node).is_err());
+        assert!(new_elements_have_current_pin(&legacy, &matching_node, &bumped_pin).is_err());
     }
 
     #[test]
     fn existing_versions_are_immutable_against_the_target() {
         let target = Ontology::load_embedded().unwrap();
-        assert!(new_elements_have_current_pin(&target, &target).is_ok());
+        assert!(new_elements_have_current_pin(&target, &target, target.graph_schema_api()).is_ok());
         let overlay = tempfile::tempdir().unwrap();
         let file = overlay.path().join("nodes/core/user.yaml");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
 
+        fs::write(
+            &file,
+            "introduced_in: '1.0.0'\nproperties:\n  id:\n    introduced_in: '1.0.0'\n",
+        )
+        .unwrap();
+        let explicit = Ontology::load_embedded_with_overlay(overlay.path()).unwrap();
+        assert!(
+            new_elements_have_current_pin(&explicit, &target, target.graph_schema_api()).is_ok()
+        );
+        assert!(
+            new_elements_have_current_pin(&target, &explicit, target.graph_schema_api()).is_ok()
+        );
+        assert_eq!(outputs(&explicit).unwrap(), outputs(&target).unwrap());
+
         fs::write(&file, "introduced_in: '0.9.0'\n").unwrap();
         let node_change = Ontology::load_embedded_with_overlay(overlay.path()).unwrap();
-        let error = new_elements_have_current_pin(&node_change, &target)
+        let error = new_elements_have_current_pin(&node_change, &target, target.graph_schema_api())
             .unwrap_err()
             .to_string();
         assert!(error.contains("node User introduced_in changed"), "{error}");
 
         fs::write(&file, "properties:\n  id:\n    introduced_in: '0.9.0'\n").unwrap();
         let field_change = Ontology::load_embedded_with_overlay(overlay.path()).unwrap();
-        let error = new_elements_have_current_pin(&field_change, &target)
-            .unwrap_err()
-            .to_string();
+        let error =
+            new_elements_have_current_pin(&field_change, &target, target.graph_schema_api())
+                .unwrap_err()
+                .to_string();
         assert!(
             error.contains("property User.id introduced_in changed"),
             "{error}"

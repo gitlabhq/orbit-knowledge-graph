@@ -1,7 +1,6 @@
 # config/ontology/nodes/ci/environment.yaml
 
 node_type: Environment
-introduced_in: "1.0.0"
 domain: ci
 description: A CI/CD deployment target (production, staging, review app, etc.)
 label: name
@@ -19,7 +18,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -27,7 +25,6 @@ properties:
     description: "Unique ID."
 
   project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -35,28 +32,24 @@ properties:
     description: "Owning project ID."
 
   name:
-    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
     description: "Name (e.g. 'production', 'staging', 'review/feature-x')."
 
   slug:
-    introduced_in: "1.0.0"
     type: string
     source: slug
     nullable: false
     description: "URL-safe slug derived from name."
 
   external_url:
-    introduced_in: "1.0.0"
     type: string
     source: external_url
     nullable: false
     description: "External URL of the environment."
 
   environment_type:
-    introduced_in: "1.0.0"
     type: string
     source: environment_type
     nullable: false
@@ -64,7 +57,6 @@ properties:
     selectivity: low
 
   state:
-    introduced_in: "1.0.0"
     type: enum
     source: state
     nullable: false
@@ -76,7 +68,6 @@ properties:
       2: stopped
 
   tier:
-    introduced_in: "1.0.0"
     type: enum
     source: tier
     nullable: false
@@ -89,21 +80,18 @@ properties:
       4: other
 
   auto_stop_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: auto_stop_at
     nullable: true
     description: "Scheduled auto-stop timestamp."
 
   auto_delete_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: auto_delete_at
     nullable: true
     description: "Scheduled auto-delete timestamp."
 
   auto_stop_setting:
-    introduced_in: "1.0.0"
     type: enum
     source: auto_stop_setting
     nullable: false
@@ -113,35 +101,30 @@ properties:
       1: with_action
 
   cluster_agent_id:
-    introduced_in: "1.0.0"
     type: int64
     source: cluster_agent_id
     nullable: true
     description: "Associated Kubernetes cluster agent ID."
 
   kubernetes_namespace:
-    introduced_in: "1.0.0"
     type: string
     source: kubernetes_namespace
     nullable: false
     description: "Target Kubernetes namespace."
 
   flux_resource_path:
-    introduced_in: "1.0.0"
     type: string
     source: flux_resource_path
     nullable: false
     description: "Flux resource path for GitOps."
 
   description:
-    introduced_in: "1.0.0"
     type: string
     source: description
     nullable: false
     description: "Free-form description."
 
   created_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: true
@@ -149,14 +132,12 @@ properties:
     description: "Creation timestamp."
 
   updated_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: updated_at
     nullable: true
     description: "Last update timestamp."
 
   merge_request_id:
-    introduced_in: "1.0.0"
     type: int64
     source: merge_request_id
     nullable: true
@@ -164,7 +145,6 @@ properties:
     description: "MR that created this review environment."
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false

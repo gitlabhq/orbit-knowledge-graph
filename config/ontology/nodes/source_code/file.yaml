@@ -1,7 +1,6 @@
 # config/ontology/nodes/source_code/file.yaml
 
 node_type: File
-introduced_in: "1.0.0"
 domain: source_code
 description: A source code file within a repository
 label: path
@@ -20,7 +19,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -32,7 +30,6 @@ properties:
       key_column: id
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false
@@ -40,7 +37,6 @@ properties:
     description: "Namespace path for authz."
 
   project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -48,7 +44,6 @@ properties:
     description: "Owning project ID."
 
   branch:
-    introduced_in: "1.0.0"
     type: string
     source: branch
     nullable: false
@@ -56,7 +51,6 @@ properties:
     description: "Git branch."
 
   commit_sha:
-    introduced_in: "1.0.0"
     type: string
     source: commit_sha
     nullable: false
@@ -64,7 +58,6 @@ properties:
     description: "Indexed commit SHA."
 
   path:
-    introduced_in: "1.0.0"
     type: string
     source: path
     nullable: false
@@ -72,7 +65,6 @@ properties:
     description: "Relative path within the repository."
 
   name:
-    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
@@ -80,7 +72,6 @@ properties:
     description: "File name including extension."
 
   extension:
-    introduced_in: "1.0.0"
     type: string
     source: extension
     nullable: false
@@ -89,7 +80,6 @@ properties:
     selectivity: low
 
   language:
-    introduced_in: "1.0.0"
     type: string
     source: language
     nullable: false
@@ -98,7 +88,6 @@ properties:
     selectivity: low
 
   size_bytes:
-    introduced_in: "1.0.0"
     type: int64
     source: size_bytes
     nullable: false
@@ -106,7 +95,6 @@ properties:
     description: "Uncompressed file size in bytes, measured at index time."
 
   content:
-    introduced_in: "1.0.0"
     type: string
     virtual:
       service: gitaly
@@ -116,7 +104,6 @@ properties:
     description: "Raw source text, resolved from Gitaly at query time."
 
   reason:
-    introduced_in: "1.0.0"
     type: string
     source: reason
     nullable: false

@@ -408,7 +408,7 @@ async fn schema_rpc_and_command_use_the_supplied_ontology() {
                 assert_eq!(
                     serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
                     serde_json::json!({
-                        "graph_schema_api": "1.0.0",
+                        "graph_schema_api": orbit_versions::VERSIONS.graph_schema_api.to_string(),
                         "domains": [{"name": "other", "nodes": ["CustomNode"]}],
                         "edges": [],
                     })

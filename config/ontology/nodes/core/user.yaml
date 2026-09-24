@@ -1,7 +1,6 @@
 # config/ontology/nodes/core/user.yaml
 
 node_type: User
-introduced_in: "1.0.0"
 domain: core
 global: true
 description: A GitLab user account
@@ -22,7 +21,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -30,14 +28,12 @@ properties:
     description: "Unique ID."
 
   username:
-    introduced_in: "1.0.0"
     type: string
     source: username
     nullable: false
     description: "Unique handle."
 
   email:
-    introduced_in: "1.0.0"
     type: string
     source: email
     nullable: false
@@ -46,14 +42,12 @@ properties:
     description: "Primary email. Admins only until per-cell authz lands (gated by `read_user_email_address`)."
 
   name:
-    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
     description: "Display name."
 
   first_name:
-    introduced_in: "1.0.0"
     type: string
     source: first_name
     nullable: false
@@ -61,7 +55,6 @@ properties:
     description: "First name. Not on any public surface; admins only."
 
   last_name:
-    introduced_in: "1.0.0"
     type: string
     source: last_name
     nullable: false
@@ -69,7 +62,6 @@ properties:
     description: "Last name. Not on any public surface; admins only."
 
   created_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: true
@@ -77,7 +69,6 @@ properties:
     description: "Creation timestamp."
 
   updated_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: updated_at
     nullable: true
@@ -85,7 +76,6 @@ properties:
     description: "Last update timestamp. Not on any public surface; admins only."
 
   state:
-    introduced_in: "1.0.0"
     type: enum
     source: state
     nullable: false
@@ -100,14 +90,12 @@ properties:
       5: deactivated
 
   avatar_url:
-    introduced_in: "1.0.0"
     type: string
     source: avatar
     nullable: true
     description: "Avatar upload filename (not a URL; the full URL is computed at runtime)."
 
   public_email:
-    introduced_in: "1.0.0"
     type: string
     source: public_email
     nullable: false
@@ -115,7 +103,6 @@ properties:
     description: "Public email, if set."
 
   preferred_language:
-    introduced_in: "1.0.0"
     type: string
     source: preferred_language
     nullable: false
@@ -123,14 +110,12 @@ properties:
     description: "Preferred UI language. Self-only on REST; admins only until per-cell authz lands."
 
   last_activity_on:
-    introduced_in: "1.0.0"
     type: date
     source: last_activity_on
     nullable: true
     description: "Last activity date."
 
   private_profile:
-    introduced_in: "1.0.0"
     type: boolean
     source: private_profile
     nullable: false
@@ -138,7 +123,6 @@ properties:
     description: "Private profile flag. Self-only on REST; admins only here."
 
   is_admin:
-    introduced_in: "1.0.0"
     type: boolean
     source: admin
     nullable: false
@@ -146,7 +130,6 @@ properties:
     description: "Instance administrator flag."
 
   is_auditor:
-    introduced_in: "1.0.0"
     type: boolean
     source: auditor
     nullable: false
@@ -154,7 +137,6 @@ properties:
     description: "Auditor role flag."
 
   is_external:
-    introduced_in: "1.0.0"
     type: boolean
     source: external
     nullable: false
@@ -162,7 +144,6 @@ properties:
     description: "External user flag. Self-only on REST, admin-only via UserWithAdmin; admins only here."
 
   user_type:
-    introduced_in: "1.0.0"
     type: enum
     source: user_type
     nullable: false

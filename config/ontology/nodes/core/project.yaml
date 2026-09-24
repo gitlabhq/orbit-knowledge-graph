@@ -1,7 +1,6 @@
 # config/ontology/nodes/core/project.yaml
 
 node_type: Project
-introduced_in: "1.0.0"
 domain: core
 description: A GitLab project/repository
 label: name
@@ -23,7 +22,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -35,7 +33,6 @@ properties:
       key_column: id
 
   full_path:
-    introduced_in: "1.0.0"
     type: string
     source: full_path
     nullable: false
@@ -46,21 +43,18 @@ properties:
       key_column: full_path
 
   name:
-    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
     description: "Display name."
 
   description:
-    introduced_in: "1.0.0"
     type: string
     source: description
     nullable: false
     description: "Description text."
 
   created_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: true
@@ -68,14 +62,12 @@ properties:
     description: "Creation timestamp."
 
   updated_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: updated_at
     nullable: true
     description: "Last update timestamp."
 
   visibility_level:
-    introduced_in: "1.0.0"
     type: enum
     source: visibility_level
     nullable: false
@@ -86,28 +78,24 @@ properties:
       20: public
 
   archived:
-    introduced_in: "1.0.0"
     type: boolean
     source: archived
     nullable: false
     description: "Archived flag."
 
   star_count:
-    introduced_in: "1.0.0"
     type: int64
     source: star_count
     nullable: false
     description: "Number of stars."
 
   last_activity_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: last_activity_at
     nullable: true
     description: "Last activity timestamp."
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false

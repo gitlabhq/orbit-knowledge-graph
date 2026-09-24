@@ -30,21 +30,28 @@ format version (`0.1`).
 The `graph_schema_api` semver pin versions public introspection independently of the storage
 `schema` pin and the ontology document's `schema_version`. Each archive records its API version
 in the manifest. Introspection reports the active snapshot's pin during migration and rollback.
-Older archives use `0.0.<storage-version>` to avoid sharing an ETag with each other or v100.
+Archives through v99 have no manifest pin and use the baseline `1.0.0`. Versions v98 and v99
+therefore share an ETag, which is acceptable before clients cache these schema responses.
 
-Every node and property records its first API version in `introduced_in`. Older archives default
-missing annotations to `1.0.0`. The compact agent-command summary lists only node names and the
-current API version. Selectively expanded nodes and their typed properties
-include their stable `introduced_in` versions. The structured protobuf response carries the full
-node and property metadata. Relationships do not carry this annotation.
+Every node and property records its first API version in `introduced_in`. Omitting it from ontology
+YAML defaults to `1.0.0`; rendered introspection still includes the resolved value. New nodes and
+properties must explicitly set it to the current `graph_schema_api` pin when that pin exceeds the
+baseline. The target-archive branch-comparison gate enforces this rule, not the standalone ontology
+validator.
+
+The compact agent-command summary lists only node names and the current API version.
+Selectively expanded nodes and their typed properties include their stable `introduced_in` versions.
+The structured protobuf response carries the full node and property metadata.
+Relationships do not carry this annotation.
 
 `graph_schema_api` validates cached schema responses. Clients must use the served snapshot's
 version for the ETag. Neither the binary pin nor the ontology document's `schema_version` is
 sufficient. **Every rendered public schema change requires a new pin**. This includes relationships,
-descriptions, and encoding. New nodes, properties, or edges bump the minor version; removals and renames bump the
-major version; encoding-only or other compatible corrections bump the patch version. New nodes and
-properties use that new pin as their `introduced_in` value; existing values never change after
-release and cannot exceed the current pin. Relationships have no `introduced_in` annotation.
+descriptions, and encoding. New nodes, properties, or edges bump the minor version.
+Removals and renames bump the major version. Encoding-only corrections bump the patch version. New nodes and
+properties explicitly set `introduced_in` to that pin. Existing resolved versions remain
+immutable after release and cannot exceed the current pin. Adding or removing an explicit baseline
+annotation is not a version change. Relationships have no `introduced_in` annotation.
 
 `config/schema-public-output.json` records hashes of RAW, TOON, and structured schema outputs.
 It includes command/RPC wrappers, summaries, node and wildcard expansion, and local/remote GQL.
@@ -54,13 +61,14 @@ that snapshot to the **target branch** and requires a newer pin if output differ
 changes do not affect the hashes. `[skip graph-schema-api-check]` waives only the target pin
 comparison; freshness and new-element checks still run. Use it only after confirming that the
 changed output cannot reach cached public schema responses. Query DSL and output-format pin checks
-remain active. Historical archives through v99 load
-missing `introduced_in` annotations as `1.0.0` for rollback compatibility.
+remain active.
 
-A pin change also requires a storage-version bump and a new immutable archive, even for an
-encoding-only change. Run `mise schema:bump:api` for output-neutral storage changes, or
-`mise schema:bump` when indexed rows change. The build and ledger check reject a current archive
-whose manifest pin differs from `config/versions.yaml`.
+The initial `1.0.0` pin uses the legacy v99 archive without changing storage. The first real pin
+bump requires a storage-version bump and a new immutable archive with a manifest pin.
+Every later pin change does too, including encoding-only changes.
+Run `mise schema:bump:api` for output-neutral storage changes, or `mise schema:bump` when indexed rows
+change. The build and ledger check reject
+a current archive whose resolved pin differs from `config/versions.yaml`.
 
 Known limitation: during migration a new binary may serve an older active archive with its older
 API pin, while applying the new binary's encoder. That window can produce different encodings

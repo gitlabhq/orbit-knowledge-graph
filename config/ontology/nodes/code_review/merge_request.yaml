@@ -1,7 +1,6 @@
 # config/ontology/nodes/code_review/merge_request.yaml
 
 node_type: MergeRequest
-introduced_in: "1.0.0"
 domain: code_review
 description: A merge request for code review and merging changes into a target branch
 label: title
@@ -20,7 +19,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -32,7 +30,6 @@ properties:
       key_column: id
 
   iid:
-    introduced_in: "1.0.0"
     type: int64
     source: iid
     nullable: true
@@ -40,35 +37,30 @@ properties:
     description: "Project-scoped merge request number."
 
   title:
-    introduced_in: "1.0.0"
     type: string
     source: title
     nullable: false
     description: "Title."
 
   description:
-    introduced_in: "1.0.0"
     type: string
     source: description
     nullable: false
     description: "Description body (markdown)."
 
   source_branch:
-    introduced_in: "1.0.0"
     type: string
     source: source_branch
     nullable: false
     description: "Source branch name."
 
   target_branch:
-    introduced_in: "1.0.0"
     type: string
     source: target_branch
     nullable: false
     description: "Target branch name."
 
   state:
-    introduced_in: "1.0.0"
     type: enum
     source: state_id
     nullable: false
@@ -81,7 +73,6 @@ properties:
     terminal_values: [merged]
 
   merge_status:
-    introduced_in: "1.0.0"
     type: string
     source: merge_status
     nullable: false
@@ -89,21 +80,18 @@ properties:
     selectivity: low
 
   draft:
-    introduced_in: "1.0.0"
     type: boolean
     source: draft
     nullable: false
     description: "Whether this is a draft/WIP merge request."
 
   squash:
-    introduced_in: "1.0.0"
     type: boolean
     source: squash
     nullable: false
     description: "Whether to squash commits on merge."
 
   created_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: true
@@ -111,35 +99,30 @@ properties:
     description: "Creation timestamp."
 
   updated_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: updated_at
     nullable: true
     description: "Last update timestamp."
 
   merge_commit_sha:
-    introduced_in: "1.0.0"
     type: string
     source: merge_commit_sha
     nullable: false
     description: "Merge commit SHA."
 
   discussion_locked:
-    introduced_in: "1.0.0"
     type: boolean
     source: discussion_locked
     nullable: true
     description: "Whether discussions are locked."
 
   prepared_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: prepared_at
     nullable: true
     description: "Preparation timestamp."
 
   project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: target_project_id
     nullable: false
@@ -147,7 +130,6 @@ properties:
     description: "Owning project ID. Stored on the node for redaction without an edge lookup."
 
   merged_commit_id:
-    introduced_in: "1.0.0"
     type: int64
     source: merged_commit_id
     nullable: true
@@ -155,126 +137,108 @@ properties:
     description: "Synthetic Commit id the MR was merged at. NULL until merged, then immutable."
 
   latest_build_started_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_latest_build_started_at
     nullable: true
     description: "Latest CI build start timestamp."
 
   latest_build_finished_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_latest_build_finished_at
     nullable: true
     description: "Latest CI build finish timestamp."
 
   first_deployed_to_production_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_first_deployed_to_production_at
     nullable: true
     description: "First production deployment timestamp."
 
   merged_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_merged_at
     nullable: true
     description: "Merge timestamp."
 
   latest_closed_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_latest_closed_at
     nullable: true
     description: "Most recent close timestamp."
 
   first_comment_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_first_comment_at
     nullable: true
     description: "First comment timestamp."
 
   first_commit_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_first_commit_at
     nullable: true
     description: "First commit authored timestamp."
 
   last_commit_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_last_commit_at
     nullable: true
     description: "Last commit authored timestamp."
 
   diff_size:
-    introduced_in: "1.0.0"
     type: int64
     source: metric_diff_size
     nullable: true
     description: "Total diff size in bytes."
 
   modified_paths_size:
-    introduced_in: "1.0.0"
     type: int64
     source: metric_modified_paths_size
     nullable: true
     description: "Number of modified file paths."
 
   commits_count:
-    introduced_in: "1.0.0"
     type: int64
     source: metric_commits_count
     nullable: true
     description: "Number of commits."
 
   first_approved_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_first_approved_at
     nullable: true
     description: "First approval timestamp."
 
   first_reassigned_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_first_reassigned_at
     nullable: true
     description: "First reassignment timestamp."
 
   added_lines:
-    introduced_in: "1.0.0"
     type: int64
     source: metric_added_lines
     nullable: true
     description: "Lines added across all files."
 
   removed_lines:
-    introduced_in: "1.0.0"
     type: int64
     source: metric_removed_lines
     nullable: true
     description: "Lines removed across all files."
 
   first_contribution:
-    introduced_in: "1.0.0"
     type: boolean
     source: metric_first_contribution
     nullable: false
     description: "Whether this is the author's first contribution to the project."
 
   reviewer_first_assigned_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: metric_reviewer_first_assigned_at
     nullable: true
     description: "First reviewer assignment timestamp."
 
   author_id:
-    introduced_in: "1.0.0"
     type: int64
     source: author_id
     nullable: true
@@ -282,42 +246,36 @@ properties:
     description: "Author user ID."
 
   merge_user_id:
-    introduced_in: "1.0.0"
     type: int64
     source: merge_user_id
     nullable: true
     description: "User ID who merged."
 
   updated_by_id:
-    introduced_in: "1.0.0"
     type: int64
     source: updated_by_id
     nullable: true
     description: "User ID who last updated."
 
   last_edited_by_id:
-    introduced_in: "1.0.0"
     type: int64
     source: last_edited_by_id
     nullable: true
     description: "User ID who last edited the description."
 
   closed_by_id:
-    introduced_in: "1.0.0"
     type: int64
     source: metric_latest_closed_by_id
     nullable: true
     description: "User ID who most recently closed."
 
   milestone_id:
-    introduced_in: "1.0.0"
     type: int64
     source: milestone_id
     nullable: true
     description: "Associated milestone ID."
 
   source_project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: source_project_id
     nullable: true
@@ -325,21 +283,18 @@ properties:
     description: "Source project ID (may differ from target for cross-project MRs)."
 
   head_pipeline_id:
-    introduced_in: "1.0.0"
     type: int64
     source: head_pipeline_id
     nullable: true
     description: "Pipeline ID on the head commit."
 
   latest_merge_request_diff_id:
-    introduced_in: "1.0.0"
     type: int64
     source: latest_merge_request_diff_id
     nullable: true
     description: "Most recent diff snapshot ID."
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false
@@ -347,7 +302,6 @@ properties:
     description: "Namespace path for authz."
 
   diff:
-    introduced_in: "1.0.0"
     type: string
     nullable: true
     virtual:

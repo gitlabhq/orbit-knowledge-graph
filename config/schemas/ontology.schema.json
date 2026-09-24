@@ -22,7 +22,7 @@
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
       "maxLength": 20,
-      "description": "Public graph schema API version in which an element first appeared."
+      "description": "Public graph schema API version in which an element first appeared. Defaults to 1.0.0 when omitted; new elements must explicitly use the current pin (checked against the target branch)."
     },
     "domainName": {
       "type": "string",
@@ -270,16 +270,7 @@
       ]
     },
     "nodePropertyDefinition": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/propertyDefinition"
-        },
-        {
-          "required": [
-            "introduced_in"
-          ]
-        }
-      ]
+      "$ref": "#/definitions/propertyDefinition"
     },
     "traversalPathLookup": {
       "type": "object",
@@ -1245,7 +1236,6 @@
       },
       "required": [
         "node_type",
-        "introduced_in",
         "domain",
         "description",
         "label",

@@ -1,7 +1,6 @@
 # config/ontology/nodes/ci/job.yaml
 
 node_type: Job
-introduced_in: "1.0.0"
 domain: ci
 description: A CI/CD job that executes scripts within a pipeline stage
 label: name
@@ -20,7 +19,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -28,7 +26,6 @@ properties:
     description: "Unique ID."
 
   name:
-    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
@@ -36,7 +33,6 @@ properties:
     description: "Job name from .gitlab-ci.yml."
 
   status:
-    introduced_in: "1.0.0"
     type: enum
     source: status
     nullable: false
@@ -59,7 +55,6 @@ properties:
     terminal_values: [success, failed, canceled, skipped]
 
   ref:
-    introduced_in: "1.0.0"
     type: string
     source: ref
     nullable: false
@@ -67,7 +62,6 @@ properties:
     description: "Branch or tag name."
 
   tag:
-    introduced_in: "1.0.0"
     type: boolean
     source: tag
     nullable: true
@@ -75,28 +69,24 @@ properties:
     description: "Whether running on a git tag."
 
   allow_failure:
-    introduced_in: "1.0.0"
     type: boolean
     source: allow_failure
     nullable: false
     description: "Whether failure is allowed without failing the pipeline."
 
   coverage:
-    introduced_in: "1.0.0"
     type: string
     source: coverage
     nullable: false
     description: "Reported code coverage percentage."
 
   environment:
-    introduced_in: "1.0.0"
     type: string
     source: environment
     nullable: false
     description: "Target environment name (e.g. production, staging)."
 
   when:
-    introduced_in: "1.0.0"
     type: enum
     source: when
     nullable: false
@@ -111,14 +101,12 @@ properties:
       4: delayed
 
   retried:
-    introduced_in: "1.0.0"
     type: boolean
     source: retried
     nullable: true
     description: "Whether superseded by a retry."
 
   failure_reason:
-    introduced_in: "1.0.0"
     type: enum
     source: failure_reason
     nullable: false
@@ -172,7 +160,6 @@ properties:
       1015: job_token_expired
 
   created_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: true
@@ -180,28 +167,24 @@ properties:
     description: "Creation timestamp."
 
   started_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: started_at
     nullable: true
     description: "Execution start timestamp."
 
   finished_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: finished_at
     nullable: true
     description: "Execution finish timestamp."
 
   queued_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: queued_at
     nullable: true
     description: "Queue timestamp."
 
   type:
-    introduced_in: "1.0.0"
     type: string
     source: type
     nullable: false
@@ -210,21 +193,18 @@ properties:
     selectivity: low
 
   runner_id:
-    introduced_in: "1.0.0"
     type: int64
     source: runner_id
     nullable: true
     description: "Executing runner ID."
 
   timeout:
-    introduced_in: "1.0.0"
     type: int64
     source: timeout
     nullable: true
     description: "Effective timeout in seconds."
 
   timeout_source:
-    introduced_in: "1.0.0"
     type: enum
     source: timeout_source
     nullable: false
@@ -236,14 +216,12 @@ properties:
       4: job_timeout_source
 
   exit_code:
-    introduced_in: "1.0.0"
     type: int64
     source: exit_code
     nullable: true
     description: "Process exit code from the runner."
 
   scheduling_type:
-    introduced_in: "1.0.0"
     type: enum
     source: scheduling_type
     nullable: false
@@ -254,7 +232,6 @@ properties:
       1: dag
 
   project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -262,7 +239,6 @@ properties:
     description: "Owning project ID."
 
   user_id:
-    introduced_in: "1.0.0"
     type: int64
     source: user_id
     nullable: true
@@ -270,7 +246,6 @@ properties:
     description: "Triggering user ID."
 
   upstream_pipeline_id:
-    introduced_in: "1.0.0"
     type: int64
     source: upstream_pipeline_id
     nullable: true
@@ -278,7 +253,6 @@ properties:
     description: "Upstream pipeline ID for bridge jobs."
 
   stage_id:
-    introduced_in: "1.0.0"
     type: int64
     source: stage_id
     nullable: true
@@ -286,7 +260,6 @@ properties:
     description: "Containing stage ID."
 
   pipeline_id:
-    introduced_in: "1.0.0"
     type: int64
     source: commit_id
     nullable: true
@@ -294,14 +267,12 @@ properties:
     description: "Containing pipeline ID. Source column is commit_id (legacy Rails naming)."
 
   auto_canceled_by_id:
-    introduced_in: "1.0.0"
     type: int64
     source: auto_canceled_by_id
     nullable: true
     description: "Pipeline ID that auto-canceled this job."
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false

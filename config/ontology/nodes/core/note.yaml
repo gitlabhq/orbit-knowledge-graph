@@ -1,7 +1,6 @@
 # config/ontology/nodes/core/note.yaml
 
 node_type: Note
-introduced_in: "1.0.0"
 domain: core
 description: A comment or annotation on a GitLab object (issue, merge request, commit, etc.)
 label: id
@@ -19,7 +18,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -27,14 +25,12 @@ properties:
     description: "Unique ID."
 
   note:
-    introduced_in: "1.0.0"
     type: string
     source: note
     nullable: false
     description: "Text content (markdown)."
 
   noteable_type:
-    introduced_in: "1.0.0"
     type: enum
     source: noteable_type
     nullable: false
@@ -54,7 +50,6 @@ properties:
       9: "ComplianceManagement::Projects::ComplianceViolation"
 
   noteable_id:
-    introduced_in: "1.0.0"
     type: int64
     source: noteable_id
     nullable: true
@@ -62,14 +57,12 @@ properties:
     description: "ID of the attached object. Null for commits."
 
   line_code:
-    introduced_in: "1.0.0"
     type: string
     source: line_code
     nullable: false
     description: "Line position identifier for diff notes."
 
   created_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: true
@@ -77,14 +70,12 @@ properties:
     description: "Creation timestamp."
 
   updated_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: updated_at
     nullable: true
     description: "Last update timestamp."
 
   discussion_id:
-    introduced_in: "1.0.0"
     type: string
     source: discussion_id
     nullable: true
@@ -92,28 +83,24 @@ properties:
     description: "Discussion thread ID."
 
   resolved_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: resolved_at
     nullable: true
     description: "Resolution timestamp."
 
   internal:
-    introduced_in: "1.0.0"
     type: boolean
     source: internal
     nullable: false
     description: "Only visible to users with Reporter+ access on the parent resource."
 
   confidential:
-    introduced_in: "1.0.0"
     type: boolean
     source: confidential
     nullable: true
     description: "Legacy alias for internal; synced on create. Being renamed per gitlab#367923."
 
   commit_id:
-    introduced_in: "1.0.0"
     type: string
     source: commit_id
     nullable: false
@@ -121,14 +108,12 @@ properties:
     description: "Commit SHA for commit notes."
 
   st_diff:
-    introduced_in: "1.0.0"
     type: string
     source: st_diff
     nullable: false
     description: "Serialized diff snippet for diff notes."
 
   project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: true
@@ -136,7 +121,6 @@ properties:
     description: "Owning project ID."
 
   author_id:
-    introduced_in: "1.0.0"
     type: int64
     source: author_id
     nullable: true
@@ -144,7 +128,6 @@ properties:
     description: "Author user ID."
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false

@@ -16,6 +16,8 @@
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
+pub const DEFAULT_INTRODUCED_IN: semver::Version = semver::Version::new(1, 0, 0);
+
 pub mod archive;
 pub mod constants;
 pub mod denormalized;
@@ -1763,10 +1765,6 @@ mod tests {
                 path: path.to_string(),
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, path.to_string()),
             })
-        }
-
-        fn legacy_introduced_in(&self) -> Option<semver::Version> {
-            Some(semver::Version::new(1, 0, 0))
         }
     }
 
