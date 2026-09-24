@@ -61,12 +61,12 @@ sequenceDiagram
 
 Fine-grained personal access tokens follow the Global Search pattern. Rails runs one token check before the route. The check answers one question: may this token call this route? After that check the token is not read again. Results follow the token owner's access through Layers 1 to 3.
 
-- One permission, Orbit **Read** (`read_orbit`), guards every Orbit REST route and `POST /orbit/mcp`. It lists the group and user scopes. There is no separate MCP permission.
-- Every Orbit route, REST and MCP, derives its boundary from the token. A token with Orbit **Read** under the User tab, or with **All memberships**, resolves to the user boundary and passes with no trimming. A token with Orbit **Read** on selected groups resolves to the first selected group and passes. A token without the permission, or with only project selections, gets `403`.
-- Group selections narrow the JWT. Rails passes the selected groups to `AuthorizationContext`. It keeps only the traversal paths under those groups and collapses ancestor paths to the group path. The traversal path cap runs after that. Layers 1 to 3 see a smaller path set and nothing else changes. An administrator's token with group selections loses the admin claim and carries the narrowed paths instead.
+- One permission, Orbit **Read** (`read_orbit`), guards every Orbit REST route and `POST /orbit/mcp`. It lists the user scope. There is no separate MCP permission.
+- Every Orbit route, REST and MCP, declares the user boundary, the same as `/search`. A token with Orbit **Read** under the User tab passes. A token without it, or one made only under group and project access, gets `403`.
 - Orbit does not read the other permissions on the token. A token without the Work item **Read** permission still gets work items from Orbit when the owner can read them in GitLab.
 - Orbit adds no section or toggle of its own to the token UI, and does not parse queries for namespaces.
-- Project selections are not supported. Traversal paths end at groups, so a project path cannot narrow the JWT. See [issue 992](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/992).
+- The earlier `read_knowledge_graph` and `execute_orbit_mcp_tool` permissions stay defined as deprecated. They expand to raw permissions no Orbit route checks, so old tokens get `403` from Orbit. The tokens stay valid for their other permissions and can still rotate.
+- Group scoping is deferred to `/groups/:id/orbit/*` routes, where the token is checked against the group in the path. Filtering results by the token's selected groups was rejected: the token check decides which endpoints a token can call, not what the service returns. See [issue 992](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/992).
 
 Prior art in Rails: the [Global Search manifest](https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/authz/permission_groups/assignable_permissions/search/global_search/use.yml) and [routes](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/search.rb), and the [MCP server gateway](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/mcp/base.rb).
 
