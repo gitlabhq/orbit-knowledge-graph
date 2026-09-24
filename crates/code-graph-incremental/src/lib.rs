@@ -1,13 +1,14 @@
+pub mod constants;
 pub mod env;
-pub mod error;
 pub mod intern;
 pub mod pipeline;
 pub mod resolver;
-pub mod sentinel;
-pub mod tags;
+pub mod shared;
 pub mod tree;
 
+pub use shared::error::{Error, LoadError};
+pub use shared::sentinel::{Killed, Limits, Sentinel};
+pub use shared::{canonical, error, sentinel, tags};
+
 pub use env::Env;
-pub use error::{Error, LoadError};
 pub use pipeline::{Context, ItemPhase, Observer, Phase, Pipeline, Report, State};
-pub use sentinel::{Killed, Limits, Sentinel};

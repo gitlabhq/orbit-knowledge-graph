@@ -16,7 +16,7 @@ pub struct Limits {
 impl Limits {
     pub fn load() -> Result<Self, LoadError> {
         Ok(orbit_utils::yaml::from_str(include_str!(
-            "../config/limits.yaml"
+            "../../config/limits.yaml"
         ))?)
     }
 
