@@ -19,6 +19,9 @@ orbit-perf:
       when: never
     # Solo schedules also run on the default branch.
     - !reference [.skip-on-solo-schedule, rules]
+    # TEMPORARY: MR runs to compare timings. Remove before review.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      allow_failure: true
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       allow_failure: true
   variables:
