@@ -9,7 +9,7 @@ use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 
 use crate::loading::{ReadOntologyFile, load_with};
-use crate::{Ontology, OntologyError};
+use crate::{DEFAULT_INTRODUCED_IN, Ontology, OntologyError};
 
 const ARCHIVE_DIRECTORY: &str = "ontology-archives";
 const ARCHIVE_ROOT: &str = "ontology";
@@ -152,11 +152,9 @@ impl OntologyArchive {
 
         Ok(Self {
             schema_version,
-            // Pre-API archives have no pin; distinguish their immutable storage versions
-            // so switching between two legacy snapshots also changes the ETag.
             graph_schema_api: manifest
                 .graph_schema_api
-                .unwrap_or_else(|| semver::Version::new(0, 0, u64::from(schema_version))),
+                .unwrap_or_else(|| DEFAULT_INTRODUCED_IN.clone()),
             bytes: bytes.to_vec(),
             sources,
         })
@@ -292,8 +290,8 @@ mod tests {
     use flate2::{Compression, write::GzEncoder};
 
     use super::{ArchiveError, OntologyArchive};
-    use crate::Ontology;
     use crate::migrations::embedded_sources;
+    use crate::{DEFAULT_INTRODUCED_IN, Ontology};
 
     const SCHEMA_VERSION: u32 = 42;
 
@@ -339,25 +337,16 @@ mod tests {
     }
 
     #[test]
-    fn main_v99_archive_keeps_legacy_graph_schema_api() {
-        let archive = OntologyArchive::bundled(99).unwrap().unwrap();
-        assert_eq!(archive.graph_schema_api().to_string(), "0.0.99");
-        assert_eq!(
-            OntologyArchive::bundled(98)
-                .unwrap()
-                .unwrap()
-                .graph_schema_api()
-                .to_string(),
-            "0.0.98"
-        );
-        assert_eq!(
-            archive
-                .load_ontology()
-                .unwrap()
-                .graph_schema_api()
-                .to_string(),
-            "0.0.99"
-        );
+    fn archives_without_a_manifest_pin_use_the_baseline() {
+        for version in [98, 99] {
+            let archive = OntologyArchive::bundled(version).unwrap().unwrap();
+            assert_eq!(archive.graph_schema_api(), &DEFAULT_INTRODUCED_IN);
+            assert_eq!(
+                archive.load_ontology().unwrap().graph_schema_api(),
+                &DEFAULT_INTRODUCED_IN
+            );
+            archive.validate_current_api_pin().unwrap();
+        }
     }
 
     #[test]

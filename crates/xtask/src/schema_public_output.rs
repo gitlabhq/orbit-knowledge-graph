@@ -301,9 +301,9 @@ mod tests {
             outputs(&archive.load_ontology().unwrap()).unwrap()
         );
         let legacy = OntologyArchive::bundled(99).unwrap().unwrap();
-        assert_ne!(
-            outputs(&legacy.load_ontology().unwrap()).unwrap()["raw/summary"],
-            outputs(&Ontology::load_embedded().unwrap()).unwrap()["raw/summary"]
+        assert_eq!(
+            outputs(&legacy.load_ontology().unwrap()).unwrap(),
+            outputs(&Ontology::load_embedded().unwrap()).unwrap()
         );
     }
 
@@ -344,15 +344,9 @@ mod tests {
             .unwrap()
             .load_ontology()
             .unwrap();
-        assert!(
-            new_elements_have_current_pin(&legacy, &Ontology::new(), legacy.graph_schema_api())
-                .is_err()
-        );
+        assert!(new_elements_have_current_pin(&legacy, &Ontology::new(), &bumped_pin).is_err());
         let matching_node = Ontology::new().with_nodes(["User"]);
-        assert!(
-            new_elements_have_current_pin(&legacy, &matching_node, legacy.graph_schema_api())
-                .is_err()
-        );
+        assert!(new_elements_have_current_pin(&legacy, &matching_node, &bumped_pin).is_err());
     }
 
     #[test]

@@ -30,7 +30,8 @@ format version (`0.1`).
 The `graph_schema_api` semver pin versions public introspection independently of the storage
 `schema` pin and the ontology document's `schema_version`. Each archive records its API version
 in the manifest. Introspection reports the active snapshot's pin during migration and rollback.
-Older archives use `0.0.<storage-version>` to avoid sharing an ETag with each other or v100.
+Archives through v99 have no manifest pin and use the baseline `1.0.0`. Versions v98 and v99
+therefore share an ETag, which is acceptable before clients cache these schema responses.
 
 Every node and property records its first API version in `introduced_in`. Omitting it from ontology
 YAML defaults to `1.0.0`; rendered introspection still includes the resolved value. New nodes and
@@ -63,10 +64,11 @@ changed output cannot reach cached public schema responses. Query DSL and output
 remain active. Historical archives through v99 load
 missing `introduced_in` annotations as `1.0.0` for rollback compatibility.
 
-A pin change also requires a storage-version bump and a new immutable archive, even for an
-encoding-only change. Run `mise schema:bump:api` for output-neutral storage changes, or
-`mise schema:bump` when indexed rows change. The build and ledger check reject a current archive
-whose manifest pin differs from `config/versions.yaml`.
+The initial `1.0.0` pin uses the legacy v99 archive without changing storage. The first real pin
+bump requires a storage-version bump and a new immutable archive with a manifest pin.
+Every later pin change does too, including encoding-only changes. Run `mise schema:bump:api` for output-neutral
+storage changes, or `mise schema:bump` when indexed rows change. The build and ledger check reject
+a current archive whose resolved pin differs from `config/versions.yaml`.
 
 Known limitation: during migration a new binary may serve an older active archive with its older
 API pin, while applying the new binary's encoder. That window can produce different encodings
