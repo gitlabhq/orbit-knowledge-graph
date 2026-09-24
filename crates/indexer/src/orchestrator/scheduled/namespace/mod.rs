@@ -208,7 +208,7 @@ impl NamespaceDispatcher {
 
     async fn save_checkpoint(&self, key: &str, upper: &DateTime<Utc>) -> Result<(), TaskError> {
         self.checkpoint_store
-            .save_completed(key, &Checkpoint::new(*upper), WriteDurability::Durable)
+            .save(key, &Checkpoint::new(*upper), WriteDurability::Durable)
             .await
             .map_err(TaskError::new)
     }

@@ -1922,7 +1922,11 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         task_id: 1,
         commit_sha: Some("abc123".to_string()),
-        had_prior_checkpoint: false,
+        checkpoint: indexer::modules::code::CodeCheckpoint::new(
+            TraversalPath::new_unchecked(traversal_path),
+            project_id,
+            "main",
+        ),
     };
 
     let cancel = code_graph::v2::CancellationToken::new();

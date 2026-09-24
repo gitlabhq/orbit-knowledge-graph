@@ -113,17 +113,17 @@ pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext)
 
     let parent = ctx
         .query(&format!(
-            "SELECT cursor_values FROM {} FINAL \
-             WHERE key = 'global.User' AND _deleted = false",
+            "SELECT count() AS cnt FROM {} FINAL \
+             WHERE key = 'global.User' AND indexed_at IS NOT NULL AND _deleted = false",
             t("checkpoint")
         ))
         .await;
-    let parent_cursor = ArrowUtils::get_column_by_name::<StringArray>(&parent[0], "cursor_values")
-        .expect("cursor_values column");
+    let parent_count =
+        ArrowUtils::get_column_by_name::<UInt64Array>(&parent[0], "cnt").expect("cnt column");
     assert_eq!(
-        parent_cursor.value(0),
-        r#"{"c":[]}"#,
-        "parent must stay at its first-pass start so the next dispatch re-triggers partitioning"
+        parent_count.value(0),
+        0,
+        "parent must stay unindexed so the next dispatch re-triggers partitioning"
     );
 
     let leftover = ctx

@@ -137,9 +137,14 @@ impl EntityHandler {
         observer.set_namespace(request.namespace_id);
 
         let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
-        let checkpoint = self
+        let mut checkpoint = self
             .checkpoint_store
-            .save_started(&checkpoint_key, request.watermark)
+            .load(&checkpoint_key)
+            .await
+            .map_err(|err| HandlerError::Processing(err.to_string()))?
+            .unwrap_or_else(|| Checkpoint::new(request.watermark));
+        self.checkpoint_store
+            .save_started(&checkpoint_key, &mut checkpoint)
             .await
             .map_err(|err| HandlerError::Processing(err.to_string()))?;
         let window = pull_window(&checkpoint, request.watermark);
@@ -172,8 +177,9 @@ impl EntityHandler {
                 column: &self.plan.deleted_column,
             }));
 
-        let should_partition =
-            self.partition_strategy.is_some() && checkpoint.is_first_pass_start();
+        let should_partition = self.partition_strategy.is_some()
+            && !checkpoint.is_indexed()
+            && checkpoint.cursor_values.is_none();
         let ranges = if should_partition {
             self.partition_strategy
                 .as_ref()
@@ -294,9 +300,7 @@ impl EntityHandler {
                 .load(&position_key)
                 .await
                 .map_err(|err| HandlerError::Processing(err.to_string()))?;
-            if let Some(cp) = existing.as_ref()
-                && cp.cursor_values.is_none()
-            {
+            if existing.as_ref().is_some_and(Checkpoint::is_indexed) {
                 info!(partition = %position_key, "skipping already-completed partition");
                 continue;
             }
@@ -346,15 +350,15 @@ impl EntityHandler {
 
 /// A cursored checkpoint must resume its original window, never widen to `(epoch, target]`.
 fn pull_window(checkpoint: &Checkpoint, request_watermark: DateTime<Utc>) -> WindowBounds {
-    match checkpoint.cursor_values {
-        Some(_) => WindowBounds {
+    if checkpoint.cursor_values.is_some() {
+        return WindowBounds {
             target: checkpoint.watermark,
             floor: checkpoint.resume_floor,
-        },
-        None => WindowBounds {
-            target: request_watermark,
-            floor: Some(checkpoint.watermark),
-        },
+        };
+    }
+    WindowBounds {
+        target: request_watermark,
+        floor: checkpoint.is_indexed().then_some(checkpoint.watermark),
     }
 }
 
@@ -635,15 +639,11 @@ mod tests {
     }
 
     #[test]
-    fn pull_window_first_pass_start_starts_from_beginning() {
+    fn pull_window_first_pass_starts_from_beginning() {
         let now = ts("2026-06-07T22:00:00Z");
-        let started = Checkpoint {
-            cursor_values: Some(Vec::new()),
-            attempts: 1,
-            ..Checkpoint::new(now)
-        };
+        let first_pass = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
         assert_eq!(
-            pull_window(&started, now),
+            pull_window(&first_pass, now),
             WindowBounds {
                 target: now,
                 floor: None
@@ -654,7 +654,8 @@ mod tests {
     #[test]
     fn pull_window_completed_advances_to_now() {
         let now = ts("2026-06-07T22:00:00Z");
-        let completed = Checkpoint::new(ts("2026-06-07T21:59:30Z"));
+        let mut completed = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
+        completed.complete(ts("2026-06-07T21:59:30Z"));
         assert_eq!(
             pull_window(&completed, now),
             WindowBounds {

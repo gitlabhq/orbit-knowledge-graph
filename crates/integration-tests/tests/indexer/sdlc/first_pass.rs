@@ -70,10 +70,6 @@ pub async fn unfinished_first_pass_counts_each_attempt(ctx: &TestContext) {
         [2]
     );
     assert_eq!(
-        checkpoint_column::<String>(ctx, "global.User", "cursor_values").await,
-        [r#"{"c":[]}"#]
-    );
-    assert_eq!(
         checkpoint_column::<Option<DateTime<Utc>>>(ctx, "global.User", "indexed_at").await,
         [None]
     );

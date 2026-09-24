@@ -40,9 +40,8 @@ pub enum CheckpointError {
 /// Where a pipeline left off: both time-position (watermark) and page-position (cursor).
 ///
 /// State machine:
-/// - No entry: first run, start from epoch, no cursor
-/// - `cursor_values: None`: completed, `watermark` becomes the next `last_watermark`
-/// - `cursor_values: Some([])`: first pass started, no page written yet
+/// - No entry, or no cursor and no `indexed_at`: first pass, start from epoch
+/// - No cursor and `indexed_at`: completed, `watermark` becomes the next `last_watermark`
 /// - `cursor_values: Some(...)`: interrupted mid-pagination, resume from cursor
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Checkpoint {
@@ -67,8 +66,28 @@ impl Checkpoint {
         }
     }
 
-    pub fn is_first_pass_start(&self) -> bool {
-        self.resume_floor.is_none() && self.cursor_values.as_ref().is_some_and(Vec::is_empty)
+    pub fn is_indexed(&self) -> bool {
+        self.indexed_at.is_some()
+    }
+
+    pub fn start_attempt(&mut self) {
+        self.attempts += 1;
+    }
+
+    pub fn advance(
+        &mut self,
+        watermark: DateTime<Utc>,
+        cursor_values: Option<Vec<String>>,
+        resume_floor: Option<DateTime<Utc>>,
+    ) {
+        self.watermark = watermark;
+        self.cursor_values = cursor_values;
+        self.resume_floor = resume_floor;
+    }
+
+    pub fn complete(&mut self, watermark: DateTime<Utc>) {
+        self.advance(watermark, None, None);
+        self.indexed_at = Some(Utc::now());
     }
 }
 
@@ -97,46 +116,13 @@ pub trait CheckpointStore: Send + Sync {
     async fn save_started(
         &self,
         key: &str,
-        target: DateTime<Utc>,
-    ) -> Result<Checkpoint, CheckpointError> {
-        let checkpoint = self.load(key).await?.unwrap_or_else(|| Checkpoint {
-            cursor_values: Some(Vec::new()),
-            ..Checkpoint::new(target)
-        });
-        if checkpoint.indexed_at.is_some() {
-            return Ok(checkpoint);
+        checkpoint: &mut Checkpoint,
+    ) -> Result<(), CheckpointError> {
+        if checkpoint.is_indexed() {
+            return Ok(());
         }
-
-        let started = Checkpoint {
-            attempts: checkpoint.attempts + 1,
-            ..checkpoint
-        };
-        self.save(key, &started, WriteDurability::Durable).await?;
-        Ok(started)
-    }
-
-    async fn save_progress(
-        &self,
-        key: &str,
-        checkpoint: &Checkpoint,
-    ) -> Result<(), CheckpointError> {
-        self.save(key, checkpoint, WriteDurability::FireAndForget)
-            .await
-    }
-
-    async fn save_completed(
-        &self,
-        key: &str,
-        checkpoint: &Checkpoint,
-        durability: WriteDurability,
-    ) -> Result<(), CheckpointError> {
-        let completed = Checkpoint {
-            cursor_values: None,
-            resume_floor: None,
-            indexed_at: Some(Utc::now()),
-            ..checkpoint.clone()
-        };
-        self.save(key, &completed, durability).await
+        checkpoint.start_attempt();
+        self.save(key, checkpoint, WriteDurability::Durable).await
     }
 }
 
@@ -406,15 +392,12 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .map(|(key, _)| key)
             .collect();
 
-        let parent = self
+        let mut parent = self
             .load(parent_key)
             .await?
             .unwrap_or_else(|| Checkpoint::new(*watermark));
-        let completed = Checkpoint {
-            watermark: *watermark,
-            ..parent
-        };
-        self.save_completed(parent_key, &completed, WriteDurability::Durable)
+        parent.complete(*watermark);
+        self.save(parent_key, &parent, WriteDurability::Durable)
             .await?;
 
         for key in partition_keys {

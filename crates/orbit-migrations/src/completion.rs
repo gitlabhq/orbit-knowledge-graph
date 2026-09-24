@@ -27,6 +27,7 @@ SELECT toInt64(splitByChar('.', key)[2]) AS namespace_id \
 FROM {table:Identifier} FINAL \
 WHERE _deleted = false \
   AND cursor_values IN ('null', '') \
+  AND indexed_at IS NOT NULL \
   AND length(splitByChar('.', key)) = 3 \
   AND splitByChar('.', key)[1] = 'ns' \
   AND match(splitByChar('.', key)[2], '^[0-9]+$') \
@@ -39,6 +40,7 @@ SELECT count(DISTINCT splitByChar('.', key)[2]) AS plan_count \
 FROM {table:Identifier} FINAL \
 WHERE _deleted = false \
   AND cursor_values IN ('null', '') \
+  AND indexed_at IS NOT NULL \
   AND length(splitByChar('.', key)) = 2 \
   AND splitByChar('.', key)[1] = 'global' \
   AND splitByChar('.', key)[2] IN {plans:Array(String)}";

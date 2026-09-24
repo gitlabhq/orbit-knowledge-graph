@@ -242,8 +242,8 @@ impl TestContext {
         for checkpoint_key in checkpoint_keys {
             self.clickhouse
                 .execute(&format!(
-                    "INSERT INTO {checkpoint_table} (key, watermark, cursor_values) \
-                     VALUES ('{checkpoint_key}', now(), 'null')"
+                    "INSERT INTO {checkpoint_table} (key, watermark, cursor_values, indexed_at) \
+                     VALUES ('{checkpoint_key}', now(), 'null', now())"
                 ))
                 .await;
         }

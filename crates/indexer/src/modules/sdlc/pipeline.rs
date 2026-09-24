@@ -22,7 +22,7 @@ use super::paging::{block_size_for, next_page_limit};
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
-use crate::durability::RunDurability;
+use crate::durability::{RunDurability, WriteDurability};
 use orbit_server_config::DatalakeRetryConfig;
 use orbit_utils::arrow::batch_slice_bytes;
 
@@ -141,7 +141,7 @@ impl Pipeline {
         durability: RunDurability,
     ) -> Result<PipelineStats, HandlerError> {
         let started_at = Instant::now();
-        let checkpoint = self.load_checkpoint(position_key).await;
+        let mut checkpoint = self.load_checkpoint(position_key).await;
         let mut cursor = Cursor::from_checkpoint(&checkpoint);
 
         if !cursor.is_first_page() {
@@ -272,14 +272,9 @@ impl Pipeline {
                 );
             }
 
-            self.save_batch_progress(
-                position_key,
-                window,
-                &cursor,
-                &checkpoint,
-                &context.progress,
-            )
-            .await?;
+            checkpoint.advance(window.target, cursor.to_checkpoint_values(), window.floor);
+            self.save_batch_progress(position_key, &checkpoint, &context.progress)
+                .await?;
 
             let Some(next) = next_page else {
                 break;
@@ -288,12 +283,9 @@ impl Pipeline {
             page = next;
         }
 
-        let completed = Checkpoint {
-            watermark: window.target,
-            ..checkpoint.clone()
-        };
+        checkpoint.complete(window.target);
         self.checkpoint_store
-            .save_completed(position_key, &completed, durability.completion)
+            .save(position_key, &checkpoint, durability.completion)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -445,21 +437,11 @@ impl Pipeline {
     async fn save_batch_progress(
         &self,
         position_key: &str,
-        window: WindowBounds,
-        cursor: &Cursor,
         checkpoint: &Checkpoint,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         self.checkpoint_store
-            .save_progress(
-                position_key,
-                &Checkpoint {
-                    watermark: window.target,
-                    cursor_values: cursor.to_checkpoint_values(),
-                    resume_floor: window.floor,
-                    ..checkpoint.clone()
-                },
-            )
+            .save(position_key, checkpoint, WriteDurability::FireAndForget)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!("failed to save cursor for {position_key}: {err}"))
@@ -505,7 +487,6 @@ mod tests {
     use super::super::plan::{TransformSpec, Transformation};
     use super::*;
     use crate::checkpoint::CheckpointError;
-    use crate::durability::WriteDurability;
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::partitioning::PartitionAssignment;
     use crate::modules::sdlc::test_helpers::test_metrics;

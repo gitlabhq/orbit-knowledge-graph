@@ -162,7 +162,7 @@ impl NamespaceDeletionScheduler {
         }
 
         self.checkpoint_store
-            .save_completed(
+            .save(
                 CHECKPOINT_KEY,
                 &Checkpoint::new(watermark),
                 WriteDurability::Durable,

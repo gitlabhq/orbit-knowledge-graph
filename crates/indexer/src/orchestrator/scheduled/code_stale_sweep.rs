@@ -119,7 +119,7 @@ impl CodeStaleSweep {
         }
 
         self.checkpoint_store
-            .save_completed(
+            .save(
                 &namespace_checkpoint_key(traversal_path),
                 &Checkpoint::new(started),
                 WriteDurability::Durable,

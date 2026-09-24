@@ -31,7 +31,36 @@ pub struct CodeCheckpoint {
     pub branch: String,
     pub last_task_id: i64,
     pub last_commit: Option<String>,
-    pub indexed_at: DateTime<Utc>,
+    pub indexed_at: Option<DateTime<Utc>>,
+    pub attempts: i64,
+}
+
+impl CodeCheckpoint {
+    pub fn new(traversal_path: TraversalPath, project_id: i64, branch: &str) -> Self {
+        Self {
+            traversal_path,
+            project_id,
+            branch: branch.to_string(),
+            last_task_id: 0,
+            last_commit: None,
+            indexed_at: None,
+            attempts: 0,
+        }
+    }
+
+    pub fn is_indexed(&self) -> bool {
+        self.indexed_at.is_some()
+    }
+
+    pub fn start_attempt(&mut self) {
+        self.attempts += 1;
+    }
+
+    pub fn complete(&mut self, task_id: i64, commit: Option<String>, indexed_at: DateTime<Utc>) {
+        self.last_task_id = task_id;
+        self.last_commit = commit;
+        self.indexed_at = Some(indexed_at);
+    }
 }
 
 #[async_trait]
@@ -43,14 +72,15 @@ pub trait CodeCheckpointStore: Send + Sync {
         branch: &str,
     ) -> Result<Option<CodeCheckpoint>, CheckpointError>;
 
-    async fn save_started(
-        &self,
-        traversal_path: &TraversalPath,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<(), CheckpointError>;
+    async fn save(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError>;
 
-    async fn save_completed(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError>;
+    async fn save_started(&self, checkpoint: &mut CodeCheckpoint) -> Result<(), CheckpointError> {
+        if checkpoint.is_indexed() {
+            return Ok(());
+        }
+        checkpoint.start_attempt();
+        self.save(checkpoint).await
+    }
 }
 
 pub(crate) type CheckpointClient = Arc<ArrowClickHouseClient>;
@@ -84,6 +114,9 @@ impl ClickHouseCodeCheckpointStore {
         let indexed_at_col: &TimestampMicrosecondArray =
             ArrowUtils::get_column_by_index(&batch, 2).ok_or(CheckpointError::InvalidType)?;
 
+        let attempts_col: &Int64Array =
+            ArrowUtils::get_column_by_index(&batch, 3).ok_or(CheckpointError::InvalidType)?;
+
         if last_task_id_col.is_null(0) {
             return Ok(None);
         }
@@ -95,11 +128,15 @@ impl ClickHouseCodeCheckpointStore {
             let v = last_commit_col.value(0).to_string();
             if v.is_empty() { None } else { Some(v) }
         };
-        let indexed_at_micros = indexed_at_col.value(0);
-        let indexed_at = Utc
-            .timestamp_micros(indexed_at_micros)
-            .single()
-            .ok_or(CheckpointError::InvalidTimestamp)?;
+        let indexed_at = if indexed_at_col.is_null(0) {
+            None
+        } else {
+            let indexed_at = Utc
+                .timestamp_micros(indexed_at_col.value(0))
+                .single()
+                .ok_or(CheckpointError::InvalidTimestamp)?;
+            Some(indexed_at)
+        };
 
         Ok(Some(CodeCheckpoint {
             traversal_path: traversal_path.clone(),
@@ -108,6 +145,7 @@ impl ClickHouseCodeCheckpointStore {
             last_task_id,
             last_commit,
             indexed_at,
+            attempts: attempts_col.value(0),
         }))
     }
 }
@@ -126,12 +164,13 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             SELECT
                 argMax(last_task_id, _version) as last_task_id,
                 argMax(last_commit, _version) as last_commit,
-                argMax(indexed_at, _version) as indexed_at
+                argMax(indexed_at, _version) as indexed_at,
+                argMax(attempts, _version) as attempts
             FROM {table}
             WHERE traversal_path = {{traversal_path:String}}
               AND project_id = {{project_id:Int64}}
               AND branch = {{branch:String}}
-            HAVING indexed_at IS NOT NULL
+            HAVING count() > 0
         "#
         );
 
@@ -148,52 +187,18 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
         Self::extract_checkpoint(batches, traversal_path, project_id, branch)
     }
 
-    async fn save_started(
-        &self,
-        traversal_path: &TraversalPath,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<(), CheckpointError> {
+    async fn save(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError> {
         let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
-
-        self.client
-            .insert_query(&format!(
-                r#"
-                INSERT INTO {table}
-                (traversal_path, project_id, branch, last_task_id, indexed_at, attempts, is_default_branch, _version)
-                SELECT {{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, 0, NULL,
-                       argMax(attempts, _version) + 1, true, {{version:UInt64}}
-                FROM {table}
-                WHERE traversal_path = {{traversal_path:String}}
-                  AND project_id = {{project_id:Int64}}
-                  AND branch = {{branch:String}}
-                HAVING argMax(indexed_at, _version) IS NULL
-            "#
-            ))
-            .param("traversal_path", traversal_path.as_str())
-            .param("project_id", project_id)
-            .param("branch", branch)
-            .param("version", write_version())
-            .execute()
-            .await
-            .map_err(|e| CheckpointError::Query(e.to_string()))
-    }
-
-    async fn save_completed(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError> {
-        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
-        let formatted_timestamp = checkpoint.indexed_at.format(TIMESTAMP_FORMAT).to_string();
+        let formatted_timestamp = checkpoint
+            .indexed_at
+            .map(|indexed_at| indexed_at.format(TIMESTAMP_FORMAT).to_string());
 
         self.client
             .insert_query(&format!(
                 r#"
                 INSERT INTO {table}
                 (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, attempts, is_default_branch, _version)
-                SELECT {{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}},
-                       {{last_commit:String}}, {{indexed_at:String}}, argMax(attempts, _version), true, {{version:UInt64}}
-                FROM {table}
-                WHERE traversal_path = {{traversal_path:String}}
-                  AND project_id = {{project_id:Int64}}
-                  AND branch = {{branch:String}}
+                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{indexed_at:Nullable(String)}}, {{attempts:Int64}}, true, {{version:UInt64}})
             "#
             ))
             .param("traversal_path", checkpoint.traversal_path.as_str())
@@ -202,6 +207,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .param("last_task_id", checkpoint.last_task_id)
             .param("last_commit", checkpoint.last_commit.as_deref().unwrap_or_default())
             .param("indexed_at", formatted_timestamp)
+            .param("attempts", checkpoint.attempts)
             .param("version", write_version())
             .execute()
             .await
@@ -221,40 +227,15 @@ pub mod test_utils {
     use parking_lot::Mutex;
     use std::collections::HashMap;
 
-    type CheckpointKey = (TraversalPath, i64, String);
-
-    fn checkpoint_key(
-        traversal_path: &TraversalPath,
-        project_id: i64,
-        branch: &str,
-    ) -> CheckpointKey {
-        (traversal_path.clone(), project_id, branch.to_string())
-    }
-
     pub struct MockCodeCheckpointStore {
-        checkpoints: Mutex<HashMap<CheckpointKey, CodeCheckpoint>>,
-        attempts: Mutex<HashMap<CheckpointKey, i64>>,
+        checkpoints: Mutex<HashMap<(TraversalPath, i64, String), CodeCheckpoint>>,
     }
 
     impl MockCodeCheckpointStore {
         pub fn new() -> Self {
             Self {
                 checkpoints: Mutex::new(HashMap::new()),
-                attempts: Mutex::new(HashMap::new()),
             }
-        }
-
-        pub fn attempts(
-            &self,
-            traversal_path: &TraversalPath,
-            project_id: i64,
-            branch: &str,
-        ) -> i64 {
-            self.attempts
-                .lock()
-                .get(&checkpoint_key(traversal_path, project_id, branch))
-                .copied()
-                .unwrap_or_default()
         }
     }
 
@@ -272,32 +253,19 @@ pub mod test_utils {
             project_id: i64,
             branch: &str,
         ) -> Result<Option<CodeCheckpoint>, CheckpointError> {
-            Ok(self
-                .checkpoints
-                .lock()
-                .get(&checkpoint_key(traversal_path, project_id, branch))
+            let checkpoints = self.checkpoints.lock();
+            Ok(checkpoints
+                .get(&(traversal_path.clone(), project_id, branch.to_string()))
                 .cloned())
         }
 
-        async fn save_started(
-            &self,
-            traversal_path: &TraversalPath,
-            project_id: i64,
-            branch: &str,
-        ) -> Result<(), CheckpointError> {
-            let key = checkpoint_key(traversal_path, project_id, branch);
-            if !self.checkpoints.lock().contains_key(&key) {
-                *self.attempts.lock().entry(key).or_default() += 1;
-            }
-            Ok(())
-        }
-
-        async fn save_completed(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError> {
-            self.checkpoints.lock().insert(
-                checkpoint_key(
-                    &checkpoint.traversal_path,
+        async fn save(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError> {
+            let mut checkpoints = self.checkpoints.lock();
+            checkpoints.insert(
+                (
+                    checkpoint.traversal_path.clone(),
                     checkpoint.project_id,
-                    &checkpoint.branch,
+                    checkpoint.branch.clone(),
                 ),
                 checkpoint.clone(),
             );
