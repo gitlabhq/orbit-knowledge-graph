@@ -61,13 +61,13 @@ that snapshot to the **target branch** and requires a newer pin if output differ
 changes do not affect the hashes. `[skip graph-schema-api-check]` waives only the target pin
 comparison; freshness and new-element checks still run. Use it only after confirming that the
 changed output cannot reach cached public schema responses. Query DSL and output-format pin checks
-remain active. Historical archives through v99 load
-missing `introduced_in` annotations as `1.0.0` for rollback compatibility.
+remain active.
 
 The initial `1.0.0` pin uses the legacy v99 archive without changing storage. The first real pin
 bump requires a storage-version bump and a new immutable archive with a manifest pin.
-Every later pin change does too, including encoding-only changes. Run `mise schema:bump:api` for output-neutral
-storage changes, or `mise schema:bump` when indexed rows change. The build and ledger check reject
+Every later pin change does too, including encoding-only changes.
+Run `mise schema:bump:api` for output-neutral storage changes, or `mise schema:bump` when indexed rows
+change. The build and ledger check reject
 a current archive whose resolved pin differs from `config/versions.yaml`.
 
 Known limitation: during migration a new binary may serve an older active archive with its older

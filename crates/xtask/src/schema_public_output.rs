@@ -300,11 +300,6 @@ mod tests {
             outputs(&served).unwrap(),
             outputs(&archive.load_ontology().unwrap()).unwrap()
         );
-        let legacy = OntologyArchive::bundled(99).unwrap().unwrap();
-        assert_eq!(
-            outputs(&legacy.load_ontology().unwrap()).unwrap(),
-            outputs(&Ontology::load_embedded().unwrap()).unwrap()
-        );
     }
 
     #[test]

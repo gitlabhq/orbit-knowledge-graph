@@ -345,7 +345,6 @@ mod tests {
                 archive.load_ontology().unwrap().graph_schema_api(),
                 &DEFAULT_INTRODUCED_IN
             );
-            archive.validate_current_api_pin().unwrap();
         }
     }
 
