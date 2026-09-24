@@ -77,6 +77,26 @@ pub struct CodeReindexProgress {
     pub ready: bool,
 }
 
+impl CodeReindexProgress {
+    fn nothing_expected() -> Self {
+        Self::from_counts(0, 0)
+    }
+
+    fn from_counts(expected_projects: u64, reindexed_projects: u64) -> Self {
+        let reindexed_percent = if expected_projects == 0 {
+            100.0
+        } else {
+            reindexed_projects as f64 * 100.0 / expected_projects as f64
+        };
+
+        Self {
+            expected_projects,
+            reindexed_projects,
+            ready: reindexed_percent >= MIN_REINDEXED_CODE_PROJECTS_PERCENT,
+        }
+    }
+}
+
 pub async fn resolve_migration_scope(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
@@ -177,11 +197,7 @@ pub async fn check_code_reindex_progress(
         .iter()
         .any(|entity| entity.name == active_table);
     if !active_table_exists || enabled_paths.is_empty() {
-        return Ok(CodeReindexProgress {
-            expected_projects: 0,
-            reindexed_projects: 0,
-            ready: true,
-        });
+        return Ok(CodeReindexProgress::nothing_expected());
     }
 
     let batches = graph
@@ -202,20 +218,10 @@ pub async fn check_code_reindex_progress(
             .and_then(|batch| ArrowUtils::get_column::<UInt64Type>(batch, column, 0))
             .unwrap_or(0)
     };
-    let expected_projects = count("expected_projects");
-    let reindexed_projects = count("reindexed_projects");
-
-    let reindexed_percent = if expected_projects == 0 {
-        100.0
-    } else {
-        reindexed_projects as f64 * 100.0 / expected_projects as f64
-    };
-
-    Ok(CodeReindexProgress {
-        expected_projects,
-        reindexed_projects,
-        ready: reindexed_percent >= MIN_REINDEXED_CODE_PROJECTS_PERCENT,
-    })
+    Ok(CodeReindexProgress::from_counts(
+        count("expected_projects"),
+        count("reindexed_projects"),
+    ))
 }
 
 async fn namespace_ids_with_completed_plans(
