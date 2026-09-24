@@ -23,8 +23,8 @@ use crate::passes::hydrate::HydrationPlan;
 use crate::passes::lower::LoweredMetadata;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, project, relationships,
-    restrict, security, settings, validate,
+    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, relationships,
+    response_policy, restrict, security, settings, validate,
 };
 use crate::types::SecurityContext;
 
@@ -85,10 +85,14 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [input]
             mutates: [query_plan, node, lowered_metadata]
         }
-        post_lower {
-            reads_env: [ontology]
+        scope_requirements {
             reads_state: [input]
             mutates: [query_plan, node]
+        }
+        response_policy {
+            reads_env: [ontology]
+            reads_state: [input]
+            mutates: [node]
         }
         enforce {
             reads_state: [input]
@@ -130,27 +134,27 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             env: [ontology, security_ctx]
             state: [raw, input, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, post_lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, scope_requirements, response_policy, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             env: [ontology, security_ctx]
             state: [raw, input, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan, lower, post_lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan, lower, scope_requirements, response_policy, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan, lower, post_lower, enforce, settings, codegen]
+            phases: [restrict, plan, lower, scope_requirements, response_policy, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             env: [ontology]
             state: [raw, input, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan, lower, post_lower, enforce, duckdb_codegen]
+            phases: [json_dsl_parse, validate_local, normalize, plan, lower, scope_requirements, response_policy, enforce, duckdb_codegen]
         }
         duckdb_gql {
             env: [ontology]
             state: [raw, input, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan, lower, post_lower, enforce, duckdb_codegen]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, plan, lower, scope_requirements, response_policy, enforce, duckdb_codegen]
         }
         validate_normalize_gql {
             env: [ontology]
@@ -258,9 +262,8 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn post_lower(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let input = require(ctx.input().clone(), "input")?;
     let mut node = require(ctx.take_node(), "node")?;
     if let Node::Query(query) = &mut node {
         for requirement in &query_plan.scope_requirements {
@@ -271,8 +274,15 @@ fn post_lower(ctx: &mut impl CompilerCtx) -> Result<()> {
             });
         }
     }
-    project::apply_text_excerpts(&mut node, &input, ctx.ontology());
     ctx.set_query_plan(query_plan);
+    ctx.set_node(node);
+    Ok(())
+}
+
+fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().clone(), "input")?;
+    let mut node = require(ctx.take_node(), "node")?;
+    response_policy::apply_text_excerpts(&mut node, &input, ctx.ontology());
     ctx.set_node(node);
     Ok(())
 }
