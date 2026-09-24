@@ -25,7 +25,7 @@ pub enum CheckpointError {
 }
 
 #[derive(Debug, Clone)]
-pub struct CodeIndexingCheckpoint {
+pub struct CodeCheckpoint {
     pub traversal_path: TraversalPath,
     pub project_id: i64,
     pub branch: String,
@@ -36,17 +36,21 @@ pub struct CodeIndexingCheckpoint {
 
 #[async_trait]
 pub trait CodeCheckpointStore: Send + Sync {
-    async fn get_checkpoint(
+    async fn load(
         &self,
         traversal_path: &TraversalPath,
         project_id: i64,
         branch: &str,
-    ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError>;
+    ) -> Result<Option<CodeCheckpoint>, CheckpointError>;
 
-    async fn set_checkpoint(
+    async fn save_started(
         &self,
-        checkpoint: &CodeIndexingCheckpoint,
+        traversal_path: &TraversalPath,
+        project_id: i64,
+        branch: &str,
     ) -> Result<(), CheckpointError>;
+
+    async fn save_completed(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError>;
 }
 
 pub(crate) type CheckpointClient = Arc<ArrowClickHouseClient>;
@@ -65,7 +69,7 @@ impl ClickHouseCodeCheckpointStore {
         traversal_path: &TraversalPath,
         project_id: i64,
         branch: &str,
-    ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError> {
+    ) -> Result<Option<CodeCheckpoint>, CheckpointError> {
         let batch = match batches.into_iter().next() {
             Some(b) if b.num_rows() > 0 => b,
             _ => return Ok(None),
@@ -97,7 +101,7 @@ impl ClickHouseCodeCheckpointStore {
             .single()
             .ok_or(CheckpointError::InvalidTimestamp)?;
 
-        Ok(Some(CodeIndexingCheckpoint {
+        Ok(Some(CodeCheckpoint {
             traversal_path: traversal_path.clone(),
             project_id,
             branch: branch.to_string(),
@@ -110,12 +114,12 @@ impl ClickHouseCodeCheckpointStore {
 
 #[async_trait]
 impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
-    async fn get_checkpoint(
+    async fn load(
         &self,
         traversal_path: &TraversalPath,
         project_id: i64,
         branch: &str,
-    ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError> {
+    ) -> Result<Option<CodeCheckpoint>, CheckpointError> {
         let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let query = format!(
             r#"
@@ -127,7 +131,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             WHERE traversal_path = {{traversal_path:String}}
               AND project_id = {{project_id:Int64}}
               AND branch = {{branch:String}}
-            HAVING count() > 0
+            HAVING indexed_at IS NOT NULL
         "#
         );
 
@@ -144,10 +148,38 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
         Self::extract_checkpoint(batches, traversal_path, project_id, branch)
     }
 
-    async fn set_checkpoint(
+    async fn save_started(
         &self,
-        checkpoint: &CodeIndexingCheckpoint,
+        traversal_path: &TraversalPath,
+        project_id: i64,
+        branch: &str,
     ) -> Result<(), CheckpointError> {
+        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
+
+        self.client
+            .insert_query(&format!(
+                r#"
+                INSERT INTO {table}
+                (traversal_path, project_id, branch, last_task_id, indexed_at, attempts, is_default_branch, _version)
+                SELECT {{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, 0, NULL,
+                       argMax(attempts, _version) + 1, true, {{version:UInt64}}
+                FROM {table}
+                WHERE traversal_path = {{traversal_path:String}}
+                  AND project_id = {{project_id:Int64}}
+                  AND branch = {{branch:String}}
+                HAVING argMax(indexed_at, _version) IS NULL
+            "#
+            ))
+            .param("traversal_path", traversal_path.as_str())
+            .param("project_id", project_id)
+            .param("branch", branch)
+            .param("version", write_version())
+            .execute()
+            .await
+            .map_err(|e| CheckpointError::Query(e.to_string()))
+    }
+
+    async fn save_completed(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError> {
         let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_timestamp = checkpoint.indexed_at.format(TIMESTAMP_FORMAT).to_string();
 
@@ -155,8 +187,13 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .insert_query(&format!(
                 r#"
                 INSERT INTO {table}
-                (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at)
-                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{indexed_at:String}})
+                (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, attempts, is_default_branch, _version)
+                SELECT {{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}},
+                       {{last_commit:String}}, {{indexed_at:String}}, argMax(attempts, _version), true, {{version:UInt64}}
+                FROM {table}
+                WHERE traversal_path = {{traversal_path:String}}
+                  AND project_id = {{project_id:Int64}}
+                  AND branch = {{branch:String}}
             "#
             ))
             .param("traversal_path", checkpoint.traversal_path.as_str())
@@ -165,12 +202,17 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .param("last_task_id", checkpoint.last_task_id)
             .param("last_commit", checkpoint.last_commit.as_deref().unwrap_or_default())
             .param("indexed_at", formatted_timestamp)
+            .param("version", write_version())
             .execute()
             .await
             .map_err(|e| CheckpointError::Query(e.to_string()))?;
 
         Ok(())
     }
+}
+
+fn write_version() -> u64 {
+    Utc::now().timestamp_micros().unsigned_abs()
 }
 
 #[cfg(test)]
@@ -180,14 +222,26 @@ pub mod test_utils {
     use std::collections::HashMap;
 
     pub struct MockCodeCheckpointStore {
-        checkpoints: Mutex<HashMap<(TraversalPath, i64, String), CodeIndexingCheckpoint>>,
+        checkpoints: Mutex<HashMap<(TraversalPath, i64, String), CodeCheckpoint>>,
+        attempts: Mutex<HashMap<(TraversalPath, i64, String), i64>>,
     }
 
     impl MockCodeCheckpointStore {
         pub fn new() -> Self {
             Self {
                 checkpoints: Mutex::new(HashMap::new()),
+                attempts: Mutex::new(HashMap::new()),
             }
+        }
+
+        pub fn attempts(
+            &self,
+            traversal_path: &TraversalPath,
+            project_id: i64,
+            branch: &str,
+        ) -> i64 {
+            let key = (traversal_path.clone(), project_id, branch.to_string());
+            self.attempts.lock().get(&key).copied().unwrap_or_default()
         }
     }
 
@@ -199,22 +253,32 @@ pub mod test_utils {
 
     #[async_trait]
     impl CodeCheckpointStore for MockCodeCheckpointStore {
-        async fn get_checkpoint(
+        async fn load(
             &self,
             traversal_path: &TraversalPath,
             project_id: i64,
             branch: &str,
-        ) -> Result<Option<CodeIndexingCheckpoint>, CheckpointError> {
+        ) -> Result<Option<CodeCheckpoint>, CheckpointError> {
             let checkpoints = self.checkpoints.lock();
             Ok(checkpoints
                 .get(&(traversal_path.clone(), project_id, branch.to_string()))
                 .cloned())
         }
 
-        async fn set_checkpoint(
+        async fn save_started(
             &self,
-            checkpoint: &CodeIndexingCheckpoint,
+            traversal_path: &TraversalPath,
+            project_id: i64,
+            branch: &str,
         ) -> Result<(), CheckpointError> {
+            let key = (traversal_path.clone(), project_id, branch.to_string());
+            if !self.checkpoints.lock().contains_key(&key) {
+                *self.attempts.lock().entry(key).or_default() += 1;
+            }
+            Ok(())
+        }
+
+        async fn save_completed(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError> {
             let mut checkpoints = self.checkpoints.lock();
             checkpoints.insert(
                 (

@@ -145,7 +145,8 @@ fn projects_sql(project_table: &str, code_checkpoint_table: &str) -> String {
            FROM {code_checkpoint_table} AS c FINAL \
            INNER JOIN {project_table} AS p FINAL ON c.project_id = p.id \
           WHERE p._deleted = 0 AND startsWith(p.traversal_path, {{path:String}}) \
-            AND c._deleted = 0 AND startsWith(c.traversal_path, {{path:String}})"
+            AND c._deleted = 0 AND c.indexed_at IS NOT NULL \
+            AND startsWith(c.traversal_path, {{path:String}})"
     )
 }
 

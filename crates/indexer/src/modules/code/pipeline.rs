@@ -10,7 +10,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
-use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
+use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
@@ -107,7 +107,7 @@ impl WorkClock {
 struct ProjectCommit {
     remaining: AtomicUsize,
     failed: AtomicBool,
-    checkpoint: CodeIndexingCheckpoint,
+    checkpoint: CodeCheckpoint,
     store: Arc<dyn CodeCheckpointStore>,
     cleaner: Arc<dyn StaleDataCleaner>,
     inflight: Arc<AtomicUsize>,
@@ -147,7 +147,7 @@ impl ProjectCommit {
                 "failed to delete stale data, will retry on next indexing"
             );
         }
-        match self.store.set_checkpoint(cp).await {
+        match self.store.save_completed(cp).await {
             Ok(()) => info!(
                 project_id = cp.project_id,
                 task_id = cp.last_task_id,
@@ -377,7 +377,7 @@ impl CodeIndexer {
                 self.metrics.record_fetch_duration(fetch_start.elapsed());
                 // No rows to flush, so checkpoint directly rather than through the sink.
                 self.checkpoint_store
-                    .set_checkpoint(&CodeIndexingCheckpoint {
+                    .save_completed(&CodeCheckpoint {
                         traversal_path: request.traversal_path.clone(),
                         project_id: request.project_id,
                         branch: request.branch.clone(),
@@ -591,7 +591,7 @@ impl CodeIndexer {
         let commit = Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1),
             failed: AtomicBool::new(false),
-            checkpoint: CodeIndexingCheckpoint {
+            checkpoint: CodeCheckpoint {
                 traversal_path: request.traversal_path.clone(),
                 project_id: request.project_id,
                 branch: request.branch.clone(),
@@ -827,7 +827,7 @@ mod tests {
         Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1 + batches),
             failed: AtomicBool::new(false),
-            checkpoint: CodeIndexingCheckpoint {
+            checkpoint: CodeCheckpoint {
                 traversal_path: TraversalPath::new_unchecked("1/7/"),
                 project_id: 7,
                 branch: "main".into(),
@@ -863,7 +863,7 @@ mod tests {
         commit.clone().release();
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
@@ -874,7 +874,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -896,7 +896,7 @@ mod tests {
         assert!(cleaner.calls.lock().is_empty());
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -930,7 +930,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
@@ -981,7 +981,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),

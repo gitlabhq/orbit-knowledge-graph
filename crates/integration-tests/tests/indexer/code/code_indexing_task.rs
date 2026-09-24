@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use chrono::{TimeZone, Utc};
-use clickhouse_client::ClickHouseConfigurationExt;
+use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
 use indexer::modules::code::{
@@ -928,7 +928,7 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 }
 
 #[tokio::test]
-async fn empty_archive_with_commit_sha_nacks_without_checkpoint() {
+async fn failed_first_index_attempts_are_counted_until_the_project_indexes() {
     let project_id: i64 = 7;
     let traversal_path = "1/7/";
 
@@ -940,31 +940,53 @@ async fn empty_archive_with_commit_sha_nacks_without_checkpoint() {
 
     let mock = MockGitlabServer::start().await;
     mock.add_project_with_empty_archive(project_id, "main");
-
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
-    let context = handler_context();
-    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
 
-    let result = handler.handle(context, envelope).await;
-    assert!(
-        result.is_err(),
-        "a push-dispatched task hitting an empty archive must nack for retry, got {:?}",
-        result
+    for _ in 0..2 {
+        let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+        let result = handler.handle(handler_context(), envelope).await;
+        assert!(
+            result.is_err(),
+            "a push-dispatched task hitting an empty archive must nack for retry, got {result:?}"
+        );
+    }
+
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [2]);
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None
     );
 
-    let checkpoint_rows = clickhouse
+    mock.replace_archive(project_id, &[("src/Main.java", "public class Main {}")]);
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    handler
+        .handle(handler_context(), envelope)
+        .await
+        .expect("the next delivery indexes the project");
+    deps.pipeline.flush().await.expect("flush");
+
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(11)
+    );
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [3]);
+}
+
+async fn attempts(
+    clickhouse: &integration_testkit::TestContext,
+    traversal_path: &str,
+    project_id: i64,
+) -> Vec<i64> {
+    let result = clickhouse
         .query(&format!(
-            "SELECT last_task_id FROM {} FINAL \
+            "SELECT attempts FROM {} FINAL \
              WHERE traversal_path = '{traversal_path}' AND project_id = {project_id} \
              AND branch = 'main' AND _deleted = false",
             t("code_indexing_checkpoint")
         ))
         .await;
-    assert!(
-        checkpoint_rows.first().is_none_or(|b| b.num_rows() == 0),
-        "no checkpoint may be written when the empty archive races a push"
-    );
+    i64::extract_column(&result, 0).expect("attempts")
 }
 
 /// Verifies that stale edge cleanup is scoped to the specific project+branch
@@ -1389,7 +1411,7 @@ async fn latest_checkpoint_task_id(
         .query(&format!(
             "SELECT last_task_id FROM {} FINAL \
              WHERE traversal_path = '{traversal_path}' AND project_id = {project_id} \
-             AND branch = '{branch}' AND _deleted = false",
+             AND branch = '{branch}' AND indexed_at IS NOT NULL AND _deleted = false",
             t("code_indexing_checkpoint")
         ))
         .await;

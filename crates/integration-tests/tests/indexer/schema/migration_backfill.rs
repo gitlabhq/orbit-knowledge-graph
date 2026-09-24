@@ -434,7 +434,8 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         .execute(&format!(
             "INSERT INTO {table} \
              (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at) \
-             VALUES ('1/100/11/', 11, 'main', 0, 'sha', now())"
+             VALUES ('1/100/11/', 11, 'main', 0, 'sha', now()), \
+                    ('1/100/12/', 12, 'main', 0, '', NULL)"
         ))
         .await;
 

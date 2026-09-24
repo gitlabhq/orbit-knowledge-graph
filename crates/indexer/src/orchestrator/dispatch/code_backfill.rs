@@ -31,6 +31,7 @@ const CHECKPOINTED_PROJECT_IDS_QUERY: &str = r#"
 SELECT DISTINCT project_id
 FROM {table:Identifier} FINAL
 WHERE _deleted = false
+  AND indexed_at IS NOT NULL
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
