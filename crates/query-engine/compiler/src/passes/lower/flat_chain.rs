@@ -112,9 +112,9 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
 /// Emitted alongside the broad authorization filter so ClickHouse can seek the
 /// edge PK to the project's contiguous range instead of the whole org.
 fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
-    hop.scope_prefix
+    hop.scope_proof
         .as_ref()
-        .map(|scope| scope.predicate(alias))
+        .map(|scope| crate::scope::scope_predicate(scope, alias))
 }
 
 #[allow(clippy::too_many_arguments)]

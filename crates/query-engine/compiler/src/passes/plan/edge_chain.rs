@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::scope::ScopePrefix;
+use crate::scope::ScopeProof;
 use ontology::constants::*;
 
 use crate::input::*;
@@ -24,9 +24,8 @@ pub struct Hop {
     pub filters: Vec<(String, InputFilter)>,
     /// None for the first hop (it's the initial FROM).
     pub join_prev: Option<JoinColumns>,
-    /// Tight `traversal_path` prefix to confine this hop's edge scan to,
-    /// carried over from the originating `InputRelationship`.
-    pub scope_prefix: Option<ScopePrefix>,
+    /// Logical proof that this hop can use the anchored traversal scope.
+    pub scope_proof: Option<ScopeProof>,
     /// Whether this hop keeps both endpoints in the same namespace (intrinsic
     /// child). Gates the FK-chain lowering, which is only result-equivalent to
     /// the edge scan for such relationships.
@@ -282,7 +281,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 scope_preserving: rel.scope_preserving,
                 filters: crate::passes::shared::ordered_filters(&rel.filters),
                 join_prev: None,
-                scope_prefix: rel.scope_prefix.clone(),
+                scope_proof: rel.scope_proof.clone(),
                 cascade_anchor: false,
             }
         })
@@ -362,7 +361,7 @@ fn elide_hops(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
     input: &Input,
-) -> (Vec<Hop>, Vec<(String, String, String)>, Vec<ScopePrefix>) {
+) -> (Vec<Hop>, Vec<(String, String, String)>, Vec<ScopeProof>) {
     let mut keep_hops = Vec::new();
     let mut elided_fks = Vec::new();
     let mut scope_requirements = Vec::new();
@@ -379,14 +378,14 @@ fn elide_hops(
         if sole_non_fk
             && hop.fk.is_none()
             && hop.scope_preserving
-            && hop.scope_prefix.is_some()
+            && hop.scope_proof.is_some()
             && hop.filters.is_empty()
             && let Some(anchor) = [hop.from_node.as_str(), hop.to_node.as_str()]
                 .into_iter()
                 .find(|a| is_pure_scope_anchor(a, nodes, input, &hop_count))
                 .map(str::to_string)
         {
-            scope_requirements.extend(hop.scope_prefix.clone());
+            scope_requirements.extend(hop.scope_proof.clone());
             nodes.remove(&anchor);
             continue;
         }
@@ -822,7 +821,7 @@ mod tests {
             }),
             filters: Vec::new(),
             join_prev: None,
-            scope_prefix: None,
+            scope_proof: None,
             scope_preserving,
             cascade_anchor: false,
         }

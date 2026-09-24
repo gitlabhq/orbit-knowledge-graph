@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
-use ontology::{Ontology, ScopeEdge, TraversalPathKind, TraversalPathLookup};
+use ontology::{Ontology, ScopeEdge, TraversalPathKind};
 
 use crate::ast::{ChType, Expr, Op, Query, SelectExpr, TableRef};
 use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
@@ -9,40 +9,63 @@ use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
 const LOOKUP_ALIAS: &str = "_scope";
 const UNRESOLVED_PATH: &str = "0/";
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
+
 #[derive(Debug, Clone, PartialEq)]
-pub struct ScopePrefix(Vec<Expr>);
+pub struct ScopeProof(Vec<ScopeSource>);
 
-impl ScopePrefix {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ScopeSource {
+    Literal(String),
+    Lookup {
+        source_table: String,
+        key_column: String,
+        value: PathScopeId,
+    },
+}
+
+impl ScopeProof {
     pub fn literal(path: &str) -> Self {
-        Self(vec![Expr::string(path)])
-    }
-
-    pub fn predicate(&self, alias: &str) -> Expr {
-        let matches = self.0.iter().map(|path| {
-            Some(Expr::func(
-                "startsWith",
-                vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path.clone()],
-            ))
-        });
-        let unresolved = self
-            .0
-            .iter()
-            .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
-        Expr::or_all(matches.chain(unresolved)).expect("scope prefix has at least one path")
-    }
-
-    pub fn resolved(&self) -> Expr {
-        Expr::and_all(self.0.iter().map(|path| {
-            Some(Expr::binary(
-                Op::Ne,
-                path.clone(),
-                Expr::string(UNRESOLVED_PATH),
-            ))
-        }))
-        .expect("scope prefix has at least one path")
+        Self(vec![ScopeSource::Literal(path.to_string())])
     }
 }
-pub fn derive_scope_prefixes(input: &Input, ontology: &Ontology) -> HashMap<String, ScopePrefix> {
+
+pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
+    let values: Vec<Expr> = proof.0.iter().map(scope_value_expr).collect();
+    let matches = values.iter().map(|path| {
+        Some(Expr::func(
+            "startsWith",
+            vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path.clone()],
+        ))
+    });
+    let unresolved = values
+        .iter()
+        .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
+    Expr::or_all(matches.chain(unresolved)).expect("scope proof has at least one source")
+}
+
+pub fn resolved_scope_guard(proof: &ScopeProof) -> Expr {
+    Expr::and_all(proof.0.iter().map(|source| {
+        Some(Expr::binary(
+            Op::Ne,
+            scope_value_expr(source),
+            Expr::string(UNRESOLVED_PATH),
+        ))
+    }))
+    .expect("scope proof has at least one source")
+}
+
+fn scope_value_expr(source: &ScopeSource) -> Expr {
+    match source {
+        ScopeSource::Literal(path) => Expr::string(path),
+        ScopeSource::Lookup {
+            source_table,
+            key_column,
+            value,
+        } => lookup_expr(source_table, key_column, value),
+    }
+}
+
+pub fn derive_scope_proofs(input: &Input, ontology: &Ontology) -> HashMap<String, ScopeProof> {
     if !matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Aggregation
@@ -50,27 +73,31 @@ pub fn derive_scope_prefixes(input: &Input, ontology: &Ontology) -> HashMap<Stri
         return HashMap::new();
     }
     let anchor_fks = ontology.anchor_fk_mappings();
-    let seed: HashMap<String, ScopePrefix> = input
+    let seed: HashMap<String, ScopeProof> = input
         .nodes
         .iter()
         .filter_map(|node| {
-            let lookups: Vec<Expr> = scope_keys(node, &anchor_fks)
+            let lookups: Vec<ScopeSource> = scope_keys(node, &anchor_fks)
                 .into_iter()
                 .filter_map(|key| {
                     ontology
                         .traversal_path_lookup(&key.entity, key.kind)
-                        .map(|spec| lookup_expr(spec, &key.value))
+                        .map(|spec| ScopeSource::Lookup {
+                            source_table: spec.source_table.clone(),
+                            key_column: spec.key_column.clone(),
+                            value: key.value,
+                        })
                 })
                 .collect();
             (1..=MAX_LOOKUPS_PER_ALIAS)
                 .contains(&lookups.len())
-                .then(|| (node.id.clone(), ScopePrefix(lookups)))
+                .then(|| (node.id.clone(), ScopeProof(lookups)))
         })
         .collect();
     ontology.propagate_scope_prefixes(&scope_edges(input), &seed)
 }
 
-fn lookup_expr(spec: &TraversalPathLookup, value: &PathScopeId) -> Expr {
+fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
     let key = match value {
         PathScopeId::Numeric(id) => Expr::param(ChType::Int64, *id),
         PathScopeId::Text(text) => Expr::param(ChType::String, text.clone()),
@@ -100,8 +127,8 @@ fn lookup_expr(spec: &TraversalPathLookup, value: &PathScopeId) -> Expr {
     );
     Expr::Scalar(Box::new(Query {
         select: vec![SelectExpr::new(path, TRAVERSAL_PATH_COLUMN)],
-        from: TableRef::scan(&spec.source_table, LOOKUP_ALIAS),
-        where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, &spec.key_column), key)),
+        from: TableRef::scan(source_table, LOOKUP_ALIAS),
+        where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, key_column), key)),
         ..Default::default()
     }))
 }

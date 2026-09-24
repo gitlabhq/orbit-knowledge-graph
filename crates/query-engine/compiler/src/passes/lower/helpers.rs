@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::scope::ScopePrefix;
+use crate::scope::{ScopeProof, scope_predicate};
 use ontology::constants::*;
 
 use crate::ast::*;
@@ -539,7 +539,7 @@ pub(super) fn build_multi_hop_union(
                 end_type_col,
                 hop.direction,
                 &type_filter,
-                hop.scope_prefix.as_ref(),
+                hop.scope_proof.as_ref(),
             )
         })
         .collect();
@@ -576,9 +576,10 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
-    scope_prefix: Option<&ScopePrefix>,
+    scope_proof: Option<&ScopeProof>,
 ) -> Query {
-    let scope_pred = |alias: &str| -> Option<Expr> { scope_prefix.map(|s| s.predicate(alias)) };
+    let scope_pred =
+        |alias: &str| -> Option<Expr> { scope_proof.map(|s| scope_predicate(s, alias)) };
 
     let mut from = TableRef::scan(edge_table, "e1");
     let mut where_parts = Vec::new();

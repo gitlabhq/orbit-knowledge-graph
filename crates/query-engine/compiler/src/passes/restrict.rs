@@ -199,11 +199,9 @@ fn validate_traversal_path_within_scope(
 /// only hold rows under that scope; scoping it is lossless and restores the
 /// edge PK prefix that the broad org-wide authorization filter erases (#601941).
 ///
-/// The per-alias prefixes come from [`crate::scope::derive_scope_prefixes`];
-/// they are kept on `input.compiler.scope_prefixes` for the security pass,
-/// which scopes the node-table scans. This stamps the edges the lowerer emits.
-fn stamp_edge_scope_prefixes(input: &mut Input, ontology: &Ontology) {
-    let node_prefix = crate::scope::derive_scope_prefixes(input, ontology);
+/// The per-alias proofs come from [`crate::scope::derive_scope_proofs`].
+fn stamp_edge_scope_proofs(input: &mut Input, ontology: &Ontology) {
+    let node_prefix = crate::scope::derive_scope_proofs(input, ontology);
     if node_prefix.is_empty() {
         return;
     }
@@ -221,7 +219,7 @@ fn stamp_edge_scope_prefixes(input: &mut Input, ontology: &Ontology) {
         if let (Some(pf), Some(pt)) = (pf, pt)
             && pf == pt
         {
-            rel.scope_prefix = Some(pf.clone());
+            rel.scope_proof = Some(pf.clone());
             continue;
         }
 
@@ -238,12 +236,12 @@ fn stamp_edge_scope_prefixes(input: &mut Input, ontology: &Ontology) {
                 _ => continue,
             };
             if let Some(prefix) = named {
-                rel.scope_prefix = Some(prefix.clone());
+                rel.scope_proof = Some(prefix.clone());
                 break;
             }
         }
     }
-    input.compiler.scope_prefixes = node_prefix;
+    input.compiler.scope_proofs = node_prefix;
 }
 
 /// Mark each relationship whose every resolved variant keeps both endpoints in
@@ -273,7 +271,7 @@ pub fn restrict(
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     enforce_traversal_path_filters(input, ontology, security_ctx)?;
-    stamp_edge_scope_prefixes(input, ontology);
+    stamp_edge_scope_proofs(input, ontology);
     stamp_scope_preserving(input, ontology);
 
     if security_ctx.admin {
@@ -425,7 +423,7 @@ mod tests {
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
             fk_column: None,
-            scope_prefix: None,
+            scope_proof: None,
             scope_preserving: false,
         }
     }
@@ -1217,7 +1215,7 @@ mod tests {
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
             fk_column: None,
-            scope_prefix: None,
+            scope_proof: None,
             scope_preserving: false,
         }
     }
@@ -1245,13 +1243,13 @@ mod tests {
             ..Input::default()
         };
         restrict(&mut input, &ont, &ctx).expect("restrict ok");
-        let mr_prefix = input.compiler.scope_prefixes.get("mr").cloned();
+        let mr_prefix = input.compiler.scope_proofs.get("mr").cloned();
         assert!(
             mr_prefix.is_some(),
             "pinned MergeRequest derives a scope prefix"
         );
         assert_eq!(
-            input.relationships[0].scope_prefix, mr_prefix,
+            input.relationships[0].scope_proof, mr_prefix,
             "prune_to_target must stamp the edge from the pinned target prefix"
         );
     }
@@ -1289,20 +1287,20 @@ mod tests {
         restrict(&mut input, &ont, &ctx).expect("restrict ok");
 
         assert_eq!(
-            input.relationships[0].scope_prefix,
-            input.compiler.scope_prefixes.get("mr_a").cloned(),
+            input.relationships[0].scope_proof,
+            input.compiler.scope_proofs.get("mr_a").cloned(),
             "edge adjacent to pinned mr_a must be scoped"
         );
-        assert!(input.relationships[0].scope_prefix.is_some());
+        assert!(input.relationships[0].scope_proof.is_some());
 
         assert!(
-            input.relationships[1].scope_prefix.is_none(),
+            input.relationships[1].scope_proof.is_none(),
             "edge to unpinned mr_b must NOT inherit mr_a's prefix; got {:?}",
-            input.relationships[1].scope_prefix
+            input.relationships[1].scope_proof
         );
 
         assert!(
-            !input.compiler.scope_prefixes.contains_key("mr_b"),
+            !input.compiler.scope_proofs.contains_key("mr_b"),
             "mr_b must remain unpinned"
         );
     }

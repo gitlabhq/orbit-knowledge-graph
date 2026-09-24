@@ -267,7 +267,7 @@ fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut node = require(ctx.take_node(), "node")?;
     if let Node::Query(query) = &mut node {
         for requirement in &query_plan.scope_requirements {
-            let guard = requirement.resolved();
+            let guard = crate::scope::resolved_scope_guard(requirement);
             query.where_clause = Some(match query.where_clause.take() {
                 Some(existing) => crate::ast::Expr::and(existing, guard),
                 None => guard,
@@ -304,7 +304,7 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     let ontology = ctx.ontology().clone();
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().as_ref(), "input")?;
-    let security_ctx = security_ctx.with_scope_prefixes(input.compiler.scope_prefixes.clone());
+    let security_ctx = security_ctx.with_scope_proofs(input.compiler.scope_proofs.clone());
     security::apply_security_context(&mut node, &security_ctx, &ontology)?;
     ctx.set_node(node);
     Ok(())

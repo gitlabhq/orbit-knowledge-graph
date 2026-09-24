@@ -35,7 +35,7 @@ pub struct Plan {
     pub table_columns: HashMap<String, HashSet<String>>,
     /// ORDER BY columns per table. Used by the lowerer for LIMIT BY dedup.
     pub table_sort_keys: HashMap<String, Vec<String>>,
-    pub scope_requirements: Vec<crate::scope::ScopePrefix>,
+    pub scope_requirements: Vec<crate::scope::ScopeProof>,
     pub body: PlanBody,
 }
 
