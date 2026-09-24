@@ -83,6 +83,10 @@ Gotchas:
   returns zero rows.
 - The graph holds every indexed checkout. `sql` scopes to the current commit,
   and `--all` spans them all. Re-index after you check out a different commit.
+- An empty result does not prove that code is absent. The index can be stale
+  or miss a language, so verify critical findings in source.
+- If `orbit list` shows no index for the repository, ask before you run
+  `orbit index .`.
 
 ## References
 
