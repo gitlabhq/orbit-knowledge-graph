@@ -59,7 +59,7 @@ entities:
       - { name: extension, type: Utf8, from: split_last("/")|split_last(".") }
       - { name: language, type: Utf8, from: tag("language") }
       - { name: size_bytes, type: Int64, position: end_byte }
-      - { name: reason, type: Utf8, const: "" }
+      - { name: reason, type: Utf8, from: tag("reason") }
 
   Definition:
     source: __def

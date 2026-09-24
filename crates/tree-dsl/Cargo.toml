@@ -48,6 +48,7 @@ pest_derive = { workspace = true }
 pest_consume = { workspace = true }
 arrow = { workspace = true }
 ontology = { path = "../ontology" }
+code-graph = { path = "../code-graph" }
 orbit-utils = { path = "../utils" }
 
 

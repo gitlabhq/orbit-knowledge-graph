@@ -1,8 +1,8 @@
 //! A typed pipeline: `Pipeline<T>` carries one artifact, and `then` swaps
 //! it for the next by running a `Phase`. Which phases apply is decided by
 //! the artifact's type, so a caller cannot resolve before linking or export
-//! before display. `index` and `reindex` are the two common orders; the
-//! runner itself knows nothing about files, trees, or graphs.
+//! before display. The runner knows nothing about files, trees, or graphs;
+//! `phases` holds those and `crate::templates` names the common orders.
 
 pub mod phases;
 mod state;
@@ -16,35 +16,6 @@ use std::time::{Duration, Instant};
 use crate::env::Env;
 use crate::error::Error;
 use crate::sentinel::{Killed, Sentinel};
-
-/// Every parseable source through parse, rewrite, link and cross-file
-/// resolution. Sources are pulled as workers free up, so a lazy iterator
-/// keeps only the files in flight in memory.
-pub fn index<'e, S>(context: Context<'e>, sources: S) -> Result<Pipeline<'e, Resolved>, Error>
-where
-    S: IntoIterator<Item = SourceFile>,
-    S::IntoIter: Send + 'static,
-{
-    Pipeline::new(context, sources.into_iter())
-        .then(Prepare)?
-        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
-        .then(Insert)?
-        .then(Resolve)
-}
-
-/// Only the changed files go through the per-file phases; resolution
-/// revisits them and everything that depended on what they replaced.
-pub fn reindex<'e>(
-    context: Context<'e>,
-    state: State,
-    changes: Changes,
-) -> Result<Pipeline<'e, Resolved>, Error> {
-    Pipeline::new(context, ReindexInput { state, changes })
-        .then(Remap)?
-        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
-        .then(Insert)?
-        .then(Resolve)
-}
 
 pub struct Pipeline<'e, T> {
     context: Context<'e>,

@@ -9,6 +9,7 @@ test-runner = ["dep:tree-dsl-tests"]
 
 [dependencies]
 tree-dsl = { path = "../tree-dsl" }
+orbit-utils = { path = "../utils" }
 tree-dsl-tests = { path = "../tree-dsl-tests", optional = true }
 clap = { workspace = true }
 dirs = { workspace = true }

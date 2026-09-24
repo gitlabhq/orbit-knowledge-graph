@@ -10,6 +10,4 @@ integration-tests-codegraph = { path = "../integration-tests-codegraph" }
 ontology = { path = "../ontology" }
 orbit-utils = { path = "../utils" }
 walkdir = { workspace = true }
-
-[dev-dependencies]
 tempfile = { workspace = true }

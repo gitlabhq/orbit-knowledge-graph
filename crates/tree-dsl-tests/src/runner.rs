@@ -3,19 +3,22 @@ use std::sync::Arc;
 use integration_tests_codegraph::assertions::{FixtureFile, Severity, TestCase, TestSuite};
 use integration_tests_codegraph::{Failure, create_test_db, run_suite};
 use ontology::Ontology;
-use tree_dsl::pipeline::{self, Changes, Display, Emit, Export, Resolved, SourceFile};
+use std::path::Path;
+
+use tree_dsl::pipeline::{Changes, Display, Emit, Export, Resolved};
 use tree_dsl::treesitter::SupportLang;
 use tree_dsl::{Context, Env, Envelope, Pipeline, Scalar, State};
+use tree_dsl::{inventory, templates};
 
-fn detect_lang(suite: &TestSuite, fixtures: &[(String, String)]) -> SupportLang {
+fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
     if let Some(ref p) = suite.pipeline
         && let Some(lang) = SupportLang::from_alias(p)
     {
         return lang;
     }
-    let langs: std::collections::HashSet<_> = fixtures
+    let langs: std::collections::HashSet<_> = paths
         .iter()
-        .filter_map(|(path, _)| SupportLang::from_path(path))
+        .filter_map(|path| SupportLang::from_path(path))
         .collect();
     match langs.len() {
         1 => *langs.iter().next().unwrap(),
@@ -33,46 +36,37 @@ fn workspace_root() -> std::path::PathBuf {
     std::path::PathBuf::from(String::from_utf8(out.stdout).unwrap().trim())
 }
 
-fn load_fixture_dir(dir: &str) -> Vec<(String, String)> {
-    let src = workspace_root().join(dir);
-    assert!(src.is_dir(), "fixture_dir not found: {}", src.display());
-    let mut files: Vec<(String, String)> = walkdir::WalkDir::new(&src)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-        .filter_map(|e| {
-            let rel = e
-                .path()
-                .strip_prefix(&src)
-                .ok()?
-                .to_string_lossy()
-                .replace('\\', "/");
-            let content = std::fs::read_to_string(e.path()).ok()?;
-            Some((rel, content))
-        })
-        .collect();
-    files.sort();
-    files
-}
-
-fn suite_fixtures(suite: &TestSuite) -> Vec<(String, String)> {
-    let mut files = match &suite.fixture_dir {
-        Some(dir) => load_fixture_dir(dir),
-        None => Vec::new(),
-    };
-    for f in &suite.fixtures {
-        files.retain(|(p, _)| p != &f.path);
-        files.push((f.path.clone(), f.content.clone()));
+/// The suite's files on disk, as a repository: `fixture_dir` copied in,
+/// inline fixtures written over it. Returns the relative paths written.
+fn write_fixtures(suite: &TestSuite, root: &Path) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Some(dir) = &suite.fixture_dir {
+        let src = workspace_root().join(dir);
+        assert!(src.is_dir(), "fixture_dir not found: {}", src.display());
+        for entry in walkdir::WalkDir::new(&src)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+        {
+            let rel = entry.path().strip_prefix(&src).unwrap();
+            let dst = root.join(rel);
+            std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+            std::fs::copy(entry.path(), &dst).unwrap();
+            paths.push(rel.to_string_lossy().replace('\\', "/"));
+        }
     }
-    files
+    paths.extend(write_files(&suite.fixtures, root));
+    paths
 }
 
-pub fn sources(files: &[FixtureFile]) -> Vec<SourceFile> {
+pub fn write_files(files: &[FixtureFile], root: &Path) -> Vec<String> {
     files
         .iter()
-        .map(|f| SourceFile {
-            path: f.path.clone(),
-            content: f.content.clone(),
+        .map(|f| {
+            let dst = root.join(&f.path);
+            std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+            std::fs::write(&dst, &f.content).unwrap();
+            f.path.clone()
         })
         .collect()
 }
@@ -123,16 +117,17 @@ pub fn run_yaml_suite(yaml: &str) {
         return;
     }
 
-    let fixtures = suite_fixtures(&suite);
-    let lang_id = detect_lang(&suite, &fixtures);
+    let repo = tempfile::tempdir().expect("temp repository");
+    let paths = write_fixtures(&suite, repo.path());
+    let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
     let env = Env::for_lang(lang_id).expect("rules compile");
 
-    let graph = pipeline::index(
-        Context::new(&env),
-        fixtures.into_iter().map(SourceFile::from),
-    )
-    .expect("suite exceeded the total budget");
+    let inventory = inventory::walk(repo.path())
+        .expect("walk fixtures")
+        .to_vec();
+    let graph = templates::index(Context::new(&env), repo.path(), inventory)
+        .expect("suite exceeded the total budget");
     let skipped = &graph.context().report.skipped;
     assert!(
         skipped.is_empty(),
@@ -144,12 +139,16 @@ pub fn run_yaml_suite(yaml: &str) {
     let mut total_skipped = suite.tests.iter().filter(|t| t.skip).count();
 
     for step in &suite.steps {
+        for removed in &step.remove {
+            std::fs::remove_file(repo.path().join(removed)).ok();
+        }
+        let mut changed = write_files(&step.add, repo.path());
+        changed.extend(write_files(&step.modify, repo.path()));
         let changes = Changes {
-            added: sources(&step.add),
-            modified: sources(&step.modify),
+            changed: inventory::classify(repo.path(), changed),
             removed: step.remove.clone(),
         };
-        let graph = pipeline::reindex(Context::new(&env), state, changes)
+        let graph = templates::reindex(Context::new(&env), state, repo.path(), changes)
             .expect("suite exceeded the total budget");
         let (next, failures) = check(graph, &ontology, &step.tests);
         state = next;

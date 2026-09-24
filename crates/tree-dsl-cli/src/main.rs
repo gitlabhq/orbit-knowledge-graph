@@ -3,13 +3,16 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
+use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
 use tree_dsl::pipeline::{
-    self, Display, Each, ItemPhase, Observer, Parse, Rewrite, SourceFile, Workset,
+    Canonicalize, Display, Each, Insert, ItemPhase, Link, Observer, Parse, Resolve, Rewrite,
+    SourceFile, Workset,
 };
 use tree_dsl::sentinel::Limits;
 use tree_dsl::tree::EdgeKind;
 use tree_dsl::treesitter::SupportLang;
 use tree_dsl::{Context, Env, Pipeline, State};
+use tree_dsl::{inventory, templates};
 
 #[derive(Parser)]
 #[command(name = "tree-dsl", about = "Code indexing CLI")]
@@ -146,19 +149,31 @@ fn cmd_parse(
     let context = Context::new(&env);
     match stage {
         Stage::Cst => {
-            let parsed = inspect(context, source, Parse)?;
+            let parsed = first(inspect(context, source, Parse)?)?;
             print_tree(&parsed.0, &env.lang);
         }
         Stage::Ast => {
-            let rewritten = inspect(context, source, Parse.pipe(Rewrite))?;
+            let rewritten = first(inspect(context, source, Parse.pipe(Rewrite))?)?;
             print_tree(&rewritten.0, &env.lang);
         }
         Stage::Ssa => {
-            let state = pipeline::index(context, vec![source])?.into_value().state;
+            let linked = inspect(
+                context,
+                source,
+                Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link),
+            )?;
+            let state = linked.then(Insert)?.then(Resolve)?.into_value().state;
             print_graph(&state, &env.lang);
         }
         Stage::Display => {
-            let state = pipeline::index(context, vec![source])?
+            let linked = inspect(
+                context,
+                source,
+                Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link),
+            )?;
+            let state = linked
+                .then(Insert)?
+                .then(Resolve)?
                 .then(Display)?
                 .into_value()
                 .state;
@@ -168,14 +183,14 @@ fn cmd_parse(
     Ok(())
 }
 
-fn print_graph(state: &State, lang: &tree_dsl::intern::Lang) {
-    print_tree(&state.trees[0], lang);
-    print_edges(&state.trees[0], &state.edges, lang);
-}
-
-/// One file through the given per-file steps, with no corpus filtering: the
-/// user named this file, so it is parsed with the language they chose.
-fn inspect<P>(context: Context<'_>, source: SourceFile, steps: P) -> anyhow::Result<P::Output>
+/// One in-memory file through the given per-file steps, with no repository
+/// walk: the user named this file, so it is parsed with the language they
+/// chose.
+fn inspect<'e, P>(
+    context: Context<'e>,
+    source: SourceFile,
+    steps: P,
+) -> anyhow::Result<Pipeline<'e, Workset<Vec<P::Output>>>>
 where
     P: ItemPhase<SourceFile> + Sync,
     P::Output: Send,
@@ -184,14 +199,23 @@ where
         state: State::new(context.env),
         items: vec![source],
         dirty: Default::default(),
-        manifests: Default::default(),
+        listed: Default::default(),
     };
-    let (context, workset) = Pipeline::new(context, workset).then(Each(steps))?.finish();
+    Ok(Pipeline::new(context, workset).then(Each(steps))?)
+}
+
+fn first<T>(pipeline: Pipeline<'_, Workset<Vec<T>>>) -> anyhow::Result<T> {
+    let (context, workset) = pipeline.finish();
     workset
         .items
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("{}", context.report.skipped[0]))
+}
+
+fn print_graph(state: &State, lang: &tree_dsl::intern::Lang) {
+    print_tree(&state.trees[0], lang);
+    print_edges(&state.trees[0], &state.edges, lang);
 }
 
 fn cmd_rewrite(
@@ -339,48 +363,73 @@ fn edge_name(kind: EdgeKind) -> &'static str {
 fn cmd_index(path: &str, lang_override: Option<String>, no_save: bool) -> anyhow::Result<()> {
     let t0 = Instant::now();
     let root = Path::new(path);
-    let paths = collect_paths(root);
+    let t_walk = Instant::now();
+    let (root, inventory) = if root.is_dir() {
+        (root.to_path_buf(), inventory::walk(root)?.to_vec())
+    } else {
+        let parent = root.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let name = root
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("{path} has no file name"))?
+            .to_string_lossy()
+            .to_string();
+        (parent.clone(), inventory::classify(&parent, [name]))
+    };
+    eprintln!(
+        "walk          {} files, {} to parse  {:.2}s",
+        inventory.len(),
+        inventory
+            .iter()
+            .filter(|e| e.decision == Decision::Parse)
+            .count(),
+        t_walk.elapsed().as_secs_f64()
+    );
 
     // One graph per pipeline; a repo mixing Python and TypeScript gets two.
-    let mut by_lang: std::collections::BTreeMap<String, (SupportLang, Vec<String>)> =
+    // Files that are not parsed belong to the repository, not a language,
+    // so the first pipeline records them.
+    let mut by_lang: std::collections::BTreeMap<String, (SupportLang, Vec<FileInventoryEntry>)> =
         Default::default();
-    for rel in paths {
-        let lang = resolve_lang(lang_override.as_deref(), Some(&rel)).pipeline();
-        by_lang
-            .entry(format!("{lang:?}"))
-            .or_insert_with(|| (lang, Vec::new()))
-            .1
-            .push(rel);
+    let mut unparsed = Vec::new();
+    for entry in inventory {
+        let lang = SupportLang::from_path(&entry.path).map(|l| l.pipeline());
+        match (entry.decision, lang) {
+            (Decision::Parse, Some(lang)) => {
+                let lang = lang_override
+                    .as_deref()
+                    .and_then(SupportLang::from_alias)
+                    .unwrap_or(lang);
+                by_lang
+                    .entry(format!("{lang:?}"))
+                    .or_insert_with(|| (lang, Vec::new()))
+                    .1
+                    .push(entry);
+            }
+            _ => unparsed.push(entry),
+        }
+    }
+    if let Some((_, entries)) = by_lang.values_mut().next() {
+        entries.append(&mut unparsed);
     }
 
     let graphs_dir = dirs::home_dir()
         .unwrap_or_else(|| Path::new(".").to_path_buf())
         .join(".orbit/var/graphs");
-    let repo = root
+    let repo = Path::new(path)
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("{path} has no file name"))?
         .to_string_lossy()
         .to_string();
-    let base = if root.is_dir() {
-        root.to_path_buf()
-    } else {
-        root.parent().unwrap_or(Path::new(".")).to_path_buf()
-    };
 
     // Pipelines are independent graphs; one pipeline's serial resolve phases
     // overlap another's parallel parse.
     use rayon::prelude::*;
     let reports: Vec<anyhow::Result<Summary>> = by_lang
         .into_par_iter()
-        .map(|(name, (lang_id, paths))| {
+        .map(|(name, (lang_id, entries))| {
             let env = Env::for_lang(lang_id)?;
-            let base = base.clone();
-            let sources = paths.into_iter().filter_map(move |rel| {
-                let content = std::fs::read_to_string(base.join(&rel)).ok()?;
-                Some(SourceFile { path: rel, content })
-            });
             let context = Context::new(&env).observe(Progress(name.clone()));
-            let (context, resolved) = pipeline::index(context, sources)
+            let (context, resolved) = templates::index(context, &root, entries)
                 .map_err(|e| anyhow::anyhow!("{e}"))?
                 .finish();
             let state = resolved.state;
@@ -481,36 +530,6 @@ impl Summary {
             edges: state.edges.len(),
         }
     }
-}
-
-/// Relative paths of every parseable file under `root`, or `root` itself.
-fn collect_paths(root: &Path) -> Vec<String> {
-    if root.is_file() {
-        return vec![
-            root.file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-        ];
-    }
-    walkdir::WalkDir::new(root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .map(|e| e.into_path())
-        .filter(|p| {
-            p.is_file()
-                && p.extension()
-                    .and_then(|e| e.to_str())
-                    .and_then(SupportLang::from_extension)
-                    .is_some()
-        })
-        .map(|p| {
-            p.strip_prefix(root)
-                .unwrap_or(&p)
-                .to_string_lossy()
-                .to_string()
-        })
-        .collect()
 }
 
 #[cfg(feature = "test-runner")]

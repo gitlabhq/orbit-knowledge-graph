@@ -1,12 +1,12 @@
-//! The sentinel end to end: a file that overruns its budget is dropped from
-//! the graph while the rest of the run completes, and a run that overruns
-//! the total budget stops.
+//! The sentinel end to end: a file that overruns its budget keeps its
+//! `File` row, tagged with why, and nothing else, while the rest of the run
+//! completes; a run that overruns the total budget stops.
 
 use tree_dsl::error::Error;
-use tree_dsl::pipeline;
 use tree_dsl::sentinel::{Killed, Limits};
 use tree_dsl::treesitter::SupportLang;
 use tree_dsl::{Context, Env, State};
+use tree_dsl::{inventory, templates};
 
 fn small() -> (String, String) {
     (
@@ -30,26 +30,40 @@ fn env(limits: Limits) -> Env {
 }
 
 fn index(env: &Env) -> Result<(State, Vec<Killed>), Error> {
-    let sources = vec![small().into(), big().into()];
-    let (context, resolved) = pipeline::index(Context::new(env), sources)?.finish();
+    let repo = tempfile::tempdir().unwrap();
+    for (path, content) in [small(), big()] {
+        std::fs::write(repo.path().join(path), content).unwrap();
+    }
+    let inventory = inventory::walk(repo.path()).unwrap().to_vec();
+    let (context, resolved) = templates::index(Context::new(env), repo.path(), inventory)?.finish();
     Ok((resolved.state, context.report.skipped))
 }
 
 #[test]
-fn file_over_budget_is_dropped_and_the_rest_indexes() {
+fn file_over_budget_keeps_a_row_with_the_reason_and_the_rest_indexes() {
     // Wide enough for a four-line file even unoptimised, far too tight for 2MB.
     let limits = Limits {
         file_rewrite_ms: 50,
         ..Limits::UNLIMITED
     };
-    let (state, killed) = index(&env(limits)).unwrap();
+    let env = env(limits);
+    let (state, killed) = index(&env).unwrap();
 
-    let labels: Vec<&str> = state.trees.iter().map(|t| t.label.as_str()).collect();
-    assert!(labels.contains(&"small.py"), "{labels:?}");
-    assert!(
-        !labels.contains(&"big.py"),
-        "big.py should have been dropped"
+    let big = state
+        .trees
+        .iter()
+        .find(|t| t.label == "big.py")
+        .expect("big.py has a File row");
+    assert_eq!(
+        big.root().descendants().count(),
+        0,
+        "nothing of big.py was parsed"
     );
+    let reason = big
+        .get_tag(0, env.lang.syms.intern("reason"))
+        .map(|v| env.lang.syms.resolve(v));
+    assert_eq!(reason, Some("skip_timeout_walk"));
+    assert!(state.trees.iter().any(|t| t.label == "small.py"));
     assert_eq!(killed.len(), 1);
     assert_eq!(
         (killed[0].label, killed[0].path.as_str()),

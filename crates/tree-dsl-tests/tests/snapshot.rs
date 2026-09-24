@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 
+use std::path::Path;
+
 use integration_tests_codegraph::assertions::{FixtureFile, IncrementalStep, TestSuite};
-use tree_dsl::pipeline::{self, Changes};
+use tree_dsl::pipeline::Changes;
 use tree_dsl::treesitter::SupportLang;
-use tree_dsl::{Context, Env, State};
-use tree_dsl_tests::runner::sources;
+use tree_dsl::{Context, Env, State, inventory, templates};
+use tree_dsl_tests::runner::write_files;
 
 fn load_suite() -> TestSuite {
     let yaml = std::fs::read_to_string(concat!(
@@ -15,20 +17,28 @@ fn load_suite() -> TestSuite {
     orbit_utils::yaml::from_str(&yaml).expect("bad yaml")
 }
 
-fn index(env: &Env, suite: &TestSuite) -> State {
-    pipeline::index(Context::new(env), sources(&suite.fixtures))
+/// The fixtures written to `repo`, walked and indexed like a repository.
+fn index(env: &Env, repo: &Path, files: &[FixtureFile]) -> State {
+    write_files(files, repo);
+    let inventory = inventory::walk(repo).unwrap().to_vec();
+    templates::index(Context::new(env), repo, inventory)
         .unwrap()
         .into_value()
         .state
 }
 
-fn reindex(env: &Env, state: State, step: &IncrementalStep) -> State {
+/// The step applied to `repo` on disk, then reindexed from the change list.
+fn reindex(env: &Env, state: State, repo: &Path, step: &IncrementalStep) -> State {
+    for removed in &step.remove {
+        std::fs::remove_file(repo.join(removed)).ok();
+    }
+    let mut changed = write_files(&step.add, repo);
+    changed.extend(write_files(&step.modify, repo));
     let changes = Changes {
-        added: sources(&step.add),
-        modified: sources(&step.modify),
+        changed: inventory::classify(repo, changed),
         removed: step.remove.clone(),
     };
-    pipeline::reindex(Context::new(env), state, changes)
+    templates::reindex(Context::new(env), state, repo, changes)
         .unwrap()
         .into_value()
         .state
@@ -66,7 +76,8 @@ fn def_names(state: &tree_dsl::State, env: &tree_dsl::Env) -> Vec<String> {
 fn round_trip_save_load() {
     let suite = load_suite();
     let env = Env::for_lang(SupportLang::Python).unwrap();
-    let state = index(&env, &suite);
+    let repo = tempfile::tempdir().unwrap();
+    let state = index(&env, repo.path(), &suite.fixtures);
     assert_eq!(state.trees.len(), suite.fixtures.len());
     assert!(!state.edges.is_empty());
 
@@ -100,7 +111,8 @@ fn round_trip_save_load() {
 fn incremental_via_snapshot_and_reindex() {
     let suite = load_suite();
     let env = Env::for_lang(SupportLang::Python).unwrap();
-    let state = index(&env, &suite);
+    let repo = tempfile::tempdir().unwrap();
+    let state = index(&env, repo.path(), &suite.fixtures);
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
     state.save(&env, &snap).unwrap();
@@ -112,7 +124,7 @@ fn incremental_via_snapshot_and_reindex() {
     );
 
     for step in &suite.steps {
-        current = reindex(&env, current, step);
+        current = reindex(&env, current, repo.path(), step);
     }
 
     assert_eq!(
@@ -128,7 +140,8 @@ fn incremental_via_snapshot_and_reindex() {
 fn modify_preserves_resolution_after_reindex() {
     let suite = load_suite();
     let env = Env::for_lang(SupportLang::Python).unwrap();
-    let state = index(&env, &suite);
+    let repo = tempfile::tempdir().unwrap();
+    let state = index(&env, repo.path(), &suite.fixtures);
     let dir = tempfile::tempdir().unwrap();
     let snap = dir.path().join("graph.bin");
     state.save(&env, &snap).unwrap();
@@ -142,7 +155,7 @@ fn modify_preserves_resolution_after_reindex() {
         remove: Vec::new(),
         ..suite.steps[0].clone()
     };
-    let updated = reindex(&env, loaded, &step);
+    let updated = reindex(&env, loaded, repo.path(), &step);
 
     assert_eq!(updated.trees.len(), 2);
     assert!(updated.edges.len() >= initial_edges);
@@ -158,26 +171,29 @@ fn modify_preserves_resolution_after_reindex() {
 /// that do not touch it.
 #[test]
 fn manifests_survive_snapshot_and_reindex() {
-    let file = |path: &str, content: &str| tree_dsl::pipeline::SourceFile {
+    let fixture = |path: &str, content: &str| FixtureFile {
         path: path.into(),
         content: content.into(),
     };
-    let manifest = |content: &str| FixtureFile {
-        path: "Cargo.toml".into(),
-        content: content.into(),
+    let step = |modify: Vec<FixtureFile>, remove: Vec<String>| IncrementalStep {
+        name: String::new(),
+        add: Vec::new(),
+        modify,
+        remove,
+        tests: Vec::new(),
     };
     let env = Env::for_lang(SupportLang::Rust).unwrap();
-    let state = pipeline::index(
-        Context::new(&env),
-        vec![
-            file("Cargo.toml", "[package]\nname = \"one\"\n"),
-            file("src/main.rs", "fn main() {}\n"),
+    let repo = tempfile::tempdir().unwrap();
+    let state = index(
+        &env,
+        repo.path(),
+        &[
+            fixture("Cargo.toml", "[package]\nname = \"one\"\n"),
+            fixture("src/main.rs", "fn main() {}\n"),
         ],
-    )
-    .unwrap()
-    .into_value()
-    .state;
-    assert_eq!(state.trees.len(), 1);
+    );
+    let parsed: Vec<&str> = state.trees.iter().map(|t| t.label.as_str()).collect();
+    assert_eq!(parsed, ["src/main.rs", "Cargo.toml"]);
     assert_eq!(state.configs[0].path, "Cargo.toml");
 
     let dir = tempfile::tempdir().unwrap();
@@ -186,38 +202,23 @@ fn manifests_survive_snapshot_and_reindex() {
     let (env, loaded) = State::load(&snap, SupportLang::Rust).unwrap();
     assert_eq!(loaded.configs.len(), 1);
 
-    let touch_source = IncrementalStep {
-        name: "edit main".into(),
-        add: Vec::new(),
-        modify: vec![FixtureFile {
-            path: "src/main.rs".into(),
-            content: "fn main() { run() }\nfn run() {}\n".into(),
-        }],
-        remove: Vec::new(),
-        tests: Vec::new(),
-    };
-    let state = reindex(&env, loaded, &touch_source);
+    let edit_source = step(
+        vec![fixture("src/main.rs", "fn main() { run() }\nfn run() {}\n")],
+        vec![],
+    );
+    let state = reindex(&env, loaded, repo.path(), &edit_source);
     assert_eq!(state.configs[0].content, "[package]\nname = \"one\"\n");
 
-    let edit_manifest = IncrementalStep {
-        name: "edit manifest".into(),
-        add: Vec::new(),
-        modify: vec![manifest("[package]\nname = \"two\"\n")],
-        remove: Vec::new(),
-        tests: Vec::new(),
-    };
-    let state = reindex(&env, state, &edit_manifest);
+    let edit_manifest = step(
+        vec![fixture("Cargo.toml", "[package]\nname = \"two\"\n")],
+        vec![],
+    );
+    let state = reindex(&env, state, repo.path(), &edit_manifest);
     assert_eq!(state.configs.len(), 1);
     assert_eq!(state.configs[0].content, "[package]\nname = \"two\"\n");
 
-    let drop_manifest = IncrementalStep {
-        name: "drop manifest".into(),
-        add: Vec::new(),
-        modify: Vec::new(),
-        remove: vec!["Cargo.toml".into()],
-        tests: Vec::new(),
-    };
-    let state = reindex(&env, state, &drop_manifest);
+    let drop_manifest = step(vec![], vec!["Cargo.toml".into()]);
+    let state = reindex(&env, state, repo.path(), &drop_manifest);
     assert!(state.configs.is_empty());
     assert_eq!(state.trees.len(), 1);
 }
