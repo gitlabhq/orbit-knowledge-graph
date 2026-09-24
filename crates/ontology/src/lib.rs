@@ -129,6 +129,7 @@ impl EdgeTableConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ontology {
     schema_version: String,
+    graph_schema_api: semver::Version,
     pub(crate) table_prefix: String,
     pub(crate) default_edge_table: String,
     /// Default ORDER BY columns for node tables (dedup key for ReplacingMergeTree).
@@ -190,6 +191,7 @@ impl Ontology {
         };
         Self {
             schema_version: String::new(),
+            graph_schema_api: orbit_versions::VERSIONS.graph_schema_api.clone(),
             table_prefix: GL_TABLE_PREFIX.to_string(),
             default_edge_table: EDGE_TABLE.to_string(),
             default_entity_sort_key: vec![
@@ -228,6 +230,11 @@ impl Ontology {
             traversal_path_lookups: Vec::new(),
             gc_preserve_patterns: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn graph_schema_api(&self) -> &semver::Version {
+        &self.graph_schema_api
     }
 
     #[must_use]

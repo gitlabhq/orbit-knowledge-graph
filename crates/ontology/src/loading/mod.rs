@@ -40,6 +40,10 @@ struct PipelineNodeMetadata {
 pub(crate) trait ReadOntologyFile {
     fn read(&self, path: &str) -> Result<String, OntologyError>;
 
+    fn graph_schema_api(&self) -> semver::Version {
+        orbit_versions::VERSIONS.graph_schema_api.clone()
+    }
+
     fn legacy_introduced_in(&self) -> Option<semver::Version> {
         None
     }
@@ -165,6 +169,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     let mut ontology = Ontology::new();
     ontology.schema_version = schema.schema_version.unwrap_or_default();
+    ontology.graph_schema_api = reader.graph_schema_api();
     ontology.table_prefix = schema.settings.table_prefix.clone();
     ontology.default_edge_table = schema.settings.default_edge_table;
     ontology.default_entity_sort_key = schema.settings.default_entity_sort_key;

@@ -821,7 +821,7 @@ impl OrbitServiceImpl {
             domains,
             nodes,
             edges,
-            graph_schema_api: orbit_versions::VERSIONS.graph_schema_api.to_string(),
+            graph_schema_api: ontology.graph_schema_api().to_string(),
         }
     }
 

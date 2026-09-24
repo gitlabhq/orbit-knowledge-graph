@@ -47,6 +47,7 @@ pub struct SchemaProperty {
     pub name: String,
     pub data_type: String,
     pub nullable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub introduced_in: String,
 }
@@ -59,7 +60,7 @@ pub fn build_schema_response(
     expand_nodes: &[String],
 ) -> SchemaResponse {
     SchemaResponse {
-        graph_schema_api: orbit_versions::VERSIONS.graph_schema_api.to_string(),
+        graph_schema_api: ontology.graph_schema_api().to_string(),
         domains: build_domains(ontology, scope, expand_nodes, None),
         edges: build_edge_names(ontology, scope, None),
     }
@@ -72,7 +73,7 @@ pub fn build_node_schema_response(
     node: &str,
 ) -> SchemaResponse {
     SchemaResponse {
-        graph_schema_api: orbit_versions::VERSIONS.graph_schema_api.to_string(),
+        graph_schema_api: ontology.graph_schema_api().to_string(),
         domains: build_domains(ontology, scope, &[], Some(node)),
         edges: build_edge_names(ontology, scope, Some(node)),
     }

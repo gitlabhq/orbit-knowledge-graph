@@ -29,8 +29,10 @@ format version (`0.1`).
 
 The `graph_schema_api` semver pin in `config/versions.yaml` versions the public introspection
 contract independently of the integer storage `schema` pin and the ontology document's
-`schema_version`. Every node and property definition records its first API version in
-`introduced_in`. The compact agent-command response keeps its unexpanded summary tier to node
+`schema_version`. Each ontology archive records its graph schema API version in the manifest,
+so introspection reports the active snapshot's version even during migration or rollback; older
+archives without the manifest field use `1.0.0`. Every node and property definition records its
+first API version in `introduced_in`. The compact agent-command response keeps its unexpanded summary tier to node
 names plus the top-level current API version. Selectively expanded nodes and their typed properties
 include their stable `introduced_in` versions. The structured protobuf response carries the full
 node and property metadata. Relationships do not carry this annotation.
@@ -38,7 +40,7 @@ node and property metadata. Relationships do not carry this annotation.
 New nodes and properties must use the next `graph_schema_api` value and land with the matching pin
 bump. Additive contract changes bump the minor version, compatible corrections bump the patch
 version, and breaking changes wait for and bump the major version. An element's `introduced_in`
-value never changes after release and cannot exceed the current pin. Historical ontology archives
+value never changes after release and cannot exceed the current pin. Historical ontology archives through v99
 that predate these annotations load them as `1.0.0` for rollback compatibility.
 
 ### The `schema` pin in `config/versions.yaml`

@@ -16,11 +16,18 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 100
+  scope: none
+  note: >-
+    introduced_in annotations affect introspection metadata only; DDL and indexed
+    rows are byte-identical
 - version: 99
   scope: none
   note: >-
-    Adds the CALLS File -> ImportedSymbol variant already emitted by the code indexer,
-    and introduced_in annotations for introspection. Neither changes DDL or indexed rows.
+    Adds the CALLS File -> ImportedSymbol variant that the code indexer already
+    emits for top-level calls to unresolved imports. Indexed rows are byte-identical;
+    the variant only declares existing edges so query validation can check relationship
+    endpoints.
 - version: 98
   scope: none
   note: >-

@@ -46,11 +46,18 @@ pub enum ArchiveError {
 struct Manifest {
     format_version: u32,
     schema_version: u32,
+    #[serde(default = "legacy_graph_schema_api")]
+    graph_schema_api: semver::Version,
+}
+
+fn legacy_graph_schema_api() -> semver::Version {
+    semver::Version::new(1, 0, 0)
 }
 
 #[derive(Debug)]
 pub struct OntologyArchive {
     schema_version: u32,
+    graph_schema_api: semver::Version,
     bytes: Vec<u8>,
     sources: BTreeMap<String, String>,
 }
@@ -86,9 +93,22 @@ impl OntologyArchive {
         schema_version: u32,
         sources: &BTreeMap<String, String>,
     ) -> Result<Self, ArchiveError> {
+        Self::from_sources_with_api(
+            schema_version,
+            orbit_versions::VERSIONS.graph_schema_api.clone(),
+            sources,
+        )
+    }
+
+    fn from_sources_with_api(
+        schema_version: u32,
+        graph_schema_api: semver::Version,
+        sources: &BTreeMap<String, String>,
+    ) -> Result<Self, ArchiveError> {
         let manifest = Manifest {
             format_version: FORMAT_VERSION,
             schema_version,
+            graph_schema_api,
         };
         let encoder = GzBuilder::new()
             .mtime(0)
@@ -136,6 +156,7 @@ impl OntologyArchive {
 
         Ok(Self {
             schema_version,
+            graph_schema_api: manifest.graph_schema_api,
             bytes: bytes.to_vec(),
             sources,
         })
@@ -143,6 +164,10 @@ impl OntologyArchive {
 
     pub fn schema_version(&self) -> u32 {
         self.schema_version
+    }
+
+    pub fn graph_schema_api(&self) -> &semver::Version {
+        &self.graph_schema_api
     }
 
     pub fn bytes(&self) -> &[u8] {
@@ -184,7 +209,11 @@ impl ReadOntologyFile for OntologyArchive {
     }
 
     fn legacy_introduced_in(&self) -> Option<semver::Version> {
-        (self.schema_version <= 98).then(|| semver::Version::new(1, 0, 0))
+        (self.schema_version <= 99).then(legacy_graph_schema_api)
+    }
+
+    fn graph_schema_api(&self) -> semver::Version {
+        self.graph_schema_api.clone()
     }
 
     fn validates_graph_schema_api(&self) -> bool {
@@ -278,6 +307,33 @@ mod tests {
     #[test]
     fn identical_sources_produce_identical_archive_bytes() {
         assert_eq!(embedded_archive().bytes(), embedded_archive().bytes());
+    }
+
+    #[test]
+    fn served_archive_reports_its_own_graph_schema_api() {
+        let sources = embedded_sources();
+        let archive = OntologyArchive::from_sources_with_api(
+            SCHEMA_VERSION,
+            semver::Version::new(2, 1, 0),
+            &sources,
+        )
+        .unwrap();
+        let ontology = archive.load_ontology().unwrap();
+        let response = crate::introspection::build_schema_response(
+            &ontology,
+            crate::introspection::IntrospectionScope::All,
+            &[],
+        );
+        assert_eq!(archive.graph_schema_api().to_string(), "2.1.0");
+        assert_eq!(response.graph_schema_api, "2.1.0");
+        assert_eq!(ontology.graph_schema_api().to_string(), "2.1.0");
+    }
+
+    #[test]
+    fn main_v99_archive_keeps_legacy_graph_schema_api() {
+        let archive = OntologyArchive::bundled(99).unwrap().unwrap();
+        assert_eq!(archive.graph_schema_api().to_string(), "1.0.0");
+        assert_eq!(archive.load_ontology().unwrap().graph_schema_api().to_string(), "1.0.0");
     }
 
     #[test]
