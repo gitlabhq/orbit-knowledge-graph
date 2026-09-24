@@ -432,6 +432,14 @@ description = "Snapshot auxiliary tables and refreshable views without bumping t
 run = "cargo xtask migration-ledger check"
 description = "Fail if the migration ledger or fingerprint snapshot drifted from the ontology"
 
+[tasks."schema:public-output"]
+run = "cargo xtask schema-public-output"
+description = "Record hashes of the rendered public graph schema encodings"
+
+[tasks."schema:public-output:check"]
+run = "bash scripts/check-graph-schema-api.sh"
+description = "Check rendered schema output and graph schema API version against origin/main"
+
 [tasks."metrics:catalog"]
 run = "cargo xtask metrics-catalog"
 description = "Regenerate crates/orbit-observability/orbit-dashboards/gkg-metrics.json"

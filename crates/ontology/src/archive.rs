@@ -46,12 +46,8 @@ pub enum ArchiveError {
 struct Manifest {
     format_version: u32,
     schema_version: u32,
-    #[serde(default = "legacy_graph_schema_api")]
-    graph_schema_api: semver::Version,
-}
-
-fn legacy_graph_schema_api() -> semver::Version {
-    semver::Version::new(1, 0, 0)
+    #[serde(default)]
+    graph_schema_api: Option<semver::Version>,
 }
 
 #[derive(Debug)]
@@ -108,7 +104,7 @@ impl OntologyArchive {
         let manifest = Manifest {
             format_version: FORMAT_VERSION,
             schema_version,
-            graph_schema_api,
+            graph_schema_api: Some(graph_schema_api),
         };
         let encoder = GzBuilder::new()
             .mtime(0)
@@ -156,7 +152,11 @@ impl OntologyArchive {
 
         Ok(Self {
             schema_version,
-            graph_schema_api: manifest.graph_schema_api,
+            // Pre-API archives have no pin; distinguish their immutable storage versions
+            // so switching between two legacy snapshots also changes the ETag.
+            graph_schema_api: manifest
+                .graph_schema_api
+                .unwrap_or_else(|| semver::Version::new(0, 0, u64::from(schema_version))),
             bytes: bytes.to_vec(),
             sources,
         })
@@ -209,7 +209,7 @@ impl ReadOntologyFile for OntologyArchive {
     }
 
     fn legacy_introduced_in(&self) -> Option<semver::Version> {
-        (self.schema_version <= 99).then(legacy_graph_schema_api)
+        (self.schema_version <= 99).then(|| semver::Version::new(1, 0, 0))
     }
 
     fn graph_schema_api(&self) -> semver::Version {
@@ -332,8 +332,23 @@ mod tests {
     #[test]
     fn main_v99_archive_keeps_legacy_graph_schema_api() {
         let archive = OntologyArchive::bundled(99).unwrap().unwrap();
-        assert_eq!(archive.graph_schema_api().to_string(), "1.0.0");
-        assert_eq!(archive.load_ontology().unwrap().graph_schema_api().to_string(), "1.0.0");
+        assert_eq!(archive.graph_schema_api().to_string(), "0.0.99");
+        assert_eq!(
+            OntologyArchive::bundled(98)
+                .unwrap()
+                .unwrap()
+                .graph_schema_api()
+                .to_string(),
+            "0.0.98"
+        );
+        assert_eq!(
+            archive
+                .load_ontology()
+                .unwrap()
+                .graph_schema_api()
+                .to_string(),
+            "0.0.99"
+        );
     }
 
     #[test]

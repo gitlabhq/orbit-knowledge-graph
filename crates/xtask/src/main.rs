@@ -9,6 +9,7 @@ mod metrics_catalog;
 mod migration_ledger;
 mod query_docs;
 mod schema;
+mod schema_public_output;
 mod synth;
 
 /// GKG development task runner.
@@ -72,6 +73,13 @@ enum Command {
         /// return a non-zero exit if they differ.
         #[arg(long)]
         check: bool,
+    },
+    /// Generate or check hashes of every public schema introspection encoding.
+    SchemaPublicOutput {
+        #[arg(long)]
+        check: bool,
+        #[arg(long, default_value = "origin/main")]
+        base: String,
     },
     /// Manage the schema-migration ledger (config/schema-migrations.yaml).
     MigrationLedger {
@@ -321,6 +329,7 @@ async fn main() -> Result<()> {
             }
         },
         Command::Schema { output } => schema::run(output),
+        Command::SchemaPublicOutput { check, base } => schema_public_output::run(check, &base),
         Command::MigrationLedger { command } => match command {
             MigrationLedgerCommand::Bump {
                 scope,

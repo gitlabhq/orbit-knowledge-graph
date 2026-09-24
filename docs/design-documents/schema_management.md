@@ -31,17 +31,31 @@ The `graph_schema_api` semver pin in `config/versions.yaml` versions the public 
 contract independently of the integer storage `schema` pin and the ontology document's
 `schema_version`. Each ontology archive records its graph schema API version in the manifest,
 so introspection reports the active snapshot's version even during migration or rollback; older
-archives without the manifest field use `1.0.0`. Every node and property definition records its
-first API version in `introduced_in`. The compact agent-command response keeps its unexpanded summary tier to node
+archives without the manifest field use `0.0.<storage-version>` so different legacy snapshots
+cannot share an ETag with each other or with the new schema.
+Every node and property definition records its first API version in `introduced_in` (older
+archives still default missing element annotations to `1.0.0`). The compact agent-command response keeps its unexpanded summary tier to node
 names plus the top-level current API version. Selectively expanded nodes and their typed properties
 include their stable `introduced_in` versions. The structured protobuf response carries the full
 node and property metadata. Relationships do not carry this annotation.
 
-New nodes and properties must use the next `graph_schema_api` value and land with the matching pin
-bump. Additive contract changes bump the minor version, compatible corrections bump the patch
-version, and breaking changes wait for and bump the major version. An element's `introduced_in`
-value never changes after release and cannot exceed the current pin. Historical ontology archives through v99
-that predate these annotations load them as `1.0.0` for rollback compatibility.
+`graph_schema_api` is the schema cache validator: clients must use the version of the served
+snapshot for their ETag, not the binary pin or the ontology document's `schema_version`. **Every
+change to rendered public schema output requires a new pin**, including relationships, descriptions,
+and encoding. New nodes, properties, or edges bump the minor version; removals and renames bump the
+major version; encoding-only or other compatible corrections bump the patch version. New nodes and
+properties use that new pin as their `introduced_in` value; existing values never change after
+release and cannot exceed the current pin. Relationships have no `introduced_in` annotation.
+
+`config/schema-public-output.json` records hashes of the actual RAW, TOON, and structured schema
+encodings for summary, every node expansion, wildcard expansion, and GQL local/remote introspection.
+Run `mise schema:public-output` to refresh it and `mise schema:public-output:check` to verify it.
+CI checks freshness and compares it against
+the **target branch**, requiring a pin greater than the target's if output differs. Storage/ETL-only
+changes do not affect the hashes. `[skip graph-schema-api-check]` bypasses only this gate; use it
+only after confirming that the changed output cannot reach cached public schema responses. The
+query DSL and query output-format pin checks remain active. Historical archives through v99 load
+missing `introduced_in` annotations as `1.0.0` for rollback compatibility.
 
 ### The `schema` pin in `config/versions.yaml`
 

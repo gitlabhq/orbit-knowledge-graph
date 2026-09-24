@@ -720,7 +720,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 }
 
 impl OrbitServiceImpl {
-    fn build_structured_schema(ontology: &Ontology, expand_nodes: &[String]) -> StructuredSchema {
+    pub fn build_structured_schema(
+        ontology: &Ontology,
+        expand_nodes: &[String],
+    ) -> StructuredSchema {
         let domains: Vec<SchemaDomain> = ontology
             .domains()
             .map(|d| SchemaDomain {

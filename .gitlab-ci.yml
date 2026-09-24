@@ -359,6 +359,17 @@ migration-ledger-check:
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
     - bash ./scripts/check-migration-ledger.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
+graph-schema-api-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-only-rules
+  needs: []
+  script:
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
+    - bash ./scripts/check-graph-schema-api.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
 pinned-version-check:
   stage: lint
   image: alpine:latest
