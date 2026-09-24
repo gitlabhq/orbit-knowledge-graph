@@ -254,6 +254,10 @@ impl Context {
             let inner = self.emit_expr(&args[0]);
             return format!("CAST({inner} AS VARCHAR)");
         }
+        if name == "CAST_VARCHAR" && args.len() == 1 {
+            let inner = self.emit_expr(&args[0]);
+            return format!("CAST({inner} AS VARCHAR)");
+        }
 
         // toJSONString(x) → just emit x (the inner map() is already
         // rewritten to json_object() which returns a JSON string).

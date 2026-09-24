@@ -78,11 +78,8 @@ fn main() {
                 _ => compiler::Frontend::JsonDsl,
             };
 
-            let compiled = match if no_optimize {
-                compiler::compile_naive(&raw, fe, &ontology, &ctx)
-            } else {
-                compiler::compile(&raw, fe, &ontology, &ctx)
-            } {
+            let _ = no_optimize;
+            let compiled = match compiler::compile(&raw, fe, &ontology, &ctx) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("compile error: {e}");

@@ -1,0 +1,27 @@
+name: "v3 logical and physical aggregation plans are backend-neutral"
+input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
+logical:
+  expect:
+    - (Aggregate group mr.state AS mr_state, COUNT() AS n (_))
+    - (EdgeScan IN_PROJECT mr->p AS e0)
+    - (NodeScan MergeRequest AS mr)
+    - (NodeScan Project AS p)
+  reject:
+    - (Scan Table...)
+    - (Deduplicate ...)
+physical:
+  clickhouse:
+    expect:
+      - (Filter mr.project_id = 1 (_))
+      - (Deduplicate Final (Scan Table("gl_merge_request") AS mr))
+      - (Scan Table("gl_merge_request") AS mr)
+    reject:
+      - (Scan Table("gl_edge") AS e0)
+      - (Scan Table("gl_project") AS p)
+  duckdb:
+    expect:
+      - (Scan Table("gl_edge") AS e0)
+      - (Scan Table("gl_merge_request") AS mr)
+    reject:
+      - (Deduplicate ...)
+      - (Scan Table("gl_project") AS p)

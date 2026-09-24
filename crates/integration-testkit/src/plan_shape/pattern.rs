@@ -1,4 +1,4 @@
-use query_engine::compiler::passes::plan_v2::explain::PlanNode;
+use query_engine::compiler::passes::plan_node::PlanNode;
 
 pub fn parse(source: &str) -> PlanNode {
     let mut parser = Parser {
@@ -38,14 +38,10 @@ fn matches(pattern: &PlanNode, node: &PlanNode) -> bool {
         return false;
     }
     let open = pattern.items.iter().any(|item| item == "...");
-    let expected: Vec<&String> = pattern
-        .items
-        .iter()
-        .filter(|item| *item != "...")
-        .collect();
+    let expected: Vec<&String> = pattern.items.iter().filter(|item| *item != "...").collect();
     let mut remaining = node.items.clone();
-    for item in expected {
-        let Some(index) = remaining.iter().position(|candidate| candidate == item) else {
+    for item in &expected {
+        let Some(index) = remaining.iter().position(|candidate| candidate == *item) else {
             return false;
         };
         remaining.remove(index);

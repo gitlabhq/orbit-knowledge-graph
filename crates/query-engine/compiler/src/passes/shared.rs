@@ -450,7 +450,7 @@ pub fn traversal_path_filter(
     }
 }
 
-pub(crate) fn generalize_to_budget(
+pub fn generalize_to_budget(
     mut leaves: Vec<TraversalPath>,
     budget: usize,
 ) -> Vec<TraversalPath> {

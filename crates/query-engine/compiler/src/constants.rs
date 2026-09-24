@@ -75,22 +75,3 @@ pub const EDGE_ALIAS_SUFFIXES: &[&str] = &[
 ];
 
 pub(crate) const PATH_NODES_COLUMN: &str = "path_nodes";
-
-pub(crate) const END_ID_COLUMN: &str = "end_id";
-
-pub(crate) const FORWARD_CTE: &str = "forward";
-
-pub(crate) const BACKWARD_CTE: &str = "backward";
-
-pub(crate) const FORWARD_ALIAS: &str = "f";
-
-pub(crate) const BACKWARD_ALIAS: &str = "b";
-
-pub(crate) const PATHS_ALIAS: &str = "paths";
-
-const NODE_FILTER_CTE_PREFIX: &str = "_nf_";
-
-/// CTE name for a node-filter: `_nf_{alias}`.
-pub(crate) fn node_filter_cte(alias: &str) -> String {
-    format!("{NODE_FILTER_CTE_PREFIX}{alias}")
-}

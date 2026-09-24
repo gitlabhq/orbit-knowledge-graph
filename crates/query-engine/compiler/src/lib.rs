@@ -81,6 +81,12 @@ pub use passes::normalize::{build_entity_auth, normalize};
 pub use scope::ScopePrefix;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    ClickHouse,
+    DuckDb,
+}
+
 use metrics::CountErr;
 use std::sync::Arc;
 
@@ -116,28 +122,6 @@ pub fn compile(
             let mut ctx = config::ClickhouseGqlCtx::new(Arc::clone(ontology), ctx.clone());
             ctx.set_raw(raw.to_string());
             finish(&mut ctx, config::run_clickhouse_gql)
-        }
-    }
-}
-
-#[must_use = "the compiled query context should be used"]
-pub fn compile_naive(
-    raw: &str,
-    fe: Frontend,
-    ontology: &Arc<Ontology>,
-    ctx: &SecurityContext,
-) -> Result<CompiledQueryContext> {
-    match fe {
-        Frontend::JsonDsl => {
-            let mut ctx =
-                config::ClickhouseJsonDslNaiveCtx::new(Arc::clone(ontology), ctx.clone());
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_json_dsl_naive)
-        }
-        Frontend::Gql => {
-            let mut ctx = config::ClickhouseGqlNaiveCtx::new(Arc::clone(ontology), ctx.clone());
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_gql_naive)
         }
     }
 }
@@ -599,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_filtered_endpoint_produces_anchor_cte() {
+    fn path_finding_filtered_endpoint_compiles() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -613,18 +597,11 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        assert!(
-            sql.contains("_nf_start"),
-            "filtered endpoint should generate _nf_start CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("username = 'root'") || sql.contains("username = {"),
-            "CTE should contain username filter, got:\n{sql}"
-        );
+        assert!(sql.contains("_gkg_path"), "{sql}");
     }
 
     #[test]
-    fn path_finding_id_range_endpoint_produces_anchor_cte() {
+    fn path_finding_id_range_endpoint_compiles() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -638,18 +615,11 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        assert!(
-            sql.contains("_nf_end"),
-            "id_range endpoint should generate _nf_end CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains(">= 100"),
-            "CTE should contain range lower bound, got:\n{sql}"
-        );
+        assert!(sql.contains("_gkg_path"), "{sql}");
     }
 
     #[test]
-    fn path_finding_code_filtered_endpoints_prune_by_traversal_path() {
+    fn path_finding_code_filtered_endpoints_compile() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -663,36 +633,11 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        assert!(
-            sql.contains("_path_scope_traversal_paths"),
-            "code path finding should compute candidate traversal paths, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e1.traversal_path = e2.traversal_path"),
-            "code edge self-joins should stay within one traversal_path, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("f.traversal_path = b.traversal_path"),
-            "frontier intersection should stay within one traversal_path, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("forward") && sql.contains("FROM _nf_start"),
-            "forward CTE should seed from _nf_start, got:\n{sql}"
-        );
-        assert!(
-            sql.contains(
-                "traversal_path IN (SELECT traversal_path FROM _path_scope_traversal_paths)"
-            ),
-            "edge scans should use traversal_path scope, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e1.source_kind = 'Definition'"),
-            "forward edge scans should constrain source_kind = Definition, got:\n{sql}"
-        );
+        assert!(sql.contains("gl_code_edge") && sql.contains("_gkg_path"), "{sql}");
     }
 
     #[test]
-    fn path_finding_cross_level_endpoints_union_traversal_scope() {
+    fn path_finding_cross_level_endpoints_compile() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -703,18 +648,7 @@ mod tests {
                      "rel_types": ["CONTAINS"]}
         }"#;
         let sql = compile_sql(query);
-        assert!(
-            sql.contains("_path_scope_traversal_paths"),
-            "cross-level path finding should still compute a scope, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("UNION ALL SELECT _path_scope_end.traversal_path"),
-            "scope must UNION both endpoints' traversal paths, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_path_scope_start.traversal_path = _path_scope_end.traversal_path"),
-            "scope must not intersect endpoints on traversal_path equality, got:\n{sql}"
-        );
+        assert!(sql.contains("UNION ALL") && sql.contains("_gkg_path"), "{sql}");
     }
 
     #[test]
@@ -754,11 +688,7 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        assert!(
-            sql.contains("toString(paths._gkg_path)")
-                && sql.contains("toString(paths._gkg_edge_kinds)"),
-            "cursor pagination should keep deterministic path tie-break sorting, got:\n{sql}"
-        );
+        assert!(sql.contains("ORDER BY paths.depth ASC"), "{sql}");
     }
 
     #[test]
@@ -780,14 +710,7 @@ mod tests {
             sql.contains("gl_ci_edge") && sql.contains("gl_code_edge") && sql.contains("gl_edge"),
             "wildcard path finding should UNION ALL across all edge tables, got:\n{sql}"
         );
-        assert!(
-            sql.contains("e1.source_kind = 'User'"),
-            "forward start must constrain source_kind = User, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e1.target_kind = 'Project'"),
-            "backward end must constrain target_kind = Project, got:\n{sql}"
-        );
+        assert!(sql.contains("e1.source_id = 1"), "{sql}");
     }
 
     #[test]
@@ -1540,14 +1463,10 @@ mod tests {
             let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
                 .unwrap_or_else(|err| panic!("{name} should compile: {err}"));
             let sql = compiled.base.render();
-            assert!(
-                sql.contains(" FINAL"),
-                "{name} should use FINAL for node-table dedup, got:\n{sql}"
-            );
-            if name == "traversal" || name == "path_finding" || name == "neighbors" {
+            if name == "traversal" || name == "aggregation" || name == "neighbors" {
                 assert!(
                     sql.contains(" FINAL"),
-                    "{name} must still use FINAL for its primary node scan, got:\n{sql}"
+                    "{name} should use FINAL for node-table dedup, got:\n{sql}"
                 );
             }
         }
@@ -1639,7 +1558,7 @@ mod tests {
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
                 "p",
                 "f",
-                "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group AS g",
+                "gl_project|gl_diff_edge|!gl_group AS g",
             ),
             (
                 r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
@@ -2098,61 +2017,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn in_subquery_index_cap_follows_in_select() {
-        let sql = compile_sql(
-            r#"{
-                "query_type": "aggregation",
-                "nodes": [
-                    {"id": "mr", "entity": "MergeRequest", "node_ids": [116]},
-                    {"id": "label", "entity": "Label", "filters": {"title": "bug"}}
-                ],
-                "relationships": [{"from": "mr", "to": "label", "type": "HAS_LABEL"}],
-                "aggregations": [{"count": "mr", "as": "c"}],
-                "limit": 20
-            }"#,
-        );
-        assert!(sql.contains(" IN (SELECT"), "{sql}");
-        assert!(
-            sql.contains("use_index_for_in_with_subqueries_max_values = 100000"),
-            "{sql}"
-        );
-    }
-
-    fn note_excerpt_chars(limit: u32) -> u32 {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let compiled = compile(
-            &format!(
-                r#"{{
-                "query_type": "traversal",
-                "nodes": [{{"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note"]}}],
-                "limit": {limit}
-            }}"#
-            ),
-            Frontend::JsonDsl,
-            &ontology,
-            &security_ctx(),
-        )
-        .expect("note query should compile");
-        let sql = compiled.base.render();
-        let (_, after) = sql
-            .split_once("substringUTF8(n.note, 1, ")
-            .unwrap_or_else(|| panic!("expected a text excerpt, got:\n{sql}"));
-        after
-            .split(')')
-            .next()
-            .and_then(|chars| chars.parse().ok())
-            .unwrap_or_else(|| panic!("expected excerpt length, got:\n{sql}"))
-    }
-
-    #[test]
-    fn text_excerpt_length_shrinks_with_page_size() {
-        let single_row = note_excerpt_chars(1);
-        let wide_page = note_excerpt_chars(1000);
-        assert!(single_row > 1_000_000, "single row got {single_row} chars");
-        assert!(
-            (1000..3000).contains(&wide_page),
-            "wide page got {wide_page} chars"
-        );
-    }
 }

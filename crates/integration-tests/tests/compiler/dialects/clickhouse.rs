@@ -274,20 +274,19 @@ fn path_finding_query() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("forward AS"), "should have forward CTE");
-    assert!(rendered.contains("backward AS"), "should have backward CTE");
     assert!(rendered.contains("UNION ALL"));
     assert!(
-        rendered.contains("arrayConcat"),
-        "paths should be concatenated"
+        rendered.contains("array(tuple("),
+        "paths should be projected as bounded edge chains"
     );
     assert!(
         rendered.contains("tuple("),
         "path nodes should be typed tuples"
     );
     assert!(
-        rendered.contains("f.end_id") && rendered.contains("b.end_id"),
-        "should join forward and backward on end_id"
+        rendered.contains("e1.target_id = e2.source_id")
+            && rendered.contains("e2.target_id = e3.source_id"),
+        "depth arms should join consecutive edges"
     );
 }
 
@@ -323,20 +322,15 @@ fn path_finding_depth_control() {
         .render();
 
     assert!(
-        shallow_sql.contains("forward AS"),
-        "shallow should have forward CTE"
+        !shallow_sql.contains("UNION ALL") && shallow_sql.contains("1 AS depth"),
+        "shallow should have one bounded arm"
     );
     assert!(
-        !shallow_sql.contains("backward AS"),
-        "shallow (max_depth=1) should not have backward CTE"
-    );
-    assert!(
-        deep_sql.contains("forward AS"),
-        "deep should have forward CTE"
-    );
-    assert!(
-        deep_sql.contains("backward AS"),
-        "deep (max_depth=3) should have backward CTE"
+        deep_sql.contains("UNION ALL")
+            && deep_sql.contains("1 AS depth")
+            && deep_sql.contains("2 AS depth")
+            && deep_sql.contains("3 AS depth"),
+        "deep should have one arm per depth"
     );
 }
 
@@ -796,7 +790,10 @@ fn scoped_count_condition_excludes_the_scope_lookup() {
     assert!(compiled.plan.contains("COUNT() AS n"), "{}", compiled.plan);
     assert!(!compiled.plan.contains("_scope"), "{}", compiled.plan);
     assert!(
-        compiled.base.render().contains("FROM gl_group AS _scope WHERE"),
+        compiled
+            .base
+            .render()
+            .contains("FROM gl_group AS _scope WHERE"),
         "{}",
         compiled.base.render()
     );
@@ -832,7 +829,11 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
         .find("scope(e0)")
         .expect("IN_PROJECT is scoped");
     assert!(in_project + e0_scope < related, "{}", compiled.plan);
-    assert!(!compiled.plan[related..].contains("scope(e1)"), "{}", compiled.plan);
+    assert!(
+        !compiled.plan[related..].contains("scope(e1)"),
+        "{}",
+        compiled.plan
+    );
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");
@@ -1512,7 +1513,11 @@ fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
         "AUTHORED should resolve to the FK plan: {}",
         compiled.plan
     );
-    assert!(compiled.plan.contains("u.id AS e0_src"), "{}", compiled.plan);
+    assert!(
+        compiled.plan.contains("u.id AS e0_src"),
+        "{}",
+        compiled.plan
+    );
 }
 
 #[test]

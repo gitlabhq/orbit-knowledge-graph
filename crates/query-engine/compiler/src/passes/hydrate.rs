@@ -110,6 +110,10 @@ pub fn generate_hydration_plan(
         QueryType::Aggregation | QueryType::Traversal => {
             let mut templates = build_static_templates(input, emitted, ontology);
 
+            if input.is_search() {
+                templates.retain(|template| !template.virtual_columns.is_empty());
+            }
+
             // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
             if input.query_type == QueryType::Aggregation {
                 templates.retain(|t| !t.virtual_columns.is_empty());

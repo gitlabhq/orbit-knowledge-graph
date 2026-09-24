@@ -20,13 +20,25 @@ use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
 use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
-use crate::passes::plan_v2::PlanMetadata;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower_v2, normalize, optimize_v2, plan_v2, restrict,
-    security, settings, validate,
+    check, codegen, cursor, enforce, hydrate, logical_v3, lower_v3, normalize, physical_v3,
+    restrict, security, settings, validate,
 };
 
-type QueryPlan = PlanMetadata;
+#[derive(Debug, Clone)]
+struct QueryPlan {
+    physical: Option<PhysicalPlan>,
+    node_sources: std::collections::HashMap<String, (String, String)>,
+    hop_count: usize,
+    has_semi_joins: bool,
+    explain: String,
+}
+
+#[derive(Debug, Clone)]
+enum PhysicalPlan {
+    ClickHouse(physical_v3::PhysicalPlan<physical_v3::ClickHouse>),
+    DuckDb(physical_v3::PhysicalPlan<physical_v3::DuckDb>),
+}
 use crate::types::SecurityContext;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
@@ -74,11 +86,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [ontology, security_ctx]
             mutates: [input]
         }
-        plan {
+        plan_clickhouse {
             mutates: [input, query_plan]
         }
-        optimize_v2 {
-            reads_env: [ontology]
+        plan_duckdb {
             mutates: [input, query_plan]
         }
         lower {
@@ -124,37 +135,27 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             env: [ontology, security_ctx]
             state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan, optimize_v2, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             env: [ontology, security_ctx]
             state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, normalize, restrict, plan, optimize_v2, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
-        }
-        clickhouse_json_dsl_naive {
-            env: [ontology, security_ctx]
-            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
-        }
-        clickhouse_gql_naive {
-            env: [ontology, security_ctx]
-            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [gql_parse, validate, normalize, restrict, plan_clickhouse, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan, lower, enforce, settings, codegen]
+            phases: [restrict, plan_clickhouse, lower, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             env: [ontology]
             state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan, lower, enforce, duckdb_codegen]
+            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, enforce, duckdb_codegen]
         }
         duckdb_gql {
             env: [ontology]
             state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, normalize, plan, lower, enforce, duckdb_codegen]
+            phases: [gql_parse, validate_local, normalize, plan_duckdb, lower, enforce, duckdb_codegen]
         }
         validate_normalize {
             env: [ontology]
@@ -223,34 +224,53 @@ fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let mut input = require(ctx.take_input(), "input")?;
-    let ontology = ctx.ontology().clone();
-    let (mut meta, op) = plan_v2::plan(&mut input, &ontology)?;
-    meta.phys_op = Some(op);
-    ctx.set_input(input);
-    ctx.set_query_plan(meta);
-    Ok(())
+fn plan_clickhouse(ctx: &mut impl CompilerCtx) -> Result<()> {
+    plan_for(ctx, crate::Backend::ClickHouse)
 }
 
-fn optimize_v2(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let mut input = require(ctx.take_input(), "input")?;
-    let plan = require(ctx.take_query_plan(), "query_plan")?;
-    let ontology = ctx.ontology().clone();
-    ctx.set_query_plan(optimize_v2::optimize_plan(&mut input, &ontology, plan));
+fn plan_duckdb(ctx: &mut impl CompilerCtx) -> Result<()> {
+    plan_for(ctx, crate::Backend::DuckDb)
+}
+
+fn plan_for(ctx: &mut impl CompilerCtx, backend: crate::Backend) -> Result<()> {
+    let input = require(ctx.take_input(), "input")?;
+    let logical = logical_v3::plan(&input);
+    let catalog = physical_v3::PhysicalCatalog::new(&logical, &input, ctx.ontology());
+    let (physical, node_sources) = match backend {
+        crate::Backend::ClickHouse => {
+            let plan = <physical_v3::ClickHouse as physical_v3::Backend>::optimize(
+                physical_v3::plan_clickhouse(logical.clone(), &catalog),
+                &catalog,
+            );
+            (PhysicalPlan::ClickHouse(plan.clone()), catalog.node_sources(&plan))
+        }
+        crate::Backend::DuckDb => {
+            let plan = physical_v3::plan_duckdb(logical.clone(), &catalog);
+            (PhysicalPlan::DuckDb(plan.clone()), catalog.node_sources(&plan))
+        }
+    };
+    let query_plan = QueryPlan {
+        node_sources,
+        hop_count: input.relationships.len(),
+        has_semi_joins: false,
+        explain: logical.root.explain(),
+        physical: Some(physical),
+    };
     ctx.set_input(input);
+    ctx.set_query_plan(query_plan);
     Ok(())
 }
 
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let input = require(ctx.input().clone(), "input")?;
-    let op = query_plan
-        .phys_op
+    let physical = query_plan
+        .physical
         .take()
-        .ok_or_else(|| QueryError::PipelineInvariant("phys_op not set".into()))?;
-    query_plan.explain = op.explain();
-    let node = lower_v2::lower(op, &input)?;
+        .ok_or_else(|| QueryError::PipelineInvariant("physical plan not set".into()))?;
+    let node = match physical {
+        PhysicalPlan::ClickHouse(plan) => lower_v3::clickhouse(plan)?,
+        PhysicalPlan::DuckDb(plan) => lower_v3::duckdb(plan)?,
+    };
     ctx.set_query_plan(query_plan);
     ctx.set_node(node);
     Ok(())
@@ -258,7 +278,7 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let node_edge_col = query_plan.node_edge_mappings.clone();
+    let node_edge_col = query_plan.node_sources.clone();
     ctx.set_query_plan(query_plan);
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;

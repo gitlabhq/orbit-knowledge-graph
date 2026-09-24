@@ -12,6 +12,30 @@ pub struct PlanScenario {
     pub reject: Vec<String>,
     #[serde(default)]
     pub plan: Option<String>,
+    #[serde(default)]
+    pub logical: PlanExpect,
+    #[serde(default)]
+    pub physical: PhysicalExpect,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanExpect {
+    #[serde(default)]
+    pub expect: Vec<String>,
+    #[serde(default)]
+    pub reject: Vec<String>,
+    #[serde(default)]
+    pub plan: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicalExpect {
+    #[serde(default)]
+    pub clickhouse: Option<PlanExpect>,
+    #[serde(default)]
+    pub duckdb: Option<PlanExpect>,
 }
 
 impl PlanScenario {
@@ -24,7 +48,14 @@ impl PlanScenario {
 
     pub fn validate(&self) {
         assert!(
-            !self.expect.is_empty() || !self.reject.is_empty() || self.plan.is_some(),
+            !self.expect.is_empty()
+                || !self.reject.is_empty()
+                || self.plan.is_some()
+                || !self.logical.expect.is_empty()
+                || !self.logical.reject.is_empty()
+                || self.logical.plan.is_some()
+                || self.physical.clickhouse.is_some()
+                || self.physical.duckdb.is_some(),
             "{}: fixture has no expect, reject, or plan",
             self.name
         );
