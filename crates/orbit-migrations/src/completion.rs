@@ -61,6 +61,7 @@ static COUNT_ACTIVE_CODE_PROJECTS_REINDEXED: LazyLock<String> = LazyLock::new(||
     )
 });
 
+// Below 100% so projects deleted, moved, or newly failing during the migration cannot block it.
 const MIN_REINDEXED_CODE_PROJECTS_PERCENT: f64 = 99.5;
 
 #[derive(Debug)]
