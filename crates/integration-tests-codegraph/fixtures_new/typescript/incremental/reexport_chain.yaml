@@ -1,0 +1,49 @@
+name: "TypeScript: reindex through a re-export chain"
+fixtures:
+  - path: src/index.ts
+    content: |
+      export { greet } from './greet';
+  - path: src/greet.ts
+    content: |
+      export function greet() {}
+  - path: src/app.ts
+    content: |
+      import { greet } from './index';
+      export function main() { greet(); }
+
+tests:
+  - name: main reaches greet through the barrel
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'main'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: greet } }
+
+steps:
+  - name: greet moves to a new file behind the same barrel
+    add:
+      - path: src/hello.ts
+        content: |
+          export function greet() {}
+    modify:
+      - path: src/index.ts
+        content: |
+          export { greet } from './hello';
+    remove: [src/greet.ts]
+    tests:
+      - name: main, untouched, now reaches the new greet
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name = 'main'
+          RETURN callee.fqn AS callee, callee.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { callee: greet, file: src/hello.ts } }
+      - name: the old file left no definition behind
+        query: |
+          MATCH (d:Definition) WHERE d.file_path = 'src/greet.ts'
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }

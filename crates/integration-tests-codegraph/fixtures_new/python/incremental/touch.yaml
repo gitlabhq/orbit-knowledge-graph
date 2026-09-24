@@ -1,0 +1,52 @@
+name: "Python: reindexing an unchanged file changes nothing"
+fixtures:
+  - path: app.py
+    content: |
+      from lib import work
+      def run():
+          work()
+
+  - path: lib.py
+    content: |
+      def work():
+          pass
+
+tests:
+  - name: run calls work across files
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: lib.work } }
+
+steps:
+  - name: touch both files with the same content
+    modify:
+      - path: app.py
+        content: |
+          from lib import work
+          def run():
+              work()
+      - path: lib.py
+        content: |
+          def work():
+              pass
+    tests:
+      - name: the call edge is still there, once
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name = 'run'
+          RETURN callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+          - { row: { callee: lib.work } }
+      - name: still two files, still two definitions
+        query: |
+          MATCH (f:File)-[:DEFINES]->(d:Definition)
+          RETURN f.path AS file, d.name AS def
+          ORDER BY file
+        assert:
+          - { row_count: 2 }
+          - { row: { file: app.py, def: run } }
+          - { row: { file: lib.py, def: work } }

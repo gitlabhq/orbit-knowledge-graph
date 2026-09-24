@@ -1,0 +1,71 @@
+name: "Rust: reindex across a manifest edit and a deleted module"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "app"
+  - path: src/main.rs
+    content: |
+      mod util;
+      mod extra;
+      use crate::util::help;
+      fn main() {
+          help();
+      }
+  - path: src/util.rs
+    content: |
+      pub fn help() {}
+  - path: src/extra.rs
+    content: |
+      pub fn more() {}
+
+tests:
+  - name: every definition and the manifest are present
+    query: |
+      MATCH (f:File)-[:DEFINES]->(d:Definition)
+      RETURN f.path AS file, d.name AS def
+      ORDER BY def
+    assert:
+      - { row_count: 3 }
+      - { row: { file: src/util.rs, def: help } }
+      - { row: { file: src/main.rs, def: main } }
+      - { row: { file: src/extra.rs, def: more } }
+
+steps:
+  - name: rename the package and drop the extra module
+    modify:
+      - path: Cargo.toml
+        content: |
+          [package]
+          name = "renamed"
+      - path: src/main.rs
+        content: |
+          mod util;
+          use crate::util::help;
+          fn main() {
+              help();
+          }
+    remove: [src/extra.rs]
+    tests:
+      - name: the untouched module and its import are still there
+        query: |
+          MATCH (f:File)-[:IMPORTS]->(i:ImportedSymbol)
+          WHERE f.path = 'src/main.rs'
+          RETURN i.identifier_name AS name
+        assert:
+          - { row_count: 1 }
+          - { row: { name: help } }
+      - name: the deleted module left nothing behind
+        query: |
+          MATCH (d:Definition) WHERE d.file_path = 'src/extra.rs'
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }
+      - name: four files became three
+        query: |
+          MATCH (f:File) RETURN f.path AS path ORDER BY path
+        assert:
+          - { row_count: 3 }
+          - { row: { path: Cargo.toml } }
+          - { row: { path: src/main.rs } }
+          - { row: { path: src/util.rs } }
