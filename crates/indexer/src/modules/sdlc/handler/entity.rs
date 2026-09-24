@@ -300,7 +300,9 @@ impl EntityHandler {
                 .load(&position_key)
                 .await
                 .map_err(|err| HandlerError::Processing(err.to_string()))?;
-            if existing.as_ref().is_some_and(Checkpoint::is_indexed) {
+            if let Some(cp) = existing.as_ref()
+                && cp.cursor_values.is_none()
+            {
                 info!(partition = %position_key, "skipping already-completed partition");
                 continue;
             }
