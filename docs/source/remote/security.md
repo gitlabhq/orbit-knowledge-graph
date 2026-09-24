@@ -79,32 +79,22 @@ environment, and stores no permission data of its own.
 Programmatic access uses your existing GitLab authentication, scoped to what the token owner
 can see in GitLab.
 
-- REST API: a personal access token with the `read_api` scope, or a fine-grained personal
-  access token with the GitLab Orbit **Read** permission, sent as a Bearer token. For more information,
-  see [REST API](access/api.md).
-- MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. A fine-grained personal
-  access token needs the same GitLab Orbit **Read** permission as the REST API.
-  For more information, see [MCP](access/mcp.md).
+- REST API: a personal access token with the `read_api` scope, or a
+  [fine-grained personal access token](#fine-grained-personal-access-tokens), sent as a Bearer token.
+  For more information, see [REST API](access/api.md).
+- MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
 
 ### Fine-grained personal access tokens
 
-A fine-grained token works with GitLab Orbit the same way it works with
-[Global Search](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens_rest/#search-resources).
-The token check is a gateway: it decides whether the token may call the endpoint. The results
-follow the token owner's access in GitLab, not the other permissions on the token.
+To use a fine-grained personal access token, on the **User** tab, select **GitLab Orbit** and the **Read** permission.
+The permission covers the REST API and MCP.
 
-- Add the GitLab Orbit **Read** permission under the **User** tab. The token can then call every
-  GitLab Orbit REST endpoint and the MCP endpoint, and sees everything the token owner can see.
-- A fine-grained token without that permission gets `403` from every GitLab Orbit endpoint,
-  including MCP.
-- GitLab Orbit does not offer group or project scopes yet. A token created only under
-  **Group and project access** gets `403` from GitLab Orbit.
-- Tokens created with the earlier **Knowledge Graph: Read** or **MCP tool: Execute** permissions
-  get `403` from GitLab Orbit. Create a new token with the GitLab Orbit **Read** permission.
-- Other permissions on the token have no effect on GitLab Orbit results. A token without the Work item
-  **Read** permission still gets work items from GitLab Orbit when the owner can read them in GitLab.
-- The Reporter floor and the Security Manager rule in
-  [Roles required to query GitLab Orbit](#roles-required-to-query-gitlab-orbit) still apply.
-- Personal access tokens do not go through SAML SSO enforcement. A token from a user with an
-  expired SAML session still reads what the user's memberships allow.
+- Results match what the token owner can access in GitLab.
+  Other permissions on the token do not limit them.
+- Group and project scopes are not supported.
+  A token with only **Group and project access** gets a `403 Forbidden` response.
+- Tokens created with the **Knowledge Graph: Read** or **GitLab Orbit MCP tool: Execute** permission get a `403 Forbidden` response.
+  Create a new token.
+- SAML SSO enforcement does not apply to personal access tokens.
+  A token keeps working after the owner's SAML session expires.

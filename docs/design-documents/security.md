@@ -59,16 +59,20 @@ sequenceDiagram
 
 ## Token Gateway: Fine-Grained Personal Access Tokens
 
-Fine-grained personal access tokens follow the Global Search pattern. Rails runs one token check before the route. The check answers one question: may this token call this route? After that check the token is not read again. Results follow the token owner's access through Layers 1 to 3.
+Fine-grained personal access tokens gate Orbit endpoints the way they gate Global Search's `/search`.
+Rails checks the token once, before the route runs, and does not read it again.
+Results then follow the token owner's access through Layers 1 to 3.
 
-- One permission, Orbit **Read** (`read_orbit`), guards every Orbit REST route and `POST /orbit/mcp`. It lists the user scope. There is no separate MCP permission.
-- Every Orbit route, REST and MCP, declares the user boundary, the same as `/search`. A token with Orbit **Read** under the User tab passes. A token without it, or one made only under group and project access, gets `403`.
-- Orbit does not read the other permissions on the token. A token without the Work item **Read** permission still gets work items from Orbit when the owner can read them in GitLab.
-- Orbit adds no section or toggle of its own to the token UI, and does not parse queries for namespaces.
-- The earlier `read_knowledge_graph` and `execute_orbit_mcp_tool` permissions stay defined as deprecated. They expand to raw permissions no Orbit route checks, so old tokens get `403` from Orbit. The tokens stay valid for their other permissions and can still rotate.
-- Group scoping is deferred to `/groups/:id/orbit/*` routes, where the token is checked against the group in the path. Filtering results by the token's selected groups was rejected: the token check decides which endpoints a token can call, not what the service returns. See [issue 992](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/992).
+- `read_orbit` (Orbit: Read, User tab) guards every Orbit REST route and `POST /orbit/mcp`.
+  Every route declares the user boundary, so group-scoped and project-scoped tokens get `403`.
+- The other permissions on the token do not filter Orbit results, and Orbit does not parse queries for namespaces.
+- `read_knowledge_graph` and `execute_orbit_mcp_tool` stay defined as deprecated, pointing at raw permissions no route checks.
+  Old tokens get `403` from Orbit but keep their other permissions and can still rotate.
+- Group-limited access is deferred to `/groups/:id/orbit/*` routes, where the caller picks the group in the path.
+  Filtering by the token's selected groups was rejected in review: token scopes gate endpoints, they do not filter results.
+  See [issue 992](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/992).
 
-Prior art in Rails: the [Global Search manifest](https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/authz/permission_groups/assignable_permissions/search/global_search/use.yml) and [routes](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/search.rb), and the [MCP server gateway](https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/api/mcp/base.rb).
+Prior art in Rails: the [Global Search manifest](https://gitlab.com/gitlab-org/gitlab/-/blob/236dbf8447e1/config/authz/permission_groups/assignable_permissions/search/global_search/use.yml) and [routes](https://gitlab.com/gitlab-org/gitlab/-/blob/236dbf8447e1/lib/api/search.rb#L265).
 
 ## Layer 1: Logical Tenant Segregation by Organization
 
