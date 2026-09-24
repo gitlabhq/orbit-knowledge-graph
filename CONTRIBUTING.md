@@ -56,8 +56,10 @@ Run `mise lint:docs` before pushing any documentation changes.
 - Reuse existing infrastructure before adding new infrastructure.
 - Before changing an area, read its design document and the crate-local `AGENTS.md`, if present.
 - Treat the ontology as the single source of truth for graph-shape facts.
-- Give every new ontology node and property an `introduced_in` value matching the next
-  `graph_schema_api` pin. See [schema management](docs/design-documents/schema_management.md#public-graph-schema-api).
+- Give every new ontology node and property an explicit `introduced_in` value matching the next
+  `graph_schema_api` pin. Omitted values on existing elements default to `1.0.0`; the target-branch
+  comparison gate (not standalone validation) checks new elements. See
+  [schema management](docs/design-documents/schema_management.md#public-graph-schema-api).
 - Read `docs/dev/sox-billing-boundary.md` before changing billing.
 
 ## Documentation conventions

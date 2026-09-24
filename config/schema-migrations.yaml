@@ -19,8 +19,8 @@ migrations:
 - version: 100
   scope: none
   note: >-
-    introduced_in annotations affect introspection metadata only; DDL and indexed
-    rows are byte-identical
+    Omitted baseline introduced_in resolves to 1.0.0; DDL, indexed rows, and public
+    output are byte-identical
 - version: 99
   scope: none
   note: >-

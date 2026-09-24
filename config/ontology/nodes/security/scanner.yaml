@@ -1,7 +1,6 @@
 # config/ontology/nodes/security/scanner.yaml
 
 node_type: VulnerabilityScanner
-introduced_in: "1.0.0"
 domain: security
 description: A security scanner that detects vulnerabilities in projects
 label: name
@@ -20,7 +19,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -28,7 +26,6 @@ properties:
     description: "Unique ID."
 
   external_id:
-    introduced_in: "1.0.0"
     type: string
     source: external_id
     nullable: false
@@ -36,14 +33,12 @@ properties:
     description: "External ID (e.g. gemnasium, bandit)."
 
   name:
-    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
     description: "Display name."
 
   vendor:
-    introduced_in: "1.0.0"
     type: string
     source: vendor
     nullable: false
@@ -51,7 +46,6 @@ properties:
     selectivity: low
 
   created_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: false
@@ -59,14 +53,12 @@ properties:
     description: "Creation timestamp."
 
   updated_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: updated_at
     nullable: false
     description: "Last update timestamp."
 
   project_id:
-    introduced_in: "1.0.0"
     type: int64
     source: project_id
     nullable: false
@@ -74,7 +66,6 @@ properties:
     description: "Owning project ID."
 
   traversal_path:
-    introduced_in: "1.0.0"
     type: string
     source: traversal_path
     filterable: false

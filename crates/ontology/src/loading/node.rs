@@ -3,7 +3,6 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
-use crate::OntologyError;
 use crate::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use crate::entities::{
     DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
@@ -14,6 +13,7 @@ use crate::etl::{
     ClickHouseExtract, ClickHouseExtractLookup, DEFAULT_TRANSFORM, EdgeMapping, EtlScope, Extract,
     ExtractQuery, NodeRef, NodeRefKind, PathResolution, Pipeline, ReindexSource, Transform,
 };
+use crate::{DEFAULT_INTRODUCED_IN, OntologyError};
 
 use super::{EtlSettings, ReadOntologyFile};
 
@@ -322,11 +322,7 @@ impl NodeYaml {
         let introduced_in = self
             .introduced_in
             .or_else(|| legacy_introduced_in.clone())
-            .ok_or_else(|| {
-                OntologyError::Validation(format!(
-                    "node '{name}' requires an introduced_in version"
-                ))
-            })?;
+            .unwrap_or_else(|| DEFAULT_INTRODUCED_IN.clone());
         let mut primary_keys = Vec::new();
 
         let fields: Vec<Field> = self
@@ -340,11 +336,7 @@ impl NodeYaml {
                 let field_introduced_in = prop_def
                     .introduced_in
                     .or_else(|| legacy_introduced_in.clone())
-                    .ok_or_else(|| {
-                        OntologyError::Validation(format!(
-                            "property '{prop_name}' on node '{name}' requires an introduced_in version"
-                        ))
-                    })?;
+                    .unwrap_or_else(|| DEFAULT_INTRODUCED_IN.clone());
 
                 let source = match (prop_def.source, prop_def.virtual_config) {
                     (Some(col), None) => FieldSource::DatabaseColumn(col),
@@ -1116,7 +1108,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_reader_rejects_missing_introduced_in() {
+    fn missing_introduced_in_resolves_to_baseline() {
         let missing_node_version = parse_test_node_with_reader(
             r#"
             node_type: entity
@@ -1130,12 +1122,8 @@ mod tests {
             "#,
             &StrictReader,
         )
-        .unwrap_err();
-        assert!(
-            missing_node_version
-                .to_string()
-                .contains("node 'TestNode' requires an introduced_in version")
-        );
+        .unwrap();
+        assert_eq!(missing_node_version.introduced_in, DEFAULT_INTRODUCED_IN);
 
         let missing_property_version = parse_test_node_with_reader(
             r#"
@@ -1150,11 +1138,10 @@ mod tests {
             "#,
             &StrictReader,
         )
-        .unwrap_err();
-        assert!(
-            missing_property_version
-                .to_string()
-                .contains("property 'id' on node 'TestNode' requires an introduced_in version")
+        .unwrap();
+        assert_eq!(
+            missing_property_version.fields[0].introduced_in,
+            DEFAULT_INTRODUCED_IN
         );
     }
 

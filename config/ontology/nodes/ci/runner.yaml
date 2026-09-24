@@ -1,7 +1,6 @@
 # config/ontology/nodes/ci/runner.yaml
 
 node_type: Runner
-introduced_in: "1.0.0"
 domain: ci
 global: true
 description: A CI/CD runner that executes jobs
@@ -21,7 +20,6 @@ redaction:
 
 properties:
   id:
-    introduced_in: "1.0.0"
     type: int64
     source: id
     nullable: false
@@ -29,7 +27,6 @@ properties:
     description: "Unique ID."
 
   runner_type:
-    introduced_in: "1.0.0"
     type: enum
     source: runner_type
     nullable: false
@@ -41,42 +38,36 @@ properties:
       3: project_type
 
   name:
-    introduced_in: "1.0.0"
     type: string
     source: name
     nullable: false
     description: "Human-readable runner name."
 
   description:
-    introduced_in: "1.0.0"
     type: string
     source: description
     nullable: false
     description: "Maintainer-provided description."
 
   active:
-    introduced_in: "1.0.0"
     type: boolean
     source: active
     nullable: false
     description: "Whether currently accepting jobs."
 
   locked:
-    introduced_in: "1.0.0"
     type: boolean
     source: locked
     nullable: false
     description: "Whether locked to its assignment."
 
   run_untagged:
-    introduced_in: "1.0.0"
     type: boolean
     source: run_untagged
     nullable: false
     description: "Whether it picks up untagged jobs."
 
   access_level:
-    introduced_in: "1.0.0"
     type: enum
     source: access_level
     nullable: false
@@ -86,21 +77,18 @@ properties:
       1: ref_protected
 
   maximum_timeout:
-    introduced_in: "1.0.0"
     type: int64
     source: maximum_timeout
     nullable: true
     description: "Max job timeout in seconds."
 
   organization_id:
-    introduced_in: "1.0.0"
     type: int64
     source: organization_id
     nullable: true
     description: "Cell organization ID."
 
   created_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: created_at
     nullable: true
@@ -108,7 +96,6 @@ properties:
     description: "Registration timestamp."
 
   contacted_at:
-    introduced_in: "1.0.0"
     type: timestamp
     source: contacted_at
     nullable: true

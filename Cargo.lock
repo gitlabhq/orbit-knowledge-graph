@@ -11149,6 +11149,7 @@ dependencies = [
  "query-engine",
  "rand 0.10.2",
  "schemars 1.2.1",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",

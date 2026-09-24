@@ -16,6 +16,8 @@
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
+pub const DEFAULT_INTRODUCED_IN: semver::Version = semver::Version::new(1, 0, 0);
+
 pub mod archive;
 pub mod constants;
 pub mod denormalized;

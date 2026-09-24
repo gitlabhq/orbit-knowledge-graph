@@ -358,7 +358,7 @@ impl Default for NodeEntity {
     fn default() -> Self {
         Self {
             name: String::new(),
-            introduced_in: semver::Version::new(1, 0, 0),
+            introduced_in: crate::DEFAULT_INTRODUCED_IN.clone(),
             domain: String::new(),
             description: String::new(),
             label: String::new(),
@@ -571,7 +571,7 @@ impl Default for Field {
     fn default() -> Self {
         Self {
             name: String::new(),
-            introduced_in: semver::Version::new(1, 0, 0),
+            introduced_in: crate::DEFAULT_INTRODUCED_IN.clone(),
             source: FieldSource::DatabaseColumn(String::new()),
             data_type: DataType::String,
             nullable: false,
