@@ -552,17 +552,17 @@ async fn migration_completion_checker_waits_until_active_code_projects_are_reind
     let checker = context.completion_checker();
 
     context
-        .given_indexed_projects(*SCHEMA_VERSION, (1..=198).chain([500]))
+        .given_indexed_projects(*SCHEMA_VERSION, (1..=197).chain([500]))
         .await;
     checker.run().await.unwrap();
 
     assert_eq!(
         read_migrating_version(&graph).await.unwrap(),
         Some(*SCHEMA_VERSION),
-        "198 of 200 active projects is below 99.5%, and project 500 is not in the active version"
+        "197 of 200 active projects is below 99%, and project 500 is not in the active version"
     );
 
-    context.given_indexed_projects(*SCHEMA_VERSION, [199]).await;
+    context.given_indexed_projects(*SCHEMA_VERSION, [198]).await;
     checker.run().await.unwrap();
 
     assert_eq!(
@@ -571,7 +571,7 @@ async fn migration_completion_checker_waits_until_active_code_projects_are_reind
             version_entry(*SCHEMA_VERSION + 1, "retired"),
             version_entry(*SCHEMA_VERSION, "active"),
         ],
-        "199 of 200 active projects reaches 99.5%"
+        "198 of 200 active projects reaches 99%"
     );
 }
 
