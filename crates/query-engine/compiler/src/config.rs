@@ -20,10 +20,11 @@ use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
 use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
+use crate::passes::lower::LoweredMetadata;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, relationships, restrict,
-    security, settings, validate,
+    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, project, relationships,
+    restrict, security, settings, validate,
 };
 use crate::types::SecurityContext;
 
@@ -42,6 +43,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub input: Input,
         pub query_plan: QueryPlan,
         pub node: Node,
+        pub lowered_metadata: LoweredMetadata,
         pub result_ctx: ResultContext,
         pub query_config: QueryConfig,
         pub hydration_plan: HydrationPlan,
@@ -81,11 +83,16 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         lower {
             reads_state: [input]
+            mutates: [query_plan, node, lowered_metadata]
+        }
+        post_lower {
+            reads_env: [ontology]
+            reads_state: [input]
             mutates: [query_plan, node]
         }
         enforce {
             reads_state: [input]
-            mutates: [query_plan, node, result_ctx]
+            mutates: [node, lowered_metadata, result_ctx]
         }
         security {
             reads_env: [security_ctx, ontology]
@@ -93,6 +100,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [node]
         }
         cursor {
+            reads_state: [lowered_metadata]
             mutates: [input, node]
         }
         check {
@@ -121,28 +129,28 @@ compiler_pipeline_macros::define_compiler_ctx! {
     pipelines {
         clickhouse_json_dsl {
             env: [ontology, security_ctx]
-            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, post_lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             env: [ontology, security_ctx]
-            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan, lower, post_lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
-            state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan, lower, enforce, settings, codegen]
+            state: [input, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [restrict, plan, lower, post_lower, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             env: [ontology]
-            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan, lower, enforce, duckdb_codegen]
+            state: [raw, input, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            phases: [json_dsl_parse, validate_local, normalize, plan, lower, post_lower, enforce, duckdb_codegen]
         }
         duckdb_gql {
             env: [ontology]
-            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan, lower, enforce, duckdb_codegen]
+            state: [raw, input, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, plan, lower, post_lower, enforce, duckdb_codegen]
         }
         validate_normalize_gql {
             env: [ontology]
@@ -234,8 +242,7 @@ fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
                 .insert(node.destination_table.clone(), node.sort_key.clone());
         }
     }
-    let mut query_plan = plan::plan(&mut input)?;
-    query_plan.resolve_text_excerpts(ctx.ontology());
+    let query_plan = plan::plan(&input)?;
     ctx.set_input(input);
     ctx.set_query_plan(query_plan);
     Ok(())
@@ -244,20 +251,40 @@ fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let input = require(ctx.input().clone(), "input")?;
-    let node = lower::emit(&query_plan, &input)?;
+    let lowered = lower::emit(&query_plan, &input)?;
+    ctx.set_query_plan(query_plan);
+    ctx.set_node(lowered.ast);
+    ctx.set_lowered_metadata(lowered.metadata);
+    Ok(())
+}
+
+fn post_lower(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
+    let input = require(ctx.input().clone(), "input")?;
+    let mut node = require(ctx.take_node(), "node")?;
+    if let Node::Query(query) = &mut node {
+        for requirement in &query_plan.scope_requirements {
+            let guard = requirement.resolved();
+            query.where_clause = Some(match query.where_clause.take() {
+                Some(existing) => crate::ast::Expr::and(existing, guard),
+                None => guard,
+            });
+        }
+    }
+    project::apply_text_excerpts(&mut node, &input, ctx.ontology());
     ctx.set_query_plan(query_plan);
     ctx.set_node(node);
     Ok(())
 }
 
 fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let node_edge_col = query_plan.node_edge_mappings();
-    ctx.set_query_plan(query_plan);
+    let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    let result_context = enforce::enforce_return(&mut node, &input, &node_edge_col)?;
+    enforce::enforce_role_scans(&mut node, &input, &metadata)?;
+    let result_context = enforce::enforce_lowered_return(&mut node, &input, &metadata)?;
     ctx.set_node(node);
+    ctx.set_lowered_metadata(metadata);
     ctx.set_result_ctx(result_context);
     Ok(())
 }
@@ -276,7 +303,8 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
     let mut node = require(ctx.take_node(), "node")?;
-    cursor::apply(&mut node, &mut input)?;
+    let metadata = require(ctx.lowered_metadata().as_ref(), "lowered_metadata")?;
+    cursor::apply(&mut node, &mut input, metadata)?;
     ctx.set_input(input);
     ctx.set_node(node);
     Ok(())

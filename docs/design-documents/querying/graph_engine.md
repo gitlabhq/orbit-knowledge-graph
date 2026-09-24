@@ -64,15 +64,16 @@ Schema calls have no state in the shared compiler contexts. `compiler::compile` 
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
 | 4 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
-| 5 | `plan` | Translates validated input into a query plan (hop chain, join strategy, FK shape) |
-| 6 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
-| 7 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
-| 8 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
-| 9 | `cursor` | Applies keyset pagination (seek predicate and readback columns) |
-| 10 | `check` | Verifies every namespaced graph-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
-| 11 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
-| 12 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
-| 13 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
+| 5 | `plan` | Chooses performance-equivalent access paths, join order, hydration, and dedup strategies |
+| 6 | `lower` | Emits the SQL AST and physical result bindings from the query plan |
+| 7 | `post_lower` | Applies semantic obligations and output projection policy to the lowered AST |
+| 8 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
+| 9 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
+| 10 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
+| 11 | `check` | Verifies every namespaced graph-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
+| 12 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
+| 13 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
+| 14 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
 The planner emits ClickHouse SQL similar to these patterns:
 

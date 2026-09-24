@@ -9,14 +9,8 @@ pub mod pathfinding;
 
 use std::collections::{HashMap, HashSet};
 
-use ontology::{DataType, FieldSource, Ontology};
-
-use crate::ast::Expr;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-
-const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
-const MAX_UTF8_BYTES_PER_CHAR: u64 = 4;
 
 pub use edge_chain::{
     FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
@@ -30,9 +24,6 @@ pub struct Plan {
     pub nodes: HashMap<String, NodePlan>,
     pub hops: Vec<Hop>,
     pub strategy: Strategy,
-    pub limit: u32,
-    pub order_by: Option<InputOrderBy>,
-    pub cursor: Option<InputCursor>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denorm_columns: HashMap<(String, String, String), (String, String)>,
     /// Relationship kinds whose edge writes each denorm tag, keyed like
@@ -44,9 +35,7 @@ pub struct Plan {
     pub table_columns: HashMap<String, HashSet<String>>,
     /// ORDER BY columns per table. Used by the lowerer for LIMIT BY dedup.
     pub table_sort_keys: HashMap<String, Vec<String>>,
-    /// `anchor exists` predicates for scope anchors the plan elided; a
-    /// missing anchor must yield no rows instead of the broad fallback.
-    pub scope_guards: Vec<Expr>,
+    pub scope_requirements: Vec<crate::scope::ScopePrefix>,
     pub body: PlanBody,
 }
 
@@ -54,58 +43,6 @@ impl Plan {
     pub fn node_edge_mappings(&self) -> HashMap<String, (String, String)> {
         self.node_edge_mappings.clone()
     }
-
-    pub(crate) fn resolve_text_excerpts(&mut self, ontology: &Ontology) {
-        let max_chars = calculate_text_excerpt_chars(self.limit);
-        for node in self.nodes.values_mut() {
-            node.text_excerpt = TextExcerpt {
-                columns: text_excerpt_columns(node.entity.as_deref(), ontology),
-                max_chars,
-            };
-        }
-        if let PlanBody::Hydration(nodes) = &mut self.body {
-            for node in nodes {
-                node.text_excerpt = TextExcerpt {
-                    columns: text_excerpt_columns(Some(&node.entity), ontology),
-                    max_chars,
-                };
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct TextExcerpt {
-    pub columns: HashSet<String>,
-    pub max_chars: u32,
-}
-
-fn calculate_text_excerpt_chars(rows_per_page: u32) -> u32 {
-    let page_chars = WORKHORSE_GRPC_MESSAGE_CAP_BYTES / MAX_UTF8_BYTES_PER_CHAR;
-    (page_chars / u64::from(rows_per_page.max(1))) as u32
-}
-
-fn text_excerpt_columns(entity: Option<&str>, ontology: &Ontology) -> HashSet<String> {
-    let Some(node) = entity.and_then(|name| ontology.get_node(name)) else {
-        return HashSet::new();
-    };
-
-    let mut excerpt_columns: HashSet<String> = node
-        .fields
-        .iter()
-        .filter(|field| field.column_name().is_some() && field.data_type == DataType::String)
-        .map(|field| field.name.clone())
-        .collect();
-
-    for field in &node.fields {
-        if let FieldSource::Virtual(source) = &field.source {
-            for lookup_input in &source.depends_on {
-                excerpt_columns.remove(lookup_input);
-            }
-        }
-    }
-
-    excerpt_columns
 }
 
 pub enum PlanBody {
@@ -191,7 +128,7 @@ pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
         .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
 }
 
-pub fn plan(input: &mut Input) -> Result<Plan> {
+pub fn plan(input: &Input) -> Result<Plan> {
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => Ok(edge_chain::plan(input)),
         QueryType::Neighbors => neighbors::plan_neighbors(input),

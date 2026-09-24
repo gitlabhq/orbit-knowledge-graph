@@ -230,12 +230,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     let Some(np) = plan.nodes.get(node_alias) else {
                         continue;
                     };
-                    let elevated_skip =
-                        matches!(np.hydration, HydrationStrategy::Skip) && np.needs_elevated_filter;
                     let is_filter_only = matches!(np.hydration, HydrationStrategy::FilterOnly);
-                    if (is_filter_only || elevated_skip)
-                        && filter_only_done.insert(node_alias.clone())
-                    {
+                    if is_filter_only && filter_only_done.insert(node_alias.clone()) {
                         narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
                     }
                 }
@@ -442,28 +438,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         where_parts.extend(nw);
                     }
                 }
-                HydrationStrategy::Skip => {
-                    if np.needs_elevated_filter && filter_only_done.insert(node_alias.clone()) {
-                        let table = np.table.as_deref().ok_or_else(|| {
-                            QueryError::Lowering(format!("node '{}' has no table", np.alias))
-                        })?;
-                        let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
-                            QueryError::Lowering(format!("no sort key for node table '{table}'"))
-                        })?;
-                        let (new_from, ns, nw) = emit_node_join_with_narrowing(
-                            from,
-                            np,
-                            edge_alias,
-                            edge_col,
-                            false,
-                            None,
-                            node_sort_key,
-                        )?;
-                        from = new_from;
-                        selects.extend(ns);
-                        where_parts.extend(nw);
-                    }
-                }
+                HydrationStrategy::Skip => {}
             }
         }
     }

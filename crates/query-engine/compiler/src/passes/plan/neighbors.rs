@@ -34,10 +34,7 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
         is_global: center_node.is_global,
         redaction_id_column: center_node.redaction_id_column.clone(),
         columns: center_node.columns.clone(),
-        text_excerpt: Default::default(),
-        dedup_columns: vec![],
         use_narrowing: false,
-        needs_elevated_filter: false,
         fk_needs_join: false,
         emit_select: true,
     };
@@ -96,13 +93,10 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
     nodes.insert(center_alias.clone(), center_np);
 
     Ok(Plan {
-        scope_guards: Vec::new(),
+        scope_requirements: Vec::new(),
         nodes,
         hops: vec![],
         strategy: Strategy::SingleNode,
-        limit: input.fetch_limit(),
-        order_by: input.order_by.clone(),
-        cursor: input.cursor.clone(),
         node_edge_mappings,
         denorm_columns: input.compiler.denormalized_columns.clone(),
         denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),
