@@ -1,7 +1,6 @@
 //! Named workflows. Each one composes phases and nothing else; the CLI and
 //! tests compose their own when they need to stop somewhere in between.
-//! Input is production's file inventory (see `inventory`): the pipeline
-//! reads each file from `root` when a worker takes it.
+//! Input is production's file inventory (see `inventory`).
 
 use std::path::Path;
 
@@ -15,7 +14,8 @@ use crate::pipeline::{
 
 /// Every file of the repository: `Parse` entries go through parse,
 /// rewrite, link and cross-file resolution; everything else becomes a
-/// `File` row carrying the reason it was not parsed.
+/// `File` row carrying the reason it was not parsed. `Parse` entries are
+/// read from `root` as workers take them.
 pub fn index<'e, S>(
     context: Context<'e>,
     root: &Path,
@@ -23,11 +23,10 @@ pub fn index<'e, S>(
 ) -> Result<Pipeline<'e, Resolved>, Error>
 where
     S: IntoIterator<Item = FileInventoryEntry>,
-    S::IntoIter: Send + 'static,
 {
     let sources = Sources {
         root: root.to_path_buf(),
-        entries: Box::new(inventory.into_iter()),
+        entries: inventory.into_iter().collect(),
     };
     Pipeline::new(context, sources)
         .then(Prepare)?

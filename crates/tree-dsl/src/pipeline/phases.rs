@@ -37,10 +37,11 @@ impl From<(String, String)> for SourceFile {
     }
 }
 
-/// A repository's classified files, read from `root` as workers take them.
+/// A repository's classified files; `Parse` entries are read from `root`
+/// as workers take them.
 pub struct Sources {
     pub root: PathBuf,
-    pub entries: Lazy<FileInventoryEntry>,
+    pub entries: Vec<FileInventoryEntry>,
 }
 
 /// Files changed since the graph was built, already classified.
@@ -56,7 +57,7 @@ pub struct ReindexInput {
 }
 
 /// The graph so far plus the items still moving through the per-item
-/// phases. `items` is a `Vec` once a phase has run; before that it can be a
+/// phases. `items` is a `Vec` once a phase has run; before that it is a
 /// lazy source so files are read only as workers take them. `dirty` is
 /// every file the resolver must revisit.
 pub struct Workset<C> {
@@ -69,28 +70,16 @@ pub struct Workset<C> {
 /// Sources not yet read into memory.
 pub type Lazy<T> = Box<dyn Iterator<Item = T> + Send>;
 
-/// What the lazy source saw besides parseable code, for `Insert` to put on
+/// What the inventory held besides parseable code, for `Insert` to put on
 /// the graph: manifests (`parse_files`) for the resolver, every other file
-/// as a `File` row with the reason it was not parsed, and each parsed
-/// file's size so one that overruns its budget still gets its row.
-#[derive(Clone, Default)]
-pub struct Listed(std::sync::Arc<std::sync::Mutex<ListedFiles>>);
-
+/// as a `File` row with the reason it was not parsed, and each parse
+/// candidate's size so one that was killed or could not be read still
+/// gets its row.
 #[derive(Default)]
-struct ListedFiles {
+pub struct Listed {
     manifests: Vec<SourceFile>,
     files: Vec<(String, u64, FileReason)>,
-    sizes: FxHashMap<String, u64>,
-}
-
-impl Listed {
-    fn with(&self, f: impl FnOnce(&mut ListedFiles)) {
-        f(&mut self.0.lock().unwrap());
-    }
-
-    fn take(&self) -> ListedFiles {
-        std::mem::take(&mut *self.0.lock().unwrap())
-    }
+    candidates: FxHashMap<String, u64>,
 }
 
 /// The tree-sitter tree, source attached.
@@ -175,64 +164,59 @@ impl Phase<ReindexInput> for Remap {
         state
             .configs
             .retain(|c| !dirty_labels.contains(c.path.as_str()));
-        let changed = Box::new(changes.changed.into_iter());
-        Ok(workset(context.env, state, root, changed, dirty))
+        Ok(workset(context.env, state, root, changes.changed, dirty))
     }
 }
 
 /// `Parse` entries this crate has a grammar for become the lazy workset,
-/// read from `root` when a worker takes them. Everything else is listed:
-/// manifests for the resolver, and every file as a `File` row.
+/// read from `root` when a worker takes them. Everything else is listed
+/// now: manifests for the resolver, and every file as a `File` row.
 fn workset(
     env: &Env,
     state: State,
     root: PathBuf,
-    entries: Lazy<FileInventoryEntry>,
+    entries: Vec<FileInventoryEntry>,
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
-    let manifest_names: Vec<String> = env
-        .rules
-        .config
-        .resolve
-        .parse_files
-        .iter()
-        .map(|pf| pf.name.clone())
-        .collect();
-    let listed = Listed::default();
-    let seen = listed.clone();
-    let items = entries.filter_map(move |entry| {
+    let manifest_names = &env.rules.config.resolve.parse_files;
+    let is_manifest = |path: &str| {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        manifest_names.iter().any(|pf| pf.name == name)
+    };
+    let mut listed = Listed::default();
+    let mut candidates = Vec::new();
+    for entry in entries {
         let FileInventoryEntry {
             path,
             size,
             decision,
             label,
         } = entry;
-        let read = || std::fs::read_to_string(root.join(&path)).ok();
-        let parse = decision == Decision::Parse && SupportLang::from_path(&path).is_some();
-        if parse && let Some(content) = read() {
-            seen.with(|l| {
-                l.sizes.insert(path.clone(), size);
-            });
-            return Some(SourceFile { path, content });
+        if decision == Decision::Parse && SupportLang::from_path(&path).is_some() {
+            listed.candidates.insert(path.clone(), size);
+            candidates.push(path);
+            continue;
         }
-        let name = path.rsplit('/').next().unwrap_or(&path);
-        let manifest = decision == Decision::Load && manifest_names.iter().any(|m| m == name);
-        let content = manifest.then(read).flatten();
+        let manifest = decision == Decision::Load && is_manifest(&path);
+        let content = manifest
+            .then(|| std::fs::read_to_string(root.join(&path)).ok())
+            .flatten();
         let reason = match (decision, label.skip) {
             (Decision::ListOnly, Some(skip)) => FileReason::Filter(skip),
-            _ if parse || (manifest && content.is_none()) => FileReason::Fault(FileFault::FileRead),
+            _ if manifest && content.is_none() => FileReason::Fault(FileFault::FileRead),
             _ => FileReason::None,
         };
-        seen.with(|l| {
-            if let Some(content) = content {
-                l.manifests.push(SourceFile {
-                    path: path.clone(),
-                    content,
-                });
-            }
-            l.files.push((path, size, reason));
-        });
-        None
+        if let Some(content) = content {
+            listed.manifests.push(SourceFile {
+                path: path.clone(),
+                content,
+            });
+        }
+        listed.files.push((path, size, reason));
+    }
+    let items = candidates.into_iter().filter_map(move |path| {
+        let content = std::fs::read_to_string(root.join(&path)).ok()?;
+        Some(SourceFile { path, content })
     });
     Workset {
         state,
@@ -473,11 +457,11 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 e
             }));
         }
-        let ListedFiles {
+        let Listed {
             manifests,
             files,
-            sizes,
-        } = listed.take();
+            mut candidates,
+        } = listed;
         for manifest in manifests {
             state.configs.retain(|c| c.path != manifest.path);
             state.configs.push(manifest);
@@ -486,13 +470,20 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
         for (path, size, reason) in files {
             state.trees.push(listed_file(lang, &path, size, reason));
         }
+        for tree in &state.trees {
+            candidates.remove(&tree.label);
+        }
         for killed in &context.report.skipped {
-            if let Some(size) = sizes.get(&killed.path) {
+            if let Some(size) = candidates.remove(&killed.path) {
                 let reason = crate::inventory::timeout(killed.label);
                 state
                     .trees
-                    .push(listed_file(lang, &killed.path, *size, reason));
+                    .push(listed_file(lang, &killed.path, size, reason));
             }
+        }
+        for (path, size) in candidates {
+            let reason = FileReason::Fault(FileFault::FileRead);
+            state.trees.push(listed_file(lang, &path, size, reason));
         }
         Ok(DirtyGraph { state, dirty })
     }

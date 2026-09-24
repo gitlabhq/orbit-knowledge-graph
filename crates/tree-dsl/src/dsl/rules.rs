@@ -264,22 +264,12 @@ pub fn load_rules(yaml: &str, lang: &Lang) -> Result<Vec<Vec<Rewrite>>, LoadErro
 }
 
 /// Everything a language YAML compiles to.
+#[derive(Default)]
 pub struct LangConfig {
     pub rewrite_stages: Vec<Vec<Rewrite>>,
     pub resolve_stages: Vec<ResolveStage>,
     pub config: Config,
     pub display_rules: Vec<Rewrite>,
-}
-
-impl Default for LangConfig {
-    fn default() -> Self {
-        Self {
-            rewrite_stages: Vec::new(),
-            resolve_stages: Vec::new(),
-            config: Config::default(),
-            display_rules: Vec::new(),
-        }
-    }
 }
 
 pub fn load_lang(yaml: &str, lang: &Lang) -> Result<LangConfig, LoadError> {
