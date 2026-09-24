@@ -320,7 +320,7 @@ settings:
         - {name: last_commit, type: string, default: "''", codec: ["ZSTD(1)"]}
         - {name: indexed_at, type: timestamp, nullable: true, codec: ["Delta(8)", "ZSTD(1)"]}
         - {name: attempts, type: int64, default: "0", codec: ["ZSTD(1)"]}
-        - {name: is_default_branch, type: bool, default: "false"}
+        - {name: is_default_branch, type: boolean, default: "false"}
       order_by: [traversal_path, project_id, branch]
       version_type: uint64
   auxiliary_dictionaries:
