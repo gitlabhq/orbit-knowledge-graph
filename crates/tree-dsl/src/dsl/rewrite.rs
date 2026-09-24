@@ -38,18 +38,24 @@ impl Placement {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn materialize(
-    t: &mut Tree,
-    lang: &Lang,
-    p: &Pat,
-    caps: &[Cap],
-    filters: &[Vec<u16>],
-    parent: NodeId,
-    span: (u32, u32),
-    pl: &mut Placement,
-    edge_ctx: Option<&EdgeCtx>,
-) {
+/// Everything a match hands to template construction that stays fixed while
+/// the template is built.
+pub(crate) struct Fill<'a> {
+    pub lang: &'a Lang,
+    pub caps: &'a [Cap],
+    pub filters: &'a [Vec<u16>],
+    pub span: (u32, u32),
+    pub edge_ctx: Option<&'a EdgeCtx<'a>>,
+}
+
+pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl: &mut Placement) {
+    let Fill {
+        lang,
+        caps,
+        filters,
+        span,
+        edge_ctx,
+    } = *fill;
     match p {
         Pat::Cap {
             slot,
@@ -187,7 +193,7 @@ pub(crate) fn materialize(
                 },
             );
             for k in kids {
-                materialize(t, lang, k, caps, filters, at, span, pl, edge_ctx);
+                materialize(t, fill, k, at, pl);
             }
         }
         Pat::Spread { slot, inject } => {
@@ -196,25 +202,16 @@ pub(crate) fn materialize(
             };
             let copy = pl.place(t, src, parent);
             for kid in inject {
-                materialize(t, lang, kid, caps, filters, copy, span, pl, edge_ctx);
+                materialize(t, fill, kid, copy, pl);
             }
         }
         Pat::Not(_) | Pat::Desc(_) => {}
     }
 }
 
-fn build_template(
-    t: &mut Tree,
-    lang: &Lang,
-    pat: &Pat,
-    caps: &[Cap],
-    filters: &[Vec<u16>],
-    span: (u32, u32),
-    edge_ctx: Option<&EdgeCtx>,
-    mut pl: Placement,
-) -> Vec<NodeId> {
+fn build_template(t: &mut Tree, fill: &Fill, pat: &Pat, mut pl: Placement) -> Vec<NodeId> {
     let holder = t.arena.new_node(Node::default());
-    materialize(t, lang, pat, caps, filters, holder, span, &mut pl, edge_ctx);
+    materialize(t, fill, pat, holder, &mut pl);
     let built: Vec<NodeId> = holder.children(&t.arena).collect();
     for &b in &built {
         b.detach(&mut t.arena);
@@ -302,7 +299,13 @@ fn apply_rewrites_inner(
             }
 
             let root_node = t.node(target);
-            let span = (root_node.start, root_node.end);
+            let fill = Fill {
+                lang,
+                caps: &caps,
+                filters: &r.filters,
+                span: (root_node.start, root_node.end),
+                edge_ctx,
+            };
 
             match &r.out {
                 Out::Tag(entries, tag_on) => {
@@ -325,7 +328,7 @@ fn apply_rewrites_inner(
                 }
                 Out::Replace(p, tag_entries, tag_on) => {
                     let pl = Placement::new(r.unique.is_none(), target);
-                    let built = build_template(t, lang, p, &caps, &r.filters, span, edge_ctx, pl);
+                    let built = build_template(t, &fill, p, pl);
                     let first = built.first().copied();
                     if let (Some((pat, kind, nslots)), Some(new_root)) = (&r.unique, first) {
                         let key = t.cursor(Tree::to_raw(new_root)).child_sym_of_kind(*kind);
@@ -374,8 +377,7 @@ fn apply_rewrites_inner(
                 Out::Append(ps) => {
                     for pat in ps {
                         let pl = Placement::new(false, target);
-                        let built =
-                            build_template(t, lang, pat, &caps, &r.filters, span, edge_ctx, pl);
+                        let built = build_template(t, &fill, pat, pl);
                         for id in built {
                             target.append(id, &mut t.arena);
                         }
