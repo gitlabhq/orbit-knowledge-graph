@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use tracing::info;
 
 use crate::campaign::CampaignState;
-use crate::checkpoint::CheckpointStore;
+use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::durability::WriteDurability;
 use crate::nats::NatsServices;
@@ -208,7 +208,7 @@ impl NamespaceDispatcher {
 
     async fn save_checkpoint(&self, key: &str, upper: &DateTime<Utc>) -> Result<(), TaskError> {
         self.checkpoint_store
-            .save_completed(key, upper, WriteDurability::Durable)
+            .save_completed(key, &Checkpoint::new(*upper), WriteDurability::Durable)
             .await
             .map_err(TaskError::new)
     }
@@ -217,7 +217,7 @@ impl NamespaceDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::checkpoint::{Checkpoint, CheckpointError};
+    use crate::checkpoint::CheckpointError;
     use crate::testkit::mocks::MockNatsServices;
     use chrono::Duration;
     use orbit_utils::traversal_path::TraversalPath;
@@ -249,24 +249,16 @@ mod tests {
             Ok(self.loaded.lock().unwrap().get(key).cloned())
         }
 
-        async fn save_progress(
-            &self,
-            _key: &str,
-            _checkpoint: &Checkpoint,
-        ) -> Result<(), CheckpointError> {
-            Ok(())
-        }
-
-        async fn save_completed(
+        async fn save(
             &self,
             key: &str,
-            watermark: &DateTime<Utc>,
+            checkpoint: &Checkpoint,
             _durability: WriteDurability,
         ) -> Result<(), CheckpointError> {
             self.saved
                 .lock()
                 .unwrap()
-                .push((key.to_string(), *watermark));
+                .push((key.to_string(), checkpoint.watermark));
             Ok(())
         }
 
@@ -367,6 +359,8 @@ mod tests {
             watermark,
             cursor_values: None,
             resume_floor: None,
+            attempts: 0,
+            indexed_at: None,
         }
     }
 

@@ -5,7 +5,7 @@ use std::time::Instant;
 use chrono::Utc;
 use tracing::{debug, info, warn};
 
-use crate::checkpoint::CheckpointStore;
+use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::durability::WriteDurability;
 use crate::modules::code::config::CodeTableNames;
@@ -121,7 +121,7 @@ impl CodeStaleSweep {
         self.checkpoint_store
             .save_completed(
                 &namespace_checkpoint_key(traversal_path),
-                &started,
+                &Checkpoint::new(started),
                 WriteDurability::Durable,
             )
             .await

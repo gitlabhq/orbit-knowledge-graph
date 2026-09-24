@@ -5,6 +5,7 @@ use futures::stream;
 use super::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
 use super::metrics::SdlcMetrics;
 use crate::checkpoint::{Checkpoint, CheckpointError, CheckpointStore};
+use crate::durability::WriteDurability;
 
 pub(crate) fn test_metrics() -> SdlcMetrics {
     SdlcMetrics::with_meter(&crate::testkit::test_meter())
@@ -64,19 +65,11 @@ impl CheckpointStore for MockCheckpointStore {
         Ok(None)
     }
 
-    async fn save_progress(
+    async fn save(
         &self,
         _key: &str,
         _checkpoint: &Checkpoint,
-    ) -> Result<(), CheckpointError> {
-        Ok(())
-    }
-
-    async fn save_completed(
-        &self,
-        _key: &str,
-        _watermark: &chrono::DateTime<chrono::Utc>,
-        _durability: crate::durability::WriteDurability,
+        _durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
         Ok(())
     }

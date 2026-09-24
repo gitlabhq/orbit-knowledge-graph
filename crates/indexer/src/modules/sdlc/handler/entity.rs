@@ -137,12 +137,12 @@ impl EntityHandler {
         observer.set_namespace(request.namespace_id);
 
         let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
-        let parent_checkpoint = self
+        let checkpoint = self
             .checkpoint_store
-            .load(&checkpoint_key)
+            .save_started(&checkpoint_key, request.watermark)
             .await
             .map_err(|err| HandlerError::Processing(err.to_string()))?;
-        let window = pull_window(parent_checkpoint.as_ref(), request.watermark);
+        let window = pull_window(&checkpoint, request.watermark);
 
         let mode = window.indexing_mode();
         observer.set_indexing_mode(mode);
@@ -172,7 +172,8 @@ impl EntityHandler {
                 column: &self.plan.deleted_column,
             }));
 
-        let should_partition = self.partition_strategy.is_some() && parent_checkpoint.is_none();
+        let should_partition =
+            self.partition_strategy.is_some() && checkpoint.is_first_pass_start();
         let ranges = if should_partition {
             self.partition_strategy
                 .as_ref()
@@ -232,7 +233,7 @@ impl EntityHandler {
                             .await
                             .map(|()| stats)
                             .map_err(|err| HandlerError::Processing(err.to_string())),
-                        // Leaving the parent absent re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
+                        // A parent still at its first-pass start re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
                         Err(incomplete) => {
                             info!(
                                 entity = %self.plan.name,
@@ -344,22 +345,15 @@ impl EntityHandler {
 }
 
 /// A cursored checkpoint must resume its original window, never widen to `(epoch, target]`.
-fn pull_window(
-    parent_checkpoint: Option<&Checkpoint>,
-    request_watermark: DateTime<Utc>,
-) -> WindowBounds {
-    match parent_checkpoint {
-        Some(checkpoint) if checkpoint.cursor_values.is_some() => WindowBounds {
+fn pull_window(checkpoint: &Checkpoint, request_watermark: DateTime<Utc>) -> WindowBounds {
+    match checkpoint.cursor_values {
+        Some(_) => WindowBounds {
             target: checkpoint.watermark,
             floor: checkpoint.resume_floor,
         },
-        Some(checkpoint) => WindowBounds {
-            target: request_watermark,
-            floor: Some(checkpoint.watermark),
-        },
         None => WindowBounds {
             target: request_watermark,
-            floor: None,
+            floor: Some(checkpoint.watermark),
         },
     }
 }
@@ -641,10 +635,17 @@ mod tests {
     }
 
     #[test]
-    fn pull_window_missing_checkpoint_starts_from_beginning() {
+    fn pull_window_first_pass_start_starts_from_beginning() {
         let now = ts("2026-06-07T22:00:00Z");
+        let started = Checkpoint {
+            watermark: now,
+            cursor_values: Some(Vec::new()),
+            resume_floor: None,
+            attempts: 1,
+            indexed_at: None,
+        };
         assert_eq!(
-            pull_window(None, now),
+            pull_window(&started, now),
             WindowBounds {
                 target: now,
                 floor: None
@@ -659,9 +660,11 @@ mod tests {
             watermark: ts("2026-06-07T21:59:30Z"),
             cursor_values: None,
             resume_floor: None,
+            attempts: 0,
+            indexed_at: None,
         };
         assert_eq!(
-            pull_window(Some(&completed), now),
+            pull_window(&completed, now),
             WindowBounds {
                 target: now,
                 floor: Some(ts("2026-06-07T21:59:30Z")),
@@ -676,9 +679,11 @@ mod tests {
             watermark: ts("2026-06-07T22:00:00Z"),
             cursor_values: Some(vec!["1/65957873/".to_string(), "42".to_string()]),
             resume_floor: Some(ts("2026-06-07T21:59:30Z")),
+            attempts: 0,
+            indexed_at: None,
         };
         assert_eq!(
-            pull_window(Some(&in_progress), now),
+            pull_window(&in_progress, now),
             WindowBounds {
                 target: ts("2026-06-07T22:00:00Z"),
                 floor: Some(ts("2026-06-07T21:59:30Z")),
@@ -693,9 +698,11 @@ mod tests {
             watermark: ts("2026-06-07T22:00:00Z"),
             cursor_values: Some(vec!["42".to_string()]),
             resume_floor: None,
+            attempts: 0,
+            indexed_at: None,
         };
         assert_eq!(
-            pull_window(Some(&legacy), now),
+            pull_window(&legacy, now),
             WindowBounds {
                 target: ts("2026-06-07T22:00:00Z"),
                 floor: None,
@@ -710,6 +717,8 @@ mod tests {
                 watermark: ts(watermark),
                 cursor_values: None,
                 resume_floor: None,
+                attempts: 0,
+                indexed_at: None,
             },
         )
     }
@@ -721,6 +730,8 @@ mod tests {
                 watermark: ts(watermark),
                 cursor_values: Some(vec!["42".to_string()]),
                 resume_floor: Some(ts(watermark)),
+                attempts: 0,
+                indexed_at: None,
             },
         )
     }

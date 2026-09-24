@@ -96,7 +96,7 @@ impl FromArrowColumn for i64 {
     }
 }
 
-impl FromArrowColumn for DateTime<Utc> {
+impl FromArrowColumn for Option<DateTime<Utc>> {
     fn extract_column(
         batches: &[RecordBatch],
         column_index: usize,
@@ -114,16 +114,29 @@ impl FromArrowColumn for DateTime<Utc> {
 
             for i in 0..column.len() {
                 if column.is_null(i) {
+                    values.push(None);
                     continue;
                 }
-                let micros = column.value(i);
-                let timestamp = Utc.timestamp_micros(micros).single().ok_or(ExtractError {
-                    expected: "valid microsecond timestamp",
-                })?;
-                values.push(timestamp);
+                let timestamp =
+                    Utc.timestamp_micros(column.value(i))
+                        .single()
+                        .ok_or(ExtractError {
+                            expected: "valid microsecond timestamp",
+                        })?;
+                values.push(Some(timestamp));
             }
         }
 
         Ok(values)
+    }
+}
+
+impl FromArrowColumn for DateTime<Utc> {
+    fn extract_column(
+        batches: &[RecordBatch],
+        column_index: usize,
+    ) -> Result<Vec<Self>, ExtractError> {
+        let values = Option::<DateTime<Utc>>::extract_column(batches, column_index)?;
+        Ok(values.into_iter().flatten().collect())
     }
 }

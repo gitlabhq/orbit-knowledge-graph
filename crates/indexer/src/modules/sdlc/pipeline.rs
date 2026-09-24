@@ -272,8 +272,14 @@ impl Pipeline {
                 );
             }
 
-            self.save_batch_progress(position_key, window, &cursor, &context.progress)
-                .await?;
+            self.save_batch_progress(
+                position_key,
+                window,
+                &cursor,
+                &checkpoint,
+                &context.progress,
+            )
+            .await?;
 
             let Some(next) = next_page else {
                 break;
@@ -283,7 +289,14 @@ impl Pipeline {
         }
 
         self.checkpoint_store
-            .save_completed(position_key, &window.target, durability.completion)
+            .save_completed(
+                position_key,
+                &Checkpoint {
+                    watermark: window.target,
+                    ..checkpoint.clone()
+                },
+                durability.completion,
+            )
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -437,6 +450,7 @@ impl Pipeline {
         position_key: &str,
         window: WindowBounds,
         cursor: &Cursor,
+        checkpoint: &Checkpoint,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         self.checkpoint_store
@@ -446,6 +460,7 @@ impl Pipeline {
                     watermark: window.target,
                     cursor_values: cursor.to_checkpoint_values(),
                     resume_floor: window.floor,
+                    ..checkpoint.clone()
                 },
             )
             .await
@@ -463,6 +478,8 @@ impl Pipeline {
                 watermark: DateTime::<Utc>::UNIX_EPOCH,
                 cursor_values: None,
                 resume_floor: None,
+                attempts: 0,
+                indexed_at: None,
             },
             Err(err) => {
                 warn!(
@@ -474,6 +491,8 @@ impl Pipeline {
                     watermark: DateTime::<Utc>::UNIX_EPOCH,
                     cursor_values: None,
                     resume_floor: None,
+                    attempts: 0,
+                    indexed_at: None,
                 }
             }
         }
@@ -656,14 +675,14 @@ mod tests {
 
     struct RecordingCheckpointStore {
         state: Mutex<Option<Checkpoint>>,
-        progress_history: Mutex<Vec<Checkpoint>>,
+        saves: Mutex<Vec<Checkpoint>>,
     }
 
     impl RecordingCheckpointStore {
         fn new() -> Self {
             Self {
                 state: Mutex::new(None),
-                progress_history: Mutex::new(Vec::new()),
+                saves: Mutex::new(Vec::new()),
             }
         }
 
@@ -672,7 +691,13 @@ mod tests {
         }
 
         fn progress_history(&self) -> Vec<Checkpoint> {
-            self.progress_history.lock().unwrap().clone()
+            self.saves
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|checkpoint| checkpoint.cursor_values.is_some())
+                .cloned()
+                .collect()
         }
     }
 
@@ -682,30 +707,14 @@ mod tests {
             Ok(self.state.lock().unwrap().clone())
         }
 
-        async fn save_progress(
+        async fn save(
             &self,
             _key: &str,
             checkpoint: &Checkpoint,
-        ) -> Result<(), CheckpointError> {
-            self.progress_history
-                .lock()
-                .unwrap()
-                .push(checkpoint.clone());
-            *self.state.lock().unwrap() = Some(checkpoint.clone());
-            Ok(())
-        }
-
-        async fn save_completed(
-            &self,
-            _key: &str,
-            watermark: &DateTime<Utc>,
             _durability: WriteDurability,
         ) -> Result<(), CheckpointError> {
-            *self.state.lock().unwrap() = Some(Checkpoint {
-                watermark: *watermark,
-                cursor_values: None,
-                resume_floor: None,
-            });
+            self.saves.lock().unwrap().push(checkpoint.clone());
+            *self.state.lock().unwrap() = Some(checkpoint.clone());
             Ok(())
         }
 
@@ -790,6 +799,54 @@ mod tests {
 
         let final_state = store.current_state().unwrap();
         assert!(final_state.cursor_values.is_none(), "should be completed");
+    }
+
+    #[tokio::test]
+    async fn page_and_completion_writes_keep_the_attempt_count() {
+        let earlier_index: DateTime<Utc> = "2024-06-01T00:00:00Z".parse().unwrap();
+        let store = Arc::new(RecordingCheckpointStore {
+            state: Mutex::new(Some(Checkpoint {
+                watermark: test_watermark(),
+                cursor_values: None,
+                resume_floor: None,
+                attempts: 3,
+                indexed_at: Some(earlier_index),
+            })),
+            saves: Mutex::new(Vec::new()),
+        });
+        let plan = simple_plan_with_batch_size("Test", 10);
+        let pipeline = Pipeline::new(
+            Arc::new(MultiBatchDatalake {
+                call_count: Mutex::new(0),
+                batch_size: 10,
+            }),
+            store.clone(),
+            test_metrics(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
+        );
+
+        pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_window(),
+                RunDurability::for_mode(IndexingMode::Incremental),
+            )
+            .await
+            .unwrap();
+
+        let pages = store.progress_history();
+        assert_eq!(pages.len(), 2);
+        assert!(
+            pages
+                .iter()
+                .all(|page| page.attempts == 3 && page.indexed_at == Some(earlier_index))
+        );
+        let completed = store.current_state().unwrap();
+        assert_eq!(completed.attempts, 3);
+        assert!(completed.indexed_at > Some(earlier_index));
     }
 
     // Comparing `has_more` against the plan's budget rather than the query's share ends
@@ -1115,8 +1172,10 @@ mod tests {
                 watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
                 cursor_values: Some(vec!["5".to_string()]),
                 resume_floor: None,
+                attempts: 0,
+                indexed_at: None,
             })),
-            progress_history: Mutex::new(Vec::new()),
+            saves: Mutex::new(Vec::new()),
         });
 
         let pipeline = Pipeline::new(

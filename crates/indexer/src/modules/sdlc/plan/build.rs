@@ -666,6 +666,8 @@ mod tests {
             watermark: Utc::now(),
             cursor_values: Some(vec!["42".to_string()]),
             resume_floor: None,
+            attempts: 0,
+            indexed_at: None,
         });
         let sql = user
             .prepare()

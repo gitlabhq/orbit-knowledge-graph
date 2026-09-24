@@ -8,6 +8,7 @@
 //! subtests in parallel, forking an isolated database per subtest to avoid
 //! cross-test contamination while eliminating per-test container startup overhead.
 
+mod first_pass;
 mod partitioning;
 
 use std::sync::Arc;
@@ -37,6 +38,9 @@ async fn global_indexing() {
         partitioning::unfinished_partition_blocks_parent_consolidation,
         partitioning::present_parent_takes_single_pull_path_and_honors_floor,
         partitioning::span_smaller_than_partition_count_falls_back_to_single_run,
+        first_pass::completed_first_pass_keeps_its_attempts_and_sets_indexed_at,
+        first_pass::unfinished_first_pass_counts_each_attempt,
+        first_pass::incremental_run_records_no_attempt,
     );
 }
 

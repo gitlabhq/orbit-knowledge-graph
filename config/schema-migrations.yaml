@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 100
+  scope: "*"
+  note: >-
+    checkpoint gains attempts and indexed_at, and code_indexing_checkpoint gains
+    attempts and is_default_branch with a nullable indexed_at, for indexing status. A
+    clone keeps the old columns, so every table rebuilds.
 - version: 99
   scope: none
   note: >-

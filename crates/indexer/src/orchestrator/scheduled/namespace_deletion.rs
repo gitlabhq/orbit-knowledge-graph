@@ -6,7 +6,7 @@ use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::checkpoint::CheckpointStore;
+use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::durability::WriteDurability;
 use crate::modules::namespace_deletion::NamespaceDeletionStore;
@@ -162,7 +162,11 @@ impl NamespaceDeletionScheduler {
         }
 
         self.checkpoint_store
-            .save_completed(CHECKPOINT_KEY, &watermark, WriteDurability::Durable)
+            .save_completed(
+                CHECKPOINT_KEY,
+                &Checkpoint::new(watermark),
+                WriteDurability::Durable,
+            )
             .await
             .map_err(TaskError::new)?;
 
@@ -263,18 +267,10 @@ mod tests {
             Ok(None)
         }
 
-        async fn save_progress(
+        async fn save(
             &self,
             _key: &str,
             _checkpoint: &Checkpoint,
-        ) -> Result<(), CheckpointError> {
-            Ok(())
-        }
-
-        async fn save_completed(
-            &self,
-            _key: &str,
-            _watermark: &chrono::DateTime<Utc>,
             _durability: WriteDurability,
         ) -> Result<(), CheckpointError> {
             Ok(())

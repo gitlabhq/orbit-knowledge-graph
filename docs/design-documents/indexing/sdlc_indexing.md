@@ -332,6 +332,7 @@ A run touches three write targets, and each mode (`RunDurability::for_mode`) pic
 | Data pages (graph tables) | durable: `async_insert=1, wait_for_async_insert=1` | durable: same |
 | Per-page progress checkpoint | fire-and-forget — `async_insert=1, wait_for_async_insert=0` | fire-and-forget |
 | Completion checkpoint | durable | fire-and-forget |
+| Attempt count (`attempts`) | durable, before the first page | not written |
 
 Only the completion durability differs, and it follows what a lost write costs. A full load's completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so a lost completion just re-derives next dispatch. Data pages are durable in both modes, so a page's encoded insert body stays in flight until ClickHouse has flushed its async-insert buffer. Progress checkpoints are always best-effort. A lost one only re-reads from the prior page (`save_progress` hardcodes fire-and-forget; it is not part of `RunDurability`).
 

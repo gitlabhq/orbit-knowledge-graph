@@ -302,6 +302,8 @@ settings:
         - {name: key, type: string, codec: ["ZSTD(1)"]}
         - {name: watermark, type: timestamp, codec: ["Delta(8)", "ZSTD(1)"]}
         - {name: cursor_values, type: string, default: "''", codec: ["ZSTD(1)"]}
+        - {name: attempts, type: int64, default: "0", codec: ["ZSTD(1)"]}
+        - {name: indexed_at, type: timestamp, nullable: true, codec: ["Delta(8)", "ZSTD(1)"]}
       order_by: [key]
     - name: namespace_deletion_schedule
       columns:
@@ -316,7 +318,9 @@ settings:
         - {name: branch, type: string, codec: ["ZSTD(1)"]}
         - {name: last_task_id, type: int64, codec: ["ZSTD(1)"]}
         - {name: last_commit, type: string, default: "''", codec: ["ZSTD(1)"]}
-        - {name: indexed_at, type: timestamp, codec: ["Delta(8)", "ZSTD(1)"]}
+        - {name: indexed_at, type: timestamp, nullable: true, codec: ["Delta(8)", "ZSTD(1)"]}
+        - {name: attempts, type: int64, default: "0", codec: ["ZSTD(1)"]}
+        - {name: is_default_branch, type: bool, default: "false"}
       order_by: [traversal_path, project_id, branch]
       version_type: uint64
   auxiliary_dictionaries:
