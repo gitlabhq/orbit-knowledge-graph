@@ -307,6 +307,16 @@ metrics-catalog-check:
   script:
     - mise run metrics:catalog:check
 
+agent-plugin-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run test:plugins
+
 dashboards-check:
   stage: lint
   extends:

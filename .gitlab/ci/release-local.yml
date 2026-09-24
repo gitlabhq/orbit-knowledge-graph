@@ -159,15 +159,14 @@ local-cli-code-sign:
 
 agent-plugin-build:
   extends:
+    - .job-template
+    - .sccache-template
     - .local-cli-release-rules
   stage: build
-  image: python:3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
   needs: []
   script:
-    - python3 -m unittest discover -s scripts -p test_agent_plugin.py -v
-    - python3 scripts/package-agent-plugin.py
+    - mise run test:plugins
+    - mise run plugins:package
   artifacts:
     paths:
       - orbit-agent-plugin.zip

@@ -76,7 +76,7 @@ fn install_for_agent(
         }
         json::replace_marked_entries(&mut root, &merge.path, &merge.marker, &entries)
             .with_context(|| format!("failed to update {}", path.display()))?;
-        let installed = json::render(&root)?;
+        let installed = json::render(&path, &root)?;
         write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
     }
 

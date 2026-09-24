@@ -42,18 +42,6 @@ If guidance is wrong or outdated (command, flag, or behavior), tell the user.
 With their confirmation, open a focused MR against `metadata.source-project` fixing `metadata.source-path` (one fix per MR, Conventional Commits).
 If they decline, note the discrepancy in one line and continue with the corrected command.
 
-## Before the first query
-
-Check `command -v orbit` and `orbit --version`. If Orbit is missing, explain
-how to install it from <https://docs.gitlab.com/orbit/local/access/cli/>.
-Do not download a binary or run `glab orbit` to bootstrap one without permission.
-If the user already uses `glab orbit`, use that launcher for the commands below.
-
-Run `orbit list` to check whether the current repository has an index.
-If it does not, ask before running `orbit index .`. Do not index on session start.
-If the index is stale or lacks a language, say so and use source files to verify
-critical findings. An empty graph result does not prove that code is absent.
-
 ## Find, then read
 
 ```shell
@@ -97,6 +85,10 @@ Gotchas:
   returns zero rows.
 - The graph holds every indexed checkout. `sql` scopes to the current commit,
   and `--all` spans them all. Re-index after you check out a different commit.
+- An empty result does not prove that code is absent. The index can be stale
+  or miss a language, so verify critical findings in source.
+- If `orbit list` shows no index for the repository, ask before you run
+  `orbit index .`.
 
 ## References
 
