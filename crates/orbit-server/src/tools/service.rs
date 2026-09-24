@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use jsonschema::Validator;
 use ontology::Ontology;
-use ontology::introspection::{IntrospectionScope, build_schema_response};
+use ontology::introspection::{IntrospectionScope, SchemaResponse, build_schema_response};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -180,8 +180,11 @@ impl ToolService {
         expand_nodes: &[String],
     ) -> Result<String, ExecutorError> {
         let response = build_schema_response(ontology, IntrospectionScope::All, expand_nodes);
-        let options = EncodeOptions::default();
-        encode(&response, &options)
+        Self::encode_schema_toon(&response)
+    }
+
+    pub fn encode_schema_toon(response: &SchemaResponse) -> Result<String, ExecutorError> {
+        encode(response, &EncodeOptions::default())
             .map_err(|e| ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}")))
     }
 

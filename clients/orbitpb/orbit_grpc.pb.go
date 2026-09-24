@@ -77,10 +77,6 @@ type OrbitServiceClient interface {
 	// Returns one complete, versioned skill tree or its cache metadata.
 	// Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
 	GetSkill(ctx context.Context, in *GetSkillRequest, opts ...grpc.CallOption) (*GetSkillResponse, error)
-	// Lists the server-defined named queries with their DSL rendered for the
-	// caller (bindings resolved from JWT claims, parameters filled with their
-	// declared examples). Lets clients discover and display named queries
-	// without owning copies of the query text.
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(ctx context.Context, in *ListNamedQueriesRequest, opts ...grpc.CallOption) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
@@ -265,10 +261,6 @@ type OrbitServiceServer interface {
 	// Returns one complete, versioned skill tree or its cache metadata.
 	// Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
 	GetSkill(context.Context, *GetSkillRequest) (*GetSkillResponse, error)
-	// Lists the server-defined named queries with their DSL rendered for the
-	// caller (bindings resolved from JWT claims, parameters filled with their
-	// declared examples). Lets clients discover and display named queries
-	// without owning copies of the query text.
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(context.Context, *ListNamedQueriesRequest) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter

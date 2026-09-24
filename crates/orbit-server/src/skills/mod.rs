@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(skills.len(), 1);
         let skill = &skills[0];
         assert_eq!(skill.name, "orbit");
-        assert_eq!(skill.version, "0.31.0");
+        assert_eq!(skill.version, "0.32.0");
         assert!(skill.description.starts_with("Use the `glab orbit` CLI"));
         assert!(skill.compatibility.contains("Orbit CLI"));
     }
