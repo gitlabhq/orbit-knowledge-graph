@@ -57,7 +57,7 @@ use std::path::Path;
 
 use loading::EtlSettings;
 
-/// A query-graph edge for [`Ontology::propagate_scope_prefixes`]. Abstracts
+/// A query-graph edge for [`Ontology::propagate_scope_proofs`]. Abstracts
 /// over compiler-specific types so the taint walk lives in the ontology crate.
 #[derive(Debug)]
 pub struct ScopeEdge<'a> {
@@ -1094,18 +1094,17 @@ impl Ontology {
         })
     }
 
-    /// Flood resolved `traversal_path` prefixes across scope-preserving edges
-    /// using a two-pass taint walk.
+    /// Propagate scope proofs across scope-preserving edges with a two-pass taint walk.
     ///
     /// **Pass A (taint):** marks every alias reachable from a seed node only
-    /// through a non-scope-preserving edge — these must never receive a prefix.
+    /// through a non-scope-preserving edge. These aliases cannot receive a proof.
     ///
     /// **Pass B (BFS):** from the seed aliases, walks scope-preserving edges
-    /// and copies the prefix to untainted neighbours.
+    /// and copies the proof to untainted neighbours.
     ///
     /// Pure: no DB calls, no widening past the seed.
     #[must_use]
-    pub fn propagate_scope_prefixes<P: Clone>(
+    pub fn propagate_scope_proofs<P: Clone>(
         &self,
         edges: &[ScopeEdge<'_>],
         seed: &std::collections::HashMap<String, P>,
@@ -1144,7 +1143,7 @@ impl Ontology {
             }
         }
 
-        // Pass B: flood prefixes across scope-preserving edges, skipping tainted.
+        // Pass B: flood proofs across scope-preserving edges, skipping tainted.
         let mut result = seed.clone();
         loop {
             let mut changed = false;
@@ -1157,8 +1156,8 @@ impl Ontology {
                     (None, Some(p)) if !tainted.contains(e.from) => Some((e.from.to_string(), p)),
                     _ => None,
                 };
-                if let Some((alias, prefix)) = propagation {
-                    result.insert(alias, prefix);
+                if let Some((alias, proof)) = propagation {
+                    result.insert(alias, proof);
                     changed = true;
                 }
             }
@@ -3798,7 +3797,7 @@ properties:
         ];
         let seed =
             std::collections::HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
-        let got = o.propagate_scope_prefixes(&edges, &seed);
+        let got = o.propagate_scope_proofs(&edges, &seed);
         assert_eq!(
             got.get("diff").map(String::as_str),
             Some("1/9970/15846663/")
@@ -3829,7 +3828,7 @@ properties:
         ];
         let seed =
             std::collections::HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
-        let got = o.propagate_scope_prefixes(&edges, &seed);
+        let got = o.propagate_scope_proofs(&edges, &seed);
         assert!(!got.contains_key("wi"));
         assert!(!got.contains_key("lab"));
     }
@@ -3859,7 +3858,7 @@ properties:
         ];
         let seed =
             std::collections::HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
-        let got = o.propagate_scope_prefixes(&edges, &seed);
+        let got = o.propagate_scope_proofs(&edges, &seed);
         assert_eq!(
             got.get("diff").map(String::as_str),
             Some("1/9970/15846663/")

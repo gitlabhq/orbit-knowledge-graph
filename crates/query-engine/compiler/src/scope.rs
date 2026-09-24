@@ -94,7 +94,7 @@ pub fn derive_scope_proofs(input: &Input, ontology: &Ontology) -> HashMap<String
                 .then(|| (node.id.clone(), ScopeProof(lookups)))
         })
         .collect();
-    ontology.propagate_scope_prefixes(&scope_edges(input), &seed)
+    ontology.propagate_scope_proofs(&scope_edges(input), &seed)
 }
 
 fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
