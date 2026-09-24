@@ -77,8 +77,11 @@ fn unlimited() -> Env {
 #[test]
 fn phases_chain_by_type_and_every_boundary_is_reported() {
     let env = unlimited();
-    let log = Log::default();
-    let (context, value) = Pipeline::new(Context::new(&env).observe(log.clone()), 21)
+    let (log, second) = (Log::default(), Log::default());
+    let context = Context::new(&env)
+        .observe(log.clone())
+        .observe(second.clone());
+    let (context, value) = Pipeline::new(context, 21)
         .then(Double)
         .unwrap()
         .then(Stringify)
@@ -102,6 +105,7 @@ fn phases_chain_by_type_and_every_boundary_is_reported() {
             "finish stringify"
         ]
     );
+    assert_eq!(second.lines(), log.lines());
 }
 
 #[test]
