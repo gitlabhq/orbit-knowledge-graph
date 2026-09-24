@@ -219,5 +219,9 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
 
 pub fn lower(input: &mut Input) -> Result<Node> {
     let plan = plan::plan(input)?;
-    emit(&plan, input).map(|lowered| lowered.ast)
+    let mut lowered = emit(&plan, input)?;
+    if let Node::Query(query) = &mut lowered.ast {
+        query.limit = Some(input.fetch_limit());
+    }
+    Ok(lowered.ast)
 }

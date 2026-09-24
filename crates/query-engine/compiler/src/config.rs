@@ -149,12 +149,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
         duckdb_json_dsl {
             env: [ontology]
             state: [raw, input, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan, lower, scope_requirements, response_policy, enforce, duckdb_codegen]
+            phases: [json_dsl_parse, validate_local, normalize, plan, lower, enforce, cursor, duckdb_codegen]
         }
         duckdb_gql {
             env: [ontology]
             state: [raw, input, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan, lower, scope_requirements, response_policy, enforce, duckdb_codegen]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, plan, lower, enforce, cursor, duckdb_codegen]
         }
         validate_normalize_gql {
             env: [ontology]

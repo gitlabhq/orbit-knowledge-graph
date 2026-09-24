@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::{DataType, FieldSource, Ontology};
 
-use crate::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, Node, Op, SelectExpr};
 use crate::input::{ColumnSelection, Input};
 
 const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
@@ -43,35 +43,8 @@ pub fn apply_text_excerpts(node: &mut Node, input: &Input, ontology: &Ontology) 
         })
         .collect();
 
-    rewrite_query(query, &columns, max_chars);
-}
-
-fn rewrite_query(query: &mut Query, columns: &HashMap<String, HashSet<String>>, max_chars: u32) {
-    for cte in &mut query.ctes {
-        rewrite_query(&mut cte.query, columns, max_chars);
-    }
-    rewrite_table(&mut query.from, columns, max_chars);
-    for arm in &mut query.union_all {
-        rewrite_query(arm, columns, max_chars);
-    }
     for select in &mut query.select {
-        rewrite_select(select, columns, max_chars);
-    }
-}
-
-fn rewrite_table(table: &mut TableRef, columns: &HashMap<String, HashSet<String>>, max_chars: u32) {
-    match table {
-        TableRef::Join { left, right, .. } => {
-            rewrite_table(left, columns, max_chars);
-            rewrite_table(right, columns, max_chars);
-        }
-        TableRef::Union { queries, .. } => {
-            for query in queries {
-                rewrite_query(query, columns, max_chars);
-            }
-        }
-        TableRef::Subquery { query, .. } => rewrite_query(query, columns, max_chars),
-        TableRef::Scan { .. } => {}
+        rewrite_select(select, &columns, max_chars);
     }
 }
 
