@@ -282,7 +282,7 @@ GET /api/v4/orbit/schema?expand=User&format=llm
 
 ```plaintext
 domains: [
-  {name: "core", nodes: [{name: "User", introduced_in: "1.0.0", props: [{name: "id", data_type: "int64", nullable: false, introduced_in: "1.0.0"}], out: ["AUTHORED", "OWNS", "MEMBER_OF"], in: ["ASSIGNED_TO"]}, "Project", "Group"]},
+  {name: "core", nodes: [{name: "User", introduced_in: "1.0.0", props: [{name: "id", data_type: "int", nullable: false, introduced_in: "1.0.0"}], out: ["AUTHORED", "OWNS", "MEMBER_OF"], in: ["ASSIGNED_TO"]}, "Project", "Group"]},
   {name: "plan", nodes: ["WorkItem", "Issue", "Epic"]},
   ...
 ]

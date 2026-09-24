@@ -80,6 +80,8 @@ enum Command {
         check: bool,
         #[arg(long, default_value = "origin/main")]
         base: String,
+        #[arg(long)]
+        skip_pin_check: bool,
     },
     /// Manage the schema-migration ledger (config/schema-migrations.yaml).
     MigrationLedger {
@@ -329,7 +331,11 @@ async fn main() -> Result<()> {
             }
         },
         Command::Schema { output } => schema::run(output),
-        Command::SchemaPublicOutput { check, base } => schema_public_output::run(check, &base),
+        Command::SchemaPublicOutput {
+            check,
+            base,
+            skip_pin_check,
+        } => schema_public_output::run(check, &base, skip_pin_check),
         Command::MigrationLedger { command } => match command {
             MigrationLedgerCommand::Bump {
                 scope,

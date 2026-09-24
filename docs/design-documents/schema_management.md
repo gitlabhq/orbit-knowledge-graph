@@ -51,9 +51,10 @@ It includes command/RPC wrappers, summaries, node and wildcard expansion, and lo
 Run `mise schema:public-output` to refresh it and `mise schema:public-output:check` to verify it.
 CI checks freshness against the bundled current archive, not the loose ontology files. It compares
 that snapshot to the **target branch** and requires a newer pin if output differs. Storage/ETL-only
-changes do not affect the hashes. `[skip graph-schema-api-check]` bypasses only this gate; use it
-only after confirming that the changed output cannot reach cached public schema responses. The
-query DSL and query output-format pin checks remain active. Historical archives through v99 load
+changes do not affect the hashes. `[skip graph-schema-api-check]` waives only the target pin
+comparison; freshness and new-element checks still run. Use it only after confirming that the
+changed output cannot reach cached public schema responses. Query DSL and output-format pin checks
+remain active. Historical archives through v99 load
 missing `introduced_in` annotations as `1.0.0` for rollback compatibility.
 
 A pin change also requires a storage-version bump and a new immutable archive, even for an

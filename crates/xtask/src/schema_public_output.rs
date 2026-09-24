@@ -1,4 +1,5 @@
 //! Recorded digests of the schema returned by each public introspection encoding.
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::process::Command;
@@ -27,6 +28,14 @@ fn outputs(ontology: &Ontology) -> Result<BTreeMap<String, String>> {
     outputs_with_encoder(ontology, ToolService::encode_schema_toon)
 }
 
+fn expansion_key(expand: &[String]) -> String {
+    if expand.is_empty() {
+        "summary".to_string()
+    } else {
+        expand.join("+")
+    }
+}
+
 fn outputs_with_encoder(
     ontology: &Ontology,
     encode: impl Fn(&SchemaResponse) -> Result<String, ExecutorError>,
@@ -34,8 +43,16 @@ fn outputs_with_encoder(
     let mut result = BTreeMap::new();
     let mut expansions = vec![Vec::new(), vec!["*".to_string()]];
     expansions.extend(ontology.nodes().map(|node| vec![node.name.clone()]));
+    let pair: Vec<String> = ontology
+        .nodes()
+        .take(2)
+        .map(|node| node.name.clone())
+        .collect();
+    if pair.len() == 2 {
+        expansions.push(pair.clone());
+    }
     for expand in expansions {
-        let key = expand.first().map_or("summary", String::as_str);
+        let key = expansion_key(&expand);
         let response = build_schema_response(ontology, IntrospectionScope::All, &expand);
         result.insert(
             format!("raw/{key}"),
@@ -71,8 +88,11 @@ fn outputs_with_encoder(
         };
         let mut scoped_expansions = vec![Vec::new(), vec!["*".to_string()]];
         scoped_expansions.extend(ontology.nodes().map(|node| vec![node.name.clone()]));
+        if pair.len() == 2 {
+            scoped_expansions.push(pair.clone());
+        }
         for expand in scoped_expansions {
-            let key = expand.first().map_or("summary", String::as_str);
+            let key = expansion_key(&expand);
             let response = build_schema_response(ontology, scope, &expand);
             result.insert(
                 format!("schema/{scope_name}/raw/{key}"),
@@ -128,19 +148,41 @@ fn new_elements_have_current_pin(current: &Ontology, target: &Ontology) -> Resul
     let pin = current.graph_schema_api();
     for node in current.nodes() {
         let previous = target.get_node(&node.name);
-        if previous.is_none() && &node.introduced_in != pin {
-            bail!("new node {} must have introduced_in {pin}", node.name);
+        match previous {
+            Some(old) if node.introduced_in != old.introduced_in => {
+                bail!(
+                    "node {} introduced_in changed from {} to {}",
+                    node.name,
+                    old.introduced_in,
+                    node.introduced_in
+                );
+            }
+            None if &node.introduced_in != pin => {
+                bail!("new node {} must have introduced_in {pin}", node.name);
+            }
+            _ => {}
         }
         for field in &node.fields {
-            if previous.is_some_and(|old| old.fields.iter().any(|f| f.name == field.name)) {
-                continue;
-            }
-            if &field.introduced_in != pin {
-                bail!(
-                    "new property {}.{} must have introduced_in {pin}",
-                    node.name,
-                    field.name
-                );
+            let old =
+                previous.and_then(|node| node.fields.iter().find(|old| old.name == field.name));
+            match old {
+                Some(old) if field.introduced_in != old.introduced_in => {
+                    bail!(
+                        "property {}.{} introduced_in changed from {} to {}",
+                        node.name,
+                        field.name,
+                        old.introduced_in,
+                        field.introduced_in
+                    );
+                }
+                None if &field.introduced_in != pin => {
+                    bail!(
+                        "new property {}.{} must have introduced_in {pin}",
+                        node.name,
+                        field.name
+                    );
+                }
+                _ => {}
             }
         }
     }
@@ -161,7 +203,7 @@ fn target_ontology(base: &str) -> Result<Ontology> {
     Ok(OntologyArchive::from_bytes(version, &bytes.stdout)?.load_ontology()?)
 }
 
-fn pin_is_newer(base: &str) -> Result<bool> {
+fn pin_order_against(base: &str) -> Result<Option<Ordering>> {
     let Some(versions) = git_show(base, "config/versions.yaml")? else {
         bail!("cannot read target versions.yaml at {base}");
     };
@@ -169,19 +211,25 @@ fn pin_is_newer(base: &str) -> Result<bool> {
         .lines()
         .any(|line| line.starts_with("graph_schema_api:"))
     {
-        return Ok(true); // First introduction of the public API pin.
+        return Ok(None); // First introduction of the public API pin.
     }
-    Ok(orbit_versions::VERSIONS.graph_schema_api
-        > orbit_versions::parse(&versions)?.graph_schema_api)
+    Ok(Some(
+        orbit_versions::VERSIONS
+            .graph_schema_api
+            .cmp(&orbit_versions::parse(&versions)?.graph_schema_api),
+    ))
 }
 
 fn require_pin_bump(
     current: &str,
     target: Option<&str>,
-    pin_is_newer: bool,
+    pin_order: Option<Ordering>,
     base: &str,
 ) -> Result<()> {
-    if target != Some(current) && !pin_is_newer {
+    if pin_order == Some(Ordering::Less) {
+        bail!("graph_schema_api cannot be lower than the target pin at {base}");
+    }
+    if target != Some(current) && pin_order == Some(Ordering::Equal) {
         bail!(
             "rendered public schema differs from {base}; graph_schema_api must be greater than the target pin"
         );
@@ -196,7 +244,7 @@ fn current_ontology() -> Result<Ontology> {
         .map_err(Into::into)
 }
 
-pub fn run(check: bool, base: &str) -> Result<()> {
+pub fn run(check: bool, base: &str, skip_pin_check: bool) -> Result<()> {
     let ontology = current_ontology()?;
     let current = outputs(&ontology)?;
     let rendered = format!("{}\n", serde_json::to_string_pretty(&current)?);
@@ -212,12 +260,14 @@ pub fn run(check: bool, base: &str) -> Result<()> {
         bail!("public schema output snapshot is stale; run cargo xtask schema-public-output");
     }
     new_elements_have_current_pin(&ontology, &target_ontology(base)?)?;
-    require_pin_bump(
-        &rendered,
-        git_show(base, SNAPSHOT)?.as_deref(),
-        pin_is_newer(base)?,
-        base,
-    )?;
+    if !skip_pin_check {
+        require_pin_bump(
+            &rendered,
+            git_show(base, SNAPSHOT)?.as_deref(),
+            pin_order_against(base)?,
+            base,
+        )?;
+    }
     println!("public schema output and graph_schema_api match {base}");
     Ok(())
 }
@@ -265,6 +315,49 @@ mod tests {
     }
 
     #[test]
+    fn existing_versions_are_immutable_against_the_target() {
+        let target = Ontology::load_embedded().unwrap();
+        assert!(new_elements_have_current_pin(&target, &target).is_ok());
+        let overlay = tempfile::tempdir().unwrap();
+        let file = overlay.path().join("nodes/core/user.yaml");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+
+        fs::write(&file, "introduced_in: '0.9.0'\n").unwrap();
+        let node_change = Ontology::load_embedded_with_overlay(overlay.path()).unwrap();
+        let error = new_elements_have_current_pin(&node_change, &target)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("node User introduced_in changed"), "{error}");
+
+        fs::write(&file, "properties:\n  id:\n    introduced_in: '0.9.0'\n").unwrap();
+        let field_change = Ontology::load_embedded_with_overlay(overlay.path()).unwrap();
+        let error = new_elements_have_current_pin(&field_change, &target)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("property User.id introduced_in changed"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_lower_pin_fails_even_if_output_is_unchanged() {
+        assert!(require_pin_bump("same", Some("same"), Some(Ordering::Less), "target").is_err());
+    }
+
+    #[test]
+    fn a_multi_node_expansion_has_its_own_output_hash() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let pair: Vec<_> = ontology
+            .nodes()
+            .take(2)
+            .map(|node| node.name.clone())
+            .collect();
+        let hashes = outputs(&ontology).unwrap();
+        assert!(hashes.contains_key(&format!("command/raw/{}", pair.join("+"))));
+    }
+
+    #[test]
     fn edge_only_changes_invalidate_the_rendered_schema() {
         let ontology = Ontology::load_embedded().unwrap();
         let before = outputs(&ontology).unwrap();
@@ -277,7 +370,7 @@ mod tests {
         assert_ne!(before["structured/summary"], after["structured/summary"]);
         let before = serde_json::to_string(&before).unwrap();
         let after = serde_json::to_string(&after).unwrap();
-        assert!(require_pin_bump(&after, Some(&before), false, "target").is_err());
+        assert!(require_pin_bump(&after, Some(&before), Some(Ordering::Equal), "target").is_err());
     }
 
     #[test]
@@ -292,7 +385,7 @@ mod tests {
         assert_ne!(before["toon/summary"], after["toon/summary"]);
         let before = serde_json::to_string(&before).unwrap();
         let after = serde_json::to_string(&after).unwrap();
-        assert!(require_pin_bump(&after, Some(&before), false, "target").is_err());
+        assert!(require_pin_bump(&after, Some(&before), Some(Ordering::Equal), "target").is_err());
     }
 
     #[test]
@@ -307,6 +400,6 @@ mod tests {
             outputs(&Ontology::load_embedded_with_overlay(overlay.path()).unwrap()).unwrap();
         assert_eq!(before, after);
         let before = serde_json::to_string(&before).unwrap();
-        assert!(require_pin_bump(&before, Some(&before), false, "target").is_ok());
+        assert!(require_pin_bump(&before, Some(&before), Some(Ordering::Equal), "target").is_ok());
     }
 }
