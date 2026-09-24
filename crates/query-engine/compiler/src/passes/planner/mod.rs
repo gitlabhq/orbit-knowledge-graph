@@ -1,9 +1,45 @@
+mod bind;
+mod explain;
+mod lower;
+mod optimize;
+mod physical;
+
 use crate::ast;
+use crate::error::Result;
 use crate::input::{AggFunction, FilterOp, Input, TruncateUnit};
 use ontology::Ontology;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::sync::Arc;
+
+pub use bind::bind;
+pub use explain::{explain, explain_clickhouse, explain_duckdb};
+pub use lower::{lower_clickhouse, lower_duckdb};
+pub use optimize::optimize;
+pub use physical::{plan_clickhouse, plan_duckdb};
+
+pub fn clickhouse(
+    input: Input,
+    ontology: Arc<Ontology>,
+) -> Result<(BoundCatalog, Candidate<ClickHouse>, String)> {
+    let (bound, logical) = bind(input, ontology)?;
+    let (bound, logical) = optimize(bound, logical);
+    let selected = plan_clickhouse(&bound, logical)?.selected;
+    let explain = explain_clickhouse(&bound, &selected.candidate.plan);
+    Ok((bound, selected.candidate, explain))
+}
+
+pub fn duckdb(
+    input: Input,
+    ontology: Arc<Ontology>,
+) -> Result<(BoundCatalog, Candidate<DuckDb>, String)> {
+    let (bound, logical) = bind(input, ontology)?;
+    let (bound, logical) = optimize(bound, logical);
+    let selected = plan_duckdb(&bound, logical)?.selected;
+    let explain = explain_duckdb(&bound, &selected.candidate.plan);
+    Ok((bound, selected.candidate, explain))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RelationId(pub u32);
@@ -124,16 +160,198 @@ pub struct SortKey {
 }
 
 pub trait Flavor: Debug + Clone + Copy + PartialEq + Eq + 'static {
-    type Scan: Debug + Clone + PartialEq + Eq;
+    type Scan: Debug + Clone + PartialEq + Eq + ScanRelation;
     type CurrentRows: Debug + Clone + PartialEq + Eq;
     type Extension: Debug + Clone + PartialEq + Eq;
     type Facts: Debug + Clone + PartialEq + Eq;
+}
+
+pub trait ScanRelation {
+    fn relation(&self) -> RelationId;
+    fn column_count(&self) -> usize;
+}
+
+impl ScanRelation for LogicalScan {
+    fn relation(&self) -> RelationId {
+        self.relation
+    }
+
+    fn column_count(&self) -> usize {
+        0
+    }
+}
+
+impl ScanRelation for PhysicalScan<ClickHouseAccess> {
+    fn relation(&self) -> RelationId {
+        self.relation
+    }
+
+    fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+}
+
+impl ScanRelation for PhysicalScan<DuckDbAccess> {
+    fn relation(&self) -> RelationId {
+        self.relation
+    }
+
+    fn column_count(&self) -> usize {
+        self.columns.len()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan<F: Flavor> {
     pub operator: Operator<F>,
     pub inputs: Vec<Self>,
+}
+
+impl<F: Flavor> Plan<F> {
+    fn leaf(operator: Operator<F>) -> Self {
+        Self {
+            operator,
+            inputs: vec![],
+        }
+    }
+
+    fn unary(operator: Operator<F>, input: Self) -> Self {
+        Self {
+            operator,
+            inputs: vec![input],
+        }
+    }
+
+    fn visit(&self, visitor: &mut impl FnMut(&Self)) {
+        visitor(self);
+        self.inputs.iter().for_each(|input| input.visit(visitor));
+    }
+
+    fn map_expressions(mut self, map: &mut impl FnMut(Expr) -> Expr) -> Self {
+        self.operator = match self.operator {
+            Operator::Filter(expression) => Operator::Filter(rewrite(expression, map)),
+            Operator::Project(columns) => Operator::Project(map_named(columns, map)),
+            Operator::Join(conditions) => Operator::Join(
+                conditions
+                    .into_iter()
+                    .map(|condition| rewrite(condition, map))
+                    .collect(),
+            ),
+            Operator::SemiJoin(condition) => Operator::SemiJoin(rewrite(condition, map)),
+            Operator::Aggregate { groups, metrics } => Operator::Aggregate {
+                groups: map_named(groups, map),
+                metrics: map_named(metrics, map),
+            },
+            Operator::Sort(keys) => Operator::Sort(
+                keys.into_iter()
+                    .map(|key| SortKey {
+                        expression: rewrite(key.expression, map),
+                        descending: key.descending,
+                    })
+                    .collect(),
+            ),
+            Operator::CurrentRows { keys, strategy } => Operator::CurrentRows {
+                keys: keys.into_iter().map(|key| rewrite(key, map)).collect(),
+                strategy,
+            },
+            operator => operator,
+        };
+        self.inputs = self
+            .inputs
+            .into_iter()
+            .map(|input| input.map_expressions(map))
+            .collect();
+        self
+    }
+}
+
+fn map_named(columns: Vec<NamedExpr>, map: &mut impl FnMut(Expr) -> Expr) -> Vec<NamedExpr> {
+    columns
+        .into_iter()
+        .map(|column| NamedExpr {
+            expression: rewrite(column.expression, map),
+            output: column.output,
+        })
+        .collect()
+}
+
+fn rewrite(expression: Expr, map: &mut impl FnMut(Expr) -> Expr) -> Expr {
+    let expression = match expression {
+        Expr::Compare { op, left, right } => Expr::Compare {
+            op,
+            left: Box::new(rewrite(*left, map)),
+            right: Box::new(rewrite(*right, map)),
+        },
+        Expr::Filter {
+            op,
+            left,
+            right,
+            data_type,
+        } => Expr::Filter {
+            op,
+            left: Box::new(rewrite(*left, map)),
+            right: right.map(|right| Box::new(rewrite(*right, map))),
+            data_type,
+        },
+        Expr::And(values) => Expr::And(
+            values
+                .into_iter()
+                .map(|value| rewrite(value, map))
+                .collect(),
+        ),
+        Expr::Or(values) => Expr::Or(
+            values
+                .into_iter()
+                .map(|value| rewrite(value, map))
+                .collect(),
+        ),
+        Expr::In {
+            value,
+            values,
+            data_type,
+        } => Expr::In {
+            value: Box::new(rewrite(*value, map)),
+            values,
+            data_type,
+        },
+        Expr::DateTrunc { unit, value } => Expr::DateTrunc {
+            unit,
+            value: Box::new(rewrite(*value, map)),
+        },
+        Expr::Aggregate { function, value } => Expr::Aggregate {
+            function,
+            value: value.map(|value| Box::new(rewrite(*value, map))),
+        },
+        Expr::Array(values) => Expr::Array(
+            values
+                .into_iter()
+                .map(|value| rewrite(value, map))
+                .collect(),
+        ),
+        Expr::Tuple(values) => Expr::Tuple(
+            values
+                .into_iter()
+                .map(|value| rewrite(value, map))
+                .collect(),
+        ),
+        Expr::JsonObject(entries) => Expr::JsonObject(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, rewrite(value, map)))
+                .collect(),
+        ),
+        Expr::Stringify(value) => Expr::Stringify(Box::new(rewrite(*value, map))),
+        Expr::ListContains { list, value } => Expr::ListContains {
+            list: Box::new(rewrite(*list, map)),
+            value,
+        },
+        Expr::TokenMatch { value, token } => Expr::TokenMatch {
+            value: Box::new(rewrite(*value, map)),
+            token,
+        },
+        expression => expression,
+    };
+    map(expression)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -207,10 +425,10 @@ pub struct BoundOutput {
     pub name: String,
 }
 
-#[derive(Debug)]
-pub struct BoundCatalog<'a> {
-    pub input: &'a Input,
-    pub ontology: &'a Ontology,
+#[derive(Debug, Clone)]
+pub struct BoundCatalog {
+    pub input: Input,
+    pub ontology: Arc<Ontology>,
     pub relations: BTreeMap<RelationId, BoundRelation>,
     pub column_ids: BTreeMap<ColumnKey, ColumnId>,
     pub columns: BTreeMap<ColumnId, BoundColumn>,
@@ -357,8 +575,8 @@ pub struct ClickHouseFacts {
 pub struct DuckDbFacts;
 
 #[derive(Debug)]
-pub struct BackendCatalog<'catalog, 'input, B: Flavor> {
-    pub bound: &'catalog BoundCatalog<'input>,
+pub struct BackendCatalog<'catalog, B: Flavor> {
+    pub bound: &'catalog BoundCatalog,
     pub relations: BTreeMap<RelationId, PhysicalRelation>,
     pub access_paths: BTreeMap<RelationId, Vec<B::Scan>>,
     pub current_rows: BTreeMap<RelationId, Vec<B::CurrentRows>>,
@@ -483,10 +701,10 @@ mod tests {
         }
     }
 
-    fn bound_catalog<'a>(input: &'a Input, ontology: &'a Ontology) -> BoundCatalog<'a> {
+    fn bound_catalog(input: Input, ontology: Ontology) -> BoundCatalog {
         BoundCatalog {
             input,
-            ontology,
+            ontology: Arc::new(ontology),
             relations: BTreeMap::from([
                 (
                     RELATION,
@@ -714,9 +932,7 @@ mod tests {
             ClickHouseAccess::EdgeTables(EdgeTableAccess {
                 layouts: vec![layout("gl_edge")],
             }),
-            ClickHouseAccess::DenormalizedJoin(
-                clickhouse_facts().denormalized_joins.remove(0),
-            ),
+            ClickHouseAccess::DenormalizedJoin(clickhouse_facts().denormalized_joins.remove(0)),
         ];
         assert_eq!(accesses.len(), 3);
         let facts = clickhouse_facts();
@@ -730,7 +946,7 @@ mod tests {
     fn skeleton_flow_exercises_every_type_for_both_backends() {
         let input = Input::default();
         let ontology = Ontology::new();
-        let bound = bound_catalog(&input, &ontology);
+        let bound = bound_catalog(input, ontology);
         let logical = logical_plan();
 
         let clickhouse_candidate = clickhouse_candidate();
@@ -835,10 +1051,7 @@ mod tests {
                 LoweredPlan {
                     ast: ast::Node::Query(Box::default()),
                     bindings: LoweredBindings {
-                        columns: BTreeMap::from([(
-                            COLUMN,
-                            ast::Expr::col("r0", "id"),
-                        )]),
+                        columns: BTreeMap::from([(COLUMN, ast::Expr::col("r0", "id"))]),
                         nodes: BTreeMap::from([(
                             INPUT_NODE,
                             LoweredOutputBinding {
@@ -853,15 +1066,21 @@ mod tests {
 
         assert_eq!(lowered.len(), 2);
         assert!(lowered.iter().all(|plan| plan.explain == "scans=1"));
-        assert!(lowered
-            .iter()
-            .all(|plan| plan.bindings.columns.contains_key(&COLUMN)));
-        assert!(lowered
-            .iter()
-            .all(|plan| plan.bindings.nodes.contains_key(&INPUT_NODE)));
+        assert!(
+            lowered
+                .iter()
+                .all(|plan| plan.bindings.columns.contains_key(&COLUMN))
+        );
+        assert!(
+            lowered
+                .iter()
+                .all(|plan| plan.bindings.nodes.contains_key(&INPUT_NODE))
+        );
         let backhalf: Vec<ast::Node> = lowered.into_iter().map(|plan| plan.ast).collect();
-        assert!(backhalf
-            .iter()
-            .all(|node| matches!(node, ast::Node::Query(_))));
+        assert!(
+            backhalf
+                .iter()
+                .all(|node| matches!(node, ast::Node::Query(_)))
+        );
     }
 }

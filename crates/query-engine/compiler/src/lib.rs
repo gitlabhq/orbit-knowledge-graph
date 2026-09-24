@@ -633,7 +633,10 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        assert!(sql.contains("gl_code_edge") && sql.contains("_gkg_path"), "{sql}");
+        assert!(
+            sql.contains("gl_code_edge") && sql.contains("_gkg_path"),
+            "{sql}"
+        );
     }
 
     #[test]
@@ -648,7 +651,10 @@ mod tests {
                      "rel_types": ["CONTAINS"]}
         }"#;
         let sql = compile_sql(query);
-        assert!(sql.contains("UNION ALL") && sql.contains("_gkg_path"), "{sql}");
+        assert!(
+            sql.contains("UNION ALL") && sql.contains("_gkg_path"),
+            "{sql}"
+        );
     }
 
     #[test]
@@ -2016,5 +2022,4 @@ mod tests {
             "no IN (subquery) in this query, got:\n{sql}"
         );
     }
-
 }

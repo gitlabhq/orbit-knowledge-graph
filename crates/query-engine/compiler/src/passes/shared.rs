@@ -450,10 +450,7 @@ pub fn traversal_path_filter(
     }
 }
 
-pub fn generalize_to_budget(
-    mut leaves: Vec<TraversalPath>,
-    budget: usize,
-) -> Vec<TraversalPath> {
+pub fn generalize_to_budget(mut leaves: Vec<TraversalPath>, budget: usize) -> Vec<TraversalPath> {
     while leaves.iter().map(|p| p.segment_count()).sum::<usize>() > budget {
         let parents: Vec<TraversalPath> = leaves.iter().map(|p| p.parent()).collect();
         if parents == leaves {

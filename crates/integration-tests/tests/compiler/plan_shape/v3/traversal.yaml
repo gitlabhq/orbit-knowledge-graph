@@ -2,24 +2,24 @@ name: "v3 logical traversal is shared by ClickHouse and DuckDB physical plans"
 input: {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
 logical:
   expect:
-    - (Limit 11 (Project u.username AS u_username, mr.title AS mr_title, ... (_)))
+    - (Limit 11 (Project e0.relationship_kind AS e0_type, e0.source_id AS e0_src, ... (_)))
     - (EdgeScan AUTHORED u->mr AS e0)
     - (NodeScan User AS u)
     - (NodeScan MergeRequest AS mr)
 physical:
   clickhouse:
     expect:
-      - (Join ON mr.author_id = u.id (_)(_))
-      - (Deduplicate Final (Scan Table("gl_user") AS u))
-      - (Deduplicate Final (Scan Table("gl_merge_request") AS mr))
-      - (Scan Table("gl_user") AS u)
-      - (Scan Table("gl_merge_request") AS mr)
+      - (Join ON mr.author_id = u.id (_) (_))
+      - (Deduplicate Final u.id (Scan Table(gl_user) AS u))
+      - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))
+      - (Scan Table(gl_user) AS u)
+      - (Scan Table(gl_merge_request) AS mr)
     reject:
-      - (Scan Table("gl_edge") AS e0)
+      - (Scan Table(gl_edge) AS e0)
   duckdb:
     expect:
-      - (Scan Table("gl_edge") AS e0)
-      - (Scan Table("gl_user") AS u)
-      - (Scan Table("gl_merge_request") AS mr)
+      - (Scan Table(gl_edge) AS e0)
+      - (Scan Table(gl_user) AS u)
+      - (Scan Table(gl_merge_request) AS mr)
     reject:
       - (Deduplicate ...)

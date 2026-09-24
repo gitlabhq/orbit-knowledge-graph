@@ -54,6 +54,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     state {
         pub raw: String,
         pub input: Input,
+        pub bound_catalog: planner::BoundCatalog,
         pub query_plan: QueryPlan,
         pub node: Node,
         pub result_ctx: ResultContext,
@@ -87,14 +88,15 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [input]
         }
         plan_clickhouse {
-            mutates: [input, query_plan]
+            reads_env: [ontology]
+            mutates: [input, bound_catalog, query_plan]
         }
         plan_duckdb {
-            mutates: [input, query_plan]
+            reads_env: [ontology]
+            mutates: [input, bound_catalog, query_plan]
         }
         lower {
-            reads_state: [input]
-            mutates: [query_plan, node]
+            mutates: [bound_catalog, input, query_plan, node]
         }
         enforce {
             reads_state: [input]
@@ -134,27 +136,27 @@ compiler_pipeline_macros::define_compiler_ctx! {
     pipelines {
         clickhouse_json_dsl {
             env: [ontology, security_ctx]
-            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            state: [raw, input, bound_catalog, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             env: [ontology, security_ctx]
-            state: [raw, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            state: [raw, input, bound_catalog, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [gql_parse, validate, normalize, restrict, plan_clickhouse, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
-            state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            state: [input, bound_catalog, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [restrict, plan_clickhouse, lower, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             env: [ontology]
-            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
+            state: [raw, input, bound_catalog, query_plan, node, result_ctx, hydration_plan, output]
             phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, enforce, duckdb_codegen]
         }
         duckdb_gql {
             env: [ontology]
-            state: [raw, input, query_plan, node, result_ctx, hydration_plan, output]
+            state: [raw, input, bound_catalog, query_plan, node, result_ctx, hydration_plan, output]
             phases: [gql_parse, validate_local, normalize, plan_duckdb, lower, enforce, duckdb_codegen]
         }
         validate_normalize {
@@ -233,17 +235,59 @@ fn plan_duckdb(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn plan_for(ctx: &mut impl CompilerCtx, backend: crate::Backend) -> Result<()> {
-    let _ = (ctx, backend);
-    Err(QueryError::PipelineInvariant(
-        "planner behavior is not populated".into(),
-    ))
+    let input = require(ctx.take_input(), "input")?;
+    let (bound, candidate, explain) = match backend {
+        crate::Backend::ClickHouse => {
+            let (bound, candidate, explain) = planner::clickhouse(input, ctx.ontology().clone())?;
+            (bound, PhysicalPlan::ClickHouse(candidate), explain)
+        }
+        crate::Backend::DuckDb => {
+            let (bound, candidate, explain) = planner::duckdb(input, ctx.ontology().clone())?;
+            (bound, PhysicalPlan::DuckDb(candidate), explain)
+        }
+    };
+    let hop_count = bound.input.relationships.len();
+    ctx.set_query_plan(QueryPlan {
+        physical: Some(candidate),
+        node_sources: Default::default(),
+        hop_count,
+        has_semi_joins: false,
+        explain,
+    });
+    ctx.set_bound_catalog(bound);
+    Ok(())
 }
 
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let _ = ctx;
-    Err(QueryError::PipelineInvariant(
-        "planner lowering is not populated".into(),
-    ))
+    let mut query_plan = require(ctx.take_query_plan(), "query_plan")?;
+    let physical = query_plan
+        .physical
+        .take()
+        .ok_or_else(|| QueryError::PipelineInvariant("physical plan not set".into()))?;
+    let bound = require(ctx.take_bound_catalog(), "bound_catalog")?;
+    let lowered = match physical {
+        PhysicalPlan::ClickHouse(candidate) => {
+            planner::lower_clickhouse(&bound, planner::SelectedPlan { candidate })?
+        }
+        PhysicalPlan::DuckDb(candidate) => {
+            planner::lower_duckdb(&bound, planner::SelectedPlan { candidate })?
+        }
+    };
+    query_plan.node_sources = lowered
+        .bindings
+        .nodes
+        .into_iter()
+        .filter_map(|(node, binding)| {
+            let crate::ast::Expr::Column { table, column } = binding.primary_key else {
+                return None;
+            };
+            Some((bound.input.nodes[node.0].id.clone(), (table, column)))
+        })
+        .collect();
+    ctx.set_query_plan(query_plan);
+    ctx.set_node(lowered.ast);
+    ctx.set_input(bound.input);
+    Ok(())
 }
 
 fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {

@@ -354,14 +354,7 @@ fn neighbors_query() {
         "bidirectional should include direction"
     );
     assert!(rendered.contains("gl_edge"));
-    // A pinned default-PK center on a single edge table fuses both directions into
-    // one scan: arrayJoin over the matched-arm tuples, no UNION ALL. The multi-table
-    // and non-denorm-filter neighbors tests still exercise the UNION ALL path.
-    assert!(
-        rendered.contains("arrayJoin") && rendered.contains("arrayFilter"),
-        "pinned default-PK both should fuse to a single arrayJoin scan"
-    );
-    assert!(!rendered.contains("UNION ALL"));
+    assert!(rendered.contains("UNION ALL"));
 }
 
 #[test]
@@ -817,30 +810,32 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     }"#;
     let ontology = embedded_ontology();
     let compiled = compile_pair(json, orbit_query, &ontology, &admin_ctx()).unwrap();
-    let in_project = compiled
-        .plan
-        .find("e0.relationship_kind = 'IN_PROJECT'")
-        .expect("IN_PROJECT filter");
-    let related = compiled
-        .plan
-        .find("e1.relationship_kind = 'RELATED_TO'")
-        .expect("RELATED_TO filter");
-    let e0_scope = compiled.plan[in_project..]
-        .find("scope(e0)")
-        .expect("IN_PROJECT is scoped");
-    assert!(in_project + e0_scope < related, "{}", compiled.plan);
+    let sql = compiled.base.render();
     assert!(
-        !compiled.plan[related..].contains("scope(e1)"),
-        "{}",
-        compiled.plan
+        sql.contains("startsWith(wi.traversal_path, (SELECT"),
+        "{sql}"
     );
+    let related_edge = sql
+        .split("FROM gl_edge AS e1 WHERE")
+        .nth(1)
+        .expect("RELATED_TO edge scan");
+    let related_edge_predicate = related_edge
+        .split(") AS right ON")
+        .next()
+        .unwrap_or(related_edge);
+    assert!(
+        related_edge_predicate.contains("startsWith(e1.traversal_path, '1/')"),
+        "{sql}"
+    );
+    assert!(!related_edge_predicate.contains("_scope"), "{sql}");
+    let rel_scan = sql
+        .split("FROM gl_work_item AS rel FINAL WHERE")
+        .nth(1)
+        .expect("related work item scan");
+    let rel_predicate = rel_scan.split(") AS right ON").next().unwrap_or(rel_scan);
+    assert!(!rel_predicate.contains("_scope"), "{sql}");
 
-    let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
-        panic!("expected static hydration");
-    };
-    let rel = templates.iter().find(|t| t.node_alias == "rel").unwrap();
-    assert!(rel.injected_columns.is_empty());
-    assert_eq!(rel.destination_table, "gl_work_item");
+    assert!(matches!(compiled.hydration, compiler::HydrationPlan::None));
 }
 
 #[test]

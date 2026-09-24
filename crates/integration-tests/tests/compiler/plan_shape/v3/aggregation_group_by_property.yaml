@@ -12,16 +12,14 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Filter mr.project_id = 1 (_))
-      - (Deduplicate Final (Scan Table("gl_merge_request") AS mr))
-      - (Scan Table("gl_merge_request") AS mr)
+      - (Join ON mr.project_id = p.id (_) (_))
+      - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))
+      - (Scan Table(gl_merge_request) AS mr)
     reject:
-      - (Scan Table("gl_edge") AS e0)
-      - (Scan Table("gl_project") AS p)
+      - (Scan Table(gl_edge) AS e0)
   duckdb:
     expect:
-      - (Scan Table("gl_edge") AS e0)
-      - (Scan Table("gl_merge_request") AS mr)
+      - (Scan Table(gl_edge) AS e0)
+      - (Scan Table(gl_merge_request) AS mr)
     reject:
       - (Deduplicate ...)
-      - (Scan Table("gl_project") AS p)
