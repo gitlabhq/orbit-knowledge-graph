@@ -249,6 +249,38 @@ impl TestContext {
         }
     }
 
+    async fn create_version_table(&self, table: &str, version: u32) {
+        self.clickhouse
+            .execute(&format!(
+                "CREATE TABLE {} AS {}",
+                prefixed_table_name(table, version),
+                prefixed_table_name(table, *SCHEMA_VERSION)
+            ))
+            .await;
+    }
+
+    async fn given_indexed_projects(
+        &self,
+        version: u32,
+        project_ids: impl IntoIterator<Item = i64>,
+    ) {
+        let rows = project_ids
+            .into_iter()
+            .map(|project_id| {
+                format!("('1/100/{project_id}/', {project_id}, 'main', 0, 'sha', now())")
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.clickhouse
+            .execute(&format!(
+                "INSERT INTO {} \
+                 (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at) \
+                 VALUES {rows}",
+                prefixed_table_name("code_indexing_checkpoint", version)
+            ))
+            .await;
+    }
+
     async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
         let container = Nats::default()
             .with_cmd(&NatsServerCmd::default().with_jetstream())
@@ -497,6 +529,53 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
 }
 
 #[tokio::test]
+async fn migration_completion_checker_waits_until_active_code_projects_are_reindexed() {
+    let context = TestContext::new().await;
+    common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
+    context.given_enabled_namespaces([100]).await;
+    context
+        .given_migration(*SCHEMA_VERSION + 1, *SCHEMA_VERSION)
+        .await;
+    context.complete_required_pipelines(&[100]).await;
+    context
+        .catalog
+        .publish(&embedded_archive(*SCHEMA_VERSION))
+        .await
+        .unwrap();
+    context
+        .create_version_table("code_indexing_checkpoint", *SCHEMA_VERSION + 1)
+        .await;
+    context
+        .given_indexed_projects(*SCHEMA_VERSION + 1, 1..=200)
+        .await;
+    let graph = context.clickhouse.create_client();
+    let checker = context.completion_checker();
+
+    context
+        .given_indexed_projects(*SCHEMA_VERSION, (1..=198).chain([500]))
+        .await;
+    checker.run().await.unwrap();
+
+    assert_eq!(
+        read_migrating_version(&graph).await.unwrap(),
+        Some(*SCHEMA_VERSION),
+        "198 of 200 active projects is below 99.5%, and project 500 is not in the active version"
+    );
+
+    context.given_indexed_projects(*SCHEMA_VERSION, [199]).await;
+    checker.run().await.unwrap();
+
+    assert_eq!(
+        read_all_versions(&graph).await.unwrap(),
+        vec![
+            version_entry(*SCHEMA_VERSION + 1, "retired"),
+            version_entry(*SCHEMA_VERSION, "active"),
+        ],
+        "199 of 200 active projects reaches 99.5%"
+    );
+}
+
+#[tokio::test]
 async fn migration_completion_checker_promotes_when_no_namespaces_are_enabled() {
     let context = TestContext::new().await;
 
@@ -531,11 +610,8 @@ async fn migration_completion_checker_does_not_promote_version_it_does_not_embed
         .await;
 
     for table in ["checkpoint", "code_indexing_checkpoint"] {
-        let source_table = prefixed_table_name(table, *SCHEMA_VERSION);
-        let migrating_table = prefixed_table_name(table, *SCHEMA_VERSION + 1);
         context
-            .clickhouse
-            .execute(&format!("CREATE TABLE {migrating_table} AS {source_table}"))
+            .create_version_table(table, *SCHEMA_VERSION + 1)
             .await;
     }
     context

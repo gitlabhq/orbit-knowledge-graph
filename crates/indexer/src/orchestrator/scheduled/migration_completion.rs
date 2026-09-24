@@ -1,15 +1,13 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use orbit_migrations::catalog::OntologyCatalog;
-use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
-use orbit_migrations::version::{
-    SCHEMA_VERSION, promote_version, read_migrating_version, table_prefix,
-};
+use orbit_migrations::scope::MigrationScope;
+use orbit_migrations::version::{SCHEMA_VERSION, promote_version, read_migrating_version};
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::arrow::ArrowUtils;
-use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
+use orbit_utils::traversal_path::TopLevelSplit;
 use tracing::{info, warn};
 
 use crate::campaign::CampaignState;
@@ -20,29 +18,6 @@ use crate::schema::metrics::CompletionMetrics;
 
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
 const LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(120);
-
-static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
-    let del = ontology::siphon_deleted_column();
-    let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
-    format!(
-        "SELECT count(DISTINCT p.id) AS ns_count \
-         FROM project_namespace_traversal_paths AS p \
-         WHERE p.deleted = false \
-           AND extract(p.traversal_path, '{top}') IN (\
-               SELECT traversal_path FROM siphon_knowledge_graph_enabled_namespaces \
-               WHERE {del} = false AND match(traversal_path, '{top}$'))"
-    )
-});
-
-static COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: LazyLock<String> = LazyLock::new(|| {
-    let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
-    format!(
-        "SELECT count(DISTINCT project_id) AS ns_count \
-         FROM {{table:Identifier}} FINAL \
-         WHERE _deleted = false \
-           AND extract(traversal_path, '{top}') IN {{paths:Array(String)}}"
-    )
-});
 
 const READ_MIGRATING_AGE: &str = "\
 SELECT toUInt64(dateDiff('second', created_at, now())) AS age_seconds \
@@ -245,25 +220,11 @@ impl MigrationCompletionChecker {
     }
 
     async fn is_migration_complete(&self, version: u32) -> Result<bool, String> {
-        let prefix = table_prefix(version);
-
         let enabled_namespaces = self
             .fetch_enabled_top_level_namespaces()
             .await
             .map_err(|e| format!("fetch enabled namespaces: {e}"))?;
         let enabled_count = enabled_namespaces.ids.len() as u64;
-
-        let code_table = format!("{prefix}{CODE_INDEXING_CHECKPOINT_TABLE}");
-        let code_coverage = match self
-            .compute_code_coverage(&code_table, &enabled_namespaces.paths)
-            .await
-        {
-            Ok(coverage) => Some(coverage),
-            Err(error) => {
-                warn!(version, %error, "code coverage telemetry unavailable this tick");
-                None
-            }
-        };
 
         let scope = self.resolve_migration_scope(version).await?;
         let sdlc_progress = orbit_migrations::completion::check_sdlc_reindex_progress(
@@ -276,13 +237,20 @@ impl MigrationCompletionChecker {
         .await
         .map_err(|error| format!("check SDLC reindex progress: {error}"))?;
 
+        let code_progress = orbit_migrations::completion::check_code_reindex_progress(
+            &self.graph,
+            version,
+            &enabled_namespaces.paths,
+        )
+        .await
+        .map_err(|error| format!("check code reindex progress: {error}"))?;
+
         info!(
             version,
             sdlc_indexed_namespaces = sdlc_progress.completed_namespaces,
             enabled_namespaces = enabled_count,
-            code_indexed_projects = code_coverage.map(|(_, indexed, _)| indexed),
-            code_eligible_projects = code_coverage.map(|(eligible, _, _)| eligible),
-            code_coverage = code_coverage.map(|(_, _, ratio)| ratio),
+            code_reindexed_projects = code_progress.reindexed_projects,
+            code_expected_projects = code_progress.expected_projects,
             migration_scope = %scope,
             "migration completion status"
         );
@@ -295,17 +263,15 @@ impl MigrationCompletionChecker {
             sdlc_progress.completed_namespaces,
             enabled_count,
         );
-        if let Some((eligible_projects, indexed_projects, _)) = code_coverage {
-            self.metrics.record_units(
-                "code",
-                version,
-                current,
-                indexed_projects,
-                eligible_projects,
-            );
-        }
+        self.metrics.record_units(
+            "code",
+            version,
+            current,
+            code_progress.reindexed_projects,
+            code_progress.expected_projects,
+        );
 
-        Ok(sdlc_progress.ready)
+        Ok(sdlc_progress.ready && code_progress.ready)
     }
 
     async fn resolve_migration_scope(
@@ -336,70 +302,10 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no age_seconds in result".to_string())
     }
 
-    async fn compute_code_coverage(
-        &self,
-        code_table: &str,
-        enabled_paths: &[TraversalPath],
-    ) -> Result<(u64, u64, f64), String> {
-        let eligible_projects = self
-            .count_eligible_projects()
-            .await
-            .map_err(|e| format!("count code-eligible projects: {e}"))?;
-
-        let indexed_projects = self
-            .count_scoped_checkpoint_projects(code_table, enabled_paths)
-            .await
-            .map_err(|e| format!("count code-indexed projects: {e}"))?;
-
-        let coverage = if eligible_projects == 0 {
-            1.0
-        } else {
-            indexed_projects as f64 / eligible_projects as f64
-        };
-        Ok((eligible_projects, indexed_projects, coverage))
-    }
-
     async fn fetch_enabled_top_level_namespaces(&self) -> Result<TopLevelSplit, String> {
         orbit_migrations::completion::fetch_enabled_top_level_namespaces(&self.datalake)
             .await
             .map_err(|e| format!("fetch enabled namespaces: {e}"))
-    }
-
-    async fn count_eligible_projects(&self) -> Result<u64, String> {
-        let batches = self
-            .datalake
-            .query(&COUNT_CODE_ELIGIBLE_PROJECTS)
-            .fetch_arrow()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        batches
-            .first()
-            .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
-            .ok_or_else(|| "no ns_count in result".to_string())
-    }
-
-    async fn count_scoped_checkpoint_projects(
-        &self,
-        code_table: &str,
-        enabled_paths: &[TraversalPath],
-    ) -> Result<u64, String> {
-        if enabled_paths.is_empty() {
-            return Ok(0);
-        }
-        let batches = self
-            .graph
-            .query(&COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED)
-            .param("table", code_table)
-            .param("paths", enabled_paths)
-            .fetch_arrow()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        batches
-            .first()
-            .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
-            .ok_or_else(|| "no ns_count in result".to_string())
     }
 
     async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {

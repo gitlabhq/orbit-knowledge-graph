@@ -4,14 +4,17 @@ use std::sync::LazyLock;
 use arrow::datatypes::UInt64Type;
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use orbit_utils::arrow::ArrowUtils;
-use orbit_utils::traversal_path::TopLevelSplit;
+use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
 
 use crate::execute::{CHECKPOINT_TABLE, MigrationError};
 use crate::ledger::MigrationLedger;
 use crate::scope::{
-    MigrationScope, find_invalidated_pipelines, widen_scope_for_shared_table_writers,
+    CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope, find_invalidated_pipelines,
+    widen_scope_for_shared_table_writers,
 };
-use crate::version::{read_active_version, table_prefix};
+use crate::version::{
+    list_version_entities, prefixed_table_name, read_active_version, table_prefix,
+};
 
 static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
     let deleted_column = ontology::siphon_deleted_column();
@@ -43,9 +46,33 @@ WHERE _deleted = false \
   AND splitByChar('.', key)[1] = 'global' \
   AND splitByChar('.', key)[2] IN {plans:Array(String)}";
 
+static COUNT_ACTIVE_CODE_PROJECTS_REINDEXED: LazyLock<String> = LazyLock::new(|| {
+    let top = orbit_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
+    format!(
+        "SELECT toUInt64(count()) AS expected_projects, \
+                toUInt64(countIf(project_id IN (\
+                    SELECT project_id FROM {{migrating_table:Identifier}} FINAL \
+                    WHERE _deleted = false))) AS reindexed_projects \
+         FROM (\
+             SELECT DISTINCT project_id \
+             FROM {{active_table:Identifier}} FINAL \
+             WHERE _deleted = false \
+               AND extract(traversal_path, '{top}') IN {{paths:Array(String)}})"
+    )
+});
+
+const MIN_REINDEXED_CODE_PROJECTS_PERCENT: f64 = 99.5;
+
 #[derive(Debug)]
 pub struct SdlcReindexProgress {
     pub completed_namespaces: u64,
+    pub ready: bool,
+}
+
+#[derive(Debug)]
+pub struct CodeReindexProgress {
+    pub expected_projects: u64,
+    pub reindexed_projects: u64,
     pub ready: bool,
 }
 
@@ -132,6 +159,61 @@ pub async fn check_sdlc_reindex_progress(
     Ok(SdlcReindexProgress {
         completed_namespaces,
         ready: namespaced_ready && global_ready,
+    })
+}
+
+pub async fn check_code_reindex_progress(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+    enabled_paths: &[TraversalPath],
+) -> Result<CodeReindexProgress, MigrationError> {
+    let active_version = read_active_version(graph).await?.unwrap_or(0);
+    let active_table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, active_version);
+    let migrating_table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, version);
+
+    let active_table_exists = list_version_entities(graph, active_version)
+        .await?
+        .iter()
+        .any(|entity| entity.name == active_table);
+    if !active_table_exists || enabled_paths.is_empty() {
+        return Ok(CodeReindexProgress {
+            expected_projects: 0,
+            reindexed_projects: 0,
+            ready: true,
+        });
+    }
+
+    let batches = graph
+        .query(&COUNT_ACTIVE_CODE_PROJECTS_REINDEXED)
+        .param("active_table", &active_table)
+        .param("migrating_table", &migrating_table)
+        .param("paths", enabled_paths)
+        .fetch_arrow()
+        .await
+        .map_err(|error| MigrationError::Ddl {
+            entity_name: migrating_table.clone(),
+            reason: error.to_string(),
+        })?;
+
+    let count = |column| {
+        batches
+            .first()
+            .and_then(|batch| ArrowUtils::get_column::<UInt64Type>(batch, column, 0))
+            .unwrap_or(0)
+    };
+    let expected_projects = count("expected_projects");
+    let reindexed_projects = count("reindexed_projects");
+
+    let reindexed_percent = if expected_projects == 0 {
+        100.0
+    } else {
+        reindexed_projects as f64 * 100.0 / expected_projects as f64
+    };
+
+    Ok(CodeReindexProgress {
+        expected_projects,
+        reindexed_projects,
+        ready: reindexed_percent >= MIN_REINDEXED_CODE_PROJECTS_PERCENT,
     })
 }
 

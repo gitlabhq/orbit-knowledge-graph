@@ -394,9 +394,12 @@ namespace counts as complete only when that exact ID has completed checkpoints f
 namespaced pipeline. A checkpoint left by a namespace that has since been disabled does not count.
 Every required global pipeline must also have a completed checkpoint.
 
-Code indexing coverage is reported for operators but does not block promotion. Code indexing can
-take much longer than SDLC indexing because it downloads and processes repository archives. A
-single project failure must not hold a schema migration open indefinitely.
+Code indexing must reach parity with the active version. The expected projects are the projects
+under enabled top-level namespaces that have a row in the active `code_indexing_checkpoint`. At
+least 99.5% of them must have a row in the migrating table. A project that never indexed in the
+active version is not expected, so a project that always fails cannot block promotion. The 0.5%
+margin covers projects that are deleted, moved, or start to fail during the migration. Scopes that
+clone the code checkpoint table reach parity at once.
 
 #### Known trade-off: checkpoint-based validation
 

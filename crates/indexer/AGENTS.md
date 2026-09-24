@@ -68,7 +68,8 @@ table-set.
 `migration_completion::MigrationCompletionChecker` runs as a scheduled task in DispatchIndexing
 mode. It checks the IDs of currently enabled top-level namespaces against completed checkpoints for
 every required namespaced pipeline. Disabled namespace checkpoints do not count. Required global
-pipelines must also be complete. Promotion requires a valid target archive, writes active/retired
+pipelines must also be complete. Code must reach parity: at least 99.5% of the projects in the
+active version's `code_indexing_checkpoint` must have a row in the migrating one. Promotion requires a valid target archive, writes active/retired
 statuses together, and clears the campaign. Invalid archives leave the migration pending for retry.
 
 A single SQL query then enumerates all `v<N>_*` objects in `system.tables`. It enumerates objects
