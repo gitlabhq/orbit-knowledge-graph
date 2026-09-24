@@ -33,6 +33,7 @@ tests:
 
 steps:
   - name: rename the package and drop the extra module
+    snapshot: true
     modify:
       - path: Cargo.toml
         content: |
@@ -69,3 +70,15 @@ steps:
           - { row: { path: Cargo.toml } }
           - { row: { path: src/main.rs } }
           - { row: { path: src/util.rs } }
+
+      - name: the whole graph has exactly the two remaining definitions
+        query: |
+          MATCH (d:Definition) RETURN count(d) AS n
+        assert:
+          - { row: { n: 2 } }
+      - name: no file lists a definition from the deleted module
+        query: |
+          MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE d.file_path = 'src/extra.rs'
+          RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }

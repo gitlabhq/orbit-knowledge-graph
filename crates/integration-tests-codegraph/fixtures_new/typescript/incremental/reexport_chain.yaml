@@ -23,6 +23,7 @@ tests:
 
 steps:
   - name: greet moves to a new file behind the same barrel
+    snapshot: true
     add:
       - path: src/hello.ts
         content: |
@@ -47,3 +48,16 @@ steps:
           RETURN d.fqn AS fqn
         assert:
           - { empty: true }
+
+      - name: the whole graph has exactly two definitions and three files
+        query: |
+          MATCH (f:File) RETURN count(f) AS n
+        assert:
+          - { row: { n: 3 } }
+      - name: every definition lives in a file that still exists
+        query: |
+          MATCH (d:Definition) RETURN d.file_path AS file ORDER BY file
+        assert:
+          - { row_count: 2 }
+          - { row: { file: src/app.ts } }
+          - { row: { file: src/hello.ts } }

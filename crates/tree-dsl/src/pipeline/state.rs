@@ -12,6 +12,7 @@ use crate::env::Env;
 use crate::intern::{Interner, Lang};
 use crate::pipeline::SourceFile;
 use crate::resolver::{ImportReq, Loc, Resolver};
+use crate::sentinel::Limits;
 use crate::tree::{Edge, Node, Tag, Tree};
 use crate::treesitter::SupportLang;
 
@@ -283,8 +284,9 @@ impl State {
         zstd::Decoder::new(std::fs::File::open(path)?)?.read_to_end(&mut bytes)?;
         let snap: FullSnapshot = rkyv::from_bytes::<FullSnapshot, rkyv::rancor::BoxedError>(&bytes)
             .map_err(io::Error::other)?;
-        let mut env = Env::for_lang(lang_id).map_err(io::Error::other)?;
-        env.lang = Lang::from(snap.lang);
+        let limits = Limits::load().map_err(io::Error::other)?;
+        let env =
+            Env::with_lang(lang_id, Lang::from(snap.lang), limits).map_err(io::Error::other)?;
         let state = State {
             trees: snap.trees.into_iter().map(|t| t.into()).collect(),
             edges: snap.edges,

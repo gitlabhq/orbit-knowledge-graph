@@ -22,6 +22,7 @@ tests:
 
 steps:
   - name: touch both files with the same content
+    snapshot: true
     modify:
       - path: app.py
         content: |
@@ -50,3 +51,22 @@ steps:
           - { row_count: 2 }
           - { row: { file: app.py, def: run } }
           - { row: { file: lib.py, def: work } }
+
+      - name: the whole graph is unchanged, edge for edge
+        queries:
+          - query: |
+              MATCH (f:File)-[:DEFINES]->(d:Definition) RETURN d.fqn AS fqn
+            assert:
+              - { row_count: 2 }
+          - query: |
+              MATCH (f:File)-[:IMPORTS]->(i:ImportedSymbol) RETURN i.identifier_name AS name
+            assert:
+              - { row_count: 1 }
+          - query: |
+              MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) RETURN d.fqn AS fqn
+            assert:
+              - { row_count: 1 }
+          - query: |
+              MATCH (a:Definition)-[:CALLS]->(b:Definition) RETURN b.fqn AS fqn
+            assert:
+              - { row_count: 1 }

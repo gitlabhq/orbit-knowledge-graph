@@ -17,11 +17,16 @@ pub struct Env {
 
 impl Env {
     pub fn for_lang(lang_id: SupportLang) -> Result<Self, LoadError> {
-        Self::with_limits(lang_id, Limits::default())
+        Self::with_limits(lang_id, Limits::load()?)
     }
 
     pub fn with_limits(lang_id: SupportLang, limits: Limits) -> Result<Self, LoadError> {
-        let lang = Lang::new();
+        Self::with_lang(lang_id, Lang::new(), limits)
+    }
+
+    /// Compiles the language's rules into an existing interner, so ids in a
+    /// graph restored from a snapshot and ids in the rules agree.
+    pub fn with_lang(lang_id: SupportLang, lang: Lang, limits: Limits) -> Result<Self, LoadError> {
         let rules = match treesitter::lang_yaml(lang_id) {
             Some(yaml) => rules::load_lang(yaml, &lang)?,
             None => LangConfig::default(),

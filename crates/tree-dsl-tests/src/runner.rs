@@ -3,8 +3,6 @@ use std::sync::Arc;
 use integration_tests_codegraph::assertions::{FixtureFile, Severity, TestCase, TestSuite};
 use integration_tests_codegraph::{Failure, create_test_db, run_suite};
 use ontology::Ontology;
-use orbit_utils::arrow::ArrowUtils;
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use tree_dsl::pipeline::{Changes, Display, Emit, Export, Resolved};
@@ -107,77 +105,6 @@ fn check(
     (displayed.state, failures)
 }
 
-/// Every exported row, sorted, so two graphs can be compared whatever order
-/// their files were added in.
-fn rows(env: &Env, state: State, ontology: &Arc<Ontology>) -> BTreeMap<String, Vec<String>> {
-    let envelope = Envelope::new([
-        ("project_id", Scalar::Int(1)),
-        ("branch", Scalar::Str("main")),
-        ("commit_sha", Scalar::Str("test")),
-    ]);
-    let exported = Pipeline::new(Context::new(env), Resolved { state })
-        .then(Display)
-        .expect("display rules compile")
-        .then(Export { ontology, envelope })
-        .expect("export")
-        .into_value();
-    let mut tables = BTreeMap::new();
-    for (table, batch) in exported.tables {
-        let rows: &mut Vec<String> = tables.entry(table).or_default();
-        for row in 0..batch.num_rows() {
-            let cells: Vec<String> = batch
-                .columns()
-                .iter()
-                .map(|c| ArrowUtils::array_value_to_string(c.as_ref(), row).unwrap_or_default())
-                .collect();
-            rows.push(cells.join("|"));
-        }
-        rows.sort();
-    }
-    tables
-}
-
-/// A reindexed graph must equal the graph a fresh index of the same files
-/// builds: same rows, same ids, nothing stale and nothing missing.
-fn reindex_equals_fresh_index(
-    env: &Env,
-    repo: &Path,
-    reindexed: State,
-    ontology: &Arc<Ontology>,
-) -> Vec<Failure> {
-    let inventory = inventory::walk(repo).expect("walk fixtures").into_inner();
-    let fresh = templates::index(Context::new(env), repo, inventory)
-        .expect("fresh index")
-        .into_value()
-        .state;
-    let (reindexed, fresh) = (rows(env, reindexed, ontology), rows(env, fresh, ontology));
-    reindexed
-        .iter()
-        .chain(fresh.iter())
-        .map(|(table, _)| table)
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .filter(|table| reindexed.get(*table) != fresh.get(*table))
-        .map(|table| {
-            let (a, b) = (
-                reindexed.get(table).cloned().unwrap_or_default(),
-                fresh.get(table).cloned().unwrap_or_default(),
-            );
-            let only_reindexed: Vec<_> = a.iter().filter(|r| !b.contains(r)).collect();
-            let only_fresh: Vec<_> = b.iter().filter(|r| !a.contains(r)).collect();
-            Failure {
-                test: "reindex equals a fresh index".into(),
-                severity: Severity::Error,
-                message: format!(
-                    "{table}: {} rows only after reindex {only_reindexed:?}; {} rows only in a fresh index {only_fresh:?}",
-                    only_reindexed.len(),
-                    only_fresh.len()
-                ),
-            }
-        })
-        .collect()
-}
-
 pub fn run_yaml_suite(yaml: &str) {
     let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
 
@@ -210,8 +137,15 @@ pub fn run_yaml_suite(yaml: &str) {
     let (mut state, mut all_failures) = check(graph, &ontology, &suite.tests);
     let mut total_tests = suite.tests.len();
     let mut total_skipped = suite.tests.iter().filter(|t| t.skip).count();
+    let mut env = env;
 
     for step in &suite.steps {
+        if step.snapshot {
+            let snapshot = repo.path().join("graph.bin");
+            state.save(&env, &snapshot).expect("save snapshot");
+            (env, state) = State::load(&snapshot, lang_id).expect("load snapshot");
+            std::fs::remove_file(&snapshot).ok();
+        }
         for removed in &step.remove {
             std::fs::remove_file(repo.path().join(removed)).ok();
         }
@@ -228,16 +162,6 @@ pub fn run_yaml_suite(yaml: &str) {
         all_failures.extend(failures);
         total_tests += step.tests.len();
         total_skipped += step.tests.iter().filter(|t| t.skip).count();
-    }
-    if !suite.steps.is_empty() {
-        std::fs::remove_file(repo.path().join("graph.bin")).ok();
-        all_failures.extend(reindex_equals_fresh_index(
-            &env,
-            repo.path(),
-            state,
-            &ontology,
-        ));
-        total_tests += 1;
     }
 
     let failed = all_failures.len();

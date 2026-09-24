@@ -147,8 +147,15 @@ fn modify_preserves_resolution_after_reindex() {
     state.save(&env, &snap).unwrap();
 
     let (env, loaded) = tree_dsl::State::load(&snap, SupportLang::Python).unwrap();
-    let initial_edges = loaded.edges.len();
-    assert!(initial_edges > 0);
+    let cross_file = |state: &State| {
+        state
+            .edges
+            .iter()
+            .filter(|e| e.from_tree != e.to_tree)
+            .count()
+    };
+    let initial_cross_file = cross_file(&loaded);
+    assert!(initial_cross_file > 0);
 
     let step = IncrementalStep {
         add: Vec::new(),
@@ -158,7 +165,11 @@ fn modify_preserves_resolution_after_reindex() {
     let updated = reindex(&env, loaded, repo.path(), &step);
 
     assert_eq!(updated.trees.len(), 2);
-    assert!(updated.edges.len() >= initial_edges);
+    assert_eq!(
+        cross_file(&updated),
+        initial_cross_file,
+        "the import still resolves"
+    );
 
     let names = def_names(&updated, &env);
     assert!(names.contains(&"helper".to_string()));
@@ -177,6 +188,7 @@ fn manifests_survive_snapshot_and_reindex() {
     };
     let step = |modify: Vec<FixtureFile>, remove: Vec<String>| IncrementalStep {
         name: String::new(),
+        snapshot: false,
         add: Vec::new(),
         modify,
         remove,

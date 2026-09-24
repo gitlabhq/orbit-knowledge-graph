@@ -4,6 +4,8 @@
 
 use std::time::{Duration, Instant};
 
+use crate::error::LoadError;
+
 /// Time budgets, loaded from `config/limits.yaml`. Each one seeds a sentinel.
 #[derive(Clone, Copy, serde::Deserialize)]
 pub struct Limits {
@@ -14,8 +16,10 @@ pub struct Limits {
 }
 
 impl Limits {
-    pub fn load() -> Result<Self, orbit_utils::yaml::Error> {
-        orbit_utils::yaml::from_str(include_str!("../../config/limits.yaml"))
+    pub fn load() -> Result<Self, LoadError> {
+        Ok(orbit_utils::yaml::from_str(include_str!(
+            "../../config/limits.yaml"
+        ))?)
     }
 
     pub const UNLIMITED: Self = Self {
@@ -24,17 +28,6 @@ impl Limits {
         file_resolve_ms: u64::MAX,
         total_ms: u64::MAX,
     };
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self::load().unwrap_or(Self {
-            file_rewrite_ms: 200,
-            file_link_ms: 100,
-            file_resolve_ms: 100,
-            total_ms: 300_000,
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

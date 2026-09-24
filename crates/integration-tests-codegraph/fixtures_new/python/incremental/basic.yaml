@@ -38,6 +38,7 @@ tests:
 
 steps:
   - name: "add a function to utils"
+    snapshot: true
     modify:
       - path: utils.py
         content: |
@@ -121,3 +122,19 @@ steps:
           RETURN d.fqn AS fqn
         assert:
           - { row_count: 0 }
+
+      - name: "the whole graph: two files, no definitions, two dangling imports"
+        query: |
+          MATCH (d:Definition) RETURN count(d) AS n
+        assert:
+          - { row: { n: 0 } }
+      - name: "the whole graph: the only edges left are two files listing an import"
+        query: |
+          MATCH (f:File)-[:IMPORTS]->(i:ImportedSymbol) RETURN i.identifier_name AS name
+        assert:
+          - { row_count: 2 }
+      - name: "the whole graph: nothing resolves and nothing is called"
+        query: |
+          MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) RETURN d.fqn AS fqn
+        assert:
+          - { empty: true }

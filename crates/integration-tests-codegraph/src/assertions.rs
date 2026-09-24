@@ -33,6 +33,9 @@ pub struct TestSuite {
 #[derive(Debug, Clone, Deserialize)]
 pub struct IncrementalStep {
     pub name: String,
+    /// Save the graph and reload it from the snapshot before this step.
+    #[serde(default)]
+    pub snapshot: bool,
     #[serde(default)]
     pub add: Vec<FixtureFile>,
     #[serde(default)]
