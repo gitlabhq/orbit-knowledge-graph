@@ -8,17 +8,17 @@ mcp_server:
 instructions: |
   ## Orbit
 
-  Prefer Orbit for code search and callers/callees. Grep means `{{orbit}} grep`.
+  Prefer `{{orbit}}` commands to bash tools for file/code search and callers/callees. Grep means `{{orbit}} grep`.
 
-  - Unknown code? `{{orbit}} grep 'words'`. FTS, not regex. Terms AND; `a|b` OR.
+  - Unknown code? `{{orbit}} grep 'words'`. FTS. Terms AND; `a|b` OR.
   - grep shows IDs and file:lines. Source? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context Definition:123`.
   - Do not reread unchanged files. Reuse shown source.
   - Need file map? `{{orbit}} context path`. Directory? `{{orbit}} context dir`.
   - Too broad? Add `--path`/`--kind`.
 
 nudge_search: |
-  Grep means `{{orbit}} grep 'words'`. FTS, not regex. Terms AND; `a|b` OR. Add --path/--kind.
+  Grep means `{{orbit}} grep 'words'`. FTS. Terms AND; `a|b` OR. Add --path/--kind.
 nudge_read: |
   Do not reread unchanged files. Reuse shown source. Callers/callees? `{{orbit}} context Definition:123`.
 template_vars:
-  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. FTS, not regex."
+  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. FTS."
