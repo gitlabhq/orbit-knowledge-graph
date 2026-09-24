@@ -274,12 +274,12 @@ impl CodeIndexingTaskHandler {
             .await;
 
         let outcome = match &result {
-            Ok(Some(label)) => label,
-            Ok(None) => "skipped_lock",
+            Ok(label) => label,
+            Err(HandlerError::Backpressure(_)) => "backpressure",
             Err(_) => "error",
         };
         self.metrics.record_outcome(outcome);
-        if matches!(&result, Ok(Some(_))) {
+        if result.is_ok() {
             self.metrics.record_repository_indexed(outcome);
         }
         self.metrics.record_handler_duration(started_at);
@@ -318,7 +318,7 @@ impl CodeIndexingTaskHandler {
         started_at: DateTime<Utc>,
         attempt: u32,
         observer: &mut dyn IndexingObserver,
-    ) -> Result<Option<&'static str>, HandlerError> {
+    ) -> Result<&'static str, HandlerError> {
         let Some(namespace_id) = request.traversal_path.top_level_namespace_id() else {
             return Err(HandlerError::Processing(format!(
                 "traversal_path {:?} has no namespace_id",
@@ -330,21 +330,13 @@ impl CodeIndexingTaskHandler {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
+        let Some(guard) = LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
-        {
-            Some(guard) => guard,
-            None => {
-                warn!(
-                    task_id = request.task_id,
-                    project_id,
-                    branch = %branch,
-                    lock_key = %key,
-                    "code indexing skipped: lock held by another indexer"
-                );
-                return Ok(None);
-            }
+        else {
+            return Err(HandlerError::Backpressure(format!(
+                "lock {key} held by another indexer"
+            )));
         };
 
         context
@@ -430,7 +422,7 @@ impl CodeIndexingTaskHandler {
             warn!(project_id, branch = %branch, error = %e, "failed to index code");
         }
 
-        result.map(Some)
+        result
     }
 }
 
@@ -616,14 +608,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skips_when_lock_already_held() {
+    async fn redelivers_when_lock_already_held() {
         let ctx = TestContext::new();
         ctx.set_lock(123, "main");
 
         let envelope = TestContext::make_request(100, 123, "main");
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
-        assert!(result.is_ok());
+        assert!(matches!(result, Err(HandlerError::Backpressure(_))));
     }
 
     #[tokio::test]

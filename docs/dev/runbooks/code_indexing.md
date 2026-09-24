@@ -84,7 +84,7 @@ Consumes CDC events for `knowledge_graph_enabled_namespaces`. When a namespace i
 When the `CodeIndexingTaskHandler` receives a message:
 
 1. Compare `task_id` against stored checkpoint. Skip if `task_id <= last_task_id`.
-2. Acquire a NATS KV lock on `project.{project_id}.{base64_branch}` (TTL: 60 seconds). Skip if lock is held by another worker.
+2. Acquire a NATS KV lock on `project.{project_id}.{base64_branch}` (TTL: 60 seconds). If another worker holds the lock, redeliver the message later without counting an attempt.
 3. Download the repository archive from Rails API (or use incremental fetch / cache).
 4. Run tree-sitter + swc parsers across supported languages, build an in-memory property graph.
 5. Convert graph to Arrow batches and insert into graph tables.
@@ -347,7 +347,7 @@ OPTIMIZE TABLE `<gkg-database>`.gl_definition FINAL CLEANUP;
 |--------|-------------------|
 | Handler outcome: `indexed` | Successful indexing completions |
 | Handler outcome: `skipped_checkpoint` | Messages skipped (already processed) |
-| Handler outcome: `skipped_lock` | Messages skipped (another worker holds the lock) |
+| Handler outcome: `backpressure` | Messages redelivered without counting an attempt (another worker holds the lock, or no indexing lane is free) |
 | Handler outcome: `error` | Failed processing attempts |
 | Error stage: `repository_fetch` | Repository download failures |
 | Error stage: `checkpoint` | Checkpoint read/write failures |

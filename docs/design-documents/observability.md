@@ -86,7 +86,7 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `gkg.indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, skipped_lock, error) | Total code indexing tasks processed |
+| `gkg.indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, backpressure, error) | Total code indexing tasks processed |
 | `gkg.indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single code indexing task |
 | `gkg.indexer.code.repository.fetch.duration` | Histogram | s | | Duration of resolving a repository (cache check + optional download and extraction) |
 | `gkg.indexer.code.repository.resolution` | Counter | count | `strategy` (cache_hit, incremental, full_download, full_download_fallback) | Repository resolution strategy used |
