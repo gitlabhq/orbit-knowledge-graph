@@ -663,11 +663,8 @@ mod tests {
         let built = plans(&test_ontology(), 1000);
         let user = built.global.iter().find(|p| p.name == "User").unwrap();
         let cursor = Cursor::from_checkpoint(&Checkpoint {
-            watermark: Utc::now(),
             cursor_values: Some(vec!["42".to_string()]),
-            resume_floor: None,
-            attempts: 0,
-            indexed_at: None,
+            ..Checkpoint::new(Utc::now())
         });
         let sql = user
             .prepare()

@@ -221,9 +221,19 @@ pub mod test_utils {
     use parking_lot::Mutex;
     use std::collections::HashMap;
 
+    type CheckpointKey = (TraversalPath, i64, String);
+
+    fn checkpoint_key(
+        traversal_path: &TraversalPath,
+        project_id: i64,
+        branch: &str,
+    ) -> CheckpointKey {
+        (traversal_path.clone(), project_id, branch.to_string())
+    }
+
     pub struct MockCodeCheckpointStore {
-        checkpoints: Mutex<HashMap<(TraversalPath, i64, String), CodeCheckpoint>>,
-        attempts: Mutex<HashMap<(TraversalPath, i64, String), i64>>,
+        checkpoints: Mutex<HashMap<CheckpointKey, CodeCheckpoint>>,
+        attempts: Mutex<HashMap<CheckpointKey, i64>>,
     }
 
     impl MockCodeCheckpointStore {
@@ -240,8 +250,11 @@ pub mod test_utils {
             project_id: i64,
             branch: &str,
         ) -> i64 {
-            let key = (traversal_path.clone(), project_id, branch.to_string());
-            self.attempts.lock().get(&key).copied().unwrap_or_default()
+            self.attempts
+                .lock()
+                .get(&checkpoint_key(traversal_path, project_id, branch))
+                .copied()
+                .unwrap_or_default()
         }
     }
 
@@ -259,9 +272,10 @@ pub mod test_utils {
             project_id: i64,
             branch: &str,
         ) -> Result<Option<CodeCheckpoint>, CheckpointError> {
-            let checkpoints = self.checkpoints.lock();
-            Ok(checkpoints
-                .get(&(traversal_path.clone(), project_id, branch.to_string()))
+            Ok(self
+                .checkpoints
+                .lock()
+                .get(&checkpoint_key(traversal_path, project_id, branch))
                 .cloned())
         }
 
@@ -271,7 +285,7 @@ pub mod test_utils {
             project_id: i64,
             branch: &str,
         ) -> Result<(), CheckpointError> {
-            let key = (traversal_path.clone(), project_id, branch.to_string());
+            let key = checkpoint_key(traversal_path, project_id, branch);
             if !self.checkpoints.lock().contains_key(&key) {
                 *self.attempts.lock().entry(key).or_default() += 1;
             }
@@ -279,12 +293,11 @@ pub mod test_utils {
         }
 
         async fn save_completed(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError> {
-            let mut checkpoints = self.checkpoints.lock();
-            checkpoints.insert(
-                (
-                    checkpoint.traversal_path.clone(),
+            self.checkpoints.lock().insert(
+                checkpoint_key(
+                    &checkpoint.traversal_path,
                     checkpoint.project_id,
-                    checkpoint.branch.clone(),
+                    &checkpoint.branch,
                 ),
                 checkpoint.clone(),
             );

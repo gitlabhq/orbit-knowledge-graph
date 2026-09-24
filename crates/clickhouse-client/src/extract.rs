@@ -117,12 +117,10 @@ impl FromArrowColumn for Option<DateTime<Utc>> {
                     values.push(None);
                     continue;
                 }
-                let timestamp =
-                    Utc.timestamp_micros(column.value(i))
-                        .single()
-                        .ok_or(ExtractError {
-                            expected: "valid microsecond timestamp",
-                        })?;
+                let micros = column.value(i);
+                let timestamp = Utc.timestamp_micros(micros).single().ok_or(ExtractError {
+                    expected: "valid microsecond timestamp",
+                })?;
                 values.push(Some(timestamp));
             }
         }

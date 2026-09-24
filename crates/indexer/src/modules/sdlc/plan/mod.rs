@@ -434,13 +434,7 @@ mod tests {
 
     #[test]
     fn cursor_from_completed_checkpoint_is_first_page() {
-        let checkpoint = Checkpoint {
-            watermark: Utc::now(),
-            cursor_values: None,
-            resume_floor: None,
-            attempts: 0,
-            indexed_at: None,
-        };
+        let checkpoint = Checkpoint::new(Utc::now());
         let cursor = Cursor::from_checkpoint(&checkpoint);
         assert!(cursor.is_first_page());
     }
@@ -448,11 +442,8 @@ mod tests {
     #[test]
     fn cursor_from_in_progress_checkpoint_has_values() {
         let checkpoint = Checkpoint {
-            watermark: Utc::now(),
             cursor_values: Some(vec!["42".to_string()]),
-            resume_floor: None,
-            attempts: 0,
-            indexed_at: None,
+            ..Checkpoint::new(Utc::now())
         };
         let cursor = Cursor::from_checkpoint(&checkpoint);
         assert!(!cursor.is_first_page());

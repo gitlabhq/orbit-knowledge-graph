@@ -638,11 +638,9 @@ mod tests {
     fn pull_window_first_pass_start_starts_from_beginning() {
         let now = ts("2026-06-07T22:00:00Z");
         let started = Checkpoint {
-            watermark: now,
             cursor_values: Some(Vec::new()),
-            resume_floor: None,
             attempts: 1,
-            indexed_at: None,
+            ..Checkpoint::new(now)
         };
         assert_eq!(
             pull_window(&started, now),
@@ -656,13 +654,7 @@ mod tests {
     #[test]
     fn pull_window_completed_advances_to_now() {
         let now = ts("2026-06-07T22:00:00Z");
-        let completed = Checkpoint {
-            watermark: ts("2026-06-07T21:59:30Z"),
-            cursor_values: None,
-            resume_floor: None,
-            attempts: 0,
-            indexed_at: None,
-        };
+        let completed = Checkpoint::new(ts("2026-06-07T21:59:30Z"));
         assert_eq!(
             pull_window(&completed, now),
             WindowBounds {
@@ -676,11 +668,9 @@ mod tests {
     fn pull_window_resume_keeps_original_window() {
         let now = ts("2026-06-07T22:05:00Z");
         let in_progress = Checkpoint {
-            watermark: ts("2026-06-07T22:00:00Z"),
             cursor_values: Some(vec!["1/65957873/".to_string(), "42".to_string()]),
             resume_floor: Some(ts("2026-06-07T21:59:30Z")),
-            attempts: 0,
-            indexed_at: None,
+            ..Checkpoint::new(ts("2026-06-07T22:00:00Z"))
         };
         assert_eq!(
             pull_window(&in_progress, now),
@@ -695,11 +685,8 @@ mod tests {
     fn pull_window_resume_without_floor_starts_from_beginning() {
         let now = ts("2026-06-07T22:05:00Z");
         let legacy = Checkpoint {
-            watermark: ts("2026-06-07T22:00:00Z"),
             cursor_values: Some(vec!["42".to_string()]),
-            resume_floor: None,
-            attempts: 0,
-            indexed_at: None,
+            ..Checkpoint::new(ts("2026-06-07T22:00:00Z"))
         };
         assert_eq!(
             pull_window(&legacy, now),
@@ -711,27 +698,16 @@ mod tests {
     }
 
     fn completed_partition(key: &str, watermark: &str) -> (String, Checkpoint) {
-        (
-            key.to_string(),
-            Checkpoint {
-                watermark: ts(watermark),
-                cursor_values: None,
-                resume_floor: None,
-                attempts: 0,
-                indexed_at: None,
-            },
-        )
+        (key.to_string(), Checkpoint::new(ts(watermark)))
     }
 
     fn cursored_partition(key: &str, watermark: &str) -> (String, Checkpoint) {
         (
             key.to_string(),
             Checkpoint {
-                watermark: ts(watermark),
                 cursor_values: Some(vec!["42".to_string()]),
                 resume_floor: Some(ts(watermark)),
-                attempts: 0,
-                indexed_at: None,
+                ..Checkpoint::new(ts(watermark))
             },
         )
     }

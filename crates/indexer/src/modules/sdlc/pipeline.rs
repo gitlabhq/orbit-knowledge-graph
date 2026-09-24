@@ -288,15 +288,12 @@ impl Pipeline {
             page = next;
         }
 
+        let completed = Checkpoint {
+            watermark: window.target,
+            ..checkpoint.clone()
+        };
         self.checkpoint_store
-            .save_completed(
-                position_key,
-                &Checkpoint {
-                    watermark: window.target,
-                    ..checkpoint.clone()
-                },
-                durability.completion,
-            )
+            .save_completed(position_key, &completed, durability.completion)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -474,26 +471,14 @@ impl Pipeline {
     async fn load_checkpoint(&self, position_key: &str) -> Checkpoint {
         match self.checkpoint_store.load(position_key).await {
             Ok(Some(checkpoint)) => checkpoint,
-            Ok(None) => Checkpoint {
-                watermark: DateTime::<Utc>::UNIX_EPOCH,
-                cursor_values: None,
-                resume_floor: None,
-                attempts: 0,
-                indexed_at: None,
-            },
+            Ok(None) => Checkpoint::new(DateTime::<Utc>::UNIX_EPOCH),
             Err(err) => {
                 warn!(
                     position_key,
                     %err,
                     "failed to load checkpoint, starting from epoch"
                 );
-                Checkpoint {
-                    watermark: DateTime::<Utc>::UNIX_EPOCH,
-                    cursor_values: None,
-                    resume_floor: None,
-                    attempts: 0,
-                    indexed_at: None,
-                }
+                Checkpoint::new(DateTime::<Utc>::UNIX_EPOCH)
             }
         }
     }
@@ -803,14 +788,12 @@ mod tests {
 
     #[tokio::test]
     async fn page_and_completion_writes_keep_the_attempt_count() {
-        let earlier_index: DateTime<Utc> = "2024-06-01T00:00:00Z".parse().unwrap();
+        let earlier_indexed_at: DateTime<Utc> = "2024-06-01T00:00:00Z".parse().unwrap();
         let store = Arc::new(RecordingCheckpointStore {
             state: Mutex::new(Some(Checkpoint {
-                watermark: test_watermark(),
-                cursor_values: None,
-                resume_floor: None,
                 attempts: 3,
-                indexed_at: Some(earlier_index),
+                indexed_at: Some(earlier_indexed_at),
+                ..Checkpoint::new(test_watermark())
             })),
             saves: Mutex::new(Vec::new()),
         });
@@ -842,11 +825,11 @@ mod tests {
         assert!(
             pages
                 .iter()
-                .all(|page| page.attempts == 3 && page.indexed_at == Some(earlier_index))
+                .all(|page| page.attempts == 3 && page.indexed_at == Some(earlier_indexed_at))
         );
         let completed = store.current_state().unwrap();
         assert_eq!(completed.attempts, 3);
-        assert!(completed.indexed_at > Some(earlier_index));
+        assert!(completed.indexed_at > Some(earlier_indexed_at));
     }
 
     // Comparing `has_more` against the plan's budget rather than the query's share ends
@@ -1169,11 +1152,8 @@ mod tests {
     async fn resumes_from_stored_cursor() {
         let store = Arc::new(RecordingCheckpointStore {
             state: Mutex::new(Some(Checkpoint {
-                watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
                 cursor_values: Some(vec!["5".to_string()]),
-                resume_floor: None,
-                attempts: 0,
-                indexed_at: None,
+                ..Checkpoint::new("2024-06-15T12:00:00Z".parse().unwrap())
             })),
             saves: Mutex::new(Vec::new()),
         });

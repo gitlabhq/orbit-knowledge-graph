@@ -67,13 +67,6 @@ impl Checkpoint {
         }
     }
 
-    fn first_pass_start(watermark: DateTime<Utc>) -> Self {
-        Self {
-            cursor_values: Some(Vec::new()),
-            ..Self::new(watermark)
-        }
-    }
-
     pub fn is_first_pass_start(&self) -> bool {
         self.resume_floor.is_none() && self.cursor_values.as_ref().is_some_and(Vec::is_empty)
     }
@@ -106,10 +99,10 @@ pub trait CheckpointStore: Send + Sync {
         key: &str,
         target: DateTime<Utc>,
     ) -> Result<Checkpoint, CheckpointError> {
-        let checkpoint = self
-            .load(key)
-            .await?
-            .unwrap_or_else(|| Checkpoint::first_pass_start(target));
+        let checkpoint = self.load(key).await?.unwrap_or_else(|| Checkpoint {
+            cursor_values: Some(Vec::new()),
+            ..Checkpoint::new(target)
+        });
         if checkpoint.indexed_at.is_some() {
             return Ok(checkpoint);
         }
@@ -437,13 +430,7 @@ mod tests {
 
     #[test]
     fn serialization_roundtrip_completed() {
-        let checkpoint = Checkpoint {
-            watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
-            cursor_values: None,
-            resume_floor: None,
-            attempts: 0,
-            indexed_at: None,
-        };
+        let checkpoint = Checkpoint::new("2024-06-15T12:00:00Z".parse().unwrap());
 
         let json = serde_json::to_string(&checkpoint).unwrap();
         let deserialized: Checkpoint = serde_json::from_str(&json).unwrap();
@@ -455,11 +442,9 @@ mod tests {
     #[test]
     fn serialization_roundtrip_in_progress() {
         let checkpoint = Checkpoint {
-            watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
             cursor_values: Some(vec!["1/2/".to_string(), "42".to_string()]),
             resume_floor: Some("2024-06-15T11:59:30Z".parse().unwrap()),
-            attempts: 0,
-            indexed_at: None,
+            ..Checkpoint::new("2024-06-15T12:00:00Z".parse().unwrap())
         };
 
         let json = serde_json::to_string(&checkpoint).unwrap();

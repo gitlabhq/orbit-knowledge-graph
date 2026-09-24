@@ -235,7 +235,7 @@ mod tests {
             self.loaded
                 .lock()
                 .unwrap()
-                .insert(key.to_string(), checkpoint_at(watermark));
+                .insert(key.to_string(), Checkpoint::new(watermark));
         }
 
         fn saved(&self) -> Vec<DateTime<Utc>> {
@@ -351,16 +351,6 @@ mod tests {
         async fn enabled_namespaces(&self) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
             *self.called.lock().unwrap() = true;
             self.result.clone().map_err(TaskError::new)
-        }
-    }
-
-    fn checkpoint_at(watermark: DateTime<Utc>) -> Checkpoint {
-        Checkpoint {
-            watermark,
-            cursor_values: None,
-            resume_floor: None,
-            attempts: 0,
-            indexed_at: None,
         }
     }
 
