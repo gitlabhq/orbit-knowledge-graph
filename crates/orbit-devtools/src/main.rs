@@ -19,11 +19,9 @@ enum Command {
         /// Input format.
         #[arg(long, default_value = "json")]
         format: String,
-        /// Print the PhysOp plan as an S-expression.
+        /// Print the optimized physical plan.
         #[arg(long)]
         plan: bool,
-        #[arg(long)]
-        no_optimize: bool,
         /// Schema version prefix applied to every table name (e.g. `v1_`).
         #[arg(long)]
         prefix: Option<String>,
@@ -45,7 +43,6 @@ fn main() {
             query,
             format,
             plan: show_plan,
-            no_optimize,
             prefix,
         } => {
             let raw = match query.as_deref() {
@@ -78,7 +75,6 @@ fn main() {
                 _ => compiler::Frontend::JsonDsl,
             };
 
-            let _ = no_optimize;
             let compiled = match compiler::compile(&raw, fe, &ontology, &ctx) {
                 Ok(c) => c,
                 Err(e) => {

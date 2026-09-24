@@ -21,8 +21,8 @@ use crate::passes::enforce::ResultContext;
 use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, logical_v3, lower_v3, normalize, physical_v3,
-    restrict, security, settings, validate,
+    check, codegen, cursor, enforce, hydrate, normalize, planner, restrict, security, settings,
+    validate,
 };
 
 #[derive(Debug, Clone)]
@@ -36,8 +36,8 @@ struct QueryPlan {
 
 #[derive(Debug, Clone)]
 enum PhysicalPlan {
-    ClickHouse(physical_v3::PhysicalPlan<physical_v3::ClickHouse>),
-    DuckDb(physical_v3::PhysicalPlan<physical_v3::DuckDb>),
+    ClickHouse(planner::Candidate<planner::ClickHouse>),
+    DuckDb(planner::Candidate<planner::DuckDb>),
 }
 use crate::types::SecurityContext;
 
@@ -233,47 +233,17 @@ fn plan_duckdb(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn plan_for(ctx: &mut impl CompilerCtx, backend: crate::Backend) -> Result<()> {
-    let input = require(ctx.take_input(), "input")?;
-    let logical = logical_v3::plan(&input);
-    let catalog = physical_v3::PhysicalCatalog::new(&logical, &input, ctx.ontology());
-    let (physical, node_sources) = match backend {
-        crate::Backend::ClickHouse => {
-            let plan = <physical_v3::ClickHouse as physical_v3::Backend>::optimize(
-                physical_v3::plan_clickhouse(logical.clone(), &catalog),
-                &catalog,
-            );
-            (PhysicalPlan::ClickHouse(plan.clone()), catalog.node_sources(&plan))
-        }
-        crate::Backend::DuckDb => {
-            let plan = physical_v3::plan_duckdb(logical.clone(), &catalog);
-            (PhysicalPlan::DuckDb(plan.clone()), catalog.node_sources(&plan))
-        }
-    };
-    let query_plan = QueryPlan {
-        node_sources,
-        hop_count: input.relationships.len(),
-        has_semi_joins: false,
-        explain: logical.root.explain(),
-        physical: Some(physical),
-    };
-    ctx.set_input(input);
-    ctx.set_query_plan(query_plan);
-    Ok(())
+    let _ = (ctx, backend);
+    Err(QueryError::PipelineInvariant(
+        "planner behavior is not populated".into(),
+    ))
 }
 
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let mut query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let physical = query_plan
-        .physical
-        .take()
-        .ok_or_else(|| QueryError::PipelineInvariant("physical plan not set".into()))?;
-    let node = match physical {
-        PhysicalPlan::ClickHouse(plan) => lower_v3::clickhouse(plan)?,
-        PhysicalPlan::DuckDb(plan) => lower_v3::duckdb(plan)?,
-    };
-    ctx.set_query_plan(query_plan);
-    ctx.set_node(node);
-    Ok(())
+    let _ = ctx;
+    Err(QueryError::PipelineInvariant(
+        "planner lowering is not populated".into(),
+    ))
 }
 
 fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {
