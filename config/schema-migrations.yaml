@@ -16,11 +16,18 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 99
+  scope: none
+  note: >-
+    Adds the CALLS File -> ImportedSymbol variant that the code indexer already
+    emits for top-level calls to unresolved imports. Indexed rows are byte-identical;
+    the variant only declares existing edges so query validation can check relationship
+    endpoints.
 - version: 98
   scope: none
   note: >-
-    Dropped the unused traversal_path_lookup.dictionary annotation from Project
-    and Group (MR !2539); DDL and produced rows are byte-identical.
+    Dropped the unused traversal_path_lookup.dictionary annotation from Project and
+    Group (MR !2539); DDL and produced rows are byte-identical.
 - version: 97
   scope: none
   note: >-

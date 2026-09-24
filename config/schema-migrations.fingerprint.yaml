@@ -12,7 +12,7 @@ sources:
   edges/authored.yaml: d8d328597de8b5c800c17442f8cc78e5ff8ea1b6d13916790331c4526a583c96
   edges/auto_canceled_by.yaml: ad4ab110688ec38a756b061b2fc57218694e547de6987db8ff3b13f5f86c0fa3
   edges/built_by.yaml: 740ce8ad75f686ae754a8d98f05bfc308e4bef5d24bad2a597d405d2109d7a95
-  edges/calls.yaml: 300852ba4f945e4523a346a9eaa4acd3ae1e416ecffc627e9822315b62e37288
+  edges/calls.yaml: a6282da1cda60e3adcd7d73fc84c1fd0df5f59b5f01e37accd672d45ef01e61d
   edges/child_of.yaml: 6d81f7f54c47a4864dba725ddffe7f986fd60af7a655c8a3349709151b67b206
   edges/closed.yaml: 9804608a3faab419b732c77a900d745501e88d427ad84f87f7a6bacdef5df031
   edges/closes.yaml: 7156e0f2564438cf334735996d241b942aa5fc2a90333b8d00ba960920b3bca7

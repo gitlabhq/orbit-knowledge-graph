@@ -51,7 +51,7 @@ Lexical checks live here: identifier rules, string escapes, numeric ranges, `dat
 Syntax-tree errors carry the pair's line and column; a child shape the conversion has no arm for is a pipeline invariant, not a client error.
 Scalar values use the same value type as the compiler's filters.
 
-The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_parse` and `gql_parse`, then share the complete `validate` through `codegen` phases.
+The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_parse` and `gql_parse`, then share the complete `validate` through `codegen` phases. GQL presets add `validate_relationships` after `validate`.
 The `gql_parse` phase parses raw query text when supplied. Preparation supplies parsed Input instead, so the wrapper leaves it unchanged without parsing twice.
 Schema preparation, result types, and resolution belong only to the GQL frontend. Shared compiler contexts have no schema request, response, or introspection scope.
 
@@ -60,6 +60,7 @@ Schema preparation, result types, and resolution belong only to the GQL frontend
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 Its limits are Rust constants in `schema_limits`, and the compiler's build script asserts that the schema still matches them.
+`validate_relationships` checks each single-hop typed relationship between labeled nodes against the ontology's edge endpoints. It rejects a reversed arrow and names the valid direction. It also rejects a type that connects neither label pair. The pass reads only Input, so the JSON DSL pipelines can adopt it without frontend changes.
 JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.
 Retiring the JSON DSL later deletes the `json_dsl` module, its phase, its `Frontend` variant, and the schema file; the shared phases do not change.
 
@@ -130,6 +131,7 @@ The base ClickHouse query's attribution payload records the language alongside t
 
 ```plaintext
 MATCH pattern [WHERE predicates]
+[MATCH pattern [WHERE predicates] ...]
 RETURN projections
 [ORDER BY key [ASC | DESC]]
 [LIMIT rows | PAGE rows [AFTER 'token']]
@@ -137,6 +139,7 @@ RETURN projections
 ```
 
 The pattern can contain a node, a chain, or comma-separated parts that form one connected tree.
+Consecutive MATCH clauses combine into one pattern, and their WHERE predicates combine with AND. The compiler does not enforce openCypher relationship uniqueness, so one pattern and several clauses return the same rows. A shortest path must be the only pattern.
 Declare each node's label and inline properties on its first occurrence. Later parts can refer to that variable without declaring another node. A repeated label must match; repeated inline properties are rejected. Add further predicates with WHERE.
 The first relationship establishes the tree. Each later relationship must attach one new node to it. Disconnected hops and cycles between pattern variables are rejected. Nodes can be declared before their relationships, but every declared node must belong to the final connected pattern.
 The far endpoint of a neighbors query is the exception to the label requirement: it has a variable but no label or predicate.
@@ -154,6 +157,7 @@ Path finding supports outgoing paths from one hop to an explicit maximum.
 Aggregation over shortest paths is unsupported; shared validation rejects it for both JSON and GQL.
 Variable-length traversal accepts exact lengths and bounded ranges. Traversal and path finding share the compiler's three-hop cap.
 Undirected relationships are supported only for neighbors queries. Between labeled nodes, use `->` or `<-`.
+Write a relationship type after a colon, as in `-[:AUTHORED]->`. Without the colon, the name declares a variable that matches any relationship type. The frontend rejects an untyped relationship variable written in type style, such as `-[AUTHORED]->`, and suggests `-[:AUTHORED]->`.
 Relationship property filters, including inline maps, require a maximum of one hop.
 
 ```plaintext

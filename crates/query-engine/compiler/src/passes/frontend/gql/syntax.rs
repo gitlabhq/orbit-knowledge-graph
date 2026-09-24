@@ -27,7 +27,7 @@ impl QueryParser {
 
     fn Query(input: Node) -> Result<Query> {
         Ok(match_nodes!(input.into_children();
-            [Match((pattern, predicates)), Return(projections), clauses..] => {
+            [Matches((pattern, predicates)), Return(projections), clauses..] => {
                 let mut query = Query {
                     pattern, predicates, projections, order: None, limit: None, debug: false,
                 };
@@ -50,6 +50,26 @@ impl QueryParser {
             [literal] => Some(string(&literal)?),
         );
         Ok(Statement::SchemaCall { node })
+    }
+
+    fn Matches(input: Node) -> Result<(Pattern, Vec<Comparison>)> {
+        let node = input.clone();
+        let mut matches: Vec<_> = match_nodes!(input.into_children();
+            [Match(matches)..] => matches.collect(),
+        );
+        if matches.len() == 1 {
+            return Ok(matches.pop().expect("one MATCH clause"));
+        }
+        let mut elements = Vec::new();
+        let mut predicates = Vec::new();
+        for (pattern, clause_predicates) in matches {
+            let Pattern::Elements(clause_elements) = pattern else {
+                return Err(node.error("a shortest path must be the only MATCH pattern"));
+            };
+            elements.extend(clause_elements);
+            predicates.extend(clause_predicates);
+        }
+        Ok((Pattern::Elements(elements), predicates))
     }
 
     fn Match(input: Node) -> Result<(Pattern, Vec<Comparison>)> {
