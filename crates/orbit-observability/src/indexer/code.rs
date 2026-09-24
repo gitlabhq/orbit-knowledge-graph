@@ -121,9 +121,10 @@ pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
     "Source files skipped by the code-graph indexer for policy or watchdog reasons. \
      Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, \
      `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts \
-     `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`.",
+     `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`. \
+     `language` comes from the file extension, `unknown` when none matches.",
     None,
-    &[labels::REASON],
+    &[labels::REASON, labels::LANGUAGE],
     DOMAIN,
 );
 
@@ -133,9 +134,10 @@ pub const FILE_FAULTS: MetricSpec = MetricSpec::counter(
      completes successfully; individual files were excluded from the graph. \
      Kinds: `file_read`, `invalid_utf8`, `syntax_error`, `oxc_panic`, \
      `oxc_semantic`, `analyzer_panic`, `unknown_source_type`, \
-     `embedded_script_parse`, `rust_workspace_missing`.",
+     `embedded_script_parse`, `rust_workspace_missing`. \
+     `language` comes from the file extension, `unknown` when none matches.",
     None,
-    &[labels::KIND],
+    &[labels::KIND, labels::LANGUAGE],
     DOMAIN,
 );
 
