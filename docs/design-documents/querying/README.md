@@ -2,7 +2,7 @@
 
 ## Overview
 
-The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agents can run graph queries without having to write Cypher or SQL directly. This server adds three major capabilities:
+The deployed HTTP server (`gkg-webserver`) exposes a REST + MCP surface so agents can run graph queries without writing SQL directly. This server adds three major capabilities:
 
 - A **dedicated web server** (`gkg-webserver`) that serves queries by connecting to ClickHouse and NATS to build the graph queries and serve the results.
 - A **graph query engine** that compiles high‑level graph operations into ClickHouse SQL. It executes them directly on adjacency‑ordered edge tables and typed node tables.
@@ -18,7 +18,7 @@ View the [Intermediate Query Language](./intermediary_llm_query_language.md) des
 
 ### Orbit query frontend
 
-The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs become a typed syntax tree that lowers into compiler Input. Remote requests still use the JSON Query DSL.
+The [Orbit query frontend](orbit_query_frontend.md) is a compiler-level API for Orbit's read-only graph language. Pest pairs become a typed syntax tree that lowers into compiler Input. Rails selects it per user with the default-off `orbit_gql_queries` flag and sets the protobuf `QueryLanguage` enum. The JSON Query DSL remains the default; each user has one active mode.
 
 ### Unified Response Schema
 
@@ -32,7 +32,7 @@ A `GraphFormatter` in the Rust query pipeline handles the transformation from ra
 
 Orbit agents discover graph capabilities through a command catalog instead of relying on long MCP tool descriptions. `ListAgentCommands` returns command names, short descriptions, and parameter schemas. `InvokeAgentCommand` executes commands that do not need Rails-specific context.
 
-The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
+The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. When the request's `language` is `QUERY_LANGUAGE_GQL`, the catalog omits `get_query_dsl` and `query_graph` directs agents to `CALL db.schema()`. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
 
 Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version is the `query_dsl` pin in `config/versions.yaml`. It is tied to the `graph_query` schema `$id` major version. The query response format version is the `raw_output_format` pin in the same file.
 
@@ -48,11 +48,13 @@ Named queries are server-defined queries for consumers such as the Orbit dashboa
 
 The `named-queries` crate validates and embeds both spellings. JSON templates use `$binding` for trusted caller values and `$param` for client values. GQL templates use `binding`, `param`, `identifier`, and `integer` lookup functions. Each parameter has one JSON Schema and one example shared by both spellings.
 
-Templates are trusted, checked-in code. The build compiles both rendered examples against the ontology. Compiler parity tests require both spellings to produce the same SQL, parameters, and query type. Grammar, ontology, or parity drift fails before deployment.
+Rails sends `QUERY_TYPE_NAMED` with a separate language selected by the per-user `orbit_gql_queries` flag. Both languages use the same JSON envelope: `{"name": ..., "parameters": {...}}`. The server renders the selected spelling and compiles it with the matching frontend. Authentication, quota, redaction, and response formatting are the same for both modes.
 
-Unknown names, missing values, and invalid parameters return client-safe errors. A JSON `"$param:name"` key lets a string parameter select a property. The catalog lists parameterless queries with caller bindings resolved, so clients can execute the returned text as-is.
+The GQL `param` function encodes strings, signed or unsigned 64-bit integers, booleans, and arrays. `identifier` accepts ASCII identifiers up to 64 bytes. `integer` accepts non-negative signed 64-bit IDs, including string-valued IDs that preserve JavaScript precision.
 
-Runtime callers can keep using the existing JSON methods. Language-aware methods let the query transport select a spelling without changing the named-query envelope or caller bindings.
+Unknown names, missing values, and invalid parameters return client-safe errors. A JSON `"$param:name"` key lets a string parameter select a property. `ListNamedQueries`, surfaced as `GET /api/v4/orbit/templates`, lists parameterless queries with caller bindings resolved in the selected language.
+
+The build and active-schema loader validate both spellings. Compiler parity tests require identical SQL, parameters, and query types. The corpus smoke test executes both spellings.
 
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails. Three factors decide it: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 

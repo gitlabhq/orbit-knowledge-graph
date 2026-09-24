@@ -299,10 +299,10 @@ description = "Generate Ruby protobuf files for Rails client"
 
 [tasks."proto:build-gem"]
 run = '''
-BUNDLE_GEMFILE=tools/protogem/Gemfile bundle install --quiet
-ruby tools/protogem/build-proto-gem
+BUNDLE_GEMFILE=clients/protogem/Gemfile bundle install --quiet
+ruby clients/protogem/build-proto-gem
 '''
-description = "Build gitlab-gkg-proto Ruby gem from proto definitions"
+description = "Build gitlab-orbit-proto Ruby gem from proto definitions"
 
 [tasks."proto:publish-gem"]
 depends = ["proto:build-gem"]

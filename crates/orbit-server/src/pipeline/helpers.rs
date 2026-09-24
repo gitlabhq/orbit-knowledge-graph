@@ -3,17 +3,13 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 use tracing::{error, warn};
 
-use crate::proto::{ExecuteQueryError, ExecuteQueryMessage, execute_query_message};
+use crate::proto::{
+    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, execute_query_message,
+};
 
 use query_engine::pipeline::PipelineError;
 
 use crate::pipeline::metrics::failure_reason;
-
-pub struct QueryRequest {
-    pub query: String,
-    pub format: i32,
-    pub query_type: i32,
-}
 
 pub async fn send_invalid_request_error(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
@@ -33,7 +29,7 @@ pub async fn send_invalid_request_error(
 pub async fn receive_query_request(
     stream: &mut Streaming<ExecuteQueryMessage>,
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
-) -> Option<QueryRequest> {
+) -> Option<ExecuteQueryRequest> {
     let first_msg = match stream.next().await {
         Some(Ok(msg)) => msg,
         Some(Err(e)) => {
@@ -49,11 +45,7 @@ pub async fn receive_query_request(
     };
 
     match first_msg.content {
-        Some(execute_query_message::Content::Request(r)) => Some(QueryRequest {
-            query: r.query,
-            format: r.format,
-            query_type: r.query_type,
-        }),
+        Some(execute_query_message::Content::Request(r)) => Some(r),
         _ => {
             warn!("Expected ExecuteQueryRequest as first message");
             let _ = tx

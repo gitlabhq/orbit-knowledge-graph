@@ -68,10 +68,6 @@ service OrbitService {
   // Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
   rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
 
-  // Lists the server-defined named queries with their DSL rendered for the
-  // caller (bindings resolved from JWT claims, parameters filled with their
-  // declared examples). Lets clients discover and display named queries
-  // without owning copies of the query text.
   // Used by GET /api/v4/orbit/templates.
   rpc ListNamedQueries(ListNamedQueriesRequest) returns (ListNamedQueriesResponse);
 
@@ -105,17 +101,22 @@ message ExecuteQueryMessage {
   }
 }
 
-// Query language selector.
 enum QueryType {
   QUERY_TYPE_JSON = 0;
   QUERY_TYPE_NAMED = 1;  // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
 }
 
+enum QueryLanguage {
+  QUERY_LANGUAGE_JSON = 0;
+  QUERY_LANGUAGE_GQL = 1;
+}
+
 // Client-sent initial message to start a query.
 message ExecuteQueryRequest {
-  string query = 1;            // JSON DSL query string
+  string query = 1;
   ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: GOON text
-  QueryType query_type = 3;    // defaults to JSON DSL
+  QueryType query_type = 3;
+  QueryLanguage language = 4;
 }
 
 // Server-sent final message with query results.
@@ -223,6 +224,7 @@ message SchemaNodeStyle {
 // Request for the query DSL grammar.
 message GetQueryDslRequest {
   ResponseFormat format = 1;  // RAW: full JSON Schema; LLM: condensed TOON
+  QueryLanguage language = 2;
 }
 
 // Response carrying the DSL grammar in the requested format.
@@ -308,19 +310,18 @@ message ResponseFormatSchema {
 // ListNamedQueries — unary, returns the named-query catalog
 // ---------------------------------------------------------------------------
 
-// Request for the named-query catalog.
-message ListNamedQueriesRequest {}
+message ListNamedQueriesRequest {
+  QueryLanguage language = 1;
+}
 
-// Response listing every embedded named query.
 message ListNamedQueriesResponse {
   repeated NamedQueryDefinition queries = 1;
 }
 
-// A named query with its DSL rendered for the requesting user.
 message NamedQueryDefinition {
   string name = 1;         // stable identifier, e.g. "recent_merges"
   string description = 2;  // human-readable summary from the template YAML
-  string raw_query = 3;    // rendered query DSL as a JSON string, executable as-is
+  string raw_query = 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +367,9 @@ message ResourceAuthorization {
 // ListTools — unary, returns available MCP tool definitions
 // ---------------------------------------------------------------------------
 
-message ListToolsRequest {}
+message ListToolsRequest {
+  QueryLanguage language = 1;
+}
 
 message ListToolsResponse {
   repeated ToolDefinition tools = 1;
@@ -387,6 +390,7 @@ message ToolDefinition {
 message ListAgentCommandsRequest {
   repeated string command_names = 1; // empty means list every command
   ResponseFormat format = 2;         // RAW: command definitions; LLM: TOON command catalog
+  QueryLanguage language = 3;
 }
 
 message ListAgentCommandsResponse {
@@ -397,6 +401,7 @@ message ListAgentCommandsResponse {
 message InvokeAgentCommandRequest {
   string command_name = 1;
   string parameters_json = 2; // downstream command parameters object as JSON
+  QueryLanguage language = 3;
 }
 
 message InvokeAgentCommandResponse {
