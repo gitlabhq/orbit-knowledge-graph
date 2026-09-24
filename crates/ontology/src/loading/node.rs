@@ -318,10 +318,8 @@ impl NodeYaml {
         internal_column_prefix: &str,
         reader: &impl ReadOntologyFile,
     ) -> Result<NodeEntity, OntologyError> {
-        let legacy_introduced_in = reader.legacy_introduced_in();
         let introduced_in = self
             .introduced_in
-            .or_else(|| legacy_introduced_in.clone())
             .unwrap_or_else(|| DEFAULT_INTRODUCED_IN.clone());
         let mut primary_keys = Vec::new();
 
@@ -335,7 +333,6 @@ impl NodeYaml {
 
                 let field_introduced_in = prop_def
                     .introduced_in
-                    .or_else(|| legacy_introduced_in.clone())
                     .unwrap_or_else(|| DEFAULT_INTRODUCED_IN.clone());
 
                 let source = match (prop_def.source, prop_def.virtual_config) {
@@ -1058,18 +1055,6 @@ mod tests {
         fn read(&self, path: &str) -> Result<String, OntologyError> {
             Err(missing_file(path))
         }
-
-        fn legacy_introduced_in(&self) -> Option<semver::Version> {
-            Some(semver::Version::new(1, 0, 0))
-        }
-    }
-
-    struct StrictReader;
-
-    impl ReadOntologyFile for StrictReader {
-        fn read(&self, path: &str) -> Result<String, OntologyError> {
-            Err(missing_file(path))
-        }
     }
 
     #[test]
@@ -1088,10 +1073,7 @@ mod tests {
         }
     }
 
-    fn parse_test_node_with_reader(
-        yaml: &str,
-        reader: &impl ReadOntologyFile,
-    ) -> Result<NodeEntity, OntologyError> {
+    fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
         let node: NodeYaml = orbit_utils::yaml::from_str(yaml).unwrap();
         node.into_entity(
             "TestNode".to_string(),
@@ -1099,17 +1081,13 @@ mod tests {
             &["id".to_string()],
             &test_etl_settings(),
             "_gkg_",
-            reader,
+            &EmptyReader,
         )
-    }
-
-    fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
-        parse_test_node_with_reader(yaml, &EmptyReader)
     }
 
     #[test]
     fn missing_introduced_in_resolves_to_baseline() {
-        let missing_node_version = parse_test_node_with_reader(
+        let missing_node_version = parse_test_node(
             r#"
             node_type: entity
             domain: test
@@ -1120,12 +1098,11 @@ mod tests {
                 type: int64
                 source: id
             "#,
-            &StrictReader,
         )
         .unwrap();
         assert_eq!(missing_node_version.introduced_in, DEFAULT_INTRODUCED_IN);
 
-        let missing_property_version = parse_test_node_with_reader(
+        let missing_property_version = parse_test_node(
             r#"
             node_type: entity
             introduced_in: "1.0.0"
@@ -1136,7 +1113,6 @@ mod tests {
                 type: int64
                 source: id
             "#,
-            &StrictReader,
         )
         .unwrap();
         assert_eq!(

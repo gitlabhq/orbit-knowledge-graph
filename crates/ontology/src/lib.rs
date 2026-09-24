@@ -1766,10 +1766,6 @@ mod tests {
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, path.to_string()),
             })
         }
-
-        fn legacy_introduced_in(&self) -> Option<semver::Version> {
-            Some(semver::Version::new(1, 0, 0))
-        }
     }
 
     #[test]

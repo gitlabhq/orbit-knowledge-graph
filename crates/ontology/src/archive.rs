@@ -221,10 +221,6 @@ impl ReadOntologyFile for OntologyArchive {
             })
     }
 
-    fn legacy_introduced_in(&self) -> Option<semver::Version> {
-        (self.schema_version <= 99).then(|| crate::DEFAULT_INTRODUCED_IN.clone())
-    }
-
     fn graph_schema_api(&self) -> semver::Version {
         self.graph_schema_api.clone()
     }

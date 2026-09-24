@@ -44,10 +44,6 @@ pub(crate) trait ReadOntologyFile {
         orbit_versions::VERSIONS.graph_schema_api.clone()
     }
 
-    fn legacy_introduced_in(&self) -> Option<semver::Version> {
-        None
-    }
-
     fn validates_graph_schema_api(&self) -> bool {
         true
     }

@@ -332,6 +332,13 @@ mod tests {
             "{property_error}"
         );
 
+        let introduced = only_property
+            .modify_field("Existing", "new_property", |field| {
+                field.introduced_in = bumped_pin.clone();
+            })
+            .unwrap();
+        assert!(new_elements_have_current_pin(&introduced, &target, &bumped_pin).is_ok());
+
         let legacy = OntologyArchive::bundled(99)
             .unwrap()
             .unwrap()

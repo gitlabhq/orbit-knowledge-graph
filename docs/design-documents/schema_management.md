@@ -36,11 +36,12 @@ Every node and property records its first API version in `introduced_in`. Omitti
 YAML defaults to `1.0.0`; rendered introspection still includes the resolved value. New nodes and
 properties must explicitly set it to the current `graph_schema_api` pin when that pin exceeds the
 baseline. The target-archive branch-comparison gate enforces this rule, not the standalone ontology
-validator. Older archives also default missing annotations to `1.0.0`.
+validator.
 
-The compact agent-command summary lists only node names and the current API version. Selectively expanded nodes and their typed properties
-include their stable `introduced_in` versions. The structured protobuf response carries the full
-node and property metadata. Relationships do not carry this annotation.
+The compact agent-command summary lists only node names and the current API version.
+Selectively expanded nodes and their typed properties include their stable `introduced_in` versions.
+The structured protobuf response carries the full node and property metadata.
+Relationships do not carry this annotation.
 
 `graph_schema_api` validates cached schema responses. Clients must use the served snapshot's
 version for the ETag. Neither the binary pin nor the ontology document's `schema_version` is
