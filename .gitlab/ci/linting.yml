@@ -21,17 +21,6 @@
 # On merge_request_event pipelines: scoped to lines the MR added/changed
 # (--diff-base), so pre-existing legacy narration is not noise.
 # On main: whole-tree scan (no MR diff available).
-lint:agent-plugin:
-  stage: lint
-  image: python:3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - python3 -m unittest discover -s scripts -p test_agent_plugin.py -v
-
 lint:narration:
   stage: lint
   image: python:3.12-alpine

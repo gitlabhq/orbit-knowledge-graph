@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod agent_plugin;
 mod dashboards;
 mod ddl;
 mod integration_lanes;
@@ -28,6 +29,11 @@ enum Command {
     Synth {
         #[command(subcommand)]
         command: SynthCommand,
+    },
+    /// Package or verify the Orbit agent plugin.
+    AgentPlugin {
+        #[command(subcommand)]
+        command: AgentPluginCommand,
     },
     /// Generate JSON Schema for the server configuration.
     Schema {
@@ -163,6 +169,17 @@ enum Command {
         #[arg(long)]
         list_node_ids: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum AgentPluginCommand {
+    /// Write the plugin and both marketplace catalogs to a reproducible zip.
+    Package {
+        #[arg(default_value = "orbit-agent-plugin.zip")]
+        output: std::path::PathBuf,
+    },
+    /// Verify the manifests, the archive, and the hooks.
+    Check,
 }
 
 #[derive(Subcommand)]
@@ -367,6 +384,10 @@ async fn main() -> Result<()> {
         },
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
+        Command::AgentPlugin { command } => match command {
+            AgentPluginCommand::Package { output } => agent_plugin::package(&output),
+            AgentPluginCommand::Check => agent_plugin::check(),
+        },
         Command::IntegrationLanes { check } => integration_lanes::run(check),
         Command::QueryDocs { doc, check } => query_docs::run(doc, check),
         Command::Loadtest {

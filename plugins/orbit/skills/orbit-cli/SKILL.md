@@ -87,6 +87,10 @@ Gotchas:
   returns zero rows.
 - `sql` queries all indexed revisions by default. Use `--repo .` for the current
   checkout revision, or `--db PATH` for one file. Index a commit before querying it.
+- An empty result does not prove that code is absent. The index can be stale
+  or miss a language, so verify critical findings in source.
+- If `orbit list` shows no index for the repository, ask before you run
+  `orbit index .`.
 
 ## References
 
