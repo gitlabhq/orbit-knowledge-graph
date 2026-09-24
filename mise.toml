@@ -421,8 +421,16 @@ run = "bash ./scripts/check-rust-toolchain.sh --check"
 description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
 
 [tasks."schema:bump"]
+# The bump command itself writes the replacement archive, so it must be able to
+# compile xtask when the old archive still has the previous API pin.
+env = { GKG_SCHEMA_ARCHIVE_BUMP = "1" }
 run = "cargo xtask migration-ledger bump"
 description = "Bump the schema pin in config/versions.yaml, append a migration ledger entry, and re-snapshot fingerprints"
+
+[tasks."schema:bump:api"]
+env = { GKG_SCHEMA_ARCHIVE_BUMP = "1" }
+run = "cargo xtask migration-ledger bump --scope none --note 'public schema encoding changed; DDL and indexed rows are byte-identical'"
+description = "Bump storage version and archive for an output-neutral graph schema API encoding change"
 
 [tasks."schema:snapshot"]
 run = "cargo xtask migration-ledger snapshot"

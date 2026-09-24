@@ -129,7 +129,7 @@ enum ResponseFormat {
 | RPC | `format = raw` | `format = llm` |
 |-----|----------------|----------------|
 | `ExecuteQuery` | Tabular JSON rows + `QueryMetadata` | [GOON](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205) (Graph Object Output Notation) — deduplicated nodes/edges, 25-50% token savings |
-| `GetGraphSchema` | Structured schema (domains, nodes, edges, properties, styles) | [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text (`{name: "User", props: ["id:int", ...], out: [...]}`) |
+| `GetGraphSchema` | Structured schema (domains, nodes, edges, properties, styles) | [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text with typed `props` and `introduced_in` versions |
 | `GetClusterHealth` | Structured health (status, version, components) | [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) — compact key-value notation |
 | `ListTools` | Tool definitions (name, description, `parameters_json_schema`) | Same (no LLM variant needed) |
 
@@ -282,7 +282,7 @@ GET /api/v4/orbit/schema?expand=User&format=llm
 
 ```plaintext
 domains: [
-  {name: "core", nodes: [{name: "User", props: ["id:int", "username:string", "email:string?"], out: ["AUTHORED", "OWNS", "MEMBER_OF"], in: ["ASSIGNED_TO"]}, "Project", "Group"]},
+  {name: "core", nodes: [{name: "User", introduced_in: "1.0.0", props: [{name: "id", data_type: "int64", nullable: false, introduced_in: "1.0.0"}], out: ["AUTHORED", "OWNS", "MEMBER_OF"], in: ["ASSIGNED_TO"]}, "Project", "Group"]},
   {name: "plan", nodes: ["WorkItem", "Issue", "Epic"]},
   ...
 ]

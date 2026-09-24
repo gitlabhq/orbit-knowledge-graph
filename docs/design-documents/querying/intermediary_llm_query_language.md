@@ -408,7 +408,12 @@ Expanded nodes include their properties (with types and nullability) and their o
 
 ```yaml
 - name: User
-  props: [id:int64, username:string, email:string, is_admin:boolean, user_type:enum]
+  props:
+    - {name: id, data_type: int64, nullable: false, introduced_in: "1.0.0"}
+    - {name: username, data_type: string, nullable: false, introduced_in: "1.0.0"}
+    - {name: email, data_type: string, nullable: false, introduced_in: "1.0.0"}
+    - {name: is_admin, data_type: boolean, nullable: false, introduced_in: "1.0.0"}
+    - {name: user_type, data_type: enum, nullable: false, introduced_in: "1.0.0"}
   out: [AUTHORED, CONTAINS, MEMBER_OF, OWNER, ...]
   in: [ASSIGNED, CONFIRMED_BY, CREATOR, DISMISSED_BY, ...]
 ```

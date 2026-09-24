@@ -183,6 +183,7 @@ pub fn check(base: Option<String>) -> Result<()> {
     })?;
 
     let archive = OntologyArchive::from_bytes(schema_version, &archive_bytes)?;
+    archive.validate_current_api_pin()?;
     let current_sources = migrations::embedded_sources();
 
     if !archive.matches_sources(&current_sources) {

@@ -3,7 +3,11 @@ fn main() {
     validate_prompts();
     validate_skills();
     validate_named_queries();
-    validate_migration_ledger();
+    println!("cargo:rerun-if-env-changed=GKG_SCHEMA_ARCHIVE_BUMP");
+    // The bump task compiles xtask before it writes the new ledger and archive.
+    if std::env::var_os("GKG_SCHEMA_ARCHIVE_BUMP").is_none() {
+        validate_migration_ledger();
+    }
     validate_ontology_archives();
     validate_authored_etl_sql();
     #[cfg(feature = "regenerate-protos")]
@@ -31,7 +35,10 @@ fn validate_ontology_archives() {
         archive
             .load_ontology()
             .unwrap_or_else(|error| panic!("bundled archive v{version}: {error}"));
-        if version == current_version {
+        if version == current_version && std::env::var_os("GKG_SCHEMA_ARCHIVE_BUMP").is_none() {
+            archive
+                .validate_current_api_pin()
+                .unwrap_or_else(|error| panic!("{error}"));
             assert!(
                 archive.matches_sources(&ontology::migrations::embedded_sources()),
                 "ontology archive is stale; run `mise schema:bump`"

@@ -324,8 +324,9 @@ async fn test_property_format_has_type_and_version() {
 
     assert!(
         output.contains("{name,data_type,nullable,description,introduced_in}")
-            && output.contains("id,int,false")
-            && output.contains("\"1.0.0\""),
+            && output
+                .lines()
+                .any(|line| { line.contains("id,int,false,") && line.contains("\"1.0.0\"") }),
         "Properties should include type and introduced version: {output}"
     );
 }

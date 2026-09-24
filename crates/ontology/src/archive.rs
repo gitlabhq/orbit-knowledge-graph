@@ -170,6 +170,19 @@ impl OntologyArchive {
         &self.graph_schema_api
     }
 
+    pub fn validate_current_api_pin(&self) -> Result<(), ArchiveError> {
+        let expected = &orbit_versions::VERSIONS.graph_schema_api;
+        if &self.graph_schema_api != expected {
+            return Err(ArchiveError::Invalid(format!(
+                "current v{} archive graph_schema_api {} differs from the binary pin {}. \
+                 Run `mise schema:bump:api` to create a new storage version and archive \
+                 (use `mise schema:bump` for storage changes)",
+                self.schema_version, self.graph_schema_api, expected
+            )));
+        }
+        Ok(())
+    }
+
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -349,6 +362,19 @@ mod tests {
                 .to_string(),
             "0.0.99"
         );
+    }
+
+    #[test]
+    fn encoder_only_pin_bump_without_a_new_archive_is_rejected() {
+        let archive = OntologyArchive::from_sources_with_api(
+            orbit_versions::VERSIONS.schema,
+            semver::Version::new(0, 0, 0),
+            &embedded_sources(),
+        )
+        .unwrap();
+        let error = archive.validate_current_api_pin().unwrap_err().to_string();
+        assert!(error.contains("mise schema:bump:api"), "{error}");
+        assert!(error.contains("0.0.0"), "{error}");
     }
 
     #[test]
