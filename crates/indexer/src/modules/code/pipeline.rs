@@ -747,7 +747,7 @@ impl CodeIndexer {
 
         for skipped in &result.skipped {
             self.metrics
-                .record_file_skipped(skipped.kind.as_metric_label());
+                .record_file_skipped(skipped.kind.as_metric_label(), &skipped.path);
             debug!(
                 project_id = request.project_id,
                 branch = %request.branch,
@@ -758,7 +758,8 @@ impl CodeIndexer {
         }
 
         for fault in &result.faults {
-            self.metrics.record_file_fault(fault.kind.as_metric_label());
+            self.metrics
+                .record_file_fault(fault.kind.as_metric_label(), &fault.path);
         }
         if !result.faults.is_empty() {
             warn!(
