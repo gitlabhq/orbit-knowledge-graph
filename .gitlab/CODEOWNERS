@@ -16,7 +16,7 @@
 [Architecture] @gitlab-org/orbit/team
 /docs/design-documents/decisions/
 
-[Technical Writing] @gitlab-org/technical-writing/tw-docops
+[Technical Writing] @gitlab-org/technical-writing/tw-docops @gitlab-org/tw-leadership
 /.vale/
 .markdownlint-cli2.yaml
 
