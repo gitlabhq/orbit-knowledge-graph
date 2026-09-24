@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "0.18.1",
+  "version": "0.18.2",
   "description": "Find code and read definitions, callers, and callees with Orbit CLI.",
   "author": { "name": "GitLab" },
   "homepage": "https://docs.gitlab.com/orbit/local/",

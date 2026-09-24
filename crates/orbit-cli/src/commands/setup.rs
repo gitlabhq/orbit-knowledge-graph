@@ -306,6 +306,43 @@ mod tests {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
+    fn read_jsonc(path: &Path) -> Value {
+        let raw = std::fs::read_to_string(path).unwrap();
+        jsonc_parser::parse_to_serde_value(&raw, &Default::default()).unwrap()
+    }
+
+    #[test]
+    fn opencode_comments_survive_install_and_uninstall() {
+        for (original, remaining) in [
+            (
+                "{\n  // theme\n  \"theme\": \"dark\" // trailing\n}\n",
+                json!({"theme": "dark"}),
+            ),
+            ("{\n  // notes for later\n}\n", json!({})),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let config = dir.path().join("opencode.json");
+            std::fs::write(&config, original).unwrap();
+            let keeps_comments = |text: &str| {
+                let comments = original.lines().filter_map(|line| line.split_once("//"));
+                comments.clone().all(|(_, comment)| text.contains(comment))
+            };
+
+            install_with_mcp(&["opencode"], dir.path());
+            let installed = std::fs::read_to_string(&config).unwrap();
+            assert!(keeps_comments(&installed), "{installed}");
+            assert_eq!(
+                read_jsonc(&config)["mcp"]["orbit"]["command"],
+                json!(["orbit", "mcp", "serve"])
+            );
+
+            uninstall_named(&["opencode"], dir.path());
+            let restored = std::fs::read_to_string(&config).unwrap();
+            assert!(keeps_comments(&restored), "{restored}");
+            assert_eq!(read_jsonc(&config), remaining);
+        }
+    }
+
     #[test]
     fn setup_detects_installed_agents_from_their_config_dirs() {
         let home = tempfile::tempdir().unwrap();
@@ -412,8 +449,13 @@ mod tests {
         assert!(agents.contains("# My rules"));
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
         assert_eq!(
-            read_json(&opencode_config)["plugin"],
+            read_jsonc(&opencode_config)["plugin"],
             json!(["other.js", "./plugins/orbit.js"])
+        );
+        assert!(
+            std::fs::read_to_string(&opencode_config)
+                .unwrap()
+                .contains("// existing config")
         );
         assert_eq!(
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
@@ -435,7 +477,15 @@ mod tests {
             "# My rules\n"
         );
         assert!(!dir.path().join("AGENTS.md.orbit-backup").exists());
-        assert_eq!(read_json(&opencode_config), json!({"plugin": ["other.js"]}));
+        assert_eq!(
+            read_jsonc(&opencode_config),
+            json!({"plugin": ["other.js"]})
+        );
+        assert!(
+            std::fs::read_to_string(&opencode_config)
+                .unwrap()
+                .contains("// existing config")
+        );
         assert!(!dir.path().join(".opencode/plugins").exists());
         assert!(!dir.path().join("opencode.json").exists());
         assert!(!dir.path().join(".codex").exists());

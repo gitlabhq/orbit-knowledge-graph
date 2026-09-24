@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
-use serde_json::{Value, json};
+use jsonc_parser::cst::{CstArray, CstInputValue, CstObject, CstRootNode};
+use jsonc_parser::{CollectOptions, CommentCollectionStrategy, ParseOptions};
+use serde_json::{Map, Value, json};
 
 use super::{Report, drop_backup_when_restored, remove_file_and_empty_parents, write_file};
 use crate::commands::setup::Target;
@@ -46,13 +48,104 @@ fn read_object(path: &Path, jsonc: bool) -> Result<Value> {
     }
 }
 
-pub(super) fn render(value: &Value) -> Result<String> {
+pub(super) fn render(path: &Path, value: &Value) -> Result<String> {
+    let Some(raw) = std::fs::read_to_string(path).ok() else {
+        return render_fresh(value);
+    };
+    let Ok(root) = CstRootNode::parse(&raw, &ParseOptions::default()) else {
+        return render_fresh(value);
+    };
+    let (Some(object), Some(desired)) = (root.object_value(), value.as_object()) else {
+        return render_fresh(value);
+    };
+    sync_object(&object, desired);
+    let patched = root.to_string();
+    let reparsed: Value = jsonc_parser::parse_to_serde_value(&patched, &Default::default())
+        .with_context(|| format!("failed to update {} in place", path.display()))?;
+    if reparsed != *value {
+        bail!("failed to update {} in place", path.display());
+    }
+    Ok(patched)
+}
+
+fn render_fresh(value: &Value) -> Result<String> {
     let raw = serde_json::to_string_pretty(value).context("failed to serialize JSON")?;
     Ok(raw + "\n")
 }
 
+fn sync_object(object: &CstObject, desired: &Map<String, Value>) {
+    let mut present = Vec::new();
+    for prop in object.properties() {
+        let Some(name) = prop.name().and_then(|name| name.decoded_value().ok()) else {
+            continue;
+        };
+        let Some(wanted) = desired.get(&name) else {
+            prop.remove();
+            continue;
+        };
+        present.push(name);
+        let current = prop.value().and_then(|node| node.to_serde_value());
+        if current.as_ref() == Some(wanted) {
+            continue;
+        }
+        match (prop.object_value(), prop.array_value(), wanted) {
+            (Some(child), _, Value::Object(map)) => sync_object(&child, map),
+            (_, Some(child), Value::Array(items)) => sync_array(&child, items),
+            _ => prop.set_value(cst_input(wanted)),
+        }
+    }
+    for (name, wanted) in desired {
+        if !present.contains(name) {
+            object.append(name, cst_input(wanted));
+        }
+    }
+}
+
+fn sync_array(array: &CstArray, desired: &[Value]) {
+    let mut kept = 0;
+    for element in array.elements() {
+        if desired.get(kept) == element.to_serde_value().as_ref() {
+            kept += 1;
+        } else {
+            element.remove();
+        }
+    }
+    for wanted in &desired[kept..] {
+        array.append(cst_input(wanted));
+    }
+}
+
+fn cst_input(value: &Value) -> CstInputValue {
+    match value {
+        Value::Null => CstInputValue::Null,
+        Value::Bool(flag) => CstInputValue::Bool(*flag),
+        Value::Number(number) => CstInputValue::Number(number.to_string()),
+        Value::String(text) => CstInputValue::String(text.clone()),
+        Value::Array(items) => CstInputValue::Array(items.iter().map(cst_input).collect()),
+        Value::Object(map) => CstInputValue::Object(
+            map.iter()
+                .map(|(name, item)| (name.clone(), cst_input(item)))
+                .collect(),
+        ),
+    }
+}
+
+fn has_comments(path: &Path) -> bool {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let options = CollectOptions {
+        comments: CommentCollectionStrategy::Separate,
+        tokens: false,
+    };
+    jsonc_parser::parse_to_ast(&raw, &options, &ParseOptions::default())
+        .ok()
+        .and_then(|parsed| parsed.comments)
+        .is_some_and(|comments| !comments.is_empty())
+}
+
 pub(super) fn write_object(path: &Path, value: &Value) -> Result<()> {
-    write_file(path, render(value)?)
+    write_file(path, render(path, value)?)
 }
 
 pub(super) fn write_or_delete_when_empty(
@@ -62,7 +155,7 @@ pub(super) fn write_or_delete_when_empty(
     label: &str,
     report: &mut Report,
 ) -> Result<()> {
-    if root.as_object().is_some_and(|map| map.is_empty()) {
+    if root.as_object().is_some_and(|map| map.is_empty()) && !has_comments(path) {
         remove_file_and_empty_parents(path, target)?;
         report.note(label, "removed (was orbit-only)");
     } else {

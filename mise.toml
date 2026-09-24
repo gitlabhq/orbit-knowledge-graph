@@ -110,11 +110,11 @@ run = "cargo build --release --workspace --exclude orbit-cli && cargo build --re
 description = "Build the crates"
 
 [tasks."plugins:package"]
-run = "python3 scripts/package-agent-plugin.py"
+run = "cargo xtask agent-plugin package"
 description = "Package the Orbit agent plugin and both marketplace catalogs"
 
 [tasks."test:plugins"]
-run = "python3 -m unittest discover -s scripts -p test_agent_plugin.py -v"
+run = "cargo xtask agent-plugin check"
 description = "Test agent plugin packaging and hooks"
 
 [tasks."build:cli"]

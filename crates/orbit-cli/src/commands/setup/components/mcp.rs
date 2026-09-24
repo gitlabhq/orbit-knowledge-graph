@@ -115,7 +115,13 @@ fn install_json(
     servers.insert(server.name.to_string(), entry);
 
     let registered = format!("mcp server {} registered", server.name);
-    write_unless_unchanged(path, label, &json::render(&root)?, &registered, report)
+    write_unless_unchanged(
+        path,
+        label,
+        &json::render(path, &root)?,
+        &registered,
+        report,
+    )
 }
 
 fn orbit_owns_json_entry(servers: &serde_json::Map<String, Value>, name: &str) -> bool {
