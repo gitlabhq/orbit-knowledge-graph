@@ -334,6 +334,13 @@ impl CodeIndexingTaskHandler {
             .await
             .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
         else {
+            info!(
+                task_id = request.task_id,
+                project_id,
+                branch = %branch,
+                lock_key = %key,
+                "code indexing lock held by another indexer; redelivering"
+            );
             return Err(HandlerError::Backpressure(format!(
                 "lock {key} held by another indexer"
             )));
