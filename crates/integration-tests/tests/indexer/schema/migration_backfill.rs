@@ -259,15 +259,32 @@ impl TestContext {
             .await;
     }
 
+    async fn given_code_migration_waiting_only_on_code(&self) {
+        common::create_namespace(&self.clickhouse, 100, None, 20, "1/100/").await;
+        self.given_enabled_namespaces([100]).await;
+        self.given_migration(*SCHEMA_VERSION + 1, *SCHEMA_VERSION)
+            .await;
+        self.complete_required_pipelines(&[100]).await;
+        self.catalog
+            .publish(&embedded_archive(*SCHEMA_VERSION))
+            .await
+            .unwrap();
+        self.create_version_table("code_indexing_checkpoint", *SCHEMA_VERSION + 1)
+            .await;
+    }
+
     async fn given_indexed_projects(
         &self,
         version: u32,
+        root_namespace_id: i64,
         project_ids: impl IntoIterator<Item = i64>,
     ) {
         let rows = project_ids
             .into_iter()
             .map(|project_id| {
-                format!("('1/100/{project_id}/', {project_id}, 'main', 0, 'sha', now())")
+                format!(
+                    "('1/{root_namespace_id}/{project_id}/', {project_id}, 'main', 0, 'sha', now())"
+                )
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -531,28 +548,15 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
 #[tokio::test]
 async fn migration_completion_checker_waits_until_active_code_projects_are_reindexed() {
     let context = TestContext::new().await;
-    common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
-    context.given_enabled_namespaces([100]).await;
+    context.given_code_migration_waiting_only_on_code().await;
     context
-        .given_migration(*SCHEMA_VERSION + 1, *SCHEMA_VERSION)
-        .await;
-    context.complete_required_pipelines(&[100]).await;
-    context
-        .catalog
-        .publish(&embedded_archive(*SCHEMA_VERSION))
-        .await
-        .unwrap();
-    context
-        .create_version_table("code_indexing_checkpoint", *SCHEMA_VERSION + 1)
-        .await;
-    context
-        .given_indexed_projects(*SCHEMA_VERSION + 1, 1..=200)
+        .given_indexed_projects(*SCHEMA_VERSION + 1, 100, 1..=200)
         .await;
     let graph = context.clickhouse.create_client();
     let checker = context.completion_checker();
 
     context
-        .given_indexed_projects(*SCHEMA_VERSION, (1..=197).chain([500]))
+        .given_indexed_projects(*SCHEMA_VERSION, 100, (1..=197).chain([500]))
         .await;
     checker.run().await.unwrap();
 
@@ -562,7 +566,9 @@ async fn migration_completion_checker_waits_until_active_code_projects_are_reind
         "197 of 200 active projects is below 99%, and project 500 is not in the active version"
     );
 
-    context.given_indexed_projects(*SCHEMA_VERSION, [198]).await;
+    context
+        .given_indexed_projects(*SCHEMA_VERSION, 100, [198])
+        .await;
     checker.run().await.unwrap();
 
     assert_eq!(
@@ -572,6 +578,35 @@ async fn migration_completion_checker_waits_until_active_code_projects_are_reind
             version_entry(*SCHEMA_VERSION, "active"),
         ],
         "198 of 200 active projects reaches 99%"
+    );
+}
+
+#[tokio::test]
+async fn migration_completion_checker_ignores_active_projects_under_disabled_namespaces() {
+    let context = TestContext::new().await;
+    context.given_code_migration_waiting_only_on_code().await;
+    context
+        .given_indexed_projects(*SCHEMA_VERSION + 1, 100, 1..=10)
+        .await;
+    context
+        .given_indexed_projects(*SCHEMA_VERSION + 1, 200, 11..=20)
+        .await;
+    context
+        .given_indexed_projects(*SCHEMA_VERSION, 100, 1..=10)
+        .await;
+    let checker = context.completion_checker();
+
+    checker.run().await.unwrap();
+
+    assert_eq!(
+        read_all_versions(&context.clickhouse.create_client())
+            .await
+            .unwrap(),
+        vec![
+            version_entry(*SCHEMA_VERSION + 1, "retired"),
+            version_entry(*SCHEMA_VERSION, "active"),
+        ],
+        "projects under the disabled namespace 200 are not expected"
     );
 }
 
