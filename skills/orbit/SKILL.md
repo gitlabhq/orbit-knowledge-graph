@@ -30,7 +30,7 @@ glab api --hostname gitlab.com 'projects/gitlab-org%2Forbit%2Fknowledge-graph/re
 
 If it is already fixed there, follow that guidance and suggest `glab skills update orbit`; do not open another MR.
 Otherwise, confirm with the user before opening a focused MR against `gitlab-org/orbit/knowledge-graph`
-for the affected skill path (one fix per MR, Conventional Commits). Do not silently work around inaccurate guidance.
+for the affected skill path (one fix per MR, Conventional Commits). If the user declines, skip the upstream check and MR, note the discrepancy in one line, and continue with the corrected command.
 
 ## Discovery
 
