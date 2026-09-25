@@ -82,6 +82,8 @@ can see in GitLab.
 - REST API: a personal access token with the `read_api` scope, or a
   [fine-grained personal access token](#fine-grained-personal-access-tokens), sent as a Bearer token.
   For more information, see the [REST API](access/api.md#authentication).
+- Service accounts: a bot user with a personal access token, scoped to the groups where the
+  account is a member. For more information, see [service accounts](service-accounts.md).
 - MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
 

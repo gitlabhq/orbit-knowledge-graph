@@ -41,6 +41,7 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 | [How it works](how-it-works.md) | Indexing pipeline, graph model, query execution |
 | [What GitLab Orbit indexes](../indexed-data.md) | SDLC coverage, language support, indexing scope |
 | [Security](security.md) | Roles required to query, the authorization model, and programmatic access |
+| [Service accounts](service-accounts.md) | Query from automation with a bot user scoped to its groups |
 | [Schema reference](schema.md) | All 28 node types across 6 domains |
 | [Cookbook](cookbook.md) | Copy-paste queries for common use cases |
 | [Query language](queries/) | Full query DSL reference |
