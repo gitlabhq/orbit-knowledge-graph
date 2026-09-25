@@ -6,6 +6,12 @@ use orbit_utils::traversal_path::TraversalPath;
 
 use super::{Plan, PlanBody, PlanningModel, Strategy};
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HydrationCompileOptions {
+    pub dynamic: bool,
+    pub path_segment_budget: Option<usize>,
+}
+
 pub struct HydrationNodePlan {
     pub alias: String,
     pub table: String,
@@ -21,7 +27,11 @@ pub struct HydrationNodePlan {
     pub sort_key: Vec<String>,
 }
 
-pub fn plan_hydration(input: &Input, model: &(impl PlanningModel + ?Sized)) -> Result<Plan> {
+pub fn plan_hydration(
+    input: &Input,
+    model: &(impl PlanningModel + ?Sized),
+    options: HydrationCompileOptions,
+) -> Result<Plan> {
     if input.nodes.is_empty() {
         return Err(QueryError::Lowering(
             "hydration requires at least one node".into(),
@@ -75,6 +85,9 @@ pub fn plan_hydration(input: &Input, model: &(impl PlanningModel + ?Sized)) -> R
         denorm_rel_kinds: HashMap::new(),
         table_columns: HashMap::new(),
         table_sort_keys: HashMap::new(),
-        body: PlanBody::Hydration(hydration_nodes),
+        body: PlanBody::Hydration {
+            nodes: hydration_nodes,
+            options,
+        },
     })
 }

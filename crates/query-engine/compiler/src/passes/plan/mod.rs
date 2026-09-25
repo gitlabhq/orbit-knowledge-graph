@@ -16,7 +16,7 @@ use crate::input::*;
 pub use edge_chain::{
     FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
 };
-pub use hydration::HydrationNodePlan;
+pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
 pub use model::PlanningModel;
 
 #[derive(Clone)]
@@ -70,7 +70,10 @@ pub enum PlanBody {
         center_tp_lookup: Option<(String, String)>,
     },
     PathFinding(PathFindingBody),
-    Hydration(Vec<HydrationNodePlan>),
+    Hydration {
+        nodes: Vec<HydrationNodePlan>,
+        options: HydrationCompileOptions,
+    },
 }
 
 pub struct PathFindingBody {
@@ -137,6 +140,7 @@ pub fn plan<M>(
     input: &Input,
     scope_proofs: &HashMap<String, crate::scope::ScopeProof>,
     model: &M,
+    hydration_options: HydrationCompileOptions,
 ) -> Result<Plan>
 where
     M: PlanningModel + crate::data_model::QueryModel + ?Sized,
@@ -147,6 +151,6 @@ where
         }
         QueryType::Neighbors => neighbors::plan_neighbors(input, model),
         QueryType::PathFinding => pathfinding::plan_pathfinding(input, model),
-        QueryType::Hydration => hydration::plan_hydration(input, model),
+        QueryType::Hydration => hydration::plan_hydration(input, model, hydration_options),
     }
 }

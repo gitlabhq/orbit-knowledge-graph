@@ -79,6 +79,7 @@ pub use passes::hydrate::{
     generate_hydration_plan,
 };
 pub use passes::normalize::build_entity_auth;
+pub use passes::plan::HydrationCompileOptions;
 pub use scope::ScopeProof;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
@@ -206,16 +207,18 @@ pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Inp
 /// Codegen defaults to `HydrationPlan::None`.
 pub fn compile_input(
     input: Input,
+    options: HydrationCompileOptions,
     ontology: &Arc<Ontology>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let data_model = data_model::clickhouse(Arc::clone(ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    compile_input_model(input, ontology, &data_model, ctx)
+    compile_input_model(input, options, ontology, &data_model, ctx)
 }
 
 pub fn compile_input_model(
     input: Input,
+    options: HydrationCompileOptions,
     ontology: &Arc<Ontology>,
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     ctx: &SecurityContext,
@@ -223,6 +226,7 @@ pub fn compile_input_model(
     let mut ctx =
         config::ChHydrationCtx::new(Arc::clone(ontology), ctx.clone(), Arc::clone(data_model));
     ctx.set_input(input);
+    ctx.set_hydration_options(options);
     config::run_ch_hydration(&mut ctx)
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
@@ -2100,8 +2104,13 @@ mod tests {
         };
 
         let ont = ONTOLOGY.clone();
-        let compiled =
-            compile_input(input, &ont, &security_ctx()).expect("hydration input should compile");
+        let compiled = compile_input(
+            input,
+            HydrationCompileOptions::default(),
+            &ont,
+            &security_ctx(),
+        )
+        .expect("hydration input should compile");
         let sql = compiled.base.render();
         assert!(
             !sql.contains(" FINAL"),

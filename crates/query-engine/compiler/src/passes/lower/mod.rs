@@ -109,11 +109,11 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
             center_tp_lookup.as_ref(),
         ),
         PlanBody::PathFinding(pf) => pathfinding::emit_pathfinding(plan, input, pf),
-        PlanBody::Hydration(nodes) => hydration::emit_hydration(
+        PlanBody::Hydration { nodes, options } => hydration::emit_hydration(
             nodes,
             input.limit,
-            input.hydration_dynamic,
-            input.path_segment_budget,
+            options.dynamic,
+            options.path_segment_budget,
         ),
     }?;
 

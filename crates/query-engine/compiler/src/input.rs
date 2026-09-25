@@ -84,22 +84,6 @@ pub struct Input {
     pub order_by: Option<InputOrderBy>,
     #[serde(default)]
     pub options: QueryOptions,
-    /// True when this Input was constructed for the *dynamic* hydration codepath
-    /// (Neighbors and PathFinding origin). Hydration over Traversal/Aggregation
-    /// uses the static path and leaves this `false`.
-    ///
-    /// Selects the SQL shape for the `traversal_path` filter in hydration:
-    /// - dynamic: `arrayExists(p -> startsWith(tp, p), [paths])` (constant AST depth,
-    ///   safe against ClickHouse `max_parser_depth=1000` when the base query
-    ///   surfaced hundreds of namespace paths)
-    /// - static: left-nested OR of `startsWith(tp, p_i)` (per-leaf PK pushdown,
-    ///   only ever a small project-bounded set of paths)
-    #[serde(skip)]
-    pub hydration_dynamic: bool,
-
-    #[serde(skip)]
-    pub path_segment_budget: Option<usize>,
-
     #[serde(skip)]
     pub join_predicates: Vec<JoinPredicate>,
 }
@@ -142,8 +126,6 @@ impl Default for Input {
             cursor: None,
             order_by: None,
             options: QueryOptions::default(),
-            hydration_dynamic: false,
-            path_segment_budget: None,
             join_predicates: Vec::new(),
         }
     }
