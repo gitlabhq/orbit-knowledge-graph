@@ -8,10 +8,12 @@ use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
 use super::{
-    Context, Error, ItemPhase, Lazy, Listed, Parsed, Phase, SourceFile, Sources, State, Workset,
+    Canonical, Context, Error, ItemPhase, Lazy, Listed, Parsed, Phase, Rewritten, SourceFile,
+    Sources, State, Workset,
 };
 use crate::env::Env;
-use crate::inventory::FileReason;
+use crate::inventory::{FileFault, FileReason};
+use crate::pattern;
 use crate::sentinel::{Killed, Sentinel};
 use crate::treesitter::{self, SupportLang};
 
@@ -37,7 +39,8 @@ impl Phase<Sources> for Prepare {
 }
 
 /// Parse entries of this pipeline's languages become the lazy workset, read
-/// from `root` when a worker takes them; every other file is listed now.
+/// from `root` when a worker takes them. Everything else is listed now:
+/// manifests for the resolver, and every file as a `File` row.
 fn workset(
     env: &Env,
     state: State,
@@ -46,6 +49,11 @@ fn workset(
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
     let pipeline = env.lang_id.pipeline();
+    let manifest_names = &env.rules.config.resolve.parse_files;
+    let is_manifest = |path: &str| {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        manifest_names.iter().any(|pf| pf.name == name)
+    };
     let mut listed = Listed::default();
     let mut candidates = Vec::new();
     for entry in entries {
@@ -61,10 +69,21 @@ fn workset(
             candidates.push(path);
             continue;
         }
+        let manifest = decision == Decision::Load && is_manifest(&path);
+        let content = manifest
+            .then(|| std::fs::read_to_string(root.join(&path)).ok())
+            .flatten();
         let reason = match (decision, label.skip) {
             (Decision::ListOnly, Some(skip)) => FileReason::Filter(skip),
+            _ if manifest && content.is_none() => FileReason::Fault(FileFault::FileRead),
             _ => FileReason::None,
         };
+        if let Some(content) = content {
+            listed.manifests.push(SourceFile {
+                path: path.clone(),
+                content,
+            });
+        }
         listed.files.push((path, size, reason));
     }
     let items = candidates.into_iter().filter_map(move |path| {
@@ -158,5 +177,53 @@ impl ItemPhase<SourceFile> for Parse {
     fn run(&self, env: &Env, _run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
         let grammar = SupportLang::from_path(&file.path).unwrap_or(env.lang_id);
         treesitter::parse(&file.content, grammar, &env.lang, &file.path).map(Parsed)
+    }
+}
+
+/// The language's rewrite stages, under the per-file rewrite budget.
+pub struct Rewrite;
+
+impl ItemPhase<Parsed> for Rewrite {
+    type Output = Rewritten;
+
+    fn name(&self) -> Cow<'static, str> {
+        "rewrite".into()
+    }
+
+    fn run(
+        &self,
+        env: &Env,
+        run: &Sentinel,
+        Parsed(mut tree): Parsed,
+    ) -> Result<Rewritten, Killed> {
+        let budget = Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms);
+        for stage in &env.rules.rewrite_stages {
+            pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
+        }
+        Ok(Rewritten(tree))
+    }
+}
+
+/// Drops every non-canonical node and the source text; what is left is what
+/// the linker reads and the snapshot stores.
+pub struct Canonicalize;
+
+impl ItemPhase<Rewritten> for Canonicalize {
+    type Output = Canonical;
+
+    fn name(&self) -> Cow<'static, str> {
+        "canonicalize".into()
+    }
+
+    fn run(
+        &self,
+        _env: &Env,
+        _run: &Sentinel,
+        Rewritten(mut tree): Rewritten,
+    ) -> Result<Canonical, Killed> {
+        tree.prune();
+        tree.compact();
+        tree.source = std::sync::Arc::from("");
+        Ok(Canonical(tree))
     }
 }

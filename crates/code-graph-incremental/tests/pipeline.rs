@@ -72,7 +72,7 @@ impl Observer for Log {
 }
 
 fn unlimited() -> Env {
-    Env::with_limits(SupportLang::Python, Limits::UNLIMITED)
+    Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap()
 }
 
 #[test]
@@ -117,7 +117,8 @@ fn run_budget_stops_the_run_at_the_next_phase_boundary() {
             total_ms: 0,
             ..Limits::UNLIMITED
         },
-    );
+    )
+    .unwrap();
     let log = Log::default();
 
     let result = Pipeline::new(Context::new(&env).observe(log.clone()), 1).then(Double);

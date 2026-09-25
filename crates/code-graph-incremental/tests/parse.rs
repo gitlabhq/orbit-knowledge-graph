@@ -44,7 +44,7 @@ fn every_configured_language_parses_when_classified_for_parsing() {
         let repo = tempfile::tempdir().unwrap();
         let path = format!("a.{}", entry.extensions()[0]);
         write_all(repo.path(), &[(&path, b"x")]);
-        let env = Env::with_limits(lang, Limits::UNLIMITED);
+        let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
         let classified = inventory::walk(repo.path()).unwrap().into_inner()[0].decision;
 
         let parsed = parse_repo(&env, repo.path());
@@ -71,7 +71,7 @@ fn tsx_inside_the_typescript_pipeline_gets_the_tsx_grammar() {
         repo.path(),
         &[("app.tsx", jsx), ("util.ts", b"export const n = 1;\n")],
     );
-    let env = Env::with_limits(SupportLang::TypeScript, Limits::UNLIMITED);
+    let env = Env::with_limits(SupportLang::TypeScript, Limits::UNLIMITED).unwrap();
 
     let parsed = parse_repo(&env, repo.path());
 
@@ -96,7 +96,7 @@ fn only_this_pipelines_files_are_parsed() {
             ("data.json", b"{}"),
         ],
     );
-    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED);
+    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
 
     let parsed = parse_repo(&env, repo.path());
 
