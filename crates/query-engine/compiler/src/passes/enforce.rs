@@ -362,9 +362,8 @@ fn enforce_return_columns(
                         let mut node_predicates = Vec::new();
                         for (prop, filters) in &node.filters {
                             let data_type = model
-                                .graph()
-                                .property_id(entity_id, prop)
-                                .map(|property| model.graph().property(property).data_type);
+                                .property_for_entity_id(entity_id, prop)
+                                .map(|property| property.data_type);
                             for filter in filters {
                                 node_predicates.push(filter_to_expr(
                                     &node.id,

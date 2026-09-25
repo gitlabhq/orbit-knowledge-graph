@@ -7,7 +7,7 @@ use crate::input::*;
 
 use super::{EdgeTableConfig, HydrationStrategy, NodePlan, Plan, PlanBody, Selectivity, Strategy};
 use crate::passes::shared::has_non_denorm_filters;
-use query_data_model::{QueryBackendCatalog, QueryDataModel};
+use query_data_model::QueryDataModel;
 
 pub fn plan_neighbors<M>(input: &Input, model: &M) -> Result<Plan>
 where
@@ -88,16 +88,7 @@ where
                     };
                     kinds.contains(&center_entity)
                 })
-                .map(|r| {
-                    model
-                        .graph()
-                        .relationship_id(r)
-                        .and_then(|relationship| {
-                            model.query_backend().relationship_table(relationship)
-                        })
-                        .unwrap_or_else(|| model.query_backend().default_edge_table())
-                        .to_string()
-                })
+                .map(|r| model.relationship_table_or_default(r).to_string())
                 .collect();
             t.sort();
             t.dedup();
@@ -139,19 +130,10 @@ where
             center_tp_lookup: center_node
                 .entity
                 .as_deref()
-                .and_then(|entity| model.graph().entity_id(entity))
                 .and_then(|entity| {
-                    let lookup = model
-                        .query_backend()
-                        .traversal_path_lookup(entity, ontology::TraversalPathKind::Id)?;
-                    Some((
-                        lookup.table.clone(),
-                        model
-                            .query_backend()
-                            .property_column(lookup.property)?
-                            .to_string(),
-                    ))
-                }),
+                    model.traversal_path_lookup(entity, ontology::TraversalPathKind::Id)
+                })
+                .map(|(table, column)| (table.to_string(), column.to_string())),
         },
     })
 }

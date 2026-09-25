@@ -123,9 +123,7 @@ pub fn ordered_filters(
     properties
         .into_iter()
         .flat_map(|(property, filters)| {
-            let metadata = entity
-                .and_then(|entity| model.graph().property_id(entity, property))
-                .map(|property| model.graph().property(property));
+            let metadata = entity.and_then(|entity| model.property_for_entity_id(entity, property));
             filters.iter().map(move |filter| {
                 (
                     property.clone(),

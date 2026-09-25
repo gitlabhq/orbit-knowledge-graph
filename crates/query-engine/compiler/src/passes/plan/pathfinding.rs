@@ -30,19 +30,11 @@ where
     let edge = EdgeTableConfig::from_model(model, &path.rel_types);
 
     let endpoint_kinds = |entity: &str, source: bool| {
-        let relationships: Vec<String> = model
-            .graph()
-            .relationships()
-            .filter(|relationship| {
-                let entities = if source {
-                    model.relationship_entities(&relationship.name, true)
-                } else {
-                    model.relationship_entities(&relationship.name, false)
-                };
-                entities.contains(&entity)
-            })
-            .map(|relationship| relationship.name.clone())
-            .collect();
+        let relationships = if source {
+            model.graph().relationship_names(Some(entity), None)
+        } else {
+            model.graph().relationship_names(None, Some(entity))
+        };
         crate::passes::shared::rel_kind_filter_values(&relationships)
     };
     let forward_first_hop_filter = start_node

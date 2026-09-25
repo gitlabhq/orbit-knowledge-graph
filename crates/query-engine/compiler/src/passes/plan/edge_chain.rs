@@ -383,9 +383,7 @@ where
                             .iter()
                             .filter(|(property, _)| {
                                 model
-                                    .graph()
-                                    .property_id(entity_id, property)
-                                    .map(|property| model.graph().property(property))
+                                    .property_for_entity_id(entity_id, property)
                                     .is_none_or(|property| {
                                         !matches!(
                                             property.realization,
@@ -406,16 +404,14 @@ where
                             columns
                                 .iter()
                                 .filter(|column| {
-                                    model
-                                        .graph()
-                                        .property_id(entity_id, column)
-                                        .map(|property| model.graph().property(property))
-                                        .is_none_or(|property| {
+                                    model.property_for_entity_id(entity_id, column).is_none_or(
+                                        |property| {
                                             !matches!(
                                                 property.realization,
                                                 query_data_model::PropertyRealization::Virtual(_)
                                             )
-                                        })
+                                        },
+                                    )
                                 })
                                 .cloned()
                                 .collect(),

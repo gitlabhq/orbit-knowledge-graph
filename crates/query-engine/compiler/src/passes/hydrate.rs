@@ -153,9 +153,7 @@ fn build_static_templates(
                 .iter()
                 .filter(|property| {
                     model
-                        .graph()
-                        .property_id(entity_id, property)
-                        .map(|property| model.graph().property(property))
+                        .property_for_entity_id(entity_id, property)
                         .is_some_and(|property| {
                             matches!(property.realization, PropertyRealization::Virtual(_))
                         })
@@ -167,9 +165,7 @@ fn build_static_templates(
             let mut virtual_filters = Vec::new();
             for (property, filters) in &node.filters {
                 let is_virtual = model
-                    .graph()
-                    .property_id(entity_id, property)
-                    .map(|property| model.graph().property(property))
+                    .property_for_entity_id(entity_id, property)
                     .is_some_and(|property| {
                         matches!(property.realization, PropertyRealization::Virtual(_))
                     });
@@ -308,20 +304,14 @@ fn inject_model_virtual_dependencies(
 ) -> Vec<String> {
     let mut injected = Vec::new();
     for vc in virtual_columns {
-        let Some(property) = model
-            .graph()
-            .property_id(entity, &vc.column_name)
-            .map(|property| model.graph().property(property))
-        else {
+        let Some(property) = model.property_for_entity_id(entity, &vc.column_name) else {
             continue;
         };
         if let PropertyRealization::Virtual(vs) = &property.realization {
             for dep in &vs.depends_on {
                 if !columns.contains(dep)
                     && model
-                        .graph()
-                        .property_id(entity, dep)
-                        .map(|property| model.graph().property(property))
+                        .property_for_entity_id(entity, dep)
                         .is_some_and(|property| {
                             matches!(property.realization, PropertyRealization::Stored)
                         })
@@ -344,11 +334,7 @@ fn split_model_columns(
     let mut virtual_columns = Vec::new();
 
     for col_name in requested {
-        match model
-            .graph()
-            .property_id(entity, col_name)
-            .map(|property| model.graph().property(property))
-        {
+        match model.property_for_entity_id(entity, col_name) {
             Some(field) => match &field.realization {
                 PropertyRealization::Stored => columns.push(col_name.clone()),
                 PropertyRealization::Virtual(VirtualSource {
@@ -378,8 +364,7 @@ fn virtual_request(
     entity: query_data_model::EntityId,
     property: &str,
 ) -> Option<VirtualColumnRequest> {
-    let property = model.graph().property_id(entity, property)?;
-    let property = model.graph().property(property);
+    let property = model.property_for_entity_id(entity, property)?;
     let PropertyRealization::Virtual(source) = &property.realization else {
         return None;
     };

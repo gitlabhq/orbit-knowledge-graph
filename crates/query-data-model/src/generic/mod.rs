@@ -114,6 +114,12 @@ pub trait QueryDataModel {
         self.graph().property_named(entity, property)
     }
 
+    fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property> {
+        self.graph()
+            .property_id(entity, property)
+            .map(|property| self.graph().property(property))
+    }
+
     fn entity_table(&self, entity: &str) -> Option<&str> {
         let entity = self.graph().entity_id(entity)?;
         self.query_backend().entity_table(entity)
@@ -198,6 +204,11 @@ pub trait QueryDataModel {
             .filter_map(|relationship| self.graph().relationship_id(relationship))
             .collect();
         self.query_backend().edge_tables(&relationships)
+    }
+
+    fn relationship_table_or_default(&self, relationship: &str) -> &str {
+        self.relationship_table(relationship)
+            .unwrap_or_else(|| self.default_edge_table())
     }
 
     fn relationship_entities(&self, relationship: &str, source: bool) -> Vec<&str> {
