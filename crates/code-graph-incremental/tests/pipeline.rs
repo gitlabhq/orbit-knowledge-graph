@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{
     Context, Env, Error, ItemPhase, Killed, Limits, Observer, Phase, Pipeline, Sentinel,
 };
@@ -71,7 +72,7 @@ impl Observer for Log {
 }
 
 fn unlimited() -> Env {
-    Env::with_limits(Limits::UNLIMITED)
+    Env::with_limits(SupportLang::Python, Limits::UNLIMITED)
 }
 
 #[test]
@@ -110,10 +111,13 @@ fn phases_chain_by_type_and_every_boundary_is_reported() {
 
 #[test]
 fn run_budget_stops_the_run_at_the_next_phase_boundary() {
-    let env = Env::with_limits(Limits {
-        total_ms: 0,
-        ..Limits::UNLIMITED
-    });
+    let env = Env::with_limits(
+        SupportLang::Python,
+        Limits {
+            total_ms: 0,
+            ..Limits::UNLIMITED
+        },
+    );
     let log = Log::default();
 
     let result = Pipeline::new(Context::new(&env).observe(log.clone()), 1).then(Double);
@@ -177,6 +181,6 @@ fn item_phases_pipe_into_one_named_pass() {
 
 #[test]
 fn limits_load_from_the_shipped_config() {
-    let env = Env::load().unwrap();
+    let env = Env::for_lang(SupportLang::Python).unwrap();
     assert!(env.limits.total_ms >= env.limits.file_rewrite_ms);
 }

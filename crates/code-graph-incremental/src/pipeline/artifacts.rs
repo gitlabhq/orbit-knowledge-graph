@@ -3,8 +3,8 @@
 
 use std::path::PathBuf;
 
+use crate::inventory::FileReason;
 use arrow::record_batch::RecordBatch;
-use code_graph::v2::error::FileReason;
 use orbit_utils::fs_walk::FileInventoryEntry;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -47,9 +47,9 @@ pub type Lazy<T> = Box<dyn Iterator<Item = T> + Send>;
 #[allow(dead_code)]
 #[derive(Default)]
 pub struct Listed {
-    manifests: Vec<SourceFile>,
-    files: Vec<(String, u64, FileReason)>,
-    candidates: FxHashMap<String, u64>,
+    pub(super) manifests: Vec<SourceFile>,
+    pub(super) files: Vec<(String, u64, FileReason)>,
+    pub(super) candidates: FxHashMap<String, u64>,
 }
 
 /// The tree-sitter tree, source attached.

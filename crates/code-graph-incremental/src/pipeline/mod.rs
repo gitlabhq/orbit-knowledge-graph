@@ -10,9 +10,11 @@
 //! ```
 
 mod artifacts;
+mod phases;
 mod state;
 
 pub use artifacts::*;
+pub use phases::*;
 pub use state::{SourceFile, State};
 
 use std::borrow::Cow;
