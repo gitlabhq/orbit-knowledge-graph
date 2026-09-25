@@ -290,7 +290,7 @@ def changed_files(base: str) -> list[str]:
     if subprocess.run(["git", "cat-file", "-e", f"{base}^{{commit}}"], capture_output=True).returncode:
         subprocess.run(["git", "fetch", "origin", base, "--depth=1"], capture_output=True)
     try:
-        changed = set(git("diff", "--name-only", "--diff-filter=d", f"{base}...{head}").split())
+        changed = set(git("diff", "--name-only", "--diff-filter=d", base, head).split())
     except subprocess.CalledProcessError as exc:
         raise LintError(f"diff base {base} is unreachable; the lint did not run: {exc.stderr.strip()}") from exc
     return [f for f in scoped_files() if f in changed]
