@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 use ontology::{DataType, EnumType, FieldSelectivity, FieldSource, Ontology, VirtualSource};
 
@@ -291,26 +291,6 @@ impl GraphCatalog {
                 })
             })
             .map(|relationship| relationship.name.clone())
-            .collect()
-    }
-
-    pub fn source_entities(&self, relationship: RelationshipId) -> Vec<EntityId> {
-        self.relationship(relationship)
-            .variants
-            .iter()
-            .map(|variant| self.variant(*variant).source)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    }
-
-    pub fn target_entities(&self, relationship: RelationshipId) -> Vec<EntityId> {
-        self.relationship(relationship)
-            .variants
-            .iter()
-            .map(|variant| self.variant(*variant).target)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
             .collect()
     }
 }

@@ -68,7 +68,7 @@ where
     let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
     {
         let center_entity = center_node.entity.as_deref().unwrap_or_default();
-        let rels: Vec<&str> = if config.rel_types.is_empty() {
+        let relationships: Vec<&str> = if config.rel_types.is_empty() {
             model
                 .graph()
                 .relationships()
@@ -78,21 +78,22 @@ where
             config.rel_types.iter().map(String::as_str).collect()
         };
         let tables_for = |source: bool| -> Vec<String> {
-            let mut t: Vec<String> = rels
+            let mut tables: Vec<String> = relationships
                 .iter()
-                .filter(|r| {
-                    let kinds = if source {
-                        model.relationship_entities(r, true)
+                .filter_map(|relationship| model.relationship_route(relationship))
+                .filter(|route| {
+                    if source {
+                        &route.sources
                     } else {
-                        model.relationship_entities(r, false)
-                    };
-                    kinds.contains(&center_entity)
+                        &route.targets
+                    }
+                    .contains(&center_entity)
                 })
-                .map(|r| model.relationship_table_or_default(r).to_string())
+                .map(|route| route.table.to_string())
                 .collect();
-            t.sort();
-            t.dedup();
-            t
+            tables.sort();
+            tables.dedup();
+            tables
         };
         let outgoing = tables_for(true);
         let incoming = tables_for(false);

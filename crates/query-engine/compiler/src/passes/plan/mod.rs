@@ -108,18 +108,10 @@ impl EdgeTableConfig {
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
         for rt in rel_types {
-            source_kinds.extend(
-                model
-                    .relationship_entities(rt, true)
-                    .into_iter()
-                    .map(String::from),
-            );
-            target_kinds.extend(
-                model
-                    .relationship_entities(rt, false)
-                    .into_iter()
-                    .map(String::from),
-            );
+            if let Some(route) = model.relationship_route(rt) {
+                source_kinds.extend(route.sources.into_iter().map(String::from));
+                target_kinds.extend(route.targets.into_iter().map(String::from));
+            }
         }
         let tables = model.relationship_tables(rel_types);
         Self {

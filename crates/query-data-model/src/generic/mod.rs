@@ -48,6 +48,13 @@ pub struct PathColumn {
     pub entity: Option<EntityId>,
 }
 
+#[derive(Debug)]
+pub struct RelationshipRoute<'a> {
+    pub table: &'a str,
+    pub sources: Vec<&'a str>,
+    pub targets: Vec<&'a str>,
+}
+
 pub type DenormalizedKey = (String, String, String);
 pub type DenormalizedColumns = HashMap<DenormalizedKey, (String, String)>;
 pub type DenormalizedRelationships = HashMap<DenormalizedKey, Vec<String>>;
@@ -206,24 +213,28 @@ pub trait QueryDataModel {
         self.query_backend().edge_tables(&relationships)
     }
 
-    fn relationship_table_or_default(&self, relationship: &str) -> &str {
-        self.relationship_table(relationship)
-            .unwrap_or_else(|| self.default_edge_table())
-    }
-
-    fn relationship_entities(&self, relationship: &str, source: bool) -> Vec<&str> {
-        let Some(relationship) = self.graph().relationship_id(relationship) else {
-            return Vec::new();
-        };
-        let entities = if source {
-            self.graph().source_entities(relationship)
-        } else {
-            self.graph().target_entities(relationship)
-        };
-        entities
-            .into_iter()
-            .map(|entity| self.graph().entity(entity).name.as_str())
-            .collect()
+    fn relationship_route(&self, relationship: &str) -> Option<RelationshipRoute<'_>> {
+        let relationship = self.graph().relationship_id(relationship)?;
+        let graph_relationship = self.graph().relationship(relationship);
+        let mut sources = HashSet::new();
+        let mut targets = HashSet::new();
+        for variant in &graph_relationship.variants {
+            let variant = self.graph().variant(*variant);
+            sources.insert(self.graph().entity(variant.source).name.as_str());
+            targets.insert(self.graph().entity(variant.target).name.as_str());
+        }
+        let mut sources: Vec<_> = sources.into_iter().collect();
+        let mut targets: Vec<_> = targets.into_iter().collect();
+        sources.sort_unstable();
+        targets.sort_unstable();
+        Some(RelationshipRoute {
+            table: self
+                .query_backend()
+                .relationship_table(relationship)
+                .unwrap_or_else(|| self.default_edge_table()),
+            sources,
+            targets,
+        })
     }
 
     fn foreign_key(

@@ -8,8 +8,8 @@ pub use generic::{
     Authz, Backend, DataModel, DenormalizedCatalog, DenormalizedColumns, DenormalizedKey,
     DenormalizedRelationships, Entity, EntityId, ForeignKey, GraphCatalog, PathColumn, Property,
     PropertyId, PropertyRealization, QueryAuthorizationCatalog, QueryBackendCatalog,
-    QueryDataModel, Relationship, RelationshipId, RelationshipVariant, RelationshipVariantId,
-    TraversalPathLookup,
+    QueryDataModel, Relationship, RelationshipId, RelationshipRoute, RelationshipVariant,
+    RelationshipVariantId, TraversalPathLookup,
 };
 pub use implementations::{ClickHouse, DuckDb, EntityAuthConfig, GitLabAuthz, TrustedLocal};
 
