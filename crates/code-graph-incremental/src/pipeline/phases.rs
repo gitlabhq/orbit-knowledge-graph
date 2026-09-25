@@ -27,6 +27,7 @@ impl Phase<Sources> for Prepare {
     fn run(self, context: &mut Context, sources: Sources) -> Result<Self::Output, Error> {
         let Sources { root, entries } = sources;
         Ok(workset(
+            context.env,
             State::new(context.env),
             root,
             entries,
@@ -35,14 +36,16 @@ impl Phase<Sources> for Prepare {
     }
 }
 
-/// Parse entries this crate has a grammar for become the lazy workset, read
+/// Parse entries of this pipeline's languages become the lazy workset, read
 /// from `root` when a worker takes them; every other file is listed now.
 fn workset(
+    env: &Env,
     state: State,
     root: PathBuf,
     entries: Vec<FileInventoryEntry>,
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
+    let pipeline = env.lang_id.pipeline();
     let mut listed = Listed::default();
     let mut candidates = Vec::new();
     for entry in entries {
@@ -52,7 +55,8 @@ fn workset(
             decision,
             label,
         } = entry;
-        if decision == Decision::Parse && SupportLang::from_path(&path).is_some() {
+        let in_pipeline = SupportLang::from_path(&path).is_some_and(|l| l.pipeline() == pipeline);
+        if decision == Decision::Parse && in_pipeline {
             listed.candidates.insert(path.clone(), size);
             candidates.push(path);
             continue;
@@ -140,8 +144,8 @@ impl<T: Send> IntoParallel for Lazy<T> {
     }
 }
 
-/// tree-sitter, with the grammar the file's own extension names when it
-/// belongs to this pipeline (TSX inside the TypeScript pipeline).
+/// tree-sitter, with the grammar the file's own extension names (TSX inside
+/// the TypeScript pipeline).
 pub struct Parse;
 
 impl ItemPhase<SourceFile> for Parse {
@@ -152,9 +156,7 @@ impl ItemPhase<SourceFile> for Parse {
     }
 
     fn run(&self, env: &Env, _run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
-        let grammar = SupportLang::from_path(&file.path)
-            .filter(|l| l.pipeline() == env.lang_id.pipeline())
-            .unwrap_or(env.lang_id);
+        let grammar = SupportLang::from_path(&file.path).unwrap_or(env.lang_id);
         treesitter::parse(&file.content, grammar, &env.lang, &file.path).map(Parsed)
     }
 }

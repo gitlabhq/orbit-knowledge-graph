@@ -31,16 +31,23 @@ pub fn classify(root: &Path, paths: impl IntoIterator<Item = String>) -> Vec<Fil
         .into_iter()
         .map(|path| {
             let abs = root.join(&path);
+            let link_meta = std::fs::symlink_metadata(&abs);
+            let is_symlink = link_meta.as_ref().is_ok_and(|m| m.file_type().is_symlink());
             let mut meta = FileInventoryEntry {
                 path,
-                size: std::fs::metadata(&abs).map_or(0, |m| m.len()),
+                size: link_meta.map_or(0, |m| m.len()),
                 decision: Decision::ListOnly,
                 label: Default::default(),
             };
-            let settled = step(&mut hooks, &meta, &mut content, |buf| {
-                std::io::Read::read_to_end(&mut std::fs::File::open(&abs)?, buf).map(|_| ())
-            });
-            (meta.decision, meta.label) = settled.unwrap_or_else(|_| hooks.on_non_regular(&meta));
+            let settled = (!is_symlink)
+                .then(|| {
+                    step(&mut hooks, &meta, &mut content, |buf| {
+                        std::io::Read::read_to_end(&mut std::fs::File::open(&abs)?, buf).map(|_| ())
+                    })
+                    .ok()
+                })
+                .flatten();
+            (meta.decision, meta.label) = settled.unwrap_or_else(|| hooks.on_non_regular(&meta));
             meta
         })
         .collect()

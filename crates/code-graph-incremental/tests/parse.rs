@@ -84,12 +84,13 @@ fn tsx_inside_the_typescript_pipeline_gets_the_tsx_grammar() {
 }
 
 #[test]
-fn only_files_with_a_grammar_are_parsed() {
+fn only_this_pipelines_files_are_parsed() {
     let repo = tempfile::tempdir().unwrap();
     write_all(
         repo.path(),
         &[
             ("src/main.py", b"def f(): pass\n"),
+            ("src/main.go", b"package main\n"),
             ("README.md", b"# hi\n"),
             ("logo.png", b"\x89PNG\x00\x00"),
             ("data.json", b"{}"),
@@ -114,13 +115,14 @@ fn classify_agrees_with_walk() {
         ("dist/app.min.js", b"var a=1;"),
     ];
     write_all(repo.path(), &files);
+    std::os::unix::fs::symlink("src/main.rs", repo.path().join("link.rs")).unwrap();
 
     let walked = inventory::walk(repo.path()).unwrap().into_inner();
     let paths = walked.iter().map(|e| e.path.clone());
     let mut classified = inventory::classify(repo.path(), paths);
     classified.sort_by(|a, b| a.path.cmp(&b.path));
 
-    assert_eq!(walked.len(), files.len());
+    assert_eq!(walked.len(), files.len() + 1);
     assert_eq!(strip(walked), strip(classified));
 }
 
