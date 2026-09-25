@@ -5362,6 +5362,7 @@ dependencies = [
  "opentelemetry",
  "orbit-observability",
  "orbit-server-config",
+ "orbit-utils",
  "query-engine",
  "rand 0.10.2",
  "reqwest 0.13.4",

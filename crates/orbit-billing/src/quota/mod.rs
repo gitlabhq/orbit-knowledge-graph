@@ -103,7 +103,7 @@ impl QuotaService {
             return Ok(());
         }
 
-        let Some(request) = CdotRequest::from_inputs(inputs) else {
+        let Some(request) = CdotRequest::from_inputs(inputs, &correlation_id) else {
             warn!(
                 user_id = inputs.user_id,
                 realm = inputs.realm.as_deref().unwrap_or(""),

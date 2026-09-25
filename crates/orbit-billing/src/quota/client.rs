@@ -6,7 +6,7 @@ use secrecy::ExposeSecret;
 use tracing::warn;
 
 use super::key::CdotRequest;
-use crate::constants::CDOT_QUOTA_PATH;
+use crate::constants::{APP_ID, CDOT_QUOTA_PATH};
 
 const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
 const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
@@ -82,6 +82,7 @@ impl QuotaClient {
         };
 
         let http = reqwest::Client::builder()
+            .user_agent(format!("{APP_ID}/{}", orbit_utils::version::get()))
             .timeout(request_timeout)
             .default_headers(headers)
             .build()?;
@@ -215,6 +216,7 @@ mod tests {
             global_user_id: "g".into(),
             instance_version: "19.5.0".into(),
             license_checksum: None,
+            correlation_id: None,
         }
     }
 
@@ -223,6 +225,10 @@ mod tests {
             user: "test@example.com".into(),
             token: "test-token".into(),
         }
+    }
+
+    fn expected_user_agent() -> String {
+        format!("gkg-server/{}", orbit_utils::version::get())
     }
 
     const CHECKSUM: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -396,6 +402,7 @@ mod tests {
 
         let seen = seen.lock().unwrap();
         let (headers, query) = &seen[0];
+        assert_eq!(headers.get("user-agent").unwrap(), &expected_user_agent());
         assert_eq!(headers.get("x-license-token").unwrap(), CHECKSUM);
         assert!(headers.get("x-admin-email").is_none());
         assert!(headers.get("x-admin-token").is_none());
@@ -426,6 +433,7 @@ mod tests {
 
         let seen = seen.lock().unwrap();
         let (headers, _) = &seen[0];
+        assert_eq!(headers.get("user-agent").unwrap(), &expected_user_agent());
         assert_eq!(headers.get("x-admin-email").unwrap(), "test@example.com");
         assert_eq!(headers.get("x-admin-token").unwrap(), "test-token");
         assert!(headers.get("x-license-token").is_none());
@@ -466,6 +474,34 @@ mod tests {
         assert_eq!(
             client.check(&sample_request()).await,
             QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
+        );
+    }
+
+    #[tokio::test]
+    async fn sends_correlation_id_query_param_when_set() {
+        let (url, seen) = recording_server(AxumStatus::OK).await;
+        let mut request = license_request();
+        request.correlation_id = Some("req-123".into());
+        license_client(url).check(&request).await;
+
+        let seen = seen.lock().unwrap();
+        let (_, query) = &seen[0];
+        assert!(
+            query.split('&').any(|p| p == "correlation_id=req-123"),
+            "correlation_id missing from {query}"
+        );
+    }
+
+    #[tokio::test]
+    async fn omits_correlation_id_query_param_when_unset() {
+        let (url, seen) = recording_server(AxumStatus::OK).await;
+        license_client(url).check(&license_request()).await;
+
+        let seen = seen.lock().unwrap();
+        let (_, query) = &seen[0];
+        assert!(
+            !query.contains("correlation_id"),
+            "unexpected correlation_id in {query}"
         );
     }
 }
