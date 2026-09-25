@@ -1,0 +1,7 @@
+# Tools for bringing up the orbit-perf stack with caproni (versions track gitlab-caproni).
+[tools]
+"gitlab:gitlab-org/caproni" = { version = "v4.24.0", rename_exe = "caproni" }
+helm = "4.3.0"
+k3d = "5.8.3"
+kubectl = "1.37.0"
+docker-cli = "29.3.0"

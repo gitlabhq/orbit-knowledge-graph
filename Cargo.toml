@@ -213,6 +213,50 @@ aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
 
+# Optimise the Parquet, Arrow, zstd and RNG deps even in debug builds: synthetic
+# data generation spends most of its time in them. The rest of dev stays unoptimised.
+[profile.dev.package.parquet]
+opt-level = 3
+
+[profile.dev.package.arrow-array]
+opt-level = 3
+
+[profile.dev.package.arrow-buffer]
+opt-level = 3
+
+[profile.dev.package.arrow-cast]
+opt-level = 3
+
+[profile.dev.package.arrow-data]
+opt-level = 3
+
+[profile.dev.package.arrow-schema]
+opt-level = 3
+
+[profile.dev.package.arrow-select]
+opt-level = 3
+
+[profile.dev.package.zstd]
+opt-level = 3
+
+[profile.dev.package.zstd-safe]
+opt-level = 3
+
+[profile.dev.package.zstd-sys]
+opt-level = 3
+
+[profile.dev.package.rand]
+opt-level = 3
+
+[profile.dev.package.rand_core]
+opt-level = 3
+
+[profile.dev.package.rand_chacha]
+opt-level = 3
+
+[profile.dev.package.ppv-lite86]
+opt-level = 3
+
 [profile.fuzz]
 inherits = "dev"
 opt-level = 3
