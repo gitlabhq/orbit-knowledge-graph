@@ -1,8 +1,8 @@
-use crate::compiler::setup::{compile_pair, compile_to_ast, test_ctx, test_ontology};
+use crate::compiler::setup::{compile_pair, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
 use compiler::gql::{PreparedStatement, prepare};
 use compiler::input::DynamicColumnMode;
-use compiler::{Frontend, Node, QueryError, compile};
+use compiler::{Frontend, QueryError, compile};
 use ontology::introspection::{
     IntrospectionScope::{All, Local},
     build_schema_response,
@@ -17,17 +17,9 @@ fn compile_to_ast_works() {
         "limit": 10
     }"#;
 
-    compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
-    let node = compile_to_ast(json, &test_ontology()).unwrap();
-    let Node::Query(ref q) = node else {
-        unreachable!()
-    };
-    assert_eq!(
-        q.limit,
-        Some(11),
-        "fetch limit is the requested limit plus the has_more probe row"
-    );
-    assert!(!q.select.is_empty());
+    let compiled = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
+    assert!(compiled.base.sql.contains("LIMIT 11"));
+    assert!(compiled.base.sql.contains("SELECT"));
 }
 
 #[test]
@@ -1671,9 +1663,9 @@ fn orbit_query_after_token_binds_to_the_statement() {
     let first =
         "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2";
     let page = compile(first, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-    let hash = page.input.query_hash;
+    let hash = page.pagination.query_hash;
     assert_ne!(hash, 0);
-    let keys = vec![Some("2".to_owned()); page.input.cursor_key_count];
+    let keys = vec![Some("2".to_owned()); page.pagination.key_count];
     let token = compiler::passes::cursor::encode(hash, &keys);
 
     for next in [
@@ -1685,7 +1677,7 @@ fn orbit_query_after_token_binds_to_the_statement() {
         ),
     ] {
         let compiled = compile(&next, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-        assert_eq!(compiled.input.query_hash, hash);
+        assert_eq!(compiled.pagination.query_hash, hash);
         assert_eq!(compiled.input.cursor.as_ref().unwrap().page_size, 7);
         assert!(
             compiled.base.render().contains("u.id >"),
@@ -1703,8 +1695,7 @@ fn orbit_query_after_token_binds_to_the_statement() {
     let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]}],"order_by":"u.id","cursor":{"page_size":2}}"#;
     let json_hash = compile(json, Frontend::JsonDsl, &test_ontology(), &test_ctx())
         .unwrap()
-        .input
-        .compiler
+        .pagination
         .query_hash;
     let foreign = compiler::passes::cursor::encode(json_hash, &keys);
     let crossed = format!(

@@ -886,7 +886,6 @@ fn hydration_query_type_generates_union_all() {
             InputNode {
                 id: "hydrate".into(),
                 entity: Some("Note".into()),
-                table: Some("gl_note".into()),
                 columns: Some(ColumnSelection::List(vec![
                     "id".into(),
                     "noteable_type".into(),
@@ -897,7 +896,6 @@ fn hydration_query_type_generates_union_all() {
             InputNode {
                 id: "hydrate".into(),
                 entity: Some("Project".into()),
-                table: Some("gl_project".into()),
                 columns: Some(ColumnSelection::List(vec!["id".into(), "name".into()])),
                 node_ids: vec![10, 20],
                 ..InputNode::default()
@@ -926,10 +924,9 @@ fn hydration_widens_paths_to_segment_budget() {
             .map(|i| TraversalPath::new_unchecked(format!("1/{i:0>40}/{:0>40}/", i + 10000)))
             .collect()
     };
-    let node = |table: &str, entity: &str, paths: Vec<TraversalPath>| InputNode {
+    let node = |entity: &str, paths: Vec<TraversalPath>| InputNode {
         id: "hydrate".into(),
         entity: Some(entity.into()),
-        table: Some(table.into()),
         columns: Some(ColumnSelection::List(vec!["id".into()])),
         node_ids: vec![1],
         traversal_paths: paths,
@@ -962,10 +959,7 @@ fn hydration_widens_paths_to_segment_budget() {
 
     let exact = deep(500);
     let result = compile_hydration(
-        vec![
-            node("gl_note", "Note", exact.clone()),
-            node("gl_project", "Project", exact.clone()),
-        ],
+        vec![node("Note", exact.clone()), node("Project", exact.clone())],
         Some(2000),
     );
     let array_params = result
@@ -982,7 +976,7 @@ fn hydration_widens_paths_to_segment_budget() {
     assert_eq!(kept, expected, "under budget keeps exact leaf paths");
 
     let over = deep(900);
-    let result = compile_hydration(vec![node("gl_note", "Note", over.clone())], Some(2000));
+    let result = compile_hydration(vec![node("Note", over.clone())], Some(2000));
     let widened = bound_paths(&result);
     assert!(widened.iter().all(|w| !over.contains(w)));
     for path in &over {
@@ -994,7 +988,7 @@ fn hydration_widens_paths_to_segment_budget() {
         );
     }
 
-    let result = compile_hydration(vec![node("gl_note", "Note", over.clone())], None);
+    let result = compile_hydration(vec![node("Note", over.clone())], None);
     assert_eq!(
         bound_paths(&result).len(),
         over.len(),
@@ -1009,7 +1003,6 @@ fn hydration_single_entity_no_union_all() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("User".into()),
-            table: Some("gl_user".into()),
             columns: Some(ColumnSelection::List(vec!["id".into(), "username".into()])),
             node_ids: vec![42],
             ..InputNode::default()
@@ -1033,7 +1026,6 @@ fn hydration_uses_parameterized_ids() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("Note".into()),
-            table: Some("gl_note".into()),
             columns: Some(ColumnSelection::List(vec![
                 "id".into(),
                 "confidential".into(),
@@ -1069,7 +1061,6 @@ fn hydration_skips_security_context() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("Note".into()),
-            table: Some("gl_note".into()),
             columns: Some(ColumnSelection::List(vec![
                 "id".into(),
                 "confidential".into(),
@@ -1101,7 +1092,6 @@ fn hydration_id_only_columns_produces_map_with_id() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("User".into()),
-            table: Some("gl_user".into()),
             columns: Some(ColumnSelection::List(vec!["id".into()])),
             node_ids: vec![1],
             ..InputNode::default()
@@ -1125,7 +1115,6 @@ fn hydration_empty_columns_produces_empty_json() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("User".into()),
-            table: Some("gl_user".into()),
             columns: Some(ColumnSelection::List(vec![])),
             node_ids: vec![1],
             ..InputNode::default()
@@ -1149,7 +1138,6 @@ fn hydration_id_column_included_in_map() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("User".into()),
-            table: Some("gl_user".into()),
             columns: Some(ColumnSelection::List(vec![
                 "id".into(),
                 "username".into(),
