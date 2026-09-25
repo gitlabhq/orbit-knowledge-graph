@@ -2,7 +2,7 @@
 mod tests {
     use std::sync::Arc;
 
-    use crate::{ClickHouseDataModel, DuckDbDataModel};
+    use crate::{ClickHouseDataModel, DuckDbDataModel, PropertyRealization};
     use ontology::FieldSource;
 
     #[test]
@@ -61,9 +61,21 @@ mod tests {
         let property = model.graph().property_id(entity, "project_id").unwrap();
         let table = model.backend().table_for_entity(entity).unwrap();
 
+        let source = &model
+            .ontology()
+            .get_node("MergeRequest")
+            .unwrap()
+            .fields
+            .iter()
+            .find(|field| field.name == "project_id")
+            .unwrap()
+            .source;
+        assert!(
+            matches!(source, FieldSource::DatabaseColumn(source) if source == "target_project_id")
+        );
         assert!(matches!(
-            &model.graph().property(property).source,
-            FieldSource::DatabaseColumn(source) if source == "target_project_id"
+            model.graph().property(property).realization,
+            PropertyRealization::Stored
         ));
         assert_eq!(
             model.backend().property_column(property),

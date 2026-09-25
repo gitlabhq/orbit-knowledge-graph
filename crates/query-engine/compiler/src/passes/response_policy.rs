@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use ontology::{DataType, FieldSource};
+use ontology::DataType;
+use query_data_model::PropertyRealization;
 
 use crate::ast::{Expr, Node, Op, SelectExpr};
 use crate::input::{ColumnSelection, Input};
@@ -40,7 +41,9 @@ pub fn apply_text_excerpts(
                 .map(|property| property.name.clone())
                 .collect();
             for property in &model.graph().entity(entity).properties {
-                if let FieldSource::Virtual(source) = &model.graph().property(*property).source {
+                if let PropertyRealization::Virtual(source) =
+                    &model.graph().property(*property).realization
+                {
                     for dependency in &source.depends_on {
                         excerpted.remove(dependency);
                     }

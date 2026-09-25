@@ -4,7 +4,9 @@ mod ids;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-pub use catalog::{Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
+pub use catalog::{
+    Entity, GraphCatalog, Property, PropertyRealization, Relationship, RelationshipVariant,
+};
 pub use ids::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
 use crate::DataModelError;

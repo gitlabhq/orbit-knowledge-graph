@@ -3,9 +3,10 @@
 
 use std::collections::HashSet;
 
+use ontology::VirtualSource;
 #[cfg(test)]
-use ontology::Ontology;
-use ontology::{FieldSource, VirtualSource};
+use ontology::{FieldSource, Ontology};
+use query_data_model::PropertyRealization;
 
 use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
@@ -155,7 +156,9 @@ fn build_static_templates(
                         .graph()
                         .property_id(entity_id, property)
                         .map(|property| model.graph().property(property))
-                        .is_some_and(|property| matches!(property.source, FieldSource::Virtual(_)))
+                        .is_some_and(|property| {
+                            matches!(property.realization, PropertyRealization::Virtual(_))
+                        })
                 })
                 .cloned()
                 .collect();
@@ -167,7 +170,9 @@ fn build_static_templates(
                     .graph()
                     .property_id(entity_id, property)
                     .map(|property| model.graph().property(property))
-                    .is_some_and(|property| matches!(property.source, FieldSource::Virtual(_)));
+                    .is_some_and(|property| {
+                        matches!(property.realization, PropertyRealization::Virtual(_))
+                    });
                 if !is_virtual {
                     continue;
                 }
@@ -255,7 +260,7 @@ fn build_dynamic_specs(
                     .iter()
                     .map(|property| model.graph().property(*property))
                     .filter(|property| {
-                        !matches!(property.source, FieldSource::Virtual(_))
+                        !matches!(property.realization, PropertyRealization::Virtual(_))
                             && property.name != "_version"
                             && property.name != "_deleted"
                     })
@@ -312,7 +317,7 @@ fn inject_model_virtual_dependencies(
         else {
             continue;
         };
-        if let FieldSource::Virtual(vs) = &property.source {
+        if let PropertyRealization::Virtual(vs) = &property.realization {
             for dep in &vs.depends_on {
                 if !columns.contains(dep)
                     && model
@@ -320,7 +325,7 @@ fn inject_model_virtual_dependencies(
                         .property_id(entity, dep)
                         .map(|property| model.graph().property(property))
                         .is_some_and(|property| {
-                            matches!(property.source, FieldSource::DatabaseColumn(_))
+                            matches!(property.realization, PropertyRealization::Stored)
                         })
                 {
                     columns.push(dep.clone());
@@ -346,9 +351,9 @@ fn split_model_columns(
             .property_id(entity, col_name)
             .map(|property| model.graph().property(property))
         {
-            Some(field) => match &field.source {
-                FieldSource::DatabaseColumn(_) => columns.push(col_name.clone()),
-                FieldSource::Virtual(VirtualSource {
+            Some(field) => match &field.realization {
+                PropertyRealization::Stored => columns.push(col_name.clone()),
+                PropertyRealization::Virtual(VirtualSource {
                     service,
                     lookup,
                     disabled,
@@ -377,7 +382,7 @@ fn virtual_request(
 ) -> Option<VirtualColumnRequest> {
     let property = model.graph().property_id(entity, property)?;
     let property = model.graph().property(property);
-    let FieldSource::Virtual(source) = &property.source else {
+    let PropertyRealization::Virtual(source) = &property.realization else {
         return None;
     };
     (!source.disabled).then(|| VirtualColumnRequest {

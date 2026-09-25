@@ -239,7 +239,7 @@ impl<'a, M: crate::data_model::QueryModel> Validator<'a, M> {
     /// non-virtual fields.
     fn virtual_source(&self, entity: &str, prop: &str) -> Option<&ontology::VirtualSource> {
         let property = self.property(entity, prop)?;
-        if let ontology::FieldSource::Virtual(source) = &property.source {
+        if let query_data_model::PropertyRealization::Virtual(source) = &property.realization {
             Some(source)
         } else {
             None
@@ -1124,10 +1124,12 @@ impl<'a, M: crate::data_model::QueryModel> Validator<'a, M> {
                 )));
             }
 
-            if self
-                .property(entity, property)
-                .is_some_and(|field| matches!(field.source, ontology::FieldSource::Virtual(_)))
-            {
+            if self.property(entity, property).is_some_and(|field| {
+                matches!(
+                    field.realization,
+                    query_data_model::PropertyRealization::Virtual(_)
+                )
+            }) {
                 return Err(QueryError::Validation(format!(
                     "group_by[{i}] on \"{}\" for {entity}: field is virtual and cannot be grouped in SQL",
                     property

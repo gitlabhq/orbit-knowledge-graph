@@ -378,8 +378,8 @@ where
                                     .map(|property| model.graph().property(property))
                                     .is_none_or(|property| {
                                         !matches!(
-                                            property.source,
-                                            ontology::FieldSource::Virtual(_)
+                                            property.realization,
+                                            query_data_model::PropertyRealization::Virtual(_)
                                         )
                                     })
                             })
@@ -402,8 +402,8 @@ where
                                         .map(|property| model.graph().property(property))
                                         .is_none_or(|property| {
                                             !matches!(
-                                                property.source,
-                                                ontology::FieldSource::Virtual(_)
+                                                property.realization,
+                                                query_data_model::PropertyRealization::Virtual(_)
                                             )
                                         })
                                 })
