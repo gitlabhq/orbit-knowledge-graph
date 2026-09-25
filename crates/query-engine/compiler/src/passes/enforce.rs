@@ -17,7 +17,6 @@ use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use query_data_model::EntityAuthConfig;
 use query_data_model::QueryAuthorizationCatalog;
-use query_data_model::QueryBackendCatalog;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -229,9 +228,9 @@ pub fn enforce_role_scans(
         if alias_exists_in_from(&query.from, &input_node.id) {
             continue;
         }
-        let elevated = model.graph().entity_id(entity).is_some_and(|entity| {
+        let elevated = model.entity(entity).is_some_and(|entity| {
             model
-                .redaction_id_column(entity)
+                .redaction_id_column(entity.id)
                 .unwrap_or(DEFAULT_PRIMARY_KEY)
                 != DEFAULT_PRIMARY_KEY
         });
@@ -241,17 +240,9 @@ pub fn enforce_role_scans(
         let Some((source_alias, source_column)) = metadata.node_sources.get(&input_node.id) else {
             continue;
         };
-        let table = model
-            .query_backend()
-            .entity_table(
-                model
-                    .graph()
-                    .entity_id(entity)
-                    .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{entity}'")))?,
-            )
-            .ok_or_else(|| {
-                QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
-            })?;
+        let table = model.entity_table(entity).ok_or_else(|| {
+            QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
+        })?;
         let role_alias = format!("_role_{}", input_node.id);
         let scan = TableRef::scan_final(table, &role_alias);
         let on = Expr::eq(
@@ -304,8 +295,8 @@ fn enforce_return_columns(
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
         let entity_id = model
-            .graph()
-            .entity_id(entity)
+            .entity(entity)
+            .map(|entity| entity.id)
             .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{entity}'")))?;
         let redaction_column = redaction_column(entity_id);
 
@@ -354,7 +345,7 @@ fn enforce_return_columns(
                 // JOIN node table for the auth column (e.g. merge_request_id).
                 // Skip if the alias already exists in FROM (the lowerer
                 // hydrates nodes inline with dedup subqueries).
-                let table = model.query_backend().entity_table(entity_id).ok_or_else(|| {
+                let table = model.entity_table(entity).ok_or_else(|| {
                     QueryError::Enforcement(format!(
                         "traversal node '{}' has non-default redaction_id_column '{}' but no resolved table",
                         node.id, redaction_column
@@ -520,9 +511,7 @@ fn enforce_return_columns(
         // and ClickHouse rejects non-GROUP-BY columns in SELECT.
         // Skip when the source alias doesn't exist in FROM (FK-elided nodes
         // where the node table was absorbed into an edge filter).
-        if model.query_backend().entity_has_traversal_path(entity_id)
-            && input.query_type != QueryType::Aggregation
-        {
+        if model.entity_has_traversal_path(entity) && input.query_type != QueryType::Aggregation {
             let tp_col = traversal_path_column(&node.id);
             let has_tp = q.selects_alias(&tp_col);
             if !has_tp {

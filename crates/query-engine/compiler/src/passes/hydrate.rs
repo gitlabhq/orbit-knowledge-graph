@@ -138,7 +138,7 @@ fn build_static_templates(
         .iter()
         .filter_map(|node| {
             let entity = node.entity.as_ref()?;
-            let entity_id = model.graph().entity_id(entity)?;
+            let entity_id = model.entity(entity)?.id;
 
             let Some(ColumnSelection::List(requested)) = &node.columns else {
                 return None;
@@ -205,11 +205,11 @@ fn build_static_templates(
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
                 node_alias: node.id.clone(),
-                destination_table: model.query_backend().entity_table(entity_id)?.to_string(),
+                destination_table: model.entity_table(entity)?.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: model.query_backend().entity_has_traversal_path(entity_id),
+                has_traversal_path: model.entity_has_traversal_path(entity),
                 virtual_filters,
                 filter_injected_columns,
             })

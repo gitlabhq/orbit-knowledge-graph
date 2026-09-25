@@ -27,17 +27,17 @@ where
     let center_entity = center_node.entity.as_deref().ok_or_else(|| {
         crate::error::QueryError::Lowering("neighbors center has no entity".into())
     })?;
-    let center_entity_id = model.graph().entity_id(center_entity).ok_or_else(|| {
-        crate::error::QueryError::Lowering("neighbors center entity is unknown".into())
-    })?;
+    let center_entity_id = model
+        .entity(center_entity)
+        .map(|entity| entity.id)
+        .ok_or_else(|| {
+            crate::error::QueryError::Lowering("neighbors center entity is unknown".into())
+        })?;
 
     let center_np = NodePlan {
         alias: center_node.id.clone(),
         entity: center_node.entity.clone(),
-        table: model
-            .query_backend()
-            .entity_table(center_entity_id)
-            .map(String::from),
+        table: model.entity_table(center_entity).map(String::from),
         selectivity: Selectivity::from_node(center_node),
         hydration: HydrationStrategy::Skip,
         filters: crate::passes::shared::ordered_filters(
@@ -47,10 +47,8 @@ where
         ),
         node_ids: center_node.node_ids.clone(),
         id_range: center_node.id_range.clone(),
-        has_traversal_path: model
-            .query_backend()
-            .entity_has_traversal_path(center_entity_id),
-        is_global: model.query_backend().entity_is_global(center_entity_id),
+        has_traversal_path: model.entity_has_traversal_path(center_entity),
+        is_global: model.entity_is_global(center_entity),
         redaction_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
         columns: center_node.columns.clone(),
         use_narrowing: false,
@@ -58,7 +56,7 @@ where
         emit_select: true,
     };
 
-    let denormalized = model.query_backend().denormalized();
+    let denormalized = model.denormalized();
     let denorm_columns = denormalized.columns.clone();
     let denorm_rel_kinds = denormalized.relationships.clone();
     let has_non_denorm = has_non_denorm_filters(

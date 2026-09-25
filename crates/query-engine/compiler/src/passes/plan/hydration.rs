@@ -45,8 +45,7 @@ pub fn plan_hydration(
             let table = node
                 .entity
                 .as_deref()
-                .and_then(|entity| model.graph().entity_id(entity))
-                .and_then(|entity| model.query_backend().entity_table(entity))
+                .and_then(|entity| model.entity_table(entity))
                 .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
             let entity = node
                 .entity

@@ -125,6 +125,12 @@ pub trait QueryDataModel {
             .is_some_and(|entity| self.query_backend().entity_has_traversal_path(entity))
     }
 
+    fn entity_is_global(&self, entity: &str) -> bool {
+        self.graph()
+            .entity_id(entity)
+            .is_some_and(|entity| self.query_backend().entity_is_global(entity))
+    }
+
     fn property_column_named(&self, entity: &str, property: &str) -> Option<&str> {
         let property = self.property(entity, property)?;
         self.query_backend().property_column(property.id)
@@ -176,6 +182,14 @@ pub trait QueryDataModel {
     fn relationship_table(&self, relationship: &str) -> Option<&str> {
         let relationship = self.graph().relationship_id(relationship)?;
         self.query_backend().relationship_table(relationship)
+    }
+
+    fn default_edge_table(&self) -> &str {
+        self.query_backend().default_edge_table()
+    }
+
+    fn denormalized(&self) -> &DenormalizedCatalog {
+        self.query_backend().denormalized()
     }
 
     fn relationship_tables(&self, relationships: &[String]) -> Vec<String> {
