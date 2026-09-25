@@ -216,7 +216,7 @@ mod tests {
             global_user_id: "g".into(),
             instance_version: "19.5.0".into(),
             license_checksum: None,
-            correlation_id: None,
+            correlation_id: String::new(),
         }
     }
 
@@ -478,10 +478,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sends_correlation_id_query_param_when_set() {
+    async fn sends_correlation_id_query_param() {
         let (url, seen) = recording_server(AxumStatus::OK).await;
         let mut request = license_request();
-        request.correlation_id = Some("req-123".into());
+        request.correlation_id = "req-123".into();
         license_client(url).check(&request).await;
 
         let seen = seen.lock().unwrap();
@@ -489,19 +489,6 @@ mod tests {
         assert!(
             query.split('&').any(|p| p == "correlation_id=req-123"),
             "correlation_id missing from {query}"
-        );
-    }
-
-    #[tokio::test]
-    async fn omits_correlation_id_query_param_when_unset() {
-        let (url, seen) = recording_server(AxumStatus::OK).await;
-        license_client(url).check(&license_request()).await;
-
-        let seen = seen.lock().unwrap();
-        let (_, query) = &seen[0];
-        assert!(
-            !query.contains("correlation_id"),
-            "unexpected correlation_id in {query}"
         );
     }
 }
