@@ -12,7 +12,7 @@ use tonic::{Code, Status};
 use tonic_types::{ErrorDetails, StatusExt};
 use tracing::{info, warn};
 
-use crate::constants::{QUOTA_MAX_CACHE_ENTRIES, is_cdot_self_managed_realm};
+use crate::constants::QUOTA_MAX_CACHE_ENTRIES;
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
 use client::{QuotaAuth, QuotaClient};
 pub use inputs::QuotaCheckInputs;
@@ -89,18 +89,15 @@ impl QuotaService {
             .map(|id| id.as_str().to_string())
             .unwrap_or_default();
 
-        if inner.auth_mode == QuotaAuthMode::LicenseChecksum
-            && let Some(skip_reason) = license_auth_skip_reason(inputs)
-        {
+        if inner.auth_mode == QuotaAuthMode::LicenseChecksum && inputs.license_checksum.is_none() {
             warn!(
                 user_id = inputs.user_id,
                 realm = inputs.realm.as_deref().unwrap_or(""),
                 instance_id = inputs.instance_id.as_deref().unwrap_or(""),
                 unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                 source_type = %inputs.source_type,
-                skip_reason,
                 correlation_id = %correlation_id,
-                "quota gate decision: skipped"
+                "quota gate decision: skipped (no license_checksum claim)"
             );
             record_skipped(&inputs.source_type);
             return Ok(());
@@ -185,16 +182,6 @@ impl QuotaService {
             }
         }
     }
-}
-
-fn license_auth_skip_reason(inputs: &QuotaCheckInputs) -> Option<&'static str> {
-    if inputs.license_checksum.is_none() {
-        return Some("license_checksum claim missing");
-    }
-    if !is_cdot_self_managed_realm(inputs.realm.as_deref().unwrap_or("")) {
-        return Some("realm claim is not self-managed");
-    }
-    None
 }
 
 fn record_skipped(source_type: &str) {
@@ -530,21 +517,6 @@ mod tests {
         };
 
         assert!(svc.check(&inputs).await.is_ok());
-        assert_eq!(counter.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test]
-    async fn license_mode_with_non_self_managed_realm_allows_without_calling_cdot() {
-        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
-        let svc = license_service_for(url);
-
-        for realm in [Some("SM"), Some("SaaS"), None] {
-            let inputs = QuotaCheckInputs {
-                realm: realm.map(Into::into),
-                ..license_inputs("mcp")
-            };
-            assert!(svc.check(&inputs).await.is_ok(), "realm {realm:?}");
-        }
         assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
 

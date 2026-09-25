@@ -420,7 +420,7 @@ self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
 // A denied check returns tonic::Status::resource_exhausted("GitLab credits exhausted")
 ```
 
-**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim, or whose `realm` claim is not self-managed, skips the check; a CustomersDot `401` fails open and is not cached. Orbit never logs or re-serializes the claim.
+**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim skips the check; a CustomersDot `401` fails open and is not cached. Orbit never logs or re-serializes the claim.
 
 **Cache behavior.** GKG queries CustomersDot at `/api/v1/consumers/resolve`, then caches the decision in a `moka` cache. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; fail-open results are not.
 
