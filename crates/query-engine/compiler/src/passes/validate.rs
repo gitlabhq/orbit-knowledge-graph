@@ -394,7 +394,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
 
     fn check_relationship_types(&self, types: &[String]) -> Result<()> {
         for kind in types {
-            if kind != "*" && self.model.get().graph().relationship_id(kind).is_none() {
+            if kind != "*" && !self.model.get().relationship_exists(kind) {
                 return Err(QueryError::AllowlistRejected(format!(
                     "unknown relationship type {kind:?}"
                 )));

@@ -153,6 +153,15 @@ pub trait QueryDataModel {
         self.query_backend().property_column(property).is_some()
     }
 
+    fn property_is_virtual(&self, entity: EntityId, property: &str) -> bool {
+        self.property_for_entity_id(entity, property)
+            .is_some_and(|property| matches!(property.realization, PropertyRealization::Virtual(_)))
+    }
+
+    fn relationship_exists(&self, relationship: &str) -> bool {
+        self.graph().relationship_id(relationship).is_some()
+    }
+
     fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
         self.query_backend().default_properties(entity)
     }

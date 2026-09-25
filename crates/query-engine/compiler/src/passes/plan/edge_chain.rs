@@ -376,16 +376,7 @@ where
                     filters: crate::passes::shared::ordered_filters(
                         &n.filters
                             .iter()
-                            .filter(|(property, _)| {
-                                model
-                                    .property_for_entity_id(entity_id, property)
-                                    .is_none_or(|property| {
-                                        !matches!(
-                                            property.realization,
-                                            query_data_model::PropertyRealization::Virtual(_)
-                                        )
-                                    })
-                            })
+                            .filter(|(property, _)| !model.property_is_virtual(entity_id, property))
                             .map(|(property, filters)| (property.clone(), filters.clone()))
                             .collect(),
                         Some(entity_id),
@@ -398,16 +389,7 @@ where
                         ColumnSelection::List(columns) => ColumnSelection::List(
                             columns
                                 .iter()
-                                .filter(|column| {
-                                    model.property_for_entity_id(entity_id, column).is_none_or(
-                                        |property| {
-                                            !matches!(
-                                                property.realization,
-                                                query_data_model::PropertyRealization::Virtual(_)
-                                            )
-                                        },
-                                    )
-                                })
+                                .filter(|column| !model.property_is_virtual(entity_id, column))
                                 .cloned()
                                 .collect(),
                         ),
