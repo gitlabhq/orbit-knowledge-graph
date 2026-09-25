@@ -24,6 +24,5 @@ glab orbit <subcommand> [flags...]
 
 Set keys with `glab config set <key> <value>`. Leave
 `orbit_cli_binary_version` and `orbit_cli_last_update_check` alone.
-`orbit skills` reads the embedded local skill and lists any additional skill
-trees afterward. `orbit skills get orbit [path]` reads a file from this tree,
-and the path defaults to `SKILL.md`.
+`orbit skills` lists available skills. `orbit skills get orbit [path]` prints
+the composed skill (`SKILL.md` by default), or a specified file from its tree.
