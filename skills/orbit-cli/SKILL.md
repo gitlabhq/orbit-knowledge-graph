@@ -8,13 +8,15 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.18.0
+version: 0.18.1
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
   audience: developers
   keywords: orbit, orbit-cli, orbit-local, knowledge-graph, code-graph, duckdb, sql, repo-map
   workflow: ai
+  source-project: gitlab-org/orbit/knowledge-graph
+  source-path: skills/orbit-cli
 ---
 
 # Orbit local CLI skill
@@ -31,6 +33,12 @@ when any are available. Use `orbit skills get orbit [path]` to read a file from
 this tree. The path defaults to `SKILL.md`.
 
 Wrapper details: [`references/local/cli.md`](references/local/cli.md).
+
+## Fix inaccurate guidance
+
+If guidance is wrong or outdated (command, flag, or behavior), tell the user.
+With their confirmation, open a focused MR against `metadata.source-project` fixing `metadata.source-path` (one fix per MR, Conventional Commits).
+If they decline, note the discrepancy in one line and continue with the corrected command.
 
 ## Find, then read
 
