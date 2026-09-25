@@ -33,6 +33,11 @@ fn defer_traversal_outputs(bound: &BoundCatalog, logical: &mut LogicalPlan) {
             .input
             .relationships
             .iter()
+            .any(|relationship| relationship.hops.max > 1)
+        || bound
+            .input
+            .relationships
+            .iter()
             .all(|relationship| relationship.fk_column.is_some())
     {
         return;

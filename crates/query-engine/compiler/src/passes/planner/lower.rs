@@ -250,13 +250,27 @@ fn lower_join_ch(
     aliases: &HashMap<RelationId, String>,
     physical_columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
 ) -> Result<Query> {
-    let mut inputs = inputs.into_iter();
-    let first = inputs
-        .next()
-        .ok_or_else(|| QueryError::Lowering("join needs an input".into()))?;
+    let mut inputs = inputs;
+    let first = (!inputs.is_empty())
+        .then_some(())
+        .ok_or_else(|| QueryError::Lowering("join needs an input".into()))
+        .map(|_| inputs.remove(0))?;
     let mut available = relations_ch(&first);
     let mut query = lower_ch(bound, first, aliases, physical_columns)?;
-    for input in inputs {
+    while !inputs.is_empty() {
+        let index = inputs
+            .iter()
+            .position(|input| {
+                let right = relations_ch(input);
+                conditions.iter().any(|condition| {
+                    let relations = expression_relations(bound, condition);
+                    !relations.is_disjoint(&right)
+                        && !relations.is_disjoint(&available)
+                        && relations.is_subset(&available.union(&right).copied().collect())
+                })
+            })
+            .unwrap_or(0);
+        let input = inputs.remove(index);
         let right_relations = relations_ch(&input);
         let joined_relations = available.union(&right_relations).copied().collect();
         let alias = visible_relation_ch(&input)
@@ -291,13 +305,27 @@ fn lower_join_duck(
     conditions: Vec<Expr>,
     aliases: &HashMap<RelationId, String>,
 ) -> Result<Query> {
-    let mut inputs = inputs.into_iter();
-    let first = inputs
-        .next()
-        .ok_or_else(|| QueryError::Lowering("join needs an input".into()))?;
+    let mut inputs = inputs;
+    let first = (!inputs.is_empty())
+        .then_some(())
+        .ok_or_else(|| QueryError::Lowering("join needs an input".into()))
+        .map(|_| inputs.remove(0))?;
     let mut available = relations_duck(&first);
     let mut query = lower_duck(bound, first, aliases)?;
-    for input in inputs {
+    while !inputs.is_empty() {
+        let index = inputs
+            .iter()
+            .position(|input| {
+                let right = relations_duck(input);
+                conditions.iter().any(|condition| {
+                    let relations = expression_relations(bound, condition);
+                    !relations.is_disjoint(&right)
+                        && !relations.is_disjoint(&available)
+                        && relations.is_subset(&available.union(&right).copied().collect())
+                })
+            })
+            .unwrap_or(0);
+        let input = inputs.remove(index);
         let right_relations = relations_duck(&input);
         let joined_relations = available.union(&right_relations).copied().collect();
         let alias = visible_relation_duck(&input)
