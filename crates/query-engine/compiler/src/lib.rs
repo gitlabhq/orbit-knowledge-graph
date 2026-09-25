@@ -78,7 +78,7 @@ pub use passes::hydrate::{
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use scope::ScopePrefix;
+pub use scope::ScopeProof;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +161,20 @@ pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<
         .and_then(|()| {
             ctx.take_input().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
+            })
+        })
+        .count_err()
+}
+
+pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
+    let mut ctx = config::ValidateNormalizeGqlCtx::new(Arc::clone(ontology));
+    ctx.set_raw(raw.to_string());
+    config::run_validate_normalize_gql(&mut ctx)
+        .and_then(|()| {
+            ctx.take_input().ok_or_else(|| {
+                error::QueryError::PipelineInvariant(
+                    "validate_normalize_gql produced no input".into(),
+                )
             })
         })
         .count_err()

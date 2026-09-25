@@ -19,11 +19,13 @@ pub(crate) fn build_common(
     let environment: &'static str = config.deployment.environment.into();
 
     Ok(OrbitCommonContext::new(orbit_common::OrbitCommon {
-        deployment_type: config.deployment.kind.into(),
+        deployment_type: Some(config.deployment.kind.into()),
         surface: Some(orbit_common::OrbitCommonSurface::Server),
-        environment: environment
-            .parse::<orbit_common::OrbitCommonEnvironment>()
-            .map_err(validation("environment"))?,
+        environment: Some(
+            environment
+                .parse::<orbit_common::OrbitCommonEnvironment>()
+                .map_err(validation("environment"))?,
+        ),
         correlation_id: labkit::correlation::current()
             .as_deref()
             .map(str::parse::<orbit_common::OrbitCommonCorrelationId>)
@@ -636,7 +638,7 @@ mod tests {
                     direction: Direction::Outgoing,
                     filters: Default::default(),
                     fk_column: None,
-                    scope_prefix: None,
+                    scope_proof: None,
                     scope_preserving: false,
                 }],
                 ..Default::default()

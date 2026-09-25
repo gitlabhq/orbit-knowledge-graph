@@ -171,32 +171,40 @@ orbit mcp serve
 It serves `run_sql`, `get_graph_schema`, and `index` against
 `~/.gitlab/orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
 
-## Set up your AI assistant
+## Set up your AI agent
 
-`orbit setup` configures an AI coding assistant to consult the graph before it
-reaches for grep. Choose an assistant:
+`orbit setup` configures your AI coding agents to consult the graph before
+they reach for grep. It detects the agents installed on your machine:
 
-```plaintext
-orbit setup <duo|claude|codex|opencode|pi>
+```shell
+orbit setup
 ```
 
-Supported assistants are GitLab Duo, Claude Code, Codex, OpenCode, and Pi. The
-guidance tells them to run `orbit grep` and `orbit context` before raw source
-tools.
+A picker lists the detected agents, all pre-selected. Press Enter to apply,
+or pass `--yes` to skip the picker. Name an agent to add it even when it is
+not detected, for example `orbit setup claude codex`. Add `--mcp` to also register
+the `orbit` MCP server. Inside a Git repository, setup then indexes it so
+your agents have a graph to query; `--no-index` skips that. Run
+`orbit setup --help` for the other options. Supported agents are GitLab Duo,
+Claude Code, Codex, OpenCode, and Pi.
 
 ### What it changes
 
 This command modifies files that belong to you. It never runs on its own, only
 when you invoke it.
 
-For every assistant you name, `orbit setup`:
+For every agent it configures, `orbit setup`:
 
-- Adds a block to that assistant's instruction file, such as `CLAUDE.md` or
+- Adds a block to that agent's instruction file, such as `CLAUDE.md` or
   `AGENTS.md`. The block sits between `<!-- orbit:setup:begin -->` and
   `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
   alone. Running the command again replaces the block in place instead of adding
   a second copy.
-- Adds entries to that assistant's JSON configuration, where the assistant
+- Installs the `orbit-cli` skill into `.agents/skills/`. Claude Code does not
+  scan that directory, so it also gets a `.claude/skills/orbit-cli` link.
+- With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
+  Existing servers and comments are preserved.
+- Adds entries to that agent's JSON configuration, where the agent
   supports it. For Claude Code this is a `PreToolUse` hook in
   `settings.json`; for OpenCode it is a plugin file and its registration.
   Entries carry an `orbit` marker, and only marked entries are ever replaced or
@@ -220,16 +228,17 @@ teammates. User-global scope, the default, affects only you.
 To undo the changes, run:
 
 ```shell
-orbit setup claude --remove
+orbit uninstall
 ```
 
-This strips the marker-delimited block and the marked JSON entries, and leaves
-the rest of each file untouched. If a file contained nothing but `orbit`
-entries, it is deleted. Omit the assistant names to remove the setup for all of
-them. Backup files are not deleted.
+It lists the detected agents that have GitLab Orbit installed in that scope.
+Name agents to target only those. It removes what `orbit setup` wrote and leaves
+the rest of each file untouched. Files you edited after setup are kept, and so
+are their backups. A backup goes away once its file is back to the original.
+`--yes`, `--project`, and `--dir` work as they do for `orbit setup`.
 
 If you would rather not have `orbit setup` touch your files, skip it and add the
-same instruction block and hooks by hand.
+same instruction block, MCP entry, and hooks by hand.
 
 ## Storage
 
@@ -254,9 +263,10 @@ orbit config set telemetry.enabled false   # save a setting
 ## Telemetry
 
 The CLI sends usage events to the GitLab product analytics service so the team
-can see how GitLab Orbit is used. Each event records which command ran, nothing more:
-no repository content, file paths, or query text is sent. Telemetry is on by
-default.
+can see how GitLab Orbit is used. Each event records which command or MCP tool
+ran, whether it succeeded, its exit code and duration, the CLI version, and the
+coding agent that ran it. No repository content, file paths, or query text is sent. Telemetry
+is on by default.
 
 Turn it off with a saved setting, or with the environment variable in CI:
 

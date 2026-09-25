@@ -21,38 +21,38 @@ fixtures:
       }
 
 tests:
-  - name: Exported interface is 1-indexed start and end on line 1
+  - name: Exported interface spans its complete declaration
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/context_error.ts' AND d.fqn = 'ContextError'
       RETURN d.start_line AS sl, d.end_line AS el, d.start_char AS sc, d.end_char AS ec, d.definition_type AS dt
     assert:
       - { row_count: 1 }
-      - { row: { sl: 1, el: 1, sc: 18, ec: 30, dt: "Interface" } }
+      - { row: { sl: 1, el: 3, sc: 8, ec: 2, dt: "Interface" } }
 
-  - name: Arrow-assigned const reports its declaration line (5), not the body
+  - name: Arrow-assigned const spans its declaration and expression
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/context_error.ts' AND d.fqn = 'isContextError'
-      RETURN d.start_line AS sl
+      RETURN d.start_line AS sl, d.end_line AS el
     assert:
       - { row_count: 1 }
-      - { row: { sl: 5 } }
+      - { row: { sl: 5, el: 6 } }
 
-  - name: Exported function reports its declaration line (8)
+  - name: Exported function spans its complete body
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/context_error.ts' AND d.fqn = 'tag'
-      RETURN d.start_line AS sl
+      RETURN d.start_line AS sl, d.end_line AS el
     assert:
       - { row_count: 1 }
-      - { row: { sl: 8 } }
+      - { row: { sl: 8, el: 10 } }
 
-  - name: Unexported function reports its declaration line (12)
+  - name: Unexported function spans its complete body
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/context_error.ts' AND d.fqn = 'privateHelper'
-      RETURN d.start_line AS sl
+      RETURN d.start_line AS sl, d.end_line AS el
     assert:
       - { row_count: 1 }
-      - { row: { sl: 12 } }
+      - { row: { sl: 12, el: 14 } }

@@ -20,6 +20,8 @@ indexer_health_bind_address: "0.0.0.0:4202"
 dispatcher_health_bind_address: "0.0.0.0:4203"
 jwt_clock_skew_secs: 60
 # health_check_url: "http://localhost:4201"
+probe_server: {}
+  # bind_address: "0.0.0.0:9394"
 
 nats:
   url: "localhost:4222"
@@ -84,9 +86,16 @@ gitlab:
     # signing_key: ""
     # verifying_key: ""
 
-tls: {}
+tls:
+  # Shared identity. Setting both enables TLS on the gRPC server, and the
+  # internal group below inherits them unless it names its own.
   # cert_path: "/path/to/cert.pem"
   # key_path: "/path/to/key.pem"
+  # The internal listeners: the probe server in every mode (/-/liveness,
+  # /-/readiness and /-/metrics) and the health-check API. Inherits the identity
+  # above when enabled, or names its own cert_path and key_path as a pair.
+  internal:
+    enabled: false
 
 engine:
   # max_concurrent_workers: 16     # unset = derived from container CPU count and memory limit
@@ -184,7 +193,6 @@ metrics:
     endpoint: "http://localhost:4317"
   prometheus:
     enabled: false
-    port: 9394
 
 schema:
   max_retained_versions: 2
@@ -201,6 +209,7 @@ analytics:
 billing:
   enabled: false
   collector_url: "http://localhost:9090"
+  auth_mode: oidc
   quota:
     enabled: false
     customers_dot_url: "http://localhost:5000"

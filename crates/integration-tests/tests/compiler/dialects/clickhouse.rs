@@ -1105,6 +1105,103 @@ fn orbit_query_virtual_filter_equality_hydration_parity() {
 }
 
 #[test]
+fn orbit_query_consecutive_match_clauses_compile_like_one_pattern() {
+    let ontology = embedded_ontology();
+    let ctx = test_ctx();
+    let single = compile(
+        "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}), (u:User)-[:AUTHORED]->(mr) WHERE mr.state = 'merged' AND u.username = 'a' RETURN mr.iid, u.username LIMIT 5",
+        Frontend::Gql,
+        &ontology,
+        &ctx,
+    )
+    .unwrap();
+    for query in [
+        "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) MATCH (u:User)-[:AUTHORED]->(mr) WHERE mr.state = 'merged' AND u.username = 'a' RETURN mr.iid, u.username LIMIT 5",
+        "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) WHERE mr.state = 'merged' MATCH (u:User)-[:AUTHORED]->(mr) WHERE u.username = 'a' RETURN mr.iid, u.username LIMIT 5",
+    ] {
+        let compiled = compile(query, Frontend::Gql, &ontology, &ctx).unwrap();
+        assert_eq!(single.base.render(), compiled.base.render(), "{query}");
+        assert_eq!(single.hydration, compiled.hydration, "{query}");
+    }
+    for (query, expected) in [
+        (
+            "MATCH (u:User {id: 1}) MATCH (p:Project {id: 2}) RETURN u, p",
+            "all declared nodes must belong to one connected pattern",
+        ),
+        (
+            "MATCH p = ANY SHORTEST (a:User {id: 1})-[*1..3]->(b:Project {id: 2}) MATCH (b)-[:IN_GROUP]->(g:Group) RETURN p",
+            "a shortest path must be the only MATCH pattern",
+        ),
+        (
+            "MATCH (u:User {id: 1}) OPTIONAL MATCH (u)-[:AUTHORED]->(mr:MergeRequest) RETURN u",
+            "Orbit query syntax",
+        ),
+    ] {
+        let error = compile(query, Frontend::Gql, &ontology, &ctx).expect_err(query);
+        assert!(
+            matches!(error, QueryError::Validation(ref message) if message.contains(expected)),
+            "{query}: {error}"
+        );
+    }
+}
+
+#[test]
+fn orbit_query_rejects_relationships_the_ontology_cannot_match() {
+    let ontology = embedded_ontology();
+    let ctx = test_ctx();
+    for (query, expected) in [
+        (
+            "MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED]->(u:User) RETURN mr, u",
+            "AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr)",
+        ),
+        (
+            "MATCH (u:User)<-[a:AUTHORED]-(mr:MergeRequest {project_id: 1}) RETURN count(mr)",
+            "AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr)",
+        ),
+        (
+            "MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED]->(p:Project) RETURN mr, p",
+            "AUTHORED does not connect MergeRequest and Project in either direction",
+        ),
+        (
+            "MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|CLOSES]->(u:User) RETURN mr, u",
+            "AUTHORED goes from User to MergeRequest; reverse the arrow: (u)-[:AUTHORED]->(mr); CLOSES does not connect MergeRequest and User",
+        ),
+        (
+            "MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|CLOSES]->(p:Project) RETURN mr, p",
+            "AUTHORED|CLOSES does not connect MergeRequest and Project in either direction",
+        ),
+        (
+            "MATCH (p:Project {id: 1})<-[IN_PROJECT]-(mr:MergeRequest) RETURN count(mr)",
+            "[IN_PROJECT] declares a variable, not a relationship type; write [:IN_PROJECT]",
+        ),
+        (
+            "MATCH (mr:MergeRequest {id: 1})-[IN_MILESTONE]->(m) RETURN m",
+            "[IN_MILESTONE] declares a variable, not a relationship type; write [:IN_MILESTONE]",
+        ),
+    ] {
+        let error = compile(query, Frontend::Gql, &ontology, &ctx).expect_err(query);
+        assert!(
+            matches!(error, QueryError::Validation(ref message) if message.contains(expected)),
+            "{query}: {error}"
+        );
+    }
+    for query in [
+        "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {project_id: 1}) RETURN mr, u",
+        "MATCH (mr:MergeRequest {project_id: 1})<-[:AUTHORED]-(u:User) RETURN count(mr)",
+        "MATCH (mr:MergeRequest {project_id: 1})-[:AUTHORED|IN_PROJECT]->(p:Project) RETURN mr, p",
+        "MATCH (g:Group {id: 1})-[:CONTAINS*1..2]->(p:Project) RETURN p",
+        "MATCH (p:Project {id: 1})<-[r]-(mr:MergeRequest) RETURN count(mr)",
+        "MATCH (p:Project {id: 1})<-[R]-(mr:MergeRequest) RETURN count(mr)",
+        "MATCH (mr:MergeRequest {id: 1})-[:IN_MILESTONE]->(m) RETURN m",
+    ] {
+        compile(query, Frontend::Gql, &ontology, &ctx)
+            .unwrap_or_else(|error| panic!("{query}: {error}"));
+    }
+    let reversed = r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"u","entity":"User"}],"relationships":[{"type":"AUTHORED","from":"mr","to":"u"}]}"#;
+    compile(reversed, Frontend::JsonDsl, &ontology, &ctx).unwrap();
+}
+
+#[test]
 fn orbit_query_undirected_relationships_require_neighbors() {
     let ontology = embedded_ontology();
     let ctx = test_ctx();
@@ -1409,20 +1506,20 @@ fn orbit_query_neighbors_relationship_type_caps_match_json() {
 fn orbit_query_structural_caps_reject_with_the_json_category() {
     let chain = |count: usize| {
         let nodes: Vec<String> = (0..count)
-            .map(|i| format!(r#"{{"id":"n{i}","entity":"User"}}"#))
+            .map(|i| format!(r#"{{"id":"n{i}","entity":"Group"}}"#))
             .collect();
         let edges: Vec<String> = (1..count)
-            .map(|i| format!(r#"{{"type":"MEMBER_OF","from":"n{}","to":"n{i}"}}"#, i - 1))
+            .map(|i| format!(r#"{{"type":"CONTAINS","from":"n{}","to":"n{i}"}}"#, i - 1))
             .collect();
         let json = format!(
-            r#"{{"query_type":"traversal","nodes":[{{"id":"n0","entity":"User","node_ids":[1]}},{}],"relationships":[{}]}}"#,
+            r#"{{"query_type":"traversal","nodes":[{{"id":"n0","entity":"Group","node_ids":[1]}},{}],"relationships":[{}]}}"#,
             nodes[1..].join(","),
             edges.join(",")
         );
-        let pattern: Vec<String> = (1..count).map(|i| format!("(n{i}:User)")).collect();
+        let pattern: Vec<String> = (1..count).map(|i| format!("(n{i}:Group)")).collect();
         let text = format!(
-            "MATCH (n0:User {{id: 1}})-[:MEMBER_OF]->{} RETURN n0",
-            pattern.join("-[:MEMBER_OF]->")
+            "MATCH (n0:Group {{id: 1}})-[:CONTAINS]->{} RETURN n0",
+            pattern.join("-[:CONTAINS]->")
         );
         (json, text)
     };

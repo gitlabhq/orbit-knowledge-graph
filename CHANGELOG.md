@@ -1,3 +1,81 @@
+## [0.130.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.129.0...v0.130.0) (2026-09-24)
+
+### Features
+
+* **cli:** report command outcome in telemetry ([93fdbf4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/93fdbf41952dd95f28f2c928e58db1ca04fc81c5)) by Jean-Gabriel Doyon
+* **cli:** report MCP tool calls in telemetry ([1363a09](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1363a0966724de9205cbe2fab36f9495e8997181)) by Jean-Gabriel Doyon
+* **gql:** reject impossible relationships and accept multiple MATCH ([f7e82f7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f7e82f75164b2adb760f471c4ce079f5c60267bb)) by Aaron Algutifan
+* **observability:** label indexer file faults and skips by language ([ff495bd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ff495bd1db29665a847977a7a176f85cf53f9b23)) by ANBUCHELVAN GANESAN CSE
+* **query:** wire GQL into remote queries ([c6e1fd1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c6e1fd1167d6a0509dba5e9ac8e25947c73c4007)) by Aaron Algutifan
+
+### Fixes
+
+* **cli:** show index progress before the first query and during setup ([aa47e25](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aa47e254b2ff424dd27bc7ee2854bededf1529e7)) by Jean-Gabriel Doyon
+* **dev:** correct local Orbit setup guidance ([d609169](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d609169995e446f18e47f97a868dc4b2ab48480d)) by Dmitry Gruzd
+
+### Other
+
+* clean up docs redirects - 2026-09-23 ([d99bc0d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d99bc0d31cba0209ec1dac7e4a8af4411a551463)) by Roshni Sarangadharan
+* **deps:** update rust crate quote to v1.0.47 ([ceca407](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ceca40758f5b5121d0329616c6e16474f76b4088)) by GitLab Renovate Bot
+
+## [0.129.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.128.0...v0.129.0) (2026-09-23)
+
+### Features
+
+* **server:** serve deployed Orbit skill contract ([42b5d71](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/42b5d71ef82ff28448529f2145c47387f21f7641)) by Dmitry Gruzd
+
+### Fixes
+
+* **cli:** handle Ctrl-C and ignored nested repositories in orbit index ([3a63b51](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3a63b51dfd808338d7e58ed08fa78fed34407e6d)) by Jean-Gabriel Doyon
+* **cli:** smooth the setup and uninstall TUI rough edges ([309b7d5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/309b7d5cced4dcc8d8046f70a1775ddf55f787ba)) by Jean-Gabriel Doyon
+* **health:** hold webserver readiness until startup completes ([30c924b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/30c924b22e3e7924851770cc8952014c27109ad1)) by Bohdan Parkhomchuk
+* **server:** correct the deployed skill contract ([379d594](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/379d5946698e1df6ab463980883407041737bb55)) by Dmitry Gruzd
+
+### Performance
+
+* performance testing for orbit with synthetic data seeding using xtask ([7d314f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7d314f26a7d7125469da6c68dfac10ed6532cd98)) by Vishal Patel
+
+### Other
+
+* **deps:** update rust crate async-trait to v0.1.92 ([8f07c44](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f07c443f1ff8f8764e7d5eb54190af0c07d5106)) by GitLab Renovate Bot
+* **deps:** update rust crate cc to v1.4.6 ([02b8cbf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02b8cbf434d130a81dc360cf0e7c5f183837fa2b)) by GitLab Renovate Bot
+* **deps:** update rust crate clap to v4.6.7 ([a1198ee](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a1198eeebbaaae3c20a161664226b42d629d5ec2)) by GitLab Renovate Bot
+
+## [0.128.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.127.0...v0.128.0) (2026-09-23)
+
+### Features
+
+* **cli:** draw index progress with the setup wizard widgets ([8f5ef0c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f5ef0cf888a3d16daaa6193637e80f8ab15b2f4)) by Jean-Gabriel Doyon
+* **health:** serve readiness on the labkit probe server ([b7468e8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b7468e816df145cc91a8de8e5c364c24c7970f33)) by Bohdan Parkhomchuk
+* **query:** add GQL spellings to named queries ([a073e38](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a073e380cea06db26ca1ed568a5356c5f4023132)) by Aaron Algutifan
+* **tls:** serve the internal HTTP listeners over TLS ([f67985a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f67985a6e7b621fdf3d80f251de40af3ed43a204)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **ci:** bump cargo-zigbuild so the arm64 musl CLI build links ([b88a75f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b88a75f6d5c557b5843aec032a9f63aae0fd14fc)) by Jean-Gabriel Doyon
+
+## [0.127.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.126.0...v0.127.0) (2026-09-22)
+
+### Features
+
+* **ci:** sign images with keyless cosign ([2b707f5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2b707f5c149525f1706dd81173c2d823c84500c2)) by Bohdan Parkhomchuk
+* **cli:** detect installed agents, register MCP and skills, add orbit uninstall ([17b16ce](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/17b16ce5a3d0668756f78969fac3047ed207b4be)) by Jean-Gabriel Doyon
+* **cli:** index the current repository at the end of setup and suggest a grep ([82482f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/82482f9305ebb8682236728f122cb0f4e3171eb7)) by Jean-Gabriel Doyon
+* **cli:** interactive setup wizard with agent picker and one-line receipt ([f239a31](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f239a31e228c5e55f00ae5a051e47b7dbd4999f1)) by Jean-Gabriel Doyon
+* **cli:** rank exact names first and give agents file ranges in grep and context ([3d7e61f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3d7e61ff94b5e743dd142ba7adcf114428771051)) by Aaron Algutifan
+* **gql:** support [secure] nodes and grouped projections ([d7bf2b7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d7bf2b7fc1d9f3f6904fb5aa82a6d83fc4b22f6f)) by Aaron Algutifan
+
+### Fixes
+
+* **code-graph:** preserve JS and TS declaration spans ([b24987e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b24987e05b55559761ff913e8578d08c5823d839)) by Aaron Algutifan
+
+### Other
+
+* **cli:** use the orbit_cli glab config keys ([8e542d0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8e542d0a8dffa8b94738c0dabbad1086da671eaf)) by Jean-Gabriel Doyon
+* **codegraph-tests:** replace lance-graph with Orbit cypher + DuckDB ([804a10e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/804a10eb5f3154c59b5be2fb729307393bacd1a8)) by Michael Usachenko
+* **deps:** update rust crate futures to v0.3.34 ([a9ed63e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a9ed63e2d3811fd6d51b8c3418d0fcbf9928485d)) by GitLab Renovate Bot
+* **mr-template:** ask for before/after output on user-facing changes ([adea9b2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/adea9b2d1035e5d63568fdce2bba30bf55aa92fb)) by Dmitry Gruzd
+
 ## [0.126.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.125.0...v0.126.0) (2026-09-21)
 
 ### Features

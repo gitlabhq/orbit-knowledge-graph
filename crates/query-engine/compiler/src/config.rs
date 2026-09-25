@@ -21,14 +21,14 @@ use crate::passes::enforce::ResultContext;
 use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, normalize, planner, restrict, security, settings,
-    validate,
+    check, codegen, cursor, enforce, hydrate, normalize, planner, relationships, response_policy,
+    restrict, security, settings, validate,
 };
 
 #[derive(Debug, Clone)]
 struct QueryPlan {
     physical: Option<PhysicalPlan>,
-    node_sources: std::collections::HashMap<String, (String, String)>,
+    scope_requirements: Vec<crate::scope::ScopeProof>,
     hop_count: usize,
     has_semi_joins: bool,
     explain: String,
@@ -57,6 +57,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub bound_catalog: planner::BoundCatalog,
         pub query_plan: QueryPlan,
         pub node: Node,
+        pub lowered_metadata: planner::LoweredMetadata,
         pub result_ctx: ResultContext,
         pub query_config: QueryConfig,
         pub hydration_plan: HydrationPlan,
@@ -70,6 +71,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         gql_parse {
             mutates: [raw, input]
+        }
+        validate_relationships {
+            reads_env: [ontology]
+            reads_state: [input]
         }
         validate {
             reads_env: [ontology]
@@ -96,11 +101,20 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [input, bound_catalog, query_plan]
         }
         lower {
-            mutates: [bound_catalog, input, query_plan, node]
+            mutates: [bound_catalog, input, query_plan, node, lowered_metadata]
+        }
+        scope_requirements {
+            reads_state: [input]
+            mutates: [query_plan, node]
+        }
+        response_policy {
+            reads_env: [ontology]
+            reads_state: [input]
+            mutates: [node]
         }
         enforce {
             reads_state: [input]
-            mutates: [query_plan, node, result_ctx]
+            mutates: [node, lowered_metadata, result_ctx]
         }
         security {
             reads_env: [security_ctx, ontology]
@@ -108,6 +122,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [node]
         }
         cursor {
+            reads_state: [lowered_metadata]
             mutates: [input, node]
         }
         check {
@@ -136,28 +151,33 @@ compiler_pipeline_macros::define_compiler_ctx! {
     pipelines {
         clickhouse_json_dsl {
             env: [ontology, security_ctx]
-            state: [raw, input, bound_catalog, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, bound_catalog, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             env: [ontology, security_ctx]
-            state: [raw, input, bound_catalog, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, normalize, restrict, plan_clickhouse, lower, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, bound_catalog, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
-            state: [input, bound_catalog, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan_clickhouse, lower, enforce, settings, codegen]
+            state: [input, bound_catalog, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             env: [ontology]
-            state: [raw, input, bound_catalog, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, enforce, duckdb_codegen]
+            state: [raw, input, bound_catalog, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, enforce, cursor, duckdb_codegen]
         }
         duckdb_gql {
             env: [ontology]
-            state: [raw, input, bound_catalog, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, normalize, plan_duckdb, lower, enforce, duckdb_codegen]
+            state: [raw, input, bound_catalog, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, enforce, cursor, duckdb_codegen]
+        }
+        validate_normalize_gql {
+            env: [ontology]
+            state: [raw, input]
+            phases: [gql_parse, validate, validate_relationships, normalize]
         }
         validate_normalize {
             env: [ontology]
@@ -178,6 +198,11 @@ fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
         ctx.set_input(frontend::gql::parse(&raw)?);
     }
     Ok(())
+}
+
+fn validate_relationships(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().as_ref(), "input")?;
+    relationships::validate_relationships(input, ctx.ontology())
 }
 
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
@@ -249,7 +274,7 @@ fn plan_for(ctx: &mut impl CompilerCtx, backend: crate::Backend) -> Result<()> {
     let hop_count = bound.input.relationships.len();
     ctx.set_query_plan(QueryPlan {
         physical: Some(candidate),
-        node_sources: Default::default(),
+        scope_requirements: vec![],
         hop_count,
         has_semi_joins: false,
         explain,
@@ -273,31 +298,46 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
             planner::lower_duckdb(&bound, planner::SelectedPlan { candidate })?
         }
     };
-    query_plan.node_sources = lowered
-        .bindings
-        .nodes
-        .into_iter()
-        .filter_map(|(node, binding)| {
-            let crate::ast::Expr::Column { table, column } = binding.primary_key else {
-                return None;
-            };
-            Some((bound.input.nodes[node.0].id.clone(), (table, column)))
-        })
-        .collect();
     ctx.set_query_plan(query_plan);
     ctx.set_node(lowered.ast);
+    ctx.set_lowered_metadata(lowered.metadata);
     ctx.set_input(bound.input);
     Ok(())
 }
 
-fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let node_edge_col = query_plan.node_sources.clone();
+    let mut node = require(ctx.take_node(), "node")?;
+    if let Node::Query(query) = &mut node {
+        for requirement in &query_plan.scope_requirements {
+            let guard = crate::scope::resolved_scope_guard(requirement);
+            query.where_clause = Some(match query.where_clause.take() {
+                Some(existing) => crate::ast::Expr::and(existing, guard),
+                None => guard,
+            });
+        }
+    }
     ctx.set_query_plan(query_plan);
+    ctx.set_node(node);
+    Ok(())
+}
+
+fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().clone(), "input")?;
+    let mut node = require(ctx.take_node(), "node")?;
+    response_policy::apply_text_excerpts(&mut node, &input, ctx.ontology());
+    ctx.set_node(node);
+    Ok(())
+}
+
+fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    let result_context = enforce::enforce_return(&mut node, &input, &node_edge_col)?;
+    enforce::enforce_role_scans(&mut node, &input, &metadata)?;
+    let result_context = enforce::enforce_lowered_return(&mut node, &input, &metadata)?;
     ctx.set_node(node);
+    ctx.set_lowered_metadata(metadata);
     ctx.set_result_ctx(result_context);
     Ok(())
 }
@@ -307,7 +347,7 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     let ontology = ctx.ontology().clone();
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().as_ref(), "input")?;
-    let security_ctx = security_ctx.with_scope_prefixes(input.compiler.scope_prefixes.clone());
+    let security_ctx = security_ctx.with_scope_proofs(input.compiler.scope_proofs.clone());
     security::apply_security_context(&mut node, &security_ctx, &ontology)?;
     ctx.set_node(node);
     Ok(())
@@ -316,7 +356,8 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
     let mut node = require(ctx.take_node(), "node")?;
-    cursor::apply(&mut node, &mut input)?;
+    let metadata = require(ctx.lowered_metadata().as_ref(), "lowered_metadata")?;
+    cursor::apply(&mut node, &mut input, metadata)?;
     ctx.set_input(input);
     ctx.set_node(node);
     Ok(())

@@ -18,23 +18,16 @@ fn imported_binding_from_import(import: &JsImport) -> Option<JsImportedBinding> 
         JsImportKind::Named { imported_name } => ImportedName::Named(imported_name.clone()),
         JsImportKind::Default => ImportedName::Default,
         JsImportKind::Namespace => ImportedName::Namespace,
-        JsImportKind::CjsRequire { imported_name } => imported_name
-            .as_ref()
-            .map_or(ImportedName::Default, |name| {
-                ImportedName::Named(name.clone())
-            }),
-    };
-    let resolution_mode = match import.kind {
-        JsImportKind::CjsRequire { .. } => JsResolutionMode::Require,
-        _ => JsResolutionMode::Import,
+        JsImportKind::CjsRequire { .. } => return None,
     };
 
     Some(JsImportedBinding {
+        import_byte_offset: import.range.byte_offset.0 as u32,
         specifier: import.specifier.clone(),
         fallback_imported_name: imported_name.clone(),
         import_local_name: import.local_name.clone(),
         imported_name,
-        resolution_mode,
+        resolution_mode: JsResolutionMode::Import,
     })
 }
 
@@ -86,6 +79,7 @@ fn imported_binding_from_expression(
                 return None;
             }
             Some(JsImportedBinding {
+                import_byte_offset: base_binding.import_byte_offset,
                 specifier: base_binding.specifier,
                 fallback_imported_name: base_binding.fallback_imported_name,
                 import_local_name: base_binding.import_local_name,
@@ -202,6 +196,7 @@ fn imported_namespace_binding_from_require_call(
     };
     let specifier = call.common_js_require()?.value.to_string();
     Some(JsImportedBinding {
+        import_byte_offset: call.span.start,
         specifier,
         fallback_imported_name: ImportedName::Namespace,
         import_local_name: String::new(),
@@ -236,6 +231,7 @@ fn collect_aliases_from_binding_pattern(
                             base_binding.fallback_imported_name.clone()
                         };
                     JsImportedBinding {
+                        import_byte_offset: base_binding.import_byte_offset,
                         specifier: base_binding.specifier.clone(),
                         fallback_imported_name,
                         import_local_name: base_binding.import_local_name.clone(),

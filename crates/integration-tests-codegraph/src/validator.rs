@@ -25,13 +25,48 @@ pub(crate) fn run_suite(
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,
 ) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut failures = undeclared_edges(client, ontology);
     for test in &suite.tests {
         if test.skip {
             eprintln!("  [SKIP] \"{}\"", test.name);
             continue;
         }
         failures.extend(run_test(test, client, ontology));
+    }
+    failures
+}
+
+fn undeclared_edges(client: &DuckDbClient, ontology: &Ontology) -> Vec<Failure> {
+    let batches = client
+        .query_arrow(
+            "SELECT DISTINCT relationship_kind, source_kind, target_kind FROM gl_edge ORDER BY ALL",
+        )
+        .expect("read indexed edge kinds");
+    let mut failures = Vec::new();
+    for batch in &batches {
+        for row in 0..batch.num_rows() {
+            let value =
+                |column| ArrowUtils::get_column_string(batch, column, row).unwrap_or_default();
+            let (kind, source, target) = (
+                value("relationship_kind"),
+                value("source_kind"),
+                value("target_kind"),
+            );
+            if !ontology
+                .get_edge(&kind)
+                .unwrap_or_default()
+                .iter()
+                .any(|edge| edge.source_kind == source && edge.target_kind == target)
+            {
+                failures.push(Failure {
+                    test: "ontology declares every indexed edge".into(),
+                    severity: Severity::Error,
+                    message: format!(
+                        "{kind} {source} -> {target} is indexed but not declared in config/ontology/edges"
+                    ),
+                });
+            }
+        }
     }
     failures
 }

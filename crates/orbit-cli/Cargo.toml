@@ -24,6 +24,7 @@ orbit-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
+cliclack = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -39,11 +40,16 @@ schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 strum = { workspace = true }
+toml_edit = { workspace = true }
 uuid = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }
 
 [build-dependencies]
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tempfile = { workspace = true }

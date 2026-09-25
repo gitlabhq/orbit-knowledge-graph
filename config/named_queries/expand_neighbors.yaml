@@ -2,7 +2,7 @@ name: expand_neighbors
 description: Immediate graph neighborhood of selected nodes.
 parameters:
   entity:
-    schema: { type: string }
+    schema: { type: string, maxLength: 64 }
     example: User
   node_ids:
     schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
@@ -11,11 +11,17 @@ parameters:
     schema: { type: integer, minimum: 1, maximum: 500 }
     example: 100
 query:
-  query_type: neighbors
-  nodes:
-    - id: center
-      entity: { $param: entity }
-      node_ids: { $param: node_ids }
-  neighbors:
-    direction: both
-  limit: { $param: limit }
+  json:
+    query_type: neighbors
+    nodes:
+      - id: center
+        entity: { $param: entity }
+        node_ids: { $param: node_ids }
+    neighbors:
+      direction: both
+    limit: { $param: limit }
+  gql: |
+    MATCH (center:{{ identifier("entity") }})--(neighbor)
+    WHERE center.id IN {{ param("node_ids") }}
+    RETURN center, neighbor
+    LIMIT {{ param("limit") }}

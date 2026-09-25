@@ -1,12 +1,13 @@
-//! Declarative assistant specs embedded from `config/setup/agents/`. Each YAML file describes
-//! one assistant as four generic operations (instruction file, marker-owned JSON merges,
-//! templated files, string registrations), so adding an assistant means adding a YAML file, not
-//! Rust. The instruction block, hook nudges, and template values live in
-//! `config/setup/setup.yaml`.
+//! Declarative agent specs embedded from `config/setup/agents/`. Each YAML file describes
+//! one agent as generic operations (detection paths, instruction file, marker-owned JSON
+//! merges, templated files, string registrations, MCP entry, skill directories), so adding an
+//! agent means adding a YAML file, not Rust. The instruction block, hook nudges, MCP server,
+//! and template values live in `config/setup/setup.yaml`.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+use ontology::migrations::sha256_hex;
 use rust_embed::Embed;
 use serde::Deserialize;
 use serde_json::Value;
@@ -18,6 +19,7 @@ struct SetupAssets;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetupTexts {
+    mcp_server: McpServerText,
     instructions: String,
     nudge_search: String,
     nudge_read: String,
@@ -45,16 +47,16 @@ pub(crate) fn launcher() -> &'static str {
     &LAUNCHER
 }
 
-fn render_launcher(text: &str, launcher: &str) -> String {
+fn substitute_launcher(text: &str, launcher: &str) -> String {
     text.replace("{{orbit}}", launcher)
 }
 
 fn render_instructions(launcher: &str) -> String {
-    render_launcher(
+    substitute_launcher(
         &TEXTS
             .instructions
             .trim_end()
-            .replace("{{graph_contents}}", &graph_contents()),
+            .replace("{{graph_contents}}", &describe_graph_contents()),
         launcher,
     )
 }
@@ -62,12 +64,12 @@ fn render_instructions(launcher: &str) -> String {
 static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instructions(launcher()));
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
-    LazyLock::new(|| render_launcher(TEXTS.nudge_search.trim_end(), launcher()));
+    LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
 
 static RENDERED_NUDGE_READ: LazyLock<String> =
-    LazyLock::new(|| render_launcher(TEXTS.nudge_read.trim_end(), launcher()));
+    LazyLock::new(|| substitute_launcher(TEXTS.nudge_read.trim_end(), launcher()));
 
-fn graph_contents() -> String {
+fn describe_graph_contents() -> String {
     use strum::IntoEnumIterator;
 
     use code_graph::v2::types::{EdgeKind, NodeKind};
@@ -106,22 +108,47 @@ fn graph_contents() -> String {
     )
 }
 
-pub(crate) fn instructions() -> &'static str {
+pub(crate) fn instructions_text() -> &'static str {
     &RENDERED_INSTRUCTIONS
 }
 
-pub(crate) fn nudge_search() -> &'static str {
+pub(crate) fn search_nudge_text() -> &'static str {
     &RENDERED_NUDGE_SEARCH
 }
 
-pub(crate) fn nudge_read() -> &'static str {
+pub(crate) fn read_nudge_text() -> &'static str {
     &RENDERED_NUDGE_READ
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct AssistantSpec {
+struct McpServerText {
+    name: String,
+    command: String,
+}
+
+pub(super) struct McpServer {
+    pub(super) name: &'static str,
+    pub(super) command: String,
+    pub(super) args: Vec<String>,
+}
+
+pub(super) fn mcp_server() -> McpServer {
+    let rendered = substitute_launcher(&TEXTS.mcp_server.command, launcher());
+    let mut words = rendered.split_whitespace().map(str::to_string);
+    McpServer {
+        name: &TEXTS.mcp_server.name,
+        command: words.next().expect("mcp_server.command is non-empty"),
+        args: words.collect(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AgentSpec {
     pub(super) name: String,
+    pub(super) title: String,
+    pub(super) detect: Vec<String>,
     pub(super) instruction_file: ScopedPath,
     #[serde(default)]
     pub(super) json_merges: Vec<JsonMerge>,
@@ -129,6 +156,30 @@ pub(super) struct AssistantSpec {
     pub(super) template_files: Vec<TemplateFile>,
     #[serde(default)]
     pub(super) registrations: Vec<Registration>,
+    pub(super) mcp: Option<McpEntry>,
+    pub(super) skills: Option<SkillDirs>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct McpEntry {
+    pub(super) file: ScopedPath,
+    pub(super) format: McpFormat,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum McpFormat {
+    Claude,
+    Codex,
+    Opencode,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SkillDirs {
+    pub(super) dir: ScopedPath,
+    pub(super) link: Option<ScopedPath>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,12 +213,12 @@ pub(super) struct Registration {
     pub(super) value: ScopedPath,
 }
 
-static SPECS: LazyLock<Vec<AssistantSpec>> = LazyLock::new(|| {
-    let mut specs: Vec<AssistantSpec> = SetupAssets::iter()
+static AGENT_SPECS: LazyLock<Vec<AgentSpec>> = LazyLock::new(|| {
+    let mut specs: Vec<AgentSpec> = SetupAssets::iter()
         .filter_map(|path| {
             let stem = path.strip_prefix("agents/")?.strip_suffix(".yaml")?;
             let file = SetupAssets::get(&path).expect("embedded file must be readable");
-            let spec: AssistantSpec = orbit_utils::yaml::from_slice(&file.data)
+            let spec: AgentSpec = orbit_utils::yaml::from_slice(&file.data)
                 .unwrap_or_else(|e| panic!("config/setup/{path} is invalid: {e}"));
             assert_eq!(
                 spec.name, stem,
@@ -177,43 +228,53 @@ static SPECS: LazyLock<Vec<AssistantSpec>> = LazyLock::new(|| {
         })
         .collect();
     specs.sort_by(|a, b| a.name.cmp(&b.name));
-    assert!(!specs.is_empty(), "no assistant specs embedded");
+    assert!(!specs.is_empty(), "no agent specs embedded");
     specs
 });
 
-pub(super) fn all() -> &'static [AssistantSpec] {
-    &SPECS
+#[derive(Clone, Copy)]
+pub(super) struct Agent(&'static AgentSpec);
+
+impl std::ops::Deref for Agent {
+    type Target = AgentSpec;
+
+    fn deref(&self) -> &AgentSpec {
+        self.0
+    }
 }
 
-pub(super) fn get(name: &str) -> Option<&'static AssistantSpec> {
-    SPECS.iter().find(|spec| spec.name == name)
+pub(super) fn agents() -> impl Iterator<Item = Agent> {
+    AGENT_SPECS.iter().map(Agent)
 }
 
-pub(crate) fn names() -> Vec<&'static str> {
-    SPECS.iter().map(|spec| spec.name.as_str()).collect()
+pub(super) fn agent_named(name: &str) -> Option<Agent> {
+    agents().find(|agent| agent.name == name)
 }
+
+pub(crate) fn agent_names() -> Vec<&'static str> {
+    AGENT_SPECS.iter().map(|spec| spec.name.as_str()).collect()
+}
+
+const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
-    pub(super) fn contents(&self) -> String {
-        self.contents_with(launcher())
-    }
-
-    fn contents_with(&self, launcher: &str) -> String {
-        let mut rendered = embedded_text(&self.template);
+    pub(super) fn render(&self) -> String {
+        let mut body = read_embedded_text(&self.template);
         for (name, value) in &TEXTS.template_vars {
-            rendered = rendered.replace(&format!("{{{{{name}}}}}"), value);
+            body = body.replace(&format!("{{{{{name}}}}}"), value);
         }
-        render_launcher(&rendered, launcher)
+        let body = substitute_launcher(&body, launcher());
+        format!("{TEMPLATE_CHECKSUM_PREFIX}{}\n{body}", sha256_hex(&body))
     }
 
-    pub(super) fn is_unmodified(&self, contents: &str) -> bool {
-        [DIRECT_LAUNCHER, GLAB_LAUNCHER]
-            .iter()
-            .any(|launcher| self.contents_with(launcher) == contents)
+    pub(super) fn is_unmodified(contents: &str) -> bool {
+        contents.split_once('\n').is_some_and(|(stamp, body)| {
+            stamp.strip_prefix(TEMPLATE_CHECKSUM_PREFIX) == Some(sha256_hex(body).as_str())
+        })
     }
 }
 
-fn embedded_text(name: &str) -> String {
+fn read_embedded_text(name: &str) -> String {
     let file =
         SetupAssets::get(name).unwrap_or_else(|| panic!("config/setup/{name} is not embedded"));
     String::from_utf8(file.data.into_owned())
@@ -223,50 +284,30 @@ fn embedded_text(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::setup::json_ops;
+    use crate::commands::setup::components::json;
 
     #[test]
-    fn all_specs_parse_and_expected_assistants_exist() {
+    fn all_specs_parse_and_expected_agents_exist() {
         for name in ["duo", "claude", "codex", "opencode", "pi"] {
-            assert!(get(name).is_some(), "missing spec for {name}");
+            assert!(agent_named(name).is_some(), "missing spec for {name}");
         }
-        assert_eq!(names().len(), all().len());
+        assert_eq!(agent_names().len(), agents().count());
     }
 
     #[test]
     fn merge_entries_contain_their_marker() {
-        for spec in all() {
+        for spec in agents() {
             for merge in &spec.json_merges {
                 assert!(!merge.marker.is_empty(), "{}: empty marker", spec.name);
                 for entry in &merge.entries {
                     assert!(
-                        json_ops::contains_marker(entry, &merge.marker),
+                        json::contains_marker(entry, &merge.marker),
                         "{}: entry {entry} does not contain marker {:?}",
                         spec.name,
                         merge.marker
                     );
                 }
             }
-        }
-    }
-
-    #[test]
-    fn template_and_text_assets_resolve() {
-        for spec in all() {
-            for template_file in &spec.template_files {
-                let rendered = template_file.contents();
-                assert!(!rendered.is_empty());
-                assert!(
-                    !rendered.contains("{{"),
-                    "{}: unresolved placeholder in {}",
-                    spec.name,
-                    template_file.template
-                );
-            }
-        }
-        for text in [instructions(), nudge_search(), nudge_read()] {
-            assert!(!text.trim().is_empty());
-            assert!(!text.contains("{{"), "unresolved placeholder: {text}");
         }
     }
 
@@ -279,14 +320,27 @@ mod tests {
             let rendered = render_instructions(launcher);
             assert!(rendered.contains(expected), "{launcher}: {rendered}");
             assert!(!rendered.contains("{{orbit}}"), "{launcher}");
+            for phrase in [
+                "` commands to bash tools for file/code search and callers/callees",
+                "FTS.",
+                "Terms AND; `a|b` OR",
+                "Grep means `",
+                "grep shows IDs and file:lines",
+                "Do not reread unchanged files",
+            ] {
+                assert!(rendered.contains(phrase), "{launcher}: {phrase}");
+            }
+            assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
         }
-        let glab = get("claude").unwrap().json_merges[0].entries[0].to_string();
+        assert!(search_nudge_text().contains("FTS."));
+        assert!(read_nudge_text().contains("Do not reread unchanged files"));
+        let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
 
     #[test]
     fn opencode_plugins_are_shell_safe() {
-        let contents = get("opencode").unwrap().template_files[0].contents();
+        let contents = agent_named("opencode").unwrap().template_files[0].render();
         assert!(!contents.contains('`'));
         assert!(!contents.contains("$("));
 
@@ -300,7 +354,7 @@ mod tests {
 
     #[test]
     fn instruction_files_are_known_names_and_globals_are_home_anchored() {
-        for spec in all() {
+        for spec in agents() {
             assert!(
                 ["AGENTS.md", "CLAUDE.md"].contains(&spec.instruction_file.project.as_str()),
                 "{}: unexpected instruction file {}",
@@ -315,6 +369,10 @@ mod tests {
                         .iter()
                         .flat_map(|r| [&r.file.global, &r.value.global]),
                 )
+                .chain(spec.mcp.iter().map(|entry| &entry.file.global))
+                .chain(spec.skills.iter().flat_map(|dirs| {
+                    std::iter::once(&dirs.dir.global).chain(dirs.link.iter().map(|l| &l.global))
+                }))
             {
                 assert!(global.starts_with("~/"), "{}: {global}", spec.name);
             }

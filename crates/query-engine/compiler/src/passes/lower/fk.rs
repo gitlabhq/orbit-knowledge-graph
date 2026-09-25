@@ -42,16 +42,6 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let mut candidate_ctes = HashMap::new();
     let mut candidate_extra_predicates = fk_candidate_extra_predicates(plan)?;
 
-    // Elevated access: FilterOnly CTE so SecurityPass injects the role-gated filter.
-    if center_np.needs_elevated_filter {
-        center_where_parts.extend(emit_filter_subquery(
-            center_np,
-            center_alias,
-            DEFAULT_PRIMARY_KEY,
-            &mut ctes,
-        )?);
-    }
-
     emit_join_target_candidate_ctes(
         plan,
         &mut ctes,
@@ -218,9 +208,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
             from = new_from;
             selects.extend(ns);
             where_parts.extend(nw);
-        } else if target_np.hydration == HydrationStrategy::FilterOnly
-            || target_np.needs_elevated_filter
-        {
+        } else if target_np.hydration == HydrationStrategy::FilterOnly {
             where_parts.extend(emit_filter_subquery(
                 target_np,
                 &fk_alias,

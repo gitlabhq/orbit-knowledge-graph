@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::ast::Expr;
-use crate::scope::ScopePrefix;
+use crate::scope::ScopeProof;
 use ontology::constants::*;
 
 use crate::input::*;
 
-use super::{Plan, PlanBody, TextExcerpt};
-use crate::passes::shared::{requested_columns, resolve_edge_table};
+use super::{Plan, PlanBody};
+use crate::passes::shared::resolve_edge_table;
 
 pub struct Hop {
     pub rel_types: Vec<String>,
@@ -25,9 +24,8 @@ pub struct Hop {
     pub filters: Vec<(String, InputFilter)>,
     /// None for the first hop (it's the initial FROM).
     pub join_prev: Option<JoinColumns>,
-    /// Tight `traversal_path` prefix to confine this hop's edge scan to,
-    /// carried over from the originating `InputRelationship`.
-    pub scope_prefix: Option<ScopePrefix>,
+    /// Logical proof that this hop can use the anchored traversal scope.
+    pub scope_proof: Option<ScopeProof>,
     /// Whether this hop keeps both endpoints in the same namespace (intrinsic
     /// child). Gates the FK-chain lowering, which is only result-equivalent to
     /// the edge scan for such relationships.
@@ -68,10 +66,7 @@ pub struct NodePlan {
     pub is_global: bool,
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
-    pub text_excerpt: TextExcerpt,
-    pub dedup_columns: Vec<String>,
     pub use_narrowing: bool,
-    pub needs_elevated_filter: bool,
     pub fk_needs_join: bool,
     pub emit_select: bool,
 }
@@ -135,9 +130,6 @@ pub enum HydrationStrategy {
 pub enum Strategy {
     /// Flat edge chain: e0 JOIN e1 JOIN e2 ... (no CTEs).
     Flat,
-    Bidirectional {
-        meeting_hop: usize,
-    },
     SingleNode,
     /// FK-derived traversal answered by joining node tables on their FK
     /// columns, with zero edge-table scans. The [`FkShape`] selects how the
@@ -156,13 +148,13 @@ pub enum FkShape {
     Chain,
 }
 
-pub fn plan(input: &mut Input) -> Plan {
+pub fn plan(input: &Input) -> Plan {
     let hops = build_hops(input);
     let mut nodes = build_node_plans(input);
 
-    let (mut hops, elided_fks, scope_guards, input) =
+    let (mut hops, elided_fks, scope_requirements) =
         if input.compiler.plan_overrides.skip_fk_elision {
-            (hops, Vec::new(), Vec::new(), input)
+            (hops, Vec::new(), Vec::new())
         } else {
             elide_hops(hops, &mut nodes, input)
         };
@@ -171,9 +163,7 @@ pub fn plan(input: &mut Input) -> Plan {
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
-    if reversed {
-        input.relationships.reverse();
-    }
+    let _ = reversed;
 
     for node_plan in nodes.values_mut() {
         if overrides.force_join {
@@ -200,8 +190,6 @@ pub fn plan(input: &mut Input) -> Plan {
 
     resolve_node_flags(&hops, &mut nodes, input);
 
-    resolve_dedup_columns(&mut nodes, input);
-
     if input.query_type == QueryType::Aggregation {
         let group_by_nodes: HashSet<&str> =
             crate::input::node_group_ids(&input.aggregation.group_by).collect();
@@ -227,11 +215,8 @@ pub fn plan(input: &mut Input) -> Plan {
         nodes,
         hops,
         strategy,
-        limit: input.fetch_limit(),
-        order_by: input.order_by.clone(),
-        cursor: input.cursor.clone(),
         node_edge_mappings,
-        scope_guards,
+        scope_requirements,
         denorm_columns: input.compiler.denormalized_columns.clone(),
         denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),
         table_columns: input.compiler.table_columns.clone(),
@@ -296,7 +281,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 scope_preserving: rel.scope_preserving,
                 filters: crate::passes::shared::ordered_filters(&rel.filters),
                 join_prev: None,
-                scope_prefix: rel.scope_prefix.clone(),
+                scope_proof: rel.scope_proof.clone(),
                 cascade_anchor: false,
             }
         })
@@ -323,10 +308,7 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
                     node_ids: n.node_ids.clone(),
                     id_range: n.id_range.clone(),
                     columns: n.columns.clone(),
-                    text_excerpt: TextExcerpt::default(),
-                    dedup_columns: Vec::new(),
                     use_narrowing: false,
-                    needs_elevated_filter: false,
                     fk_needs_join: false,
                     emit_select: true,
                 },
@@ -375,20 +357,14 @@ fn is_pure_scope_anchor(
 ///     `traversal_path` prefix already encodes the containment and every
 ///     survivor is then FK-lowerable by `detect_fk`.
 #[allow(clippy::type_complexity)]
-fn elide_hops<'a>(
+fn elide_hops(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
-    input: &'a mut Input,
-) -> (
-    Vec<Hop>,
-    Vec<(String, String, String)>,
-    Vec<Expr>,
-    &'a mut Input,
-) {
+    input: &Input,
+) -> (Vec<Hop>, Vec<(String, String, String)>, Vec<ScopeProof>) {
     let mut keep_hops = Vec::new();
-    let mut keep_rels = Vec::new();
     let mut elided_fks = Vec::new();
-    let mut scope_guards = Vec::new();
+    let mut scope_requirements = Vec::new();
 
     let mut hop_count: HashMap<String, usize> = HashMap::new();
     for hop in &hops {
@@ -398,20 +374,19 @@ fn elide_hops<'a>(
     let sole_non_fk = input.query_type == QueryType::Aggregation
         && hops.iter().filter(|h| h.fk.is_none()).count() == 1;
 
-    for (i, hop) in hops.into_iter().enumerate() {
+    for hop in hops {
         if sole_non_fk
             && hop.fk.is_none()
             && hop.scope_preserving
-            && hop.scope_prefix.is_some()
+            && hop.scope_proof.is_some()
             && hop.filters.is_empty()
             && let Some(anchor) = [hop.from_node.as_str(), hop.to_node.as_str()]
                 .into_iter()
                 .find(|a| is_pure_scope_anchor(a, nodes, input, &hop_count))
                 .map(str::to_string)
         {
-            scope_guards.extend(hop.scope_prefix.as_ref().map(ScopePrefix::resolved));
+            scope_requirements.extend(hop.scope_proof.clone());
             nodes.remove(&anchor);
-            input.nodes.retain(|n| n.id != anchor);
             continue;
         }
 
@@ -476,14 +451,10 @@ fn elide_hops<'a>(
             elided_fks.push((target_node, fk_node, fk_column));
         } else {
             keep_hops.push(hop);
-            if i < input.relationships.len() {
-                keep_rels.push(input.relationships[i].clone());
-            }
         }
     }
 
-    input.relationships = keep_rels;
-    (keep_hops, elided_fks, scope_guards, input)
+    (keep_hops, elided_fks, scope_requirements)
 }
 
 /// Star first (covers single-hop FK), then chain. Chain applies to aggregations
@@ -796,20 +767,6 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         }
     }
 
-    let elevated: Vec<String> = nodes
-        .values()
-        .filter(|np| {
-            np.hydration == HydrationStrategy::Skip
-                && np.has_traversal_path
-                && np.table.is_some()
-                && has_elevated_access_level(np, input)
-        })
-        .map(|np| np.alias.clone())
-        .collect();
-    for alias in elevated {
-        nodes.get_mut(&alias).unwrap().needs_elevated_filter = true;
-    }
-
     for hop in hops {
         let Some(ref fk) = hop.fk else { continue };
         let Some(np) = nodes.get(&fk.target_node) else {
@@ -821,70 +778,6 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         if needs {
             nodes.get_mut(&fk.target_node).unwrap().fk_needs_join = true;
         }
-    }
-}
-
-/// Whether an entity requires a higher access level than the default (20).
-/// Only these entities need a FilterOnly subquery in edge-based queries so
-/// the security pass can enforce their stricter min_access_level.
-fn has_elevated_access_level(np: &NodePlan, input: &Input) -> bool {
-    let Some(ref entity) = np.entity else {
-        return false;
-    };
-    input
-        .entity_auth
-        .get(entity)
-        .is_some_and(|cfg| cfg.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
-}
-
-fn resolve_dedup_columns(nodes: &mut HashMap<String, NodePlan>, input: &Input) {
-    let aliases: Vec<String> = nodes.keys().cloned().collect();
-    for alias in aliases {
-        let np = &nodes[&alias];
-        let mut seen = HashSet::new();
-        let mut cols = Vec::new();
-
-        let mut push = |col: &str| {
-            if seen.insert(col.to_string()) {
-                cols.push(col.to_string());
-            }
-        };
-
-        push(DEFAULT_PRIMARY_KEY);
-        push(VERSION_COLUMN);
-        if np.has_traversal_path {
-            push(TRAVERSAL_PATH_COLUMN);
-        }
-
-        for col in requested_columns(&np.columns) {
-            push(&col);
-        }
-
-        for (prop, _) in &np.filters {
-            push(prop);
-        }
-
-        for agg in &input.aggregation.metrics {
-            if agg.expr.node() == alias.as_str()
-                && let Some(prop) = agg.expr.property()
-            {
-                push(prop);
-            }
-        }
-
-        if let Some(ref ob) = input.order_by
-            && ob.node == alias
-        {
-            push(&ob.property);
-        }
-
-        if np.redaction_id_column != DEFAULT_PRIMARY_KEY {
-            push(&np.redaction_id_column);
-        }
-
-        push(DELETED_COLUMN);
-
-        nodes.get_mut(&alias).unwrap().dedup_columns = cols;
     }
 }
 
@@ -906,10 +799,7 @@ mod tests {
             is_global,
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             columns: None,
-            text_excerpt: TextExcerpt::default(),
-            dedup_columns: Vec::new(),
             use_narrowing: false,
-            needs_elevated_filter: false,
             fk_needs_join: false,
             emit_select: true,
         }
@@ -931,7 +821,7 @@ mod tests {
             }),
             filters: Vec::new(),
             join_prev: None,
-            scope_prefix: None,
+            scope_proof: None,
             scope_preserving,
             cascade_anchor: false,
         }

@@ -26,7 +26,7 @@ enum FormatName {
   FORMAT_NAME_GOON = 1;
 }
 
-// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
+// Core service API. Gated behind the :knowledge_graph feature flag
 // in Rails. JWT auth carries user identity and traversal IDs for authorization.
 // Renamed from gkg.v1.KnowledgeGraphService (knowledge-graph#1152, chain
 // T10). The server keeps answering the old request paths through a legacy
@@ -60,10 +60,14 @@ service OrbitService {
   // command catalog and InvokeAgentCommand instead.
   rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
 
-  // Lists the server-defined named queries with their DSL rendered for the
-  // caller (bindings resolved from JWT claims, parameters filled with their
-  // declared examples). Lets clients discover and display named queries
-  // without owning copies of the query text.
+  // Lists the standalone Orbit Remote skills embedded in this deployment.
+  // Used by Rails to build GET /api/v4/orbit/skills.
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+
+  // Returns one complete, versioned skill tree or its cache metadata.
+  // Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
+  rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
+
   // Used by GET /api/v4/orbit/templates.
   rpc ListNamedQueries(ListNamedQueriesRequest) returns (ListNamedQueriesResponse);
 
@@ -97,17 +101,22 @@ message ExecuteQueryMessage {
   }
 }
 
-// Query language selector.
 enum QueryType {
   QUERY_TYPE_JSON = 0;
   QUERY_TYPE_NAMED = 1;  // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
 }
 
+enum QueryLanguage {
+  QUERY_LANGUAGE_JSON = 0;
+  QUERY_LANGUAGE_GQL = 1;
+}
+
 // Client-sent initial message to start a query.
 message ExecuteQueryRequest {
-  string query = 1;            // JSON DSL query string
+  string query = 1;
   ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: GOON text
-  QueryType query_type = 3;    // defaults to JSON DSL
+  QueryType query_type = 3;
+  QueryLanguage language = 4;
 }
 
 // Server-sent final message with query results.
@@ -215,6 +224,7 @@ message SchemaNodeStyle {
 // Request for the query DSL grammar.
 message GetQueryDslRequest {
   ResponseFormat format = 1;  // RAW: full JSON Schema; LLM: condensed TOON
+  QueryLanguage language = 2;
 }
 
 // Response carrying the DSL grammar in the requested format.
@@ -224,6 +234,51 @@ message GetQueryDslResponse {
     string raw_json_schema = 1;  // format = RAW: full JSON Schema as a JSON string
     string formatted_text = 2;   // format = LLM: condensed TOON
   }
+}
+
+// ---------------------------------------------------------------------------
+// Skills — unary, returns embedded Orbit Remote skill artifacts
+// ---------------------------------------------------------------------------
+
+// Request for the embedded skill catalog.
+message ListSkillsRequest {}
+
+// Response listing every skill embedded in the deployed server.
+message ListSkillsResponse {
+  repeated SkillSummary skills = 1;
+  string server_version = 2;  // Not part of skill identity.
+}
+
+message SkillSummary {
+  reserved 3;
+  reserved "tree_sha256";
+  string name = 1;
+  string version = 2;
+  string description = 4;
+  string compatibility = 5;
+}
+
+// Request for one embedded skill by name.
+message GetSkillRequest {
+  string name = 1;
+  bool metadata_only = 2;  // true omits files for a cheap cache revalidation
+}
+
+message GetSkillResponse {
+  reserved 3;
+  reserved "tree_sha256";
+  string name = 1;
+  string version = 2;
+  repeated SkillFile files = 4;  // empty when metadata_only is true
+  string compatibility = 5;
+  string server_version = 6;
+}
+
+// One UTF-8 file in an embedded skill tree.
+message SkillFile {
+  string path = 1;
+  string sha256 = 2;
+  string content = 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,19 +310,18 @@ message ResponseFormatSchema {
 // ListNamedQueries — unary, returns the named-query catalog
 // ---------------------------------------------------------------------------
 
-// Request for the named-query catalog.
-message ListNamedQueriesRequest {}
+message ListNamedQueriesRequest {
+  QueryLanguage language = 1;
+}
 
-// Response listing every embedded named query.
 message ListNamedQueriesResponse {
   repeated NamedQueryDefinition queries = 1;
 }
 
-// A named query with its DSL rendered for the requesting user.
 message NamedQueryDefinition {
   string name = 1;         // stable identifier, e.g. "recent_merges"
   string description = 2;  // human-readable summary from the template YAML
-  string raw_query = 3;    // rendered query DSL as a JSON string, executable as-is
+  string raw_query = 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +367,9 @@ message ResourceAuthorization {
 // ListTools — unary, returns available MCP tool definitions
 // ---------------------------------------------------------------------------
 
-message ListToolsRequest {}
+message ListToolsRequest {
+  QueryLanguage language = 1;
+}
 
 message ListToolsResponse {
   repeated ToolDefinition tools = 1;
@@ -334,6 +390,7 @@ message ToolDefinition {
 message ListAgentCommandsRequest {
   repeated string command_names = 1; // empty means list every command
   ResponseFormat format = 2;         // RAW: command definitions; LLM: TOON command catalog
+  QueryLanguage language = 3;
 }
 
 message ListAgentCommandsResponse {
@@ -344,6 +401,7 @@ message ListAgentCommandsResponse {
 message InvokeAgentCommandRequest {
   string command_name = 1;
   string parameters_json = 2; // downstream command parameters object as JSON
+  QueryLanguage language = 3;
 }
 
 message InvokeAgentCommandResponse {

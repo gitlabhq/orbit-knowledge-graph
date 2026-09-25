@@ -1,0 +1,39 @@
+# Orbit performance test: seeds a synthetic graph into a real caproni + Orbit
+# stack and replays the query corpus over gRPC (scripts/ci/orbit-perf.sh).
+# Default branch only, never on MRs: it stands up a full cluster.
+orbit-perf:
+  extends:
+    - .job-template
+    - .sccache-template
+  stage: benchmark
+  needs: []
+  # Each run is a full cluster and one datapoint: never cancel, never overlap.
+  interruptible: false
+  resource_group: orbit-perf
+  timeout: 2h
+  tags: [saas-linux-large-amd64]
+  services:
+    - docker:dind
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    # Solo schedules also run on the default branch.
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      allow_failure: true
+  variables:
+    # docker:dind, mirrors caproni .integration-base
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: 1
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+    FF_NETWORK_PER_BUILD: 1
+    SYNTH_CONFIG: crates/xtask/simulator_medium.yaml  # ~12M nodes / ~59M edges
+    ROUNDS: "5"
+    CONCURRENCY: "20"
+  script:
+    - bash scripts/ci/orbit-perf.sh
+  artifacts:
+    when: always
+    paths:
+      - loadtest-results.md

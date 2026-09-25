@@ -6,7 +6,7 @@ const REMINDER = "{{reminder}}";
 
 export const OrbitPlugin = async () => {
   let reminded = false;
-  const root = process.env.ORBIT_DATA_DIR || join(homedir(), ".orbit");
+  const root = process.env.ORBIT_DATA_DIR || join(homedir(), ".gitlab", "orbit");
   return {
     "tool.execute.after": async (input, output) => {
       if (reminded) return;

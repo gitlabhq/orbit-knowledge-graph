@@ -134,10 +134,9 @@ pub struct TextIndexMeta {
 /// optimize, enforce, SIP, fold, etc.).
 #[derive(Debug, Clone)]
 pub struct CompilerMetadata {
-    /// Per-alias scope prefixes derived by `restrict` from anchored nodes and
-    /// flooded across scope-preserving edges; the security pass ANDs them onto
-    /// the alias's scan.
-    pub scope_prefixes: HashMap<String, crate::scope::ScopePrefix>,
+    /// Per-alias scope proofs derived from anchored nodes and propagated across
+    /// scope-preserving edges. Downstream passes lower them into predicates.
+    pub scope_proofs: HashMap<String, crate::scope::ScopeProof>,
     /// Maps node alias → (edge_alias, edge_column) for edge-only nodes.
     /// Written by lower, read by enforce to emit `_gkg_*` redaction columns
     /// from edge columns instead of node table columns. Also used by SIP
@@ -195,7 +194,7 @@ pub struct CompilerMetadata {
 impl Default for CompilerMetadata {
     fn default() -> Self {
         Self {
-            scope_prefixes: HashMap::new(),
+            scope_proofs: HashMap::new(),
             node_edge_col: HashMap::new(),
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
@@ -610,12 +609,9 @@ pub struct InputRelationship {
     /// The compiler resolves which node has the column from the edge variant's entity types.
     #[serde(skip)]
     pub fk_column: Option<String>,
-    /// Tight `traversal_path` prefix this edge's scan may be confined to. Set by
-    /// `restrict` when both endpoints resolve to the same project/group scope, so
-    /// the edge scan inherits the PK prefix instead of the broad org-wide one.
-    /// Lossless because an edge row's `traversal_path` is its source entity's.
+    /// Proof that this edge scan can use the anchored project or group scope.
     #[serde(skip)]
-    pub scope_prefix: Option<crate::scope::ScopePrefix>,
+    pub scope_proof: Option<crate::scope::ScopeProof>,
     /// Whether every resolved variant of this relationship keeps both endpoints
     /// in the same namespace. Set by `restrict`. Only scope-preserving FK edges
     /// link a node to an intrinsic child whose lifecycle is coupled to the

@@ -702,10 +702,25 @@ pub struct LoweredOutputBinding {
     pub primary_key: ast::Expr,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LoweredMetadata {
+    pub node_sources: std::collections::HashMap<String, (String, String)>,
+    pub edges: Vec<LoweredEdge>,
+    pub stable_order: Vec<ast::OrderExpr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoweredEdge {
+    pub column_prefix: String,
+    pub path_column: Option<String>,
+    pub rel_types: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct LoweredPlan {
     pub ast: ast::Node,
     pub bindings: LoweredBindings,
+    pub metadata: LoweredMetadata,
     pub explain: String,
 }
 
@@ -1096,6 +1111,7 @@ mod tests {
                             },
                         )]),
                     },
+                    metadata: LoweredMetadata::default(),
                     explain: format!("scans={}", candidate.scans),
                 }
             })

@@ -17,6 +17,7 @@ use crate::passes::shared::{
 
 pub fn emit_neighbors(
     plan: &Plan,
+    input: &Input,
     center_alias: &str,
     direction: Direction,
     edge: &EdgeTableConfig,
@@ -70,41 +71,12 @@ pub fn emit_neighbors(
         dedup_subquery(alias, table, select, scan_where)
     }
 
-    let edge_tiebreakers = || -> Vec<OrderExpr> {
-        vec![
-            OrderExpr::asc(Expr::col(edge_alias, SOURCE_ID_COLUMN)),
-            OrderExpr::asc(Expr::col(edge_alias, TARGET_ID_COLUMN)),
-            OrderExpr::asc(Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN)),
-        ]
-    };
-    let projected_tiebreakers = || -> Vec<OrderExpr> {
-        vec![
-            OrderExpr::asc(Expr::ident(redaction_id_column(&center_id))),
-            OrderExpr::asc(Expr::ident(neighbor_id_column())),
-            OrderExpr::asc(Expr::ident(relationship_type_column())),
-            OrderExpr::asc(Expr::ident(neighbor_is_outgoing_column())),
-        ]
-    };
-    let tie_breakers = || {
-        if direction == Direction::Both {
-            projected_tiebreakers()
+    let order_by = match &input.order_by {
+        Some(ob) => vec![if ob.direction == OrderDirection::Desc {
+            OrderExpr::desc(Expr::col(&ob.node, &ob.property))
         } else {
-            edge_tiebreakers()
-        }
-    };
-    let order_by = match &plan.order_by {
-        Some(ob) => {
-            let mut exprs = vec![if ob.direction == OrderDirection::Desc {
-                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
-            } else {
-                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-            }];
-            if plan.cursor.is_some() {
-                exprs.extend(tie_breakers());
-            }
-            exprs
-        }
-        None if plan.cursor.is_some() => tie_breakers(),
+            OrderExpr::asc(Expr::col(&ob.node, &ob.property))
+        }],
         None => vec![],
     };
 
@@ -296,18 +268,18 @@ pub fn emit_neighbors(
             edge_alias,
         );
         q.order_by = order_by;
-        q.limit = Some(plan.limit);
+        q.limit = Some(input.limit);
         Ok(Node::Query(Box::new(q)))
     } else if direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
         outgoing.order_by = order_by;
-        outgoing.limit = Some(plan.limit);
+        outgoing.limit = Some(input.limit);
         Ok(Node::Query(Box::new(outgoing)))
     } else {
         let mut arm = build_arm(direction);
         arm.order_by = order_by;
-        arm.limit = Some(plan.limit);
+        arm.limit = Some(input.limit);
         Ok(Node::Query(Box::new(arm)))
     }
 }

@@ -31,6 +31,8 @@ const (
 	OrbitService_ExecuteQuery_FullMethodName       = "/orbit.v1.OrbitService/ExecuteQuery"
 	OrbitService_GetGraphSchema_FullMethodName     = "/orbit.v1.OrbitService/GetGraphSchema"
 	OrbitService_GetQueryDsl_FullMethodName        = "/orbit.v1.OrbitService/GetQueryDsl"
+	OrbitService_ListSkills_FullMethodName         = "/orbit.v1.OrbitService/ListSkills"
+	OrbitService_GetSkill_FullMethodName           = "/orbit.v1.OrbitService/GetSkill"
 	OrbitService_ListNamedQueries_FullMethodName   = "/orbit.v1.OrbitService/ListNamedQueries"
 	OrbitService_GetResponseFormat_FullMethodName  = "/orbit.v1.OrbitService/GetResponseFormat"
 	OrbitService_GetClusterHealth_FullMethodName   = "/orbit.v1.OrbitService/GetClusterHealth"
@@ -41,7 +43,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
+// Core service API. Gated behind the :knowledge_graph feature flag
 // in Rails. JWT auth carries user identity and traversal IDs for authorization.
 // Renamed from gkg.v1.KnowledgeGraphService (knowledge-graph#1152, chain
 // T10). The server keeps answering the old request paths through a legacy
@@ -69,10 +71,12 @@ type OrbitServiceClient interface {
 	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
 	// command catalog and InvokeAgentCommand instead.
 	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
-	// Lists the server-defined named queries with their DSL rendered for the
-	// caller (bindings resolved from JWT claims, parameters filled with their
-	// declared examples). Lets clients discover and display named queries
-	// without owning copies of the query text.
+	// Lists the standalone Orbit Remote skills embedded in this deployment.
+	// Used by Rails to build GET /api/v4/orbit/skills.
+	ListSkills(ctx context.Context, in *ListSkillsRequest, opts ...grpc.CallOption) (*ListSkillsResponse, error)
+	// Returns one complete, versioned skill tree or its cache metadata.
+	// Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
+	GetSkill(ctx context.Context, in *GetSkillRequest, opts ...grpc.CallOption) (*GetSkillResponse, error)
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(ctx context.Context, in *ListNamedQueriesRequest, opts ...grpc.CallOption) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
@@ -159,6 +163,26 @@ func (c *orbitServiceClient) GetQueryDsl(ctx context.Context, in *GetQueryDslReq
 	return out, nil
 }
 
+func (c *orbitServiceClient) ListSkills(ctx context.Context, in *ListSkillsRequest, opts ...grpc.CallOption) (*ListSkillsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSkillsResponse)
+	err := c.cc.Invoke(ctx, OrbitService_ListSkills_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orbitServiceClient) GetSkill(ctx context.Context, in *GetSkillRequest, opts ...grpc.CallOption) (*GetSkillResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSkillResponse)
+	err := c.cc.Invoke(ctx, OrbitService_GetSkill_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *orbitServiceClient) ListNamedQueries(ctx context.Context, in *ListNamedQueriesRequest, opts ...grpc.CallOption) (*ListNamedQueriesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListNamedQueriesResponse)
@@ -203,7 +227,7 @@ func (c *orbitServiceClient) GetGraphStatus(ctx context.Context, in *GetGraphSta
 // All implementations must embed UnimplementedOrbitServiceServer
 // for forward compatibility.
 //
-// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
+// Core service API. Gated behind the :knowledge_graph feature flag
 // in Rails. JWT auth carries user identity and traversal IDs for authorization.
 // Renamed from gkg.v1.KnowledgeGraphService (knowledge-graph#1152, chain
 // T10). The server keeps answering the old request paths through a legacy
@@ -231,10 +255,12 @@ type OrbitServiceServer interface {
 	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
 	// command catalog and InvokeAgentCommand instead.
 	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
-	// Lists the server-defined named queries with their DSL rendered for the
-	// caller (bindings resolved from JWT claims, parameters filled with their
-	// declared examples). Lets clients discover and display named queries
-	// without owning copies of the query text.
+	// Lists the standalone Orbit Remote skills embedded in this deployment.
+	// Used by Rails to build GET /api/v4/orbit/skills.
+	ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error)
+	// Returns one complete, versioned skill tree or its cache metadata.
+	// Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
+	GetSkill(context.Context, *GetSkillRequest) (*GetSkillResponse, error)
 	// Used by GET /api/v4/orbit/templates.
 	ListNamedQueries(context.Context, *ListNamedQueriesRequest) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
@@ -275,6 +301,12 @@ func (UnimplementedOrbitServiceServer) GetGraphSchema(context.Context, *GetGraph
 }
 func (UnimplementedOrbitServiceServer) GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetQueryDsl not implemented")
+}
+func (UnimplementedOrbitServiceServer) ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSkills not implemented")
+}
+func (UnimplementedOrbitServiceServer) GetSkill(context.Context, *GetSkillRequest) (*GetSkillResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSkill not implemented")
 }
 func (UnimplementedOrbitServiceServer) ListNamedQueries(context.Context, *ListNamedQueriesRequest) (*ListNamedQueriesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListNamedQueries not implemented")
@@ -406,6 +438,42 @@ func _OrbitService_GetQueryDsl_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrbitService_ListSkills_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSkillsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrbitServiceServer).ListSkills(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrbitService_ListSkills_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrbitServiceServer).ListSkills(ctx, req.(*ListSkillsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrbitService_GetSkill_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSkillRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrbitServiceServer).GetSkill(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrbitService_GetSkill_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrbitServiceServer).GetSkill(ctx, req.(*GetSkillRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _OrbitService_ListNamedQueries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListNamedQueriesRequest)
 	if err := dec(in); err != nil {
@@ -504,6 +572,14 @@ var OrbitService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetQueryDsl",
 			Handler:    _OrbitService_GetQueryDsl_Handler,
+		},
+		{
+			MethodName: "ListSkills",
+			Handler:    _OrbitService_ListSkills_Handler,
+		},
+		{
+			MethodName: "GetSkill",
+			Handler:    _OrbitService_GetSkill_Handler,
 		},
 		{
 			MethodName: "ListNamedQueries",

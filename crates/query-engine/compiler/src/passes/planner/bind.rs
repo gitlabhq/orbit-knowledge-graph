@@ -1349,7 +1349,7 @@ mod tests {
                 direction: Direction::Outgoing,
                 filters: Default::default(),
                 fk_column: None,
-                scope_prefix: None,
+                scope_proof: None,
                 scope_preserving: false,
             }],
             ..Default::default()

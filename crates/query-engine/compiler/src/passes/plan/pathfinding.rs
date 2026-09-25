@@ -39,13 +39,10 @@ pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
     nodes.insert(end_alias.clone(), end_np);
 
     Ok(Plan {
-        scope_guards: Vec::new(),
+        scope_requirements: Vec::new(),
         nodes,
         hops: vec![],
         strategy: Strategy::SingleNode,
-        limit: input.fetch_limit(),
-        order_by: None,
-        cursor: input.cursor.clone(),
         node_edge_mappings: HashMap::new(),
         denorm_columns: input.compiler.denormalized_columns.clone(),
         denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),
@@ -79,10 +76,7 @@ fn node_plan_from(node: &InputNode) -> NodePlan {
         is_global: node.is_global,
         redaction_id_column: node.redaction_id_column.clone(),
         columns: node.columns.clone(),
-        text_excerpt: Default::default(),
-        dedup_columns: vec![],
         use_narrowing: false,
-        needs_elevated_filter: false,
         fk_needs_join: false,
         emit_select: true,
     }

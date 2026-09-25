@@ -11,6 +11,8 @@ pub mod hydrate;
 pub mod normalize;
 pub mod plan_node;
 pub mod planner;
+pub mod relationships;
+pub mod response_policy;
 pub mod restrict;
 pub mod security;
 pub mod settings;

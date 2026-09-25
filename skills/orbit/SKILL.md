@@ -1,12 +1,15 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.30.2
+version: 0.32.1
 license: MIT
+compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, gkg, graph, query, glab
   workflow: ai
+  source-project: gitlab-org/orbit/knowledge-graph
+  source-path: skills/orbit
 ---
 
 # Orbit skill
@@ -17,16 +20,26 @@ Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab or
 
 If a `glab orbit` command fails with "command not found", an auth error, or a feature-flag exit code, work through the [first-run setup](references/troubleshooting.md#first-run-setup).
 
+## Fix inaccurate guidance
+
+If guidance is wrong or outdated (command, flag, or behavior), tell the user.
+With their confirmation, open a focused MR against `metadata.source-project` fixing `metadata.source-path` (one fix per MR, Conventional Commits).
+If they decline, note the discrepancy in one line and continue with the corrected command.
+
 ## Discovery
 
 `glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to read the bundled local skill and list any additional runtime skills, or `glab orbit skills get orbit references/local/sql.md` to read one of its files. For entity properties, prefer the recipes in [`references/recipes.md`](references/recipes.md) over schema introspection. They already encode the columns and filters known to work.
 
-If you must introspect, call `glab orbit ontology <Entity...>` with explicit entity names. The unscoped form returns about 17 KB of output. Call it at most once per session, because the ontology does not change mid-session. `glab orbit dsl` prints the full DSL JSON Schema. The ontology command returns an object with a `nodes` array and does not accept `--jq`, so pipe into `jq`. Per-node `outgoing_edges` and `incoming_edges` are arrays of edge type names, not objects:
+If you must introspect, call `glab orbit ontology <Entity...>` with explicit entity names. The unscoped form returns about 17 KB of output. Call it at most once per session, because the ontology does not change mid-session. In JSON mode, `glab orbit dsl` prints the DSL JSON Schema. In GQL mode, run `CALL db.schema()` instead. The ontology command returns an object with a `nodes` array and does not accept `--jq`, so pipe into `jq`. Per-node `outgoing_edges` and `incoming_edges` are arrays of edge type names, not objects:
 
 ```shell
 glab orbit ontology Project |
   jq '.nodes[] | select(.name == "Project") | .properties'
 ```
+
+The default-off Rails `orbit_gql_queries` flag selects one mode per user: JSON objects when off, GQL strings when on. Follow only the active mode's discovery; a mismatched query rejects without parser fallback. GQL mode hides and rejects `get_query_dsl`; use `CALL db.schema()` instead. The JSON recipes below apply only when the flag is off.
+
+The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in that mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one `aggregation` query over N traversal queries for "how many X grouped by Y", and batch related lookups.
 
@@ -34,7 +47,7 @@ When editing Orbit docs or skills, fence executable query JSON as `json orbit-qu
 
 ## Running a query
 
-Write the request body to a file and pass it to `glab orbit query`. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
+Write the request body to a file and pass it to `glab orbit query --file`. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
 Many filters need a numeric project ID. For the repository you are in, let `glab` resolve it from the Git remote.
 
@@ -64,7 +77,7 @@ Put the request body in `/tmp/q.json`.
 ```
 
 ```shell
-glab orbit query /tmp/q.json
+glab orbit query --file /tmp/q.json
 ```
 
 `filters` is an object keyed by property name, not an array. Every query declares its node selectors in the `nodes` array. Filter operators, multi-hop `hops`, and `path_finding` limits are in [`references/query_language.md`](references/query_language.md). Paste-ready shapes for each `query_type` are in [`references/recipes.md`](references/recipes.md).

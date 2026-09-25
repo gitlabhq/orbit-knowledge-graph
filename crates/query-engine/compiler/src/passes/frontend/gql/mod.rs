@@ -48,6 +48,12 @@ const INVARIANT_PREFIXES: [&str; 3] = [
 ];
 
 #[derive(Debug)]
+pub enum RoutedStatement {
+    Query(Box<Input>),
+    Schema(SchemaResponse),
+}
+
+#[derive(Debug)]
 pub enum PreparedStatement {
     Query(Box<CompiledQueryContext>),
     Schema(SchemaResponse),
@@ -60,15 +66,22 @@ pub fn prepare(
     security_context: &SecurityContext,
     scope: IntrospectionScope,
 ) -> Result<PreparedStatement> {
+    match route(raw, ontology, scope)? {
+        RoutedStatement::Query(input) => compile_query(*input, ontology, security_context)
+            .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
+        RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
+    }
+}
+
+pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Result<RoutedStatement> {
     match parse_statement(raw).count_err()? {
-        ast::Statement::Query(query) => {
-            let input = lower::lower(raw, *query).count_err()?;
-            compile_query(input, ontology, security_context)
-                .map(|compiled| PreparedStatement::Query(Box::new(compiled)))
-        }
+        ast::Statement::Query(query) => lower::lower(raw, *query)
+            .count_err()
+            .map(Box::new)
+            .map(RoutedStatement::Query),
         ast::Statement::SchemaCall { node } => resolve_schema(node, ontology, scope)
             .count_err()
-            .map(PreparedStatement::Schema),
+            .map(RoutedStatement::Schema),
     }
 }
 
@@ -81,7 +94,7 @@ pub fn parse(raw: &str) -> Result<Input> {
     }
 }
 
-fn compile_query(
+pub fn compile_query(
     input: Input,
     ontology: &Ontology,
     security_context: &SecurityContext,
@@ -116,8 +129,12 @@ fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
     check_bounds(raw)?;
     let statement = <QueryParser as pest_consume::Parser>::parse(Rule::Statement, raw)
         .map_err(|error| {
+            let (line, column) = match error.line_col {
+                LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
+            };
             QueryError::Validation(format!(
-                "Orbit query syntax: {error}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported."
+                "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
+                error.variant.message()
             ))
         })?
         .single()

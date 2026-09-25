@@ -45,7 +45,7 @@ The agent-facing surface collapses to two MCP tools and two REST endpoints. The 
 | MCP `tools/call` | Routes through `invoke_command` |
 | REST (agent) | `GET /api/v4/orbit/agent/commands`, `POST /api/v4/orbit/agent/commands/:name` |
 | REST (UI / programmatic) | `GET /api/v4/orbit/{query,schema,graph_status,tools,status}` (unchanged) |
-| GKG gRPC | `ListAgentCommands`, `InvokeAgentCommand` (new); plus `GetQueryDsl`, `GetResponseFormat` (new), and the existing `ExecuteQuery`, `GetGraphSchema`, `GetGraphStatus`, `ListTools`, `GetClusterHealth` |
+| GKG gRPC | `ListAgentCommands`, `InvokeAgentCommand`, `GetQueryDsl`, `GetResponseFormat`, `ListSkills`, and `GetSkill`; plus the existing `ExecuteQuery`, `GetGraphSchema`, `GetGraphStatus`, `ListTools`, and `GetClusterHealth` |
 
 The new agent REST endpoints sit under `/orbit/agent/*` and are marked `hidden: true` in Grape. That namespace is the agent-only contract. GKG can change the command catalog at any time. This does not break dashboards or hand-written API clients. Those dashboards use the structured `/orbit/{query,schema,...}` endpoints.
 
@@ -53,7 +53,7 @@ The new agent REST endpoints sit under `/orbit/agent/*` and are marked `hidden: 
 
 The command registry lives in the GKG server at `crates/orbit-server/src/tools/registry.rs` (`CommandRegistry`). Each command has a name, a short description, and a JSON Schema for its parameters. This is the same `ToolDefinition` shape we already use for MCP tools.
 
-Initial catalog:
+Initial commands:
 
 | Command | Where it executes | Why |
 |---|---|---|
@@ -62,12 +62,41 @@ Initial catalog:
 | `get_query_dsl` | GKG executor (`InvokeAgentCommand`) | Returns `config/schemas/graph_query.schema.json` and `config/QUERY_DSL_VERSION` (RAW) or a versioned TOON-condensed grammar (LLM) |
 | `get_response_format` | GKG executor (`InvokeAgentCommand`) | Returns the response JSON Schema and its semver from `RAW_OUTPUT_FORMAT_VERSION` |
 
-The two new commands (`get_query_dsl`, `get_response_format`) directly answer the discovery problems that motivated this ADR:
+The schema-discovery commands (`get_query_dsl`, `get_response_format`) directly answer the discovery problems that motivated this ADR:
 
 - `get_query_dsl` decouples the DSL grammar from the `query_graph` tool description. Agents that hit truncation can still fetch the full grammar on demand, along with `QUERY_DSL_VERSION`. Direct API consumers can use the `GetQueryDsl` RPC or a REST endpoint such as `GET /api/v4/orbit/dsl`; MCP agents use the command catalog and `InvokeAgentCommand`.
 - `get_response_format` returns the JSON Schema for the formatter output plus the matching `RAW_OUTPUT_FORMAT_VERSION`. Coding agents that build Python iteration on top of `query_graph` get an authoritative shape they can pin against.
 
-Both new commands accept a `format: raw | llm` parameter, mirroring `get_graph_schema`. RAW returns the verbatim JSON Schema; LLM returns a TOON-condensed form to save tokens.
+Both schema-discovery commands accept a `format: raw | llm` parameter, mirroring `get_graph_schema`. RAW returns the verbatim JSON Schema; LLM returns a TOON-condensed form to save tokens.
+
+### Skills are not commands
+
+Skills are a CLI delivery channel, not an agent capability. The typed `ListSkills`
+and `GetSkill` gRPC methods serve the deployed Orbit Remote skill to Rails, whose
+typed `/orbit/skills` endpoints are the only consumer. The methods deliberately
+sit outside `CommandRegistry`, so MCP agents can neither list nor invoke skills.
+
+The server embeds only `skills/orbit`; Orbit Local continues to own
+`skills/orbit-cli`. A skill is identified by its frontmatter `name` and
+top-level `version`. The merge request check requires a version bump for changes
+under the corresponding `skills/<name>/` tree. It is not a content-identity
+guarantee: concurrent changes can choose the same next version, and an explicit
+`[skip skill-version-bump-check]` bypass exists. Both manifests include
+`compatibility` for environment discovery.
+
+`ListSkills` returns each skill's name, version, description, and compatibility.
+`GetSkill` returns the versioned tree, or no files when `metadata_only` is true.
+Full-tree responses sort normalized relative paths and include each UTF-8 file's
+SHA-256 for integrity verification. Both responses include `server_version` as
+deployment provenance; it is not part of skill identity.
+
+Rails uses `"<version>"` as the item ETag. The collection ETag is a digest over
+sorted `(name, version)` pairs. Clients validate every per-file
+SHA-256 before publishing a downloaded tree and key their caches by the skill
+version. Unknown names return `NOT_FOUND` with sorted known names.
+
+This artifact envelope is separate from the query formatter response. Adding or
+changing it does not require a `raw_output_format` pin bump.
 
 ### Command flow
 
@@ -100,7 +129,7 @@ Two control points keep this safe:
 
 ### `list_commands` and `invoke_command` shape
 
-`list_commands` accepts an optional `command_names` array and returns a slice of the registry. `invoke_command` requires `command_name` and accepts a generic `parameters` object that GKG validates against the registered schema.
+`list_commands` accepts an optional `command_names` array and returns a slice of the catalog. `invoke_command` requires `command_name` and accepts a generic `parameters` object that GKG validates against the registered invocation schema.
 
 The MCP wrapper (`API::Orbit::McpHandlers::CallTool`) advertises either the legacy tool set or the new `list_commands`/`invoke_command` pair, controlled by a feature flag (see [Feature flag rollout](#feature-flag-rollout)). Agents discover the command catalog by calling `list_commands` once at the start of a session.
 

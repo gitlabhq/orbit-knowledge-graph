@@ -8,12 +8,15 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.10.1
+version: 0.18.1
 license: MIT
+compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
   audience: developers
   keywords: orbit, orbit-cli, orbit-local, knowledge-graph, code-graph, duckdb, sql, repo-map
   workflow: ai
+  source-project: gitlab-org/orbit/knowledge-graph
+  source-path: skills/orbit-cli
 ---
 
 # Orbit local CLI skill
@@ -31,19 +34,30 @@ this tree. The path defaults to `SKILL.md`.
 
 Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 
+## Fix inaccurate guidance
+
+If guidance is wrong or outdated (command, flag, or behavior), tell the user.
+With their confirmation, open a focused MR against `metadata.source-project` fixing `metadata.source-path` (one fix per MR, Conventional Commits).
+If they decline, note the discrepancy in one line and continue with the corrected command.
+
 ## Find, then read
 
 ```shell
 orbit index .
 orbit grep "rate limit" --path src --kind Method,Function
-orbit context Definition:<id>          # or one file path
+orbit grep 'query_arrow|insert_batch|execute' --path crates/duckdb-client
+orbit context Definition:<id> src/lib.rs:120-180 crates/duckdb-client
 ```
 
-`grep` returns `Definition:<id>` references. Pass them to `context`.
-Definition targets list connections by edge kind: `<--` is a caller, `-->`
-is a callee. Connections from test, fixture, and generated files are hidden
-but counted, and `--tests` shows them. Reuse the returned source. Never
-truncate Orbit output.
+Quote `a|b|c` for OR alternatives. Each alternative uses conjunctive FTS, and a
+single token must also match literally, ignoring case. Results rank exact names,
+then name/path hits, then body mentions. Rows include Definition IDs and ranges;
+body mentions also show the count and first matching line.
+
+Pass Definition IDs, exact FQNs, paths, ranges, or directories to `context`.
+Definition targets show full source and indexed relationships. File targets show
+a compact map and at most ten connections per section, with omitted counts.
+`<--` is a caller and `-->` is a callee. Reuse the returned source.
 
 <!-- orbit:section quick-start -->
 ## Query and map

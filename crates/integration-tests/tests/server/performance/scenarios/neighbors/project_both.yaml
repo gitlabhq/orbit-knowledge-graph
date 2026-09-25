@@ -1,0 +1,10 @@
+description: Neighbors of a Project in both directions
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}],
+      "neighbors": {"direction": "both"}
+    }
+expect:
+  compile_only: true

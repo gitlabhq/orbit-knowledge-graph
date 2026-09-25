@@ -2,14 +2,13 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use duckdb_client::search::DuckDbSearch;
-use orbit_search::{GrepOutcome, RecallFilter, SearchVocab};
+use orbit_search::{GrepOutcome, RecallFilter};
 
 use crate::workspace;
 
 pub(super) struct LocalBackend {
     search: DuckDbSearch,
     header: String,
-    git: workspace::GitInfo,
 }
 
 impl LocalBackend {
@@ -22,16 +21,11 @@ impl LocalBackend {
         Ok(Self {
             search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, paths)?,
             header: git.short_sha().to_string(),
-            git,
         })
     }
 
     pub(super) fn header(&self) -> &str {
         &self.header
-    }
-
-    pub(super) fn git(&self) -> &workspace::GitInfo {
-        &self.git
     }
 
     pub(super) fn search(&self) -> &DuckDbSearch {
@@ -42,10 +36,9 @@ impl LocalBackend {
         &self,
         query: &str,
         limit: usize,
-        vocab: &SearchVocab,
         filter: &RecallFilter,
     ) -> Result<(GrepOutcome, Vec<duckdb_client::search::NodeValue>)> {
-        self.search.grep(query, limit, vocab, filter)
+        self.search.grep(query, limit, filter)
     }
 }
 
@@ -104,6 +97,10 @@ mod tests {
         }
 
         fn scoped_search(self, paths: &[&str]) -> DuckDbSearch {
+            self.search_with_sources(paths, &[])
+        }
+
+        fn search_with_sources(self, paths: &[&str], sources: &[(i64, &str)]) -> DuckDbSearch {
             self.client.load_extension("fts").unwrap();
             self.client
                 .execute(
@@ -115,6 +112,14 @@ mod tests {
                     &[serde_json::json!(7), serde_json::json!("sha")],
                 )
                 .unwrap();
+            for (id, source) in sources {
+                self.client
+                    .execute(
+                        "UPDATE gl_def_doc_7 SET source = ?1 WHERE def_id = ?2",
+                        &[serde_json::json!(source), serde_json::json!(id)],
+                    )
+                    .unwrap();
+            }
             self.client
                 .execute(
                     &duckdb_client::search::create_fts_index_sql("gl_def_doc_7"),
@@ -124,10 +129,6 @@ mod tests {
             let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
             DuckDbSearch::scoped(self.client, 7, "sha", &paths).unwrap()
         }
-    }
-
-    fn vocab(search: &DuckDbSearch) -> SearchVocab {
-        super::super::build_vocab(search).unwrap()
     }
 
     fn kinds(kinds: &[&str]) -> RecallFilter {
@@ -193,9 +194,8 @@ mod tests {
         g.edge(2, "CALLS", 3);
 
         let search = g.search();
-        let vocab = vocab(&search);
         let (_, nodes) = search
-            .grep("dlq publish", 5, &vocab, &RecallFilter::default())
+            .grep("dlq publish", 5, &RecallFilter::default())
             .unwrap();
         assert_eq!(nodes[0].entity_type, "Definition");
         assert_eq!(nodes[0].id, 1);
@@ -212,10 +212,7 @@ mod tests {
         g.def(3, "Cli::limit", "limit", "crates/cli/src/main.rs");
 
         let search = g.scoped_search(&["crates/compiler"]);
-        let vocab = vocab(&search);
-        let (outcome, _) = search
-            .grep("limit", 5, &vocab, &RecallFilter::default())
-            .unwrap();
+        let (outcome, _) = search.grep("limit", 5, &RecallFilter::default()).unwrap();
         let ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
         assert_eq!(ids, vec![2]);
     }
@@ -228,10 +225,7 @@ mod tests {
         g.def(3, "Cli::limit", "limit", "crates/cli/src/main.rs");
 
         let search = g.scoped_search(&["crates/*/src/main.rs", "e2e/"]);
-        let vocab = vocab(&search);
-        let (outcome, _) = search
-            .grep("limit", 5, &vocab, &RecallFilter::default())
-            .unwrap();
+        let (outcome, _) = search.grep("limit", 5, &RecallFilter::default()).unwrap();
         let mut ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
         ids.sort_unstable();
         assert_eq!(ids, vec![1, 3]);
@@ -257,9 +251,8 @@ mod tests {
         g.typed_def(3, "Cli::limit", "limit", "crates/cli/src/main.rs", "Method");
 
         let search = g.search();
-        let vocab = vocab(&search);
         let (outcome, _) = search
-            .grep("limit", 5, &vocab, &kinds(&["constant", "Field"]))
+            .grep("limit", 5, &kinds(&["constant", "Field"]))
             .unwrap();
         let mut ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
         ids.sort_unstable();
@@ -267,37 +260,162 @@ mod tests {
     }
 
     #[test]
-    fn exact_name_hit_outranks_stem_hit_on_a_hub() {
-        let g = TestGraph::new("grep-exact-name");
-        g.def(
-            1,
-            "compiler::compile",
-            "compile",
-            "crates/compiler/src/lib.rs",
+    fn exact_names_rank_first_then_bm25_and_graph_degree_is_ignored() {
+        let g = TestGraph::new("grep-bm25-order");
+        g.def(1, "Module::compile", "compile", "src/a.rs");
+        g.def(2, "Module::compiled", "compiled", "src/a.rs");
+        for caller in 10..60 {
+            g.def(caller, &format!("Caller::c{caller}"), "c", "src/c.rs");
+            g.edge(caller, "CALLS", 1);
+        }
+        let long_source = "unrelated ".repeat(400);
+        let search =
+            g.search_with_sources(&[], &[(1, &long_source), (2, "compile compile compile")]);
+        let raw = search.client().query_arrow_json(
+            "SELECT def_id AS id, fts_main_gl_def_doc_7.match_bm25(def_id, ?1, fields := 'name,context,source', conjunctive := true) AS score
+             FROM gl_def_doc_7 WHERE score IS NOT NULL ORDER BY score DESC, id",
+            &[serde_json::json!("compile")]).unwrap();
+        assert_eq!(duckdb_client::i64_column(&raw, "id"), [2, 1]);
+        let raw_scores: std::collections::HashMap<i64, f64> = duckdb_client::i64_column(&raw, "id")
+            .into_iter()
+            .zip(duckdb_client::f64_column(&raw, "score"))
+            .collect();
+        search.client().execute("DROP TABLE gl_edge", &[]).unwrap();
+        let (outcome, nodes) = search.grep("compile", 2, &RecallFilter::default()).unwrap();
+        assert_eq!(
+            outcome.matches.iter().map(|hit| hit.id).collect::<Vec<_>>(),
+            [1, 2]
         );
+        for hit in &outcome.matches {
+            assert_eq!(hit.score, raw_scores[&hit.id]);
+        }
+        assert!(outcome.matches[0].exact_name);
+        assert!(!outcome.matches[1].exact_name);
+        assert_eq!(outcome.matches[1].body_offset, Some(1));
+        assert_eq!(outcome.matches[1].mentions, 3);
+        assert_eq!(nodes.len(), 2);
+        let (limited, nodes) = search.grep("compile", 1, &RecallFilter::default()).unwrap();
+        assert_eq!(limited.total, 2);
+        assert_eq!(limited.exact_alternatives, ["compile"]);
+        assert_eq!(nodes.len(), 1);
+        assert!(limited.matches[0].exact_name);
+    }
+
+    #[test]
+    fn full_query_conjunction_rejects_partial_body_hits_and_missing_vocabulary() {
+        let g = TestGraph::new("grep-conjunction");
+        g.def(1, "with_metaclass", "with_metaclass", "src/compat.py");
         g.def(
             2,
-            "code_graph::compiled_labels",
-            "compiled_labels",
-            "crates/code-graph/src/edge.rs",
+            "prepare_multipart",
+            "prepare_multipart",
+            "src/request.py",
         );
-        for caller in 10..60 {
-            g.def(
-                caller,
-                &format!("Caller::c{caller}"),
-                "c",
-                "crates/x/src/c.rs",
-            );
-            g.edge(caller, "CALLS", 2);
-        }
-
-        let search = g.search();
-        let vocab = vocab(&search);
+        g.def(3, "copy", "copy", "src/models.py");
+        let search = g.search_with_sources(
+            &[],
+            &[
+                (1, "def with_metaclass(): prepare()"),
+                (3, "# clone this object"),
+            ],
+        );
         let (outcome, _) = search
-            .grep("compile", 5, &vocab, &RecallFilter::default())
+            .grep("prepare_multipart", 5, &RecallFilter::default())
             .unwrap();
-        assert_eq!(outcome.matches[0].id, 1);
-        assert_eq!(outcome.matches[1].id, 2);
+        assert_eq!(
+            outcome.matches.iter().map(|hit| hit.id).collect::<Vec<_>>(),
+            [2]
+        );
+        assert!(outcome.matches[0].name_match);
+        let (outcome, _) = search.grep("clone", 5, &RecallFilter::default()).unwrap();
+        assert_eq!(outcome.matches.len(), 1);
+        assert_eq!(outcome.matches[0].id, 3);
+        assert!(!outcome.matches[0].name_match);
+        assert!(!outcome.matches[0].exact_name);
+        for query in [
+            "prepare_nonexistenttoken",
+            "unfindable",
+            "' OR true --",
+            "clone'; DROP TABLE gl_definition; --",
+        ] {
+            let (outcome, nodes) = search.grep(query, 5, &RecallFilter::default()).unwrap();
+            assert_eq!(outcome.total, 0, "{query}");
+            assert!(outcome.matches.is_empty());
+            assert!(nodes.is_empty());
+        }
+        assert!(search.grep("!!!", 5, &RecallFilter::default()).is_err());
+        assert!(search.grep("clone", 0, &RecallFilter::default()).is_err());
+        assert_eq!(
+            search.list_corpus(&RecallFilter::default()).unwrap().len(),
+            3
+        );
+    }
+
+    #[test]
+    fn exact_metadata_uses_raw_names_and_respects_scope_before_limits() {
+        let g = TestGraph::new("grep-exact-scopes");
+        g.def(1, "markInSync", "markInSync", "src/a.rs");
+        g.def(2, "mark_in_sync", "mark_in_sync", "src/a.rs");
+        g.typed_def(3, "Other::markInSync", "markInSync", "src/a.rs", "Class");
+        g.def(4, "outside", "outside", "other/a.rs");
+        let search = g.scoped_search(&["src"]);
+        let (outcome, _) = search
+            .grep(
+                "markInSync|MARKINSYNC|mark_in_sync|outside",
+                1,
+                &kinds(&["method"]),
+            )
+            .unwrap();
+        assert_eq!(
+            outcome.alternatives,
+            ["markInSync", "mark_in_sync", "outside"]
+        );
+        assert_eq!(outcome.exact_alternatives, ["markInSync", "mark_in_sync"]);
+        assert_eq!(outcome.total, 2);
+        assert_eq!(outcome.matches.len(), 1);
+        let (camel, _) = search.grep("markInSync", 5, &kinds(&["method"])).unwrap();
+        assert_eq!(camel.matches.len(), 1);
+        assert!(camel.matches[0].exact_name);
+        let (words, _) = search.grep("mark in sync", 5, &kinds(&["method"])).unwrap();
+        assert!(words.exact_alternatives.is_empty());
+        assert!(words.matches.iter().all(|hit| !hit.exact_name));
+        let (scoped, _) = search.grep("outside", 5, &RecallFilter::default()).unwrap();
+        assert!(scoped.exact_alternatives.is_empty());
+        let (scoped, _) = search.grep("mark_in_sync", 5, &kinds(&["class"])).unwrap();
+        assert!(scoped.exact_alternatives.is_empty());
+    }
+
+    #[test]
+    fn or_scores_use_best_alternative_and_ties_use_id() {
+        let g = TestGraph::new("grep-or-scores");
+        g.def(2, "clone", "clone", "src/a.rs");
+        g.def(1, "clone", "clone", "src/a.rs");
+        g.def(3, "prepare_clone", "prepare_clone", "src/b.rs");
+        let search = g.search();
+        let (clones, _) = search.grep("clone", 5, &RecallFilter::default()).unwrap();
+        let (prepares, _) = search.grep("prepare", 5, &RecallFilter::default()).unwrap();
+        let (combined, _) = search
+            .grep("clone|prepare|CLONE", 5, &RecallFilter::default())
+            .unwrap();
+        assert_eq!(combined.total, 3);
+        for hit in &combined.matches {
+            let expected = clones
+                .matches
+                .iter()
+                .chain(&prepares.matches)
+                .filter(|other| other.id == hit.id)
+                .map(|other| other.score)
+                .max_by(f64::total_cmp)
+                .unwrap();
+            assert_eq!(hit.score, expected);
+        }
+        let tied: Vec<_> = combined
+            .matches
+            .iter()
+            .filter(|hit| hit.id < 3)
+            .map(|hit| hit.id)
+            .collect();
+        assert_eq!(tied, [1, 2]);
     }
 
     #[test]
@@ -307,11 +425,76 @@ mod tests {
         g.def(2, "Mr::title", "title", "app/mr.rb");
 
         let search = g.search();
-        let vocab = vocab(&search);
         let (_, nodes) = search
-            .grep("mr-title-check", 5, &vocab, &RecallFilter::default())
+            .grep("mr-title-check", 5, &RecallFilter::default())
             .unwrap();
         assert_eq!(nodes[0].properties["fqn"], "mr-title-check");
+    }
+
+    #[test]
+    fn conjunctive_fts_ignores_empty_boundary_tokens_but_keeps_real_terms() {
+        let g = TestGraph::new("grep-boundary-tokens");
+        let names = [
+            ("__init__", "init"),
+            ("_private", "private"),
+            ("save!", "save"),
+            ("valid?", "valid"),
+            ("entry_0", "entry"),
+            ("__café__", "cafe"),
+            ("_naïve2", "naive"),
+            ("_東京_init_", "東京 init"),
+            ("__東京__", "東京"),
+        ];
+        for (i, (name, _)) in names.iter().enumerate() {
+            g.def(i as i64 + 1, name, name, "src/definitions.rs");
+        }
+        g.def(99, "0__", "0__", "src/definitions.rs");
+        let search = g.search();
+        let mut missing = Vec::new();
+        for (i, (name, normalized)) in names.iter().enumerate() {
+            let (outcome, _) = search.grep(name, 20, &RecallFilter::default()).unwrap();
+            assert_eq!(outcome.exact_alternatives, [*name]);
+            if !outcome
+                .matches
+                .iter()
+                .any(|hit| hit.id == i as i64 + 1 && hit.exact_name && hit.name_match)
+            {
+                missing.push(*name);
+                continue;
+            }
+            let raw = search.client().query_arrow_json(
+                "SELECT def_id AS id, fts_main_gl_def_doc_7.match_bm25(def_id, ?1, fields := 'name,context,source', conjunctive := true) AS score
+                 FROM gl_def_doc_7 WHERE score IS NOT NULL AND contains(lower(context), lower(?2)) ORDER BY score DESC, id",
+                &[serde_json::json!(normalized), serde_json::json!(name)]).unwrap();
+            assert_eq!(outcome.matches[0].id, i as i64 + 1, "{name}");
+            let mut ids: Vec<i64> = outcome.matches.iter().map(|hit| hit.id).collect();
+            ids.sort_unstable();
+            let mut literal = duckdb_client::i64_column(&raw, "id");
+            literal.sort_unstable();
+            assert_eq!(ids, literal, "{name}");
+        }
+        assert!(
+            missing.is_empty(),
+            "boundary identifiers not retrieved: {missing:?}"
+        );
+        for query in [
+            "_entry_nonexistenttoken_0",
+            "__init_nonexistenttoken__",
+            "_entry_未登録_0",
+            "0__",
+            "123",
+        ] {
+            let (outcome, nodes) = search.grep(query, 20, &RecallFilter::default()).unwrap();
+            assert_eq!(outcome.total, 0, "{query}");
+            assert!(nodes.is_empty(), "{query}");
+        }
+        let (outcome, nodes) = search
+            .grep("__init__|__INIT__|save!", 1, &RecallFilter::default())
+            .unwrap();
+        assert_eq!(outcome.alternatives, ["__init__", "save!"]);
+        assert_eq!(outcome.exact_alternatives, ["__init__", "save!"]);
+        assert_eq!(outcome.total, 2);
+        assert_eq!(nodes.len(), 1);
     }
 
     #[test]
@@ -321,27 +504,7 @@ mod tests {
         g.def(2, "Dlq::publish", "publish", "app/services/dlq.rb");
 
         let search = g.search();
-        let vocab = vocab(&search);
-        let (outcome, _) = search
-            .grep("find", 5, &vocab, &RecallFilter::default())
-            .unwrap();
+        let (outcome, _) = search.grep("find", 5, &RecallFilter::default()).unwrap();
         assert_eq!(outcome.matches[0].id, 1);
-    }
-
-    #[test]
-    fn vocab_maps_question_verbs_through_the_db_stemmer() {
-        use orbit_search::content_words;
-        use orbit_search::grep::GrepSource;
-
-        let g = TestGraph::new("vocab-stem");
-        g.def(1, "Dlq::publish", "publish", "app/services/dlq.rb");
-        let search = g.search();
-        let vocab = vocab(&search);
-
-        let stem_all = |q: &str| search.stem(&content_words(q)).unwrap();
-        assert!(vocab.is_relational(&stem_all("calling")[0]));
-        assert!(!vocab.is_relational(&stem_all("hooks")[0]));
-        let stems = stem_all("who calls execute_hooks");
-        assert_eq!(stems.iter().filter(|s| vocab.is_relational(s)).count(), 1);
     }
 }

@@ -5,7 +5,7 @@ use comrak::nodes::NodeValue;
 use comrak::{Arena, Options, parse_document};
 use syn::{Expr, ExprLit, Item, Lit, Meta};
 
-use crate::CLAP_HELP_COMMAND;
+use crate::{CLAP_HELP_COMMAND, parse_skill_frontmatter};
 
 const MANIFEST: &str = "SKILL.md";
 const SLOT_PREFIX: &str = "<!-- orbit:include local:";
@@ -35,6 +35,8 @@ pub fn validate_skill_pair(
     let local_manifest = local
         .get(MANIFEST)
         .ok_or_else(|| format!("{} is missing {MANIFEST}", local_root.display()))?;
+    parse_skill_frontmatter(remote_manifest, "orbit")?;
+    parse_skill_frontmatter(local_manifest, "orbit-cli")?;
     let slots = parse_markers(remote_manifest, MarkerTree::Remote)?;
     let sections = parse_markers(local_manifest, MarkerTree::Local)?;
     if slots != sections {
@@ -480,19 +482,34 @@ fn to_kebab_case(name: &str) -> String {
 mod tests {
     use super::*;
 
+    fn manifest(name: &str, body: &str) -> String {
+        format!(
+            "---\nname: {name}\nversion: 1.0.0\ndescription: Orbit skill\ncompatibility: Requires Orbit\nmetadata:\n  audience: developers\n---\n{body}"
+        )
+    }
+
+    fn remote_manifest(body: &str) -> String {
+        manifest("orbit", body)
+    }
+
     fn fixture() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("remote/references")).unwrap();
         std::fs::create_dir_all(root.path().join("local/references/local")).unwrap();
         std::fs::write(
             root.path().join("remote/SKILL.md"),
-            "[remote](references/remote.md)\n<!-- orbit:include local:quick-start -->\n`orbit graph-status --project-id 1`\n",
+            remote_manifest(
+                "[remote](references/remote.md)\n<!-- orbit:include local:quick-start -->\n`orbit graph-status --project-id 1`\n",
+            ),
         )
         .unwrap();
         std::fs::write(root.path().join("remote/references/remote.md"), "remote\n").unwrap();
         std::fs::write(
             root.path().join("local/SKILL.md"),
-            "<!-- orbit:section quick-start -->\n[local](references/local/sql.md)\n<!-- /orbit:section -->\n",
+            manifest(
+                "orbit-cli",
+                "<!-- orbit:section quick-start -->\n[local](references/local/sql.md)\n<!-- /orbit:section -->\n",
+            ),
         )
         .unwrap();
         std::fs::write(root.path().join("local/references/local/sql.md"), "local\n").unwrap();
@@ -525,6 +542,75 @@ mod tests {
         assert_eq!(
             result.remote_commands,
             BTreeSet::from(["graph-status".into()])
+        );
+    }
+
+    #[test]
+    fn build_validation_rejects_invalid_frontmatter() {
+        for (original, replacement, expected_error) in [
+            ("version: 1.0.0", "version: not-semver", "not-semver"),
+            (
+                "description: Orbit skill",
+                "description: Orbit skill\nunknown: value",
+                "unknown field",
+            ),
+            ("name: orbit", "name: another-skill", "does not match"),
+            ("description: Orbit skill", "description: '  '", "empty"),
+            (
+                "compatibility: Requires Orbit",
+                "compatibility: '  '",
+                "empty",
+            ),
+            ("version: 1.0.0\n", "", "missing field `version`"),
+            (
+                "metadata:\n  audience: developers",
+                "metadata:\n  audience: [developers]",
+                "metadata key \"audience\" must have a string value",
+            ),
+            (
+                "metadata:\n  audience: developers",
+                "metadata:\n  version: 1.0\n  audience: developers",
+                "version must be a top-level",
+            ),
+        ] {
+            let root = fixture();
+            let manifest = std::fs::read_to_string(root.path().join("remote/SKILL.md")).unwrap();
+            std::fs::write(
+                root.path().join("remote/SKILL.md"),
+                manifest.replacen(original, replacement, 1),
+            )
+            .unwrap();
+            let result = validate(root.path());
+            assert!(result.is_err(), "accepted replacement {replacement:?}");
+            let error = result.unwrap_err();
+            assert!(error.contains(expected_error), "{error}");
+        }
+    }
+
+    #[test]
+    fn frontmatter_parser_rejects_nested_version_without_top_level() {
+        let manifest = remote_manifest("body\n")
+            .replace("version: 1.0.0\n", "")
+            .replace("metadata:\n", "metadata:\n  version: 1.0\n");
+        let error = parse_skill_frontmatter(&manifest, "orbit").unwrap_err();
+        assert!(error.contains("version must be a top-level"), "{error}");
+    }
+
+    #[test]
+    fn frontmatter_parser_accepts_missing_metadata_block() {
+        let manifest = remote_manifest("body\n").replace("metadata:\n  audience: developers\n", "");
+        assert_eq!(
+            parse_skill_frontmatter(&manifest, "orbit").unwrap().name,
+            "orbit"
+        );
+    }
+
+    #[test]
+    fn frontmatter_parser_tolerates_crlf() {
+        let manifest = remote_manifest("body\n").replace('\n', "\r\n");
+        assert_eq!(
+            parse_skill_frontmatter(&manifest, "orbit").unwrap().name,
+            "orbit"
         );
     }
 
@@ -583,7 +669,10 @@ mod tests {
         let root = fixture();
         std::fs::write(
             root.path().join("local/SKILL.md"),
-            "<!-- orbit:section other -->\n<!-- /orbit:section -->\n",
+            manifest(
+                "orbit-cli",
+                "<!-- orbit:section other -->\n<!-- /orbit:section -->\n",
+            ),
         )
         .unwrap();
         assert!(
@@ -602,11 +691,45 @@ mod tests {
     }
 
     #[test]
+    fn normalized_skill_paths_reject_absolute_and_parent_components() {
+        for path in [Path::new("/SKILL.md"), Path::new("references/../SKILL.md")] {
+            assert!(
+                normalized_relative_path(path).is_err(),
+                "{}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn validation_rejects_non_utf8_file_content() {
+        let root = fixture();
+        std::fs::write(root.path().join("remote/references/remote.md"), [0xff]).unwrap();
+        let error = validate(root.path()).unwrap_err();
+        assert!(error.contains("UTF-8 skill file"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normalized_skill_paths_reject_non_utf8_names() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = Path::new(std::ffi::OsStr::from_bytes(b"references/\xff.md"));
+        assert!(
+            normalized_relative_path(path)
+                .unwrap_err()
+                .contains("not UTF-8")
+        );
+    }
+
+    #[test]
     fn links_resolve_across_the_composed_union() {
         let root = fixture();
         std::fs::write(
             root.path().join("remote/SKILL.md"),
-            "[local](references/local/sql.md)\n<!-- orbit:include local:quick-start -->\n`orbit query`\n",
+            remote_manifest(
+                "[local](references/local/sql.md)\n<!-- orbit:include local:quick-start -->\n`orbit query`\n",
+            ),
         )
         .unwrap();
         assert!(validate(root.path()).is_ok());
@@ -618,7 +741,9 @@ mod tests {
             let root = fixture();
             std::fs::write(
                 root.path().join("remote/SKILL.md"),
-                format!("[bad]({destination})\n<!-- orbit:include local:quick-start -->\n"),
+                remote_manifest(&format!(
+                    "[bad]({destination})\n<!-- orbit:include local:quick-start -->\n"
+                )),
             )
             .unwrap();
             assert!(validate(root.path()).is_err(), "{destination}");
@@ -683,7 +808,7 @@ orbit graph-status --project-id 1
         let root = fixture();
         std::fs::write(
             root.path().join("remote/SKILL.md"),
-            "<!-- orbit:include local:quick-start -->\n",
+            remote_manifest("<!-- orbit:include local:quick-start -->\n"),
         )
         .unwrap();
         assert!(
@@ -698,7 +823,9 @@ orbit graph-status --project-id 1
         let root = fixture();
         std::fs::write(
             root.path().join("remote/SKILL.md"),
-            "<!-- orbit:include local:quick-start -->\n`orbit help`\n`orbit imaginary`\n",
+            remote_manifest(
+                "<!-- orbit:include local:quick-start -->\n`orbit help`\n`orbit imaginary`\n",
+            ),
         )
         .unwrap();
         let error = validate(root.path()).unwrap_err();

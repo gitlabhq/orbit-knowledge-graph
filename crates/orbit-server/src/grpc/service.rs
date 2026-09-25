@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use ontology::Ontology;
+use ontology::introspection::SchemaResponse;
 use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration};
 use orbit_utils::traversal_path::TraversalPath;
+use query_engine::compiler::Frontend;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -20,24 +22,82 @@ use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::pipeline::{
-    QueryPipelineService, receive_query_request, send_invalid_request_error, send_query_error,
+    QueryPipelineService, QueryServiceOutput, RawQuery, receive_query_request,
+    send_invalid_request_error, send_query_error,
 };
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
-    GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
-    InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
-    ListAgentCommandsResponse, ListNamedQueriesRequest, ListNamedQueriesResponse, ListToolsRequest,
-    ListToolsResponse, NamedQueryDefinition, QueryMetadata, QueryType, ResponseFormat,
-    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
-    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
-    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
-    invoke_agent_command_response,
+    GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse, GetSkillRequest,
+    GetSkillResponse, InvokeAgentCommandRequest, InvokeAgentCommandResponse,
+    ListAgentCommandsRequest, ListAgentCommandsResponse, ListNamedQueriesRequest,
+    ListNamedQueriesResponse, ListSkillsRequest, ListSkillsResponse, ListToolsRequest,
+    ListToolsResponse, NamedQueryDefinition, QueryLanguage, QueryMetadata, QueryType,
+    ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
+    SchemaNodeStyle, SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary, StructuredSchema,
+    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
+    get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
 };
+use crate::skills::{get_skill, list_skills};
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
+
+fn query_frontend(language: i32) -> Result<Frontend, String> {
+    match QueryLanguage::try_from(language) {
+        Ok(QueryLanguage::Json) => Ok(Frontend::JsonDsl),
+        Ok(QueryLanguage::Gql) => Ok(Frontend::Gql),
+        Err(_) => Err(format!("Unknown language: {language}")),
+    }
+}
+
+fn resolve_raw_query(
+    query_type: i32,
+    query: String,
+    language: i32,
+    named_queries: &named_queries::NamedQueries,
+    values: &named_queries::BindingValues,
+) -> Result<RawQuery, String> {
+    let query_type =
+        QueryType::try_from(query_type).map_err(|_| format!("Unknown query_type: {query_type}"))?;
+    let frontend = query_frontend(language)?;
+    let text = match query_type {
+        QueryType::Json => query,
+        QueryType::Named => named_queries
+            .render_request_language(&query, named_language(frontend), values)
+            .map_err(|e| e.to_string())?,
+    };
+    Ok(RawQuery { text, frontend })
+}
+
+fn named_language(frontend: Frontend) -> named_queries::Language {
+    match frontend {
+        Frontend::JsonDsl => named_queries::Language::Json,
+        Frontend::Gql => named_queries::Language::Gql,
+    }
+}
+
+fn schema_query_result(
+    response: &SchemaResponse,
+    use_llm_format: bool,
+) -> Result<ExecuteQueryResult, PipelineError> {
+    use crate::proto::execute_query_result::Content;
+
+    let content = if use_llm_format {
+        ToolService::encode_schema_toon(response)
+            .map(Content::FormattedText)
+            .map_err(|error| PipelineError::custom(error.to_string()))?
+    } else {
+        serde_json::to_string(response)
+            .map(Content::ResultJson)
+            .map_err(|error| PipelineError::custom(error.to_string()))?
+    };
+    Ok(ExecuteQueryResult {
+        content: Some(content),
+        metadata: None,
+    })
+}
 
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
@@ -150,10 +210,12 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
-        let tools = ToolRegistry::get_all_tools()
-            .into_iter()
-            .map(proto_tool_definition)
-            .collect();
+        let tools = ToolRegistry::tools_for(
+            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?,
+        )
+        .into_iter()
+        .map(proto_tool_definition)
+        .collect();
 
         Ok(Response::new(ListToolsResponse { tools }))
     }
@@ -177,7 +239,9 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             "Listing agent commands for user"
         );
 
-        let all_commands = CommandRegistry::get_all_commands();
+        let all_commands = CommandRegistry::commands_for(
+            query_frontend(req.language).map_err(Status::invalid_argument)?,
+        );
         let commands: Vec<_> = if requested.is_empty() {
             all_commands
         } else {
@@ -230,6 +294,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         ctx.record_in_current_span();
 
         let req = request.get_ref();
+        let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
         if req.command_name.trim().is_empty() {
             return Err(Status::invalid_argument("command_name is required"));
         }
@@ -254,6 +319,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             } => {
                 let schema = self.active_schema.snapshot()?;
                 ToolService::render_graph_schema(&schema.ontology, &expand_nodes, format)
+            }
+            AgentCommand::QueryLanguage { .. } if frontend == Frontend::Gql => {
+                Err(ExecutorError::NotFound(
+                    "get_query_dsl is unavailable with GQL; run CALL db.schema()".into(),
+                ))
             }
             AgentCommand::QueryLanguage { format } => ToolService::render_query_language(format),
             AgentCommand::ResponseFormat { format } => ToolService::render_response_format(format),
@@ -306,20 +376,16 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     None => return,
                 };
 
-                let resolved = match QueryType::try_from(req.query_type) {
-                    Ok(QueryType::Json) => Ok(req.query),
-                    Ok(QueryType::Named) => {
-                        let values = named_queries::BindingValues {
-                            current_user_id: ctx.claims.user_id,
-                        };
-                        schema
-                            .named_queries
-                            .render_request(&req.query, &values)
-                            .map_err(|e| e.to_string())
-                    }
-                    Err(_) => Err(format!("Unknown query_type: {}", req.query_type)),
-                };
-                let query_json = match resolved {
+                let resolved = resolve_raw_query(
+                    req.query_type,
+                    req.query,
+                    req.language,
+                    &schema.named_queries,
+                    &named_queries::BindingValues {
+                        current_user_id: ctx.claims.user_id,
+                    },
+                );
+                let query = match resolved {
                     Ok(query) => query,
                     Err(message) => {
                         send_invalid_request_error(&tx, message).await;
@@ -327,19 +393,20 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     }
                 };
 
-                info!(query_len = query_json.len(), "Executing query");
+                info!(query_len = query.text.len(), "Executing query");
 
                 let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
                 let timeout = std::time::Duration::from_secs(stream_timeout);
                 let result = pipeline
-                    .run_query(&schema, ctx, &query_json, tx.clone(), stream, timeout)
+                    .run_query(&schema, ctx, query, tx.clone(), stream, timeout)
                     .await;
 
-                match result {
-                    Ok(output) => {
-                        info!("Sending final query result");
-
+                let result = result.and_then(|output| match output {
+                    QueryServiceOutput::Schema(response) => {
+                        schema_query_result(&response, use_llm_format)
+                    }
+                    QueryServiceOutput::Graph(output) => {
                         use crate::proto::execute_query_result::Content;
 
                         let (formatted, format_version, format_name) = if use_llm_format {
@@ -372,11 +439,16 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                             format_name: proto_format_name(format_name).into(),
                         });
 
+                        Ok(ExecuteQueryResult { content, metadata })
+                    }
+                });
+
+                match result {
+                    Ok(result) => {
+                        info!("Sending final query result");
                         let _ = tx
                             .send(Ok(ExecuteQueryMessage {
-                                content: Some(execute_query_message::Content::Result(
-                                    ExecuteQueryResult { content, metadata },
-                                )),
+                                content: Some(execute_query_message::Content::Result(result)),
                             }))
                             .await;
                     }
@@ -480,6 +552,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         ctx.record_in_current_span();
 
         let req = request.get_ref();
+        if query_frontend(req.language).map_err(Status::invalid_argument)? == Frontend::Gql {
+            return Err(Status::not_found(
+                "GQL has no query DSL document; run CALL db.schema() for the graph shape",
+            ));
+        }
         info!(format = ?req.format, "Fetching query DSL grammar for user");
 
         let response = if req.format == ResponseFormat::Llm as i32 {
@@ -505,6 +582,70 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         skip(self, request),
         fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
     )]
+    async fn list_skills(
+        &self,
+        request: Request<ListSkillsRequest>,
+    ) -> Result<Response<ListSkillsResponse>, Status> {
+        let ctx = extract_request_context(&request, &self.validator)?;
+        ctx.record_in_current_span();
+
+        let skills: Vec<SkillSummary> = list_skills()
+            .into_iter()
+            .map(|skill| SkillSummary {
+                name: skill.name,
+                version: skill.version,
+                description: skill.description,
+                compatibility: skill.compatibility,
+            })
+            .collect();
+
+        info!(count = skills.len(), "Listing embedded skills");
+        Ok(Response::new(ListSkillsResponse {
+            skills,
+            server_version: orbit_utils::version::get().to_string(),
+        }))
+    }
+
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
+    )]
+    async fn get_skill(
+        &self,
+        request: Request<GetSkillRequest>,
+    ) -> Result<Response<GetSkillResponse>, Status> {
+        let ctx = extract_request_context(&request, &self.validator)?;
+        ctx.record_in_current_span();
+
+        let req = request.get_ref();
+        info!(skill_name = %req.name, metadata_only = req.metadata_only, "Fetching embedded skill");
+
+        let skill = get_skill(&req.name, req.metadata_only)
+            .map_err(|error| Status::not_found(error.to_string()))?;
+        let files = skill
+            .files
+            .unwrap_or_default()
+            .into_iter()
+            .map(|file| ProtoSkillFile {
+                path: file.path,
+                sha256: file.sha256,
+                content: file.content,
+            })
+            .collect();
+
+        Ok(Response::new(GetSkillResponse {
+            name: skill.metadata.name,
+            version: skill.metadata.version,
+            files,
+            compatibility: skill.metadata.compatibility,
+            server_version: orbit_utils::version::get().to_string(),
+        }))
+    }
+
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
+    )]
     async fn list_named_queries(
         &self,
         request: Request<ListNamedQueriesRequest>,
@@ -512,11 +653,13 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
 
+        let frontend =
+            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
         let values = named_queries::BindingValues {
             current_user_id: ctx.claims.user_id,
         };
         let schema = self.active_schema.snapshot()?;
-        let queries = named_query_definitions(&schema.named_queries, &values)
+        let queries = named_query_definitions(&schema.named_queries, frontend, &values)
             .map_err(|e| Status::internal(e.to_string()))?;
 
         info!(count = queries.len(), "Listing named queries");
@@ -715,8 +858,10 @@ impl OrbitServiceImpl {
 
 fn named_query_definitions(
     named_queries: &named_queries::NamedQueries,
+    frontend: Frontend,
     values: &named_queries::BindingValues,
 ) -> Result<Vec<NamedQueryDefinition>, named_queries::NamedQueryError> {
+    let language = named_language(frontend);
     let mut queries: Vec<_> = named_queries
         .iter()
         .filter(|query| query.example_parameters().is_empty())
@@ -726,7 +871,7 @@ fn named_query_definitions(
     queries
         .into_iter()
         .map(|query| {
-            let raw_query = query.render(values, &query.example_parameters())?;
+            let raw_query = query.render_language(language, values, &query.example_parameters())?;
             Ok(NamedQueryDefinition {
                 name: query.name.clone(),
                 description: query.description.clone(),
@@ -761,6 +906,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 #[cfg(test)]
 mod tests {
     mod commands;
+    mod skills;
 
     use super::*;
     use crate::proto::orbit_service_server::OrbitService;
@@ -1060,63 +1206,30 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn list_named_queries_returns_rendered_catalog() {
-        let service = test_service();
-        let response = service
-            .list_named_queries(authed_request(ListNamedQueriesRequest {}))
-            .await
-            .unwrap()
-            .into_inner();
-
-        assert!(!response.queries.is_empty());
-        for query in &response.queries {
-            assert!(!query.name.is_empty());
-            assert!(!query.description.is_empty());
-            let dsl: serde_json::Value = serde_json::from_str(&query.raw_query)
-                .unwrap_or_else(|e| panic!("`{}` DSL must be valid JSON: {e}", query.name));
-            assert!(dsl.is_object(), "`{}` DSL must be an object", query.name);
-            assert!(
-                !query.raw_query.contains("$binding") && !query.raw_query.contains("$param"),
-                "`{}` DSL must have all placeholders resolved: {}",
-                query.name,
-                query.raw_query
-            );
+    #[test]
+    fn resolve_raw_query_selects_frontend_by_language() {
+        let queries = named_queries::NamedQueries::load_embedded().unwrap();
+        let bindings = named_queries::BindingValues {
+            current_user_id: 73,
+        };
+        for (language, frontend, raw) in [
+            (
+                QueryLanguage::Json,
+                Frontend::JsonDsl,
+                r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"User"}]}"#,
+            ),
+            (QueryLanguage::Gql, Frontend::Gql, "MATCH (n:User) RETURN n"),
+        ] {
+            let resolve = |kind, text: &str| {
+                resolve_raw_query(kind, text.into(), language as i32, &queries, &bindings).unwrap()
+            };
+            assert_eq!(resolve(QueryType::Json as i32, raw).frontend, frontend);
+            let named = resolve(QueryType::Named as i32, r#"{"name":"my_neighbors"}"#);
+            assert_eq!(named.frontend, frontend);
+            assert!(named.text.contains("73"));
         }
-
-        let names: Vec<_> = response.queries.iter().map(|q| q.name.as_str()).collect();
-        assert!(
-            !names.contains(&"expand_neighbors"),
-            "parameter-driven queries must be excluded from the catalog, got {names:?}"
-        );
-        assert_eq!(
-            names.first(),
-            Some(&"my_neighbors"),
-            "the default query must lead the catalog, got {names:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn list_named_queries_substitutes_caller_user_id() {
-        let user_id = 424_242;
-
-        let service = test_service();
-        let response = service
-            .list_named_queries(authed_request_for_user(ListNamedQueriesRequest {}, user_id))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let my_neighbors = response
-            .queries
-            .iter()
-            .find(|q| q.name == "my_neighbors")
-            .expect("my_neighbors is an embedded named query");
-        assert!(
-            my_neighbors.raw_query.contains("424242"),
-            "my_neighbors DSL should contain the caller's user_id: {}",
-            my_neighbors.raw_query
-        );
+        assert!(resolve_raw_query(99, "".into(), 0, &queries, &bindings).is_err());
+        assert!(resolve_raw_query(0, "".into(), 99, &queries, &bindings).is_err());
     }
 
     fn test_claims() -> Claims {

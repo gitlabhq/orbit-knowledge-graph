@@ -802,7 +802,7 @@ fn lowered<B: Flavor>(
         .into_iter()
         .map(|(id, expression)| Ok((id, lower_expr(bound, &expression, &aliases)?)))
         .collect::<Result<_>>()?;
-    let nodes = candidate
+    let nodes: BTreeMap<_, _> = candidate
         .outputs
         .nodes
         .into_iter()
@@ -815,11 +815,96 @@ fn lowered<B: Flavor>(
             ))
         })
         .collect::<Result<_>>()?;
+    let node_sources = nodes
+        .iter()
+        .filter_map(|(node, binding)| {
+            let ast::Expr::Column { table, column } = &binding.primary_key else {
+                return None;
+            };
+            Some((
+                bound.input.nodes[node.0].id.clone(),
+                (table.clone(), column.clone()),
+            ))
+        })
+        .collect();
+    let edges = bound
+        .input
+        .relationships
+        .iter()
+        .enumerate()
+        .map(|(index, relationship)| {
+            let column_prefix = if relationship.hops.max > 1 {
+                format!("hop_e{index}_")
+            } else {
+                format!("e{index}_")
+            };
+            LoweredEdge {
+                path_column: (relationship.hops.max > 1)
+                    .then(|| format!("{column_prefix}path_nodes")),
+                column_prefix,
+                rel_types: relationship.types.clone(),
+            }
+        })
+        .collect();
+    let stable_order = stable_order(bound, &query, &node_sources);
     Ok(LoweredPlan {
         ast: Node::Query(Box::new(query)),
         bindings: LoweredBindings { columns, nodes },
+        metadata: LoweredMetadata {
+            node_sources,
+            edges,
+            stable_order,
+        },
         explain: format!("scans={}", candidate.cost.scans),
     })
+}
+
+fn stable_order(
+    bound: &BoundCatalog,
+    query: &Query,
+    node_sources: &HashMap<String, (String, String)>,
+) -> Vec<OrderExpr> {
+    match bound.input.query_type {
+        crate::input::QueryType::Aggregation => {
+            query.group_by.iter().cloned().map(OrderExpr::asc).collect()
+        }
+        crate::input::QueryType::PathFinding => vec![
+            OrderExpr::asc(ast::Expr::func(
+                "toString",
+                vec![ast::Expr::col("paths", crate::constants::path_column())],
+            )),
+            OrderExpr::asc(ast::Expr::func(
+                "toString",
+                vec![ast::Expr::col(
+                    "paths",
+                    crate::constants::edge_kinds_column(),
+                )],
+            )),
+        ],
+        crate::input::QueryType::Neighbors => bound
+            .input
+            .neighbors
+            .as_ref()
+            .filter(|neighbors| neighbors.direction == crate::input::Direction::Both)
+            .map_or_else(Vec::new, |_| {
+                vec![
+                    OrderExpr::asc(ast::Expr::ident(crate::constants::redaction_id_column(
+                        &bound.input.nodes[0].id,
+                    ))),
+                    OrderExpr::asc(ast::Expr::ident(crate::constants::neighbor_id_column())),
+                    OrderExpr::asc(ast::Expr::ident(
+                        crate::constants::relationship_type_column(),
+                    )),
+                    OrderExpr::asc(ast::Expr::ident(
+                        crate::constants::neighbor_is_outgoing_column(),
+                    )),
+                ]
+            }),
+        _ => node_sources
+            .values()
+            .map(|(alias, column)| OrderExpr::asc(ast::Expr::col(alias, column)))
+            .collect(),
+    }
 }
 
 fn edge_tables(layouts: &[TableLayout], alias: &str) -> TableRef {
@@ -979,7 +1064,7 @@ mod tests {
                 direction: Direction::Outgoing,
                 filters: Default::default(),
                 fk_column: None,
-                scope_prefix: None,
+                scope_proof: None,
                 scope_preserving: false,
             }],
             ..Default::default()

@@ -37,8 +37,8 @@ start and passes it as the single `--config` file. The file is a `yq` deep merge
 2. Values read from the GDK checkout. These are ClickHouse URLs from `gdk.yml`, the GitLab base URL,
    and the Siphon stream name from GDK's Siphon config. They also include JWT keys and the ClickHouse
    password from the GitLab secret files.
-3. The mode's Prometheus port, so the processes `mise run dev` starts side by side do not collide once
-   metrics are enabled.
+3. The mode's probe server port, so the processes `mise run dev` starts side by side do not collide.
+   Every mode binds this port for `/-/liveness` and `/-/readiness`, with or without metrics.
 4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
 
 Passing `--config` disables the default `config/config.yaml` lookup.
@@ -391,8 +391,20 @@ Example: `info,orbit_server=debug,gkg_indexer=trace`
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `metrics.prometheus.enabled` | `false` | Expose the `/-/metrics` scrape endpoint |
-| `metrics.prometheus.port` | `9394` | Prometheus scrape port |
+| `metrics.prometheus.enabled` | `false` | Add the `/-/metrics` scrape endpoint to the probe server |
+| `metrics.prometheus.port` | unset | Deprecated. Use `probe_server.bind_address`. When set alone it gives the probe server address as `0.0.0.0:<port>` |
+
+### Probe server
+
+One internal listener serves `/-/liveness`, `/-/readiness` and, when
+`metrics.prometheus.enabled` is true, `/-/metrics`. It binds in every mode.
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `probe_server.bind_address` | `0.0.0.0:9394` | Probe server listen address |
+
+When both `probe_server.bind_address` and `metrics.prometheus.port` are set and they name a
+different port, startup fails. Set `probe_server.bind_address` alone.
 
 ## Webserver
 
@@ -409,10 +421,33 @@ These settings are used by the Webserver mode.
 
 ### TLS
 
+`cert_path` and `key_path` are the shared identity. Setting both enables TLS on the gRPC
+server. The internal group below is off by default. When enabled it inherits that identity
+unless it names its own, so an externally pinned certificate and an internal one can rotate
+on different cycles.
+
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `tls.cert_path` | None | TLS certificate path (PEM) |
 | `tls.key_path` | None | TLS private key path (PEM) |
+| `tls.internal.enabled` | `false` | TLS on the probe server (`/-/liveness`, `/-/readiness`, `/-/metrics`) and the health-check API |
+| `tls.internal.cert_path` | None | Overrides `tls.cert_path` for the internal listeners |
+| `tls.internal.key_path` | None | Overrides `tls.key_path` for the internal listeners |
+
+Certificates are read at startup, so rotation needs a pod restart.
+
+Enabling `tls.internal` changes what clients must send:
+
+- Kubernetes probes on the probe server need `scheme: HTTPS`. The kubelet does not verify the
+  certificate.
+- `health_check_url` must become `https://`. The webserver verifies that certificate against
+  the OS trust store. The certificate needs a SAN for the health-check service name, and its
+  CA must be present in `/etc/pki/tls/certs`.
+- KEDA scalers that read `/queue-depth` need the same treatment.
+- The PodMonitor needs `scheme: https` and a `tlsConfig` that either trusts the issuing CA
+  (with `serverName`, because Prometheus connects to the pod IP) or sets `insecureSkipVerify`.
+
+The legacy `/live` and `/ready` listeners stay plaintext until the chart probes the probe server.
 
 ### gRPC tuning
 
@@ -491,7 +526,8 @@ Controls Snowplow billing-event emission and the CDot quota gate that enforces G
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `billing.enabled` | `false` | Enable Snowplow billing-event emission |
-| `billing.collector_url` | `""` | Snowplow collector endpoint |
+| `billing.collector_url` | `""` | Snowplow collector endpoint. On Self-Managed / Dedicated, point at the host matching the Cloud Connector token audience (`https://billing.prdsub.gitlab.net` / `https://billing.stgsub.gitlab.net`). |
+| `billing.auth_mode` | `oidc` | Authentication for emission. `oidc` uses GCP workload-identity (GitLab.com only). `cloud_connector` pulls the Cloud Connector instance token from Rails and caches it in memory (Self-Managed / Dedicated). |
 
 ### Quota gate
 
@@ -570,8 +606,8 @@ cargo run -p orbit-object-storage --example roundtrip -- config.yaml [secrets-di
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `health_check.bind_address` | `0.0.0.0:4201` | HealthCheck mode bind address |
-| `indexer_health_bind_address` | `0.0.0.0:4202` | Health check server address for Indexer mode |
-| `dispatcher_health_bind_address` | `0.0.0.0:4203` | Health check server address for DispatchIndexing mode |
+| `indexer_health_bind_address` | `0.0.0.0:4202` | `/live` and `/ready` address for Indexer mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
+| `dispatcher_health_bind_address` | `0.0.0.0:4203` | `/live` and `/ready` address for DispatchIndexing mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
 
 ## Tuning guide
 
@@ -782,5 +818,7 @@ metrics:
   log_level: info,orbit_server=debug
   prometheus:
     enabled: true
-    port: 9394
+
+probe_server:
+  bind_address: "0.0.0.0:9394"
 ```

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::scope::ScopePrefix;
+use crate::scope::ScopeProof;
 
 use crate::error::{QueryError, Result};
 use orbit_utils::traversal_path::TraversalPath;
@@ -92,7 +92,7 @@ impl AuthorizedPath {
 pub struct SecurityContext {
     pub org_id: i64,
     pub traversal_paths: Vec<AuthorizedPath>,
-    pub scope_prefixes: HashMap<String, ScopePrefix>,
+    pub scope_proofs: HashMap<String, ScopeProof>,
     pub admin: bool,
     pub access_level: Option<AccessLevel>,
     pub realm: Option<Realm>,
@@ -131,7 +131,7 @@ impl SecurityContext {
         Ok(Self {
             org_id,
             traversal_paths,
-            scope_prefixes: HashMap::new(),
+            scope_proofs: HashMap::new(),
             admin: false,
             access_level: None,
             realm: None,
@@ -150,8 +150,8 @@ impl SecurityContext {
         self
     }
 
-    pub fn with_scope_prefixes(mut self, scope_prefixes: HashMap<String, ScopePrefix>) -> Self {
-        self.scope_prefixes = scope_prefixes;
+    pub fn with_scope_proofs(mut self, scope_proofs: HashMap<String, ScopeProof>) -> Self {
+        self.scope_proofs = scope_proofs;
         self
     }
 

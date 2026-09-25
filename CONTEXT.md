@@ -125,11 +125,11 @@ The JSON-based query language for the property graph. Supports four query types:
 _Avoid_: intermediate query language, intermediary LLM query language, JSON query language
 
 **Orbit Query Frontend**:
-A compiler-level interface for Orbit's read-only graph language. The `gql` frontend module converts Pest pairs into a typed syntax tree, then lowers it into compiler Input. It does not replace the deployed JSON **Query DSL**.
-_Avoid_: Describing Orbit Query as the deployed query language
+A compiler-level interface for Orbit's read-only graph language. The `gql` frontend module converts Pest pairs into a typed syntax tree, then lowers it into compiler Input. Rails selects it per user with the default-off `orbit_gql_queries` feature flag and sets the protobuf `QueryLanguage` enum, independently of raw or named source kind. JSON **Query DSL** and GQL are mutually exclusive modes, not client-selected languages.
+_Avoid_: Describing Orbit Query as the default query language
 
 **Named Query**:
-A graph query defined in YAML under `config/named_queries/` and invoked by name, instead of the client authoring the **Query DSL** string. Compiled against the ontology at `orbit-server` build time so drift fails the build.
+A graph query defined in YAML under `config/named_queries/` and invoked by name. Each definition carries a JSON **Query DSL** spelling and a GQL spelling of the same shape; Rails sets `QUERY_TYPE_NAMED` and a separate `QueryLanguage` value. That language selects both the spelling and the matching compiler frontend. Trusted templates encode client values and bind caller identity separately. Both rendered examples compile against the ontology at `orbit-server` build time so drift fails the build.
 _Avoid_: preset query, query template
 
 **Hop**:

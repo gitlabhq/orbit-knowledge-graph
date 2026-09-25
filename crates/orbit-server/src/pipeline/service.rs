@@ -12,6 +12,8 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
+use ontology::introspection::SchemaResponse;
+use query_engine::compiler::Frontend;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
@@ -19,8 +21,19 @@ use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, Pipel
 
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput,
+    RoutingStage, SecurityStage,
 };
+
+pub struct RawQuery {
+    pub text: String,
+    pub frontend: Frontend,
+}
+
+pub enum QueryServiceOutput {
+    Graph(Box<PipelineOutput>),
+    Schema(SchemaResponse),
+}
 
 #[derive(Clone)]
 pub struct QueryPipelineService {
@@ -68,15 +81,16 @@ impl QueryPipelineService {
         &self,
         schema: &SchemaSnapshot,
         request_context: RequestContext,
-        query_json: &str,
+        query: RawQuery,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
         timeout: std::time::Duration,
-    ) -> Result<PipelineOutput, PipelineError> {
+    ) -> Result<QueryServiceOutput, PipelineError> {
         let coding_agent = request_context.coding_agent().map(String::from);
         let claims = request_context.claims;
+        let schema_obs = OTelPipelineObserver::start();
         let mut obs = MultiObserver::new(vec![
-            Box::new(OTelPipelineObserver::start()),
+            Box::new(schema_obs.clone()),
             Box::new(BillingObserver::new(
                 self.billing_tracker.clone(),
                 crate::billing_adapter::billing_inputs(&claims, coding_agent.clone()),
@@ -104,7 +118,8 @@ impl QueryPipelineService {
         }
 
         let mut ctx = QueryPipelineContext {
-            query_json: query_json.to_string(),
+            frontend: query.frontend,
+            query_json: query.text,
             compiled: None,
             ontology: Arc::clone(&schema.ontology),
             security_context: None,
@@ -117,7 +132,16 @@ impl QueryPipelineService {
         // tore down the observer before record_error could run, leaving
         // timed-out queries invisible to every metric.
         let pipeline = async {
-            PipelineRunner::start(&mut ctx, &mut obs)
+            let route = PipelineRunner::start(&mut ctx, &mut obs)
+                .then(&RoutingStage)
+                .await?
+                .finish()
+                .ok_or_else(|| PipelineError::custom("RoutingStage produced no output"))?;
+            if let RoutingOutput::Schema(response) = route {
+                return Ok(QueryServiceOutput::Schema(response));
+            }
+
+            let output = PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&SecurityStage)
                 .await?
                 .then(&CompilationStage)
@@ -137,7 +161,10 @@ impl QueryPipelineService {
                 .then(&OutputStage)
                 .await?
                 .finish()
-                .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+                .ok_or_else(|| {
+                    PipelineError::custom("OutputStage did not produce PipelineOutput")
+                })?;
+            Ok(QueryServiceOutput::Graph(Box::new(output)))
         };
 
         let output = match tokio::time::timeout(timeout, pipeline).await {
@@ -150,7 +177,12 @@ impl QueryPipelineService {
             }
         };
 
-        obs.finish(output.row_count, output.redacted_count);
+        match &output {
+            QueryServiceOutput::Graph(output) => {
+                obs.finish(output.row_count, output.redacted_count)
+            }
+            QueryServiceOutput::Schema(_) => schema_obs.finish_schema(),
+        }
         Ok(output)
     }
 }
