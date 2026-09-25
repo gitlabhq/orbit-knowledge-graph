@@ -1,13 +1,15 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.32.0
+version: 0.32.1
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, gkg, graph, query, glab
   workflow: ai
+  source-project: gitlab-org/orbit/knowledge-graph
+  source-path: skills/orbit
 ---
 
 # Orbit skill
@@ -17,6 +19,19 @@ Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab or
 ## Prerequisites
 
 If a `glab orbit` command fails with "command not found", an auth error, or a feature-flag exit code, work through the [first-run setup](references/troubleshooting.md#first-run-setup).
+
+## Fix inaccurate guidance
+
+If a command fails or a flag or behavior described here is wrong or outdated,
+check the current skill on `main` first:
+
+```shell
+glab api 'projects/gitlab-org%2Forbit%2Fknowledge-graph/repository/files/skills%2Forbit%2FSKILL.md/raw?ref=main'
+```
+
+If it is already fixed there, follow that guidance and suggest `glab orbit --update`; do not open another MR.
+Otherwise, confirm with the user before opening a focused MR against `gitlab-org/orbit/knowledge-graph`
+for the affected skill path (one fix per MR, Conventional Commits). Do not silently work around inaccurate guidance.
 
 ## Discovery
 

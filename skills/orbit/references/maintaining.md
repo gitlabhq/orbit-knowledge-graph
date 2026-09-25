@@ -5,8 +5,7 @@ queries. See [`SKILL.md`](../SKILL.md) for usage.
 
 ## Contributing
 
-If Orbit guidance, recipes, or helper behavior is inaccurate, update this skill
-in `gitlab-org/orbit/knowledge-graph` rather than working around it silently.
+For inaccurate guidance, follow [Fix inaccurate guidance](../SKILL.md#fix-inaccurate-guidance).
 Keep `SKILL.md`, `references/`, and `scripts/` in sync, and use `opencode run`
 for meaningful behavior changes.
 
