@@ -19,7 +19,7 @@ async fn list_skills_returns_deployed_skill_metadata() {
     assert_eq!(response.skills.len(), 1);
     let skill = &response.skills[0];
     assert_eq!(skill.name, "orbit");
-    assert_eq!(skill.version, "0.32.1");
+    assert_eq!(skill.version, "0.32.2");
     assert!(skill.description.contains("glab orbit"));
     assert!(skill.compatibility.contains("Orbit CLI"));
     assert_eq!(response.server_version, orbit_utils::version::get());
@@ -71,7 +71,7 @@ async fn get_skill_metadata_only_omits_files() {
         .into_inner();
 
     assert_eq!(response.name, "orbit");
-    assert_eq!(response.version, "0.32.1");
+    assert_eq!(response.version, "0.32.2");
     assert!(response.compatibility.contains("Orbit CLI"));
     assert_eq!(response.server_version, orbit_utils::version::get());
     assert!(response.files.is_empty());

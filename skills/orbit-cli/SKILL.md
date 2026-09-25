@@ -8,7 +8,7 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.18.1
+version: 0.18.2
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -28,9 +28,9 @@ production data, use the `orbit` skill.
 
 The binary is `orbit`, or `glab orbit` through the wrapper. Add `--yes` in
 non-interactive shells. Run `orbit <command> --help` before you guess a flag.
-Run `orbit skills` to read this skill; it lists additional skill trees afterward
-when any are available. Use `orbit skills get orbit [path]` to read a file from
-this tree. The path defaults to `SKILL.md`.
+Run `orbit skills` to list available skills. Use `orbit skills get orbit [path]`
+to print the composed skill (`SKILL.md` by default), or specify a path to print
+a file from the skill tree.
 
 Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 
