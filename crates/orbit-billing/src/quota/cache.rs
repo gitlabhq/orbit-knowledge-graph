@@ -75,7 +75,8 @@ impl QuotaCache {
 
     /// Returns the gate decision and whether it was served from cache.
     ///
-    /// `FailOpen` means CDot was unreachable or returned an unexpected status.
+    /// `FailOpen` means CDot was unreachable, rejected our credentials, or returned an
+    /// unexpected status.
     /// The caller should still allow the request through but record the
     /// outcome separately from a genuine `Allow`.
     pub(crate) async fn check(&self, request: CdotRequest) -> (QuotaGateDecision, CacheOutcome) {

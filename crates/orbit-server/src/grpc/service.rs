@@ -906,6 +906,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 #[cfg(test)]
 mod tests {
     mod commands;
+    mod quota;
     mod skills;
 
     use super::*;

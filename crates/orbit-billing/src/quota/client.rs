@@ -47,12 +47,10 @@ pub(crate) enum QuotaOutcome {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailOpenReason {
-    /// CDot was unreachable or returned an unexpected status.
-    Upstream,
-    /// CDot answered 401 to `X-License-Token`: an expired, offline, or unknown license.
-    /// Routine on self-managed, and fail-open results are not cached, so it recurs on
-    /// every query and must not be logged at warn.
-    LicenseRejected,
+    Unreachable,
+    /// CDot rejected the admin credentials or the license checksum.
+    Unauthorized,
+    UnexpectedResponse,
 }
 
 pub(crate) struct QuotaClient {
@@ -127,7 +125,7 @@ impl QuotaClient {
                     feature_qualified_name = %request.key.feature_qualified_name,
                     "quota check request failed; failing open"
                 );
-                return QuotaOutcome::FailOpen(FailOpenReason::Upstream);
+                return QuotaOutcome::FailOpen(FailOpenReason::Unreachable);
             }
         };
 
@@ -143,9 +141,6 @@ impl QuotaClient {
                 decision: QuotaDecision::Deny(DenyReason::QuotaExhausted),
                 ttl,
             },
-            StatusCode::UNAUTHORIZED if self.license_auth => {
-                QuotaOutcome::FailOpen(FailOpenReason::LicenseRejected)
-            }
             other => {
                 warn!(
                     status = %other,
@@ -158,7 +153,12 @@ impl QuotaClient {
                     feature_qualified_name = %request.key.feature_qualified_name,
                     "unexpected quota check response; failing open"
                 );
-                QuotaOutcome::FailOpen(FailOpenReason::Upstream)
+                let reason = if other == StatusCode::UNAUTHORIZED {
+                    FailOpenReason::Unauthorized
+                } else {
+                    FailOpenReason::UnexpectedResponse
+                };
+                QuotaOutcome::FailOpen(reason)
             }
         }
     }
@@ -348,7 +348,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn status_403_fails_open() {
+    async fn status_403_fails_open_as_unexpected_response() {
         let url = stub_server(AxumStatus::FORBIDDEN, None).await;
         let client = QuotaClient::new(
             url,
@@ -359,12 +359,12 @@ mod tests {
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Upstream)
+            QuotaOutcome::FailOpen(FailOpenReason::UnexpectedResponse)
         );
     }
 
     #[tokio::test]
-    async fn connection_error_fails_open() {
+    async fn connection_error_fails_open_as_unreachable() {
         // Port 1 is reserved and unroutable; the TCP connect fails before any HTTP exchange.
         install_crypto();
         let client = QuotaClient::new(
@@ -376,7 +376,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Upstream)
+            QuotaOutcome::FailOpen(FailOpenReason::Unreachable)
         );
     }
 
@@ -424,16 +424,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn license_mode_401_fails_open_as_license_rejected() {
+    async fn license_mode_401_fails_open_as_unauthorized() {
         let (url, _) = recording_server(AxumStatus::UNAUTHORIZED).await;
         assert_eq!(
             license_client(url).check(&license_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::LicenseRejected)
+            QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
         );
     }
 
     #[tokio::test]
-    async fn admin_mode_401_fails_open_as_upstream() {
+    async fn admin_mode_401_fails_open_as_unauthorized() {
         let (url, _) = recording_server(AxumStatus::UNAUTHORIZED).await;
         let client = QuotaClient::new(
             url,
@@ -444,7 +444,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Upstream)
+            QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
         );
     }
 }

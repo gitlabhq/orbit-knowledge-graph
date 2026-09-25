@@ -5,17 +5,16 @@ mod key;
 mod metrics;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use orbit_server_config::{BillingConfig, QuotaAuthMode};
 use tonic::{Code, Status};
 use tonic_types::{ErrorDetails, StatusExt};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::constants::{QUOTA_MAX_CACHE_ENTRIES, is_cdot_self_managed_realm};
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
-use client::{FailOpenReason, QuotaAuth, QuotaClient};
+use client::{QuotaAuth, QuotaClient};
 pub use inputs::QuotaCheckInputs;
 use key::CdotRequest;
 
@@ -35,7 +34,6 @@ pub struct QuotaService {
 struct QuotaServiceInner {
     cache: QuotaCache,
     auth_mode: QuotaAuthMode,
-    realm_mismatch_warned: AtomicBool,
 }
 
 impl QuotaService {
@@ -73,7 +71,6 @@ impl QuotaService {
             inner: Some(QuotaServiceInner {
                 cache,
                 auth_mode: cfg.auth_mode,
-                realm_mismatch_warned: AtomicBool::new(false),
             }),
         })
     }
@@ -92,7 +89,19 @@ impl QuotaService {
             .map(|id| id.as_str().to_string())
             .unwrap_or_default();
 
-        if inner.auth_mode == QuotaAuthMode::LicenseChecksum && !inner.license_auth_usable(inputs) {
+        if inner.auth_mode == QuotaAuthMode::LicenseChecksum
+            && let Some(skip_reason) = license_auth_skip_reason(inputs)
+        {
+            warn!(
+                user_id = inputs.user_id,
+                realm = inputs.realm.as_deref().unwrap_or(""),
+                instance_id = inputs.instance_id.as_deref().unwrap_or(""),
+                unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
+                source_type = %inputs.source_type,
+                skip_reason,
+                correlation_id = %correlation_id,
+                "quota gate decision: skipped"
+            );
             record_skipped(&inputs.source_type);
             return Ok(());
         }
@@ -133,18 +142,7 @@ impl QuotaService {
                 );
                 Ok(())
             }
-            QuotaGateDecision::FailOpen(FailOpenReason::LicenseRejected) => {
-                debug!(
-                    user_id = inputs.user_id,
-                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                    source_type = %inputs.source_type,
-                    correlation_id = %correlation_id,
-                    "quota gate decision: fail_open (CustomersDot rejected the license checksum)"
-                );
-                Ok(())
-            }
-            QuotaGateDecision::FailOpen(FailOpenReason::Upstream) => {
+            QuotaGateDecision::FailOpen(reason) => {
                 warn!(
                     user_id = inputs.user_id,
                     realm = inputs.realm.as_deref().unwrap_or(""),
@@ -153,6 +151,7 @@ impl QuotaService {
                     instance_id = inputs.instance_id.as_deref().unwrap_or(""),
                     unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                     source_type = %inputs.source_type,
+                    reason = ?reason,
                     cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
                     correlation_id = %correlation_id,
                     "quota gate decision: fail_open"
@@ -188,32 +187,17 @@ impl QuotaService {
     }
 }
 
-impl QuotaServiceInner {
-    // Without a checksum (older Rails, offline or legacy license, no license) or a
-    // realm CDot accepts for license auth, CDot can only answer 401 or 402
-    // `realm_mismatch`, so the query is allowed without asking.
-    fn license_auth_usable(&self, inputs: &QuotaCheckInputs) -> bool {
-        if inputs.license_checksum.is_none() {
-            debug!(
-                user_id = inputs.user_id,
-                source_type = %inputs.source_type,
-                "quota check skipped: no license_checksum claim"
-            );
-            return false;
-        }
-        let realm = inputs.realm.as_deref().unwrap_or("");
-        if !is_cdot_self_managed_realm(realm) {
-            if !self.realm_mismatch_warned.swap(true, Ordering::Relaxed) {
-                warn!(
-                    realm,
-                    "quota.auth_mode=license_checksum but the realm claim is not \
-                     self-managed; skipping quota checks for such requests"
-                );
-            }
-            return false;
-        }
-        true
+// Without a checksum (no online cloud license, or an older Rails) or a realm CDot accepts
+// for license auth, CDot can only answer 401 or 402 `realm_mismatch`, so the query is
+// allowed without asking. Either way quota is not enforced for the request.
+fn license_auth_skip_reason(inputs: &QuotaCheckInputs) -> Option<&'static str> {
+    if inputs.license_checksum.is_none() {
+        return Some("license_checksum claim missing");
     }
+    if !is_cdot_self_managed_realm(inputs.realm.as_deref().unwrap_or("")) {
+        return Some("realm claim is not self-managed");
+    }
+    None
 }
 
 fn record_skipped(source_type: &str) {
@@ -565,8 +549,6 @@ mod tests {
             assert!(svc.check(&inputs).await.is_ok(), "realm {realm:?}");
         }
         assert_eq!(counter.load(Ordering::SeqCst), 0);
-        let inner = svc.inner.as_ref().unwrap();
-        assert!(inner.realm_mismatch_warned.load(Ordering::Relaxed));
     }
 
     #[tokio::test]
