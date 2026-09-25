@@ -89,7 +89,6 @@ impl HydrationStage {
         let compiled = compile_input_model(
             hydration_input,
             options,
-            &ctx.ontology,
             data_model,
             ctx.security_context()?,
         )

@@ -107,7 +107,7 @@ pub fn compile_query(
     let ontology = Arc::new(ontology.clone());
     let data_model = crate::data_model::clickhouse(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    let mut ctx = config::ClickhouseGqlCtx::new(ontology, security_context.clone(), data_model);
+    let mut ctx = config::ClickhouseGqlCtx::new(security_context.clone(), data_model);
     ctx.set_input(input);
     crate::finish(&mut ctx, config::run_clickhouse_gql)
 }

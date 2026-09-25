@@ -30,7 +30,6 @@ impl PipelineStage for CompilationStage {
                 Some(data_model) => compiler::compile_model(
                     &ctx.query_json,
                     ctx.frontend,
-                    ontology,
                     data_model,
                     security_context,
                 ),

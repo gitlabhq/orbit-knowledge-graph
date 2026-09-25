@@ -11,6 +11,7 @@ use crate::input::EntityAuthConfig;
 use crate::passes::plan::PlanningModel;
 
 pub trait QueryModel: PlanningModel + Send + Sync {
+    fn ontology(&self) -> &ontology::Ontology;
     fn entity_available(&self, entity: EntityId) -> bool;
     fn default_properties(&self, entity: EntityId) -> &[PropertyId];
     fn property_column(&self, property: PropertyId) -> Option<&str>;
@@ -47,6 +48,10 @@ pub fn duckdb(ontology: Arc<ontology::Ontology>) -> Result<Arc<DuckDbDataModel>,
 }
 
 impl QueryModel for ClickHouseDataModel {
+    fn ontology(&self) -> &ontology::Ontology {
+        self.ontology()
+    }
+
     fn entity_available(&self, entity: EntityId) -> bool {
         self.backend().entity(entity).is_some()
     }
@@ -148,6 +153,10 @@ impl SecurityModel for ClickHouseDataModel {
 }
 
 impl QueryModel for DuckDbDataModel {
+    fn ontology(&self) -> &ontology::Ontology {
+        self.ontology()
+    }
+
     fn entity_available(&self, entity: EntityId) -> bool {
         self.backend().entity(entity).is_some()
     }

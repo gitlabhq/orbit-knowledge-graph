@@ -2,9 +2,6 @@
 //! and pipeline presets. The macro generates the `CompilerCtx` trait,
 //! per-pipeline context structs, and runner functions.
 
-use std::sync::Arc;
-
-use ontology::Ontology;
 use orbit_server_config::QueryConfig;
 
 /// Pathfinding hard ceilings. Config can tighten but never exceed these.
@@ -14,6 +11,7 @@ const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
 const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 100_000;
 
 use crate::ast::{Node, Query, TableRef};
+use crate::data_model::QueryModel;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
@@ -36,7 +34,6 @@ fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
 
 compiler_pipeline_macros::define_compiler_ctx! {
     env {
-        pub ontology: Arc<Ontology>,
         pub security_ctx: SecurityContext,
     }
 
@@ -57,7 +54,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
     phases {
         json_dsl_parse {
-            reads_env: [ontology]
+            reads_env: [data_model]
             mutates: [raw, input, pagination]
         }
         gql_parse {
@@ -146,43 +143,43 @@ compiler_pipeline_macros::define_compiler_ctx! {
     pipelines {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
-            env: [ontology, security_ctx]
+            env: [security_ctx]
             state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [json_dsl_parse, validate, normalize, restrict, plan, lower, scope_requirements, response_policy, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
-            env: [ontology, security_ctx]
+            env: [security_ctx]
             state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan, lower, scope_requirements, response_policy, enforce, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
-            env: [ontology, security_ctx]
+            env: [security_ctx]
             state: [input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [restrict, plan, lower, scope_requirements, response_policy, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
-            env: [ontology]
+            env: []
             state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
             phases: [json_dsl_parse, validate_local, normalize, plan, lower, enforce_local, cursor, duckdb_codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
-            env: [ontology]
+            env: []
             state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
             phases: [gql_parse, validate_local, validate_relationships, normalize, plan, lower, enforce_local, cursor, duckdb_codegen]
         }
         validate_normalize_gql {
             model: query_data_model::ClickHouseDataModel
-            env: [ontology]
+            env: []
             state: [raw, input, pagination]
             phases: [gql_parse, validate, validate_relationships, normalize]
         }
         validate_normalize {
             model: query_data_model::ClickHouseDataModel
-            env: [ontology]
+            env: []
             state: [raw, input, pagination]
             phases: [json_dsl_parse, validate, normalize]
         }
@@ -191,7 +188,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
 fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
     let raw = require(ctx.take_raw(), "raw")?;
-    let (input, query_hash) = frontend::json_dsl::parse(&raw, ctx.ontology())?;
+    let (input, query_hash) = frontend::json_dsl::parse(&raw, ctx.data_model().ontology())?;
     ctx.set_input(input);
     ctx.set_pagination(PaginationContext {
         query_hash,
