@@ -81,18 +81,19 @@ can see in GitLab.
 
 - REST API: a personal access token with the `read_api` scope, or a
   [fine-grained personal access token](#fine-grained-personal-access-tokens), sent as a Bearer token.
-  For more information, see [REST API](access/api.md).
+  For more information, see the [REST API](access/api.md#authentication).
 - MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
 
 ### Fine-grained personal access tokens
 
-To use a fine-grained personal access token, on the **User** tab, select **GitLab Orbit** and the **Read** permission.
-The permission covers the REST API and MCP.
+When you [create a fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/#create-a-fine-grained-personal-access-token),
+under **Add resource permissions**, select the **User** tab, then select the **GitLab Orbit** resource
+and the **Read** permission. The permission covers the REST API and MCP.
 
 - Results match what the token owner can access in GitLab.
   Other permissions on the token do not limit them.
-- Group and project scopes are not supported.
+- You cannot limit a token to specific groups or projects for GitLab Orbit.
   A token with only **Group and project access** gets a `403 Forbidden` response.
 - Tokens created with the **Knowledge Graph: Read** or **GitLab Orbit MCP tool: Execute** permission get a `403 Forbidden` response.
   Create a new token.

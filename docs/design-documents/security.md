@@ -63,7 +63,7 @@ Fine-grained personal access tokens gate Orbit endpoints the way they gate Globa
 Rails checks the token once, before the route runs, and does not read it again.
 Results then follow the token owner's access through Layers 1 to 3.
 
-- `read_orbit` (Orbit: Read, User tab) guards every Orbit REST route and `POST /orbit/mcp`.
+- `read_orbit` (Orbit: Read, User tab) guards every Orbit REST route and `POST /api/v4/orbit/mcp`.
   Every route declares the user boundary, so group-scoped and project-scoped tokens get `403`.
 - The other permissions on the token do not filter Orbit results, and Orbit does not parse queries for namespaces.
 - `read_knowledge_graph` and `execute_orbit_mcp_tool` stay defined as deprecated, pointing at raw permissions no route checks.
