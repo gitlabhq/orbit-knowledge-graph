@@ -36,15 +36,9 @@ Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 
 ## Fix inaccurate guidance
 
-If guidance is wrong or outdated (command, flag, or behavior), check the current copy on `main` (swap the path for `references/` files):
-
-```shell
-glab api --hostname gitlab.com 'projects/gitlab-org%2Forbit%2Fknowledge-graph/repository/files/skills%2Forbit-cli%2FSKILL.md/raw?ref=main'
-```
-
-If it is already fixed there, follow that guidance and suggest `glab orbit --update` then `glab orbit setup` once a release includes the fix; do not open another MR.
-Otherwise, confirm with the user before opening a focused MR against `gitlab-org/orbit/knowledge-graph`
-for the affected skill path (one fix per MR, Conventional Commits). If the user declines, skip the upstream check and MR, note the discrepancy in one line, and continue with the corrected command.
+If guidance is wrong or outdated (command, flag, or behavior), tell the user.
+With their confirmation, open a focused MR against `metadata.source-project` fixing `metadata.source-path` (one fix per MR, Conventional Commits).
+If they decline, note the discrepancy in one line and continue with the corrected command.
 
 ## Find, then read
 
