@@ -213,6 +213,9 @@ aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
 
+[profile.dev]
+debug = "line-tables-only"
+
 # Optimise the Parquet, Arrow, zstd and RNG deps even in debug builds: synthetic
 # data generation spends most of its time in them. The rest of dev stays unoptimised.
 [profile.dev.package.parquet]
