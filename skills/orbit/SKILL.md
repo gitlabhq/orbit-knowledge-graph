@@ -22,14 +22,13 @@ If a `glab orbit` command fails with "command not found", an auth error, or a fe
 
 ## Fix inaccurate guidance
 
-If a command fails or a flag or behavior described here is wrong or outdated,
-check the current skill on `main` first:
+If guidance is wrong or outdated (command, flag, or behavior), check the current copy on `main` (swap the path for `references/` files):
 
 ```shell
-glab api 'projects/gitlab-org%2Forbit%2Fknowledge-graph/repository/files/skills%2Forbit%2FSKILL.md/raw?ref=main'
+glab api --hostname gitlab.com 'projects/gitlab-org%2Forbit%2Fknowledge-graph/repository/files/skills%2Forbit%2FSKILL.md/raw?ref=main'
 ```
 
-If it is already fixed there, follow that guidance and suggest `glab orbit --update`; do not open another MR.
+If it is already fixed there, follow that guidance and suggest `glab skills update orbit`; do not open another MR.
 Otherwise, confirm with the user before opening a focused MR against `gitlab-org/orbit/knowledge-graph`
 for the affected skill path (one fix per MR, Conventional Commits). Do not silently work around inaccurate guidance.
 
