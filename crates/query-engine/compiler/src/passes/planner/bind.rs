@@ -866,10 +866,10 @@ impl Builder {
                         {
                             let mut predicates = self.kind_predicates(hop_relation, &input.types);
                             if hop == 1 {
-                                let (source, _) = input.direction.edge_columns();
+                                let (source_name, _) = input.direction.edge_columns();
                                 let source = self.column(
                                     hop_relation,
-                                    source,
+                                    source_name,
                                     Some(ontology::DataType::Int),
                                 );
                                 let from = self
@@ -878,14 +878,31 @@ impl Builder {
                                     .nodes
                                     .iter()
                                     .find(|node| node.id == input.from)
+                                    .cloned()
                                     .unwrap();
                                 predicates.extend(ids(source, &from.node_ids));
+                                if let Some(entity) = from.entity.as_deref() {
+                                    let kind = self.column(
+                                        hop_relation,
+                                        if source_name == SOURCE_ID_COLUMN {
+                                            SOURCE_KIND_COLUMN
+                                        } else {
+                                            TARGET_KIND_COLUMN
+                                        },
+                                        Some(ontology::DataType::String),
+                                    );
+                                    predicates.push(compare(
+                                        CompareOp::Eq,
+                                        Expr::Column(kind),
+                                        literal(entity.to_string()),
+                                    ));
+                                }
                             }
                             if hop == depth {
-                                let (_, target) = input.direction.edge_columns();
+                                let (_, target_name) = input.direction.edge_columns();
                                 let target = self.column(
                                     hop_relation,
-                                    target,
+                                    target_name,
                                     Some(ontology::DataType::Int),
                                 );
                                 let to = self
@@ -894,8 +911,25 @@ impl Builder {
                                     .nodes
                                     .iter()
                                     .find(|node| node.id == input.to)
+                                    .cloned()
                                     .unwrap();
                                 predicates.extend(ids(target, &to.node_ids));
+                                if let Some(entity) = to.entity.as_deref() {
+                                    let kind = self.column(
+                                        hop_relation,
+                                        if target_name == SOURCE_ID_COLUMN {
+                                            SOURCE_KIND_COLUMN
+                                        } else {
+                                            TARGET_KIND_COLUMN
+                                        },
+                                        Some(ontology::DataType::String),
+                                    );
+                                    predicates.push(compare(
+                                        CompareOp::Eq,
+                                        Expr::Column(kind),
+                                        literal(entity.to_string()),
+                                    ));
+                                }
                             }
                             predicates
                         },

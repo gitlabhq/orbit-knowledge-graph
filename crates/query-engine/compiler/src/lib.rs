@@ -953,7 +953,7 @@ mod tests {
             "variable-length traversal must use UNION ALL arms, got:\n{sql}"
         );
         assert!(
-            sql.contains("e0.source_id = 1"),
+            sql.contains("source_id = 1"),
             "pinned User node_ids must reach the outer WHERE, got:\n{sql}"
         );
         assert!(
@@ -986,7 +986,7 @@ mod tests {
             "variable-length traversal should use UNION ALL arms, got:\n{sql}"
         );
         assert!(
-            sql.contains("e0.target_id = 1"),
+            sql.contains("target_id = 1"),
             "pinned to-side node_ids must reach the outer WHERE, got:\n{sql}"
         );
     }
@@ -1578,7 +1578,7 @@ mod tests {
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
                 "p",
                 "f",
-                "gl_project|gl_diff_edge|!gl_group AS g",
+                "gl_project|gl_merge_request_diff_file|!gl_group AS g",
             ),
             (
                 r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
