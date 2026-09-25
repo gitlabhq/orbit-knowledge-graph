@@ -111,15 +111,13 @@ impl EdgeTableConfig {
             if let Some(route) = model.relationship_route(rt) {
                 source_kinds.extend(
                     route
-                        .sources
-                        .iter()
-                        .map(|entity| model.graph().entity(*entity).name.clone()),
+                        .source_entities()
+                        .map(|entity| model.graph().entity(entity).name.clone()),
                 );
                 target_kinds.extend(
                     route
-                        .targets
-                        .iter()
-                        .map(|entity| model.graph().entity(*entity).name.clone()),
+                        .target_entities()
+                        .map(|entity| model.graph().entity(entity).name.clone()),
                 );
             }
         }

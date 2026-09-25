@@ -51,8 +51,32 @@ pub struct PathColumn {
 #[derive(Debug)]
 pub struct RelationshipRoute<'a> {
     pub table: &'a str,
-    pub sources: &'a [EntityId],
-    pub targets: &'a [EntityId],
+    graph: &'a GraphCatalog,
+    relationship: &'a Relationship,
+}
+
+impl RelationshipRoute<'_> {
+    pub fn source_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.relationship
+            .variants
+            .iter()
+            .map(|variant| self.graph.variant(*variant).source)
+    }
+
+    pub fn target_entities(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.relationship
+            .variants
+            .iter()
+            .map(|variant| self.graph.variant(*variant).target)
+    }
+
+    pub fn has_source(&self, entity: EntityId) -> bool {
+        self.source_entities().any(|source| source == entity)
+    }
+
+    pub fn has_target(&self, entity: EntityId) -> bool {
+        self.target_entities().any(|target| target == entity)
+    }
 }
 
 pub type DenormalizedKey = (String, String, String);
@@ -259,8 +283,8 @@ pub trait QueryDataModel {
                 .query_backend()
                 .relationship_table(relationship)
                 .unwrap_or_else(|| self.default_edge_table()),
-            sources: &graph_relationship.sources,
-            targets: &graph_relationship.targets,
+            graph: self.graph(),
+            relationship: graph_relationship,
         })
     }
 

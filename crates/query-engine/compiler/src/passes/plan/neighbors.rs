@@ -80,8 +80,9 @@ where
             let mut tables: Vec<String> = relationships
                 .iter()
                 .filter_map(|relationship| model.relationship_route(relationship))
-                .filter(|route| {
-                    if source { route.sources } else { route.targets }.contains(&center_entity_id)
+                .filter(|route| match source {
+                    true => route.has_source(center_entity_id),
+                    false => route.has_target(center_entity_id),
                 })
                 .map(|route| route.table.to_string())
                 .collect();
