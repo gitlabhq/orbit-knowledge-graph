@@ -87,15 +87,17 @@ can see in GitLab.
 
 ### Fine-grained personal access tokens
 
-When you [create a fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/#create-a-fine-grained-personal-access-token),
-under **Add resource permissions**, select the **User** tab, then select the **GitLab Orbit** resource
-and the **Read** permission. The permission covers the REST API and MCP.
+You can use a fine-grained personal access token
+to authenticate with GitLab Orbit Remote.
 
-- Results match what the token owner can access in GitLab.
-  Other permissions on the token do not limit them.
-- You cannot limit a token to specific groups or projects for GitLab Orbit.
-  A token with only **Group and project access** gets a `403 Forbidden` response.
-- Tokens created with the **Knowledge Graph: Read** or **GitLab Orbit MCP tool: Execute** permission get a `403 Forbidden` response.
-  Create a new token.
-- SAML SSO enforcement does not apply to personal access tokens.
-  A token keeps working after the owner's SAML session expires.
+If you use a fine-grained personal access token:
+
+- Results from read operations are scoped to the token owner's access level.
+- Group and project resources are not supported. A token generated with only group and project resources
+gets a `403 Forbidden` response during authentication.
+- SAML SSO enforcement does not apply to personal access tokens. A token continues to work after the owner's SAML session expires.
+
+If you want to configure a token to
+work with GitLab Orbit Remote, add the **GitLab Orbit** resource
+to the token when you create it. For more information,
+see [create a fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/#create-a-fine-grained-personal-access-token).
