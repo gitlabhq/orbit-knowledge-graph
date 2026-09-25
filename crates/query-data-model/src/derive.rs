@@ -23,8 +23,8 @@ mod tests {
             "gl_definition"
         );
         assert_eq!(
-            remote.backend().relationship(contains).unwrap().table,
-            "gl_edge"
+            remote.backend().relationship_table(contains),
+            Some("gl_edge")
         );
         assert_eq!(
             local.backend().relationship_table(contains),

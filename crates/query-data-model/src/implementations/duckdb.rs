@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::{Backend, DataModelError, EntityId, GraphCatalog, PropertyId, RelationshipId};
 
@@ -37,19 +37,6 @@ impl DuckDbCatalog {
 
     pub fn edge_column_type(&self, column: &str) -> Option<ontology::DataType> {
         self.edge_column_types.get(column).copied()
-    }
-
-    pub fn edge_tables_for(&self, relationships: &[RelationshipId]) -> Vec<String> {
-        if relationships.is_empty() {
-            return vec![self.edge_table.clone()];
-        }
-        relationships
-            .iter()
-            .filter_map(|id| self.relationship_table(*id))
-            .map(String::from)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
     }
 }
 

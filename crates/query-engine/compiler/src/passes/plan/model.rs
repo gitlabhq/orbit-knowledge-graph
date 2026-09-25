@@ -1,8 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use query_data_model::{
-    ClickHouseDataModel, DenormalizedProperty, DuckDbDataModel, EntityId, RelationshipId,
-};
+use query_data_model::{ClickHouseDataModel, DenormalizedProperty, DuckDbDataModel, EntityId};
 
 pub trait PlanningModel {
     fn graph(&self) -> &query_data_model::GraphCatalog;
@@ -13,11 +11,39 @@ pub trait PlanningModel {
     fn force_join(&self) -> bool;
     fn force_emit_select(&self) -> bool;
     fn default_edge_table(&self) -> &str;
-    fn relationship_names(&self) -> Vec<String>;
+    fn all_edge_tables(&self) -> Vec<String>;
+    fn relationship_names(&self) -> Vec<String> {
+        self.graph()
+            .relationships()
+            .map(|relationship| relationship.name.clone())
+            .collect()
+    }
     fn edge_table(&self, relationship: &str) -> Option<&str>;
-    fn edge_tables(&self, relationships: &[String]) -> Vec<String>;
-    fn source_entities(&self, relationship: &str) -> Vec<String>;
-    fn target_entities(&self, relationship: &str) -> Vec<String>;
+    fn edge_tables(&self, relationships: &[String]) -> Vec<String> {
+        if relationships.is_empty() || relationships == ["*"] {
+            return self.all_edge_tables();
+        }
+        let requested = relationships
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        self.graph()
+            .relationships()
+            .filter(|relationship| {
+                requested.is_empty() || requested.contains(relationship.name.as_str())
+            })
+            .filter_map(|relationship| self.edge_table(&relationship.name))
+            .map(String::from)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+    fn source_entities(&self, relationship: &str) -> Vec<String> {
+        relationship_entities(self.graph(), relationship, |variant| variant.source)
+    }
+    fn target_entities(&self, relationship: &str) -> Vec<String> {
+        relationship_entities(self.graph(), relationship, |variant| variant.target)
+    }
     fn foreign_key(
         &self,
         relationships: &[String],
@@ -31,6 +57,27 @@ pub trait PlanningModel {
     fn scope_preserving(&self, relationship: &str, source: &str, target: &str) -> bool;
     fn pruned_scope_endpoint(&self, relationship: &str, source: &str, target: &str)
     -> Option<bool>;
+}
+
+fn relationship_entities(
+    graph: &query_data_model::GraphCatalog,
+    relationship: &str,
+    endpoint: impl Fn(&query_data_model::RelationshipVariant) -> EntityId,
+) -> Vec<String> {
+    graph
+        .relationship_id(relationship)
+        .map(|id| {
+            graph
+                .relationship(id)
+                .variants
+                .iter()
+                .map(|variant| endpoint(graph.variant(*variant)))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|entity| graph.entity(entity).name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub struct ResolvedDenormalizedProperty {
@@ -50,23 +97,6 @@ pub struct ForeignKey {
 pub type DenormalizedKey = (String, String, String);
 pub type DenormalizedColumns = HashMap<DenormalizedKey, (String, String)>;
 pub type DenormalizedRelationships = HashMap<DenormalizedKey, Vec<String>>;
-
-fn names(graph: &query_data_model::GraphCatalog, entities: &[EntityId]) -> Vec<String> {
-    entities
-        .iter()
-        .map(|id| graph.entity(*id).name.clone())
-        .collect()
-}
-
-fn relationship_ids(
-    graph: &query_data_model::GraphCatalog,
-    relationships: &[String],
-) -> Vec<RelationshipId> {
-    relationships
-        .iter()
-        .filter_map(|name| graph.relationship_id(name))
-        .collect()
-}
 
 fn resolve_denormalized(
     model: &ClickHouseDataModel,
@@ -122,45 +152,16 @@ impl PlanningModel for ClickHouseDataModel {
         self.backend().default_edge_table()
     }
 
-    fn relationship_names(&self) -> Vec<String> {
-        self.graph()
-            .relationships()
-            .map(|relationship| relationship.name.clone())
+    fn all_edge_tables(&self) -> Vec<String> {
+        self.backend()
+            .edge_tables()
+            .map(|table| table.name.clone())
             .collect()
     }
 
     fn edge_table(&self, relationship: &str) -> Option<&str> {
         let id = self.graph().relationship_id(relationship)?;
-        self.backend()
-            .relationship(id)
-            .map(|layout| layout.table.as_str())
-    }
-
-    fn edge_tables(&self, relationships: &[String]) -> Vec<String> {
-        self.backend()
-            .edge_tables_for(&relationship_ids(self.graph(), relationships))
-    }
-
-    fn source_entities(&self, relationship: &str) -> Vec<String> {
-        let Some(layout) = self
-            .graph()
-            .relationship_id(relationship)
-            .and_then(|id| self.backend().relationship(id))
-        else {
-            return Vec::new();
-        };
-        names(self.graph(), &layout.source_entities)
-    }
-
-    fn target_entities(&self, relationship: &str) -> Vec<String> {
-        let Some(layout) = self
-            .graph()
-            .relationship_id(relationship)
-            .and_then(|id| self.backend().relationship(id))
-        else {
-            return Vec::new();
-        };
-        names(self.graph(), &layout.target_entities)
+        self.backend().relationship_table(id)
     }
 
     fn foreign_key(
@@ -302,55 +303,13 @@ impl PlanningModel for DuckDbDataModel {
         self.backend().edge_table()
     }
 
-    fn relationship_names(&self) -> Vec<String> {
-        self.graph()
-            .relationships()
-            .map(|relationship| relationship.name.clone())
-            .collect()
+    fn all_edge_tables(&self) -> Vec<String> {
+        vec![self.backend().edge_table().to_string()]
     }
 
     fn edge_table(&self, relationship: &str) -> Option<&str> {
         let id = self.graph().relationship_id(relationship)?;
         self.backend().relationship_table(id)
-    }
-
-    fn edge_tables(&self, relationships: &[String]) -> Vec<String> {
-        self.backend()
-            .edge_tables_for(&relationship_ids(self.graph(), relationships))
-    }
-
-    fn source_entities(&self, relationship: &str) -> Vec<String> {
-        self.graph()
-            .relationship_id(relationship)
-            .map(|id| {
-                self.graph()
-                    .relationship(id)
-                    .variants
-                    .iter()
-                    .map(|variant| self.graph().variant(*variant).source)
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .map(|entity| self.graph().entity(entity).name.clone())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    fn target_entities(&self, relationship: &str) -> Vec<String> {
-        self.graph()
-            .relationship_id(relationship)
-            .map(|id| {
-                self.graph()
-                    .relationship(id)
-                    .variants
-                    .iter()
-                    .map(|variant| self.graph().variant(*variant).target)
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .map(|entity| self.graph().entity(entity).name.clone())
-                    .collect()
-            })
-            .unwrap_or_default()
     }
 
     fn foreign_key(

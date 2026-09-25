@@ -4,7 +4,7 @@ mod duckdb;
 
 pub use authz::{GitLabAuthz, GitLabAuthzCatalog, TrustedLocal, TrustedLocalCatalog};
 pub use clickhouse::{
-    ClickHouse, ClickHouseCatalog, DenormalizedProperty, EntityLayout, PathColumn,
-    RelationshipLayout, TableLayout, TextIndex, TraversalPathLookup, VariantLayout,
+    ClickHouse, ClickHouseCatalog, DenormalizedProperty, EntityLayout, PathColumn, TableLayout,
+    TextIndex, TraversalPathLookup, VariantLayout,
 };
 pub use duckdb::{DuckDb, DuckDbCatalog};

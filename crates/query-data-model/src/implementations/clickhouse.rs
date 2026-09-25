@@ -46,15 +46,7 @@ pub struct EntityLayout {
 }
 
 #[derive(Debug, Clone)]
-pub struct RelationshipLayout {
-    pub table: String,
-    pub source_entities: Vec<EntityId>,
-    pub target_entities: Vec<EntityId>,
-}
-
-#[derive(Debug, Clone)]
 pub struct VariantLayout {
-    pub table: String,
     pub foreign_key: Option<PropertyId>,
 }
 
@@ -85,7 +77,7 @@ pub struct TraversalPathLookup {
 pub struct ClickHouseCatalog {
     default_edge_table: String,
     entities: HashMap<EntityId, EntityLayout>,
-    relationships: HashMap<RelationshipId, RelationshipLayout>,
+    relationships: HashMap<RelationshipId, String>,
     variants: HashMap<RelationshipVariantId, VariantLayout>,
     properties: HashMap<PropertyId, String>,
     tables: HashMap<String, TableLayout>,
@@ -99,8 +91,8 @@ impl ClickHouseCatalog {
         self.entities.get(&id)
     }
 
-    pub fn relationship(&self, id: RelationshipId) -> Option<&RelationshipLayout> {
-        self.relationships.get(&id)
+    pub fn relationship_table(&self, id: RelationshipId) -> Option<&str> {
+        self.relationships.get(&id).map(String::as_str)
     }
 
     pub fn variant(&self, id: RelationshipVariantId) -> Option<&VariantLayout> {
@@ -127,7 +119,7 @@ impl ClickHouseCatalog {
     pub fn edge_tables(&self) -> impl Iterator<Item = &TableLayout> {
         self.relationships
             .values()
-            .map(|relationship| relationship.table.as_str())
+            .map(String::as_str)
             .collect::<BTreeSet<_>>()
             .into_iter()
             .filter_map(|name| self.tables.get(name))
@@ -157,19 +149,6 @@ impl ClickHouseCatalog {
         kind: ontology::TraversalPathKind,
     ) -> Option<&TraversalPathLookup> {
         self.traversal_path_lookups.get(&(entity, kind))
-    }
-
-    pub fn edge_tables_for(&self, relationships: &[RelationshipId]) -> Vec<String> {
-        if relationships.is_empty() {
-            return self.edge_tables().map(|table| table.name.clone()).collect();
-        }
-        relationships
-            .iter()
-            .filter_map(|id| self.relationship(*id))
-            .map(|layout| layout.table.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
     }
 }
 
@@ -312,8 +291,6 @@ impl Backend for ClickHouse {
             let table = ontology
                 .edge_table_for_relationship(&relationship.name)
                 .to_string();
-            let mut source_entities = BTreeSet::new();
-            let mut target_entities = BTreeSet::new();
             for edge in ontology_variants {
                 if edge.source_kind.is_empty() || edge.target_kind.is_empty() {
                     continue;
@@ -330,8 +307,6 @@ impl Backend for ClickHouse {
                         name: edge.target_kind.clone(),
                     }
                 })?;
-                source_entities.insert(source);
-                target_entities.insert(target);
                 let variant_id = graph
                     .variant_id(relationship.id, source, target)
                     .ok_or_else(|| {
@@ -345,22 +320,9 @@ impl Backend for ClickHouse {
                         .property_id(source, column)
                         .or_else(|| graph.property_id(target, column))
                 });
-                variants.insert(
-                    variant_id,
-                    VariantLayout {
-                        table: edge.destination_table.clone(),
-                        foreign_key,
-                    },
-                );
+                variants.insert(variant_id, VariantLayout { foreign_key });
             }
-            relationships.insert(
-                relationship.id,
-                RelationshipLayout {
-                    table,
-                    source_entities: source_entities.into_iter().collect(),
-                    target_entities: target_entities.into_iter().collect(),
-                },
-            );
+            relationships.insert(relationship.id, table);
         }
 
         let denormalized_properties = ontology
