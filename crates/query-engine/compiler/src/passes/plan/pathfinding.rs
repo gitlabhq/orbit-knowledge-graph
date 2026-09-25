@@ -31,16 +31,21 @@ where
 
     let endpoint_kinds = |entity: &str, source: bool| {
         let relationships: Vec<String> = model
-            .relationship_names()
-            .into_iter()
+            .graph()
+            .relationships()
             .filter(|relationship| {
                 let entities = if source {
-                    model.source_entities(relationship)
+                    super::model::relationship_entities(model.graph(), &relationship.name, |v| {
+                        v.source
+                    })
                 } else {
-                    model.target_entities(relationship)
+                    super::model::relationship_entities(model.graph(), &relationship.name, |v| {
+                        v.target
+                    })
                 };
                 entities.iter().any(|kind| kind == entity)
             })
+            .map(|relationship| relationship.name.clone())
             .collect();
         crate::passes::shared::rel_kind_filter_values(&relationships)
     };

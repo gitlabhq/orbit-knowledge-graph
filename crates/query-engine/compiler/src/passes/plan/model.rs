@@ -12,12 +12,6 @@ pub trait PlanningModel {
     fn force_emit_select(&self) -> bool;
     fn default_edge_table(&self) -> &str;
     fn all_edge_tables(&self) -> Vec<String>;
-    fn relationship_names(&self) -> Vec<String> {
-        self.graph()
-            .relationships()
-            .map(|relationship| relationship.name.clone())
-            .collect()
-    }
     fn edge_table(&self, relationship: &str) -> Option<&str>;
     fn edge_tables(&self, relationships: &[String]) -> Vec<String> {
         if relationships.is_empty() || relationships == ["*"] {
@@ -38,12 +32,6 @@ pub trait PlanningModel {
             .into_iter()
             .collect()
     }
-    fn source_entities(&self, relationship: &str) -> Vec<String> {
-        relationship_entities(self.graph(), relationship, |variant| variant.source)
-    }
-    fn target_entities(&self, relationship: &str) -> Vec<String> {
-        relationship_entities(self.graph(), relationship, |variant| variant.target)
-    }
     fn foreign_key(
         &self,
         relationships: &[String],
@@ -59,7 +47,7 @@ pub trait PlanningModel {
     -> Option<bool>;
 }
 
-fn relationship_entities(
+pub(super) fn relationship_entities(
     graph: &query_data_model::GraphCatalog,
     relationship: &str,
     endpoint: impl Fn(&query_data_model::RelationshipVariant) -> EntityId,

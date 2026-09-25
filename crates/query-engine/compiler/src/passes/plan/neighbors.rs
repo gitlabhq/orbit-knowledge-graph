@@ -63,20 +63,23 @@ where
     let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
     {
         let center_entity = center_node.entity.as_deref().unwrap_or_default();
-        let all_relationships = model.relationship_names();
-        let rels: Vec<&String> = if config.rel_types.is_empty() {
-            all_relationships.iter().collect()
+        let rels: Vec<&str> = if config.rel_types.is_empty() {
+            model
+                .graph()
+                .relationships()
+                .map(|relationship| relationship.name.as_str())
+                .collect()
         } else {
-            config.rel_types.iter().collect()
+            config.rel_types.iter().map(String::as_str).collect()
         };
         let tables_for = |source: bool| -> Vec<String> {
             let mut t: Vec<String> = rels
                 .iter()
                 .filter(|r| {
                     let kinds = if source {
-                        model.source_entities(r)
+                        super::model::relationship_entities(model.graph(), r, |v| v.source)
                     } else {
-                        model.target_entities(r)
+                        super::model::relationship_entities(model.graph(), r, |v| v.target)
                     };
                     kinds.iter().any(|kind| kind == center_entity)
                 })

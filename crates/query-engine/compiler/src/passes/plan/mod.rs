@@ -109,8 +109,12 @@ impl EdgeTableConfig {
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
         for rt in rel_types {
-            source_kinds.extend(model.source_entities(rt));
-            target_kinds.extend(model.target_entities(rt));
+            source_kinds.extend(model::relationship_entities(model.graph(), rt, |v| {
+                v.source
+            }));
+            target_kinds.extend(model::relationship_entities(model.graph(), rt, |v| {
+                v.target
+            }));
         }
         let tables = model.edge_tables(rel_types);
         Self {
