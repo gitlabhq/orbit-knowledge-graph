@@ -86,6 +86,11 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "code-graph-incremental"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "orbit-cli"
 expression = "LicenseRef-EE"
 license-files = []

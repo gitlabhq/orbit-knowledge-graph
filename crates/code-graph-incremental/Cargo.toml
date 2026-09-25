@@ -1,0 +1,20 @@
+[package]
+name = "code-graph-incremental"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[lints]
+workspace = true
+
+[dependencies]
+arrow = { workspace = true }
+indextree = "4.9"
+lasso = { version = "0.7", features = ["multi-threaded", "ahasher"] }
+rkyv = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+smallvec = { workspace = true }
+strum = { workspace = true }
+code-graph = { path = "../code-graph" }
+orbit-utils = { path = "../utils" }
