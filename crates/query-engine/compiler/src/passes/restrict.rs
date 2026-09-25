@@ -15,6 +15,7 @@ use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 #[cfg(test)]
 use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::QueryAuthorizationCatalog;
 use std::collections::HashSet;
 
 fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
@@ -27,7 +28,7 @@ fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
 
 fn enforce_aggregation_scope(
     input: &Input,
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     let is_scoped = |entity: &str| model.entity_has_traversal_path(entity);
 
@@ -86,7 +87,7 @@ fn enforce_aggregation_scope(
 
 fn enforce_traversal_path_filters(
     input: &Input,
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     for node in &input.nodes {
@@ -102,6 +103,7 @@ fn enforce_traversal_path_filters(
         // Entities without a redaction role use the normal traversal-path floor:
         // Rails only sends Reporter+ paths, and stricter entities override this.
         let min_role = model
+            .query_authorization()
             .entity_auth()
             .get(entity)
             .map(|policy| policy.required_access_level)
@@ -202,13 +204,13 @@ fn validate_traversal_path_within_scope(
 /// The per-alias proofs come from [`crate::scope::derive_scope_proofs`].
 fn stamp_edge_scope_proofs(
     input: &Input,
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> std::collections::HashMap<String, crate::scope::ScopeProof> {
     crate::scope::derive_scope_proofs(input, model)
 }
 
 fn admin_only(
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
     entity: &str,
     property: &str,
 ) -> bool {
@@ -217,7 +219,7 @@ fn admin_only(
 
 pub fn restrict(
     input: &mut Input,
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<std::collections::HashMap<String, crate::scope::ScopeProof>> {
     enforce_traversal_path_filters(input, model, security_ctx)?;

@@ -11,7 +11,7 @@ use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
 pub fn plan_pathfinding<M>(input: &Input, model: &M) -> Result<Plan>
 where
-    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + ?Sized,
 {
     let path = input
         .path
@@ -35,11 +35,11 @@ where
             .relationships()
             .filter(|relationship| {
                 let entities = if source {
-                    super::relationship_entities(model.graph(), &relationship.name, |v| v.source)
+                    model.relationship_entities(&relationship.name, true)
                 } else {
-                    super::relationship_entities(model.graph(), &relationship.name, |v| v.target)
+                    model.relationship_entities(&relationship.name, false)
                 };
-                entities.iter().any(|kind| kind == entity)
+                entities.contains(&entity)
             })
             .map(|relationship| relationship.name.clone())
             .collect();
@@ -88,7 +88,7 @@ where
 
 fn node_plan_from<M>(node: &InputNode, model: &M) -> Result<NodePlan>
 where
-    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + ?Sized,
 {
     let entity = node
         .entity

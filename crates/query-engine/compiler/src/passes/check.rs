@@ -21,7 +21,7 @@ const STARTS_WITH_FNAME: &str = "startsWith";
 pub fn check_ast(
     node: &Node,
     ctx: &SecurityContext,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     match node {
         Node::Query(q) => {
@@ -37,7 +37,7 @@ pub fn check_ast(
 fn check_query(
     q: &Query,
     ctx: &SecurityContext,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     let aliases = collect_node_aliases(&q.from, model);
     for alias in &aliases {
@@ -64,7 +64,7 @@ fn check_query(
 fn check_subqueries_in_expr(
     expr: &Expr,
     ctx: &SecurityContext,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     match expr {
         Expr::InSelect { query, .. } | Expr::Scalar(query) => check_query(query, ctx, model),
@@ -92,7 +92,7 @@ fn check_subqueries_in_expr(
 fn check_derived_tables_in_from(
     table_ref: &TableRef,
     ctx: &SecurityContext,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     match table_ref {
         TableRef::Subquery { query, .. } => check_query(query, ctx, model),

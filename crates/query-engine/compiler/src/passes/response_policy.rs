@@ -13,7 +13,7 @@ const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
 pub fn apply_text_excerpts(
     node: &mut Node,
     input: &Input,
-    model: &(impl crate::data_model::QueryModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) {
     let Node::Query(query) = node else { return };
     let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES

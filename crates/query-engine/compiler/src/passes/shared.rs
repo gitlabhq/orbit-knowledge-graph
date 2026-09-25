@@ -116,7 +116,7 @@ pub fn node_ids_predicate(alias: &str, ids: &[i64]) -> Expr {
 pub fn ordered_filters(
     filters: &std::collections::HashMap<String, Vec<crate::input::InputFilter>>,
     entity: Option<query_data_model::EntityId>,
-    model: &(impl crate::data_model::QueryModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Vec<(String, BoundFilter)> {
     let mut properties: Vec<_> = filters.iter().collect();
     properties.sort_unstable_by_key(|(property, _)| *property);

@@ -201,7 +201,7 @@ pub struct Skip {
     pub selectivity: bool,
 }
 
-pub struct Validator<'a, M: crate::data_model::QueryModel> {
+pub struct Validator<'a, M: query_data_model::QueryDataModel> {
     model: ValidationModel<'a, M>,
     skip: Skip,
 }
@@ -222,7 +222,7 @@ impl<M> ValidationModel<'_, M> {
     }
 }
 
-impl<'a, M: crate::data_model::QueryModel> Validator<'a, M> {
+impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
     pub fn new(model: &'a M) -> Self {
         Self {
             model: ValidationModel::Borrowed(model),

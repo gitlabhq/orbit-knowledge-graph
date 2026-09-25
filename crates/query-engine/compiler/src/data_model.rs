@@ -1,31 +1,6 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use ontology::DataType;
-use query_data_model::{
-    ClickHouseDataModel, DataModelError, DuckDbDataModel, EntityId, PropertyId,
-};
-
-use query_data_model::EntityAuthConfig;
-
-pub trait QueryModel: query_data_model::QueryDataModel + Send + Sync {
-    fn default_properties(&self, entity: EntityId) -> &[PropertyId];
-    fn property_column(&self, property: PropertyId) -> Option<&str>;
-    fn table_column_type(&self, table: &str, column: &str) -> Option<DataType>;
-    fn has_text_index(&self, property: PropertyId) -> bool;
-}
-
-pub trait AuthorizationModel: QueryModel {
-    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig>;
-    fn is_admin_only(&self, property: PropertyId) -> bool;
-    fn redaction_id_column(&self, entity: EntityId) -> &str;
-}
-
-pub trait SecurityModel: AuthorizationModel {
-    fn table_path_scopable(&self, table: &str) -> bool;
-    fn table_has_path_columns(&self, table: &str) -> bool;
-    fn table_minimum_access_level(&self, table: &str) -> u32;
-}
+use query_data_model::{ClickHouseDataModel, DataModelError, DuckDbDataModel};
 
 pub fn clickhouse(
     ontology: Arc<ontology::Ontology>,
@@ -35,86 +10,4 @@ pub fn clickhouse(
 
 pub fn duckdb(ontology: Arc<ontology::Ontology>) -> Result<Arc<DuckDbDataModel>, DataModelError> {
     DuckDbDataModel::derive(ontology).map(Arc::new)
-}
-
-impl QueryModel for ClickHouseDataModel {
-    fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
-        self.backend()
-            .entity(entity)
-            .map(|layout| layout.default_properties.as_slice())
-            .unwrap_or_default()
-    }
-
-    fn property_column(&self, property: PropertyId) -> Option<&str> {
-        self.backend().property_column(property)
-    }
-
-    fn table_column_type(&self, table: &str, column: &str) -> Option<DataType> {
-        self.backend()
-            .table(table)
-            .and_then(|layout| layout.column_types.get(column).copied())
-    }
-
-    fn has_text_index(&self, property: PropertyId) -> bool {
-        self.backend().has_text_index(property)
-    }
-}
-
-impl AuthorizationModel for ClickHouseDataModel {
-    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
-        self.authorization().entity_auth()
-    }
-
-    fn is_admin_only(&self, property: PropertyId) -> bool {
-        self.authorization().is_admin_only(property)
-    }
-
-    fn redaction_id_column(&self, entity: EntityId) -> &str {
-        self.authorization()
-            .entity(entity)
-            .and_then(|policy| self.property_column(policy.id_property))
-            .unwrap_or(ontology::constants::DEFAULT_PRIMARY_KEY)
-    }
-}
-
-impl SecurityModel for ClickHouseDataModel {
-    fn table_path_scopable(&self, table: &str) -> bool {
-        self.backend()
-            .table(table)
-            .is_some_and(|layout| layout.path_scopable)
-    }
-
-    fn table_has_path_columns(&self, table: &str) -> bool {
-        self.backend()
-            .table(table)
-            .is_none_or(|layout| !layout.path_columns.is_empty())
-    }
-
-    fn table_minimum_access_level(&self, table: &str) -> u32 {
-        self.backend()
-            .table(table)
-            .map(|layout| layout.minimum_access_level(self.authorization()))
-            .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL)
-    }
-}
-
-impl QueryModel for DuckDbDataModel {
-    fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
-        self.graph().entity(entity).properties.as_slice()
-    }
-
-    fn property_column(&self, property: PropertyId) -> Option<&str> {
-        query_data_model::QueryBackendCatalog::property_column(self.backend(), property)
-    }
-
-    fn table_column_type(&self, table: &str, column: &str) -> Option<DataType> {
-        if table != self.backend().edge_table() {
-            return None;
-        }
-        self.backend().edge_column_type(column)
-    }
-
-    fn has_text_index(&self, _property: PropertyId) -> bool {
-        false
-    }
 }

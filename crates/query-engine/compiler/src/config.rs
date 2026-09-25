@@ -263,7 +263,7 @@ fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn restrict<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: crate::data_model::AuthorizationModel,
+    C::Model: query_data_model::QueryDataModel,
 {
     let security_ctx = ctx.security_ctx().clone();
     let mut input = require(ctx.take_input(), "input")?;
@@ -348,7 +348,7 @@ fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn enforce<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: crate::data_model::AuthorizationModel,
+    C::Model: query_data_model::QueryDataModel,
 {
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
@@ -365,7 +365,7 @@ where
 fn enforce_local<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: crate::data_model::QueryModel,
+    C::Model: query_data_model::QueryDataModel,
 {
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
@@ -381,7 +381,7 @@ where
 fn security<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: crate::data_model::SecurityModel,
+    C::Model: query_data_model::QueryDataModel,
 {
     let security_ctx = ctx.security_ctx().clone();
     let mut node = require(ctx.take_node(), "node")?;
@@ -407,7 +407,7 @@ fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn check<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: crate::data_model::SecurityModel,
+    C::Model: query_data_model::QueryDataModel,
 {
     let node = require(ctx.node().clone(), "node")?;
     check::check_ast(&node, ctx.security_ctx(), ctx.data_model())
@@ -416,7 +416,7 @@ where
 fn hydrate_plan<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: crate::data_model::AuthorizationModel,
+    C::Model: query_data_model::QueryDataModel,
 {
     let input = require(ctx.input().as_ref(), "input")?;
     let emitted = require(ctx.node().as_ref(), "node")?;

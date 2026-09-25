@@ -230,7 +230,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
     }
 
     trait_sigs.push(quote! {
-        type Model: crate::data_model::QueryModel;
+        type Model: query_data_model::QueryDataModel + Send + Sync;
         fn data_model(&self) -> &Self::Model;
         fn current_phase(&self) -> &'static str;
         fn set_current_phase(&mut self, phase: &'static str);

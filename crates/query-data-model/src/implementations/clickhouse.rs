@@ -2,8 +2,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::GitLabAuthzCatalog;
 use crate::{
-    Backend, DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PropertyId,
-    QueryBackendCatalog, RelationshipId, RelationshipVariantId, TraversalPathLookup,
+    Backend, DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PathColumn,
+    PropertyId, QueryBackendCatalog, RelationshipId, RelationshipVariantId, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
@@ -29,12 +29,6 @@ impl TableLayout {
             .max()
             .unwrap_or(20)
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct PathColumn {
-    pub name: String,
-    pub entity: Option<EntityId>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,8 +127,32 @@ impl QueryBackendCatalog for ClickHouseCatalog {
         self.entity(entity).is_some_and(|layout| layout.global)
     }
 
+    fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
+        self.entity(entity)
+            .map(|layout| layout.default_properties.as_slice())
+            .unwrap_or_default()
+    }
+
     fn property_column(&self, property: PropertyId) -> Option<&str> {
         ClickHouseCatalog::property_column(self, property)
+    }
+
+    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
+        self.table(table)
+            .and_then(|layout| layout.column_types.get(column).copied())
+    }
+
+    fn has_text_index(&self, property: PropertyId) -> bool {
+        ClickHouseCatalog::has_text_index(self, property)
+    }
+
+    fn table_path_scopable(&self, table: &str) -> bool {
+        self.table(table).is_some_and(|layout| layout.path_scopable)
+    }
+
+    fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
+        self.table(table)
+            .map(|layout| layout.path_columns.as_slice())
     }
 
     fn default_edge_table(&self) -> &str {

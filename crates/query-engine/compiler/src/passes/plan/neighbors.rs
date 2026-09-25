@@ -11,7 +11,7 @@ use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
 pub fn plan_neighbors<M>(input: &Input, model: &M) -> Result<Plan>
 where
-    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + ?Sized,
 {
     let config = input
         .neighbors
@@ -84,11 +84,11 @@ where
                 .iter()
                 .filter(|r| {
                     let kinds = if source {
-                        super::relationship_entities(model.graph(), r, |v| v.source)
+                        model.relationship_entities(r, true)
                     } else {
-                        super::relationship_entities(model.graph(), r, |v| v.target)
+                        model.relationship_entities(r, false)
                     };
-                    kinds.iter().any(|kind| kind == center_entity)
+                    kinds.contains(&center_entity)
                 })
                 .map(|r| {
                     model

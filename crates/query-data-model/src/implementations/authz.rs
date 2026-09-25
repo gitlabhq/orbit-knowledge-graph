@@ -80,6 +80,19 @@ impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
     fn is_admin_only(&self, property: PropertyId) -> bool {
         GitLabAuthzCatalog::is_admin_only(self, property)
     }
+
+    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
+        GitLabAuthzCatalog::entity_auth(self)
+    }
+
+    fn redaction_id_property(&self, entity: EntityId) -> Option<PropertyId> {
+        self.entity(entity).map(|policy| policy.id_property)
+    }
+
+    fn required_access_level(&self, entity: EntityId) -> Option<u32> {
+        self.entity(entity)
+            .map(|policy| policy.required_access_level)
+    }
 }
 
 pub struct GitLabAuthz;
@@ -217,6 +230,20 @@ impl QueryAuthorizationCatalog for TrustedLocalCatalog {
 
     fn is_admin_only(&self, _property: PropertyId) -> bool {
         false
+    }
+
+    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
+        static EMPTY: std::sync::LazyLock<HashMap<String, EntityAuthConfig>> =
+            std::sync::LazyLock::new(HashMap::new);
+        &EMPTY
+    }
+
+    fn redaction_id_property(&self, _entity: EntityId) -> Option<PropertyId> {
+        None
+    }
+
+    fn required_access_level(&self, _entity: EntityId) -> Option<u32> {
+        None
     }
 }
 

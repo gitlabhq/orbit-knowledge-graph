@@ -155,7 +155,7 @@ pub fn plan<M>(
     use_fk_elision: bool,
 ) -> Plan
 where
-    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + ?Sized,
 {
     let hops = build_hops(input, scope_proofs, model);
     let mut nodes = build_node_plans(input, model);
@@ -261,7 +261,7 @@ where
 
 fn build_hops<M>(input: &Input, scope_proofs: &HashMap<String, ScopeProof>, model: &M) -> Vec<Hop>
 where
-    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + ?Sized,
 {
     let entities: HashMap<&str, &str> = input
         .nodes
@@ -272,14 +272,8 @@ where
         .relationships
         .iter()
         .map(|rel| {
-            let relationship_ids: Vec<_> = rel
-                .types
-                .iter()
-                .filter_map(|relationship| model.graph().relationship_id(relationship))
-                .collect();
             let edge_table = model
-                .query_backend()
-                .edge_tables(&relationship_ids)
+                .relationship_tables(&rel.types)
                 .into_iter()
                 .next()
                 .unwrap_or_else(|| model.query_backend().default_edge_table().to_string());
@@ -295,16 +289,7 @@ where
                 .and_then(|node| node.entity.as_deref());
             let fk = from_entity
                 .zip(to_entity)
-                .and_then(|(source, target)| {
-                    let source = model.graph().entity_id(source)?;
-                    let target = model.graph().entity_id(target)?;
-                    model.query_backend().foreign_key(
-                        model.graph(),
-                        &relationship_ids,
-                        source,
-                        target,
-                    )
-                })
+                .and_then(|(source, target)| model.foreign_key(&rel.types, source, target))
                 .and_then(|foreign_key| {
                     let holder = &model.graph().entity(foreign_key.holder).name;
                     let fk_node = if from_entity == Some(holder.as_str()) {
@@ -371,7 +356,7 @@ where
 
 fn build_node_plans<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
 where
-    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + ?Sized,
 {
     input
         .nodes

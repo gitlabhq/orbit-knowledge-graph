@@ -42,6 +42,12 @@ pub struct TraversalPathLookup {
     pub property: PropertyId,
 }
 
+#[derive(Debug, Clone)]
+pub struct PathColumn {
+    pub name: String,
+    pub entity: Option<EntityId>,
+}
+
 pub type DenormalizedKey = (String, String, String);
 pub type DenormalizedColumns = HashMap<DenormalizedKey, (String, String)>;
 pub type DenormalizedRelationships = HashMap<DenormalizedKey, Vec<String>>;
@@ -56,7 +62,12 @@ pub trait QueryBackendCatalog {
     fn entity_table(&self, entity: EntityId) -> Option<&str>;
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;
+    fn default_properties(&self, entity: EntityId) -> &[PropertyId];
     fn property_column(&self, property: PropertyId) -> Option<&str>;
+    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
+    fn has_text_index(&self, property: PropertyId) -> bool;
+    fn table_path_scopable(&self, table: &str) -> bool;
+    fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
     fn default_edge_table(&self) -> &str;
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str>;
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
@@ -81,6 +92,9 @@ pub trait QueryAuthorizationCatalog {
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope>;
     fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId>;
     fn is_admin_only(&self, property: PropertyId) -> bool;
+    fn entity_auth(&self) -> &HashMap<String, crate::EntityAuthConfig>;
+    fn redaction_id_property(&self, entity: EntityId) -> Option<PropertyId>;
+    fn required_access_level(&self, entity: EntityId) -> Option<u32>;
 }
 
 pub trait QueryDataModel {
@@ -116,14 +130,91 @@ pub trait QueryDataModel {
         self.query_backend().property_column(property.id)
     }
 
+    fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
+        self.query_backend().default_properties(entity)
+    }
+
+    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
+        self.query_backend().table_column_type(table, column)
+    }
+
+    fn has_text_index(&self, property: PropertyId) -> bool {
+        self.query_backend().has_text_index(property)
+    }
+
     fn admin_only(&self, entity: &str, property: &str) -> bool {
         self.property(entity, property)
             .is_some_and(|property| self.query_authorization().is_admin_only(property.id))
     }
 
+    fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
+        let property = self.query_authorization().redaction_id_property(entity)?;
+        self.query_backend().property_column(property)
+    }
+
+    fn table_path_scopable(&self, table: &str) -> bool {
+        self.query_backend().table_path_scopable(table)
+    }
+
+    fn table_has_path_columns(&self, table: &str) -> bool {
+        self.query_backend()
+            .table_path_columns(table)
+            .is_none_or(|columns| !columns.is_empty())
+    }
+
+    fn table_minimum_access_level(&self, table: &str) -> u32 {
+        self.query_backend()
+            .table_path_columns(table)
+            .into_iter()
+            .flatten()
+            .filter_map(|column| column.entity)
+            .filter_map(|entity| self.query_authorization().required_access_level(entity))
+            .max()
+            .unwrap_or(ontology::RequiredRole::Reporter.as_access_level())
+    }
+
     fn relationship_table(&self, relationship: &str) -> Option<&str> {
         let relationship = self.graph().relationship_id(relationship)?;
         self.query_backend().relationship_table(relationship)
+    }
+
+    fn relationship_tables(&self, relationships: &[String]) -> Vec<String> {
+        let relationships: Vec<_> = relationships
+            .iter()
+            .filter_map(|relationship| self.graph().relationship_id(relationship))
+            .collect();
+        self.query_backend().edge_tables(&relationships)
+    }
+
+    fn relationship_entities(&self, relationship: &str, source: bool) -> Vec<&str> {
+        let Some(relationship) = self.graph().relationship_id(relationship) else {
+            return Vec::new();
+        };
+        let entities = if source {
+            self.graph().source_entities(relationship)
+        } else {
+            self.graph().target_entities(relationship)
+        };
+        entities
+            .into_iter()
+            .map(|entity| self.graph().entity(entity).name.as_str())
+            .collect()
+    }
+
+    fn foreign_key(
+        &self,
+        relationships: &[String],
+        source: &str,
+        target: &str,
+    ) -> Option<ForeignKey> {
+        let relationships: Vec<_> = relationships
+            .iter()
+            .filter_map(|relationship| self.graph().relationship_id(relationship))
+            .collect();
+        let source = self.graph().entity_id(source)?;
+        let target = self.graph().entity_id(target)?;
+        self.query_backend()
+            .foreign_key(self.graph(), &relationships, source, target)
     }
 
     fn variant_scope(

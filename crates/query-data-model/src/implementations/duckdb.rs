@@ -9,6 +9,7 @@ use crate::{
 pub struct DuckDbEntityLayout {
     pub table: String,
     pub properties: HashMap<PropertyId, String>,
+    pub default_properties: Vec<PropertyId>,
     pub sort_key: Vec<String>,
 }
 
@@ -40,6 +41,12 @@ impl QueryBackendCatalog for DuckDbCatalog {
         false
     }
 
+    fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
+        self.entity(entity)
+            .map(|layout| layout.default_properties.as_slice())
+            .unwrap_or_default()
+    }
+
     fn property_column(&self, property: PropertyId) -> Option<&str> {
         let entity = self.entities.iter().find_map(|(entity, layout)| {
             layout.properties.contains_key(&property).then_some(entity)
@@ -48,6 +55,24 @@ impl QueryBackendCatalog for DuckDbCatalog {
             .properties
             .get(&property)
             .map(String::as_str)
+    }
+
+    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
+        (table == self.edge_table())
+            .then(|| self.edge_column_type(column))
+            .flatten()
+    }
+
+    fn has_text_index(&self, _property: PropertyId) -> bool {
+        false
+    }
+
+    fn table_path_scopable(&self, _table: &str) -> bool {
+        false
+    }
+
+    fn table_path_columns(&self, _table: &str) -> Option<&[crate::PathColumn]> {
+        None
     }
 
     fn default_edge_table(&self) -> &str {
@@ -172,6 +197,7 @@ impl Backend for DuckDb {
                 DuckDbEntityLayout {
                     table: node.destination_table.clone(),
                     properties,
+                    default_properties: graph.entity(entity_id).properties.clone(),
                     sort_key: node.sort_key.clone(),
                 },
             );

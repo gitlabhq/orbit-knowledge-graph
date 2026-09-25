@@ -16,6 +16,7 @@ use crate::passes::lower::LoweredMetadata;
 use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id_range_predicate};
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use query_data_model::EntityAuthConfig;
+use query_data_model::QueryAuthorizationCatalog;
 use query_data_model::QueryBackendCatalog;
 use std::collections::{HashMap, HashSet};
 
@@ -125,12 +126,16 @@ pub fn enforce_lowered_return(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
-    ctx.entity_auth.clone_from(model.entity_auth());
+    ctx.entity_auth
+        .clone_from(model.query_authorization().entity_auth());
     enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |entity| {
-        crate::data_model::AuthorizationModel::redaction_id_column(model, entity).to_string()
+        model
+            .redaction_id_column(entity)
+            .unwrap_or(DEFAULT_PRIMARY_KEY)
+            .to_string()
     })?;
     Ok(ctx)
 }
@@ -139,7 +144,7 @@ pub fn enforce_local_return(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl crate::data_model::QueryModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |_| {
@@ -152,7 +157,7 @@ fn enforce_lowered_return_with(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl crate::data_model::QueryModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
@@ -212,7 +217,7 @@ pub fn enforce_role_scans(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     let Node::Query(query) = node else {
         return Ok(());
@@ -225,7 +230,9 @@ pub fn enforce_role_scans(
             continue;
         }
         let elevated = model.graph().entity_id(entity).is_some_and(|entity| {
-            crate::data_model::AuthorizationModel::redaction_id_column(model, entity)
+            model
+                .redaction_id_column(entity)
+                .unwrap_or(DEFAULT_PRIMARY_KEY)
                 != DEFAULT_PRIMARY_KEY
         });
         if !elevated {
@@ -285,7 +292,7 @@ fn enforce_return_columns(
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
     node_edge_col: &HashMap<String, (String, String)>,
-    model: &(impl crate::data_model::QueryModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
     let select_len_before = q.select.len();

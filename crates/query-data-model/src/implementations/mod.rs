@@ -5,7 +5,5 @@ mod duckdb;
 pub use authz::{
     EntityAuthConfig, GitLabAuthz, GitLabAuthzCatalog, TrustedLocal, TrustedLocalCatalog,
 };
-pub use clickhouse::{
-    ClickHouse, ClickHouseCatalog, EntityLayout, PathColumn, TableLayout, VariantLayout,
-};
+pub use clickhouse::{ClickHouse, ClickHouseCatalog, EntityLayout, TableLayout, VariantLayout};
 pub use duckdb::{DuckDb, DuckDbCatalog};

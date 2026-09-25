@@ -41,7 +41,7 @@ static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     // An entirely empty security context is treated as a fail-closed bug:
     // the caller forgot to populate traversal paths. Emitting `Bool(false)`
@@ -73,7 +73,7 @@ pub fn apply_security_context(
 fn apply_to_query(
     q: &mut Query,
     ctx: &SecurityContext,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     let aliased_tables = collect_aliased_tables(&q.from, model);
     if !aliased_tables.is_empty() {
@@ -111,7 +111,7 @@ fn apply_to_query(
 fn apply_security_to_expr(
     expr: &mut Expr,
     ctx: &SecurityContext,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     match expr {
         Expr::InSelect { query, .. } | Expr::Scalar(query) => apply_to_query(query, ctx, model),
@@ -175,7 +175,7 @@ fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
 
 pub(crate) fn collect_node_aliases(
     table_ref: &TableRef,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Vec<String> {
     collect_aliased_tables(table_ref, model)
         .into_iter()
@@ -188,7 +188,7 @@ pub(crate) fn collect_node_aliases(
 /// minimum role before building the `startsWith(...)` predicate.
 pub(crate) fn collect_aliased_tables(
     table_ref: &TableRef,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Vec<(String, String)> {
     match table_ref {
         TableRef::Scan { table, alias, .. } if should_apply_security_filter(table, model) => {
@@ -209,7 +209,7 @@ pub(crate) fn collect_aliased_tables(
 fn apply_security_to_from(
     table_ref: &mut TableRef,
     ctx: &SecurityContext,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     match table_ref {
         TableRef::Union { queries, .. } => {
@@ -233,7 +233,7 @@ fn apply_security_to_from(
 /// (`v1_gl_user`) table names. CTEs like `path_cte` are excluded.
 fn should_apply_security_filter(
     table: &str,
-    model: &(impl crate::data_model::SecurityModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> bool {
     let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
         Regex::new(&format!(

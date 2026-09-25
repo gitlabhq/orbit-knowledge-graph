@@ -15,11 +15,11 @@ use std::collections::{BTreeMap, HashMap};
 /// directly without going through `compile()`.
 pub fn build_entity_auth(ontology: &ontology::Ontology) -> HashMap<String, EntityAuthConfig> {
     ClickHouseDataModel::derive(std::sync::Arc::new(ontology.clone()))
-        .map(|model| crate::data_model::AuthorizationModel::entity_auth(&model).clone())
+        .map(|model| model.authorization().entity_auth().clone())
         .unwrap_or_default()
 }
 
-pub fn normalize<M: crate::data_model::QueryModel>(input: Input, model: &M) -> Result<Input> {
+pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -> Result<Input> {
     let mut input = input;
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
@@ -100,7 +100,7 @@ pub(crate) fn is_wildcard(types: &[String]) -> bool {
 
 fn infer_wildcard_relationship_kinds(
     input: &mut Input,
-    model: &(impl crate::data_model::QueryModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) {
     let entity_for: HashMap<&str, &str> = input
         .nodes

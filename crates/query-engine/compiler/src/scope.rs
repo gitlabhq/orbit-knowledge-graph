@@ -68,7 +68,7 @@ fn scope_value_expr(source: &ScopeSource) -> Expr {
 
 pub fn derive_scope_proofs(
     input: &Input,
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> HashMap<String, ScopeProof> {
     if !matches!(
         input.query_type,
@@ -107,7 +107,7 @@ pub fn derive_scope_proofs(
 }
 
 fn scope_preserving(
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
     relationship: &str,
     source: &str,
     target: &str,
@@ -119,7 +119,7 @@ fn scope_preserving(
 
 fn propagate_scope_proofs(
     input: &Input,
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
     seed: &HashMap<String, ScopeProof>,
 ) -> HashMap<String, ScopeProof> {
     use std::collections::HashSet;

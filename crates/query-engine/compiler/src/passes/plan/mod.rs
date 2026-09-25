@@ -7,7 +7,7 @@ pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
@@ -16,28 +16,7 @@ pub use edge_chain::{
     FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
 };
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
-use query_data_model::{QueryBackendCatalog, QueryDataModel};
-
-fn relationship_entities(
-    graph: &query_data_model::GraphCatalog,
-    relationship: &str,
-    endpoint: impl Fn(&query_data_model::RelationshipVariant) -> query_data_model::EntityId,
-) -> Vec<String> {
-    graph
-        .relationship_id(relationship)
-        .map(|id| {
-            graph
-                .relationship(id)
-                .variants
-                .iter()
-                .map(|variant| endpoint(graph.variant(*variant)))
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .map(|entity| graph.entity(entity).name.clone())
-                .collect()
-        })
-        .unwrap_or_default()
-}
+use query_data_model::QueryDataModel;
 
 #[derive(Clone)]
 pub struct BoundFilter {
@@ -129,14 +108,20 @@ impl EdgeTableConfig {
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
         for rt in rel_types {
-            source_kinds.extend(relationship_entities(model.graph(), rt, |v| v.source));
-            target_kinds.extend(relationship_entities(model.graph(), rt, |v| v.target));
+            source_kinds.extend(
+                model
+                    .relationship_entities(rt, true)
+                    .into_iter()
+                    .map(String::from),
+            );
+            target_kinds.extend(
+                model
+                    .relationship_entities(rt, false)
+                    .into_iter()
+                    .map(String::from),
+            );
         }
-        let relationship_ids: Vec<_> = rel_types
-            .iter()
-            .filter_map(|relationship| model.graph().relationship_id(relationship))
-            .collect();
-        let tables = model.query_backend().edge_tables(&relationship_ids);
+        let tables = model.relationship_tables(rel_types);
         Self {
             rel_type_filter: if rel_types.is_empty() {
                 None
@@ -186,7 +171,7 @@ fn plan<M>(
     use_fk_elision: bool,
 ) -> Result<Plan>
 where
-    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + ?Sized,
 {
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => {
