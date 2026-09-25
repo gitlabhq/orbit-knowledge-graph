@@ -170,7 +170,7 @@ impl ClickHouseCheckpointStore {
                         argMax(watermark, _version) AS watermark, \
                         argMax(cursor_values, _version) AS cursor_values, \
                         argMax(attempts, _version) AS attempts, \
-                        maxIf(indexed_at, _version > tombstoned_at) AS indexed_at \
+                        maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at) AS indexed_at \
                  FROM (SELECT *, maxIf(_version, _deleted) OVER (PARTITION BY key) AS tombstoned_at \
                        FROM {table} WHERE {key_condition}) \
                  GROUP BY key \

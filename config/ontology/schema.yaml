@@ -322,7 +322,6 @@ settings:
         - {name: attempts, type: int64, default: "0", codec: ["ZSTD(1)"]}
         - {name: is_default_branch, type: boolean, default: "false"}
       order_by: [traversal_path, project_id, branch]
-      version_type: uint64
   auxiliary_dictionaries:
     - name: gl_project_traversal_paths_dict
       source_table: gl_project

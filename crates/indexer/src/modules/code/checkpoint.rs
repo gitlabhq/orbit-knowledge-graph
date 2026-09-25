@@ -174,7 +174,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             SELECT
                 argMax(last_task_id, _version) as last_task_id,
                 argMax(last_commit, _version) as last_commit,
-                maxIf(indexed_at, _version > tombstoned_at) as indexed_at,
+                maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at) as indexed_at,
                 argMax(attempts, _version) as attempts
             FROM (
                 SELECT *, maxIf(_version, _deleted) OVER () AS tombstoned_at
@@ -210,8 +210,8 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .insert_query(&format!(
                 r#"
                 INSERT INTO {table}
-                (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, attempts, is_default_branch, _version)
-                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{indexed_at:Nullable(String)}}, {{attempts:Int64}}, true, {{version:UInt64}})
+                (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, attempts, is_default_branch)
+                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{indexed_at:Nullable(String)}}, {{attempts:Int64}}, true)
             "#
             ))
             .param("traversal_path", checkpoint.traversal_path.as_str())
@@ -221,17 +221,12 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .param("last_commit", checkpoint.last_commit.as_deref().unwrap_or_default())
             .param("indexed_at", formatted_timestamp)
             .param("attempts", checkpoint.attempts)
-            .param("version", write_version())
             .execute()
             .await
             .map_err(|e| CheckpointError::Query(e.to_string()))?;
 
         Ok(())
     }
-}
-
-fn write_version() -> u64 {
-    Utc::now().timestamp_micros().unsigned_abs()
 }
 
 #[cfg(test)]

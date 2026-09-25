@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
     indexed_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     attempts Int64 DEFAULT 0 CODEC(ZSTD(1)),
     is_default_branch Bool DEFAULT false,
-    _version UInt64,
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch)
