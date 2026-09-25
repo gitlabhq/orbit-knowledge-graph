@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::scope::ScopePrefix;
+use crate::scope::{ScopeProof, scope_predicate};
 use ontology::constants::*;
 
 use crate::ast::*;
@@ -14,42 +14,6 @@ use crate::passes::shared::{
     deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate, id_range_predicate,
     rel_kind_filter, rel_kind_filter_values,
 };
-
-const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
-
-pub(super) fn text_excerpt_projection(
-    alias: &str,
-    column: &str,
-    text_excerpt: &TextExcerpt,
-) -> Expr {
-    let value = Expr::col(alias, column);
-    if !text_excerpt.columns.contains(column) {
-        return value;
-    }
-
-    let excerpt = Expr::func(
-        "substringUTF8",
-        vec![
-            value.clone(),
-            Expr::lit(1),
-            Expr::lit(text_excerpt.max_chars),
-        ],
-    );
-    let shortened = Expr::binary(
-        Op::Gt,
-        Expr::func("length", vec![value]),
-        Expr::func("length", vec![excerpt.clone()]),
-    );
-    let suffix = Expr::func(
-        "if",
-        vec![
-            shortened,
-            Expr::string(TEXT_TRUNCATION_SUFFIX),
-            Expr::string(""),
-        ],
-    );
-    Expr::func("concat", vec![excerpt, suffix])
-}
 
 /// The candidate-id prefilter runs these before `FINAL`, so it may over-select
 /// stale rows; the outer latest-row scan re-applies them after `FINAL`.
@@ -76,12 +40,7 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
     }
     crate::passes::shared::requested_columns(&np.columns)
         .into_iter()
-        .map(|col| {
-            SelectExpr::new(
-                text_excerpt_projection(alias, &col, &np.text_excerpt),
-                format!("{alias}_{col}"),
-            )
-        })
+        .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
         .collect()
 }
 
@@ -580,7 +539,7 @@ pub(super) fn build_multi_hop_union(
                 end_type_col,
                 hop.direction,
                 &type_filter,
-                hop.scope_prefix.as_ref(),
+                hop.scope_proof.as_ref(),
             )
         })
         .collect();
@@ -617,9 +576,10 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
-    scope_prefix: Option<&ScopePrefix>,
+    scope_proof: Option<&ScopeProof>,
 ) -> Query {
-    let scope_pred = |alias: &str| -> Option<Expr> { scope_prefix.map(|s| s.predicate(alias)) };
+    let scope_pred =
+        |alias: &str| -> Option<Expr> { scope_proof.map(|s| scope_predicate(s, alias)) };
 
     let mut from = TableRef::scan(edge_table, "e1");
     let mut where_parts = Vec::new();

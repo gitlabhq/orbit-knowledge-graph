@@ -7,6 +7,7 @@ use crate::passes::shared::requested_columns;
 
 pub fn emit_aggregation(
     plan: &Plan,
+    input: &Input,
     aggregations: &[InputAggregationMetric],
     group_by_keys: &[InputGroupByKey],
     agg_sort: Option<&InputAggSort>,
@@ -20,7 +21,7 @@ pub fn emit_aggregation(
         agg_sort,
         if_cond.as_ref(),
     );
-    let q = output.into_query(agg_select, group_by, order_by, plan.limit);
+    let q = output.into_query(agg_select, group_by, order_by, input.limit);
     Ok(Node::Query(Box::new(q)))
 }
 
@@ -99,12 +100,6 @@ fn build_aggregation(
             OrderExpr::asc(Expr::ident(alias))
         });
     }
-    if plan.cursor.is_some() {
-        // The group-key tuple is unique per result row, so it completes the
-        // sort into a total order the keyset seek can anchor on.
-        order_by.extend(group_by.iter().map(|e| OrderExpr::asc(e.clone())));
-    }
-
     (select, group_by, order_by)
 }
 

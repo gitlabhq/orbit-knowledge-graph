@@ -78,7 +78,7 @@ pub use passes::hydrate::{
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use scope::ScopePrefix;
+pub use scope::ScopeProof;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;

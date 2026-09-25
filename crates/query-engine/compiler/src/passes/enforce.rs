@@ -12,6 +12,7 @@ use crate::constants::{
 };
 use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
+use crate::passes::lower::LoweredMetadata;
 use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id_range_predicate};
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{HashMap, HashSet};
@@ -123,6 +124,36 @@ pub fn enforce_return(
     input: &Input,
     node_edge_col: &HashMap<String, (String, String)>,
 ) -> Result<ResultContext> {
+    let metadata = LoweredMetadata {
+        node_sources: node_edge_col.clone(),
+        edges: input
+            .relationships
+            .iter()
+            .enumerate()
+            .map(|(index, relationship)| {
+                let column_prefix = if relationship.hops.max > 1 {
+                    format!("hop_e{index}_")
+                } else {
+                    format!("e{index}_")
+                };
+                crate::passes::lower::LoweredEdge {
+                    path_column: (relationship.hops.max > 1)
+                        .then(|| format!("{column_prefix}path_nodes")),
+                    column_prefix,
+                    rel_types: relationship.types.clone(),
+                }
+            })
+            .collect(),
+        stable_order: Vec::new(),
+    };
+    enforce_lowered_return(node, input, &metadata)
+}
+
+pub fn enforce_lowered_return(
+    node: &mut Node,
+    input: &Input,
+    metadata: &LoweredMetadata,
+) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth = input.entity_auth.clone();
 
@@ -137,9 +168,13 @@ pub fn enforce_return(
     };
 
     match node {
-        Node::Query(q) => {
-            enforce_return_columns(q, input, &selectable_nodes, &mut ctx, node_edge_col)?
-        }
+        Node::Query(q) => enforce_return_columns(
+            q,
+            input,
+            &selectable_nodes,
+            &mut ctx,
+            &metadata.node_sources,
+        )?,
         Node::Insert(_) => return Ok(ctx),
     }
 
@@ -152,13 +187,8 @@ pub fn enforce_return(
             EDGE_TYPE_SUFFIX,
         };
 
-        for (i, rel) in input.relationships.iter().enumerate() {
-            let prefix = if rel.hops.max > 1 {
-                format!("hop_e{i}_")
-            } else {
-                format!("e{i}_")
-            };
-            let path_column = (rel.hops.max > 1).then(|| format!("{prefix}path_nodes"));
+        for edge in &metadata.edges {
+            let prefix = edge.column_prefix.clone();
             ctx.edges.push(EdgeMeta {
                 type_column: format!("{prefix}{EDGE_TYPE_SUFFIX}"),
                 src_column: format!("{prefix}{EDGE_SRC_SUFFIX}"),
@@ -166,15 +196,62 @@ pub fn enforce_return(
                 dst_column: format!("{prefix}{EDGE_DST_SUFFIX}"),
                 dst_type_column: format!("{prefix}{EDGE_DST_TYPE_SUFFIX}"),
                 column_prefix: prefix,
-                path_column,
-                rel_types: rel.types.clone(),
-                from_alias: rel.from.clone(),
-                to_alias: rel.to.clone(),
+                path_column: edge.path_column.clone(),
+                rel_types: edge.rel_types.clone(),
+                from_alias: String::new(),
+                to_alias: String::new(),
             });
         }
     }
 
     Ok(ctx)
+}
+
+pub fn enforce_role_scans(
+    node: &mut Node,
+    input: &Input,
+    metadata: &LoweredMetadata,
+) -> Result<()> {
+    let Node::Query(query) = node else {
+        return Ok(());
+    };
+    for input_node in &input.nodes {
+        let Some(entity) = input_node.entity.as_deref() else {
+            continue;
+        };
+        if alias_exists_in_from(&query.from, &input_node.id) {
+            continue;
+        }
+        let elevated = input.entity_auth.get(entity).is_some_and(|auth| {
+            auth.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL
+        });
+        if !elevated {
+            continue;
+        }
+        let Some((source_alias, source_column)) = metadata.node_sources.get(&input_node.id) else {
+            continue;
+        };
+        let table = input_node.table.as_deref().ok_or_else(|| {
+            QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
+        })?;
+        let role_alias = format!("_role_{}", input_node.id);
+        let scan = TableRef::scan_final(table, &role_alias);
+        let on = Expr::eq(
+            Expr::col(source_alias, source_column),
+            Expr::col(&role_alias, DEFAULT_PRIMARY_KEY),
+        );
+        query.from = TableRef::join(
+            JoinType::Inner,
+            std::mem::replace(&mut query.from, TableRef::scan("_placeholder", "_")),
+            scan,
+            on,
+        );
+        query.where_clause = Some(match query.where_clause.take() {
+            Some(existing) => Expr::and(existing, deleted_false(&role_alias)),
+            None => deleted_false(&role_alias),
+        });
+    }
+    Ok(())
 }
 
 /// Ensure `expr` sits in `GROUP BY` for aggregation queries. The identity

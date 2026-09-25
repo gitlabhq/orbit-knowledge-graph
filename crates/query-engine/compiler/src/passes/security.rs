@@ -78,9 +78,9 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
                 .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
             let eligible = ctx.paths_at_least(min_role);
             let broad = build_path_filter(alias, &eligible);
-            match ctx.scope_prefixes.get(alias) {
+            match ctx.scope_proofs.get(alias) {
                 Some(scope) if ontology.is_table_path_scopable(table) => {
-                    Expr::and(broad, scope.predicate(alias))
+                    Expr::and(broad, crate::scope::scope_predicate(scope, alias))
                 }
                 _ => broad,
             }
@@ -242,7 +242,7 @@ mod tests {
     use super::*;
     use crate::AuthorizedPath;
     use crate::ast::{JoinType, Op, SelectExpr};
-    use crate::scope::ScopePrefix;
+    use crate::scope::ScopeProof;
     use ontology::constants::EDGE_TABLE;
     use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
@@ -743,12 +743,12 @@ mod tests {
     }
 
     #[test]
-    fn scope_prefix_narrows_scoped_alias_beside_broad_filter() {
-        let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("p".to_string(), ScopePrefix::literal("1/24/23/"));
+    fn scope_proof_narrows_scoped_alias_beside_broad_filter() {
+        let mut proofs = std::collections::HashMap::new();
+        proofs.insert("p".to_string(), ScopeProof::literal("1/24/23/"));
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes(prefixes);
+            .with_scope_proofs(proofs);
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -785,13 +785,13 @@ mod tests {
     }
 
     #[test]
-    fn scope_prefix_below_role_floor_keeps_broad() {
+    fn scope_proof_below_role_floor_keeps_broad() {
         let ontology = Ontology::load_embedded().unwrap();
-        let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("v".to_string(), ScopePrefix::literal("1/100/200/"));
+        let mut proofs = std::collections::HashMap::new();
+        proofs.insert("v".to_string(), ScopeProof::literal("1/100/200/"));
         let ctx = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)])
             .unwrap()
-            .with_scope_prefixes(prefixes);
+            .with_scope_proofs(proofs);
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -815,12 +815,12 @@ mod tests {
     }
 
     #[test]
-    fn scope_prefix_dropped_on_non_path_scopable_alias() {
-        let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("g".to_string(), ScopePrefix::literal("1/24/23/"));
+    fn scope_proof_dropped_on_non_path_scopable_alias() {
+        let mut proofs = std::collections::HashMap::new();
+        proofs.insert("g".to_string(), ScopeProof::literal("1/24/23/"));
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes(prefixes);
+            .with_scope_proofs(proofs);
 
         let ontology = Ontology::new().with_nodes(["Global"]);
 
@@ -843,7 +843,7 @@ mod tests {
         assert_eq!(
             starts_with_paths_for_alias(where_clause, "g"),
             vec!["1/".to_string()],
-            "non-path-scopable alias must drop scope_prefix and keep broad authz only"
+            "non-path-scopable alias must drop the scope proof and keep broad authz only"
         );
     }
 

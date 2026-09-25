@@ -12,6 +12,7 @@ pub mod lower;
 pub mod normalize;
 pub mod plan;
 pub mod relationships;
+pub mod response_policy;
 pub mod restrict;
 pub mod security;
 pub mod settings;

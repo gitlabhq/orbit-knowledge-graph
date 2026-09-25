@@ -202,6 +202,9 @@ pub(super) async fn scope_implied_container_elision_star_counts_authored_mrs(ctx
     )
     .await;
 
+    resp.skip_requirement(Requirement::Filter {
+        field: "full_path".into(),
+    });
     resp.assert_group_row_value_i64("u", "User", 7701, "c", 2);
     resp.assert_group_row_value_i64("u", "User", 7702, "c", 1);
 }
@@ -275,6 +278,9 @@ pub(super) async fn scope_implied_container_elision_chain_counts_diff_files(ctx:
     )
     .await;
 
+    resp.skip_requirement(Requirement::Filter {
+        field: "full_path".into(),
+    });
     resp.assert_group_row_value_i64("p", "Project", 7010, "c", 3);
 }
 

@@ -18,7 +18,7 @@ use crate::passes::shared::{
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 
-pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
+pub fn emit_pathfinding(plan: &Plan, input: &Input, pf: &PathFindingBody) -> Result<Node> {
     let start_np = &plan.nodes[&pf.start];
     let end_np = &plan.nodes[&pf.end];
 
@@ -213,20 +213,7 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
         TableRef::union_all(vec![direct_query, intersection_query], PATHS_ALIAS)
     };
 
-    let mut order_by = vec![OrderExpr::asc(Expr::col(PATHS_ALIAS, DEPTH_COLUMN))];
-    if plan.cursor.is_some() {
-        order_by.extend([
-            OrderExpr::asc(Expr::func(
-                "toString",
-                vec![Expr::col(PATHS_ALIAS, path_column())],
-            )),
-            OrderExpr::asc(Expr::func(
-                "toString",
-                vec![Expr::col(PATHS_ALIAS, edge_kinds_column())],
-            )),
-        ]);
-    }
-
+    let order_by = vec![OrderExpr::asc(Expr::col(PATHS_ALIAS, DEPTH_COLUMN))];
     Ok(Node::Query(Box::new(Query {
         ctes: {
             let mut ctes = anchor_ctes;
@@ -246,7 +233,7 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
         ],
         from: paths_union,
         order_by,
-        limit: Some(plan.limit),
+        limit: Some(input.limit),
         ..Default::default()
     })))
 }
