@@ -99,6 +99,7 @@ pub(super) async fn run_query_with_security(
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
+        &compiled.pagination,
     ));
 
     let pipeline_output = query_engine::shared::PipelineOutput {

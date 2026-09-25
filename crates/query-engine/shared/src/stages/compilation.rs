@@ -23,7 +23,21 @@ impl PipelineStage for CompilationStage {
 
         let compiled = match ctx.phases.get::<compiler::Input>() {
             Some(input) => compiler::gql::compile_query(input.clone(), ontology, security_context),
-            None => compiler::compile(&ctx.query_json, ctx.frontend, ontology, security_context),
+            None => match ctx
+                .server_extensions
+                .get::<Arc<query_data_model::ClickHouseDataModel>>()
+            {
+                Some(data_model) => compiler::compile_model(
+                    &ctx.query_json,
+                    ctx.frontend,
+                    ontology,
+                    data_model,
+                    security_context,
+                ),
+                None => {
+                    compiler::compile(&ctx.query_json, ctx.frontend, ontology, security_context)
+                }
+            },
         }
         .map_err(|e| PipelineError::Compile {
             client_safe: e.is_client_safe(),

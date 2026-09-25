@@ -46,7 +46,7 @@ pub fn emit_neighbors(
     fn build_center_dedup(
         alias: &str,
         table: &str,
-        filters: &[(String, InputFilter)],
+        filters: &[(String, crate::passes::plan::BoundFilter)],
         node_ids: &[i64],
         id_range: Option<&InputIdRange>,
         extra_select: &[&str],
@@ -146,7 +146,7 @@ pub fn emit_neighbors(
         for (prop, filter) in &center_filters {
             let key = (center_entity.clone(), prop.clone(), denorm_dir.to_string());
             if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
-                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, &filter.filter)
             {
                 where_parts.push(expr);
             }
@@ -297,7 +297,7 @@ fn build_fused_both_arm(
     center_entity: &str,
     center_has_tp: bool,
     center_node_ids: &[i64],
-    center_filters: &[(String, InputFilter)],
+    center_filters: &[(String, crate::passes::plan::BoundFilter)],
     plan: &Plan,
     edge: &EdgeTableConfig,
     edge_table: &str,
@@ -318,7 +318,7 @@ fn build_fused_both_arm(
                 denorm_dir.to_string(),
             );
             if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
-                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, &filter.filter)
             {
                 parts.push(expr);
             }

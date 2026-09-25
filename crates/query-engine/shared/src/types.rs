@@ -95,13 +95,17 @@ pub struct PaginationMeta {
 /// the sort-key values of a redaction-denied row. When an entire page is
 /// denied there is no authorized row to advance past, so it falls back to the
 /// last scanned row to keep pagination progressing rather than stall.
-pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> PaginationMeta {
+pub fn paginate(
+    query_result: &mut QueryResult,
+    input: &compiler::Input,
+    pagination: &compiler::passes::codegen::PaginationContext,
+) -> PaginationMeta {
     let window = input.cursor.as_ref().map_or(input.limit, |c| c.page_size) as usize;
     let has_more = query_result.len() > window;
     if has_more {
         query_result.truncate(window);
     }
-    let key_count = input.compiler.cursor_key_count;
+    let key_count = pagination.key_count;
     let next_cursor = input
         .cursor
         .as_ref()
@@ -127,7 +131,7 @@ pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> Pagi
                 })
                 .collect::<Option<Vec<Option<String>>>>()
         })
-        .map(|keys| compiler::passes::cursor::encode(input.compiler.query_hash, &keys));
+        .map(|keys| compiler::passes::cursor::encode(pagination.query_hash, &keys));
     PaginationMeta {
         has_more,
         truncated: has_more,

@@ -12,25 +12,34 @@ use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::passes::security::{SecurityContext, collect_node_aliases};
+#[cfg(test)]
 use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
 
 const STARTS_WITH_FNAME: &str = "startsWith";
 
-pub fn check_ast(node: &Node, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
+pub fn check_ast(
+    node: &Node,
+    ctx: &SecurityContext,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
+) -> Result<()> {
     match node {
         Node::Query(q) => {
             for cte in &q.ctes {
-                check_query(&cte.query, ctx, ontology)?;
+                check_query(&cte.query, ctx, model)?;
             }
-            check_query(q, ctx, ontology)
+            check_query(q, ctx, model)
         }
         Node::Insert(_) => Ok(()),
     }
 }
 
-fn check_query(q: &Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
-    let aliases = collect_node_aliases(&q.from, ontology);
+fn check_query(
+    q: &Query,
+    ctx: &SecurityContext,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
+) -> Result<()> {
+    let aliases = collect_node_aliases(&q.from, model);
     for alias in &aliases {
         if !has_valid_path_filter(q.where_clause.as_ref(), alias, ctx) {
             return Err(QueryError::Security(format!(
@@ -42,29 +51,33 @@ fn check_query(q: &Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<
     // Recurse into UNION ALL arms (defense-in-depth: currently only
     // recursive CTE arms which scan CTE names, not gl_* tables).
     for arm in &q.union_all {
-        check_query(arm, ctx, ontology)?;
+        check_query(arm, ctx, model)?;
     }
 
     if let Some(where_clause) = q.where_clause.as_ref() {
-        check_subqueries_in_expr(where_clause, ctx, ontology)?;
+        check_subqueries_in_expr(where_clause, ctx, model)?;
     }
 
-    check_derived_tables_in_from(&q.from, ctx, ontology)
+    check_derived_tables_in_from(&q.from, ctx, model)
 }
 
-fn check_subqueries_in_expr(expr: &Expr, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
+fn check_subqueries_in_expr(
+    expr: &Expr,
+    ctx: &SecurityContext,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
+) -> Result<()> {
     match expr {
-        Expr::InSelect { query, .. } | Expr::Scalar(query) => check_query(query, ctx, ontology),
+        Expr::InSelect { query, .. } | Expr::Scalar(query) => check_query(query, ctx, model),
         Expr::BinaryOp { left, right, .. } => {
-            check_subqueries_in_expr(left, ctx, ontology)?;
-            check_subqueries_in_expr(right, ctx, ontology)
+            check_subqueries_in_expr(left, ctx, model)?;
+            check_subqueries_in_expr(right, ctx, model)
         }
         Expr::UnaryOp { expr, .. }
         | Expr::Lambda { body: expr, .. }
-        | Expr::InSubquery { expr, .. } => check_subqueries_in_expr(expr, ctx, ontology),
+        | Expr::InSubquery { expr, .. } => check_subqueries_in_expr(expr, ctx, model),
         Expr::FuncCall { args, .. } => {
             for arg in args {
-                check_subqueries_in_expr(arg, ctx, ontology)?;
+                check_subqueries_in_expr(arg, ctx, model)?;
             }
             Ok(())
         }
@@ -79,19 +92,19 @@ fn check_subqueries_in_expr(expr: &Expr, ctx: &SecurityContext, ontology: &Ontol
 fn check_derived_tables_in_from(
     table_ref: &TableRef,
     ctx: &SecurityContext,
-    ontology: &Ontology,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
 ) -> Result<()> {
     match table_ref {
-        TableRef::Subquery { query, .. } => check_query(query, ctx, ontology),
+        TableRef::Subquery { query, .. } => check_query(query, ctx, model),
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                check_query(arm, ctx, ontology)?;
+                check_query(arm, ctx, model)?;
             }
             Ok(())
         }
         TableRef::Join { left, right, .. } => {
-            check_derived_tables_in_from(left, ctx, ontology)?;
-            check_derived_tables_in_from(right, ctx, ontology)
+            check_derived_tables_in_from(left, ctx, model)?;
+            check_derived_tables_in_from(right, ctx, model)
         }
         TableRef::Scan { .. } => Ok(()),
     }
@@ -173,6 +186,16 @@ fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> 
 mod tests {
     use super::*;
     use crate::ast::{SelectExpr, TableRef};
+
+    fn apply_security(node: &mut Node, context: &SecurityContext, ontology: &Ontology) {
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+        crate::passes::security::apply_security_context(node, context, model.as_ref()).unwrap();
+    }
+
+    fn check(node: &Node, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+        check_ast(node, context, model.as_ref())
+    }
     fn project_query(where_clause: Option<Expr>) -> Node {
         Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -191,8 +214,8 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(&mut node, &ctx, &ontology).unwrap();
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        apply_security(&mut node, &ctx, &ontology);
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     #[test]
@@ -200,7 +223,7 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = project_query(Some(Expr::lit(true)));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -216,7 +239,7 @@ mod tests {
         );
         let node = project_query(Some(wrong_filter));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -228,8 +251,8 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(&mut node, &ctx, &ontology).unwrap();
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        apply_security(&mut node, &ctx, &ontology);
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     /// An AND-chain containing `Bool(false)` short-circuits to zero rows, so
@@ -244,7 +267,7 @@ mod tests {
         let dead = Expr::param(crate::ast::ChType::Bool, false);
         let node = project_query(Some(Expr::binary(Op::And, dead, Expr::lit(true))));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     /// A `col = false` comparison (or any other non-AND operator whose
@@ -267,7 +290,7 @@ mod tests {
         );
         let node = project_query(Some(eq_false));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -289,7 +312,7 @@ mod tests {
         );
         let node = project_query(Some(or_expr));
         let ontology = ontology::Ontology::new();
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -319,7 +342,7 @@ mod tests {
         );
         let node = project_query(Some(where_expr));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     /// Inverse of the previous test: if the AND chain has no Bool(false)
@@ -341,7 +364,7 @@ mod tests {
         );
         let node = project_query(Some(where_expr));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -362,7 +385,7 @@ mod tests {
             ..Default::default()
         }));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     fn wrap_in_subquery(inner: Query) -> Node {
@@ -394,7 +417,7 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = wrap_in_subquery(inner_project_query(None));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -405,12 +428,8 @@ mod tests {
     fn accepts_subquery_with_inner_security_filter() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut inner = inner_project_query(None);
-        crate::passes::security::apply_security_context(
-            &mut Node::Query(Box::new(inner.clone())),
-            &ctx,
-            &ontology::Ontology::new(),
-        )
-        .unwrap();
+        let mut wrapped = Node::Query(Box::new(inner.clone()));
+        apply_security(&mut wrapped, &ctx, &ontology::Ontology::new());
         let filter = Expr::func(
             STARTS_WITH_FNAME,
             vec![
@@ -421,7 +440,7 @@ mod tests {
         inner.where_clause = Some(filter);
         let node = wrap_in_subquery(inner);
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     #[test]
@@ -443,7 +462,7 @@ mod tests {
         };
         let node = wrap_in_subquery(inner);
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -477,7 +496,7 @@ mod tests {
         };
         let node = wrap_in_subquery(inner);
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     #[test]
@@ -494,7 +513,7 @@ mod tests {
         };
         let node = wrap_in_subquery(inner);
         let ontology = ontology::Ontology::new();
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     #[test]
@@ -523,7 +542,7 @@ mod tests {
             ..Default::default()
         }));
         let ontology = ontology::Ontology::new();
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -552,8 +571,8 @@ mod tests {
             ..Default::default()
         }));
         let ontology = ontology::Ontology::new();
-        crate::passes::security::apply_security_context(&mut node, &ctx, &ontology).unwrap();
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        apply_security(&mut node, &ctx, &ontology);
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     #[test]
@@ -583,7 +602,7 @@ mod tests {
 
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let ontology = ontology::Ontology::new();
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -626,7 +645,7 @@ mod tests {
 
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let ontology = ontology::Ontology::new();
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 
     #[test]
@@ -664,7 +683,7 @@ mod tests {
             ..Default::default()
         }));
         let ontology = ontology::Ontology::new();
-        let err = check_ast(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, &ontology).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -717,6 +736,6 @@ mod tests {
             ..Default::default()
         }));
         let ontology = ontology::Ontology::new();
-        assert!(check_ast(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, &ontology).is_ok());
     }
 }

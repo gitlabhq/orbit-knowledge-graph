@@ -3,7 +3,9 @@
 
 use std::collections::HashSet;
 
-use ontology::{FieldSource, Ontology, VirtualSource};
+#[cfg(test)]
+use ontology::Ontology;
+use ontology::{FieldSource, VirtualSource};
 
 use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
@@ -99,16 +101,16 @@ pub struct VirtualColumnRequest {
 pub fn generate_hydration_plan(
     input: &Input,
     emitted: &Node,
-    ontology: &Ontology,
+    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
     match input.query_type {
         QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => {
-            HydrationPlan::Dynamic(build_dynamic_specs(input, ontology, security_ctx))
+            HydrationPlan::Dynamic(build_dynamic_specs(input, model, security_ctx))
         }
         QueryType::Aggregation | QueryType::Traversal => {
-            let mut templates = build_static_templates(input, emitted, ontology);
+            let mut templates = build_static_templates(input, emitted, model);
 
             // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
             if input.query_type == QueryType::Aggregation {
@@ -127,7 +129,7 @@ pub fn generate_hydration_plan(
 fn build_static_templates(
     input: &Input,
     emitted: &Node,
-    ontology: &Ontology,
+    model: &(impl crate::data_model::QueryModel + ?Sized),
 ) -> Vec<HydrationTemplate> {
     let projected = |alias: &str| matches!(emitted, Node::Query(q) if q.selects_alias(alias));
     input
@@ -135,37 +137,76 @@ fn build_static_templates(
         .iter()
         .filter_map(|node| {
             let entity = node.entity.as_ref()?;
-            let ont_node = ontology.get_node(entity)?;
+            let entity_id = model.graph().entity_id(entity)?;
 
             let Some(ColumnSelection::List(requested)) = &node.columns else {
                 return None;
             };
 
-            // DB-only columns (virtual already stripped by normalize).
-            let mut columns: Vec<String> = requested
+            let selected: Vec<String> = requested
                 .iter()
-                .filter(|col| !projected(&format!("{}_{col}", node.id)))
+                .filter(|column| !projected(&format!("{}_{column}", node.id)))
                 .cloned()
                 .collect();
-            let virtual_columns = node.virtual_columns.clone();
+            let requested_virtuals: HashSet<String> = requested
+                .iter()
+                .filter(|property| {
+                    model
+                        .graph()
+                        .property_id(entity_id, property)
+                        .map(|property| model.graph().property(property))
+                        .is_some_and(|property| matches!(property.source, FieldSource::Virtual(_)))
+                })
+                .cloned()
+                .collect();
+            let (mut columns, mut virtual_columns) =
+                split_model_columns(&selected, model, entity_id);
+            let mut virtual_filters = Vec::new();
+            for (property, filters) in &node.filters {
+                let is_virtual = model
+                    .graph()
+                    .property_id(entity_id, property)
+                    .map(|property| model.graph().property(property))
+                    .is_some_and(|property| matches!(property.source, FieldSource::Virtual(_)));
+                if !is_virtual {
+                    continue;
+                }
+                virtual_filters.extend(filters.iter().cloned().map(|mut filter| {
+                    filter.op.get_or_insert(crate::input::FilterOp::Eq);
+                    (property.clone(), filter)
+                }));
+                if !virtual_columns
+                    .iter()
+                    .any(|column| column.column_name == *property)
+                    && let Some(request) = virtual_request(model, entity_id, property)
+                {
+                    virtual_columns.push(request);
+                }
+            }
+            let filter_injected_columns = virtual_filters
+                .iter()
+                .map(|(property, _)| property)
+                .filter(|property| !requested_virtuals.contains(*property))
+                .cloned()
+                .collect();
 
             if columns.is_empty() && virtual_columns.is_empty() {
                 return None;
             }
 
             let injected_columns =
-                inject_virtual_dependencies(&mut columns, &virtual_columns, ont_node);
+                inject_model_virtual_dependencies(&mut columns, &virtual_columns, model, entity_id);
 
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
                 node_alias: node.id.clone(),
-                destination_table: ont_node.destination_table.clone(),
+                destination_table: model.entity_table(entity_id)?.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: ont_node.has_traversal_path,
-                virtual_filters: node.virtual_filters.clone(),
-                filter_injected_columns: node.filter_injected_virtual_columns.clone(),
+                has_traversal_path: model.entity_has_traversal_path(entity_id),
+                virtual_filters,
+                filter_injected_columns,
             })
         })
         .collect()
@@ -182,36 +223,51 @@ fn build_static_templates(
 /// rather than from `node.columns` that `RestrictPass` pruned.
 fn build_dynamic_specs(
     input: &Input,
-    ontology: &Ontology,
+    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Vec<DynamicEntityColumns> {
-    ontology
-        .node_names()
-        .filter_map(|name| {
-            let node = ontology.get_node(name)?;
+    model
+        .graph()
+        .entities()
+        .filter_map(|entity| {
+            let name = entity.name.as_str();
+            if !model.entity_available(entity.id) {
+                return None;
+            }
 
             let admin_only: HashSet<&str> = if security_ctx.admin {
                 HashSet::new()
             } else {
-                ontology.admin_only_properties(name).collect()
+                entity
+                    .properties
+                    .iter()
+                    .filter(|property| model.is_admin_only(**property))
+                    .map(|property| model.graph().property(*property).name.as_str())
+                    .collect()
             };
 
             let requested: Vec<String> = match input.options.dynamic_columns {
                 // Virtual columns are excluded from dynamic modes: they
                 // require an explicit user request because they incur
                 // external service calls (e.g. Gitaly round-trips).
-                DynamicColumnMode::All => node
-                    .fields
+                DynamicColumnMode::All => entity
+                    .properties
                     .iter()
-                    .filter(|f| !f.is_virtual() && f.name != "_version" && f.name != "_deleted")
-                    .filter(|f| !admin_only.contains(f.name.as_str()))
-                    .map(|f| f.name.clone())
+                    .map(|property| model.graph().property(*property))
+                    .filter(|property| {
+                        !matches!(property.source, FieldSource::Virtual(_))
+                            && property.name != "_version"
+                            && property.name != "_deleted"
+                    })
+                    .filter(|property| !admin_only.contains(property.name.as_str()))
+                    .map(|property| property.name.clone())
                     .collect(),
-                DynamicColumnMode::Default => node
-                    .default_columns
+                DynamicColumnMode::Default => model
+                    .default_properties(entity.id)
                     .iter()
-                    .filter(|c| !admin_only.contains(c.as_str()))
-                    .cloned()
+                    .map(|property| model.graph().property(*property).name.as_str())
+                    .filter(|property| !admin_only.contains(property))
+                    .map(String::from)
                     .collect(),
             };
 
@@ -219,44 +275,53 @@ fn build_dynamic_specs(
                 return None;
             }
 
-            let (mut columns, virtual_columns) = split_columns(&requested, node);
+            let (mut columns, virtual_columns) = split_model_columns(&requested, model, entity.id);
 
             if columns.is_empty() && virtual_columns.is_empty() {
                 return None;
             }
 
             let injected_columns =
-                inject_virtual_dependencies(&mut columns, &virtual_columns, node);
+                inject_model_virtual_dependencies(&mut columns, &virtual_columns, model, entity.id);
 
             Some(DynamicEntityColumns {
                 entity_type: name.to_string(),
-                destination_table: node.destination_table.clone(),
+                destination_table: model.entity_table(entity.id)?.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: node.has_traversal_path,
+                has_traversal_path: model.entity_has_traversal_path(entity.id),
             })
         })
         .collect()
 }
 
 /// Returns the columns that were injected (not originally requested).
-fn inject_virtual_dependencies(
+fn inject_model_virtual_dependencies(
     columns: &mut Vec<String>,
     virtual_columns: &[VirtualColumnRequest],
-    node: &ontology::NodeEntity,
+    model: &(impl crate::data_model::QueryModel + ?Sized),
+    entity: query_data_model::EntityId,
 ) -> Vec<String> {
     let mut injected = Vec::new();
     for vc in virtual_columns {
-        let Some(field) = node.fields.iter().find(|f| f.name == vc.column_name) else {
+        let Some(property) = model
+            .graph()
+            .property_id(entity, &vc.column_name)
+            .map(|property| model.graph().property(property))
+        else {
             continue;
         };
-        if let FieldSource::Virtual(vs) = &field.source {
+        if let FieldSource::Virtual(vs) = &property.source {
             for dep in &vs.depends_on {
                 if !columns.contains(dep)
-                    && node.fields.iter().any(|f| {
-                        f.name == *dep && matches!(f.source, FieldSource::DatabaseColumn(_))
-                    })
+                    && model
+                        .graph()
+                        .property_id(entity, dep)
+                        .map(|property| model.graph().property(property))
+                        .is_some_and(|property| {
+                            matches!(property.source, FieldSource::DatabaseColumn(_))
+                        })
                 {
                     columns.push(dep.clone());
                     injected.push(dep.clone());
@@ -267,15 +332,20 @@ fn inject_virtual_dependencies(
     injected
 }
 
-fn split_columns(
+fn split_model_columns(
     requested: &[String],
-    node: &ontology::NodeEntity,
+    model: &(impl crate::data_model::QueryModel + ?Sized),
+    entity: query_data_model::EntityId,
 ) -> (Vec<String>, Vec<VirtualColumnRequest>) {
     let mut columns = Vec::new();
     let mut virtual_columns = Vec::new();
 
     for col_name in requested {
-        match node.fields.iter().find(|f| &f.name == col_name) {
+        match model
+            .graph()
+            .property_id(entity, col_name)
+            .map(|property| model.graph().property(property))
+        {
             Some(field) => match &field.source {
                 FieldSource::DatabaseColumn(_) => columns.push(col_name.clone()),
                 FieldSource::Virtual(VirtualSource {
@@ -298,6 +368,91 @@ fn split_columns(
     }
 
     (columns, virtual_columns)
+}
+
+fn virtual_request(
+    model: &(impl crate::data_model::QueryModel + ?Sized),
+    entity: query_data_model::EntityId,
+    property: &str,
+) -> Option<VirtualColumnRequest> {
+    let property = model.graph().property_id(entity, property)?;
+    let property = model.graph().property(property);
+    let FieldSource::Virtual(source) = &property.source else {
+        return None;
+    };
+    (!source.disabled).then(|| VirtualColumnRequest {
+        column_name: property.name.clone(),
+        service: source.service.clone(),
+        lookup: source.lookup.clone(),
+    })
+}
+
+#[cfg(test)]
+fn inject_virtual_dependencies(
+    columns: &mut Vec<String>,
+    virtual_columns: &[VirtualColumnRequest],
+    node: &ontology::NodeEntity,
+) -> Vec<String> {
+    let mut injected = Vec::new();
+    for virtual_column in virtual_columns {
+        let Some(field) = node
+            .fields
+            .iter()
+            .find(|field| field.name == virtual_column.column_name)
+        else {
+            continue;
+        };
+        if let FieldSource::Virtual(source) = &field.source {
+            for dependency in &source.depends_on {
+                if !columns.contains(dependency)
+                    && node.fields.iter().any(|field| {
+                        field.name == *dependency
+                            && matches!(field.source, FieldSource::DatabaseColumn(_))
+                    })
+                {
+                    columns.push(dependency.clone());
+                    injected.push(dependency.clone());
+                }
+            }
+        }
+    }
+    injected
+}
+
+#[cfg(test)]
+fn split_columns(
+    requested: &[String],
+    node: &ontology::NodeEntity,
+) -> (Vec<String>, Vec<VirtualColumnRequest>) {
+    let mut columns = Vec::new();
+    let mut virtual_columns = Vec::new();
+    for column in requested {
+        match node.fields.iter().find(|field| field.name == *column) {
+            Some(field) => match &field.source {
+                FieldSource::DatabaseColumn(_) => columns.push(column.clone()),
+                FieldSource::Virtual(source) if !source.disabled => {
+                    virtual_columns.push(VirtualColumnRequest {
+                        column_name: column.clone(),
+                        service: source.service.clone(),
+                        lookup: source.lookup.clone(),
+                    });
+                }
+                FieldSource::Virtual(_) => {}
+            },
+            None => columns.push(column.clone()),
+        }
+    }
+    (columns, virtual_columns)
+}
+
+#[cfg(test)]
+fn build_dynamic_specs_from_ontology(
+    input: &Input,
+    ontology: &Ontology,
+    security_context: &SecurityContext,
+) -> Vec<DynamicEntityColumns> {
+    let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+    build_dynamic_specs(input, model.as_ref(), security_context)
 }
 
 #[cfg(test)]
@@ -537,7 +692,7 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let specs = build_dynamic_specs(&input, &ont, &ctx);
+        let specs = build_dynamic_specs_from_ontology(&input, &ont, &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -563,7 +718,7 @@ mod tests {
         let ctx = admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let specs = build_dynamic_specs(&input, &ont, &ctx);
+        let specs = build_dynamic_specs_from_ontology(&input, &ont, &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -590,7 +745,7 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::Default);
 
-        let specs = build_dynamic_specs(&input, &ont, &ctx);
+        let specs = build_dynamic_specs_from_ontology(&input, &ont, &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -606,7 +761,8 @@ mod tests {
         let input = neighbors_input(DynamicColumnMode::All);
 
         let emitted = Node::Query(Box::default());
-        let plan = generate_hydration_plan(&input, &emitted, &ont, &ctx);
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont)).unwrap();
+        let plan = generate_hydration_plan(&input, &emitted, model.as_ref(), &ctx);
 
         match plan {
             HydrationPlan::Dynamic(specs) => {

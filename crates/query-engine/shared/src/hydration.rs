@@ -315,7 +315,6 @@ pub fn hydrate_static(
         nodes.push(InputNode {
             id: HYDRATION_NODE_ALIAS.to_string(),
             entity: Some(template.entity_type.clone()),
-            table: Some(template.destination_table.clone()),
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
             traversal_paths,
@@ -392,7 +391,6 @@ pub fn hydrate_dynamic(
         nodes.push(InputNode {
             id: HYDRATION_NODE_ALIAS.to_string(),
             entity: Some(entity_type.clone()),
-            table: Some(spec.destination_table.clone()),
             columns: Some(ColumnSelection::List(spec.columns.clone())),
             node_ids: capped_ids,
             traversal_paths: tps,

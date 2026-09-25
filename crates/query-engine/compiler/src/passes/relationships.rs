@@ -1,16 +1,21 @@
-use ontology::Ontology;
-
 use crate::input::{Direction, HopRange, InputRelationship};
 use crate::{Input, QueryError, Result};
 
-pub fn validate_relationships(input: &Input, ontology: &Ontology) -> Result<()> {
+pub fn validate_relationships(
+    input: &Input,
+    model: &(impl crate::data_model::QueryModel + ?Sized),
+) -> Result<()> {
     input
         .relationships
         .iter()
-        .try_for_each(|edge| check_direction(input, edge, ontology))
+        .try_for_each(|edge| check_direction(input, edge, model))
 }
 
-fn check_direction(input: &Input, edge: &InputRelationship, ontology: &Ontology) -> Result<()> {
+fn check_direction(
+    input: &Input,
+    edge: &InputRelationship,
+    model: &(impl crate::data_model::QueryModel + ?Sized),
+) -> Result<()> {
     let entity = |id: &str| {
         input
             .nodes
@@ -26,23 +31,26 @@ fn check_direction(input: &Input, edge: &InputRelationship, ontology: &Ontology)
     }
     let (mut reversed, mut unconnected) = (Vec::new(), Vec::new());
     for kind in &edge.types {
-        let variants: Vec<_> = ontology
-            .get_edge(kind)
+        let variants: Vec<_> = model
+            .graph()
+            .relationship_id(kind)
+            .map(|relationship| model.graph().relationship(relationship).variants.as_slice())
             .unwrap_or_default()
             .iter()
-            .filter(|variant| !variant.source_kind.is_empty() && !variant.target_kind.is_empty())
+            .map(|variant| model.graph().variant(*variant))
             .collect();
         if variants.is_empty()
-            || variants
-                .iter()
-                .any(|variant| variant.source_kind == source && variant.target_kind == target)
+            || variants.iter().any(|variant| {
+                model.graph().entity(variant.source).name == source
+                    && model.graph().entity(variant.target).name == target
+            })
         {
             return Ok(());
         }
-        if variants
-            .iter()
-            .any(|variant| variant.source_kind == target && variant.target_kind == source)
-        {
+        if variants.iter().any(|variant| {
+            model.graph().entity(variant.source).name == target
+                && model.graph().entity(variant.target).name == source
+        }) {
             reversed.push(kind.as_str());
         } else {
             unconnected.push(kind.as_str());

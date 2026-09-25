@@ -76,6 +76,7 @@ pub fn prepare(
 pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Result<RoutedStatement> {
     match parse_statement(raw).count_err()? {
         ast::Statement::Query(query) => lower::lower(raw, *query)
+            .map(|(input, _)| input)
             .count_err()
             .map(Box::new)
             .map(RoutedStatement::Query),
@@ -86,6 +87,10 @@ pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Resul
 }
 
 pub fn parse(raw: &str) -> Result<Input> {
+    parse_with_hash(raw).map(|(input, _)| input)
+}
+
+pub fn parse_with_hash(raw: &str) -> Result<(Input, u64)> {
     match parse_statement(raw)? {
         ast::Statement::Query(query) => lower::lower(raw, *query),
         ast::Statement::SchemaCall { .. } => Err(QueryError::Validation(
@@ -99,8 +104,10 @@ pub fn compile_query(
     ontology: &Ontology,
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx =
-        config::ClickhouseGqlCtx::new(Arc::new(ontology.clone()), security_context.clone());
+    let ontology = Arc::new(ontology.clone());
+    let data_model = crate::data_model::clickhouse(Arc::clone(&ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    let mut ctx = config::ClickhouseGqlCtx::new(ontology, security_context.clone(), data_model);
     ctx.set_input(input);
     crate::finish(&mut ctx, config::run_clickhouse_gql)
 }

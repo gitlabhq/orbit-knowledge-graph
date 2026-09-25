@@ -4,6 +4,7 @@
 
 pub mod edge_chain;
 pub mod hydration;
+mod model;
 pub mod neighbors;
 pub mod pathfinding;
 
@@ -16,6 +17,14 @@ pub use edge_chain::{
     FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
 };
 pub use hydration::HydrationNodePlan;
+pub use model::PlanningModel;
+
+#[derive(Clone)]
+pub struct BoundFilter {
+    pub filter: InputFilter,
+    pub data_type: Option<ontology::DataType>,
+    pub selectivity: ontology::FieldSelectivity,
+}
 
 /// Pipeline state compatibility alias (HasQueryPlan, take_query_plan, etc.).
 pub type QueryPlan = Plan;
@@ -92,19 +101,15 @@ pub struct EdgeTableConfig {
 }
 
 impl EdgeTableConfig {
-    pub fn from_input(metadata: &CompilerMetadata, rel_types: &[String]) -> Self {
+    pub fn from_model(model: &(impl PlanningModel + ?Sized), rel_types: &[String]) -> Self {
         use std::collections::BTreeSet;
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
         for rt in rel_types {
-            if let Some(kinds) = metadata.edge_source_kinds.get(rt) {
-                source_kinds.extend(kinds.iter().cloned());
-            }
-            if let Some(kinds) = metadata.edge_target_kinds.get(rt) {
-                target_kinds.extend(kinds.iter().cloned());
-            }
+            source_kinds.extend(model.source_entities(rt));
+            target_kinds.extend(model.target_entities(rt));
         }
-        let tables = metadata.resolve_edge_tables(rel_types);
+        let tables = model.edge_tables(rel_types);
         Self {
             rel_type_filter: if rel_types.is_empty() {
                 None
@@ -128,11 +133,20 @@ pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
         .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
 }
 
-pub fn plan(input: &Input) -> Result<Plan> {
+pub fn plan<M>(
+    input: &Input,
+    scope_proofs: &HashMap<String, crate::scope::ScopeProof>,
+    model: &M,
+) -> Result<Plan>
+where
+    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+{
     match input.query_type {
-        QueryType::Traversal | QueryType::Aggregation => Ok(edge_chain::plan(input)),
-        QueryType::Neighbors => neighbors::plan_neighbors(input),
-        QueryType::PathFinding => pathfinding::plan_pathfinding(input),
-        QueryType::Hydration => hydration::plan_hydration(input),
+        QueryType::Traversal | QueryType::Aggregation => {
+            Ok(edge_chain::plan(input, scope_proofs, model))
+        }
+        QueryType::Neighbors => neighbors::plan_neighbors(input, model),
+        QueryType::PathFinding => pathfinding::plan_pathfinding(input, model),
+        QueryType::Hydration => hydration::plan_hydration(input, model),
     }
 }

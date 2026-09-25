@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
-use query_engine::compiler::{HydrationPlan, InputNode, QueryType, compile_input};
+use query_engine::compiler::{HydrationPlan, InputNode, QueryType, compile_input_model};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -83,11 +83,20 @@ impl HydrationStage {
         hydration_input.path_segment_budget =
             Some(orbit_utils::clickhouse::MAX_BOUND_PATH_SEGMENTS);
 
-        let compiled = compile_input(hydration_input, &ctx.ontology, ctx.security_context()?)
-            .map_err(|e| PipelineError::Compile {
-                client_safe: e.is_client_safe(),
-                message: e.to_string(),
-            })?;
+        let data_model = ctx
+            .server_extensions
+            .get::<Arc<query_data_model::ClickHouseDataModel>>()
+            .ok_or_else(|| PipelineError::custom("query data model missing"))?;
+        let compiled = compile_input_model(
+            hydration_input,
+            &ctx.ontology,
+            data_model,
+            ctx.security_context()?,
+        )
+        .map_err(|e| PipelineError::Compile {
+            client_safe: e.is_client_safe(),
+            message: e.to_string(),
+        })?;
 
         let rendered_sql = compiled.base.render();
         let debug = if ctx.compiled()?.input.options.include_debug_sql {

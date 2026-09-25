@@ -393,7 +393,7 @@ pub(super) fn emit_denorm_tags(
                 continue;
             }
             if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
-                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, &filter.filter)
             {
                 where_parts.push(expr);
                 tagged.insert(tag_id);

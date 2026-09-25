@@ -115,6 +115,7 @@ async fn run_pipeline(
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
+        &compiled.pagination,
     ));
 
     PipelineOutput {

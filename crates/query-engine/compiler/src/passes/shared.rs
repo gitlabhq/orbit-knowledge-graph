@@ -5,8 +5,10 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::constants::*;
 use crate::input::*;
+use crate::passes::plan::BoundFilter;
 
-pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
+pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
+    let filter = &bound.filter;
     let col = Expr::col(alias, prop);
 
     if let Some((rhs_alias, rhs_prop)) = &filter.rhs_column {
@@ -26,7 +28,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let str_val = || filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
     let typed = |v: serde_json::Value| -> Expr {
-        Expr::param(data_type_to_ch(filter.data_type.as_ref()), v)
+        Expr::param(data_type_to_ch(bound.data_type.as_ref()), v)
     };
 
     match filter.op {
@@ -41,7 +43,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
                 Expr::col_in(
                     alias,
                     prop,
-                    data_type_to_ch(filter.data_type.as_ref()),
+                    data_type_to_ch(bound.data_type.as_ref()),
                     arr.clone(),
                 )
                 .unwrap_or_else(|| Expr::param(ChType::Bool, false))
@@ -113,15 +115,29 @@ pub fn node_ids_predicate(alias: &str, ids: &[i64]) -> Expr {
 
 pub fn ordered_filters(
     filters: &std::collections::HashMap<String, Vec<crate::input::InputFilter>>,
-) -> Vec<(String, crate::input::InputFilter)> {
+    entity: Option<query_data_model::EntityId>,
+    model: &(impl crate::data_model::QueryModel + ?Sized),
+) -> Vec<(String, BoundFilter)> {
     let mut properties: Vec<_> = filters.iter().collect();
     properties.sort_unstable_by_key(|(property, _)| *property);
     properties
         .into_iter()
         .flat_map(|(property, filters)| {
-            filters
-                .iter()
-                .map(move |filter| (property.clone(), filter.clone()))
+            let metadata = entity
+                .and_then(|entity| model.graph().property_id(entity, property))
+                .map(|property| model.graph().property(property));
+            filters.iter().map(move |filter| {
+                (
+                    property.clone(),
+                    BoundFilter {
+                        filter: filter.clone(),
+                        data_type: metadata.map(|property| property.data_type),
+                        selectivity: metadata
+                            .map(|property| property.selectivity)
+                            .unwrap_or_default(),
+                    },
+                )
+            })
         })
         .collect()
 }
@@ -149,15 +165,6 @@ pub fn edge_select_columns_with_prefix(alias: &str, prefix: &str) -> Vec<SelectE
     .iter()
     .map(|(col, suffix)| SelectExpr::new(Expr::col(alias, *col), format!("{prefix}_{suffix}")))
     .collect()
-}
-
-pub fn resolve_edge_table(input: &Input, rel_types: &[String]) -> String {
-    for t in rel_types {
-        if let Some(table) = input.compiler.edge_table_for_rel.get(t) {
-            return table.clone();
-        }
-    }
-    input.compiler.default_edge_table.clone()
 }
 
 pub fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
@@ -369,7 +376,7 @@ pub fn dedup_subquery(
 
 pub fn has_non_denorm_filters(
     entity: &str,
-    filters: &[(String, InputFilter)],
+    filters: &[(String, BoundFilter)],
     denorm_map: &HashMap<(String, String, String), (String, String)>,
 ) -> bool {
     filters.iter().any(|(prop, _)| {

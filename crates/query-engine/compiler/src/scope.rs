@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
-use ontology::{Ontology, ScopeEdge, TraversalPathKind};
 
 use crate::ast::{ChType, Expr, Op, Query, SelectExpr, TableRef};
 use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
@@ -65,36 +65,159 @@ fn scope_value_expr(source: &ScopeSource) -> Expr {
     }
 }
 
-pub fn derive_scope_proofs(input: &Input, ontology: &Ontology) -> HashMap<String, ScopeProof> {
+pub fn derive_scope_proofs(
+    input: &Input,
+    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+) -> HashMap<String, ScopeProof> {
     if !matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Aggregation
     ) {
         return HashMap::new();
     }
-    let anchor_fks = ontology.anchor_fk_mappings();
+    let anchor_fks = anchor_fk_mappings(model);
     let seed: HashMap<String, ScopeProof> = input
         .nodes
         .iter()
         .filter_map(|node| {
-            let lookups: Vec<ScopeSource> = scope_keys(node, &anchor_fks)
-                .into_iter()
-                .filter_map(|key| {
-                    ontology
-                        .traversal_path_lookup(&key.entity, key.kind)
-                        .map(|spec| ScopeSource::Lookup {
-                            source_table: spec.source_table.clone(),
-                            key_column: spec.key_column.clone(),
-                            value: key.value,
-                        })
+            let lookups: Vec<ScopeSource> = scope_keys(
+                node,
+                &anchor_fks
+                    .iter()
+                    .map(|(column, entity)| (column.as_str(), entity.as_str()))
+                    .collect::<Vec<_>>(),
+            )
+            .into_iter()
+            .filter_map(|key| {
+                let entity = model.graph().entity_id(&key.entity)?;
+                crate::data_model::AuthorizationModel::traversal_path_lookup(
+                    model, entity, key.kind,
+                )
+                .map(|(source_table, key_column)| ScopeSource::Lookup {
+                    source_table,
+                    key_column,
+                    value: key.value,
                 })
-                .collect();
+            })
+            .collect();
             (1..=MAX_LOOKUPS_PER_ALIAS)
                 .contains(&lookups.len())
                 .then(|| (node.id.clone(), ScopeProof(lookups)))
         })
         .collect();
-    ontology.propagate_scope_proofs(&scope_edges(input), &seed)
+    propagate_scope_proofs(input, model, &seed)
+}
+
+fn anchor_fk_mappings(
+    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+) -> Vec<(String, String)> {
+    let mut mappings = HashMap::new();
+    for variant in model.graph().variants() {
+        if model.variant_scope(variant.id) != Some(ontology::EdgeVariantScope::NamespaceAnchor) {
+            continue;
+        }
+        let Some(property) = model.foreign_key(
+            &[model
+                .graph()
+                .relationship(variant.relationship)
+                .name
+                .clone()],
+            &model.graph().entity(variant.source).name,
+            &model.graph().entity(variant.target).name,
+        ) else {
+            continue;
+        };
+        mappings
+            .entry(property.column)
+            .or_insert_with(|| model.graph().entity(variant.target).name.clone());
+    }
+    mappings.into_iter().collect()
+}
+
+fn scope_preserving(
+    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    relationship: &str,
+    source: &str,
+    target: &str,
+) -> bool {
+    let Some(variant) = model
+        .graph()
+        .relationship_id(relationship)
+        .zip(model.graph().entity_id(source))
+        .zip(model.graph().entity_id(target))
+        .and_then(|((relationship, source), target)| {
+            model.graph().variant_id(relationship, source, target)
+        })
+    else {
+        return false;
+    };
+    model
+        .variant_scope(variant)
+        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
+}
+
+fn propagate_scope_proofs(
+    input: &Input,
+    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
+    seed: &HashMap<String, ScopeProof>,
+) -> HashMap<String, ScopeProof> {
+    use std::collections::HashSet;
+
+    if seed.is_empty() {
+        return HashMap::new();
+    }
+    let edges = scope_edges(input);
+    let preserving: Vec<bool> = edges
+        .iter()
+        .map(|edge| {
+            edge.types
+                .iter()
+                .all(|kind| scope_preserving(model, kind, edge.source_kind, edge.target_kind))
+        })
+        .collect();
+    let mut tainted = HashSet::new();
+    loop {
+        let mut changed = false;
+        for (index, edge) in edges.iter().enumerate() {
+            if preserving[index] {
+                continue;
+            }
+            for (from, to) in [(edge.from, edge.to), (edge.to, edge.from)] {
+                if (seed.contains_key(from) || tainted.contains(from)) && tainted.insert(to) {
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut result = seed.clone();
+    loop {
+        let mut changed = false;
+        for (index, edge) in edges.iter().enumerate() {
+            if !preserving[index] {
+                continue;
+            }
+            let next = match (result.get(edge.from).cloned(), result.get(edge.to).cloned()) {
+                (Some(proof), None) if !tainted.contains(edge.to) => {
+                    Some((edge.to.to_string(), proof))
+                }
+                (None, Some(proof)) if !tainted.contains(edge.from) => {
+                    Some((edge.from.to_string(), proof))
+                }
+                _ => None,
+            };
+            if let Some((alias, proof)) = next {
+                result.insert(alias, proof);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    result
 }
 
 fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
@@ -224,7 +347,15 @@ fn entity_of<'a>(input: &'a Input, alias: &str) -> &'a str {
         .and_then(|n| n.entity.as_deref())
         .unwrap_or("")
 }
-pub fn scope_edges(input: &Input) -> Vec<ScopeEdge<'_>> {
+struct ScopeEdge<'a> {
+    from: &'a str,
+    to: &'a str,
+    types: &'a [String],
+    source_kind: &'a str,
+    target_kind: &'a str,
+}
+
+fn scope_edges(input: &Input) -> Vec<ScopeEdge<'_>> {
     input
         .relationships
         .iter()
@@ -257,7 +388,6 @@ mod tests {
         InputNode {
             id: id.to_string(),
             entity: Some("Project".to_string()),
-            has_traversal_path: true,
             node_ids: vec![42],
             ..Default::default()
         }
@@ -290,7 +420,6 @@ mod tests {
         let mut node = InputNode {
             id: "p".to_string(),
             entity: Some("Project".to_string()),
-            has_traversal_path: true,
             ..Default::default()
         };
         node.filters.insert(
@@ -312,7 +441,6 @@ mod tests {
         let mut node = InputNode {
             id: "p".to_string(),
             entity: Some("Project".to_string()),
-            has_traversal_path: true,
             ..Default::default()
         };
         node.filters.insert(

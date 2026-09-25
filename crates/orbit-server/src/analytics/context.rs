@@ -112,7 +112,6 @@ fn apply_metrics(
         let mut filter_count: i64 = 0;
         let mut max_hops: i64 = 0;
         let mut variable_hops = false;
-        let mut virtual_cols = false;
 
         let mut columns = BTreeSet::new();
         let mut has_star = false;
@@ -121,7 +120,6 @@ fn apply_metrics(
             if let Some(e) = &node.entity {
                 entities.insert(e.clone());
             }
-            virtual_cols |= !node.virtual_columns.is_empty();
             match &node.columns {
                 Some(query_engine::compiler::ColumnSelection::All) => has_star = true,
                 Some(query_engine::compiler::ColumnSelection::List(cols)) => {
@@ -175,7 +173,7 @@ fn apply_metrics(
         q.filter_count = Some(filter_count);
         q.max_hops = Some(max_hops);
         q.has_variable_hops = Some(variable_hops);
-        q.has_virtual_columns = Some(virtual_cols);
+        q.has_virtual_columns = Some(metrics.has_virtual_columns);
         q.column_selection_mode = if has_star {
             "all"
         } else if !columns.is_empty() {

@@ -6,8 +6,8 @@ use ontology::constants::*;
 
 use crate::input::*;
 
-use super::{Plan, PlanBody};
-use crate::passes::shared::resolve_edge_table;
+use super::PlanningModel;
+use super::{BoundFilter, Plan, PlanBody};
 
 pub struct Hop {
     pub rel_types: Vec<String>,
@@ -21,7 +21,7 @@ pub struct Hop {
     pub max_hops: u32,
     /// When set, the plan can join node tables directly without the edge table.
     pub fk: Option<HopFk>,
-    pub filters: Vec<(String, InputFilter)>,
+    pub filters: Vec<(String, BoundFilter)>,
     /// None for the first hop (it's the initial FROM).
     pub join_prev: Option<JoinColumns>,
     /// Logical proof that this hop can use the anchored traversal scope.
@@ -59,7 +59,7 @@ pub struct NodePlan {
     pub table: Option<String>,
     pub selectivity: Selectivity,
     pub hydration: HydrationStrategy,
-    pub filters: Vec<(String, InputFilter)>,
+    pub filters: Vec<(String, BoundFilter)>,
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub has_traversal_path: bool,
@@ -148,34 +148,39 @@ pub enum FkShape {
     Chain,
 }
 
-pub fn plan(input: &Input) -> Plan {
-    let hops = build_hops(input);
-    let mut nodes = build_node_plans(input);
+pub fn plan<M>(input: &Input, scope_proofs: &HashMap<String, ScopeProof>, model: &M) -> Plan
+where
+    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+{
+    let hops = build_hops(input, scope_proofs, model);
+    let mut nodes = build_node_plans(input, model);
 
-    let (mut hops, elided_fks, scope_requirements) =
-        if input.compiler.plan_overrides.skip_fk_elision {
-            (hops, Vec::new(), Vec::new())
-        } else {
-            elide_hops(hops, &mut nodes, input)
-        };
-
-    let overrides = &input.compiler.plan_overrides;
+    let (mut hops, elided_fks, scope_requirements) = if model.skip_fk_elision() {
+        (hops, Vec::new(), Vec::new())
+    } else {
+        elide_hops(hops, &mut nodes, input)
+    };
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
     let _ = reversed;
 
     for node_plan in nodes.values_mut() {
-        if overrides.force_join {
+        if model.force_join() {
             node_plan.hydration = HydrationStrategy::Join;
         } else {
-            node_plan.hydration = determine_hydration(node_plan, input, &hops);
+            node_plan.hydration = determine_hydration(
+                node_plan,
+                input,
+                &hops,
+                &super::model::denormalized_maps(model).1,
+            );
         }
     }
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if !overrides.skip_fk_elision
+    } else if !model.skip_fk_elision()
         && let Some(shape) = detect_fk(&hops, &nodes)
     {
         Strategy::Fk(shape)
@@ -196,7 +201,7 @@ pub fn plan(input: &Input) -> Plan {
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
-    } else if overrides.force_emit_select {
+    } else if model.force_emit_select() {
         for np in nodes.values_mut() {
             np.emit_select = true;
         }
@@ -211,64 +216,118 @@ pub fn plan(input: &Input) -> Plan {
         PlanBody::Traversal
     };
 
+    let (denorm_columns, denorm_rel_kinds) = super::model::denormalized_maps(model);
+    let table_names: HashSet<String> = input
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            node.entity
+                .as_deref()
+                .and_then(|entity| model.graph().entity_id(entity))
+                .and_then(|entity| model.entity_table(entity))
+                .map(String::from)
+        })
+        .chain(hops.iter().map(|hop| hop.edge_table.clone()))
+        .collect();
+    let table_columns = table_names
+        .iter()
+        .filter_map(|table| {
+            model
+                .table_columns(table)
+                .map(|columns| (table.clone(), columns.clone()))
+        })
+        .collect();
+    let table_sort_keys = table_names
+        .iter()
+        .filter_map(|table| {
+            model
+                .table_sort_key(table)
+                .map(|sort_key| (table.clone(), sort_key.to_vec()))
+        })
+        .collect();
     Plan {
         nodes,
         hops,
         strategy,
         node_edge_mappings,
         scope_requirements,
-        denorm_columns: input.compiler.denormalized_columns.clone(),
-        denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),
-        table_columns: input.compiler.table_columns.clone(),
-        table_sort_keys: input.compiler.table_sort_keys.clone(),
+        denorm_columns,
+        denorm_rel_kinds,
+        table_columns,
+        table_sort_keys,
         body,
     }
 }
 
-fn build_hops(input: &Input) -> Vec<Hop> {
+fn build_hops<M>(input: &Input, scope_proofs: &HashMap<String, ScopeProof>, model: &M) -> Vec<Hop>
+where
+    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+{
+    let entities: HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|node| Some((node.id.as_str(), node.entity.as_deref()?)))
+        .collect();
     input
         .relationships
         .iter()
         .map(|rel| {
-            let edge_table = resolve_edge_table(input, &rel.types);
-            let fk = rel.fk_column.as_ref().and_then(|col| {
-                let from_table = input
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == rel.from)
-                    .and_then(|n| n.table.as_deref())
-                    .unwrap_or("");
-                let to_table = input
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == rel.to)
-                    .and_then(|n| n.table.as_deref())
-                    .unwrap_or("");
-
-                let from_has = input
-                    .compiler
-                    .table_columns
-                    .get(from_table)
-                    .is_some_and(|cols| cols.contains(col));
-                let to_has = input
-                    .compiler
-                    .table_columns
-                    .get(to_table)
-                    .is_some_and(|cols| cols.contains(col));
-
-                let (fk_node, target_node) = if from_has {
-                    (rel.from.clone(), rel.to.clone())
-                } else if to_has {
-                    (rel.to.clone(), rel.from.clone())
-                } else {
-                    return None;
-                };
-                Some(HopFk {
-                    fk_node,
-                    fk_column: col.clone(),
-                    target_node,
+            let edge_table = model
+                .edge_tables(&rel.types)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| model.default_edge_table().to_string());
+            let from_entity = input
+                .nodes
+                .iter()
+                .find(|node| node.id == rel.from)
+                .and_then(|node| node.entity.as_deref());
+            let to_entity = input
+                .nodes
+                .iter()
+                .find(|node| node.id == rel.to)
+                .and_then(|node| node.entity.as_deref());
+            let fk = from_entity
+                .zip(to_entity)
+                .and_then(|(source, target)| model.foreign_key(&rel.types, source, target))
+                .and_then(|foreign_key| {
+                    let fk_node = if from_entity == Some(foreign_key.holder.as_str()) {
+                        rel.from.clone()
+                    } else if to_entity == Some(foreign_key.holder.as_str()) {
+                        rel.to.clone()
+                    } else {
+                        return None;
+                    };
+                    let target_node = if fk_node == rel.from {
+                        rel.to.clone()
+                    } else {
+                        rel.from.clone()
+                    };
+                    Some(HopFk {
+                        fk_node,
+                        fk_column: foreign_key.column,
+                        target_node,
+                    })
+                });
+            let from_entity = entities.get(rel.from.as_str()).copied().unwrap_or_default();
+            let to_entity = entities.get(rel.to.as_str()).copied().unwrap_or_default();
+            let scope_preserving = !rel.types.is_empty()
+                && rel.types.iter().all(|kind| {
+                    model.scope_preserving(kind, from_entity, to_entity)
+                        || model.scope_preserving(kind, to_entity, from_entity)
+                });
+            let from_proof = scope_proofs.get(&rel.from);
+            let to_proof = scope_proofs.get(&rel.to);
+            let scope_proof = if from_proof == to_proof {
+                from_proof.cloned()
+            } else {
+                rel.types.iter().find_map(|kind| {
+                    model
+                        .pruned_scope_endpoint(kind, from_entity, to_entity)
+                        .and_then(|source| if source { from_proof } else { to_proof })
+                        .cloned()
                 })
-            });
+            };
             Hop {
                 rel_types: rel.types.clone(),
                 edge_table,
@@ -278,41 +337,86 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 min_hops: rel.hops.min,
                 max_hops: rel.hops.max,
                 fk,
-                scope_preserving: rel.scope_preserving,
-                filters: crate::passes::shared::ordered_filters(&rel.filters),
+                scope_preserving,
+                filters: crate::passes::shared::ordered_filters(&rel.filters, None, model),
                 join_prev: None,
-                scope_proof: rel.scope_proof.clone(),
+                scope_proof,
                 cascade_anchor: false,
             }
         })
         .collect()
 }
 
-fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
+fn build_node_plans<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
+where
+    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+{
     input
         .nodes
         .iter()
-        .map(|n| {
+        .filter_map(|n| {
+            let entity = n.entity.as_deref()?;
+            let entity_id = model.graph().entity_id(entity)?;
             (
                 n.id.clone(),
                 NodePlan {
                     alias: n.id.clone(),
                     entity: n.entity.clone(),
-                    table: n.table.clone(),
+                    table: model.entity_table(entity_id).map(String::from),
                     selectivity: Selectivity::from_node(n),
                     hydration: HydrationStrategy::Skip,
-                    has_traversal_path: n.has_traversal_path,
-                    is_global: n.is_global,
-                    redaction_id_column: n.redaction_id_column.clone(),
-                    filters: crate::passes::shared::ordered_filters(&n.filters),
+                    has_traversal_path: model.entity_has_traversal_path(entity_id),
+                    is_global: model.entity_is_global(entity_id),
+                    redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
+                    filters: crate::passes::shared::ordered_filters(
+                        &n.filters
+                            .iter()
+                            .filter(|(property, _)| {
+                                model
+                                    .graph()
+                                    .property_id(entity_id, property)
+                                    .map(|property| model.graph().property(property))
+                                    .is_none_or(|property| {
+                                        !matches!(
+                                            property.source,
+                                            ontology::FieldSource::Virtual(_)
+                                        )
+                                    })
+                            })
+                            .map(|(property, filters)| (property.clone(), filters.clone()))
+                            .collect(),
+                        Some(entity_id),
+                        model,
+                    ),
                     node_ids: n.node_ids.clone(),
                     id_range: n.id_range.clone(),
-                    columns: n.columns.clone(),
+                    columns: n.columns.as_ref().map(|columns| match columns {
+                        ColumnSelection::All => ColumnSelection::All,
+                        ColumnSelection::List(columns) => ColumnSelection::List(
+                            columns
+                                .iter()
+                                .filter(|column| {
+                                    model
+                                        .graph()
+                                        .property_id(entity_id, column)
+                                        .map(|property| model.graph().property(property))
+                                        .is_none_or(|property| {
+                                            !matches!(
+                                                property.source,
+                                                ontology::FieldSource::Virtual(_)
+                                            )
+                                        })
+                                })
+                                .cloned()
+                                .collect(),
+                        ),
+                    }),
                     use_narrowing: false,
                     fk_needs_join: false,
                     emit_select: true,
                 },
             )
+                .into()
         })
         .collect()
 }
@@ -433,7 +537,14 @@ fn elide_hops(
                         ..Default::default()
                     }
                 };
-                fk_np.filters.push((fk_column, filter));
+                fk_np.filters.push((
+                    fk_column,
+                    BoundFilter {
+                        filter,
+                        data_type: Some(ontology::DataType::Int),
+                        selectivity: ontology::FieldSelectivity::High,
+                    },
+                ));
                 if fk_np.selectivity > Selectivity::Filtered {
                     fk_np.selectivity = Selectivity::Filtered;
                 }
@@ -568,7 +679,12 @@ fn reorder_by_selectivity(
     }
 }
 
-fn determine_hydration(node_plan: &NodePlan, input: &Input, hops: &[Hop]) -> HydrationStrategy {
+fn determine_hydration(
+    node_plan: &NodePlan,
+    input: &Input,
+    hops: &[Hop],
+    denorm_rel_kinds: &HashMap<(String, String, String), Vec<String>>,
+) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
     let is_group_by_node = crate::input::node_group_ids(&input.aggregation.group_by)
@@ -592,9 +708,10 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input, hops: &[Hop]) -> Hyd
     // Skip the node table only when every filter is carried by a hop's edge
     // tag; an uncovered filter stays on the node table so it isn't dropped.
     let entity = node_plan.entity.as_deref().unwrap_or("");
-    let has_uncovered_filter = node_plan.filters.iter().any(|(prop, _)| {
-        !filter_covered_by_denorm(entity, prop, alias, hops, &input.compiler.denorm_rel_kinds)
-    });
+    let has_uncovered_filter = node_plan
+        .filters
+        .iter()
+        .any(|(prop, _)| !filter_covered_by_denorm(entity, prop, alias, hops, denorm_rel_kinds));
 
     if has_uncovered_filter {
         return HydrationStrategy::FilterOnly;

@@ -13,7 +13,7 @@ use crate::{Input, InputNode, QueryError, Result};
 use super::ast::{Limit, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
 use super::{QueryParser, Rule, invalid};
 
-pub(super) fn lower(source: &str, query: Query<'_>) -> Result<Input> {
+pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
     let mut lowering = Lowering {
         input: Input::default(),
         edges: HashMap::new(),
@@ -36,14 +36,13 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<Input> {
             lowering.input.cursor = Some(InputCursor {
                 page_size: size,
                 after,
-                seek: None,
             });
-            lowering.input.compiler.query_hash = statement_hash(source, span);
+            return Ok((lowering.input, statement_hash(source, span)));
         }
         None => {}
-    }
+    };
     lowering.input.options.include_debug_sql = query.debug;
-    Ok(lowering.input)
+    Ok((lowering.input, 0))
 }
 
 fn statement_hash(source: &str, page: pest::Span<'_>) -> u64 {
@@ -159,9 +158,6 @@ impl Lowering {
             direction: relationship.direction,
             hops: HopRange::default(),
             filters: HashMap::new(),
-            fk_column: None,
-            scope_proof: None,
-            scope_preserving: false,
         };
         if relationship.types.is_empty()
             && let Some(alias) = &relationship.variable
@@ -236,8 +232,6 @@ impl Lowering {
                 to: edge.to,
                 max_depth: edge.hops.max,
                 rel_types: edge.types,
-                forward_first_hop_rel_types: Vec::new(),
-                backward_first_hop_rel_types: Vec::new(),
             });
         } else if self.input.nodes.len() == 2 && self.input.nodes[1].entity.is_none() {
             let far = self.input.nodes.pop().expect("neighbor endpoint");
@@ -308,7 +302,7 @@ fn is_type_shaped(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     fn hash(query: &str) -> u64 {
-        super::super::parse(query).unwrap().compiler.query_hash
+        super::super::parse_with_hash(query).unwrap().1
     }
 
     #[test]

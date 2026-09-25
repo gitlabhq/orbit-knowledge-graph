@@ -36,6 +36,7 @@ minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
+query-data-model = { path = "../query-data-model" }
 tower = { workspace = true }
 opentelemetry = { workspace = true }
 prost = { workspace = true }

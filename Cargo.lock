@@ -1517,6 +1517,7 @@ dependencies = [
  "pest",
  "pest_consume",
  "pest_derive",
+ "query-data-model",
  "regex",
  "serde",
  "serde_json",
@@ -5645,6 +5646,7 @@ dependencies = [
  "orbit-utils",
  "orbit-versions",
  "prost",
+ "query-data-model",
  "query-engine",
  "reqwest 0.13.4",
  "rust-embed",
@@ -6977,6 +6979,14 @@ dependencies = [
  "wasi",
  "web-sys",
  "winapi",
+]
+
+[[package]]
+name = "query-data-model"
+version = "0.1.0"
+dependencies = [
+ "ontology",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -8996,6 +9006,7 @@ dependencies = [
  "ontology",
  "orbit-utils",
  "pipeline",
+ "query-data-model",
  "serde",
  "serde_json",
  "tokio",

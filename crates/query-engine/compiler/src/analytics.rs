@@ -13,6 +13,8 @@ pub struct ExecMetrics {
     pub input: Option<Input>,
     #[serde(skip)]
     pub hydration: Option<HydrationPlan>,
+    #[serde(skip)]
+    pub has_virtual_columns: bool,
     pub compile_ms: Option<u64>,
     pub execute_ms: Option<u64>,
     pub authorization_ms: Option<u64>,

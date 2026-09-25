@@ -3,12 +3,16 @@ use std::collections::HashMap;
 use crate::error::Result;
 use crate::input::*;
 
+use super::PlanningModel;
 use super::{
     EdgeTableConfig, HydrationStrategy, NodePlan, PathFindingBody, Plan, PlanBody, Selectivity,
     Strategy, find_node,
 };
 
-pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
+pub fn plan_pathfinding<M>(input: &Input, model: &M) -> Result<Plan>
+where
+    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+{
     let path = input
         .path
         .as_ref()
@@ -19,16 +23,35 @@ pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
     let start_alias = start_node.id.clone();
     let end_alias = end_node.id.clone();
 
-    let start_np = node_plan_from(start_node);
-    let end_np = node_plan_from(end_node);
+    let start_np = node_plan_from(start_node, model)?;
+    let end_np = node_plan_from(end_node, model)?;
 
     let scoped_by_tp = start_np.has_traversal_path && end_np.has_traversal_path;
-    let edge = EdgeTableConfig::from_input(&input.compiler, &path.rel_types);
+    let edge = EdgeTableConfig::from_model(model, &path.rel_types);
 
-    let forward_first_hop_filter =
-        crate::passes::shared::rel_kind_filter_values(&path.forward_first_hop_rel_types);
-    let backward_first_hop_filter =
-        crate::passes::shared::rel_kind_filter_values(&path.backward_first_hop_rel_types);
+    let endpoint_kinds = |entity: &str, source: bool| {
+        let relationships: Vec<String> = model
+            .relationship_names()
+            .into_iter()
+            .filter(|relationship| {
+                let entities = if source {
+                    model.source_entities(relationship)
+                } else {
+                    model.target_entities(relationship)
+                };
+                entities.iter().any(|kind| kind == entity)
+            })
+            .collect();
+        crate::passes::shared::rel_kind_filter_values(&relationships)
+    };
+    let forward_first_hop_filter = start_node
+        .entity
+        .as_deref()
+        .and_then(|entity| endpoint_kinds(entity, true));
+    let backward_first_hop_filter = end_node
+        .entity
+        .as_deref()
+        .and_then(|entity| endpoint_kinds(entity, false));
 
     let max_depth = path.max_depth;
     let forward_depth = max_depth / 2 + max_depth % 2;
@@ -44,10 +67,10 @@ pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
         hops: vec![],
         strategy: Strategy::SingleNode,
         node_edge_mappings: HashMap::new(),
-        denorm_columns: input.compiler.denormalized_columns.clone(),
-        denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),
-        table_columns: input.compiler.table_columns.clone(),
-        table_sort_keys: input.compiler.table_sort_keys.clone(),
+        denorm_columns: HashMap::new(),
+        denorm_rel_kinds: HashMap::new(),
+        table_columns: HashMap::new(),
+        table_sort_keys: HashMap::new(),
         body: PlanBody::PathFinding(PathFindingBody {
             start: start_alias,
             end: end_alias,
@@ -62,22 +85,33 @@ pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
     })
 }
 
-fn node_plan_from(node: &InputNode) -> NodePlan {
-    NodePlan {
+fn node_plan_from<M>(node: &InputNode, model: &M) -> Result<NodePlan>
+where
+    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+{
+    let entity = node
+        .entity
+        .as_deref()
+        .ok_or_else(|| crate::error::QueryError::Lowering("path node has no entity".into()))?;
+    let entity_id = model
+        .graph()
+        .entity_id(entity)
+        .ok_or_else(|| crate::error::QueryError::Lowering("path node entity is unknown".into()))?;
+    Ok(NodePlan {
         alias: node.id.clone(),
         entity: node.entity.clone(),
-        table: node.table.clone(),
+        table: model.entity_table(entity_id).map(String::from),
         selectivity: Selectivity::from_node(node),
         hydration: HydrationStrategy::Skip,
-        filters: crate::passes::shared::ordered_filters(&node.filters),
+        filters: crate::passes::shared::ordered_filters(&node.filters, Some(entity_id), model),
         node_ids: node.node_ids.clone(),
         id_range: node.id_range.clone(),
-        has_traversal_path: node.has_traversal_path,
-        is_global: node.is_global,
-        redaction_id_column: node.redaction_id_column.clone(),
+        has_traversal_path: model.entity_has_traversal_path(entity_id),
+        is_global: model.entity_is_global(entity_id),
+        redaction_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
         columns: node.columns.clone(),
         use_narrowing: false,
         fk_needs_join: false,
         emit_select: true,
-    }
+    })
 }

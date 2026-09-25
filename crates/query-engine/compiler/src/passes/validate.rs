@@ -21,8 +21,13 @@ use crate::schema_limits::{
     MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT,
 };
 use crate::types::SecurityContext;
-use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
+#[cfg(test)]
+use ontology::Ontology;
+use ontology::{DataType, TRAVERSAL_PATH_COLUMN};
 use orbit_utils::traversal_path::TraversalPath;
+#[cfg(test)]
+use query_data_model::ClickHouseDataModel;
+use query_data_model::PropertyId;
 
 use super::errors::format_schema_error;
 
@@ -31,7 +36,7 @@ pub(crate) const BASE_SCHEMA_JSON: &str =
 
 static BASE_SCHEMA_VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
 
-fn base_validator() -> &'static jsonschema::Validator {
+pub(crate) fn base_validator() -> &'static jsonschema::Validator {
     BASE_SCHEMA_VALIDATOR.get_or_init(|| {
         let schema: serde_json::Value =
             serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
@@ -75,7 +80,7 @@ pub(crate) fn node_ref_regex() -> &'static regex::Regex {
     })
 }
 
-fn collect_schema_errors(
+pub(crate) fn collect_schema_errors(
     validator: &jsonschema::Validator,
     value: &serde_json::Value,
 ) -> Result<()> {
@@ -195,15 +200,31 @@ pub struct Skip {
     pub selectivity: bool,
 }
 
-pub struct Validator<'a> {
-    ontology: &'a Ontology,
+pub struct Validator<'a, M: crate::data_model::QueryModel> {
+    model: ValidationModel<'a, M>,
     skip: Skip,
 }
 
-impl<'a> Validator<'a> {
-    pub fn new(ontology: &'a Ontology) -> Self {
+enum ValidationModel<'a, M> {
+    Borrowed(&'a M),
+    #[cfg(test)]
+    Owned(M),
+}
+
+impl<M> ValidationModel<'_, M> {
+    fn get(&self) -> &M {
+        match self {
+            Self::Borrowed(model) => model,
+            #[cfg(test)]
+            Self::Owned(model) => model,
+        }
+    }
+}
+
+impl<'a, M: crate::data_model::QueryModel> Validator<'a, M> {
+    pub fn new(model: &'a M) -> Self {
         Self {
-            ontology,
+            model: ValidationModel::Borrowed(model),
             skip: Skip::default(),
         }
     }
@@ -217,36 +238,39 @@ impl<'a> Validator<'a> {
     /// Returns the virtual source declaration for the field, or `None` for
     /// non-virtual fields.
     fn virtual_source(&self, entity: &str, prop: &str) -> Option<&ontology::VirtualSource> {
-        let node = self.ontology.get_node(entity)?;
-        let field = node.fields.iter().find(|f| f.name == prop)?;
-        if let ontology::FieldSource::Virtual(vs) = &field.source {
-            Some(vs)
+        let property = self.property(entity, prop)?;
+        if let ontology::FieldSource::Virtual(source) = &property.source {
+            Some(source)
         } else {
             None
         }
     }
 
-    /// Parse JSON and validate against the base schema (structure, identifiers, security).
-    pub fn check_json(&self, json: &str) -> Result<serde_json::Value> {
-        let value: serde_json::Value = serde_json::from_str(json)?;
-        collect_schema_errors(base_validator(), &value)?;
-        Ok(value)
+    fn property_id(&self, entity: &str, property: &str) -> Option<PropertyId> {
+        let model = self.model.get();
+        let entity = model.graph().entity_id(entity)?;
+        model.graph().property_id(entity, property)
     }
 
-    /// Validate against the ontology-derived schema (entity types, columns, relationship types).
-    pub fn check_ontology(&self, value: &serde_json::Value) -> Result<()> {
-        let schema = self
-            .ontology
-            .derive_json_schema(BASE_SCHEMA_JSON)
-            .map_err(|e| QueryError::Validation(format!("failed to derive schema: {e}")))?;
+    fn property(&self, entity: &str, property: &str) -> Option<&query_data_model::Property> {
+        let model = self.model.get();
+        self.property_id(entity, property)
+            .map(|id| model.graph().property(id))
+    }
 
-        let validator = jsonschema::validator_for(&schema)
-            .map_err(|e| QueryError::Validation(format!("invalid derived schema: {e}")))?;
+    fn field_type(&self, entity: &str, property: &str) -> Option<DataType> {
+        self.property(entity, property)
+            .map(|property| property.data_type)
+    }
 
-        collect_schema_errors(&validator, value).map_err(|e| match e {
-            QueryError::Validation(msg) => QueryError::AllowlistRejected(msg),
-            other => other,
-        })
+    fn field_flag(
+        &self,
+        entity: &str,
+        property: &str,
+        flag: impl Fn(&query_data_model::Property) -> bool,
+        _fallback: impl Fn(&ontology::Field) -> bool,
+    ) -> bool {
+        self.property(entity, property).map(flag).unwrap_or(false)
     }
 
     /// Validate what the JSON schema used to enforce, natively on `Input`, so
@@ -359,14 +383,19 @@ impl<'a> Validator<'a> {
 
     fn check_field(&self, entity: &str, property: &str) -> Result<()> {
         validate_identifier(property)?;
-        self.ontology
-            .validate_field(entity, property)
-            .map_err(|error| QueryError::AllowlistRejected(error.to_string()))
+        if ontology::constants::NODE_RESERVED_COLUMNS.contains(&property) {
+            return Ok(());
+        }
+        self.property(entity, property).map(|_| ()).ok_or_else(|| {
+            QueryError::AllowlistRejected(format!(
+                "field \"{property}\" does not exist on node type \"{entity}\""
+            ))
+        })
     }
 
     fn check_relationship_types(&self, types: &[String]) -> Result<()> {
         for kind in types {
-            if kind != "*" && !self.ontology.has_edge(kind) {
+            if kind != "*" && self.model.get().graph().relationship_id(kind).is_none() {
                 return Err(QueryError::AllowlistRejected(format!(
                     "unknown relationship type {kind:?}"
                 )));
@@ -589,10 +618,7 @@ impl<'a> Validator<'a> {
                     .and_then(|n| n.entity.as_deref());
                 if let Some(entity) = entity {
                     self.check_field(entity, prop)?;
-                    if !self
-                        .ontology
-                        .check_field_flag(entity, prop, |f| f.filterable)
-                    {
+                    if !self.field_flag(entity, prop, |f| f.filterable, |f| f.filterable) {
                         return Err(QueryError::AllowlistRejected(format!(
                             "join predicate on \"{prop}\" for {entity}: field is not filterable"
                         )));
@@ -615,8 +641,8 @@ impl<'a> Validator<'a> {
                 .find(|n| n.id == jp.rhs_node)
                 .and_then(|n| n.entity.as_deref());
             if let (Some(le), Some(re)) = (lhs_entity, rhs_entity) {
-                let lhs_type = self.ontology.get_field_type(le, &jp.lhs_prop);
-                let rhs_type = self.ontology.get_field_type(re, &jp.rhs_prop);
+                let lhs_type = self.field_type(le, &jp.lhs_prop);
+                let rhs_type = self.field_type(re, &jp.rhs_prop);
                 if let (Some(lt), Some(rt)) = (lhs_type, rhs_type)
                     && lt != rt
                 {
@@ -638,13 +664,13 @@ impl<'a> Validator<'a> {
             for (prop, filters) in &node.filters {
                 let is_traversal_path_filter = prop == TRAVERSAL_PATH_COLUMN
                     && self
-                        .ontology
-                        .get_node(entity)
-                        .is_some_and(|n| n.has_traversal_path);
+                        .model
+                        .get()
+                        .graph()
+                        .entity_id(entity)
+                        .is_some_and(|entity| self.model.get().entity_has_traversal_path(entity));
                 if !is_traversal_path_filter
-                    && !self
-                        .ontology
-                        .check_field_flag(entity, prop, |f| f.filterable)
+                    && !self.field_flag(entity, prop, |f| f.filterable, |f| f.filterable)
                 {
                     return Err(QueryError::Validation(format!(
                         "filter on \"{prop}\" for {entity}: field is not filterable"
@@ -686,7 +712,7 @@ impl<'a> Validator<'a> {
                         }
                     }
                 }
-                let Some(data_type) = self.ontology.get_field_type(entity, prop) else {
+                let Some(data_type) = self.field_type(entity, prop) else {
                     continue;
                 };
                 for filter in filters {
@@ -698,10 +724,12 @@ impl<'a> Validator<'a> {
                             .and_then(|n| n.entity.as_deref());
                         if let Some(rhs_entity) = rhs_entity {
                             self.check_field(rhs_entity, rhs_prop)?;
-                            if !self
-                                .ontology
-                                .check_field_flag(rhs_entity, rhs_prop, |f| f.filterable)
-                            {
+                            if !self.field_flag(
+                                rhs_entity,
+                                rhs_prop,
+                                |f| f.filterable,
+                                |f| f.filterable,
+                            ) {
                                 return Err(QueryError::AllowlistRejected(format!(
                                     "filter on \"{rhs_prop}\" for {rhs_entity}: field is not filterable"
                                 )));
@@ -726,14 +754,19 @@ impl<'a> Validator<'a> {
         }
 
         for (i, rel) in input.relationships.iter().enumerate() {
+            let model = self.model.get();
             let edge_table = rel
                 .types
                 .first()
-                .map(|t| self.ontology.edge_table_for_relationship(t))
-                .unwrap_or(self.ontology.edge_table());
+                .and_then(|kind| {
+                    model
+                        .graph()
+                        .relationship_id(kind)
+                        .and_then(|id| model.edge_table(&model.graph().relationship(id).name))
+                })
+                .unwrap_or_else(|| model.default_edge_table());
             for (prop, filters) in &rel.filters {
-                let Some(data_type) = self.ontology.get_edge_table_column_type(edge_table, prop)
-                else {
+                let Some(data_type) = self.model.get().table_column_type(edge_table, prop) else {
                     return Err(QueryError::Validation(format!(
                         "relationship[{i}] filter on unknown edge column \"{prop}\" \
                          (table \"{edge_table}\" does not have this column)"
@@ -752,38 +785,6 @@ impl<'a> Validator<'a> {
         }
 
         Ok(())
-    }
-
-    /// Annotate every filter with its resolved column [`DataType`].
-    /// Runs after `check_filter_types`, so unknown columns fall through
-    /// with `data_type = None` and the lowerer infers from the JSON value.
-    pub fn annotate_filter_types(&self, input: &mut Input) {
-        for node in &mut input.nodes {
-            let Some(entity) = node.entity.clone() else {
-                continue;
-            };
-            for (prop, filters) in node.filters.iter_mut() {
-                let dt = self.ontology.get_field_type(&entity, prop);
-                let selectivity = self
-                    .ontology
-                    .get_node(&entity)
-                    .and_then(|n| n.fields.iter().find(|f| f.name == *prop))
-                    .map(|f| f.selectivity)
-                    .unwrap_or_default();
-                for filter in filters {
-                    filter.data_type = dt;
-                    filter.selectivity = selectivity;
-                }
-            }
-        }
-        for rel in &mut input.relationships {
-            for (prop, filters) in rel.filters.iter_mut() {
-                let dt = self.ontology.get_edge_column_type(prop);
-                for filter in filters {
-                    filter.data_type = dt;
-                }
-            }
-        }
     }
 
     const MIN_LIKE_PATTERN_LEN: usize = 3;
@@ -852,11 +853,7 @@ impl<'a> Validator<'a> {
             FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens
         );
 
-        if is_like_op
-            && !self
-                .ontology
-                .check_field_flag(entity, prop, |f| f.like_allowed)
-        {
+        if is_like_op && !self.field_flag(entity, prop, |f| f.like_allowed, |f| f.like_allowed) {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
                  LIKE operators (contains/starts_with/ends_with) are not allowed on this field"
@@ -877,7 +874,11 @@ impl<'a> Validator<'a> {
             )));
         }
 
-        if is_token_op && self.ontology.text_index_tokenizer(entity, prop).is_none() {
+        if is_token_op
+            && self
+                .property_id(entity, prop)
+                .is_none_or(|property| !self.model.get().has_text_index(property))
+        {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
                  token operators (token_match/all_tokens/any_tokens) require a text index on the field"
@@ -1066,19 +1067,18 @@ impl<'a> Validator<'a> {
                     .entity
                     .as_ref()
                     .ok_or_else(|| QueryError::ReferenceError("missing entity".into()))?;
-                self.ontology.validate_field(entity, prop).map_err(|e| {
+                self.check_field(entity, prop).map_err(|e| {
                     QueryError::AllowlistRejected(format!(
                         "invalid property in aggregation \"{alias}\": {e}"
                     ))
                 })?;
 
                 if matches!(function, AggFunction::Sum | AggFunction::Avg) {
-                    let data_type =
-                        self.ontology.get_field_type(entity, prop).ok_or_else(|| {
-                            QueryError::AllowlistRejected(format!(
-                                "invalid property in aggregation \"{alias}\": {entity}.{prop}"
-                            ))
-                        })?;
+                    let data_type = self.field_type(entity, prop).ok_or_else(|| {
+                        QueryError::AllowlistRejected(format!(
+                            "invalid property in aggregation \"{alias}\": {entity}.{prop}"
+                        ))
+                    })?;
 
                     if !matches!(data_type, DataType::Int | DataType::Float) {
                         return Err(QueryError::Validation(format!(
@@ -1113,27 +1113,20 @@ impl<'a> Validator<'a> {
                 continue;
             };
 
-            self.ontology
-                .validate_field(entity, property)
-                .map_err(|e| {
-                    QueryError::AllowlistRejected(format!("invalid property in group_by[{i}]: {e}"))
-                })?;
+            self.check_field(entity, property).map_err(|e| {
+                QueryError::AllowlistRejected(format!("invalid property in group_by[{i}]: {e}"))
+            })?;
 
-            if !self
-                .ontology
-                .check_field_flag(entity, property, |f| f.filterable)
-            {
+            if !self.field_flag(entity, property, |f| f.filterable, |f| f.filterable) {
                 return Err(QueryError::Validation(format!(
                     "group_by[{i}] on \"{}\" for {entity}: field is not filterable",
                     property
                 )));
             }
 
-            if let Some(field) = self
-                .ontology
-                .get_node(entity)
-                .and_then(|n| n.fields.iter().find(|f| f.name == property))
-                && field.is_virtual()
+            if self
+                .property(entity, property)
+                .is_some_and(|field| matches!(field.source, ontology::FieldSource::Virtual(_)))
             {
                 return Err(QueryError::Validation(format!(
                     "group_by[{i}] on \"{}\" for {entity}: field is virtual and cannot be grouped in SQL",
@@ -1142,11 +1135,7 @@ impl<'a> Validator<'a> {
             }
 
             if let Some(unit) = group.truncate() {
-                let field = self
-                    .ontology
-                    .get_node(entity)
-                    .and_then(|n| n.fields.iter().find(|f| f.name == property));
-                let data_type = field.map(|f| f.data_type);
+                let data_type = self.field_type(entity, property);
                 if !matches!(
                     data_type,
                     Some(ontology::DataType::Date) | Some(ontology::DataType::DateTime)
@@ -1217,11 +1206,9 @@ impl<'a> Validator<'a> {
             .entity
             .as_ref()
             .ok_or_else(|| QueryError::ReferenceError("missing entity".into()))?;
-        self.ontology
-            .validate_field(entity, &order_by.property)
-            .map_err(|e| {
-                QueryError::AllowlistRejected(format!("invalid order_by property: {}", e))
-            })?;
+        self.check_field(entity, &order_by.property).map_err(|e| {
+            QueryError::AllowlistRejected(format!("invalid order_by property: {}", e))
+        })?;
 
         Ok(())
     }
@@ -1427,6 +1414,15 @@ fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn validator(ontology: &Ontology) -> Validator<'_, ClickHouseDataModel> {
+        Validator {
+            model: ValidationModel::Owned(
+                ClickHouseDataModel::derive(std::sync::Arc::new(ontology.clone())).unwrap(),
+            ),
+            skip: Skip::default(),
+        }
+    }
     use crate::input::parse_input;
     use ontology::{DataType, FieldSource, VirtualSource};
 
@@ -1469,15 +1465,13 @@ mod tests {
     fn assert_ok(json: &str) {
         let input = parse_input(json).unwrap();
         let ontology = test_ontology();
-        Validator::new(&ontology).check_references(&input).unwrap();
+        validator(&ontology).check_references(&input).unwrap();
     }
 
     fn assert_rejects(json: &str, expected: &str) {
         let input = parse_input(json).unwrap();
         let ontology = test_ontology();
-        let err = Validator::new(&ontology)
-            .check_references(&input)
-            .unwrap_err();
+        let err = validator(&ontology).check_references(&input).unwrap_err();
         assert!(
             err.to_string().contains(expected),
             "expected error containing \"{expected}\", got: {err}"
@@ -1487,7 +1481,7 @@ mod tests {
     #[test]
     fn node_filter_cap_counts_property_keys_not_entries() {
         let ontology = test_ontology();
-        let validator = Validator::new(&ontology);
+        let validator = validator(&ontology);
 
         let two_props_many_entries = parse_input(
             r#"{
@@ -1533,7 +1527,7 @@ mod tests {
     #[test]
     fn per_property_filter_entry_cap_rejects_overlong_and_chains() {
         let ontology = test_ontology();
-        let validator = Validator::new(&ontology);
+        let validator = validator(&ontology);
 
         let eleven_conditions: String = (0..11)
             .map(|_| r#"{"gte": "2020-01-01"}"#)
@@ -1827,9 +1821,7 @@ mod tests {
                 });
             })
             .unwrap();
-        let err = Validator::new(&ontology)
-            .check_references(&input)
-            .unwrap_err();
+        let err = validator(&ontology).check_references(&input).unwrap_err();
         assert!(
             err.to_string().contains("field is virtual"),
             "expected virtual field rejection, got: {err}"
@@ -2166,7 +2158,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        Validator::new(&ontology).check_references(&input).unwrap();
+        validator(&ontology).check_references(&input).unwrap();
     }
 
     #[test]
@@ -2204,7 +2196,7 @@ mod tests {
     #[test]
     fn filter_type_mismatch_fails_closed() {
         let ontology = test_ontology();
-        let validator = Validator::new(&ontology);
+        let validator = validator(&ontology);
 
         let input = parse_input(
             r#"{
@@ -2402,7 +2394,7 @@ mod tests {
                 ("target_id", DataType::Int),
                 ("target_kind", DataType::String),
             ]);
-        let validator = Validator::new(&ontology);
+        let validator = validator(&ontology);
 
         let input = parse_input(r#"{
             "query_type": "traversal",
@@ -2436,7 +2428,7 @@ mod tests {
                 ("target_id", DataType::Int),
                 ("target_kind", DataType::String),
             ]);
-        let validator = Validator::new(&ontology);
+        let validator = validator(&ontology);
 
         let input = parse_input(r#"{
             "query_type": "traversal",
@@ -2784,7 +2776,7 @@ mod tests {
     #[test]
     fn rejects_short_like_pattern() {
         let ont = test_ontology();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -2806,7 +2798,7 @@ mod tests {
     #[test]
     fn rejects_like_on_disallowed_field() {
         let ont = ontology_with_sensitive_field();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -2836,7 +2828,7 @@ mod tests {
                     ("state", DataType::Enum),
                 ],
             );
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -2868,7 +2860,7 @@ mod tests {
     #[test]
     fn accepts_equality_on_like_disallowed_field() {
         let ont = ontology_with_sensitive_field();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -2888,7 +2880,7 @@ mod tests {
     #[test]
     fn rejects_filter_on_unfilterable_field() {
         let ont = ontology_with_unfilterable_field();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -2909,7 +2901,7 @@ mod tests {
     #[test]
     fn rejects_group_by_property_on_unfilterable_field() {
         let ont = ontology_with_unfilterable_field();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "aggregation",
@@ -2931,7 +2923,7 @@ mod tests {
     #[test]
     fn accepts_filter_on_traversal_path_even_when_field_is_unfilterable() {
         let ont = ontology_with_unfilterable_field();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -2951,7 +2943,7 @@ mod tests {
     #[test]
     fn rejects_traversal_path_filter_on_global_entity() {
         let ont = test_ontology();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -2972,7 +2964,7 @@ mod tests {
     #[test]
     fn rejects_unsupported_traversal_path_filter_operator() {
         let ont = ontology_with_unfilterable_field();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -2993,7 +2985,7 @@ mod tests {
     #[test]
     fn rejects_invalid_traversal_path_filter_format() {
         let ont = ontology_with_unfilterable_field();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -3014,7 +3006,7 @@ mod tests {
     #[test]
     fn rejects_unsupported_relationship_traversal_path_filter_operator() {
         let ont = test_ontology();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",
@@ -3043,7 +3035,7 @@ mod tests {
     #[test]
     fn accepts_filter_on_filterable_field() {
         let ont = ontology_with_unfilterable_field();
-        let validator = Validator::new(&ont);
+        let validator = validator(&ont);
         let input = parse_input(
             r#"{
             "query_type": "traversal",

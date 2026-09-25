@@ -25,6 +25,7 @@ struct PhaseDecl {
 
 struct PipelineDecl {
     name: Ident,
+    model: Type,
     env: Vec<Ident>,
     state: Vec<Ident>,
     run: Vec<Ident>,
@@ -107,12 +108,14 @@ impl Parse for PipelineDecl {
         let content;
         braced!(content in input);
         let mut env = Vec::new();
+        let mut model = None;
         let mut state = Vec::new();
         let mut run = Vec::new();
         while !content.is_empty() {
             let key: Ident = content.parse()?;
             content.parse::<Token![:]>()?;
             match key.to_string().as_str() {
+                "model" => model = Some(content.parse::<Type>()?),
                 "env" => env = parse_ident_list(&content)?,
                 "state" => state = parse_ident_list(&content)?,
                 "phases" | "run" => run = parse_ident_list(&content)?,
@@ -126,6 +129,7 @@ impl Parse for PipelineDecl {
         }
         Ok(PipelineDecl {
             name,
+            model: model.ok_or_else(|| content.error("pipeline requires `model`"))?,
             env,
             state,
             run,
@@ -226,6 +230,8 @@ pub fn generate(input: TokenStream) -> TokenStream {
     }
 
     trait_sigs.push(quote! {
+        type Model: crate::data_model::QueryModel;
+        fn data_model(&self) -> &Self::Model;
         fn current_phase(&self) -> &'static str;
         fn set_current_phase(&mut self, phase: &'static str);
     });
@@ -252,6 +258,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
     for pipeline in &ctx.pipelines {
         let ctx_name = format_ident!("{}Ctx", to_pascal(&pipeline.name.to_string()));
         let run_fn = format_ident!("run_{}", pipeline.name);
+        let model_ty = &pipeline.model;
 
         let env_fields: Vec<_> = pipeline
             .env
@@ -279,10 +286,35 @@ pub fn generate(input: TokenStream) -> TokenStream {
                 quote! { #n: #ty }
             })
             .collect();
+        let model_param = quote! { data_model: std::sync::Arc<#model_ty> };
         let env_names: Vec<_> = pipeline.env.iter().collect();
         let state_names: Vec<_> = pipeline.state.iter().collect();
 
         let mut trait_impls = Vec::new();
+
+        let model_phases: Vec<_> = ctx
+            .phases
+            .iter()
+            .filter(|phase| phase.reads_env.iter().any(|field| field == "data_model"))
+            .map(|phase| phase.name.to_string())
+            .collect();
+        let model_arms: Vec<_> = model_phases.iter().map(|phase| quote! { #phase }).collect();
+        let model_allowed = model_phases.join(", ");
+        trait_impls.push(quote! {
+            type Model = #model_ty;
+
+            fn data_model(&self) -> &Self::Model {
+                if !self.current_phase.is_empty() {
+                    assert!(
+                        matches!(self.current_phase, #(#model_arms)|*),
+                        "phase `{}` cannot read `data_model` (allowed: {})",
+                        self.current_phase,
+                        #model_allowed
+                    );
+                }
+                &self.data_model
+            }
+        });
 
         for env_name in &pipeline.env {
             let ty = find_env_ty(&ctx.env_fields, env_name);
@@ -409,14 +441,16 @@ pub fn generate(input: TokenStream) -> TokenStream {
 
         out.extend(quote! {
             pub struct #ctx_name {
+                pub data_model: std::sync::Arc<#model_ty>,
                 #(#env_fields,)*
                 #(#state_fields,)*
                 current_phase: &'static str,
             }
 
             impl #ctx_name {
-                pub fn new(#(#ctor_params),*) -> Self {
+                pub fn new(#(#ctor_params,)* #model_param) -> Self {
                     Self {
+                        data_model,
                         #(#env_names,)*
                         #(#state_names: None,)*
                         current_phase: "",

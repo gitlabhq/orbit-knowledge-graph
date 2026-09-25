@@ -10,6 +10,7 @@ orbit-utils = { path = "../../utils" }
 orbit-versions = { path = "../../orbit-versions" }
 base64 = { workspace = true }
 ontology = { path = "../../ontology" }
+query-data-model = { path = "../../query-data-model" }
 compiler-pipeline-macros = { path = "../compiler-pipeline-macros" }
 opentelemetry = { workspace = true }
 regex = { workspace = true }

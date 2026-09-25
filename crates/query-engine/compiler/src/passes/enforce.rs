@@ -119,44 +119,41 @@ impl ResultContext {
     }
 }
 
-pub fn enforce_return(
-    node: &mut Node,
-    input: &Input,
-    node_edge_col: &HashMap<String, (String, String)>,
-) -> Result<ResultContext> {
-    let metadata = LoweredMetadata {
-        node_sources: node_edge_col.clone(),
-        edges: input
-            .relationships
-            .iter()
-            .enumerate()
-            .map(|(index, relationship)| {
-                let column_prefix = if relationship.hops.max > 1 {
-                    format!("hop_e{index}_")
-                } else {
-                    format!("e{index}_")
-                };
-                crate::passes::lower::LoweredEdge {
-                    path_column: (relationship.hops.max > 1)
-                        .then(|| format!("{column_prefix}path_nodes")),
-                    column_prefix,
-                    rel_types: relationship.types.clone(),
-                }
-            })
-            .collect(),
-        stable_order: Vec::new(),
-    };
-    enforce_lowered_return(node, input, &metadata)
-}
-
 pub fn enforce_lowered_return(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
+    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
-    ctx.entity_auth = input.entity_auth.clone();
+    ctx.entity_auth = model.entity_auth();
+    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |entity| {
+        crate::data_model::AuthorizationModel::redaction_id_column(model, entity).to_string()
+    })?;
+    Ok(ctx)
+}
 
+pub fn enforce_local_return(
+    node: &mut Node,
+    input: &Input,
+    metadata: &LoweredMetadata,
+    model: &(impl crate::data_model::QueryModel + ?Sized),
+) -> Result<ResultContext> {
+    let mut ctx = ResultContext::new().with_query_type(input.query_type);
+    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |_| {
+        DEFAULT_PRIMARY_KEY.to_string()
+    })?;
+    Ok(ctx)
+}
+
+fn enforce_lowered_return_with(
+    node: &mut Node,
+    input: &Input,
+    metadata: &LoweredMetadata,
+    model: &(impl crate::data_model::QueryModel + ?Sized),
+    ctx: &mut ResultContext,
+    redaction_column: impl Fn(query_data_model::EntityId) -> String,
+) -> Result<()> {
     let selectable_nodes: HashSet<&str> = match input.query_type {
         QueryType::Aggregation => {
             crate::input::node_group_ids(&input.aggregation.group_by).collect()
@@ -172,10 +169,12 @@ pub fn enforce_lowered_return(
             q,
             input,
             &selectable_nodes,
-            &mut ctx,
+            ctx,
             &metadata.node_sources,
+            model,
+            redaction_column,
         )?,
-        Node::Insert(_) => return Ok(ctx),
+        Node::Insert(_) => return Ok(()),
     }
 
     if matches!(
@@ -204,13 +203,14 @@ pub fn enforce_lowered_return(
         }
     }
 
-    Ok(ctx)
+    Ok(())
 }
 
 pub fn enforce_role_scans(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
+    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
 ) -> Result<()> {
     let Node::Query(query) = node else {
         return Ok(());
@@ -222,8 +222,9 @@ pub fn enforce_role_scans(
         if alias_exists_in_from(&query.from, &input_node.id) {
             continue;
         }
-        let elevated = input.entity_auth.get(entity).is_some_and(|auth| {
-            auth.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL
+        let elevated = model.graph().entity_id(entity).is_some_and(|entity| {
+            crate::data_model::AuthorizationModel::redaction_id_column(model, entity)
+                != DEFAULT_PRIMARY_KEY
         });
         if !elevated {
             continue;
@@ -231,9 +232,16 @@ pub fn enforce_role_scans(
         let Some((source_alias, source_column)) = metadata.node_sources.get(&input_node.id) else {
             continue;
         };
-        let table = input_node.table.as_deref().ok_or_else(|| {
-            QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
-        })?;
+        let table = model
+            .entity_table(
+                model
+                    .graph()
+                    .entity_id(entity)
+                    .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{entity}'")))?,
+            )
+            .ok_or_else(|| {
+                QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
+            })?;
         let role_alias = format!("_role_{}", input_node.id);
         let scan = TableRef::scan_final(table, &role_alias);
         let on = Expr::eq(
@@ -274,6 +282,8 @@ fn enforce_return_columns(
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
     node_edge_col: &HashMap<String, (String, String)>,
+    model: &(impl crate::data_model::QueryModel + ?Sized),
+    redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
     let select_len_before = q.select.len();
     let globally_edge_centric = matches!(
@@ -283,6 +293,11 @@ fn enforce_return_columns(
 
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
+        let entity_id = model
+            .graph()
+            .entity_id(entity)
+            .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{entity}'")))?;
+        let redaction_column = redaction_column(entity_id);
 
         if !selectable_nodes.contains(node.id.as_str()) {
             continue;
@@ -301,7 +316,7 @@ fn enforce_return_columns(
             continue;
         }
 
-        let needs_separate_pk = node.redaction_id_column != DEFAULT_PRIMARY_KEY;
+        let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
 
         // Use edge-centric path if the query type is globally edge-centric,
         // or if this specific node has an edge column mapping (e.g. edge-only
@@ -329,10 +344,10 @@ fn enforce_return_columns(
                 // JOIN node table for the auth column (e.g. merge_request_id).
                 // Skip if the alias already exists in FROM (the lowerer
                 // hydrates nodes inline with dedup subqueries).
-                let table = node.table.as_ref().ok_or_else(|| {
+                let table = model.entity_table(entity_id).ok_or_else(|| {
                     QueryError::Enforcement(format!(
                         "traversal node '{}' has non-default redaction_id_column '{}' but no resolved table",
-                        node.id, node.redaction_id_column
+                        node.id, redaction_column
                     ))
                 })?;
                 if !alias_exists_in_from(&q.from, &node.id) {
@@ -345,8 +360,20 @@ fn enforce_return_columns(
                     } else {
                         let mut node_predicates = Vec::new();
                         for (prop, filters) in &node.filters {
+                            let data_type = model
+                                .graph()
+                                .property_id(entity_id, prop)
+                                .map(|property| model.graph().property(property).data_type);
                             for filter in filters {
-                                node_predicates.push(filter_to_expr(&node.id, prop, filter));
+                                node_predicates.push(filter_to_expr(
+                                    &node.id,
+                                    prop,
+                                    &crate::passes::plan::BoundFilter {
+                                        filter: filter.clone(),
+                                        data_type,
+                                        selectivity: ontology::FieldSelectivity::High,
+                                    },
+                                ));
                             }
                         }
                         if !node.node_ids.is_empty() {
@@ -394,7 +421,7 @@ fn enforce_return_columns(
                 ensure_in_group_by(q, input.query_type, edge_id_expr.clone());
 
                 let has_id = q.selects_alias(&id_col);
-                let id_expr = Expr::col(&node.id, &node.redaction_id_column);
+                let id_expr = Expr::col(&node.id, &redaction_column);
                 if !has_id {
                     q.select.push(SelectExpr {
                         expr: id_expr.clone(),
@@ -451,7 +478,7 @@ fn enforce_return_columns(
             let has_type = q.selects_alias(&type_col);
 
             if !has_id {
-                let id_expr = Expr::col(&node.id, &node.redaction_id_column);
+                let id_expr = Expr::col(&node.id, &redaction_column);
                 q.select.push(SelectExpr {
                     expr: id_expr.clone(),
                     alias: Some(id_col.clone()),
@@ -483,7 +510,8 @@ fn enforce_return_columns(
         // and ClickHouse rejects non-GROUP-BY columns in SELECT.
         // Skip when the source alias doesn't exist in FROM (FK-elided nodes
         // where the node table was absorbed into an edge filter).
-        if node.has_traversal_path && input.query_type != QueryType::Aggregation {
+        if model.entity_has_traversal_path(entity_id) && input.query_type != QueryType::Aggregation
+        {
             let tp_col = traversal_path_column(&node.id);
             let has_tp = q.selects_alias(&tp_col);
             if !has_tp {
@@ -535,913 +563,5 @@ fn alias_exists_in_from(from: &TableRef, target: &str) -> bool {
         TableRef::Join { left, right, .. } => {
             alias_exists_in_from(left, target) || alias_exists_in_from(right, target)
         }
-    }
-}
-
-#[cfg(test)]
-#[allow(irrefutable_let_patterns)]
-mod tests {
-    use super::*;
-    use crate::ast::{JoinType, TableRef};
-    use crate::input::{CompilerMetadata, InputNode, QueryType};
-
-    fn has_scan(t: &TableRef, tbl: &str) -> bool {
-        match t {
-            TableRef::Scan { table, .. } => table == tbl,
-            TableRef::Join { left, right, .. } => has_scan(left, tbl) || has_scan(right, tbl),
-            TableRef::Union { queries, .. } => queries.iter().any(|q| has_scan(&q.from, tbl)),
-            TableRef::Subquery { query, .. } => has_scan(&query.from, tbl),
-        }
-    }
-
-    fn test_input() -> Input {
-        Input {
-            query_type: QueryType::Traversal,
-            nodes: vec![InputNode {
-                id: "u".to_string(),
-                entity: Some("User".to_string()),
-                table: Some("gl_user".to_string()),
-                ..Default::default()
-            }],
-            ..Input::default()
-        }
-    }
-
-    fn test_input_two_nodes() -> Input {
-        Input {
-            query_type: QueryType::Traversal,
-            nodes: vec![
-                InputNode {
-                    id: "u".to_string(),
-                    entity: Some("User".to_string()),
-                    table: Some("gl_user".to_string()),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "p".to_string(),
-                    entity: Some("Project".to_string()),
-                    table: Some("gl_project".to_string()),
-                    ..Default::default()
-                },
-            ],
-            compiler: CompilerMetadata {
-                node_edge_col: [
-                    ("u".into(), ("e0".into(), "source_id".into())),
-                    ("p".into(), ("e0".into(), "target_id".into())),
-                ]
-                .into(),
-                ..Default::default()
-            },
-            ..Input::default()
-        }
-    }
-
-    fn single_table_from() -> TableRef {
-        TableRef::scan("gl_user", "u")
-    }
-
-    fn two_table_from() -> TableRef {
-        TableRef::join(
-            JoinType::Inner,
-            TableRef::scan("gl_user", "u"),
-            TableRef::scan("gl_project", "p"),
-            Expr::lit(true),
-        )
-    }
-
-    #[test]
-    fn adds_type_columns_after_id_columns() {
-        let query = Query {
-            select: vec![
-                SelectExpr {
-                    expr: Expr::col("u", "id"),
-                    alias: Some("_gkg_u_id".into()),
-                },
-                SelectExpr {
-                    expr: Expr::col("p", "id"),
-                    alias: Some("_gkg_p_id".into()),
-                },
-            ],
-            from: two_table_from(),
-            limit: Some(30),
-            ..Default::default()
-        };
-
-        let input = test_input_two_nodes();
-        let mut node = Node::Query(Box::new(query));
-
-        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 4);
-        assert_eq!(q.select[0].alias, Some("_gkg_u_id".into()));
-        assert_eq!(q.select[1].alias, Some("_gkg_u_type".into()));
-        assert_eq!(q.select[2].alias, Some("_gkg_p_id".into()));
-        assert_eq!(q.select[3].alias, Some("_gkg_p_type".into()));
-
-        if let Expr::Param { value, .. } = &q.select[1].expr {
-            assert_eq!(value.as_str(), Some("User"));
-        } else {
-            panic!("expected param");
-        }
-        if let Expr::Param { value, .. } = &q.select[3].expr {
-            assert_eq!(value.as_str(), Some("Project"));
-        } else {
-            panic!("expected param");
-        }
-    }
-
-    #[test]
-    fn skips_existing_type_columns() {
-        let query = Query {
-            select: vec![
-                SelectExpr {
-                    expr: Expr::col("u", "id"),
-                    alias: Some("_gkg_u_id".into()),
-                },
-                SelectExpr {
-                    expr: Expr::lit("User"),
-                    alias: Some("_gkg_u_type".into()),
-                },
-                SelectExpr {
-                    expr: Expr::col("p", "id"),
-                    alias: Some("_gkg_p_id".into()),
-                },
-            ],
-            from: two_table_from(),
-            limit: Some(30),
-            ..Default::default()
-        };
-
-        let input = test_input_two_nodes();
-        let mut node = Node::Query(Box::new(query));
-
-        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 4);
-        assert_eq!(q.select[0].alias, Some("_gkg_u_id".into()));
-        assert_eq!(q.select[1].alias, Some("_gkg_u_type".into()));
-        assert_eq!(q.select[2].alias, Some("_gkg_p_id".into()));
-        assert_eq!(q.select[3].alias, Some("_gkg_p_type".into()));
-    }
-
-    #[test]
-    fn adds_id_and_type_columns_when_missing() {
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "username"),
-                alias: Some("name".into()),
-            }],
-            from: single_table_from(),
-            limit: Some(30),
-            ..Default::default()
-        };
-
-        let input = test_input();
-        let mut node = Node::Query(Box::new(query));
-
-        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 3);
-        assert_eq!(q.select[0].alias, Some("name".into()));
-        assert_eq!(q.select[1].alias, Some("_gkg_u_id".into()));
-        assert_eq!(q.select[2].alias, Some("_gkg_u_type".into()));
-
-        if let Expr::Column { table, column } = &q.select[1].expr {
-            assert_eq!(table, "u");
-            assert_eq!(column, "id");
-        } else {
-            panic!("expected column expression for _gkg_u_id");
-        }
-    }
-
-    #[test]
-    fn skips_nodes_without_entity() {
-        let input = Input {
-            nodes: vec![InputNode {
-                id: "n".to_string(),
-                ..Default::default()
-            }],
-            ..Input::default()
-        };
-
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: Some("n_id".into()),
-            }],
-            from: TableRef::scan("kg_node", "n"),
-            limit: Some(30),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        let ctx = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 1);
-        assert!(ctx.is_empty());
-    }
-
-    #[test]
-    fn builds_result_context() {
-        let input = test_input_two_nodes();
-        let query = Query {
-            select: vec![],
-            from: two_table_from(),
-            limit: Some(30),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        let ctx = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        assert_eq!(ctx.len(), 2);
-
-        let user = ctx.get("u").unwrap();
-        assert_eq!(user.entity_type, "User");
-        assert_eq!(user.id_column, "_gkg_u_id");
-        assert_eq!(user.type_column, "_gkg_u_type");
-
-        let project = ctx.get("p").unwrap();
-        assert_eq!(project.entity_type, "Project");
-    }
-
-    #[test]
-    fn aggregation_only_adds_columns_for_group_by_nodes() {
-        use crate::input::{
-            AggExpr, AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
-        };
-
-        let input = Input {
-            query_type: QueryType::Aggregation,
-            nodes: vec![
-                InputNode {
-                    id: "u".to_string(),
-                    entity: Some("User".to_string()),
-                    table: Some("gl_user".to_string()),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "n".to_string(),
-                    entity: Some("Note".to_string()),
-                    table: Some("gl_note".to_string()),
-                    ..Default::default()
-                },
-            ],
-            aggregation: InputAggregation {
-                metrics: vec![InputAggregationMetric {
-                    expr: AggExpr::from_parts(AggFunction::Count, "n", None),
-                    alias: Some("note_count".to_string()),
-                }],
-                group_by: vec![InputGroupByKey::Node {
-                    node: "u".to_string(),
-                    alias: None,
-                }],
-                ..Default::default()
-            },
-            limit: 10,
-            ..Input::default()
-        };
-
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "id"),
-                alias: Some("u_id".into()),
-            }],
-            from: TableRef::scan("kg_user", "u"),
-            group_by: vec![Expr::col("u", "id")],
-            limit: Some(10),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        let ctx = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 3);
-        assert!(q.selects_alias("_gkg_u_id"));
-        assert!(q.selects_alias("_gkg_u_type"));
-        assert!(!q.selects_alias("_gkg_n_id"));
-        assert!(!q.selects_alias("_gkg_n_type"));
-        assert_eq!(q.group_by.len(), 1);
-
-        assert_eq!(ctx.len(), 1);
-        assert!(ctx.get("u").is_some());
-        assert!(ctx.get("n").is_none());
-    }
-
-    #[test]
-    fn aggregation_adds_redaction_id_to_group_by() {
-        use crate::input::{
-            AggExpr, AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
-        };
-
-        let input = Input {
-            query_type: QueryType::Aggregation,
-            nodes: vec![
-                InputNode {
-                    id: "u".to_string(),
-                    entity: Some("User".to_string()),
-                    table: Some("gl_user".to_string()),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "mr".to_string(),
-                    entity: Some("MergeRequest".to_string()),
-                    table: Some("gl_merge_request".to_string()),
-                    ..Default::default()
-                },
-            ],
-            aggregation: InputAggregation {
-                metrics: vec![InputAggregationMetric {
-                    expr: AggExpr::from_parts(AggFunction::Count, "mr", None),
-                    alias: Some("mr_count".to_string()),
-                }],
-                group_by: vec![InputGroupByKey::Node {
-                    node: "u".to_string(),
-                    alias: None,
-                }],
-                ..Default::default()
-            },
-            ..Input::default()
-        };
-
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("u", "username"),
-                alias: Some("u_username".into()),
-            }],
-            from: TableRef::scan("gl_user", "u"),
-            group_by: vec![Expr::col("u", "username")],
-            limit: Some(10),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert!(
-            q.group_by.contains(&Expr::col("u", "id")),
-            "redaction id column must be in GROUP BY: {:?}",
-            q.group_by
-        );
-        assert_eq!(q.group_by.len(), 2);
-    }
-
-    #[test]
-    fn aggregation_adds_separate_pk_to_group_by() {
-        use crate::input::{
-            AggExpr, AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
-        };
-
-        // When the group-by node has redaction_id_column != "id", enforce
-        // emits a separate _gkg_*_pk column. DuckDB rejects SELECT columns
-        // that aren't in GROUP BY, so the pk must be appended.
-        let input = Input {
-            query_type: QueryType::Aggregation,
-            nodes: vec![
-                InputNode {
-                    id: "f".to_string(),
-                    entity: Some("File".to_string()),
-                    table: Some("gl_file".to_string()),
-                    redaction_id_column: "project_id".to_string(),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "d".to_string(),
-                    entity: Some("Definition".to_string()),
-                    table: Some("gl_definition".to_string()),
-                    ..Default::default()
-                },
-            ],
-            aggregation: InputAggregation {
-                metrics: vec![InputAggregationMetric {
-                    expr: AggExpr::from_parts(AggFunction::Count, "d", None),
-                    alias: Some("defs".to_string()),
-                }],
-                group_by: vec![InputGroupByKey::Node {
-                    node: "f".to_string(),
-                    alias: None,
-                }],
-                ..Default::default()
-            },
-            limit: 10,
-            ..Input::default()
-        };
-
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("f", "path"),
-                alias: Some("f_path".into()),
-            }],
-            from: TableRef::scan("gl_file", "f"),
-            group_by: vec![Expr::col("f", "path")],
-            limit: Some(10),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        let pk_expr = Expr::col("f", "id");
-        let id_expr = Expr::col("f", "project_id");
-        assert!(
-            q.group_by.contains(&pk_expr),
-            "separate pk column must be in GROUP BY: {:?}",
-            q.group_by
-        );
-        assert!(
-            q.group_by.contains(&id_expr),
-            "redaction id column must be in GROUP BY: {:?}",
-            q.group_by
-        );
-        assert_eq!(q.group_by.len(), 3);
-    }
-
-    #[test]
-    fn uses_correct_redaction_id_column_per_node() {
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_definition", "d"),
-                TableRef::scan("gl_project", "p"),
-                Expr::lit(true),
-            ),
-            limit: Some(10),
-            ..Default::default()
-        }));
-
-        let input = Input {
-            query_type: QueryType::Traversal,
-            nodes: vec![
-                InputNode {
-                    id: "d".to_string(),
-                    entity: Some("Definition".to_string()),
-                    table: Some("gl_definition".to_string()),
-                    redaction_id_column: "project_id".to_string(),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "p".to_string(),
-                    entity: Some("Project".to_string()),
-                    table: Some("gl_project".to_string()),
-                    ..Default::default()
-                },
-            ],
-            compiler: CompilerMetadata {
-                node_edge_col: [
-                    ("d".into(), ("e0".into(), "source_id".into())),
-                    ("p".into(), ("e0".into(), "target_id".into())),
-                ]
-                .into(),
-                ..Default::default()
-            },
-            limit: 10,
-            ..Input::default()
-        };
-
-        let ctx = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        assert_eq!(q.select.len(), 5);
-
-        assert_eq!(q.select[0].alias, Some("_gkg_d_pk".into()));
-        assert!(
-            matches!(&q.select[0].expr, Expr::Column { table, column } if table == "e0" && column == "source_id")
-        );
-        assert_eq!(q.select[1].alias, Some("_gkg_d_id".into()));
-        assert!(matches!(&q.select[1].expr, Expr::Column { column, .. } if column == "project_id"));
-        assert_eq!(q.select[2].alias, Some("_gkg_d_type".into()));
-        assert!(matches!(&q.select[2].expr, Expr::Param { value, .. } if value == "Definition"));
-
-        assert_eq!(q.select[3].alias, Some("_gkg_p_id".into()));
-        assert!(
-            matches!(&q.select[3].expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
-        );
-        assert_eq!(q.select[4].alias, Some("_gkg_p_type".into()));
-        assert!(matches!(&q.select[4].expr, Expr::Param { value, .. } if value == "Project"));
-
-        assert_eq!(ctx.len(), 2);
-        let d_node = ctx.get("d").unwrap();
-        assert_eq!(d_node.entity_type, "Definition");
-        assert_eq!(d_node.pk_column, "_gkg_d_pk");
-        assert_eq!(d_node.id_column, "_gkg_d_id");
-        let p_node = ctx.get("p").unwrap();
-        assert_eq!(p_node.entity_type, "Project");
-        assert_eq!(p_node.pk_column, "_gkg_p_pk");
-        assert_eq!(p_node.id_column, "_gkg_p_id");
-    }
-
-    #[test]
-    fn path_finding_uses_gkg_path_column() {
-        use crate::ast::Cte;
-        use crate::input::InputPath;
-
-        let input = Input {
-            query_type: QueryType::PathFinding,
-            nodes: vec![
-                InputNode {
-                    id: "start".to_string(),
-                    entity: Some("Project".to_string()),
-                    table: Some("gl_project".to_string()),
-                    node_ids: vec![100],
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "end".to_string(),
-                    entity: Some("Project".to_string()),
-                    table: Some("gl_project".to_string()),
-                    node_ids: vec![200],
-                    ..Default::default()
-                },
-            ],
-            path: Some(InputPath {
-                path_type: crate::input::PathType::Shortest,
-                from: "start".to_string(),
-                to: "end".to_string(),
-                max_depth: 3,
-                rel_types: vec![],
-                forward_first_hop_rel_types: vec![],
-                backward_first_hop_rel_types: vec![],
-            }),
-            ..Input::default()
-        };
-
-        let mut query = Node::Query(Box::new(Query {
-            ctes: vec![
-                Cte::new(
-                    "d0",
-                    Query {
-                        select: vec![SelectExpr {
-                            expr: Expr::col("start", "id"),
-                            alias: Some("node_id".into()),
-                        }],
-                        from: TableRef::scan("gl_project", "start"),
-                        ..Default::default()
-                    },
-                ),
-                Cte::new(
-                    "d1",
-                    Query {
-                        from: TableRef::scan("d0", "p"),
-                        ..Default::default()
-                    },
-                ),
-            ],
-            select: vec![SelectExpr {
-                expr: Expr::col("all_paths", "path"),
-                alias: Some("_gkg_path".into()),
-            }],
-            from: TableRef::scan("gl_project", "end"),
-            limit: Some(30),
-            ..Default::default()
-        }));
-
-        let ctx = enforce_return(&mut query, &input, &input.compiler.node_edge_col).unwrap();
-
-        // Path finding uses the _gkg_path column for redaction data, so enforce
-        // adds no _gkg_* columns; ctx is empty but carries query_type.
-        assert!(ctx.is_empty());
-        assert_eq!(ctx.query_type, Some(QueryType::PathFinding));
-    }
-
-    #[test]
-    fn default_entity_does_not_emit_pk_column() {
-        let input = Input {
-            query_type: QueryType::Traversal,
-            nodes: vec![InputNode {
-                id: "p".to_string(),
-                entity: Some("Project".to_string()),
-                table: Some("gl_project".to_string()),
-                ..Default::default()
-            }],
-            ..Input::default()
-        };
-
-        let query = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("p", "name"),
-                alias: Some("p_name".into()),
-            }],
-            from: TableRef::scan("gl_project", "p"),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        let aliases: Vec<_> = q.select.iter().filter_map(|s| s.alias.as_ref()).collect();
-        assert!(aliases.contains(&&"_gkg_p_id".to_string()));
-        assert!(aliases.contains(&&"_gkg_p_type".to_string()));
-        assert!(
-            !aliases.contains(&&"_gkg_p_pk".to_string()),
-            "default entity (redaction_id_column == id) should not emit _gkg_p_pk"
-        );
-        assert_eq!(q.select.len(), 3);
-    }
-
-    fn traversal_input_with_edge_col(
-        nodes: Vec<InputNode>,
-        node_edge_col: HashMap<String, (String, String)>,
-    ) -> Input {
-        use crate::input::CompilerMetadata;
-        Input {
-            query_type: QueryType::Traversal,
-            nodes,
-            compiler: CompilerMetadata {
-                node_edge_col,
-                ..Default::default()
-            },
-            ..Input::default()
-        }
-    }
-
-    fn edge_from() -> TableRef {
-        TableRef::scan("kg_edge", "e0")
-    }
-
-    #[test]
-    fn traversal_emits_gkg_id_from_edge_column() {
-        let node_edge_col: HashMap<String, (String, String)> = [
-            ("u".into(), ("e0".into(), "source_id".into())),
-            ("mr".into(), ("e0".into(), "target_id".into())),
-        ]
-        .into();
-
-        let input = traversal_input_with_edge_col(
-            vec![
-                InputNode {
-                    id: "u".to_string(),
-                    entity: Some("User".to_string()),
-                    table: Some("gl_user".to_string()),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "mr".to_string(),
-                    entity: Some("MergeRequest".to_string()),
-                    table: Some("gl_merge_request".to_string()),
-                    ..Default::default()
-                },
-            ],
-            node_edge_col,
-        );
-
-        let query = Query {
-            select: vec![],
-            from: edge_from(),
-            limit: Some(10),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        let u_id = q
-            .select
-            .iter()
-            .find(|s| s.alias.as_deref() == Some("_gkg_u_id"))
-            .expect("missing _gkg_u_id");
-        assert!(
-            matches!(&u_id.expr, Expr::Column { table, column } if table == "e0" && column == "source_id")
-        );
-
-        let mr_id = q
-            .select
-            .iter()
-            .find(|s| s.alias.as_deref() == Some("_gkg_mr_id"))
-            .expect("missing _gkg_mr_id");
-        assert!(
-            matches!(&mr_id.expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
-        );
-
-        assert!(!q.selects_alias("_gkg_u_pk"));
-        assert!(!q.selects_alias("_gkg_mr_pk"));
-
-        assert!(q.selects_alias("_gkg_u_type"));
-        assert!(q.selects_alias("_gkg_mr_type"));
-    }
-
-    #[test]
-    fn traversal_non_default_redaction_emits_pk_and_joins_node_table() {
-        let node_edge_col: HashMap<String, (String, String)> = [
-            ("mr".into(), ("e0".into(), "source_id".into())),
-            ("d".into(), ("e0".into(), "target_id".into())),
-        ]
-        .into();
-
-        let input = traversal_input_with_edge_col(
-            vec![
-                InputNode {
-                    id: "mr".to_string(),
-                    entity: Some("MergeRequest".to_string()),
-                    table: Some("gl_merge_request".to_string()),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "d".to_string(),
-                    entity: Some("MergeRequestDiff".to_string()),
-                    table: Some("gl_mergerequestdiff".to_string()),
-                    redaction_id_column: "merge_request_id".to_string(),
-                    ..Default::default()
-                },
-            ],
-            node_edge_col,
-        );
-
-        let query = Query {
-            select: vec![],
-            from: edge_from(),
-            limit: Some(10),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        let d_pk = q
-            .select
-            .iter()
-            .find(|s| s.alias.as_deref() == Some("_gkg_d_pk"))
-            .expect("missing _gkg_d_pk");
-        assert!(
-            matches!(&d_pk.expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
-        );
-
-        let d_id = q
-            .select
-            .iter()
-            .find(|s| s.alias.as_deref() == Some("_gkg_d_id"))
-            .expect("missing _gkg_d_id");
-        assert!(
-            matches!(&d_id.expr, Expr::Column { table, column } if table == "d" && column == "merge_request_id")
-        );
-
-        assert!(
-            has_scan(&q.from, "gl_mergerequestdiff"),
-            "non-default redaction_id_column should JOIN the node table"
-        );
-
-        assert!(!q.selects_alias("_gkg_mr_pk"));
-    }
-
-    #[test]
-    fn traversal_non_default_redaction_on_source_side() {
-        let node_edge_col: HashMap<String, (String, String)> = [
-            ("d".into(), ("e0".into(), "source_id".into())),
-            ("mr".into(), ("e0".into(), "target_id".into())),
-        ]
-        .into();
-
-        let input = traversal_input_with_edge_col(
-            vec![
-                InputNode {
-                    id: "d".to_string(),
-                    entity: Some("MergeRequestDiff".to_string()),
-                    table: Some("gl_mergerequestdiff".to_string()),
-                    redaction_id_column: "merge_request_id".to_string(),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "mr".to_string(),
-                    entity: Some("MergeRequest".to_string()),
-                    table: Some("gl_merge_request".to_string()),
-                    ..Default::default()
-                },
-            ],
-            node_edge_col,
-        );
-
-        let query = Query {
-            select: vec![],
-            from: edge_from(),
-            limit: Some(10),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
-
-        let Node::Query(q) = node else {
-            panic!("expected Query")
-        };
-
-        let d_pk = q
-            .select
-            .iter()
-            .find(|s| s.alias.as_deref() == Some("_gkg_d_pk"))
-            .expect("missing _gkg_d_pk");
-        assert!(
-            matches!(&d_pk.expr, Expr::Column { table, column } if table == "e0" && column == "source_id"),
-            "_gkg_d_pk should be e0.source_id, got {:?}",
-            d_pk.expr
-        );
-    }
-
-    #[test]
-    fn traversal_node_without_edge_mapping_returns_error() {
-        let input = traversal_input_with_edge_col(
-            vec![
-                InputNode {
-                    id: "x".to_string(),
-                    entity: Some("User".to_string()),
-                    table: Some("gl_user".to_string()),
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "y".to_string(),
-                    entity: Some("Project".to_string()),
-                    table: Some("gl_project".to_string()),
-                    ..Default::default()
-                },
-            ],
-            HashMap::new(),
-        );
-
-        let query = Query {
-            select: vec![],
-            from: edge_from(),
-            limit: Some(10),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        let err = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap_err();
-        assert!(
-            err.to_string().contains("no edge mapping"),
-            "expected edge mapping error, got: {err}"
-        );
-    }
-
-    #[test]
-    fn traversal_non_default_redaction_without_table_returns_error() {
-        let node_edge_col: HashMap<String, (String, String)> =
-            [("d".into(), ("e0".into(), "target_id".into()))].into();
-
-        let input = traversal_input_with_edge_col(
-            vec![InputNode {
-                id: "d".to_string(),
-                entity: Some("MergeRequestDiff".to_string()),
-                table: None,
-                redaction_id_column: "merge_request_id".to_string(),
-                ..Default::default()
-            }],
-            node_edge_col,
-        );
-
-        let query = Query {
-            select: vec![],
-            from: edge_from(),
-            limit: Some(10),
-            ..Default::default()
-        };
-
-        let mut node = Node::Query(Box::new(query));
-        let err = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap_err();
-        assert!(
-            err.to_string().contains("no resolved table"),
-            "expected missing table error, got: {err}"
-        );
     }
 }

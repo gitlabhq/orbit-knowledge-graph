@@ -543,14 +543,14 @@ fn build_denorm_tags(
     entity: &str,
     dir_prefix: &str,
     edge_alias: &str,
-    filters: &[(String, InputFilter)],
+    filters: &[(String, crate::passes::plan::BoundFilter)],
     denorm_map: &HashMap<(String, String, String), (String, String)>,
 ) -> Vec<Expr> {
     let mut exprs = Vec::new();
     for (prop, filter) in filters {
         let key = (entity.to_string(), prop.clone(), dir_prefix.to_string());
         if let Some((tag_col, tag_key)) = denorm_map.get(&key)
-            && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+            && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, &filter.filter)
         {
             exprs.push(expr);
         }

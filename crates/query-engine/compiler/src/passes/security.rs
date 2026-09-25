@@ -30,6 +30,7 @@ use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
+#[cfg(test)]
 use ontology::Ontology;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 
@@ -40,7 +41,7 @@ static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
-    ontology: &Ontology,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
 ) -> Result<()> {
     // An entirely empty security context is treated as a fail-closed bug:
     // the caller forgot to populate traversal paths. Emitting `Bool(false)`
@@ -61,25 +62,27 @@ pub fn apply_security_context(
     match node {
         Node::Query(q) => {
             for cte in &mut q.ctes {
-                apply_to_query(&mut cte.query, ctx, ontology)?;
+                apply_to_query(&mut cte.query, ctx, model)?;
             }
-            apply_to_query(q, ctx, ontology)
+            apply_to_query(q, ctx, model)
         }
         Node::Insert(_) => Ok(()),
     }
 }
 
-fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
-    let aliased_tables = collect_aliased_tables(&q.from, ontology);
+fn apply_to_query(
+    q: &mut Query,
+    ctx: &SecurityContext,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
+) -> Result<()> {
+    let aliased_tables = collect_aliased_tables(&q.from, model);
     if !aliased_tables.is_empty() {
         let security_conds = aliased_tables.iter().map(|(alias, table)| {
-            let min_role = ontology
-                .min_access_level_for_table(table)
-                .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+            let min_role = model.table_minimum_access_level(table);
             let eligible = ctx.paths_at_least(min_role);
             let broad = build_path_filter(alias, &eligible);
             match ctx.scope_proofs.get(alias) {
-                Some(scope) if ontology.is_table_path_scopable(table) => {
+                Some(scope) if model.table_path_scopable(table) => {
                     Expr::and(broad, crate::scope::scope_predicate(scope, alias))
                 }
                 _ => broad,
@@ -92,14 +95,14 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
         );
     }
 
-    apply_security_to_from(&mut q.from, ctx, ontology)?;
+    apply_security_to_from(&mut q.from, ctx, model)?;
 
     if let Some(where_clause) = &mut q.where_clause {
-        apply_security_to_expr(where_clause, ctx, ontology)?;
+        apply_security_to_expr(where_clause, ctx, model)?;
     }
 
     for arm in &mut q.union_all {
-        apply_to_query(arm, ctx, ontology)?;
+        apply_to_query(arm, ctx, model)?;
     }
 
     Ok(())
@@ -108,20 +111,20 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
 fn apply_security_to_expr(
     expr: &mut Expr,
     ctx: &SecurityContext,
-    ontology: &Ontology,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
 ) -> Result<()> {
     match expr {
-        Expr::InSelect { query, .. } | Expr::Scalar(query) => apply_to_query(query, ctx, ontology),
+        Expr::InSelect { query, .. } | Expr::Scalar(query) => apply_to_query(query, ctx, model),
         Expr::BinaryOp { left, right, .. } => {
-            apply_security_to_expr(left, ctx, ontology)?;
-            apply_security_to_expr(right, ctx, ontology)
+            apply_security_to_expr(left, ctx, model)?;
+            apply_security_to_expr(right, ctx, model)
         }
         Expr::UnaryOp { expr, .. }
         | Expr::Lambda { body: expr, .. }
-        | Expr::InSubquery { expr, .. } => apply_security_to_expr(expr, ctx, ontology),
+        | Expr::InSubquery { expr, .. } => apply_security_to_expr(expr, ctx, model),
         Expr::FuncCall { args, .. } => {
             for arg in args {
-                apply_security_to_expr(arg, ctx, ontology)?;
+                apply_security_to_expr(arg, ctx, model)?;
             }
             Ok(())
         }
@@ -170,8 +173,11 @@ fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }
 
-pub(crate) fn collect_node_aliases(table_ref: &TableRef, ontology: &Ontology) -> Vec<String> {
-    collect_aliased_tables(table_ref, ontology)
+pub(crate) fn collect_node_aliases(
+    table_ref: &TableRef,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
+) -> Vec<String> {
+    collect_aliased_tables(table_ref, model)
         .into_iter()
         .map(|(a, _)| a)
         .collect()
@@ -182,16 +188,16 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef, ontology: &Ontology) ->
 /// minimum role before building the `startsWith(...)` predicate.
 pub(crate) fn collect_aliased_tables(
     table_ref: &TableRef,
-    ontology: &Ontology,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
 ) -> Vec<(String, String)> {
     match table_ref {
-        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table, ontology) => {
+        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table, model) => {
             vec![(alias.clone(), table.clone())]
         }
         TableRef::Scan { .. } => vec![],
         TableRef::Join { left, right, .. } => {
-            let mut aliases = collect_aliased_tables(left, ontology);
-            aliases.extend(collect_aliased_tables(right, ontology));
+            let mut aliases = collect_aliased_tables(left, model);
+            aliases.extend(collect_aliased_tables(right, model));
             aliases
         }
         // Derived tables don't have traversal_path columns themselves.
@@ -203,20 +209,20 @@ pub(crate) fn collect_aliased_tables(
 fn apply_security_to_from(
     table_ref: &mut TableRef,
     ctx: &SecurityContext,
-    ontology: &Ontology,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
 ) -> Result<()> {
     match table_ref {
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                apply_to_query(arm, ctx, ontology)?;
+                apply_to_query(arm, ctx, model)?;
             }
         }
         TableRef::Subquery { query, .. } => {
-            apply_to_query(query, ctx, ontology)?;
+            apply_to_query(query, ctx, model)?;
         }
         TableRef::Join { left, right, .. } => {
-            apply_security_to_from(left, ctx, ontology)?;
-            apply_security_to_from(right, ctx, ontology)?;
+            apply_security_to_from(left, ctx, model)?;
+            apply_security_to_from(right, ctx, model)?;
         }
         TableRef::Scan { .. } => {}
     }
@@ -225,7 +231,10 @@ fn apply_security_to_from(
 
 /// Handles both unprefixed (`gl_user`) and schema-version-prefixed
 /// (`v1_gl_user`) table names. CTEs like `path_cte` are excluded.
-fn should_apply_security_filter(table: &str, ontology: &Ontology) -> bool {
+fn should_apply_security_filter(
+    table: &str,
+    model: &(impl crate::data_model::SecurityModel + ?Sized),
+) -> bool {
     let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
         Regex::new(&format!(
             r"^(?:v\d+_)?{}.+$",
@@ -234,7 +243,7 @@ fn should_apply_security_filter(table: &str, ontology: &Ontology) -> bool {
         .expect("valid regex")
     });
 
-    graph_table_pattern.is_match(table) && !ontology.is_global_table(table)
+    graph_table_pattern.is_match(table) && model.table_has_path_columns(table)
 }
 
 #[cfg(test)]
@@ -246,6 +255,21 @@ mod tests {
     use ontology::constants::EDGE_TABLE;
     use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
+
+    fn apply(node: &mut Node, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+        apply_security_context(node, context, model.as_ref())
+    }
+
+    fn aliases(table: &TableRef, ontology: &Ontology) -> Vec<String> {
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+        collect_node_aliases(table, model.as_ref())
+    }
+
+    fn applies(table: &str, ontology: &Ontology) -> bool {
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+        should_apply_security_filter(table, model.as_ref())
+    }
 
     fn simple_query() -> Node {
         Node::Query(Box::new(Query {
@@ -443,7 +467,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -487,7 +511,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -530,7 +554,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -578,7 +602,7 @@ mod tests {
     fn inject_adds_security_to_simple_query() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = simple_query();
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, &Ontology::new()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -594,7 +618,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, &Ontology::new()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -608,7 +632,7 @@ mod tests {
             Expr::eq(Expr::col("p", "id"), Expr::col("e", "source")),
         );
 
-        let aliases = collect_node_aliases(&from, &ontology);
+        let aliases = aliases(&from, &ontology);
         assert_eq!(aliases, vec!["p", "e"]);
     }
 
@@ -622,25 +646,25 @@ mod tests {
             Expr::lit(true),
         );
 
-        let aliases = collect_node_aliases(&from, &ontology);
+        let aliases = aliases(&from, &ontology);
         assert_eq!(aliases, vec!["mr"]);
     }
 
     #[test]
     fn should_apply_security_filter_skips_user() {
         let ontology = Ontology::load_embedded().unwrap();
-        assert!(!should_apply_security_filter("gl_user", &ontology));
-        assert!(should_apply_security_filter(EDGE_TABLE, &ontology));
-        assert!(should_apply_security_filter("gl_project", &ontology));
-        assert!(should_apply_security_filter("gl_merge_request", &ontology));
+        assert!(!applies("gl_user", &ontology));
+        assert!(applies(EDGE_TABLE, &ontology));
+        assert!(applies("gl_project", &ontology));
+        assert!(applies("gl_merge_request", &ontology));
     }
 
     #[test]
     fn should_apply_security_filter_skips_ctes() {
         let ontology = Ontology::new();
-        assert!(!should_apply_security_filter("path_cte", &ontology));
-        assert!(!should_apply_security_filter("some_cte", &ontology));
-        assert!(!should_apply_security_filter("nodes", &ontology));
+        assert!(!applies("path_cte", &ontology));
+        assert!(!applies("some_cte", &ontology));
+        assert!(!applies("nodes", &ontology));
     }
 
     #[test]
@@ -656,7 +680,7 @@ mod tests {
             }],
             "hop_e0",
         );
-        let aliases = collect_node_aliases(&from, &Ontology::new());
+        let aliases = aliases(&from, &Ontology::new());
         assert!(aliases.is_empty());
     }
 
@@ -690,7 +714,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -728,7 +752,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, &Ontology::new()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -766,7 +790,7 @@ mod tests {
         }));
 
         let ontology = Ontology::new().with_path_scopable_nodes(["Project", "WorkItem"]);
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -802,7 +826,7 @@ mod tests {
             limit: Some(10),
             ..Default::default()
         }));
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -834,7 +858,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -869,7 +893,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, &Ontology::new()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()

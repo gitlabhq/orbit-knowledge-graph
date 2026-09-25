@@ -30,6 +30,7 @@ members = [
   "crates/object-storage",
   "crates/orbit-server",
   "crates/ontology",
+  "crates/query-data-model",
 
   "crates/health-check",
   "crates/gitaly-protos",
