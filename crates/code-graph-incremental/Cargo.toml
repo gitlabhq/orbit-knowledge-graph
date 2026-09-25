@@ -17,7 +17,7 @@ lasso = { version = "0.7", features = ["multi-threaded", "ahasher"] }
 pest = { workspace = true }
 pest_consume = { workspace = true }
 pest_derive = { workspace = true }
-regex = "1"
+regex = { workspace = true }
 rayon = { workspace = true }
 rkyv = { workspace = true }
 rustc-hash = { workspace = true }
