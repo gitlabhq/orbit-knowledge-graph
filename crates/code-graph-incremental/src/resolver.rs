@@ -1,6 +1,18 @@
 use rustc_hash::FxHashMap;
 
+use crate::canonical::Canonical as C;
+use crate::constants::WILDCARD;
+use crate::intern::Lang;
 use crate::tags::ReservedTags;
+
+pub const CLASS_LIKE: &[C] = &[
+    C::Class,
+    C::Struct,
+    C::ImplBlock,
+    C::Interface,
+    C::Trait,
+    C::Enum,
+];
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
@@ -34,4 +46,16 @@ pub struct Resolver {
     file_index: FileIndex,
     wildcard_sym: u32,
     tags: ReservedTags,
+}
+
+impl Resolver {
+    pub fn new(lang: &Lang) -> Self {
+        Self {
+            visible: Vec::new(),
+            reqs: Vec::new(),
+            file_index: FileIndex::default(),
+            wildcard_sym: lang.syms.intern(WILDCARD),
+            tags: ReservedTags::new(lang),
+        }
+    }
 }
