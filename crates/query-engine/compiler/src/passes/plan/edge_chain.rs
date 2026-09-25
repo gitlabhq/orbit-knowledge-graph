@@ -7,7 +7,7 @@ use ontology::constants::*;
 use crate::input::*;
 
 use super::{BoundFilter, Plan, PlanBody};
-use query_data_model::{QueryBackendCatalog, QueryDataModel};
+use query_data_model::QueryDataModel;
 
 pub struct Hop {
     pub rel_types: Vec<String>,
@@ -159,7 +159,6 @@ where
 {
     let hops = build_hops(input, scope_proofs, model);
     let mut nodes = build_node_plans(input, model);
-    let backend = model.query_backend();
 
     let (mut hops, elided_fks, scope_requirements) = if use_fk_elision {
         elide_hops(hops, &mut nodes, input)
@@ -170,8 +169,8 @@ where
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
     let _ = reversed;
-    let denorm_columns = backend.denormalized().columns.clone();
-    let denorm_rel_kinds = backend.denormalized().relationships.clone();
+    let denorm_columns = model.denormalized().columns.clone();
+    let denorm_rel_kinds = model.denormalized().relationships.clone();
 
     for node_plan in nodes.values_mut() {
         if use_fk_elision {
@@ -223,8 +222,7 @@ where
         .filter_map(|node| {
             node.entity
                 .as_deref()
-                .and_then(|entity| model.graph().entity_id(entity))
-                .and_then(|entity| backend.entity_table(entity))
+                .and_then(|entity| model.entity_table(entity))
                 .map(String::from)
         })
         .chain(hops.iter().map(|hop| hop.edge_table.clone()))
@@ -232,7 +230,7 @@ where
     let table_columns = table_names
         .iter()
         .filter_map(|table| {
-            backend
+            model
                 .table_columns(table)
                 .map(|columns| (table.clone(), columns.clone()))
         })
@@ -240,7 +238,7 @@ where
     let table_sort_keys = table_names
         .iter()
         .filter_map(|table| {
-            backend
+            model
                 .table_sort_key(table)
                 .map(|sort_key| (table.clone(), sort_key.to_vec()))
         })
@@ -276,7 +274,7 @@ where
                 .relationship_tables(&rel.types)
                 .into_iter()
                 .next()
-                .unwrap_or_else(|| model.query_backend().default_edge_table().to_string());
+                .unwrap_or_else(|| model.default_edge_table().to_string());
             let from_entity = input
                 .nodes
                 .iter()
@@ -369,14 +367,11 @@ where
                 NodePlan {
                     alias: n.id.clone(),
                     entity: n.entity.clone(),
-                    table: model
-                        .query_backend()
-                        .entity_table(entity_id)
-                        .map(String::from),
+                    table: model.entity_table(entity).map(String::from),
                     selectivity: Selectivity::from_node(n),
                     hydration: HydrationStrategy::Skip,
-                    has_traversal_path: model.query_backend().entity_has_traversal_path(entity_id),
-                    is_global: model.query_backend().entity_is_global(entity_id),
+                    has_traversal_path: model.entity_has_traversal_path(entity),
+                    is_global: model.entity_is_global(entity),
                     redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
                     filters: crate::passes::shared::ordered_filters(
                         &n.filters

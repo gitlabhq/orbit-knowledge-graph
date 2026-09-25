@@ -157,6 +157,14 @@ pub trait QueryDataModel {
         self.query_backend().table_column_type(table, column)
     }
 
+    fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
+        self.query_backend().table_columns(table)
+    }
+
+    fn table_sort_key(&self, table: &str) -> Option<&[String]> {
+        self.query_backend().table_sort_key(table)
+    }
+
     fn has_text_index(&self, property: PropertyId) -> bool {
         self.query_backend().has_text_index(property)
     }

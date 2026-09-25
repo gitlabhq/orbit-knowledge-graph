@@ -5,7 +5,7 @@ use crate::input::*;
 use orbit_utils::traversal_path::TraversalPath;
 
 use super::{Plan, PlanBody, Strategy};
-use query_data_model::{QueryBackendCatalog, QueryDataModel};
+use query_data_model::QueryDataModel;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HydrationCompileOptions {
@@ -56,7 +56,6 @@ pub fn plan_hydration(
                 _ => vec![],
             };
             let sort_key = model
-                .query_backend()
                 .table_sort_key(table)
                 .filter(|sk| !sk.is_empty())
                 .map(<[String]>::to_vec)
