@@ -11,7 +11,6 @@ pub struct EntityAuthorization {
     pub id_property: PropertyId,
     pub owner_entity: Option<EntityId>,
     pub required_access_level: u32,
-    pub global: bool,
 }
 
 #[derive(Debug)]
@@ -95,7 +94,6 @@ impl Authz for GitLabAuthz {
                             .then(|| owners.get(redaction.resource_type.as_str()).copied())
                             .flatten(),
                         required_access_level: redaction.required_role.as_access_level(),
-                        global: node.global,
                     },
                 );
             }

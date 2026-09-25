@@ -28,7 +28,7 @@ pub fn normalize<M: crate::data_model::QueryModel>(input: Input, model: &M) -> R
             .graph()
             .entity_id(entity)
             .ok_or_else(|| QueryError::AllowlistRejected(format!("unknown entity '{entity}'")))?;
-        if !model.entity_available(entity_id) {
+        if model.entity_table(entity_id).is_none() {
             return Err(QueryError::AllowlistRejected(format!(
                 "entity '{entity}' is not available in this data model"
             )));

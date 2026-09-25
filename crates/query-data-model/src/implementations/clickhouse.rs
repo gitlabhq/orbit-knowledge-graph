@@ -61,13 +61,6 @@ pub struct DenormalizedProperty {
 }
 
 #[derive(Debug, Clone)]
-pub struct TextIndex {
-    pub table: String,
-    pub property: PropertyId,
-    pub tokenizer: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct TraversalPathLookup {
     pub table: String,
     pub property: PropertyId,
@@ -82,7 +75,7 @@ pub struct ClickHouseCatalog {
     properties: HashMap<PropertyId, String>,
     tables: HashMap<String, TableLayout>,
     denormalized_properties: Vec<DenormalizedProperty>,
-    text_indexes: Vec<TextIndex>,
+    text_indexes: HashSet<PropertyId>,
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
 }
 
@@ -133,14 +126,8 @@ impl ClickHouseCatalog {
         &self.denormalized_properties
     }
 
-    pub fn text_indexes(&self) -> &[TextIndex] {
-        &self.text_indexes
-    }
-
     pub fn has_text_index(&self, property: PropertyId) -> bool {
-        self.text_indexes
-            .iter()
-            .any(|index| index.property == property)
+        self.text_indexes.contains(&property)
     }
 
     pub fn traversal_path_lookup(
@@ -164,7 +151,7 @@ impl Backend for ClickHouse {
         let mut entities = HashMap::new();
         let mut properties = HashMap::new();
         let mut tables = HashMap::new();
-        let mut text_indexes = Vec::new();
+        let mut text_indexes = HashSet::new();
 
         for node in ontology.nodes() {
             let entity_id =
@@ -188,12 +175,11 @@ impl Backend for ClickHouse {
                 if node.default_columns.iter().any(|name| name == &field.name) {
                     default_properties.push(property_id);
                 }
-                if let Some(tokenizer) = ontology.text_index_tokenizer(&node.name, &field.name) {
-                    text_indexes.push(TextIndex {
-                        table: node.destination_table.clone(),
-                        property: property_id,
-                        tokenizer: tokenizer.to_string(),
-                    });
+                if ontology
+                    .text_index_tokenizer(&node.name, &field.name)
+                    .is_some()
+                {
+                    text_indexes.insert(property_id);
                 }
             }
             if let Some(property) =

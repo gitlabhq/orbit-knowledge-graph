@@ -236,9 +236,7 @@ fn build_dynamic_specs(
         .entities()
         .filter_map(|entity| {
             let name = entity.name.as_str();
-            if !model.entity_available(entity.id) {
-                return None;
-            }
+            model.entity_table(entity.id)?;
 
             let admin_only: HashSet<&str> = if security_ctx.admin {
                 HashSet::new()
