@@ -1,10 +1,12 @@
 pub mod constants;
 pub mod env;
 pub mod intern;
+pub mod inventory;
 pub mod pipeline;
 pub mod resolver;
 pub mod shared;
 pub mod tree;
+pub mod treesitter;
 
 pub use shared::error::{Error, LoadError};
 pub use shared::sentinel::{Killed, Limits, Sentinel};

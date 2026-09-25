@@ -1,14 +1,116 @@
-use lasso::ThreadedRodeo;
+use lasso::{Key, Spur, ThreadedRodeo};
+use strum::IntoEnumIterator;
 
-/// Ids are `spur + 1`, so 0 means "no symbol".
-#[allow(dead_code)]
+use crate::canonical::{self, CANONICAL_BASE, Canonical};
+
 pub struct Interner {
     pub(crate) rodeo: ThreadedRodeo,
 }
 
-/// One language's interners: node kinds, field names, and symbols.
+impl Default for Interner {
+    fn default() -> Self {
+        Self {
+            rodeo: ThreadedRodeo::new(),
+        }
+    }
+}
+
+impl Clone for Interner {
+    fn clone(&self) -> Self {
+        let new = Self::default();
+        let mut pairs: Vec<(usize, &str)> = self
+            .rodeo
+            .iter()
+            .map(|(k, v)| (k.into_usize(), v))
+            .collect();
+        pairs.sort_by_key(|(k, _)| *k);
+        for (_, s) in pairs {
+            new.rodeo.get_or_intern(s);
+        }
+        new
+    }
+}
+
+impl Interner {
+    pub fn intern(&self, s: &str) -> u32 {
+        let spur = self.rodeo.get_or_intern(s);
+        spur.into_usize() as u32 + 1
+    }
+
+    pub fn resolve(&self, i: u32) -> &str {
+        if i == 0 {
+            return "";
+        }
+        let spur = Spur::try_from_usize(i as usize - 1).expect("invalid spur");
+        self.rodeo.resolve(&spur)
+    }
+
+    pub fn lookup(&self, s: &str) -> u32 {
+        self.rodeo
+            .get(s)
+            .map(|spur| spur.into_usize() as u32 + 1)
+            .unwrap_or(0)
+    }
+
+    pub fn len(&self) -> u32 {
+        self.rodeo.len() as u32
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[derive(Default, Clone)]
 pub struct Lang {
     pub kinds: Interner,
     pub fields: Interner,
     pub syms: Interner,
+}
+
+impl Lang {
+    pub fn new() -> Lang {
+        Lang::default()
+    }
+
+    pub fn intern_kind(&self, s: &str) -> u16 {
+        if let Ok(ck) = s.parse::<Canonical>() {
+            return ck as u16;
+        }
+        let id = self.kinds.intern(s) as u16;
+        debug_assert!(
+            id < CANONICAL_BASE,
+            "dynamic kind ID {id} collides with canonical range"
+        );
+        id
+    }
+
+    pub fn lookup_kind(&self, s: &str) -> u16 {
+        if let Ok(ck) = s.parse::<Canonical>() {
+            return ck as u16;
+        }
+        self.kinds.lookup(s) as u16
+    }
+
+    pub fn intern_field(&self, s: &str) -> u16 {
+        self.fields.intern(s) as u16
+    }
+
+    pub fn kind_name(&self, k: u16) -> &str {
+        if canonical::is_canonical(k) {
+            for ck in Canonical::iter() {
+                if ck as u16 == k {
+                    let s: &'static str = ck.into();
+                    return s;
+                }
+            }
+            Canonical::Unknown.into()
+        } else {
+            self.kinds.resolve(k as u32)
+        }
+    }
+
+    pub fn field_name(&self, f: u16) -> &str {
+        self.fields.resolve(f as u32)
+    }
 }
