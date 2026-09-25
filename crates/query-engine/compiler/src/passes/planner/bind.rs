@@ -72,10 +72,10 @@ impl Builder {
 
     fn traversal(&mut self) -> Result<Plan<Logical>> {
         let (graph, nodes, edges) = self.graph()?;
-        let mut projections = Vec::new();
-        for edge in &edges {
-            projections.extend(self.edge_outputs(edge));
-        }
+        let mut projections: Vec<_> = edges
+            .iter()
+            .flat_map(|edge| self.edge_outputs(edge))
+            .collect();
         if edges.is_empty()
             || nodes
                 .iter()
@@ -85,39 +85,23 @@ impl Builder {
                 projections.extend(self.node_outputs(node));
             }
         }
-        let mut plan = Plan::unary(Operator::Project(projections), graph);
+        let mut plan = graph.project(projections);
         if let Some(order) = self.catalog.input.order_by.clone() {
-            let relation = nodes
+            let node = nodes
                 .iter()
                 .find(|node| self.catalog.input.nodes[node.input.0].id == order.node)
-                .map(|node| node.relation)
                 .ok_or_else(|| QueryError::PipelineInvariant("order node is missing".into()))?;
-            let column = self.column(relation, &order.property, None);
-            plan = Plan::unary(
-                Operator::Sort(vec![SortKey {
-                    expression: Expr::Column(column),
-                    descending: order.direction == crate::input::OrderDirection::Desc,
-                }]),
-                plan,
-            );
+            plan = plan.sort(vec![SortKey {
+                expression: self.column(node.relation, &order.property, None).into(),
+                descending: order.direction == crate::input::OrderDirection::Desc,
+            }]);
         } else if self.catalog.input.cursor.is_some() && edges.is_empty() {
-            let id = self.column(
-                nodes[0].relation,
-                DEFAULT_PRIMARY_KEY,
-                Some(ontology::DataType::Int),
-            );
-            plan = Plan::unary(
-                Operator::Sort(vec![SortKey {
-                    expression: Expr::Column(id),
-                    descending: false,
-                }]),
-                plan,
-            );
+            plan = plan.sort(vec![SortKey {
+                expression: nodes[0].id.into(),
+                descending: false,
+            }]);
         }
-        Ok(Plan::unary(
-            Operator::Limit(self.catalog.input.fetch_limit()),
-            plan,
-        ))
+        Ok(plan.limit(self.catalog.input.fetch_limit()))
     }
 
     fn aggregation(&mut self) -> Result<Plan<Logical>> {
@@ -125,14 +109,9 @@ impl Builder {
         let metrics = self.catalog.input.aggregation.metrics.clone();
         let sort = self.catalog.input.aggregation.sort.clone();
         let (graph, nodes, _) = self.graph()?;
-        let relations: HashMap<_, _> = nodes
+        let nodes_by_name: HashMap<_, _> = nodes
             .iter()
-            .map(|node| {
-                (
-                    self.catalog.input.nodes[node.input.0].id.clone(),
-                    node.relation,
-                )
-            })
+            .map(|node| (self.catalog.input.nodes[node.input.0].id.clone(), node))
             .collect();
         let mut group_exprs = Vec::new();
         for group in groups {
@@ -143,26 +122,19 @@ impl Builder {
                     truncate,
                     alias,
                 } => {
-                    let column = self.column(relations[&node], &property, None);
-                    let expression =
-                        truncate.map_or(Expr::Column(column), |unit| Expr::DateTrunc {
-                            unit,
-                            value: Box::new(Expr::Column(column)),
-                        });
-                    group_exprs.push(NamedExpr {
-                        expression,
-                        output: self.output(alias.unwrap_or_else(|| match truncate {
-                            Some(unit) => format!("{node}_{property}_{}", unit.name()),
-                            None => format!("{node}_{property}"),
-                        })),
+                    let column = self.column(nodes_by_name[&node].relation, &property, None);
+                    let expression = truncate.map_or(column.into(), |unit| Expr::DateTrunc {
+                        unit,
+                        value: Box::new(column.into()),
                     });
+                    let output = alias.unwrap_or_else(|| match truncate {
+                        Some(unit) => format!("{node}_{property}_{}", unit.name()),
+                        None => format!("{node}_{property}"),
+                    });
+                    group_exprs.push(self.named(expression, output));
                 }
                 InputGroupByKey::Node { node, .. } => {
-                    let selected = nodes
-                        .iter()
-                        .find(|candidate| self.catalog.input.nodes[candidate.input.0].id == node)
-                        .unwrap();
-                    group_exprs.extend(self.node_outputs(selected));
+                    group_exprs.extend(self.node_outputs(nodes_by_name[&node]));
                 }
             }
         }
@@ -170,24 +142,15 @@ impl Builder {
         for metric in metrics {
             let function = metric.expr.function();
             let value = metric.expr.property().map(|property| {
-                Box::new(Expr::Column(self.column(
-                    relations[metric.expr.node()],
-                    property,
-                    None,
-                )))
+                Box::new(
+                    self.column(nodes_by_name[metric.expr.node()].relation, property, None)
+                        .into(),
+                )
             });
-            metric_exprs.push(NamedExpr {
-                expression: Expr::Aggregate { function, value },
-                output: self.output(metric.output_name()),
-            });
+            let expression = Expr::Aggregate { function, value };
+            metric_exprs.push(self.named(expression, metric.output_name()));
         }
-        let mut plan = Plan::unary(
-            Operator::Aggregate {
-                groups: group_exprs,
-                metrics: metric_exprs,
-            },
-            graph,
-        );
+        let mut plan = graph.aggregate(group_exprs, metric_exprs);
         if let Some(sort) = sort {
             let output = self
                 .catalog
@@ -195,19 +158,13 @@ impl Builder {
                 .iter()
                 .find_map(|(id, output)| (output.name == sort.column).then_some(*id));
             if let Some(output) = output {
-                plan = Plan::unary(
-                    Operator::Sort(vec![SortKey {
-                        expression: Expr::Output(output),
-                        descending: sort.direction == crate::input::OrderDirection::Desc,
-                    }]),
-                    plan,
-                );
+                plan = plan.sort(vec![SortKey {
+                    expression: output.into(),
+                    descending: sort.direction == crate::input::OrderDirection::Desc,
+                }]);
             }
         }
-        Ok(Plan::unary(
-            Operator::Limit(self.catalog.input.fetch_limit()),
-            plan,
-        ))
+        Ok(plan.limit(self.catalog.input.fetch_limit()))
     }
 
     fn neighbors(&mut self) -> Result<Plan<Logical>> {
@@ -218,18 +175,12 @@ impl Builder {
         let plan = match config.direction {
             Direction::Outgoing => self.neighbor_arm(true, config.rel_types)?,
             Direction::Incoming => self.neighbor_arm(false, config.rel_types)?,
-            Direction::Both => Plan {
-                operator: Operator::Union,
-                inputs: vec![
-                    self.neighbor_arm(true, config.rel_types.clone())?,
-                    self.neighbor_arm(false, config.rel_types)?,
-                ],
-            },
+            Direction::Both => Plan::union(vec![
+                self.neighbor_arm(true, config.rel_types.clone())?,
+                self.neighbor_arm(false, config.rel_types)?,
+            ]),
         };
-        Ok(Plan::unary(
-            Operator::Limit(self.catalog.input.fetch_limit()),
-            plan,
-        ))
+        Ok(plan.limit(self.catalog.input.fetch_limit()))
     }
 
     fn neighbor_arm(&mut self, outgoing: bool, kinds: Vec<String>) -> Result<Plan<Logical>> {
@@ -293,21 +244,15 @@ impl Builder {
                 literal(entity),
             ));
         }
-        let plan = join(
+        let plan = Plan::join(
             [
-                filter(
-                    Plan::leaf(Operator::Scan(LogicalScan {
-                        relation: edge_relation,
-                    })),
-                    predicates,
-                ),
+                Plan::leaf(Operator::Scan(LogicalScan {
+                    relation: edge_relation,
+                }))
+                .filter(predicates),
                 node.plan,
             ],
-            vec![compare(
-                CompareOp::Eq,
-                Expr::Column(edge_center),
-                Expr::Column(node_id),
-            )],
+            vec![Expr::from(edge_center).eq(node_id)],
         );
         let neighbor_id = self.column(edge_relation, neighbor_id, Some(ontology::DataType::Int));
         let neighbor_kind = self.column(
@@ -360,7 +305,7 @@ impl Builder {
                 )),
             },
         ];
-        Ok(Plan::unary(Operator::Project(columns), plan))
+        Ok(plan.project(columns))
     }
 
     fn pathfinding(&mut self) -> Result<Plan<Logical>> {
@@ -472,10 +417,7 @@ impl Builder {
                 }
                 edges.push((
                     relation,
-                    filter(
-                        Plan::leaf(Operator::Scan(LogicalScan { relation })),
-                        predicates,
-                    ),
+                    Plan::leaf(Operator::Scan(LogicalScan { relation })).filter(predicates),
                 ));
             }
             let mut conditions = Vec::new();
@@ -537,7 +479,7 @@ impl Builder {
             let inputs = std::iter::once(start_node.plan)
                 .chain(edges.iter().map(|edge| edge.1.clone()))
                 .chain(std::iter::once(end_node.plan));
-            let plan = join(inputs, conditions);
+            let plan = Plan::join(inputs, conditions);
             let start_kind = self.catalog.input.nodes[start]
                 .entity
                 .clone()
@@ -563,39 +505,27 @@ impl Builder {
                     ))
                 })
                 .collect();
-            arms.push(Plan::unary(
-                Operator::Project(vec![
-                    NamedExpr {
-                        expression: Expr::Array(path_values),
-                        output: path_output,
-                    },
-                    NamedExpr {
-                        expression: Expr::Array(edge_kinds),
-                        output: kinds_output,
-                    },
-                    NamedExpr {
-                        expression: literal(i64::from(depth)),
-                        output: depth_output,
-                    },
-                ]),
-                plan,
-            ));
+            arms.push(plan.project(vec![
+                NamedExpr {
+                    expression: Expr::Array(path_values),
+                    output: path_output,
+                },
+                NamedExpr {
+                    expression: Expr::Array(edge_kinds),
+                    output: kinds_output,
+                },
+                NamedExpr {
+                    expression: literal(i64::from(depth)),
+                    output: depth_output,
+                },
+            ]));
         }
-        let union = Plan {
-            operator: Operator::Union,
-            inputs: arms,
-        };
-        let sorted = Plan::unary(
-            Operator::Sort(vec![SortKey {
-                expression: Expr::Output(depth_output),
+        Ok(Plan::union(arms)
+            .sort(vec![SortKey {
+                expression: depth_output.into(),
                 descending: false,
-            }]),
-            union,
-        );
-        Ok(Plan::unary(
-            Operator::Limit(self.catalog.input.fetch_limit()),
-            sorted,
-        ))
+            }])
+            .limit(self.catalog.input.fetch_limit()))
     }
 
     fn hydration(&mut self) -> Result<Plan<Logical>> {
@@ -640,7 +570,7 @@ impl Builder {
                         data_type: Some(ontology::DataType::String),
                     })
                     .collect();
-                filter(current, vec![Expr::Or(predicates)])
+                current.filter(vec![Expr::Or(predicates)])
             };
             let properties = requested(&input)
                 .into_iter()
@@ -649,35 +579,19 @@ impl Builder {
                     (name, Expr::Stringify(Box::new(Expr::Column(column))))
                 })
                 .collect();
-            arms.push(Plan::unary(
-                Operator::Project(vec![
-                    NamedExpr {
-                        expression: Expr::Column(id),
-                        output: self.output(format!("{}_{}", input.id, input.id_property)),
-                    },
-                    NamedExpr {
-                        expression: literal(input.entity.unwrap_or_default()),
-                        output: self.output(format!("{}_entity_type", input.id)),
-                    },
-                    NamedExpr {
-                        expression: Expr::Stringify(Box::new(Expr::JsonObject(properties))),
-                        output: self.output(format!("{}_props", input.id)),
-                    },
-                ]),
-                current,
-            ));
+            let id_output = format!("{}_{}", input.id, input.id_property);
+            let entity_output = format!("{}_entity_type", input.id);
+            let properties_output = format!("{}_props", input.id);
+            arms.push(current.project(vec![
+                self.named(id, id_output),
+                self.named(input.entity.unwrap_or_default(), entity_output),
+                self.named(
+                    Expr::Stringify(Box::new(Expr::JsonObject(properties))),
+                    properties_output,
+                ),
+            ]));
         }
-        Ok(Plan::unary(
-            Operator::Limit(self.catalog.input.fetch_limit()),
-            if arms.len() == 1 {
-                arms.pop().unwrap()
-            } else {
-                Plan {
-                    operator: Operator::Union,
-                    inputs: arms,
-                }
-            },
-        ))
+        Ok(Plan::union_or_single(arms).limit(self.catalog.input.fetch_limit()))
     }
 
     fn graph(&mut self) -> Result<(Plan<Logical>, Vec<Node>, Vec<Edge>)> {
@@ -753,7 +667,7 @@ impl Builder {
             .iter()
             .map(|edge| edge.plan.clone())
             .chain(nodes.iter().map(|node| node.plan.clone()));
-        Ok((join(inputs, conditions), nodes, edges))
+        Ok((Plan::join(inputs, conditions), nodes, edges))
     }
 
     fn node(&mut self, index: usize) -> Result<Node> {
@@ -771,23 +685,20 @@ impl Builder {
             vec![],
         );
         let id = self.column(relation, DEFAULT_PRIMARY_KEY, Some(ontology::DataType::Int));
-        let plan = filter(Plan::leaf(Operator::Scan(LogicalScan { relation })), {
+        let plan = Plan::leaf(Operator::Scan(LogicalScan { relation })).filter({
             let mut predicates = self.node_predicates(relation, &input, id);
             let deleted = self.column(
                 relation,
                 ontology::constants::DELETED_COLUMN,
                 Some(ontology::DataType::Bool),
             );
-            predicates.push(compare(
-                CompareOp::Eq,
-                Expr::Column(deleted),
-                literal(false),
-            ));
+            predicates.push(Expr::from(deleted).eq(false));
             predicates
         });
         Ok(Node {
             relation,
             input: InputNodeId(index),
+            id,
             plan,
         })
     }
@@ -836,10 +747,8 @@ impl Builder {
             relationships,
         );
         let plan = if input.hops.max == 1 {
-            filter(
-                Plan::leaf(Operator::Scan(LogicalScan { relation })),
-                self.edge_predicates(relation, &input),
-            )
+            Plan::leaf(Operator::Scan(LogicalScan { relation }))
+                .filter(self.edge_predicates(relation, &input))
         } else {
             let mut arms = Vec::new();
             for depth in input.hops.min.max(1)..=input.hops.max {
@@ -859,81 +768,79 @@ impl Builder {
                         None,
                         relationships,
                     );
-                    let scan = filter(
-                        Plan::leaf(Operator::Scan(LogicalScan {
-                            relation: hop_relation,
-                        })),
-                        {
-                            let mut predicates = self.kind_predicates(hop_relation, &input.types);
-                            if hop == 1 {
-                                let (source_name, _) = input.direction.edge_columns();
-                                let source = self.column(
+                    let scan = Plan::leaf(Operator::Scan(LogicalScan {
+                        relation: hop_relation,
+                    }))
+                    .filter({
+                        let mut predicates = self.kind_predicates(hop_relation, &input.types);
+                        if hop == 1 {
+                            let (source_name, _) = input.direction.edge_columns();
+                            let source = self.column(
+                                hop_relation,
+                                source_name,
+                                Some(ontology::DataType::Int),
+                            );
+                            let from = self
+                                .catalog
+                                .input
+                                .nodes
+                                .iter()
+                                .find(|node| node.id == input.from)
+                                .cloned()
+                                .unwrap();
+                            predicates.extend(ids(source, &from.node_ids));
+                            if let Some(entity) = from.entity.as_deref() {
+                                let kind = self.column(
                                     hop_relation,
-                                    source_name,
-                                    Some(ontology::DataType::Int),
+                                    if source_name == SOURCE_ID_COLUMN {
+                                        SOURCE_KIND_COLUMN
+                                    } else {
+                                        TARGET_KIND_COLUMN
+                                    },
+                                    Some(ontology::DataType::String),
                                 );
-                                let from = self
-                                    .catalog
-                                    .input
-                                    .nodes
-                                    .iter()
-                                    .find(|node| node.id == input.from)
-                                    .cloned()
-                                    .unwrap();
-                                predicates.extend(ids(source, &from.node_ids));
-                                if let Some(entity) = from.entity.as_deref() {
-                                    let kind = self.column(
-                                        hop_relation,
-                                        if source_name == SOURCE_ID_COLUMN {
-                                            SOURCE_KIND_COLUMN
-                                        } else {
-                                            TARGET_KIND_COLUMN
-                                        },
-                                        Some(ontology::DataType::String),
-                                    );
-                                    predicates.push(compare(
-                                        CompareOp::Eq,
-                                        Expr::Column(kind),
-                                        literal(entity.to_string()),
-                                    ));
-                                }
+                                predicates.push(compare(
+                                    CompareOp::Eq,
+                                    Expr::Column(kind),
+                                    literal(entity.to_string()),
+                                ));
                             }
-                            if hop == depth {
-                                let (_, target_name) = input.direction.edge_columns();
-                                let target = self.column(
+                        }
+                        if hop == depth {
+                            let (_, target_name) = input.direction.edge_columns();
+                            let target = self.column(
+                                hop_relation,
+                                target_name,
+                                Some(ontology::DataType::Int),
+                            );
+                            let to = self
+                                .catalog
+                                .input
+                                .nodes
+                                .iter()
+                                .find(|node| node.id == input.to)
+                                .cloned()
+                                .unwrap();
+                            predicates.extend(ids(target, &to.node_ids));
+                            if let Some(entity) = to.entity.as_deref() {
+                                let kind = self.column(
                                     hop_relation,
-                                    target_name,
-                                    Some(ontology::DataType::Int),
+                                    if target_name == SOURCE_ID_COLUMN {
+                                        SOURCE_KIND_COLUMN
+                                    } else {
+                                        TARGET_KIND_COLUMN
+                                    },
+                                    Some(ontology::DataType::String),
                                 );
-                                let to = self
-                                    .catalog
-                                    .input
-                                    .nodes
-                                    .iter()
-                                    .find(|node| node.id == input.to)
-                                    .cloned()
-                                    .unwrap();
-                                predicates.extend(ids(target, &to.node_ids));
-                                if let Some(entity) = to.entity.as_deref() {
-                                    let kind = self.column(
-                                        hop_relation,
-                                        if target_name == SOURCE_ID_COLUMN {
-                                            SOURCE_KIND_COLUMN
-                                        } else {
-                                            TARGET_KIND_COLUMN
-                                        },
-                                        Some(ontology::DataType::String),
-                                    );
-                                    predicates.push(compare(
-                                        CompareOp::Eq,
-                                        Expr::Column(kind),
-                                        literal(entity.to_string()),
-                                    ));
-                                }
+                                predicates.push(compare(
+                                    CompareOp::Eq,
+                                    Expr::Column(kind),
+                                    literal(entity.to_string()),
+                                ));
                             }
-                            predicates
-                        },
-                    );
+                        }
+                        predicates
+                    });
                     hops.push((hop_relation, scan));
                 }
                 let mut conditions = Vec::new();
@@ -1025,102 +932,95 @@ impl Builder {
                 });
                 arms.push(Plan::unary(
                     Operator::Project(columns),
-                    join(hops.into_iter().map(|hop| hop.1), conditions),
+                    Plan::join(hops.into_iter().map(|hop| hop.1), conditions),
                 ));
             }
-            filter(
-                Plan::unary(
-                    Operator::Bind(relation),
-                    Plan {
-                        operator: Operator::Union,
-                        inputs: arms,
-                    },
-                ),
-                {
-                    let (source, target) = input.direction.edge_columns();
-                    let source = self.column(relation, source, Some(ontology::DataType::Int));
-                    let target = self.column(relation, target, Some(ontology::DataType::Int));
-                    let from = self
-                        .catalog
-                        .input
-                        .nodes
-                        .iter()
-                        .find(|node| node.id == input.from)
-                        .cloned()
-                        .unwrap();
-                    let to = self
-                        .catalog
-                        .input
-                        .nodes
-                        .iter()
-                        .find(|node| node.id == input.to)
-                        .cloned()
-                        .unwrap();
-                    let mut predicates: Vec<_> = ids(source, &from.node_ids)
-                        .into_iter()
-                        .chain(ids(target, &to.node_ids))
-                        .collect();
-                    for (node, column_name, direction) in [
-                        (
-                            &from,
-                            ontology::constants::SOURCE_TAGS_COLUMN,
-                            ontology::DenormDirection::Source,
-                        ),
-                        (
-                            &to,
-                            ontology::constants::TARGET_TAGS_COLUMN,
-                            ontology::DenormDirection::Target,
-                        ),
-                    ] {
-                        let Some(entity) = node.entity.as_deref() else {
-                            continue;
-                        };
-                        for (property, filters) in &node.filters {
-                            let Some(definition) =
-                                self.catalog.ontology.denormalized_properties().iter().find(
-                                    |definition| {
-                                        definition.node_kind == entity
-                                            && definition.property_name == *property
-                                            && definition.direction == direction
-                                            && input.types.contains(&definition.relationship_kind)
-                                    },
-                                )
-                            else {
-                                continue;
-                            };
-                            let tag_key = definition.tag_key.clone();
-                            let list = self.column(
-                                relation,
-                                column_name,
-                                Some(ontology::DataType::String),
-                            );
-                            for filter in filters {
-                                let values: Vec<_> = match filter.value.as_ref() {
-                                    Some(serde_json::Value::Array(values)) => {
-                                        values.iter().collect()
-                                    }
-                                    Some(value) => vec![value],
-                                    None => continue,
-                                };
-                                predicates.push(Expr::ListContains {
-                                    list: Box::new(Expr::Column(list)),
-                                    values: values
-                                        .into_iter()
-                                        .map(|value| {
-                                            let value = value
-                                                .as_str()
-                                                .map(str::to_string)
-                                                .unwrap_or_else(|| value.to_string());
-                                            Value::String(format!("{}:{value}", tag_key))
-                                        })
-                                        .collect(),
-                                });
-                            }
-                        }
-                    }
-                    predicates
+            Plan::unary(
+                Operator::Bind(relation),
+                Plan {
+                    operator: Operator::Union,
+                    inputs: arms,
                 },
             )
+            .filter({
+                let (source, target) = input.direction.edge_columns();
+                let source = self.column(relation, source, Some(ontology::DataType::Int));
+                let target = self.column(relation, target, Some(ontology::DataType::Int));
+                let from = self
+                    .catalog
+                    .input
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == input.from)
+                    .cloned()
+                    .unwrap();
+                let to = self
+                    .catalog
+                    .input
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == input.to)
+                    .cloned()
+                    .unwrap();
+                let mut predicates: Vec<_> = ids(source, &from.node_ids)
+                    .into_iter()
+                    .chain(ids(target, &to.node_ids))
+                    .collect();
+                for (node, column_name, direction) in [
+                    (
+                        &from,
+                        ontology::constants::SOURCE_TAGS_COLUMN,
+                        ontology::DenormDirection::Source,
+                    ),
+                    (
+                        &to,
+                        ontology::constants::TARGET_TAGS_COLUMN,
+                        ontology::DenormDirection::Target,
+                    ),
+                ] {
+                    let Some(entity) = node.entity.as_deref() else {
+                        continue;
+                    };
+                    for (property, filters) in &node.filters {
+                        let Some(definition) =
+                            self.catalog.ontology.denormalized_properties().iter().find(
+                                |definition| {
+                                    definition.node_kind == entity
+                                        && definition.property_name == *property
+                                        && definition.direction == direction
+                                        && input.types.contains(&definition.relationship_kind)
+                                },
+                            )
+                        else {
+                            continue;
+                        };
+                        let tag_key = definition.tag_key.clone();
+                        let list =
+                            self.column(relation, column_name, Some(ontology::DataType::String));
+                        for filter in filters {
+                            let values: Vec<_> = match filter.value.as_ref() {
+                                Some(serde_json::Value::Array(values)) => values.iter().collect(),
+                                Some(value) => vec![value],
+                                None => continue,
+                            };
+                            predicates.push(Expr::ListContains {
+                                list: Box::new(Expr::Column(list)),
+                                values: values
+                                    .into_iter()
+                                    .map(|value| {
+                                        let value = value
+                                            .as_str()
+                                            .map(str::to_string)
+                                            .unwrap_or_else(|| value.to_string());
+                                        Value::String(format!("{}:{value}", tag_key))
+                                    })
+                                    .collect(),
+                            });
+                        }
+                    }
+                }
+                predicates
+            })
         };
         Ok(Edge {
             relation,
@@ -1163,12 +1063,8 @@ impl Builder {
         let mut predicates = self.filters(relation, &node.filters);
         predicates.extend(ids(id, &node.node_ids));
         if let Some(range) = &node.id_range {
-            predicates.push(compare(
-                CompareOp::Ge,
-                Expr::Column(id),
-                literal(range.start),
-            ));
-            predicates.push(compare(CompareOp::Le, Expr::Column(id), literal(range.end)));
+            predicates.push(Expr::from(id).ge(range.start));
+            predicates.push(Expr::from(id).le(range.end));
         }
         predicates
     }
@@ -1343,10 +1239,7 @@ impl Builder {
         .into_iter()
         .map(|(name, suffix, data_type)| {
             let column = self.column(edge.relation, name, Some(data_type));
-            NamedExpr {
-                expression: Expr::Column(column),
-                output: self.output(format!("{prefix}_{suffix}")),
-            }
+            self.named(column, format!("{prefix}_{suffix}"))
         })
         .collect();
         let is_multi_hop = matches!(self.catalog.relations[&edge.relation].origin, RelationOrigin::Edge { input: Some(input), .. } if self.catalog.input.relationships[input.0].hops.max > 1);
@@ -1449,12 +1342,20 @@ impl Builder {
             .insert(id, BoundOutput { name: name.into() });
         id
     }
+
+    fn named(&mut self, expression: impl Into<Expr>, name: impl Into<String>) -> NamedExpr {
+        NamedExpr {
+            expression: expression.into(),
+            output: self.output(name),
+        }
+    }
 }
 
 #[derive(Clone)]
 struct Node {
     relation: RelationId,
     input: InputNodeId,
+    id: ColumnId,
     plan: Plan<Logical>,
 }
 
@@ -1468,34 +1369,10 @@ struct Edge {
     plan: Plan<Logical>,
 }
 
-fn filter(plan: Plan<Logical>, predicates: Vec<Expr>) -> Plan<Logical> {
-    if predicates.is_empty() {
-        plan
-    } else {
-        Plan::unary(Operator::Filter(conjunction(predicates)), plan)
-    }
-}
-
-fn join(inputs: impl IntoIterator<Item = Plan<Logical>>, conditions: Vec<Expr>) -> Plan<Logical> {
-    let mut inputs: Vec<_> = inputs.into_iter().collect();
-    if inputs.len() == 1 {
-        inputs.pop().unwrap()
-    } else {
-        Plan {
-            operator: Operator::Join(conditions),
-            inputs,
-        }
-    }
-}
-
 fn ids(column: ColumnId, values: &[i64]) -> Vec<Expr> {
     match values {
         [] => vec![],
-        [value] => vec![compare(
-            CompareOp::Eq,
-            Expr::Column(column),
-            literal(*value),
-        )],
+        [value] => vec![Expr::from(column).eq(*value)],
         values => vec![Expr::In {
             value: Box::new(Expr::Column(column)),
             values: values.iter().copied().map(Value::Int).collect(),
@@ -1508,14 +1385,6 @@ fn requested(node: &InputNode) -> Vec<String> {
     match &node.columns {
         Some(ColumnSelection::List(columns)) => columns.clone(),
         _ => vec![],
-    }
-}
-
-fn conjunction(mut predicates: Vec<Expr>) -> Expr {
-    if predicates.len() == 1 {
-        predicates.pop().unwrap()
-    } else {
-        Expr::And(predicates)
     }
 }
 

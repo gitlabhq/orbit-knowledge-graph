@@ -162,6 +162,58 @@ pub enum Expr {
     },
 }
 
+impl Expr {
+    fn compare(self, op: CompareOp, right: impl Into<Self>) -> Self {
+        Self::Compare {
+            op,
+            left: Box::new(self),
+            right: Box::new(right.into()),
+        }
+    }
+
+    fn eq(self, right: impl Into<Self>) -> Self {
+        self.compare(CompareOp::Eq, right)
+    }
+
+    fn le(self, right: impl Into<Self>) -> Self {
+        self.compare(CompareOp::Le, right)
+    }
+
+    fn ge(self, right: impl Into<Self>) -> Self {
+        self.compare(CompareOp::Ge, right)
+    }
+}
+
+impl From<ColumnId> for Expr {
+    fn from(column: ColumnId) -> Self {
+        Self::Column(column)
+    }
+}
+
+impl From<OutputId> for Expr {
+    fn from(output: OutputId) -> Self {
+        Self::Output(output)
+    }
+}
+
+impl From<i64> for Expr {
+    fn from(value: i64) -> Self {
+        Self::Literal(Value::Int(value))
+    }
+}
+
+impl From<bool> for Expr {
+    fn from(value: bool) -> Self {
+        Self::Literal(Value::Bool(value))
+    }
+}
+
+impl From<String> for Expr {
+    fn from(value: String) -> Self {
+        Self::Literal(Value::String(value))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NamedExpr {
     pub expression: Expr,
@@ -234,6 +286,56 @@ impl<F: Flavor> Plan<F> {
         Self {
             operator,
             inputs: vec![input],
+        }
+    }
+
+    fn filter(self, mut predicates: Vec<Expr>) -> Self {
+        match predicates.len() {
+            0 => self,
+            1 => Self::unary(Operator::Filter(predicates.pop().unwrap()), self),
+            _ => Self::unary(Operator::Filter(Expr::And(predicates)), self),
+        }
+    }
+
+    fn project(self, columns: Vec<NamedExpr>) -> Self {
+        Self::unary(Operator::Project(columns), self)
+    }
+
+    fn aggregate(self, groups: Vec<NamedExpr>, metrics: Vec<NamedExpr>) -> Self {
+        Self::unary(Operator::Aggregate { groups, metrics }, self)
+    }
+
+    fn sort(self, keys: Vec<SortKey>) -> Self {
+        Self::unary(Operator::Sort(keys), self)
+    }
+
+    fn limit(self, count: u32) -> Self {
+        Self::unary(Operator::Limit(count), self)
+    }
+
+    fn union(inputs: Vec<Self>) -> Self {
+        Self {
+            operator: Operator::Union,
+            inputs,
+        }
+    }
+
+    fn union_or_single(mut inputs: Vec<Self>) -> Self {
+        match inputs.len() {
+            1 => inputs.pop().unwrap(),
+            _ => Self::union(inputs),
+        }
+    }
+
+    fn join(inputs: impl IntoIterator<Item = Self>, conditions: Vec<Expr>) -> Self {
+        let mut inputs: Vec<_> = inputs.into_iter().collect();
+        if inputs.len() == 1 {
+            inputs.pop().unwrap()
+        } else {
+            Self {
+                operator: Operator::Join(conditions),
+                inputs,
+            }
         }
     }
 
