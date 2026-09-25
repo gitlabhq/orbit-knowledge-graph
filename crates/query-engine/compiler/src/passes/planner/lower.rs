@@ -16,13 +16,13 @@ pub fn lower_clickhouse(
         &aliases,
         &physical_columns,
     )?;
-    lowered(bound, selected.candidate, aliases, query)
+    lowered(bound, selected.candidate, aliases, physical_columns, query)
 }
 
 pub fn lower_duckdb(bound: &BoundCatalog, selected: SelectedPlan<DuckDb>) -> Result<LoweredPlan> {
     let aliases = aliases_duckdb(bound, &selected.candidate.plan);
     let query = lower_duck(bound, selected.candidate.plan.clone(), &aliases)?;
-    lowered(bound, selected.candidate, aliases, query)
+    lowered(bound, selected.candidate, aliases, BTreeMap::new(), query)
 }
 
 fn aliases_clickhouse(
@@ -88,9 +88,12 @@ fn lower_ch(
                 ClickHouseAccess::Table(access) => {
                     TableRef::scan(access.layout.table.0, &aliases[&scan.relation])
                 }
-                ClickHouseAccess::EdgeTables(access) => {
-                    edge_tables(&access.layouts, &aliases[&scan.relation])
-                }
+                ClickHouseAccess::EdgeTables(access) => edge_tables(
+                    bound,
+                    scan.relation,
+                    &access.layouts,
+                    &aliases[&scan.relation],
+                ),
                 ClickHouseAccess::DenormalizedJoin(access) => {
                     TableRef::scan(access.layout.table.0, &aliases[&scan.relation])
                 }
@@ -143,7 +146,7 @@ fn lower_ch(
         Operator::Bind(relation) => Ok(Query {
             from: TableRef::subquery(
                 select_star(only_ch(bound, plan.inputs, aliases, physical_columns)?),
-                relation_alias(bound, relation),
+                format!("bound_{}", relation.0),
             ),
             ..Default::default()
         }),
@@ -221,7 +224,7 @@ fn lower_duck(
         Operator::Bind(relation) => Ok(Query {
             from: TableRef::subquery(
                 select_star(only_duck(bound, plan.inputs, aliases)?),
-                relation_alias(bound, relation),
+                format!("bound_{}", relation.0),
             ),
             ..Default::default()
         }),
@@ -251,13 +254,20 @@ fn lower_join_ch(
     let first = inputs
         .next()
         .ok_or_else(|| QueryError::Lowering("join needs an input".into()))?;
+    let mut available = relations_ch(&first);
     let mut query = lower_ch(bound, first, aliases, physical_columns)?;
     for input in inputs {
         let right_relations = relations_ch(&input);
+        let joined_relations = available.union(&right_relations).copied().collect();
+        let alias = visible_relation_ch(&input)
+            .and_then(|relation| aliases.get(&relation))
+            .cloned()
+            .unwrap_or_else(|| "right".into());
         let condition = join_condition_ch(
             bound,
             &conditions,
             &right_relations,
+            &joined_relations,
             aliases,
             physical_columns,
         )?;
@@ -266,10 +276,11 @@ fn lower_join_ch(
             query.from,
             TableRef::subquery(
                 select_star(lower_ch(bound, input, aliases, physical_columns)?),
-                "right",
+                alias,
             ),
             condition,
         );
+        available = joined_relations;
     }
     Ok(query)
 }
@@ -284,16 +295,29 @@ fn lower_join_duck(
     let first = inputs
         .next()
         .ok_or_else(|| QueryError::Lowering("join needs an input".into()))?;
+    let mut available = relations_duck(&first);
     let mut query = lower_duck(bound, first, aliases)?;
     for input in inputs {
         let right_relations = relations_duck(&input);
-        let condition = join_condition(bound, &conditions, &right_relations, aliases)?;
+        let joined_relations = available.union(&right_relations).copied().collect();
+        let alias = visible_relation_duck(&input)
+            .and_then(|relation| aliases.get(&relation))
+            .cloned()
+            .unwrap_or_else(|| "right".into());
+        let condition = join_condition(
+            bound,
+            &conditions,
+            &right_relations,
+            &joined_relations,
+            aliases,
+        )?;
         query.from = TableRef::join(
             JoinType::Inner,
             query.from,
-            TableRef::subquery(select_star(lower_duck(bound, input, aliases)?), "right"),
+            TableRef::subquery(select_star(lower_duck(bound, input, aliases)?), alias),
             condition,
         );
+        available = joined_relations;
     }
     Ok(query)
 }
@@ -383,11 +407,15 @@ fn join_condition(
     bound: &BoundCatalog,
     conditions: &[Expr],
     right_relations: &BTreeSet<RelationId>,
+    joined_relations: &BTreeSet<RelationId>,
     aliases: &HashMap<RelationId, String>,
 ) -> Result<ast::Expr> {
     Ok(conditions
         .iter()
-        .filter(|condition| !expression_relations(bound, condition).is_disjoint(right_relations))
+        .filter(|condition| {
+            let relations = expression_relations(bound, condition);
+            !relations.is_disjoint(right_relations) && relations.is_subset(joined_relations)
+        })
         .map(|condition| lower_expr(bound, condition, aliases))
         .collect::<Result<Vec<_>>>()?
         .into_iter()
@@ -399,12 +427,16 @@ fn join_condition_ch(
     bound: &BoundCatalog,
     conditions: &[Expr],
     right_relations: &BTreeSet<RelationId>,
+    joined_relations: &BTreeSet<RelationId>,
     aliases: &HashMap<RelationId, String>,
     physical_columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
 ) -> Result<ast::Expr> {
     Ok(conditions
         .iter()
-        .filter(|condition| !expression_relations(bound, condition).is_disjoint(right_relations))
+        .filter(|condition| {
+            let relations = expression_relations(bound, condition);
+            !relations.is_disjoint(right_relations) && relations.is_subset(joined_relations)
+        })
         .map(|condition| lower_expr_ch(bound, condition, aliases, physical_columns))
         .collect::<Result<Vec<_>>>()?
         .into_iter()
@@ -413,23 +445,59 @@ fn join_condition_ch(
 }
 
 fn relations_ch(plan: &Plan<ClickHouse>) -> BTreeSet<RelationId> {
-    let mut relations = BTreeSet::new();
-    visit_ch(plan, &mut |plan| {
-        if let Operator::Scan(scan) = &plan.operator {
-            relations.insert(scan.relation);
-        }
-    });
-    relations
+    match &plan.operator {
+        Operator::Bind(relation) => BTreeSet::from([*relation]),
+        Operator::Scan(scan) => BTreeSet::from([scan.relation]),
+        Operator::CurrentRows { .. }
+        | Operator::Filter(_)
+        | Operator::Project(_)
+        | Operator::Sort(_)
+        | Operator::Limit(_)
+        | Operator::SemiJoin(_) => plan.inputs.first().map(relations_ch).unwrap_or_default(),
+        _ => plan.inputs.iter().flat_map(relations_ch).collect(),
+    }
 }
 
 fn relations_duck(plan: &Plan<DuckDb>) -> BTreeSet<RelationId> {
-    let mut relations = BTreeSet::new();
-    visit_duck(plan, &mut |plan| {
-        if let Operator::Scan(scan) = &plan.operator {
-            relations.insert(scan.relation);
-        }
-    });
-    relations
+    match &plan.operator {
+        Operator::Bind(relation) => BTreeSet::from([*relation]),
+        Operator::Scan(scan) => BTreeSet::from([scan.relation]),
+        Operator::CurrentRows { .. }
+        | Operator::Filter(_)
+        | Operator::Project(_)
+        | Operator::Sort(_)
+        | Operator::Limit(_)
+        | Operator::SemiJoin(_) => plan.inputs.first().map(relations_duck).unwrap_or_default(),
+        _ => plan.inputs.iter().flat_map(relations_duck).collect(),
+    }
+}
+
+fn visible_relation_ch(plan: &Plan<ClickHouse>) -> Option<RelationId> {
+    match &plan.operator {
+        Operator::Bind(relation) => Some(*relation),
+        Operator::Scan(scan) => Some(scan.relation),
+        Operator::CurrentRows { .. }
+        | Operator::Filter(_)
+        | Operator::Project(_)
+        | Operator::Sort(_)
+        | Operator::Limit(_)
+        | Operator::SemiJoin(_) => plan.inputs.first().and_then(visible_relation_ch),
+        _ => None,
+    }
+}
+
+fn visible_relation_duck(plan: &Plan<DuckDb>) -> Option<RelationId> {
+    match &plan.operator {
+        Operator::Bind(relation) => Some(*relation),
+        Operator::Scan(scan) => Some(scan.relation),
+        Operator::CurrentRows { .. }
+        | Operator::Filter(_)
+        | Operator::Project(_)
+        | Operator::Sort(_)
+        | Operator::Limit(_)
+        | Operator::SemiJoin(_) => plan.inputs.first().and_then(visible_relation_duck),
+        _ => None,
+    }
 }
 
 fn expression_relations(bound: &BoundCatalog, expression: &Expr) -> BTreeSet<RelationId> {
@@ -655,7 +723,12 @@ fn lower_expr(
             let left = lower_expr(bound, left, aliases)?;
             let right = right.as_ref().map_or_else(
                 || ast::Expr::param(data_type_to_ch(data_type.as_ref()), serde_json::Value::Null),
-                |right| lower_expr(bound, right, aliases).unwrap(),
+                |right| match right.as_ref() {
+                    Expr::Literal(value) => {
+                        ast::Expr::param(data_type_to_ch(data_type.as_ref()), json_value(value))
+                    }
+                    right => lower_expr(bound, right, aliases).unwrap(),
+                },
             );
             match op {
                 FilterOp::IsNull => ast::Expr::unary(ast::Op::IsNull, left),
@@ -823,17 +896,38 @@ fn physical_columns(plan: &Plan<ClickHouse>) -> BTreeMap<ColumnId, (RelationId, 
     columns
 }
 
+fn table_aliases(table: &TableRef) -> Vec<String> {
+    match table {
+        TableRef::Scan { alias, .. }
+        | TableRef::Union { alias, .. }
+        | TableRef::Subquery { alias, .. } => vec![alias.clone()],
+        TableRef::Join { left, right, .. } => table_aliases(left)
+            .into_iter()
+            .chain(table_aliases(right))
+            .collect(),
+    }
+}
+
 fn lowered<B: Flavor>(
     bound: &BoundCatalog,
     candidate: Candidate<B>,
     aliases: HashMap<RelationId, String>,
+    physical_columns: BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
     query: Query,
 ) -> Result<LoweredPlan> {
     let columns: BTreeMap<_, _> = candidate
         .columns
         .columns
         .into_iter()
-        .map(|(id, expression)| Ok((id, lower_expr(bound, &expression, &aliases)?)))
+        .map(|(id, expression)| {
+            Ok((
+                id,
+                physical_columns.get(&id).map_or_else(
+                    || lower_expr(bound, &expression, &aliases),
+                    |(relation, column)| Ok(ast::Expr::col(&aliases[relation], &column.0)),
+                )?,
+            ))
+        })
         .collect::<Result<_>>()?;
     let nodes: BTreeMap<_, _> = candidate
         .outputs
@@ -848,7 +942,7 @@ fn lowered<B: Flavor>(
             ))
         })
         .collect::<Result<_>>()?;
-    let node_sources = nodes
+    let mut node_sources: HashMap<_, _> = nodes
         .iter()
         .filter_map(|(node, binding)| {
             let ast::Expr::Column { table, column } = &binding.primary_key else {
@@ -860,6 +954,46 @@ fn lowered<B: Flavor>(
             ))
         })
         .collect();
+    let top_level_aliases: BTreeSet<_> = table_aliases(&query.from).into_iter().collect();
+    node_sources.retain(|_, (alias, _)| top_level_aliases.contains(alias));
+    for (relation, metadata) in &bound.relations {
+        let RelationOrigin::Edge {
+            input: Some(input),
+            depth: None,
+            hop: None,
+        } = metadata.origin
+        else {
+            continue;
+        };
+        let relationship = &bound.input.relationships[input.0];
+        let (source, target) = relationship.direction.edge_columns();
+        for (node, column) in [(&relationship.from, source), (&relationship.to, target)] {
+            if node_sources.contains_key(node) {
+                continue;
+            }
+            let Some(column_id) = bound.column_ids.get(&ColumnKey {
+                relation: *relation,
+                name: column.into(),
+            }) else {
+                continue;
+            };
+            let Some(expression) = physical_columns
+                .get(column_id)
+                .map(|(relation, column)| ast::Expr::col(&aliases[relation], &column.0))
+                .or_else(|| {
+                    aliases
+                        .get(relation)
+                        .map(|alias| ast::Expr::col(alias, column))
+                })
+            else {
+                continue;
+            };
+            let ast::Expr::Column { table, column } = expression else {
+                continue;
+            };
+            node_sources.insert(node.clone(), (table, column));
+        }
+    }
     let edges = bound
         .input
         .relationships
@@ -927,21 +1061,34 @@ fn stable_order(
                     )),
                 ]
             }),
-        _ => node_sources
-            .values()
+        _ => bound
+            .input
+            .nodes
+            .iter()
+            .filter_map(|node| node_sources.get(&node.id))
             .map(|(alias, column)| OrderExpr::asc(ast::Expr::col(alias, column)))
             .collect(),
     }
 }
 
-fn edge_tables(layouts: &[TableLayout], alias: &str) -> TableRef {
+fn edge_tables(
+    bound: &BoundCatalog,
+    relation: RelationId,
+    layouts: &[TableLayout],
+    alias: &str,
+) -> TableRef {
     match layouts {
         [layout] => TableRef::scan(&layout.table.0, alias),
         _ => TableRef::union_all(
             layouts
                 .iter()
                 .map(|layout| Query {
-                    select: vec![SelectExpr::star()],
+                    select: bound
+                        .columns
+                        .values()
+                        .filter(|column| column.relation == relation)
+                        .map(|column| SelectExpr::col(alias, &column.name))
+                        .collect(),
                     from: TableRef::scan(&layout.table.0, alias),
                     ..Default::default()
                 })
@@ -1030,6 +1177,13 @@ fn filter_op(op: FilterOp) -> ast::Op {
 fn relation_alias(bound: &BoundCatalog, relation: RelationId) -> String {
     match bound.relations[&relation].origin {
         RelationOrigin::Node { input } => bound.input.nodes[input.0].id.clone(),
+        RelationOrigin::Edge {
+            input: Some(input),
+            depth: None,
+            hop: None,
+        } if bound.input.relationships[input.0].hops.max > 1 => {
+            format!("bound_{}", relation.0)
+        }
         RelationOrigin::Edge {
             input: Some(input), ..
         } => format!("e{}", input.0),

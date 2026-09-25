@@ -31,7 +31,6 @@ pub fn plan_clickhouse(
     if let Some(candidate) = foreign_key_candidate(&catalog, ordinary.clone()) {
         candidates.insert(candidate);
     }
-    candidates.insert(text_index_candidate(&catalog, ordinary.clone()));
     let edge_property = edge_property_candidate(&catalog, ordinary);
     let edge_count = bound
         .relations
@@ -133,43 +132,6 @@ fn replace_with_denormalized(
     plan
 }
 
-fn text_index_candidate(
-    catalog: &BackendCatalog<'_, ClickHouse>,
-    mut candidate: Candidate<ClickHouse>,
-) -> Candidate<ClickHouse> {
-    let indexed: BTreeSet<_> = catalog
-        .facts
-        .text_indexes
-        .iter()
-        .map(|index| index.column)
-        .collect();
-    candidate.plan = candidate
-        .plan
-        .map_expressions(&mut |expression| match expression {
-            Expr::Filter {
-                op: FilterOp::Contains,
-                left,
-                right: Some(right),
-                ..
-            } if matches!(left.as_ref(), Expr::Column(column) if indexed.contains(column)) => {
-                if let Expr::Literal(token) = *right {
-                    Expr::TokenMatch { value: left, token }
-                } else {
-                    Expr::Filter {
-                        op: FilterOp::Contains,
-                        left,
-                        right: Some(right),
-                        data_type: Some(ontology::DataType::String),
-                    }
-                }
-            }
-            expression => expression,
-        });
-    candidate.cost = plan_cost(&candidate.plan);
-    candidate.cost.residual_filters = candidate.cost.residual_filters.saturating_sub(1);
-    candidate
-}
-
 fn edge_property_candidate(
     catalog: &BackendCatalog<'_, ClickHouse>,
     mut candidate: Candidate<ClickHouse>,
@@ -266,18 +228,35 @@ fn foreign_key_candidate(
     mut candidate: Candidate<ClickHouse>,
 ) -> Option<Candidate<ClickHouse>> {
     let bound = catalog.bound;
-    let expected = bound
-        .relations
-        .values()
-        .filter(|metadata| matches!(metadata.origin, RelationOrigin::Edge { input: Some(_), .. }))
-        .count();
-    if catalog.facts.foreign_keys.len() != expected {
+    let mut required = BTreeSet::new();
+    candidate.plan.visit(&mut |plan| {
+        if let Operator::Scan(scan) = &plan.operator
+            && matches!(
+                bound.relations[&scan.relation].origin,
+                RelationOrigin::Edge { input: Some(_), .. }
+            )
+        {
+            required.insert(scan.relation);
+        }
+    });
+    let available: BTreeSet<_> = catalog
+        .facts
+        .foreign_keys
+        .iter()
+        .map(|access| access.relationship)
+        .collect();
+    if required.is_empty() || !required.is_subset(&available) {
         return None;
     }
     let mut substitutions = BTreeMap::new();
     let mut relationships = BTreeSet::new();
     let mut join_conditions = Vec::new();
-    for access in &catalog.facts.foreign_keys {
+    for access in catalog
+        .facts
+        .foreign_keys
+        .iter()
+        .filter(|access| required.contains(&access.relationship))
+    {
         let holder_column = bound.column_ids.get(&ColumnKey {
             relation: access.holder,
             name: access.column.0.clone(),

@@ -4,6 +4,7 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 pub fn optimize(mut bound: BoundCatalog, mut logical: LogicalPlan) -> (BoundCatalog, LogicalPlan) {
     elide_scope_implied_relationship(&bound, &mut logical);
     prune_fk_aggregation_leaves(&mut bound, &mut logical);
+    defer_traversal_outputs(&bound, &mut logical);
     if bound
         .input
         .relationships
@@ -12,19 +13,60 @@ pub fn optimize(mut bound: BoundCatalog, mut logical: LogicalPlan) -> (BoundCata
     {
         return (bound, logical);
     }
-    if bound.input.query_type != crate::input::QueryType::Aggregation {
-        loop {
-            let previous = logical.root.clone();
-            logical.root = rewrite(logical.root, &mut bound, BTreeSet::new());
-            if logical.root == previous {
-                break;
-            }
+    loop {
+        let previous = logical.root.clone();
+        logical.root = rewrite(logical.root, &mut bound, BTreeSet::new());
+        if logical.root == previous {
+            break;
         }
     }
     if matches!(bound.input.query_type, crate::input::QueryType::Traversal) {
         logical.root = add_sip(logical.root, &mut bound);
     }
     (bound, logical)
+}
+
+fn defer_traversal_outputs(bound: &BoundCatalog, logical: &mut LogicalPlan) {
+    if bound.input.query_type != crate::input::QueryType::Traversal
+        || bound.input.relationships.is_empty()
+        || bound
+            .input
+            .relationships
+            .iter()
+            .all(|relationship| relationship.fk_column.is_some())
+    {
+        return;
+    }
+    let deferred: BTreeSet<_> = bound
+        .input
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| node.filters.is_empty())
+        .map(|(index, _)| InputNodeId(index))
+        .collect();
+    logical.root = remove_deferred_outputs(logical.root.clone(), bound, &deferred);
+}
+
+fn remove_deferred_outputs(
+    mut plan: Plan<Logical>,
+    bound: &BoundCatalog,
+    deferred: &BTreeSet<InputNodeId>,
+) -> Plan<Logical> {
+    plan.inputs = plan
+        .inputs
+        .into_iter()
+        .map(|input| remove_deferred_outputs(input, bound, deferred))
+        .collect();
+    if let Operator::Project(columns) = &mut plan.operator {
+        columns.retain(|column| {
+            let Expr::Column(id) = column.expression else {
+                return true;
+            };
+            !matches!(bound.relations[&bound.columns[&id].relation].origin, RelationOrigin::Node { input } if deferred.contains(&input))
+        });
+    }
+    plan
 }
 
 fn prune_fk_aggregation_leaves(bound: &mut BoundCatalog, logical: &mut LogicalPlan) {
@@ -406,6 +448,21 @@ fn rewrite(
             continue;
         };
         let node = &bound.input.nodes[node_index];
+        let elevated = bound
+            .input
+            .entity_auth
+            .get(node.entity.as_deref().unwrap_or_default())
+            .is_some_and(|auth| {
+                auth.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL
+            });
+        if bound.input.query_type == crate::input::QueryType::Aggregation
+            && (!elevated
+                || !node.filters.is_empty()
+                || node.id_range.is_some()
+                || node.node_ids.is_empty())
+        {
+            continue;
+        }
         if bound.input.query_type == crate::input::QueryType::Aggregation
             && bound
                 .input

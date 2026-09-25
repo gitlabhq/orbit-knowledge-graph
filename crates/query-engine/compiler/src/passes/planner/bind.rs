@@ -329,7 +329,7 @@ impl Builder {
                 output: self.output(crate::constants::relationship_type_column()),
             },
             NamedExpr {
-                expression: literal(outgoing),
+                expression: literal(i64::from(outgoing)),
                 output: self.output(crate::constants::neighbor_is_outgoing_column()),
             },
             NamedExpr {
@@ -621,7 +621,7 @@ impl Builder {
                         data_type: Some(ontology::DataType::String),
                     })
                     .collect();
-                filter(current, predicates)
+                filter(current, vec![Expr::Or(predicates)])
             };
             let properties = requested(&input)
                 .into_iter()
@@ -975,100 +975,98 @@ impl Builder {
                     join(hops.into_iter().map(|hop| hop.1), conditions),
                 ));
             }
-            Plan::unary(
-                Operator::Bind(relation),
-                filter(
+            filter(
+                Plan::unary(
+                    Operator::Bind(relation),
                     Plan {
                         operator: Operator::Union,
                         inputs: arms,
                     },
-                    {
-                        let (source, target) = input.direction.edge_columns();
-                        let source = self.column(relation, source, Some(ontology::DataType::Int));
-                        let target = self.column(relation, target, Some(ontology::DataType::Int));
-                        let from = self
-                            .catalog
-                            .input
-                            .nodes
-                            .iter()
-                            .find(|node| node.id == input.from)
-                            .cloned()
-                            .unwrap();
-                        let to = self
-                            .catalog
-                            .input
-                            .nodes
-                            .iter()
-                            .find(|node| node.id == input.to)
-                            .cloned()
-                            .unwrap();
-                        let mut predicates: Vec<_> = ids(source, &from.node_ids)
-                            .into_iter()
-                            .chain(ids(target, &to.node_ids))
-                            .collect();
-                        for (node, column_name, direction) in [
-                            (
-                                &from,
-                                ontology::constants::SOURCE_TAGS_COLUMN,
-                                ontology::DenormDirection::Source,
-                            ),
-                            (
-                                &to,
-                                ontology::constants::TARGET_TAGS_COLUMN,
-                                ontology::DenormDirection::Target,
-                            ),
-                        ] {
-                            let Some(entity) = node.entity.as_deref() else {
-                                continue;
-                            };
-                            for (property, filters) in &node.filters {
-                                let Some(definition) = self
-                                    .catalog
-                                    .ontology
-                                    .denormalized_properties()
-                                    .iter()
-                                    .find(|definition| {
+                ),
+                {
+                    let (source, target) = input.direction.edge_columns();
+                    let source = self.column(relation, source, Some(ontology::DataType::Int));
+                    let target = self.column(relation, target, Some(ontology::DataType::Int));
+                    let from = self
+                        .catalog
+                        .input
+                        .nodes
+                        .iter()
+                        .find(|node| node.id == input.from)
+                        .cloned()
+                        .unwrap();
+                    let to = self
+                        .catalog
+                        .input
+                        .nodes
+                        .iter()
+                        .find(|node| node.id == input.to)
+                        .cloned()
+                        .unwrap();
+                    let mut predicates: Vec<_> = ids(source, &from.node_ids)
+                        .into_iter()
+                        .chain(ids(target, &to.node_ids))
+                        .collect();
+                    for (node, column_name, direction) in [
+                        (
+                            &from,
+                            ontology::constants::SOURCE_TAGS_COLUMN,
+                            ontology::DenormDirection::Source,
+                        ),
+                        (
+                            &to,
+                            ontology::constants::TARGET_TAGS_COLUMN,
+                            ontology::DenormDirection::Target,
+                        ),
+                    ] {
+                        let Some(entity) = node.entity.as_deref() else {
+                            continue;
+                        };
+                        for (property, filters) in &node.filters {
+                            let Some(definition) =
+                                self.catalog.ontology.denormalized_properties().iter().find(
+                                    |definition| {
                                         definition.node_kind == entity
                                             && definition.property_name == *property
                                             && definition.direction == direction
                                             && input.types.contains(&definition.relationship_kind)
-                                    })
-                                else {
-                                    continue;
+                                    },
+                                )
+                            else {
+                                continue;
+                            };
+                            let tag_key = definition.tag_key.clone();
+                            let list = self.column(
+                                relation,
+                                column_name,
+                                Some(ontology::DataType::String),
+                            );
+                            for filter in filters {
+                                let values: Vec<_> = match filter.value.as_ref() {
+                                    Some(serde_json::Value::Array(values)) => {
+                                        values.iter().collect()
+                                    }
+                                    Some(value) => vec![value],
+                                    None => continue,
                                 };
-                                let tag_key = definition.tag_key.clone();
-                                let list = self.column(
-                                    relation,
-                                    column_name,
-                                    Some(ontology::DataType::String),
-                                );
-                                for filter in filters {
-                                    let values: Vec<_> = match filter.value.as_ref() {
-                                        Some(serde_json::Value::Array(values)) => {
-                                            values.iter().collect()
-                                        }
-                                        Some(value) => vec![value],
-                                        None => continue,
-                                    };
-                                    predicates.push(Expr::ListContains {
-                                        list: Box::new(Expr::Column(list)),
-                                        values: values
-                                            .into_iter()
-                                            .map(|value| {
-                                                let value = value
-                                                    .as_str()
-                                                    .map(str::to_string)
-                                                    .unwrap_or_else(|| value.to_string());
-                                                Value::String(format!("{}:{value}", tag_key))
-                                            })
-                                            .collect(),
-                                    });
-                                }
+                                predicates.push(Expr::ListContains {
+                                    list: Box::new(Expr::Column(list)),
+                                    values: values
+                                        .into_iter()
+                                        .map(|value| {
+                                            let value = value
+                                                .as_str()
+                                                .map(str::to_string)
+                                                .unwrap_or_else(|| value.to_string());
+                                            Value::String(format!("{}:{value}", tag_key))
+                                        })
+                                        .collect(),
+                                });
                             }
                         }
-                        predicates
-                    },
-                ),
+                    }
+                    predicates
+                },
             )
         };
         Ok(Edge {
@@ -1242,7 +1240,28 @@ impl Builder {
 
     fn node_outputs(&mut self, node: &Node) -> Vec<NamedExpr> {
         let input = self.catalog.input.nodes[node.input.0].clone();
-        requested(&input)
+        let mut columns = requested(&input);
+        for virtual_column in &input.virtual_columns {
+            let Some(entity) = input.entity.as_deref() else {
+                continue;
+            };
+            let Some(field) = self.catalog.ontology.get_node(entity).and_then(|entity| {
+                entity
+                    .fields
+                    .iter()
+                    .find(|field| field.name == virtual_column.column_name)
+            }) else {
+                continue;
+            };
+            if let ontology::FieldSource::Virtual(source) = &field.source {
+                for dependency in &source.depends_on {
+                    if !columns.contains(dependency) {
+                        columns.push(dependency.clone());
+                    }
+                }
+            }
+        }
+        columns
             .into_iter()
             .map(|name| {
                 let column = self.column(node.relation, &name, None);
