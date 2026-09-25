@@ -70,6 +70,7 @@ lint:prose:
     - uv run --quiet scripts/linting/prose_lint_test.py
     - |
       if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1
         uv run --quiet scripts/linting/prose_lint.py --diff-base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
       else
         uv run --quiet scripts/linting/prose_lint.py --all
