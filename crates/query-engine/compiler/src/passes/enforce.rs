@@ -219,7 +219,7 @@ pub fn enforce_role_scans(
         let Some(entity) = input_node.entity.as_deref() else {
             continue;
         };
-        if query.selects_alias(&format!("{}_{}", input_node.id, DEFAULT_PRIMARY_KEY)) {
+        if alias_exists_in_from(&query.from, &input_node.id) {
             continue;
         }
         let elevated = input.entity_auth.get(entity).is_some_and(|auth| {
