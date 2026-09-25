@@ -5,7 +5,6 @@ use ontology::EnumType;
 use ontology::Ontology;
 use query_data_model::ClickHouseDataModel;
 use query_data_model::EntityAuthConfig;
-use query_data_model::QueryBackendCatalog;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
@@ -29,11 +28,7 @@ pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -
         let entity_record = model
             .entity(entity)
             .ok_or_else(|| QueryError::AllowlistRejected(format!("unknown entity '{entity}'")))?;
-        if model
-            .query_backend()
-            .entity_table(entity_record.id)
-            .is_none()
-        {
+        if model.entity_table(entity).is_none() {
             return Err(QueryError::AllowlistRejected(format!(
                 "entity '{entity}' is not available in this data model"
             )));

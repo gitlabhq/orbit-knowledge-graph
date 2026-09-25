@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use ontology::VirtualSource;
 #[cfg(test)]
 use ontology::{FieldSource, Ontology};
-use query_data_model::{PropertyRealization, QueryAuthorizationCatalog, QueryBackendCatalog};
+use query_data_model::PropertyRealization;
 
 use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
@@ -232,7 +232,7 @@ fn build_dynamic_specs(
         .entities()
         .filter_map(|entity| {
             let name = entity.name.as_str();
-            model.query_backend().entity_table(entity.id)?;
+            model.entity_table(name)?;
 
             let admin_only: HashSet<&str> = if security_ctx.admin {
                 HashSet::new()
@@ -240,7 +240,7 @@ fn build_dynamic_specs(
                 entity
                     .properties
                     .iter()
-                    .filter(|property| model.query_authorization().is_admin_only(**property))
+                    .filter(|property| model.property_is_admin_only(**property))
                     .map(|property| model.graph().property(*property).name.as_str())
                     .collect()
             };
@@ -285,11 +285,11 @@ fn build_dynamic_specs(
 
             Some(DynamicEntityColumns {
                 entity_type: name.to_string(),
-                destination_table: model.query_backend().entity_table(entity.id)?.to_string(),
+                destination_table: model.entity_table(name)?.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: model.query_backend().entity_has_traversal_path(entity.id),
+                has_traversal_path: model.entity_has_traversal_path(name),
             })
         })
         .collect()

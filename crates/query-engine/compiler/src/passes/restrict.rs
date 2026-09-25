@@ -15,7 +15,6 @@ use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 #[cfg(test)]
 use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::QueryAuthorizationCatalog;
 use std::collections::HashSet;
 
 fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
@@ -103,10 +102,7 @@ fn enforce_traversal_path_filters(
         // Entities without a redaction role use the normal traversal-path floor:
         // Rails only sends Reporter+ paths, and stricter entities override this.
         let min_role = model
-            .query_authorization()
-            .entity_auth()
-            .get(entity)
-            .map(|policy| policy.required_access_level)
+            .entity_minimum_access_level(entity)
             .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
         let eligible_paths = security_ctx.paths_at_least(min_role);
         for tp_filter in tp_filters {

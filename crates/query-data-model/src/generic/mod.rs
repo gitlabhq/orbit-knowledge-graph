@@ -149,6 +149,10 @@ pub trait QueryDataModel {
         self.query_backend().property_column(property.id)
     }
 
+    fn property_is_stored(&self, property: PropertyId) -> bool {
+        self.query_backend().property_column(property).is_some()
+    }
+
     fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
         self.query_backend().default_properties(entity)
     }
@@ -172,6 +176,23 @@ pub trait QueryDataModel {
     fn admin_only(&self, entity: &str, property: &str) -> bool {
         self.property(entity, property)
             .is_some_and(|property| self.query_authorization().is_admin_only(property.id))
+    }
+
+    fn entity_auth(&self) -> &HashMap<String, crate::EntityAuthConfig> {
+        self.query_authorization().entity_auth()
+    }
+
+    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId> {
+        self.query_authorization().anchor_foreign_keys()
+    }
+
+    fn entity_minimum_access_level(&self, entity: &str) -> Option<u32> {
+        let entity = self.graph().entity_id(entity)?;
+        self.query_authorization().required_access_level(entity)
+    }
+
+    fn property_is_admin_only(&self, property: PropertyId) -> bool {
+        self.query_authorization().is_admin_only(property)
     }
 
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {

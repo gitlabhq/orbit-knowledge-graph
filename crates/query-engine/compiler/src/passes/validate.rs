@@ -28,7 +28,6 @@ use orbit_utils::traversal_path::TraversalPath;
 #[cfg(test)]
 use query_data_model::ClickHouseDataModel;
 use query_data_model::PropertyId;
-use query_data_model::QueryBackendCatalog;
 
 use super::errors::format_schema_error;
 
@@ -754,7 +753,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 .types
                 .first()
                 .and_then(|kind| model.relationship_table(kind))
-                .unwrap_or_else(|| model.query_backend().default_edge_table());
+                .unwrap_or_else(|| model.default_edge_table());
             for (prop, filters) in &rel.filters {
                 let Some(data_type) = self.model.get().table_column_type(edge_table, prop) else {
                     return Err(QueryError::Validation(format!(

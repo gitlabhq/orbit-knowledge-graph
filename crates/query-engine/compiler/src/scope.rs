@@ -1,4 +1,3 @@
-use query_data_model::QueryAuthorizationCatalog;
 use std::collections::HashMap;
 
 use ontology::TraversalPathKind;
@@ -77,7 +76,6 @@ pub fn derive_scope_proofs(
         return HashMap::new();
     }
     let anchor_fks: Vec<_> = model
-        .query_authorization()
         .anchor_foreign_keys()
         .iter()
         .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))

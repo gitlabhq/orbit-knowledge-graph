@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ontology::DataType;
-use query_data_model::{PropertyRealization, QueryBackendCatalog};
+use query_data_model::PropertyRealization;
 
 use crate::ast::{Expr, Node, Op, SelectExpr};
 use crate::input::{ColumnSelection, Input};
@@ -35,8 +35,7 @@ pub fn apply_text_excerpts(
                 .iter()
                 .map(|property| model.graph().property(*property))
                 .filter(|property| {
-                    model.query_backend().property_column(property.id).is_some()
-                        && property.data_type == DataType::String
+                    model.property_is_stored(property.id) && property.data_type == DataType::String
                 })
                 .map(|property| property.name.clone())
                 .collect();
