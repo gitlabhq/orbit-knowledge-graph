@@ -147,8 +147,9 @@ mod tests {
         assert_eq!(get("feature_qualified_name"), Some("orbit_mcp"));
     }
 
-    // CDot normalizes the realm to `self_managed` and answers 402 `realm_mismatch` to anything
-    // else, so Orbit's internal "SM" must never replace the claim value.
+    // The quota check sends the realm claim exactly as Rails signed it (`self-managed`), which
+    // is the value CustomersDot expects. It must never be replaced by `constants::REALM_SM`
+    // ("SM"), the realm Orbit writes into billing events.
     #[test]
     fn self_managed_realm_claim_is_sent_verbatim() {
         let inputs = inputs_with(Some("self-managed"), Some("guid-1"), Some("uid-1"), None);

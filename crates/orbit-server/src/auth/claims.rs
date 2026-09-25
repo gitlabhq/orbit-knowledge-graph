@@ -104,25 +104,10 @@ fn deserialize_source_type<'de, D: Deserializer<'de>>(d: D) -> Result<SourceType
     })
 }
 
-const LICENSE_CHECKSUM_LEN: usize = 64;
-
-// A malformed checksum drops to `None` instead of failing: serde errors can echo the
-// offending value, and `grpc::auth` puts JWT validation errors in logs and the status.
 fn deserialize_license_checksum<'de, D: Deserializer<'de>>(
     d: D,
 ) -> Result<Option<SecretString>, D::Error> {
-    match Option::<serde_json::Value>::deserialize(d)? {
-        None => Ok(None),
-        Some(serde_json::Value::String(s)) if is_license_checksum(&s) => Ok(Some(s.into())),
-        Some(_) => {
-            tracing::warn!("license_checksum claim malformed; ignoring");
-            Ok(None)
-        }
-    }
-}
-
-fn is_license_checksum(s: &str) -> bool {
-    s.len() == LICENSE_CHECKSUM_LEN && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    Ok(Option::<String>::deserialize(d)?.map(SecretString::from))
 }
 
 #[cfg(test)]
@@ -185,22 +170,6 @@ mod tests {
     fn absent_or_null_license_checksum_is_none() {
         assert!(parse_claims(None).license_checksum.is_none());
         assert!(parse_claims(Some(Value::Null)).license_checksum.is_none());
-    }
-
-    #[test]
-    fn malformed_license_checksum_is_dropped_without_failing() {
-        let malformed = [
-            json!(&CHECKSUM[..63]),
-            json!(format!("{CHECKSUM}0")),
-            json!(CHECKSUM.to_uppercase()),
-            json!(CHECKSUM.replacen('0', "g", 1)),
-            json!(42),
-            json!({ "value": CHECKSUM }),
-        ];
-        for value in malformed {
-            let claims = parse_claims(Some(value.clone()));
-            assert!(claims.license_checksum.is_none(), "accepted {value}");
-        }
     }
 
     #[test]
