@@ -479,6 +479,8 @@ impl Builder {
                 ));
             }
             let mut conditions = Vec::new();
+            let scoped_by_path = self.catalog.input.nodes[start].has_traversal_path
+                && self.catalog.input.nodes[end].has_traversal_path;
             let start_id = self.column(
                 start_node.relation,
                 DEFAULT_PRIMARY_KEY,
@@ -499,6 +501,23 @@ impl Builder {
                     Expr::Column(left),
                     Expr::Column(right),
                 ));
+                if scoped_by_path {
+                    let left_path = self.column(
+                        pair[0].0,
+                        ontology::constants::TRAVERSAL_PATH_COLUMN,
+                        Some(ontology::DataType::String),
+                    );
+                    let right_path = self.column(
+                        pair[1].0,
+                        ontology::constants::TRAVERSAL_PATH_COLUMN,
+                        Some(ontology::DataType::String),
+                    );
+                    conditions.push(compare(
+                        CompareOp::Eq,
+                        Expr::Column(left_path),
+                        Expr::Column(right_path),
+                    ));
+                }
             }
             let last_target = self.column(
                 edges.last().unwrap().0,
