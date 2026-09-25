@@ -38,9 +38,11 @@ async fn global_indexing() {
         partitioning::unfinished_partition_blocks_parent_consolidation,
         partitioning::present_parent_takes_single_pull_path_and_honors_floor,
         partitioning::span_smaller_than_partition_count_falls_back_to_single_run,
-        first_pass::completed_first_pass_keeps_its_attempts_and_sets_indexed_at,
+        first_pass::completed_first_pass_resets_attempts_and_sets_indexed_at,
         first_pass::unfinished_first_pass_counts_each_attempt,
-        first_pass::incremental_run_records_no_attempt,
+        first_pass::incremental_run_keeps_indexed_at_and_ends_with_zero_attempts,
+        first_pass::stale_page_write_after_completion_keeps_indexed_at,
+        first_pass::tombstoned_key_does_not_resurrect_an_old_completion,
     );
 }
 

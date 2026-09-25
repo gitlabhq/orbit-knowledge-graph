@@ -332,9 +332,9 @@ A run touches three write targets, and each mode (`RunDurability::for_mode`) pic
 | Data pages (graph tables) | durable: `async_insert=1, wait_for_async_insert=1` | durable: same |
 | Per-page progress checkpoint | fire-and-forget — `async_insert=1, wait_for_async_insert=0` | fire-and-forget |
 | Completion checkpoint | durable | fire-and-forget |
-| Attempt count (`attempts`) | durable, before the first page | not written |
+| Attempt count (`attempts`) | durable, before the first page; the completion write resets it to 0 | fire-and-forget, before the first page |
 
-Only the completion durability differs, and it follows what a lost write costs. A full load's completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so a lost completion just re-derives next dispatch. Data pages are durable in both modes, so a page's encoded insert body stays in flight until ClickHouse has flushed its async-insert buffer. Progress checkpoints are always best-effort. A lost one only re-reads from the prior page (`save_progress` hardcodes fire-and-forget; it is not part of `RunDurability`).
+Only the completion durability differs, and it follows what a lost write costs. A full load's completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so a lost completion just re-derives next dispatch. Data pages are durable in both modes, so a page's encoded insert body stays in flight until ClickHouse has flushed its async-insert buffer. Progress checkpoints are always best-effort. A lost one only re-reads from the prior page (the per-page save hardcodes fire-and-forget; it is not part of `RunDurability`).
 
 `FireAndForget` and `Durable` both pin `async_insert=1` to coalesce parts and differ only on `wait_for_async_insert`. A third state exists in the type (`data_writes` is an `Option`, and `None` imposes nothing and inherits the configured `insert_settings`). But neither mode currently selects it.
 
@@ -347,11 +347,15 @@ CREATE TABLE IF NOT EXISTS checkpoint (
     key String,
     watermark DateTime64(6, 'UTC'),
     cursor_values String DEFAULT '',
+    attempts Int64 DEFAULT 0,
+    indexed_at Nullable(DateTime64(6, 'UTC')),
     _version DateTime64(6, 'UTC') DEFAULT now64()
 ) ENGINE = ReplacingMergeTree(_version) ORDER BY (key);
 ```
 
-Three states: no row means first run (start from epoch). Empty `cursor_values` means the plan finished its last run cleanly. Non-empty `cursor_values` means the plan was interrupted mid-pagination and should resume from that cursor.
+Three states: no row, or no `indexed_at`, means first pass (start from epoch). Empty `cursor_values` with `indexed_at` means the plan finished its last run cleanly. Non-empty `cursor_values` means the plan was interrupted mid-pagination and should resume from that cursor.
+
+Readers take the newest row per key by `_version`. The exception is `indexed_at`: it is the newest value written since the last tombstone. A page write from an overlapping run cannot hide a completion.
 
 Position keys encode scope and entity, e.g. `"global.User"` or `"ns.42.Project"` for namespace 42's Project plan.
 

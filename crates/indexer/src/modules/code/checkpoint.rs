@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::observer::IndexingMode;
 use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
@@ -48,18 +49,35 @@ impl CodeCheckpoint {
         }
     }
 
-    pub fn is_indexed(&self) -> bool {
-        self.indexed_at.is_some()
+    pub fn indexing_mode(&self) -> IndexingMode {
+        match self.indexed_at {
+            Some(_) => IndexingMode::Incremental,
+            None => IndexingMode::Full,
+        }
+    }
+
+    pub fn is_indexed_through(&self, task_id: i64) -> bool {
+        self.indexed_at.is_some() && self.last_task_id >= task_id
     }
 
     pub fn start_attempt(&mut self) {
         self.attempts += 1;
     }
 
-    pub fn complete(&mut self, task_id: i64, commit: Option<String>, indexed_at: DateTime<Utc>) {
+    pub fn complete(
+        &mut self,
+        task_id: i64,
+        commit_sha: Option<String>,
+        indexed_at: DateTime<Utc>,
+    ) {
         self.last_task_id = task_id;
-        self.last_commit = commit;
+        self.last_commit = commit_sha;
+        self.attempts = 0;
         self.indexed_at = Some(indexed_at);
+    }
+
+    pub fn complete_empty_repository(&mut self, task_id: i64) {
+        self.complete(task_id, None, Utc::now());
     }
 }
 
@@ -73,14 +91,6 @@ pub trait CodeCheckpointStore: Send + Sync {
     ) -> Result<Option<CodeCheckpoint>, CheckpointError>;
 
     async fn save(&self, checkpoint: &CodeCheckpoint) -> Result<(), CheckpointError>;
-
-    async fn save_started(&self, checkpoint: &mut CodeCheckpoint) -> Result<(), CheckpointError> {
-        if checkpoint.is_indexed() {
-            return Ok(());
-        }
-        checkpoint.start_attempt();
-        self.save(checkpoint).await
-    }
 }
 
 pub(crate) type CheckpointClient = Arc<ArrowClickHouseClient>;
@@ -164,12 +174,15 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             SELECT
                 argMax(last_task_id, _version) as last_task_id,
                 argMax(last_commit, _version) as last_commit,
-                argMax(indexed_at, _version) as indexed_at,
+                maxIf(indexed_at, _version > tombstoned_at) as indexed_at,
                 argMax(attempts, _version) as attempts
-            FROM {table}
-            WHERE traversal_path = {{traversal_path:String}}
-              AND project_id = {{project_id:Int64}}
-              AND branch = {{branch:String}}
+            FROM (
+                SELECT *, maxIf(_version, _deleted) OVER () AS tombstoned_at
+                FROM {table}
+                WHERE traversal_path = {{traversal_path:String}}
+                  AND project_id = {{project_id:Int64}}
+                  AND branch = {{branch:String}}
+            )
             HAVING count() > 0
         "#
         );

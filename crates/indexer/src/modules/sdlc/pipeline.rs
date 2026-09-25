@@ -137,11 +137,11 @@ impl Pipeline {
         plan: &Plan,
         mut base_query: PreparedQuery,
         position_key: &str,
+        mut checkpoint: Checkpoint,
         window: WindowBounds,
-        durability: RunDurability,
     ) -> Result<PipelineStats, HandlerError> {
         let started_at = Instant::now();
-        let mut checkpoint = self.load_checkpoint(position_key).await;
+        let durability = RunDurability::for_mode(window.indexing_mode());
         let mut cursor = Cursor::from_checkpoint(&checkpoint);
 
         if !cursor.is_first_page() {
@@ -272,7 +272,7 @@ impl Pipeline {
                 );
             }
 
-            checkpoint.advance(window.target, cursor.to_checkpoint_values(), window.floor);
+            checkpoint.record_page(window.target, window.floor, cursor.to_checkpoint_values());
             self.save_batch_progress(position_key, &checkpoint, &context.progress)
                 .await?;
 
@@ -448,21 +448,6 @@ impl Pipeline {
             })?;
         progress.notify_in_progress().await;
         Ok(())
-    }
-
-    async fn load_checkpoint(&self, position_key: &str) -> Checkpoint {
-        match self.checkpoint_store.load(position_key).await {
-            Ok(Some(checkpoint)) => checkpoint,
-            Ok(None) => Checkpoint::new(DateTime::<Utc>::UNIX_EPOCH),
-            Err(err) => {
-                warn!(
-                    position_key,
-                    %err,
-                    "failed to load checkpoint, starting from epoch"
-                );
-                Checkpoint::new(DateTime::<Utc>::UNIX_EPOCH)
-            }
-        }
     }
 }
 
@@ -716,8 +701,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
         assert!(result.is_ok());
@@ -743,8 +728,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -768,16 +753,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn page_and_completion_writes_keep_the_attempt_count() {
-        let earlier_indexed_at: DateTime<Utc> = "2024-06-01T00:00:00Z".parse().unwrap();
-        let store = Arc::new(RecordingCheckpointStore {
-            state: Mutex::new(Some(Checkpoint {
-                attempts: 3,
-                indexed_at: Some(earlier_indexed_at),
-                ..Checkpoint::new(test_watermark())
-            })),
-            saves: Mutex::new(Vec::new()),
-        });
+    async fn page_writes_keep_the_attempt_count_and_completion_resets_it() {
+        let mut checkpoint = Checkpoint::new(test_watermark());
+        for _ in 0..3 {
+            checkpoint.start_attempt();
+        }
+        let store = Arc::new(RecordingCheckpointStore::new());
         let plan = simple_plan_with_batch_size("Test", 10);
         let pipeline = Pipeline::new(
             Arc::new(MultiBatchDatalake {
@@ -795,8 +776,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                checkpoint,
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await
             .unwrap();
@@ -806,11 +787,11 @@ mod tests {
         assert!(
             pages
                 .iter()
-                .all(|page| page.attempts == 3 && page.indexed_at == Some(earlier_indexed_at))
+                .all(|page| page.attempts == 3 && page.indexed_at.is_none())
         );
         let completed = store.current_state().unwrap();
-        assert_eq!(completed.attempts, 3);
-        assert!(completed.indexed_at > Some(earlier_indexed_at));
+        assert_eq!(completed.attempts, 0);
+        assert!(completed.indexed_at.is_some());
     }
 
     // Comparing `has_more` against the plan's budget rather than the query's share ends
@@ -853,8 +834,8 @@ mod tests {
                 &plan,
                 query,
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Full),
             )
             .await
             .expect("partitioned run should succeed");
@@ -882,8 +863,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -956,8 +937,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -994,8 +975,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -1033,8 +1014,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1113,8 +1094,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1131,17 +1112,12 @@ mod tests {
 
     #[tokio::test]
     async fn resumes_from_stored_cursor() {
-        let store = Arc::new(RecordingCheckpointStore {
-            state: Mutex::new(Some(Checkpoint {
-                cursor_values: Some(vec!["5".to_string()]),
-                ..Checkpoint::new("2024-06-15T12:00:00Z".parse().unwrap())
-            })),
-            saves: Mutex::new(Vec::new()),
-        });
+        let mut stored = Checkpoint::new(test_watermark());
+        stored.record_page(test_watermark(), None, Some(vec!["5".to_string()]));
 
         let pipeline = Pipeline::new(
             Arc::new(EmptyDatalake),
-            store,
+            Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
         );
@@ -1153,8 +1129,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                stored,
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1233,8 +1209,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await
             .expect("run should succeed");

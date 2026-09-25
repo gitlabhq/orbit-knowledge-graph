@@ -970,7 +970,7 @@ async fn failed_first_index_attempts_are_counted_until_the_project_indexes() {
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(11)
     );
-    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [3]);
+    assert_eq!(attempts(&clickhouse, traversal_path, project_id).await, [0]);
 }
 
 async fn attempts(

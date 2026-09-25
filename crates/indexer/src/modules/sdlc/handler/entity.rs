@@ -143,14 +143,19 @@ impl EntityHandler {
             .await
             .map_err(|err| HandlerError::Processing(err.to_string()))?
             .unwrap_or_else(|| Checkpoint::new(request.watermark));
-        self.checkpoint_store
-            .save_started(&checkpoint_key, &mut checkpoint)
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))?;
         let window = pull_window(&checkpoint, request.watermark);
-
         let mode = window.indexing_mode();
         observer.set_indexing_mode(mode);
+
+        checkpoint.start_attempt();
+        self.checkpoint_store
+            .save(
+                &checkpoint_key,
+                &checkpoint,
+                RunDurability::for_mode(mode).attempt_start,
+            )
+            .await
+            .map_err(|err| HandlerError::Processing(err.to_string()))?;
 
         let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
         let pipeline_context = PipelineContext {
@@ -177,9 +182,8 @@ impl EntityHandler {
                 column: &self.plan.deleted_column,
             }));
 
-        let should_partition = self.partition_strategy.is_some()
-            && !checkpoint.is_indexed()
-            && checkpoint.cursor_values.is_none();
+        let should_partition =
+            self.partition_strategy.is_some() && checkpoint.is_first_pass_before_paging();
         let ranges = if should_partition {
             self.partition_strategy
                 .as_ref()
@@ -190,8 +194,6 @@ impl EntityHandler {
             Vec::new()
         };
 
-        let durability = RunDurability::for_mode(mode);
-
         let result = if ranges.is_empty() {
             self.pipeline
                 .run_plan(
@@ -199,8 +201,8 @@ impl EntityHandler {
                     &self.plan,
                     base_query,
                     &checkpoint_key,
+                    checkpoint,
                     window,
-                    durability,
                 )
                 .await
         } else {
@@ -215,7 +217,6 @@ impl EntityHandler {
                     base_query.into_partitions(ranges),
                     &checkpoint_key,
                     window,
-                    durability,
                     &context,
                     &pipeline_context,
                 )
@@ -287,7 +288,6 @@ impl EntityHandler {
         )>,
         checkpoint_key: &str,
         window: WindowBounds,
-        durability: RunDurability,
         context: &HandlerContext,
         parent_pipeline_context: &PipelineContext,
     ) -> Result<PipelineStats, HandlerError> {
@@ -300,12 +300,14 @@ impl EntityHandler {
                 .load(&position_key)
                 .await
                 .map_err(|err| HandlerError::Processing(err.to_string()))?;
-            if let Some(cp) = existing.as_ref()
-                && cp.cursor_values.is_none()
-            {
-                info!(partition = %position_key, "skipping already-completed partition");
-                continue;
-            }
+            let checkpoint = match existing {
+                Some(cp) if cp.cursor_values.is_none() => {
+                    info!(partition = %position_key, "skipping already-completed partition");
+                    continue;
+                }
+                Some(cp) => cp,
+                None => Checkpoint::new(window.target),
+            };
 
             let plan = self.plan.clone();
             let pipeline = Arc::clone(&self.pipeline);
@@ -322,8 +324,8 @@ impl EntityHandler {
                         &plan,
                         query,
                         &position_key,
+                        checkpoint,
                         window,
-                        durability,
                     )
                     .await
             });
@@ -360,7 +362,7 @@ fn pull_window(checkpoint: &Checkpoint, request_watermark: DateTime<Utc>) -> Win
     }
     WindowBounds {
         target: request_watermark,
-        floor: checkpoint.is_indexed().then_some(checkpoint.watermark),
+        floor: checkpoint.completed_watermark(),
     }
 }
 

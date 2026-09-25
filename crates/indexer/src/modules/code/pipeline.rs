@@ -20,7 +20,7 @@ use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, 
 use crate::handler::{HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::nats::ProgressNotifier;
-use crate::observer::IndexingObserver;
+use crate::observer::{IndexingMode, IndexingObserver};
 use orbit_utils::traversal_path::TraversalPath;
 
 #[derive(Clone)]
@@ -136,7 +136,7 @@ impl ProjectCommit {
         let mut checkpoint = self.request.checkpoint.clone();
         // A first index into this schema version (backfill or new project) has no
         // checkpointed prior snapshot to tombstone, so skip the FINAL-scan cleanup.
-        if checkpoint.is_indexed()
+        if checkpoint.indexing_mode() == IndexingMode::Incremental
             && let Err(error) = self
                 .cleaner
                 .delete_stale_data(
@@ -389,7 +389,7 @@ impl CodeIndexer {
                 self.metrics.record_fetch_duration(fetch_start.elapsed());
                 // No rows to flush, so checkpoint directly rather than through the sink.
                 let mut checkpoint = request.checkpoint.clone();
-                checkpoint.complete(request.task_id, None, Utc::now());
+                checkpoint.complete_empty_repository(request.task_id);
                 self.checkpoint_store
                     .save(&checkpoint)
                     .await
@@ -827,7 +827,7 @@ mod tests {
         let traversal_path = TraversalPath::new_unchecked("1/7/");
         let mut checkpoint = CodeCheckpoint::new(traversal_path.clone(), 7, "main");
         if indexed {
-            checkpoint.complete(6, None, Utc::now());
+            checkpoint.complete_empty_repository(6);
         }
         Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1 + batches),

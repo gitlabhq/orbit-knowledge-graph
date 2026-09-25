@@ -18,7 +18,7 @@ use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::indexing_status::RunRows;
 use crate::locking::{LockError, LockGuard};
 use crate::nats::ProgressNotifier;
-use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
+use crate::observer::{self, IndexingObserver, PipelineType};
 use crate::retry::GlobalRetry;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
@@ -206,7 +206,7 @@ impl CodeIndexingTaskHandler {
                 request.project_id,
                 sentinel_branch,
             );
-            checkpoint.complete(request.task_id, None, Utc::now());
+            checkpoint.complete_empty_repository(request.task_id);
             if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
                 warn!(
                     project_id = request.project_id,
@@ -228,17 +228,18 @@ impl CodeIndexingTaskHandler {
             .unwrap_or_else(|| {
                 CodeCheckpoint::new(request.traversal_path.clone(), request.project_id, &branch)
             });
-        if checkpoint.is_indexed() && checkpoint.last_task_id >= request.task_id {
+        if checkpoint.is_indexed_through(request.task_id) {
             debug!(task_id = request.task_id, "already indexed, skipping");
             self.metrics.record_outcome("skipped_checkpoint");
             return Ok(());
         }
+        let mode = checkpoint.indexing_mode();
 
         info!(
             task_id = request.task_id,
             project_id = request.project_id,
             branch = %branch,
-            is_indexed = checkpoint.is_indexed(),
+            indexing_mode = ?mode,
             dispatch_id = %request.dispatch_id,
             campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
             "starting code indexing"
@@ -254,11 +255,7 @@ impl CodeIndexingTaskHandler {
         observer.set_project(request.project_id, &branch);
         observer.set_commit_sha(request.commit_sha.clone());
         observer.set_traversal_path(Some(&request.traversal_path));
-        observer.set_indexing_mode(if checkpoint.is_indexed() {
-            IndexingMode::Incremental
-        } else {
-            IndexingMode::Full
-        });
+        observer.set_indexing_mode(mode);
 
         let result = self
             .index_with_lock(
@@ -346,8 +343,9 @@ impl CodeIndexingTaskHandler {
             }
         };
 
+        checkpoint.start_attempt();
         self.checkpoint_store
-            .save_started(&mut checkpoint)
+            .save(&checkpoint)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to save start: {e}")))?;
 
@@ -776,7 +774,10 @@ mod tests {
             .await
             .unwrap()
             .expect("the attempt is saved");
-        assert!(!checkpoint.is_indexed(), "no index on the raced attempt");
+        assert!(
+            checkpoint.indexed_at.is_none(),
+            "no index on the raced attempt"
+        );
         assert_eq!(checkpoint.attempts, 1);
     }
 
