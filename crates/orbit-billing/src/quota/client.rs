@@ -98,14 +98,23 @@ impl QuotaClient {
         let params = request.as_query_params();
 
         let mut builder = self.http.head(&url).query(&params);
-        // `QuotaService` never sends a license-mode request without a checksum, and the
-        // claim is validated hex, so the header is always present in license mode.
-        if self.license_auth
-            && let Some(mut token) = request
+        if self.license_auth {
+            // Without the header CDot can only answer 401, so an unusable claim fails open here
+            // instead of sending an unauthenticated request.
+            let Some(mut token) = request
                 .license_checksum
                 .as_ref()
                 .and_then(|c| HeaderValue::from_str(c.expose_secret()).ok())
-        {
+            else {
+                warn!(
+                    user_id = %request.key.user_id,
+                    instance_id = %request.key.instance_id,
+                    unique_instance_id = %request.key.unique_instance_id,
+                    feature_qualified_name = %request.key.feature_qualified_name,
+                    "license_checksum claim is missing or not a valid header value; failing open"
+                );
+                return QuotaOutcome::FailOpen(FailOpenReason::Unauthorized);
+            };
             token.set_sensitive(true);
             builder = builder.header(X_LICENSE_TOKEN, token);
         }
@@ -420,6 +429,19 @@ mod tests {
         assert_eq!(headers.get("x-admin-email").unwrap(), "test@example.com");
         assert_eq!(headers.get("x-admin-token").unwrap(), "test-token");
         assert!(headers.get("x-license-token").is_none());
+    }
+
+    #[tokio::test]
+    async fn license_mode_with_unencodable_checksum_fails_open_without_calling_cdot() {
+        let (url, seen) = recording_server(AxumStatus::OK).await;
+        let mut request = license_request();
+        request.license_checksum = Some("bad\nvalue".into());
+
+        assert_eq!(
+            license_client(url).check(&request).await,
+            QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
+        );
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
