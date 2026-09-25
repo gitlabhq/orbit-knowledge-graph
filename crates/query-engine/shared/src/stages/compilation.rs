@@ -21,12 +21,17 @@ impl PipelineStage for CompilationStage {
             .security_context()
             .inspect_err(|e| obs.record_error(e))?;
 
+        let data_model = ctx
+            .server_extensions
+            .get::<Arc<query_data_model::ClickHouseDataModel>>();
         let compiled = match ctx.phases.get::<compiler::Input>() {
-            Some(input) => compiler::gql::compile_query(input.clone(), ontology, security_context),
-            None => match ctx
-                .server_extensions
-                .get::<Arc<query_data_model::ClickHouseDataModel>>()
-            {
+            Some(input) => match data_model {
+                Some(data_model) => {
+                    compiler::gql::compile_query_model(input.clone(), data_model, security_context)
+                }
+                None => compiler::gql::compile_query(input.clone(), ontology, security_context),
+            },
+            None => match data_model {
                 Some(data_model) => compiler::compile_model(
                     &ctx.query_json,
                     ctx.frontend,
