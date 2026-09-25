@@ -43,6 +43,7 @@ pub struct GitLabAuthzCatalog {
     entity_auth: HashMap<String, EntityAuthConfig>,
     admin_only: HashMap<PropertyId, bool>,
     variant_scopes: HashMap<RelationshipVariantId, ontology::EdgeVariantScope>,
+    anchor_foreign_keys: HashMap<String, EntityId>,
 }
 
 impl GitLabAuthzCatalog {
@@ -70,6 +71,14 @@ impl GitLabAuthzCatalog {
 impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         GitLabAuthzCatalog::variant_scope(self, variant)
+    }
+
+    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId> {
+        &self.anchor_foreign_keys
+    }
+
+    fn is_admin_only(&self, property: PropertyId) -> bool {
+        GitLabAuthzCatalog::is_admin_only(self, property)
     }
 }
 
@@ -149,6 +158,7 @@ impl Authz for GitLabAuthz {
         }
 
         let mut variant_scopes = HashMap::new();
+        let mut anchor_foreign_keys = HashMap::new();
         for edge in ontology.edges() {
             let Some(scope) = edge.scope else {
                 continue;
@@ -174,6 +184,11 @@ impl Authz for GitLabAuthz {
             if let Some(variant) = graph.variant_id(relationship, source, target) {
                 variant_scopes.insert(variant, scope);
             }
+            if scope == ontology::EdgeVariantScope::NamespaceAnchor
+                && let Some(column) = &edge.fk_column
+            {
+                anchor_foreign_keys.entry(column.clone()).or_insert(target);
+            }
         }
 
         Ok(GitLabAuthzCatalog {
@@ -181,6 +196,7 @@ impl Authz for GitLabAuthz {
             entity_auth,
             admin_only,
             variant_scopes,
+            anchor_foreign_keys,
         })
     }
 }
@@ -191,6 +207,16 @@ pub struct TrustedLocalCatalog;
 impl QueryAuthorizationCatalog for TrustedLocalCatalog {
     fn variant_scope(&self, _variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         None
+    }
+
+    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId> {
+        static EMPTY: std::sync::LazyLock<HashMap<String, EntityId>> =
+            std::sync::LazyLock::new(HashMap::new);
+        &EMPTY
+    }
+
+    fn is_admin_only(&self, _property: PropertyId) -> bool {
+        false
     }
 }
 

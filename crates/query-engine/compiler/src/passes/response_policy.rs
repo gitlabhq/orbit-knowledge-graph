@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ontology::DataType;
-use query_data_model::PropertyRealization;
+use query_data_model::{PropertyRealization, QueryBackendCatalog};
 
 use crate::ast::{Expr, Node, Op, SelectExpr};
 use crate::input::{ColumnSelection, Input};
@@ -23,24 +23,24 @@ pub fn apply_text_excerpts(
         .nodes
         .iter()
         .filter_map(|node| {
-            let entity = model.graph().entity_id(node.entity.as_deref()?)?;
+            let entity = model.entity(node.entity.as_deref()?)?;
             let requested = match &node.columns {
                 Some(ColumnSelection::List(columns)) => columns,
                 _ => return None,
             };
             let mut excerpted: HashSet<String> = model
                 .graph()
-                .entity(entity)
+                .entity(entity.id)
                 .properties
                 .iter()
                 .map(|property| model.graph().property(*property))
                 .filter(|property| {
-                    model.property_column(property.id).is_some()
+                    model.query_backend().property_column(property.id).is_some()
                         && property.data_type == DataType::String
                 })
                 .map(|property| property.name.clone())
                 .collect();
-            for property in &model.graph().entity(entity).properties {
+            for property in &entity.properties {
                 if let PropertyRealization::Virtual(source) =
                     &model.graph().property(*property).realization
                 {

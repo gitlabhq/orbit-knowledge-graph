@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ontology::{DataType, EdgeVariantScope, TraversalPathKind};
+use ontology::DataType;
 use query_data_model::{
     ClickHouseDataModel, DataModelError, DuckDbDataModel, EntityId, PropertyId,
-    RelationshipVariantId,
 };
 
 use query_data_model::EntityAuthConfig;
@@ -19,12 +18,6 @@ pub trait QueryModel: query_data_model::QueryDataModel + Send + Sync {
 pub trait AuthorizationModel: QueryModel {
     fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig>;
     fn is_admin_only(&self, property: PropertyId) -> bool;
-    fn variant_scope(&self, variant: RelationshipVariantId) -> Option<EdgeVariantScope>;
-    fn traversal_path_lookup(
-        &self,
-        entity: EntityId,
-        kind: TraversalPathKind,
-    ) -> Option<(String, String)>;
     fn redaction_id_column(&self, entity: EntityId) -> &str;
 }
 
@@ -74,22 +67,6 @@ impl AuthorizationModel for ClickHouseDataModel {
 
     fn is_admin_only(&self, property: PropertyId) -> bool {
         self.authorization().is_admin_only(property)
-    }
-
-    fn variant_scope(&self, variant: RelationshipVariantId) -> Option<EdgeVariantScope> {
-        self.authorization().variant_scope(variant)
-    }
-
-    fn traversal_path_lookup(
-        &self,
-        entity: EntityId,
-        kind: TraversalPathKind,
-    ) -> Option<(String, String)> {
-        let lookup = self.backend().traversal_path_lookup(entity, kind)?;
-        Some((
-            lookup.table.clone(),
-            self.property_column(lookup.property)?.to_string(),
-        ))
     }
 
     fn redaction_id_column(&self, entity: EntityId) -> &str {

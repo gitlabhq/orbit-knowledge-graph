@@ -31,27 +31,17 @@ fn check_direction(
     }
     let (mut reversed, mut unconnected) = (Vec::new(), Vec::new());
     for kind in &edge.types {
-        let variants: Vec<_> = model
-            .graph()
-            .relationship_id(kind)
-            .map(|relationship| model.graph().relationship(relationship).variants.as_slice())
-            .unwrap_or_default()
-            .iter()
-            .map(|variant| model.graph().variant(*variant))
-            .collect();
-        if variants.is_empty()
-            || variants.iter().any(|variant| {
-                model.graph().entity(variant.source).name == source
-                    && model.graph().entity(variant.target).name == target
-            })
-        {
+        let graph = model.graph();
+        let Some(relationship) = graph.relationship_id(kind) else {
+            return Ok(());
+        };
+        if graph.variant_named(kind, source, target).is_some() {
             return Ok(());
         }
-        if variants.iter().any(|variant| {
-            model.graph().entity(variant.source).name == target
-                && model.graph().entity(variant.target).name == source
-        }) {
+        if graph.variant_named(kind, target, source).is_some() {
             reversed.push(kind.as_str());
+        } else if graph.relationship(relationship).variants.is_empty() {
+            return Ok(());
         } else {
             unconnected.push(kind.as_str());
         }

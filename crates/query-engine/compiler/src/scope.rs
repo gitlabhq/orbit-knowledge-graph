@@ -1,4 +1,4 @@
-use query_data_model::QueryBackendCatalog;
+use query_data_model::QueryAuthorizationCatalog;
 use std::collections::HashMap;
 
 use ontology::TraversalPathKind;
@@ -76,31 +76,28 @@ pub fn derive_scope_proofs(
     ) {
         return HashMap::new();
     }
-    let anchor_fks = anchor_fk_mappings(model);
+    let anchor_fks: Vec<_> = model
+        .query_authorization()
+        .anchor_foreign_keys()
+        .iter()
+        .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))
+        .collect();
     let seed: HashMap<String, ScopeProof> = input
         .nodes
         .iter()
         .filter_map(|node| {
-            let lookups: Vec<ScopeSource> = scope_keys(
-                node,
-                &anchor_fks
-                    .iter()
-                    .map(|(column, entity)| (column.as_str(), entity.as_str()))
-                    .collect::<Vec<_>>(),
-            )
-            .into_iter()
-            .filter_map(|key| {
-                let entity = model.graph().entity_id(&key.entity)?;
-                crate::data_model::AuthorizationModel::traversal_path_lookup(
-                    model, entity, key.kind,
-                )
-                .map(|(source_table, key_column)| ScopeSource::Lookup {
-                    source_table,
-                    key_column,
-                    value: key.value,
+            let lookups: Vec<ScopeSource> = scope_keys(node, &anchor_fks)
+                .into_iter()
+                .filter_map(|key| {
+                    model.traversal_path_lookup(&key.entity, key.kind).map(
+                        |(source_table, key_column)| ScopeSource::Lookup {
+                            source_table: source_table.to_string(),
+                            key_column: key_column.to_string(),
+                            value: key.value,
+                        },
+                    )
                 })
-            })
-            .collect();
+                .collect();
             (1..=MAX_LOOKUPS_PER_ALIAS)
                 .contains(&lookups.len())
                 .then(|| (node.id.clone(), ScopeProof(lookups)))
@@ -109,48 +106,14 @@ pub fn derive_scope_proofs(
     propagate_scope_proofs(input, model, &seed)
 }
 
-fn anchor_fk_mappings(
-    model: &(impl crate::data_model::AuthorizationModel + ?Sized),
-) -> Vec<(String, String)> {
-    let mut mappings = HashMap::new();
-    for variant in model.graph().variants() {
-        if model.variant_scope(variant.id) != Some(ontology::EdgeVariantScope::NamespaceAnchor) {
-            continue;
-        }
-        let Some(property) = model.query_backend().foreign_key(
-            model.graph(),
-            &[variant.relationship],
-            variant.source,
-            variant.target,
-        ) else {
-            continue;
-        };
-        mappings
-            .entry(property.column)
-            .or_insert_with(|| model.graph().entity(variant.target).name.clone());
-    }
-    mappings.into_iter().collect()
-}
-
 fn scope_preserving(
     model: &(impl crate::data_model::AuthorizationModel + ?Sized),
     relationship: &str,
     source: &str,
     target: &str,
 ) -> bool {
-    let Some(variant) = model
-        .graph()
-        .relationship_id(relationship)
-        .zip(model.graph().entity_id(source))
-        .zip(model.graph().entity_id(target))
-        .and_then(|((relationship, source), target)| {
-            model.graph().variant_id(relationship, source, target)
-        })
-    else {
-        return false;
-    };
     model
-        .variant_scope(variant)
+        .variant_scope(relationship, source, target)
         .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
 }
 

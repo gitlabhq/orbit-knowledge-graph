@@ -7,7 +7,7 @@ use ontology::constants::*;
 use crate::input::*;
 
 use super::{BoundFilter, Plan, PlanBody};
-use query_data_model::{QueryAuthorizationCatalog, QueryBackendCatalog, QueryDataModel};
+use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
 pub struct Hop {
     pub rel_types: Vec<String>,
@@ -259,19 +259,6 @@ where
     }
 }
 
-fn variant_scope(
-    model: &(impl QueryDataModel + ?Sized),
-    relationship: &str,
-    source: &str,
-    target: &str,
-) -> Option<ontology::EdgeVariantScope> {
-    let relationship = model.graph().relationship_id(relationship)?;
-    let source = model.graph().entity_id(source)?;
-    let target = model.graph().entity_id(target)?;
-    let variant = model.graph().variant_id(relationship, source, target)?;
-    model.query_authorization().variant_scope(variant)
-}
-
 fn build_hops<M>(input: &Input, scope_proofs: &HashMap<String, ScopeProof>, model: &M) -> Vec<Hop>
 where
     M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
@@ -342,9 +329,11 @@ where
             let to_entity = entities.get(rel.to.as_str()).copied().unwrap_or_default();
             let scope_preserving = !rel.types.is_empty()
                 && rel.types.iter().all(|kind| {
-                    variant_scope(model, kind, from_entity, to_entity)
+                    model
+                        .variant_scope(kind, from_entity, to_entity)
                         .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
-                        || variant_scope(model, kind, to_entity, from_entity)
+                        || model
+                            .variant_scope(kind, to_entity, from_entity)
                             .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
                 });
             let from_proof = scope_proofs.get(&rel.from);
@@ -353,7 +342,7 @@ where
                 from_proof.cloned()
             } else {
                 rel.types.iter().find_map(|kind| {
-                    match variant_scope(model, kind, from_entity, to_entity) {
+                    match model.variant_scope(kind, from_entity, to_entity) {
                         Some(ontology::EdgeVariantScope::PruneToSource) => from_proof,
                         Some(ontology::EdgeVariantScope::PruneToTarget) => to_proof,
                         _ => None,

@@ -26,11 +26,14 @@ pub fn normalize<M: crate::data_model::QueryModel>(input: Input, model: &M) -> R
             continue;
         };
 
-        let entity_id = model
-            .graph()
-            .entity_id(entity)
+        let entity_record = model
+            .entity(entity)
             .ok_or_else(|| QueryError::AllowlistRejected(format!("unknown entity '{entity}'")))?;
-        if model.query_backend().entity_table(entity_id).is_none() {
+        if model
+            .query_backend()
+            .entity_table(entity_record.id)
+            .is_none()
+        {
             return Err(QueryError::AllowlistRejected(format!(
                 "entity '{entity}' is not available in this data model"
             )));
@@ -39,8 +42,8 @@ pub fn normalize<M: crate::data_model::QueryModel>(input: Input, model: &M) -> R
         match &mut node.columns {
             Some(ColumnSelection::All) => {
                 let columns = model
-                    .graph()
-                    .entity(entity_id)
+                    .entity(entity)
+                    .expect("entity resolved above")
                     .properties
                     .iter()
                     .map(|property| model.graph().property(*property).name.clone())
@@ -49,17 +52,17 @@ pub fn normalize<M: crate::data_model::QueryModel>(input: Input, model: &M) -> R
             }
             Some(ColumnSelection::List(_)) => {}
             None => {
-                let columns = if model.default_properties(entity_id).is_empty() {
+                let columns = if model.default_properties(entity_record.id).is_empty() {
                     model
-                        .graph()
-                        .entity(entity_id)
+                        .entity(entity)
+                        .expect("entity resolved above")
                         .properties
                         .iter()
                         .map(|property| model.graph().property(*property).name.clone())
                         .collect()
                 } else {
                     model
-                        .default_properties(entity_id)
+                        .default_properties(entity_record.id)
                         .iter()
                         .map(|property| model.graph().property(*property).name.clone())
                         .collect()
@@ -69,11 +72,7 @@ pub fn normalize<M: crate::data_model::QueryModel>(input: Input, model: &M) -> R
         }
 
         for (column, filters) in &mut node.filters {
-            let Some(property) = model
-                .graph()
-                .property_id(entity_id, column)
-                .map(|property| model.graph().property(property))
-            else {
+            let Some(property) = model.property(entity, column) else {
                 continue;
             };
             // Only coerce int-based enums; string enums are already strings in the source
@@ -108,21 +107,8 @@ fn infer_wildcard_relationship_kinds(
         .iter()
         .filter_map(|n| Some((n.id.as_str(), n.entity.as_deref()?)))
         .collect();
-    let matching = |source: Option<&str>, target: Option<&str>| -> Vec<String> {
-        model
-            .graph()
-            .relationships()
-            .filter(|relationship| {
-                relationship.variants.iter().any(|variant| {
-                    let variant = model.graph().variant(*variant);
-                    source.is_none_or(|source| model.graph().entity(variant.source).name == source)
-                        && target.is_none_or(|target| {
-                            model.graph().entity(variant.target).name == target
-                        })
-                })
-            })
-            .map(|relationship| relationship.name.clone())
-            .collect()
+    let matching = |source: Option<&str>, target: Option<&str>| {
+        model.graph().relationship_names(source, target)
     };
     let infer = |direction: Direction,
                  outgoing: (Option<&str>, Option<&str>),

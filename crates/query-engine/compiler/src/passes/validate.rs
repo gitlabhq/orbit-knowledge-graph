@@ -248,15 +248,14 @@ impl<'a, M: crate::data_model::QueryModel> Validator<'a, M> {
     }
 
     fn property_id(&self, entity: &str, property: &str) -> Option<PropertyId> {
-        let model = self.model.get();
-        let entity = model.graph().entity_id(entity)?;
-        model.graph().property_id(entity, property)
+        self.model
+            .get()
+            .property(entity, property)
+            .map(|property| property.id)
     }
 
     fn property(&self, entity: &str, property: &str) -> Option<&query_data_model::Property> {
-        let model = self.model.get();
-        self.property_id(entity, property)
-            .map(|id| model.graph().property(id))
+        self.model.get().property(entity, property)
     }
 
     fn field_type(&self, entity: &str, property: &str) -> Option<DataType> {
@@ -664,17 +663,7 @@ impl<'a, M: crate::data_model::QueryModel> Validator<'a, M> {
             };
             for (prop, filters) in &node.filters {
                 let is_traversal_path_filter = prop == TRAVERSAL_PATH_COLUMN
-                    && self
-                        .model
-                        .get()
-                        .graph()
-                        .entity_id(entity)
-                        .is_some_and(|entity| {
-                            self.model
-                                .get()
-                                .query_backend()
-                                .entity_has_traversal_path(entity)
-                        });
+                    && self.model.get().entity_has_traversal_path(entity);
                 if !is_traversal_path_filter
                     && !self.field_flag(entity, prop, |f| f.filterable, |f| f.filterable)
                 {
@@ -764,12 +753,7 @@ impl<'a, M: crate::data_model::QueryModel> Validator<'a, M> {
             let edge_table = rel
                 .types
                 .first()
-                .and_then(|kind| {
-                    model
-                        .graph()
-                        .relationship_id(kind)
-                        .and_then(|id| model.query_backend().relationship_table(id))
-                })
+                .and_then(|kind| model.relationship_table(kind))
                 .unwrap_or_else(|| model.query_backend().default_edge_table());
             for (prop, filters) in &rel.filters {
                 let Some(data_type) = self.model.get().table_column_type(edge_table, prop) else {

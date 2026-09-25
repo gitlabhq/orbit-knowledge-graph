@@ -55,7 +55,7 @@ pub struct GraphCatalog {
     relationships: Vec<Relationship>,
     variants: Vec<RelationshipVariant>,
     entity_ids: HashMap<String, EntityId>,
-    property_ids: HashMap<(EntityId, String), PropertyId>,
+    property_ids: Vec<HashMap<String, PropertyId>>,
     relationship_ids: HashMap<String, RelationshipId>,
     variant_ids: HashMap<(RelationshipId, EntityId, EntityId), RelationshipVariantId>,
 }
@@ -65,7 +65,7 @@ impl GraphCatalog {
         let mut entities = Vec::new();
         let mut properties = Vec::new();
         let mut entity_ids = HashMap::new();
-        let mut property_ids = HashMap::new();
+        let mut property_ids = Vec::new();
 
         for node in ontology.nodes() {
             let entity_id = EntityId(entities.len());
@@ -77,10 +77,11 @@ impl GraphCatalog {
             }
 
             let mut entity_properties = Vec::new();
+            let mut entity_property_ids = HashMap::new();
             for field in &node.fields {
                 let property_id = PropertyId(properties.len());
-                if property_ids
-                    .insert((entity_id, field.name.clone()), property_id)
+                if entity_property_ids
+                    .insert(field.name.clone(), property_id)
                     .is_some()
                 {
                     return Err(DataModelError::Duplicate {
@@ -109,7 +110,7 @@ impl GraphCatalog {
             }
             if !node.fields.iter().any(|field| field.name == "id") {
                 let property_id = PropertyId(properties.len());
-                property_ids.insert((entity_id, "id".to_string()), property_id);
+                entity_property_ids.insert("id".to_string(), property_id);
                 entity_properties.push(property_id);
                 properties.push(Property {
                     id: property_id,
@@ -130,6 +131,7 @@ impl GraphCatalog {
                 name: node.name.clone(),
                 properties: entity_properties,
             });
+            property_ids.push(entity_property_ids);
         }
 
         let mut relationships = Vec::new();
@@ -235,8 +237,18 @@ impl GraphCatalog {
         self.entity_ids.get(name).copied()
     }
 
+    pub fn entity_named(&self, name: &str) -> Option<&Entity> {
+        self.entity_id(name).map(|id| self.entity(id))
+    }
+
     pub fn property_id(&self, entity: EntityId, name: &str) -> Option<PropertyId> {
-        self.property_ids.get(&(entity, name.to_string())).copied()
+        self.property_ids.get(entity.index())?.get(name).copied()
+    }
+
+    pub fn property_named(&self, entity: &str, property: &str) -> Option<&Property> {
+        let entity = self.entity_id(entity)?;
+        self.property_id(entity, property)
+            .map(|id| self.property(id))
     }
 
     pub fn relationship_id(&self, name: &str) -> Option<RelationshipId> {
@@ -252,6 +264,34 @@ impl GraphCatalog {
         self.variant_ids
             .get(&(relationship, source, target))
             .copied()
+    }
+
+    pub fn variant_named(
+        &self,
+        relationship: &str,
+        source: &str,
+        target: &str,
+    ) -> Option<&RelationshipVariant> {
+        let relationship = self.relationship_id(relationship)?;
+        let source = self.entity_id(source)?;
+        let target = self.entity_id(target)?;
+        self.variant_id(relationship, source, target)
+            .map(|id| self.variant(id))
+    }
+
+    pub fn relationship_names(&self, source: Option<&str>, target: Option<&str>) -> Vec<String> {
+        let source = source.and_then(|name| self.entity_id(name));
+        let target = target.and_then(|name| self.entity_id(name));
+        self.relationships()
+            .filter(|relationship| {
+                relationship.variants.iter().any(|variant| {
+                    let variant = self.variant(*variant);
+                    source.is_none_or(|source| variant.source == source)
+                        && target.is_none_or(|target| variant.target == target)
+                })
+            })
+            .map(|relationship| relationship.name.clone())
+            .collect()
     }
 
     pub fn source_entities(&self, relationship: RelationshipId) -> Vec<EntityId> {

@@ -15,7 +15,6 @@ use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 #[cfg(test)]
 use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
-use query_data_model::QueryBackendCatalog;
 use std::collections::HashSet;
 
 fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
@@ -30,12 +29,7 @@ fn enforce_aggregation_scope(
     input: &Input,
     model: &(impl crate::data_model::AuthorizationModel + ?Sized),
 ) -> Result<()> {
-    let is_scoped = |entity: &str| {
-        model
-            .graph()
-            .entity_id(entity)
-            .is_some_and(|entity| model.query_backend().entity_has_traversal_path(entity))
-    };
+    let is_scoped = |entity: &str| model.entity_has_traversal_path(entity);
 
     let mut reachable: HashSet<&str> = input
         .nodes
@@ -102,7 +96,7 @@ fn enforce_traversal_path_filters(
         ) else {
             continue;
         };
-        let Some(_) = model.graph().entity_id(entity) else {
+        let Some(_) = model.entity(entity) else {
             continue;
         };
         // Entities without a redaction role use the normal traversal-path floor:
@@ -218,11 +212,7 @@ fn admin_only(
     entity: &str,
     property: &str,
 ) -> bool {
-    model
-        .graph()
-        .entity_id(entity)
-        .and_then(|entity| model.graph().property_id(entity, property))
-        .is_some_and(|property| model.is_admin_only(property))
+    model.admin_only(entity, property)
 }
 
 pub fn restrict(

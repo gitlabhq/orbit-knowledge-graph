@@ -79,6 +79,8 @@ pub trait QueryBackendCatalog {
 
 pub trait QueryAuthorizationCatalog {
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope>;
+    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId>;
+    fn is_admin_only(&self, property: PropertyId) -> bool;
 }
 
 pub trait QueryDataModel {
@@ -89,6 +91,64 @@ pub trait QueryDataModel {
     fn graph(&self) -> &GraphCatalog;
     fn query_backend(&self) -> &Self::BackendCatalog;
     fn query_authorization(&self) -> &Self::AuthorizationCatalog;
+
+    fn entity(&self, name: &str) -> Option<&Entity> {
+        self.graph().entity_named(name)
+    }
+
+    fn property(&self, entity: &str, property: &str) -> Option<&Property> {
+        self.graph().property_named(entity, property)
+    }
+
+    fn entity_table(&self, entity: &str) -> Option<&str> {
+        let entity = self.graph().entity_id(entity)?;
+        self.query_backend().entity_table(entity)
+    }
+
+    fn entity_has_traversal_path(&self, entity: &str) -> bool {
+        self.graph()
+            .entity_id(entity)
+            .is_some_and(|entity| self.query_backend().entity_has_traversal_path(entity))
+    }
+
+    fn property_column_named(&self, entity: &str, property: &str) -> Option<&str> {
+        let property = self.property(entity, property)?;
+        self.query_backend().property_column(property.id)
+    }
+
+    fn admin_only(&self, entity: &str, property: &str) -> bool {
+        self.property(entity, property)
+            .is_some_and(|property| self.query_authorization().is_admin_only(property.id))
+    }
+
+    fn relationship_table(&self, relationship: &str) -> Option<&str> {
+        let relationship = self.graph().relationship_id(relationship)?;
+        self.query_backend().relationship_table(relationship)
+    }
+
+    fn variant_scope(
+        &self,
+        relationship: &str,
+        source: &str,
+        target: &str,
+    ) -> Option<ontology::EdgeVariantScope> {
+        let relationship = self.graph().relationship_id(relationship)?;
+        let source = self.graph().entity_id(source)?;
+        let target = self.graph().entity_id(target)?;
+        let variant = self.graph().variant_id(relationship, source, target)?;
+        self.query_authorization().variant_scope(variant)
+    }
+
+    fn traversal_path_lookup(
+        &self,
+        entity: &str,
+        kind: ontology::TraversalPathKind,
+    ) -> Option<(&str, &str)> {
+        let entity = self.graph().entity_id(entity)?;
+        let lookup = self.query_backend().traversal_path_lookup(entity, kind)?;
+        let column = self.query_backend().property_column(lookup.property)?;
+        Some((&lookup.table, column))
+    }
 }
 
 pub struct DataModel<B: Backend, A: Authz> {
