@@ -345,10 +345,10 @@ fn relation_alias(bound: &BoundCatalog, relation: RelationId) -> String {
 
 fn expression_text(bound: &BoundCatalog, expression: &Expr) -> String {
     match expression {
-        Expr::Column(column) => {
-            let column = &bound.columns[column];
-            format!("{}.{}", relation_alias(bound, column.relation), column.name)
-        }
+        Expr::Column(column) => bound.columns.get(column).map_or_else(
+            || format!("physical_column_{}", column.0),
+            |column| format!("{}.{}", relation_alias(bound, column.relation), column.name),
+        ),
         Expr::Output(output) => bound.outputs[output].name.clone(),
         Expr::Literal(Value::Int(value)) => value.to_string(),
         Expr::Literal(Value::Float(value)) => value.clone(),

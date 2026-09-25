@@ -261,20 +261,32 @@ fn plan_duckdb(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn plan_for(ctx: &mut impl CompilerCtx, backend: crate::Backend) -> Result<()> {
     let input = require(ctx.take_input(), "input")?;
-    let (bound, candidate, explain) = match backend {
+    let (bound, candidate, scope_requirements, explain) = match backend {
         crate::Backend::ClickHouse => {
-            let (bound, candidate, explain) = planner::clickhouse(input, ctx.ontology().clone())?;
-            (bound, PhysicalPlan::ClickHouse(candidate), explain)
+            let (bound, candidate, scope_requirements, explain) =
+                planner::clickhouse(input, ctx.ontology().clone())?;
+            (
+                bound,
+                PhysicalPlan::ClickHouse(candidate),
+                scope_requirements,
+                explain,
+            )
         }
         crate::Backend::DuckDb => {
-            let (bound, candidate, explain) = planner::duckdb(input, ctx.ontology().clone())?;
-            (bound, PhysicalPlan::DuckDb(candidate), explain)
+            let (bound, candidate, scope_requirements, explain) =
+                planner::duckdb(input, ctx.ontology().clone())?;
+            (
+                bound,
+                PhysicalPlan::DuckDb(candidate),
+                scope_requirements,
+                explain,
+            )
         }
     };
     let hop_count = bound.input.relationships.len();
     ctx.set_query_plan(QueryPlan {
         physical: Some(candidate),
-        scope_requirements: vec![],
+        scope_requirements,
         hop_count,
         has_semi_joins: false,
         explain,

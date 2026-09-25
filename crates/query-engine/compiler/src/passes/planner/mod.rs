@@ -25,23 +25,35 @@ pub use physical_duckdb::plan_duckdb;
 pub fn clickhouse(
     input: Input,
     ontology: Arc<Ontology>,
-) -> Result<(BoundCatalog, Candidate<ClickHouse>, String)> {
+) -> Result<(
+    BoundCatalog,
+    Candidate<ClickHouse>,
+    Vec<crate::scope::ScopeProof>,
+    String,
+)> {
     let (bound, logical) = bind(input, ontology)?;
     let (bound, logical) = optimize(bound, logical);
+    let scope_requirements = logical.scope_requirements.clone();
     let selected = plan_clickhouse(&bound, logical)?.selected;
     let explain = explain_clickhouse(&bound, &selected.candidate.plan);
-    Ok((bound, selected.candidate, explain))
+    Ok((bound, selected.candidate, scope_requirements, explain))
 }
 
 pub fn duckdb(
     input: Input,
     ontology: Arc<Ontology>,
-) -> Result<(BoundCatalog, Candidate<DuckDb>, String)> {
+) -> Result<(
+    BoundCatalog,
+    Candidate<DuckDb>,
+    Vec<crate::scope::ScopeProof>,
+    String,
+)> {
     let (bound, logical) = bind(input, ontology)?;
     let (bound, logical) = optimize(bound, logical);
+    let scope_requirements = logical.scope_requirements.clone();
     let selected = plan_duckdb(&bound, logical)?.selected;
     let explain = explain_duckdb(&bound, &selected.candidate.plan);
-    Ok((bound, selected.candidate, explain))
+    Ok((bound, selected.candidate, scope_requirements, explain))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -142,7 +154,7 @@ pub enum Expr {
     Stringify(Box<Self>),
     ListContains {
         list: Box<Self>,
-        value: Value,
+        values: Vec<Value>,
     },
     TokenMatch {
         value: Box<Self>,
@@ -344,9 +356,9 @@ fn rewrite(expression: Expr, map: &mut impl FnMut(Expr) -> Expr) -> Expr {
                 .collect(),
         ),
         Expr::Stringify(value) => Expr::Stringify(Box::new(rewrite(*value, map))),
-        Expr::ListContains { list, value } => Expr::ListContains {
+        Expr::ListContains { list, values } => Expr::ListContains {
             list: Box::new(rewrite(*list, map)),
-            value,
+            values,
         },
         Expr::TokenMatch { value, token } => Expr::TokenMatch {
             value: Box::new(rewrite(*value, map)),
@@ -470,6 +482,7 @@ pub struct TableAccess {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeTableAccess {
     pub layouts: Vec<TableLayout>,
+    pub columns: BTreeMap<ColumnId, PhysicalColumn>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -494,8 +507,9 @@ pub struct DenormalizedAccess {
 pub struct EdgePropertyAccess {
     pub edge: RelationId,
     pub source: ColumnId,
+    pub column: ColumnId,
     pub edge_column: PhysicalColumn,
-    pub token: Value,
+    pub tokens: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -507,6 +521,7 @@ pub struct TextIndexAccess {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogicalPlan {
     pub root: Plan<Logical>,
+    pub scope_requirements: Vec<crate::scope::ScopeProof>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -527,6 +542,15 @@ pub enum ClickHouseAccess {
     Table(TableAccess),
     EdgeTables(EdgeTableAccess),
     DenormalizedJoin(DenormalizedAccess),
+}
+
+impl ClickHouseAccess {
+    fn edge_columns(&self) -> Option<&BTreeMap<ColumnId, PhysicalColumn>> {
+        match self {
+            Self::EdgeTables(access) => Some(&access.columns),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -848,6 +872,7 @@ mod tests {
                     inputs: vec![],
                 }],
             },
+            scope_requirements: vec![],
         }
     }
 
@@ -870,8 +895,9 @@ mod tests {
             edge_properties: vec![EdgePropertyAccess {
                 edge: EDGE,
                 source: COLUMN,
+                column: EDGE_COLUMN,
                 edge_column: PhysicalColumn("source_tags".into()),
-                token: Value::String("state:opened".into()),
+                tokens: vec![Value::String("state:opened".into())],
             }],
             text_indexes: vec![TextIndexAccess {
                 column: COLUMN,
@@ -983,6 +1009,7 @@ mod tests {
             }),
             ClickHouseAccess::EdgeTables(EdgeTableAccess {
                 layouts: vec![layout("gl_edge")],
+                columns: BTreeMap::new(),
             }),
             ClickHouseAccess::DenormalizedJoin(clickhouse_facts().denormalized_joins.remove(0)),
         ];

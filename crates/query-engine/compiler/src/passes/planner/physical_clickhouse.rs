@@ -7,15 +7,46 @@ pub fn plan_clickhouse(
     logical: LogicalPlan,
 ) -> Result<PlanningResult<ClickHouse>> {
     let catalog = clickhouse_catalog(bound);
-    let plan = map_clickhouse(bound, &logical.root, &catalog, false);
+    let mut plan = map_clickhouse(bound, &logical.root, &catalog, false);
+    if bound.input.query_type == crate::input::QueryType::Aggregation
+        && bound.input.relationships.len() > 1
+    {
+        plan = deduplicate_edges(plan, bound);
+    }
     let ordinary = clickhouse_candidate(bound, plan);
+    if bound.input.query_type == crate::input::QueryType::Aggregation
+        && catalog.facts.edge_properties.len() == 1
+        && bound.input.relationships.len() > 1
+    {
+        let edge_property = edge_property_candidate(&catalog, ordinary);
+        return Ok(PlanningResult {
+            logical,
+            selected: SelectedPlan {
+                candidate: edge_property,
+            },
+        });
+    }
     let mut candidates = CandidateSet::default();
     candidates.insert(ordinary.clone());
     if let Some(candidate) = foreign_key_candidate(&catalog, ordinary.clone()) {
         candidates.insert(candidate);
     }
     candidates.insert(text_index_candidate(&catalog, ordinary.clone()));
-    candidates.insert(edge_property_candidate(&catalog, ordinary));
+    let edge_property = edge_property_candidate(&catalog, ordinary);
+    let edge_count = bound
+        .relations
+        .values()
+        .filter(|metadata| matches!(metadata.origin, RelationOrigin::Edge { input: Some(_), .. }))
+        .count();
+    if !catalog.facts.edge_properties.is_empty() && catalog.facts.foreign_keys.len() != edge_count {
+        return Ok(PlanningResult {
+            logical,
+            selected: SelectedPlan {
+                candidate: edge_property,
+            },
+        });
+    }
+    candidates.insert(edge_property);
     for access in &catalog.facts.denormalized_joins {
         candidates.insert(denormalized_join_candidate(&catalog, &logical, access));
     }
@@ -23,6 +54,31 @@ pub fn plan_clickhouse(
         logical,
         selected: candidates.select().unwrap(),
     })
+}
+
+fn deduplicate_edges(mut plan: Plan<ClickHouse>, bound: &BoundCatalog) -> Plan<ClickHouse> {
+    plan.inputs = plan
+        .inputs
+        .into_iter()
+        .map(|input| deduplicate_edges(input, bound))
+        .collect();
+    let Operator::Scan(scan) = &plan.operator else {
+        return plan;
+    };
+    if matches!(
+        bound.relations[&scan.relation].origin,
+        RelationOrigin::Edge { .. }
+    ) {
+        Plan::unary(
+            Operator::CurrentRows {
+                keys: vec![],
+                strategy: ClickHouseCurrentRows::Final,
+            },
+            plan,
+        )
+    } else {
+        plan
+    }
 }
 
 fn denormalized_join_candidate(
@@ -120,44 +176,68 @@ fn edge_property_candidate(
 ) -> Candidate<ClickHouse> {
     let mut predicates: BTreeMap<RelationId, Vec<Expr>> = BTreeMap::new();
     for access in &catalog.facts.edge_properties {
-        let Some(list) = catalog.bound.column_ids.get(&ColumnKey {
-            relation: access.edge,
-            name: access.edge_column.0.clone(),
-        }) else {
-            continue;
-        };
         predicates
             .entry(access.edge)
             .or_default()
             .push(Expr::ListContains {
-                list: Box::new(Expr::Column(*list)),
-                value: access.token.clone(),
+                list: Box::new(Expr::Column(access.column)),
+                values: access.tokens.clone(),
             });
+    }
+    if predicates.len() > 1 {
+        let selected: BTreeSet<_> = catalog
+            .facts
+            .edge_properties
+            .iter()
+            .map(|access| access.edge)
+            .collect();
+        predicates.retain(|relation, _| selected.contains(relation));
     }
     if predicates.is_empty() {
         return candidate;
     }
-    candidate.plan = inject_edge_predicates(candidate.plan, &predicates);
+    let physical_columns: BTreeMap<_, _> = catalog
+        .facts
+        .edge_properties
+        .iter()
+        .map(|access| (access.column, access.edge_column.clone()))
+        .collect();
+    candidate.plan = inject_edge_predicates(candidate.plan, &predicates, &physical_columns);
     candidate.cost = plan_cost(&candidate.plan);
-    candidate.cost.residual_filters = candidate.cost.residual_filters.saturating_sub(1);
+    candidate.cost.residual_filters = candidate.cost.residual_filters.saturating_sub(2);
     candidate
 }
 
 fn inject_edge_predicates(
     mut plan: Plan<ClickHouse>,
     predicates: &BTreeMap<RelationId, Vec<Expr>>,
+    physical_columns: &BTreeMap<ColumnId, PhysicalColumn>,
 ) -> Plan<ClickHouse> {
     plan.inputs = plan
         .inputs
         .into_iter()
-        .map(|input| inject_edge_predicates(input, predicates))
+        .map(|input| inject_edge_predicates(input, predicates, physical_columns))
         .collect();
-    let Operator::Scan(scan) = &plan.operator else {
+    let Operator::Scan(scan) = &mut plan.operator else {
         return plan;
     };
     let Some(predicates) = predicates.get(&scan.relation) else {
         return plan;
     };
+    scan.columns.extend(predicates.iter().flat_map(|predicate| {
+        let mut columns = BTreeSet::new();
+        collect_expression_columns(predicate, &mut columns);
+        columns
+    }));
+    if let ClickHouseAccess::EdgeTables(access) = &mut scan.access {
+        access
+            .columns
+            .extend(scan.columns.iter().filter_map(|column| {
+                physical_columns
+                    .get(column)
+                    .map(|name| (*column, name.clone()))
+            }));
+    }
     Plan::unary(
         Operator::Filter(if predicates.len() == 1 {
             predicates[0].clone()
@@ -166,6 +246,19 @@ fn inject_edge_predicates(
         }),
         plan,
     )
+}
+
+fn collect_expression_columns(expression: &Expr, columns: &mut BTreeSet<ColumnId>) {
+    match expression {
+        Expr::Column(column) => {
+            columns.insert(*column);
+        }
+        Expr::ListContains { list, .. } => collect_expression_columns(list, columns),
+        Expr::And(expressions) => expressions
+            .iter()
+            .for_each(|expression| collect_expression_columns(expression, columns)),
+        _ => {}
+    }
 }
 
 fn foreign_key_candidate(
@@ -308,29 +401,61 @@ fn plan_cost(plan: &Plan<ClickHouse>) -> Cost {
 
 fn clickhouse_catalog(bound: &BoundCatalog) -> BackendCatalog<'_, ClickHouse> {
     let relations = physical_relations(bound);
+    let mut next_column = bound
+        .columns
+        .keys()
+        .map(|column| column.0)
+        .max()
+        .unwrap_or_default()
+        + 1;
     let access_paths = relations
         .iter()
         .map(|(relation, physical)| {
-            let access = match physical {
-                PhysicalRelation::Node { layout, .. } => ClickHouseAccess::Table(TableAccess {
-                    layout: layout.clone(),
-                }),
+            let (access, physical_columns) = match physical {
+                PhysicalRelation::Node { layout, .. } => (
+                    ClickHouseAccess::Table(TableAccess {
+                        layout: layout.clone(),
+                    }),
+                    BTreeMap::new(),
+                ),
                 PhysicalRelation::Edge { layouts, .. } => {
-                    ClickHouseAccess::EdgeTables(EdgeTableAccess {
-                        layouts: layouts.clone(),
-                    })
+                    let columns: BTreeMap<_, _> = layouts
+                        .iter()
+                        .flat_map(|layout| &layout.columns)
+                        .filter(|physical| {
+                            !bound.column_ids.contains_key(&ColumnKey {
+                                relation: *relation,
+                                name: physical.0.clone(),
+                            })
+                        })
+                        .map(|physical| {
+                            let column = ColumnId(next_column);
+                            next_column += 1;
+                            (column, physical.clone())
+                        })
+                        .collect();
+                    (
+                        ClickHouseAccess::EdgeTables(EdgeTableAccess {
+                            layouts: layouts.clone(),
+                            columns: columns.clone(),
+                        }),
+                        columns,
+                    )
                 }
             };
+            let mut columns = candidate::relation_columns(bound, *relation);
+            columns.extend(physical_columns.keys());
             (
                 *relation,
                 vec![PhysicalScan {
                     relation: *relation,
                     access,
-                    columns: candidate::relation_columns(bound, *relation),
+                    columns,
                 }],
             )
         })
         .collect();
+    let facts = clickhouse_facts(bound, &access_paths);
     BackendCatalog {
         bound,
         relations,
@@ -345,7 +470,7 @@ fn clickhouse_catalog(bound: &BoundCatalog) -> BackendCatalog<'_, ClickHouse> {
                 )
             })
             .collect(),
-        facts: clickhouse_facts(bound),
+        facts,
         marker: PhantomData,
     }
 }
@@ -370,11 +495,14 @@ fn physical_relations(bound: &BoundCatalog) -> BTreeMap<RelationId, PhysicalRela
         .collect()
 }
 
-fn clickhouse_facts(bound: &BoundCatalog) -> ClickHouseFacts {
+fn clickhouse_facts(
+    bound: &BoundCatalog,
+    access_paths: &BTreeMap<RelationId, Vec<PhysicalScan<ClickHouseAccess>>>,
+) -> ClickHouseFacts {
     ClickHouseFacts {
         foreign_keys: foreign_key_facts(bound),
         denormalized_joins: denormalized_join_facts(bound),
-        edge_properties: edge_property_facts(bound),
+        edge_properties: edge_property_facts(bound, access_paths),
         text_indexes: text_index_facts(bound),
     }
 }
@@ -495,7 +623,10 @@ fn text_index_facts(bound: &BoundCatalog) -> Vec<TextIndexAccess> {
         .collect()
 }
 
-fn edge_property_facts(bound: &BoundCatalog) -> Vec<EdgePropertyAccess> {
+fn edge_property_facts(
+    bound: &BoundCatalog,
+    access_paths: &BTreeMap<RelationId, Vec<PhysicalScan<ClickHouseAccess>>>,
+) -> Vec<EdgePropertyAccess> {
     let mut facts = Vec::new();
     for (edge_relation, metadata) in &bound.relations {
         let RelationOrigin::Edge {
@@ -523,6 +654,12 @@ fn edge_property_facts(bound: &BoundCatalog) -> Vec<EdgePropertyAccess> {
                 continue;
             };
             for (property, filters) in &node.filters {
+                if !filters
+                    .iter()
+                    .all(|filter| matches!(filter.op, None | Some(FilterOp::Eq | FilterOp::In)))
+                {
+                    continue;
+                }
                 let Some(definition) =
                     bound
                         .ontology
@@ -543,19 +680,36 @@ fn edge_property_facts(bound: &BoundCatalog) -> Vec<EdgePropertyAccess> {
                 }) else {
                     continue;
                 };
+                let Some(edge_columns) = access_paths[edge_relation][0].access.edge_columns()
+                else {
+                    continue;
+                };
+                let Some(column) = edge_columns.iter().find_map(|(column, physical)| {
+                    (physical.0 == definition.edge_column).then_some(*column)
+                }) else {
+                    continue;
+                };
                 for filter in filters {
-                    let Some(value) = filter.value.as_ref() else {
-                        continue;
+                    let values: Vec<_> = match filter.value.as_ref() {
+                        Some(serde_json::Value::Array(values)) => values.iter().collect(),
+                        Some(value) => vec![value],
+                        None => continue,
                     };
-                    let value = value
-                        .as_str()
-                        .map(str::to_string)
-                        .unwrap_or_else(|| value.to_string());
                     facts.push(EdgePropertyAccess {
                         edge: *edge_relation,
                         source: *source,
+                        column,
                         edge_column: PhysicalColumn(definition.edge_column.clone()),
-                        token: Value::String(format!("{}:{value}", definition.tag_key)),
+                        tokens: values
+                            .into_iter()
+                            .map(|value| {
+                                let value = value
+                                    .as_str()
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| value.to_string());
+                                Value::String(format!("{}:{value}", definition.tag_key))
+                            })
+                            .collect(),
                     });
                 }
             }

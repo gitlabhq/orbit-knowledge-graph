@@ -136,7 +136,7 @@ fn lower_ch(
                 .collect::<Result<Vec<_>>>()?;
             Ok(Query {
                 select: union_projection(&queries),
-                from: TableRef::union_all(queries, "union"),
+                from: TableRef::union_all(queries, union_alias(bound)),
                 ..Default::default()
             })
         }
@@ -214,7 +214,7 @@ fn lower_duck(
                 .collect::<Result<Vec<_>>>()?;
             Ok(Query {
                 select: union_projection(&queries),
-                from: TableRef::union_all(queries, "union"),
+                from: TableRef::union_all(queries, union_alias(bound)),
                 ..Default::default()
             })
         }
@@ -632,7 +632,14 @@ fn lower_expr(
             })?;
             ast::Expr::col(alias, &column.name)
         }
-        Expr::Output(output) => ast::Expr::ident(&bound.outputs[output].name),
+        Expr::Output(output) => {
+            let name = &bound.outputs[output].name;
+            if bound.input.query_type == crate::input::QueryType::PathFinding {
+                ast::Expr::col("paths", name)
+            } else {
+                ast::Expr::ident(name)
+            }
+        }
         Expr::Literal(value) => literal(value),
         Expr::Compare { op, left, right } => ast::Expr::binary(
             compare_op(*op),
@@ -748,10 +755,20 @@ fn lower_expr(
                 ast::Expr::func("toString", vec![lower_expr(bound, value, aliases)?])
             }
         }
-        Expr::ListContains { list, value } => ast::Expr::func(
-            "has",
-            vec![lower_expr(bound, list, aliases)?, literal(value)],
-        ),
+        Expr::ListContains { list, values } => {
+            let list = lower_expr(bound, list, aliases)?;
+            if values.len() == 1 {
+                ast::Expr::func("has", vec![list, literal(&values[0])])
+            } else {
+                ast::Expr::func(
+                    "hasAny",
+                    vec![
+                        list,
+                        ast::Expr::func("array", values.iter().map(literal).collect()),
+                    ],
+                )
+            }
+        }
         Expr::TokenMatch { value, token } => ast::Expr::func(
             "hasToken",
             vec![lower_expr(bound, value, aliases)?, literal(token)],
@@ -765,6 +782,20 @@ fn lower_expr_ch(
     aliases: &HashMap<RelationId, String>,
     physical_columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
 ) -> Result<ast::Expr> {
+    if let Expr::ListContains { list, values } = expression {
+        let list = lower_expr_ch(bound, list, aliases, physical_columns)?;
+        return Ok(if values.len() == 1 {
+            ast::Expr::func("has", vec![list, literal(&values[0])])
+        } else {
+            ast::Expr::func(
+                "hasAny",
+                vec![
+                    list,
+                    ast::Expr::func("array", values.iter().map(literal).collect()),
+                ],
+            )
+        });
+    }
     if let Expr::Column(column) = expression
         && let Some((relation, physical)) = physical_columns.get(column)
     {
@@ -776,12 +807,14 @@ fn lower_expr_ch(
 fn physical_columns(plan: &Plan<ClickHouse>) -> BTreeMap<ColumnId, (RelationId, PhysicalColumn)> {
     let mut columns = BTreeMap::new();
     visit_ch(plan, &mut |plan| {
-        if let Operator::Scan(scan) = &plan.operator
-            && let ClickHouseAccess::DenormalizedJoin(access) = &scan.access
-        {
+        if let Operator::Scan(scan) = &plan.operator {
+            let physical = match &scan.access {
+                ClickHouseAccess::DenormalizedJoin(access) => &access.columns,
+                ClickHouseAccess::EdgeTables(access) => &access.columns,
+                ClickHouseAccess::Table(_) => return,
+            };
             columns.extend(
-                access
-                    .columns
+                physical
                     .iter()
                     .map(|(column, physical)| (*column, (scan.relation, physical.clone()))),
             );
@@ -869,16 +902,10 @@ fn stable_order(
             query.group_by.iter().cloned().map(OrderExpr::asc).collect()
         }
         crate::input::QueryType::PathFinding => vec![
-            OrderExpr::asc(ast::Expr::func(
-                "toString",
-                vec![ast::Expr::col("paths", crate::constants::path_column())],
-            )),
-            OrderExpr::asc(ast::Expr::func(
-                "toString",
-                vec![ast::Expr::col(
-                    "paths",
-                    crate::constants::edge_kinds_column(),
-                )],
+            OrderExpr::asc(ast::Expr::col("paths", crate::constants::path_column())),
+            OrderExpr::asc(ast::Expr::col(
+                "paths",
+                crate::constants::edge_kinds_column(),
             )),
         ],
         crate::input::QueryType::Neighbors => bound
@@ -921,6 +948,14 @@ fn edge_tables(layouts: &[TableLayout], alias: &str) -> TableRef {
                 .collect(),
             alias,
         ),
+    }
+}
+
+fn union_alias(bound: &BoundCatalog) -> &'static str {
+    if bound.input.query_type == crate::input::QueryType::PathFinding {
+        "paths"
+    } else {
+        "union"
     }
 }
 

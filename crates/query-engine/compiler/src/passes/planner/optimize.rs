@@ -2,6 +2,8 @@ use super::*;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 pub fn optimize(mut bound: BoundCatalog, mut logical: LogicalPlan) -> (BoundCatalog, LogicalPlan) {
+    elide_scope_implied_relationship(&bound, &mut logical);
+    prune_fk_aggregation_leaves(&mut bound, &mut logical);
     if bound
         .input
         .relationships
@@ -23,6 +25,326 @@ pub fn optimize(mut bound: BoundCatalog, mut logical: LogicalPlan) -> (BoundCata
         logical.root = add_sip(logical.root, &mut bound);
     }
     (bound, logical)
+}
+
+fn prune_fk_aggregation_leaves(bound: &mut BoundCatalog, logical: &mut LogicalPlan) {
+    if bound.input.query_type != crate::input::QueryType::Aggregation {
+        return;
+    }
+    let mut removed = BTreeSet::new();
+    let protected: BTreeSet<_> = bound
+        .input
+        .nodes
+        .iter()
+        .filter(|node| !node.filters.is_empty())
+        .flat_map(|node| {
+            bound
+                .input
+                .relationships
+                .iter()
+                .filter(move |relationship| relationship.from == node.id)
+                .filter(|relationship| {
+                    relationship.fk_column.is_some()
+                        && relationship_carries_node_filter(bound, relationship, node)
+                })
+                .map(|relationship| relationship.from.as_str())
+        })
+        .collect();
+    for (node_index, node) in bound.input.nodes.iter().enumerate() {
+        if bound.input.relationships.len() > 1
+            && bound.input.nodes.iter().any(|candidate| {
+                !candidate.filters.is_empty()
+                    && protected.contains(candidate.id.as_str())
+                    && bound
+                        .input
+                        .relationships
+                        .iter()
+                        .filter(|relationship| relationship.from == candidate.id)
+                        .count()
+                        > 1
+            })
+        {
+            continue;
+        }
+        if !node.filters.is_empty()
+            || !node.node_ids.is_empty()
+            || node.id_range.is_some()
+            || bound
+                .input
+                .aggregation
+                .group_by
+                .iter()
+                .any(|group| group.node() == node.id)
+            || bound
+                .input
+                .entity_auth
+                .get(node.entity.as_deref().unwrap_or_default())
+                .is_some_and(|auth| {
+                    auth.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL
+                })
+        {
+            continue;
+        }
+        let relationships: Vec<_> = bound
+            .input
+            .relationships
+            .iter()
+            .enumerate()
+            .filter(|(_, relationship)| relationship.from == node.id || relationship.to == node.id)
+            .collect();
+        if protected.contains(node.id.as_str())
+            && relationships.iter().any(|(_, relationship)| {
+                let other = if relationship.from == node.id {
+                    relationship.to.as_str()
+                } else {
+                    relationship.from.as_str()
+                };
+                protected.contains(other)
+            })
+        {
+            continue;
+        }
+        let [(relationship_index, relationship)] = relationships.as_slice() else {
+            continue;
+        };
+        let Some(foreign_key) = relationship.fk_column.as_deref() else {
+            continue;
+        };
+        let other_name = if relationship.from == node.id {
+            &relationship.to
+        } else {
+            &relationship.from
+        };
+        if node.filters.keys().any(|property| {
+            let Some(entity) = node.entity.as_deref() else {
+                return false;
+            };
+            let direction = if relationship.from == node.id {
+                ontology::DenormDirection::Source
+            } else {
+                ontology::DenormDirection::Target
+            };
+            bound
+                .ontology
+                .denormalized_properties()
+                .iter()
+                .any(|definition| {
+                    definition.node_kind == entity
+                        && definition.property_name == *property
+                        && definition.direction == direction
+                        && relationship.types.contains(&definition.relationship_kind)
+                })
+        }) {
+            continue;
+        }
+        let Some(other) = bound
+            .input
+            .nodes
+            .iter()
+            .find(|candidate| candidate.id == *other_name)
+        else {
+            continue;
+        };
+        let node_holds_key = bound
+            .ontology
+            .get_node(node.entity.as_deref().unwrap_or_default())
+            .is_some_and(|entity| {
+                entity
+                    .storage
+                    .columns
+                    .iter()
+                    .any(|column| column.name == foreign_key)
+            });
+        let other_holds_key = bound
+            .ontology
+            .get_node(other.entity.as_deref().unwrap_or_default())
+            .is_some_and(|entity| {
+                entity
+                    .storage
+                    .columns
+                    .iter()
+                    .any(|column| column.name == foreign_key)
+            });
+        if node_holds_key || !other_holds_key {
+            continue;
+        }
+        let metrics_supported = bound
+            .input
+            .aggregation
+            .metrics
+            .iter()
+            .filter(|metric| metric.expr.node() == node.id)
+            .all(|metric| {
+                metric.expr.function() == crate::input::AggFunction::Count
+                    && metric
+                        .expr
+                        .property()
+                        .is_none_or(|property| property == DEFAULT_PRIMARY_KEY)
+            });
+        if !metrics_supported {
+            continue;
+        }
+        removed.extend(bound.relations.iter().filter_map(|(relation, metadata)| {
+            match metadata.origin {
+                RelationOrigin::Node { input } if input == InputNodeId(node_index) => {
+                    Some(*relation)
+                }
+                RelationOrigin::Edge {
+                    input: Some(input), ..
+                } if input == InputRelationshipId(*relationship_index) => Some(*relation),
+                _ => None,
+            }
+        }));
+    }
+    if removed.is_empty() {
+        return;
+    }
+    logical.root = remove_relations(logical.root.clone(), bound, &removed).map_expressions(
+        &mut |expression| match expression {
+            Expr::Aggregate {
+                function: crate::input::AggFunction::Count,
+                value: Some(value),
+            } if matches!(value.as_ref(), Expr::Column(column) if removed.contains(&bound.columns[column].relation)) => {
+                Expr::Aggregate {
+                    function: crate::input::AggFunction::Count,
+                    value: None,
+                }
+            }
+            expression => expression,
+        },
+    );
+    bound
+        .relations
+        .retain(|relation, _| !removed.contains(relation));
+    bound
+        .columns
+        .retain(|_, column| !removed.contains(&column.relation));
+    bound
+        .column_ids
+        .retain(|key, _| !removed.contains(&key.relation));
+}
+
+fn relationship_carries_node_filter(
+    bound: &BoundCatalog,
+    relationship: &crate::input::InputRelationship,
+    node: &crate::input::InputNode,
+) -> bool {
+    let Some(entity) = node.entity.as_deref() else {
+        return false;
+    };
+    let direction = if relationship.from == node.id {
+        ontology::DenormDirection::Source
+    } else {
+        ontology::DenormDirection::Target
+    };
+    node.filters.keys().any(|property| {
+        bound
+            .ontology
+            .denormalized_properties()
+            .iter()
+            .any(|definition| {
+                definition.node_kind == entity
+                    && definition.property_name == *property
+                    && definition.direction == direction
+                    && relationship.types.contains(&definition.relationship_kind)
+            })
+    })
+}
+
+fn elide_scope_implied_relationship(bound: &BoundCatalog, logical: &mut LogicalPlan) {
+    if bound.input.query_type != crate::input::QueryType::Aggregation {
+        return;
+    }
+    let mut connections = BTreeMap::<&str, usize>::new();
+    for relationship in &bound.input.relationships {
+        *connections.entry(&relationship.from).or_default() += 1;
+        *connections.entry(&relationship.to).or_default() += 1;
+    }
+    let mut eligible = bound
+        .input
+        .relationships
+        .iter()
+        .enumerate()
+        .filter(|(_, relationship)| relationship.fk_column.is_none());
+    let Some((relationship_index, relationship)) = eligible.next() else {
+        return;
+    };
+    if eligible.next().is_some()
+        || !relationship.scope_preserving
+        || !relationship.filters.is_empty()
+    {
+        return;
+    }
+    let Some(proof) = relationship.scope_proof.clone() else {
+        return;
+    };
+    let Some(anchor_index) = bound.input.nodes.iter().position(|node| {
+        [&relationship.from, &relationship.to].contains(&&node.id)
+            && node.has_traversal_path
+            && connections.get(node.id.as_str()) == Some(&1)
+            && crate::scope::is_scope_only(node)
+            && !bound
+                .input
+                .aggregation
+                .group_by
+                .iter()
+                .any(|group| group.node() == node.id)
+            && !bound
+                .input
+                .aggregation
+                .metrics
+                .iter()
+                .any(|metric| metric.expr.node() == node.id)
+            && !bound
+                .input
+                .order_by
+                .as_ref()
+                .is_some_and(|order| order.node == node.id)
+    }) else {
+        return;
+    };
+    let removed: BTreeSet<_> = bound
+        .relations
+        .iter()
+        .filter_map(|(relation, metadata)| match metadata.origin {
+            RelationOrigin::Node { input } if input == InputNodeId(anchor_index) => Some(*relation),
+            RelationOrigin::Edge {
+                input: Some(input), ..
+            } if input == InputRelationshipId(relationship_index) => Some(*relation),
+            _ => None,
+        })
+        .collect();
+    logical.root = remove_relations(logical.root.clone(), bound, &removed);
+    logical.scope_requirements.push(proof);
+}
+
+fn remove_relations(
+    mut plan: Plan<Logical>,
+    bound: &BoundCatalog,
+    removed: &BTreeSet<RelationId>,
+) -> Plan<Logical> {
+    plan.inputs = plan
+        .inputs
+        .into_iter()
+        .filter(|input| relation_id(input).is_none_or(|relation| !removed.contains(&relation)))
+        .map(|input| remove_relations(input, bound, removed))
+        .collect();
+    if let Operator::Join(conditions) = &mut plan.operator {
+        conditions.retain(|condition| {
+            let mut columns = BTreeSet::new();
+            collect_columns(condition, &mut columns);
+            columns.iter().all(|column| {
+                bound
+                    .columns
+                    .get(column)
+                    .is_none_or(|column| !removed.contains(&column.relation))
+            })
+        });
+        if plan.inputs.len() == 1 {
+            return plan.inputs.pop().unwrap();
+        }
+    }
+    plan
 }
 
 fn rewrite(
