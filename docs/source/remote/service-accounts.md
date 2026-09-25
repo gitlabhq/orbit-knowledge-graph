@@ -26,8 +26,7 @@ title: Service accounts
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Use a [service account](https://docs.gitlab.com/user/profile/service_accounts/) to query GitLab Orbit
-from a script, a CI/CD job, or an AI agent.
+Use a [service account](https://docs.gitlab.com/user/profile/service_accounts/) to query GitLab Orbit from a script, a CI/CD job, or an AI agent.
 A service account is a bot user with no password.
 The account authenticates to the GitLab Orbit REST API with a personal access token.
 
@@ -64,8 +63,7 @@ The role that the account holds controls which data domains it can read:
 | Security Manager             | Reporter data, and vulnerabilities and findings        |
 | Administrator or auditor     | All data in every group where GitLab Orbit is on       |
 
-For more information about the roles, see
-[roles required to query GitLab Orbit](security.md#roles-required-to-query-gitlab-orbit).
+For more information about the roles, see [roles required to query GitLab Orbit](security.md#roles-required-to-query-gitlab-orbit).
 
 ### Administrator and auditor accounts
 
@@ -92,16 +90,14 @@ To set up a service account:
    A project service account can only be a member of its own project, so it cannot get scope.
    A group service account can only join its own group and the subgroups of that group.
    To query more than one top-level group, create one service account for each group.
-1. [Create a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-personal-access-token-for-a-service-account)
-   for the service account:
+1. [Create a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-personal-access-token-for-a-service-account) for the service account:
    - Select the `read_api` scope.
      GitLab Orbit is read-only, so the account does not need the `api` scope.
    - Set an expiration date.
    - Copy the token.
      GitLab shows it only once.
    - Store the token in a secret store, such as a [masked CI/CD variable](https://docs.gitlab.com/ci/variables/#mask-a-cicd-variable).
-1. [Add the service account to each group](https://docs.gitlab.com/user/profile/service_accounts/#add-a-service-account-to-a-group-or-project)
-   that the tool must query.
+1. [Add the service account to each group](https://docs.gitlab.com/user/profile/service_accounts/#add-a-service-account-to-a-group-or-project) that the tool must query.
    Select the Reporter role.
    Select the Security Manager role only if the tool must read security data.
 
@@ -145,8 +141,7 @@ To verify the scope:
 
 1. Compare the `full_path` values in the response with the groups that you added the account to.
    The response must not contain other groups.
-   If the response contains groups from outside those memberships, check that the account is
-   not an administrator or auditor.
+   If the response contains groups from outside those memberships, check that the account is not an administrator or auditor.
 
 The service account can also call the other [REST API endpoints](access/api.md).
 
@@ -159,8 +154,7 @@ Give each service account the smallest scope that its task needs:
 - Add the account to the lowest subgroup that contains the data, not to the top-level group.
 - Use the Reporter role unless the tool must read security data.
 - Use the `read_api` scope.
-- [Rotate the token](https://docs.gitlab.com/user/profile/service_accounts/#rotate-a-personal-access-token)
-  before it expires.
+- [Rotate the token](https://docs.gitlab.com/user/profile/service_accounts/#rotate-a-personal-access-token) before it expires.
   A revoked or expired token stops all queries from the tool.
 - Remove the account from a group when the tool no longer needs that group.
 
@@ -185,16 +179,13 @@ To resolve this issue:
 ### Error: `403 Forbidden`
 
 You might get a `403 Forbidden` response with no other message.
-GitLab Orbit returns this response when none of the groups of the account has a license for
-GitLab Orbit.
+GitLab Orbit returns this response when none of the groups of the account has a license for GitLab Orbit.
 
 To resolve this issue:
 
-- Add the account to a group in a top-level group with a Premium or Ultimate subscription where
-  GitLab Orbit is on.
+- Add the account to a group in a top-level group with a Premium or Ultimate subscription where GitLab Orbit is on.
 
-If you added the account to a group a short time ago, GitLab can keep the earlier result for a
-few minutes.
+If you added the account to a group a short time ago, GitLab can keep the earlier result for a few minutes.
 Wait a few minutes, then send the query again.
 
 ### Error: `404 Not Found`
@@ -202,16 +193,13 @@ Wait a few minutes, then send the query again.
 You might get a `404 Not Found` response from all GitLab Orbit endpoints.
 
 This issue occurs when the `knowledge_graph` feature flag is not enabled for the service account.
-GitLab checks the flag for the user that sends the request, so the flag can be on for you and off
-for the service account.
+GitLab checks the flag for the user that sends the request, so the flag can be on for you and off for the service account.
 
-To resolve this issue, contact your GitLab administrator to enable the `knowledge_graph` feature
-flag for the service account.
+To resolve this issue, contact your GitLab administrator to enable the `knowledge_graph` feature flag for the service account.
 
 ### Results do not include security data
 
-A service account with the Reporter role can query the graph, but GitLab Orbit removes security
-entities from the results and from aggregate counts.
+A service account with the Reporter role can query the graph, but GitLab Orbit removes security entities from the results and from aggregate counts.
 
 To resolve this issue:
 
