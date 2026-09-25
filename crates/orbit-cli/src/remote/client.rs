@@ -315,7 +315,6 @@ fn parse_credential_helper_response(json: &[u8]) -> Option<ResolvedEndpoint> {
     })
 }
 
-
 fn build_user_agent(get_env: impl Fn(&str) -> Option<String>) -> String {
     let mut ua = format!(
         "orbit/{} ({}, {})",
