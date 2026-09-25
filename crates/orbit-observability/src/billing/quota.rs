@@ -26,10 +26,6 @@ const DOMAIN: &str = "billing.quota";
 // coalesces concurrent misses, and fail-open results are never cached, so under a
 // CDot outage every request reports `cache=miss` while actual HTTP calls are far
 // fewer. Use `cdot_duration_seconds_count{outcome="fail_open"}` for the call rate.
-//
-// `decision=skipped` means `license_checksum` auth mode had no license checksum or
-// a non-self-managed realm to present, so CDot was not called and the request was
-// allowed through. Always `cache=miss`.
 pub const QUOTA_DECISIONS: MetricSpec = MetricSpec::counter(
     "gkg.billing.quota.decisions",
     "Quota gate decisions, labelled by outcome (allow/deny/fail_open/skipped), cache result \

@@ -48,7 +48,6 @@ pub(crate) enum QuotaOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailOpenReason {
     Unreachable,
-    /// CDot rejected the admin credentials or the license checksum.
     Unauthorized,
     UnexpectedResponse,
 }

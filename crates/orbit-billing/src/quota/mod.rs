@@ -187,9 +187,6 @@ impl QuotaService {
     }
 }
 
-// Without a checksum (no online cloud license, or an older Rails) or a realm CDot accepts
-// for license auth, CDot can only answer 401 or 402 `realm_mismatch`, so the query is
-// allowed without asking. Either way quota is not enforced for the request.
 fn license_auth_skip_reason(inputs: &QuotaCheckInputs) -> Option<&'static str> {
     if inputs.license_checksum.is_none() {
         return Some("license_checksum claim missing");
