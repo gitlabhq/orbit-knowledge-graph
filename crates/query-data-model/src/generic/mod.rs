@@ -178,8 +178,26 @@ pub trait QueryDataModel {
     }
 
     fn property_is_virtual(&self, entity: EntityId, property: &str) -> bool {
-        self.property_for_entity_id(entity, property)
-            .is_some_and(|property| matches!(property.realization, PropertyRealization::Virtual(_)))
+        self.virtual_source_for_entity_id(entity, property)
+            .is_some()
+    }
+
+    fn virtual_source_for_entity_id(
+        &self,
+        entity: EntityId,
+        property: &str,
+    ) -> Option<&ontology::VirtualSource> {
+        let PropertyRealization::Virtual(source) =
+            &self.property_for_entity_id(entity, property)?.realization
+        else {
+            return None;
+        };
+        Some(source)
+    }
+
+    fn virtual_source(&self, entity: &str, property: &str) -> Option<&ontology::VirtualSource> {
+        let entity = self.graph().entity_id(entity)?;
+        self.virtual_source_for_entity_id(entity, property)
     }
 
     fn relationship_exists(&self, relationship: &str) -> bool {

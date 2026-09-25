@@ -235,15 +235,8 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         self
     }
 
-    /// Returns the virtual source declaration for the field, or `None` for
-    /// non-virtual fields.
     fn virtual_source(&self, entity: &str, prop: &str) -> Option<&ontology::VirtualSource> {
-        let property = self.property(entity, prop)?;
-        if let query_data_model::PropertyRealization::Virtual(source) = &property.realization {
-            Some(source)
-        } else {
-            None
-        }
+        self.model.get().virtual_source(entity, prop)
     }
 
     fn property_id(&self, entity: &str, property: &str) -> Option<PropertyId> {

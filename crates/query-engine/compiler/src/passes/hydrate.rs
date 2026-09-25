@@ -151,25 +151,14 @@ fn build_static_templates(
                 .collect();
             let requested_virtuals: HashSet<String> = requested
                 .iter()
-                .filter(|property| {
-                    model
-                        .property_for_entity_id(entity_id, property)
-                        .is_some_and(|property| {
-                            matches!(property.realization, PropertyRealization::Virtual(_))
-                        })
-                })
+                .filter(|property| model.property_is_virtual(entity_id, property))
                 .cloned()
                 .collect();
             let (mut columns, mut virtual_columns) =
                 split_model_columns(&selected, model, entity_id);
             let mut virtual_filters = Vec::new();
             for (property, filters) in &node.filters {
-                let is_virtual = model
-                    .property_for_entity_id(entity_id, property)
-                    .is_some_and(|property| {
-                        matches!(property.realization, PropertyRealization::Virtual(_))
-                    });
-                if !is_virtual {
+                if !model.property_is_virtual(entity_id, property) {
                     continue;
                 }
                 virtual_filters.extend(filters.iter().cloned().map(|mut filter| {
@@ -304,21 +293,19 @@ fn inject_model_virtual_dependencies(
 ) -> Vec<String> {
     let mut injected = Vec::new();
     for vc in virtual_columns {
-        let Some(property) = model.property_for_entity_id(entity, &vc.column_name) else {
+        let Some(source) = model.virtual_source_for_entity_id(entity, &vc.column_name) else {
             continue;
         };
-        if let PropertyRealization::Virtual(vs) = &property.realization {
-            for dep in &vs.depends_on {
-                if !columns.contains(dep)
-                    && model
-                        .property_for_entity_id(entity, dep)
-                        .is_some_and(|property| {
-                            matches!(property.realization, PropertyRealization::Stored)
-                        })
-                {
-                    columns.push(dep.clone());
-                    injected.push(dep.clone());
-                }
+        for dependency in &source.depends_on {
+            if !columns.contains(dependency)
+                && model
+                    .property_for_entity_id(entity, dependency)
+                    .is_some_and(|property| {
+                        matches!(property.realization, PropertyRealization::Stored)
+                    })
+            {
+                columns.push(dependency.clone());
+                injected.push(dependency.clone());
             }
         }
     }
@@ -364,12 +351,9 @@ fn virtual_request(
     entity: query_data_model::EntityId,
     property: &str,
 ) -> Option<VirtualColumnRequest> {
-    let property = model.property_for_entity_id(entity, property)?;
-    let PropertyRealization::Virtual(source) = &property.realization else {
-        return None;
-    };
+    let source = model.virtual_source_for_entity_id(entity, property)?;
     (!source.disabled).then(|| VirtualColumnRequest {
-        column_name: property.name.clone(),
+        column_name: property.to_string(),
         service: source.service.clone(),
         lookup: source.lookup.clone(),
     })
