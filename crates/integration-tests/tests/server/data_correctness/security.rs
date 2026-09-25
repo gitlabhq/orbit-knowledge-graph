@@ -1018,6 +1018,8 @@ pub(super) async fn traversal_vulnerability_reporter_no_filters_sees_nothing(ctx
 pub(super) async fn traversal_vulnerability_security_manager_no_filters_sees_data(
     ctx: &TestContext,
 ) {
+    let mut redaction = allow_all();
+    redaction.allow("vulnerability", &[8000]);
     let resp = run_query_with_security(
         ctx,
         r#"{
@@ -1029,17 +1031,15 @@ pub(super) async fn traversal_vulnerability_security_manager_no_filters_sees_dat
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
             "limit": 10
         }"#,
-        &allow_all(),
+        &redaction,
         SecurityContext::new_with_roles(1, vec![security_manager_path("1/100/")]).unwrap(),
     )
     .await;
 
-    // TODO: when the over-restriction bug is fixed, this should be
-    // assert_node_count(2) + assert_node_ids (Vulnerability 8000 + Project 1000).
-    resp.assert_node_count(0);
-    resp.assert_node_ids("Project", &[]);
-    resp.assert_node_ids("Vulnerability", &[]);
-    resp.assert_edge_count("IN_PROJECT", 0);
+    resp.assert_node_count(2);
+    resp.assert_node_ids("Project", &[1000]);
+    resp.assert_node_ids("Vulnerability", &[8000]);
+    resp.assert_edge_count("IN_PROJECT", 1);
 }
 
 /// Security Manager (25) hits the exact floor of Vulnerability's `required_role`;

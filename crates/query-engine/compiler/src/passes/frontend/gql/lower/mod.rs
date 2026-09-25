@@ -160,7 +160,7 @@ impl Lowering {
             hops: HopRange::default(),
             filters: HashMap::new(),
             fk_column: None,
-            scope_prefix: None,
+            scope_proof: None,
             scope_preserving: false,
         };
         if relationship.types.is_empty()

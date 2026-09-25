@@ -11,6 +11,7 @@ use crate::ast::*;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, QueryType};
+use crate::passes::lower::LoweredMetadata;
 use orbit_utils::clickhouse::ChType;
 
 pub fn cursor_column(i: usize) -> String {
@@ -87,13 +88,21 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
     hash
 }
 
-pub fn apply(node: &mut Node, input: &mut Input) -> Result<()> {
-    let Some(cursor) = &input.cursor else {
-        return Ok(());
-    };
+pub fn apply(node: &mut Node, input: &mut Input, metadata: &LoweredMetadata) -> Result<()> {
     let Node::Query(q) = node else {
         return Ok(());
     };
+    q.limit = Some(input.fetch_limit());
+    let Some(cursor) = &input.cursor else {
+        return Ok(());
+    };
+    let additional: Vec<_> = metadata
+        .stable_order
+        .iter()
+        .filter(|key| !q.order_by.iter().any(|current| current.expr == key.expr))
+        .cloned()
+        .collect();
+    q.order_by.extend(additional);
     let order_by = q.order_by.clone();
     input.compiler.cursor_key_count = order_by.len();
     if order_by.is_empty() {
