@@ -22,7 +22,7 @@ pub(crate) struct CdotRequest {
     pub global_user_id: String,
     pub instance_version: String,
     pub license_checksum: Option<SecretString>,
-    pub correlation_id: Option<String>,
+    pub correlation_id: String,
 }
 
 impl CdotRequest {
@@ -51,12 +51,12 @@ impl CdotRequest {
             global_user_id: inputs.global_user_id.clone().unwrap_or_default(),
             instance_version: inputs.instance_version.clone().unwrap_or_default(),
             license_checksum: inputs.license_checksum.clone(),
-            correlation_id: (!correlation_id.is_empty()).then(|| correlation_id.to_string()),
+            correlation_id: correlation_id.to_string(),
         })
     }
 
     pub(crate) fn as_query_params(&self) -> Vec<(&'static str, &str)> {
-        let mut params: Vec<(&'static str, &str)> = vec![
+        vec![
             ("realm", &self.key.realm),
             ("user_id", &self.key.user_id),
             ("global_user_id", &self.global_user_id),
@@ -66,13 +66,8 @@ impl CdotRequest {
             ("instance_version", &self.instance_version),
             ("event_type", &self.key.event_type),
             ("feature_qualified_name", &self.key.feature_qualified_name),
-        ];
-        // Matches the AI Gateway's parameter so CustomersDot request logs can be joined to
-        // Orbit's logs without a CustomersDot change.
-        if let Some(id) = self.correlation_id.as_deref() {
-            params.push(("correlation_id", id));
-        }
-        params
+            ("correlation_id", &self.correlation_id),
+        ]
     }
 }
 
@@ -182,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn correlation_id_is_sent_as_query_param_when_present() {
+    fn correlation_id_is_sent_as_query_param() {
         let inputs = inputs_with(Some("SaaS"), None, None, Some(1));
         let req = CdotRequest::from_inputs(&inputs, "req-123").unwrap();
         let params = req.as_query_params();
@@ -191,17 +186,5 @@ mod tests {
             .find(|(k, _)| *k == "correlation_id")
             .map(|(_, v)| *v);
         assert_eq!(correlation_id, Some("req-123"));
-    }
-
-    #[test]
-    fn correlation_id_param_is_omitted_when_absent() {
-        let inputs = inputs_with(Some("SaaS"), None, None, Some(1));
-        let req = CdotRequest::from_inputs(&inputs, "").unwrap();
-        assert!(req.correlation_id.is_none());
-        assert!(
-            req.as_query_params()
-                .iter()
-                .all(|(k, _)| *k != "correlation_id")
-        );
     }
 }

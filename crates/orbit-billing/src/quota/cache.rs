@@ -208,7 +208,7 @@ mod tests {
             global_user_id: String::new(),
             instance_version: String::new(),
             license_checksum: None,
-            correlation_id: None,
+            correlation_id: String::new(),
         }
     }
 
@@ -362,7 +362,7 @@ mod tests {
 
         for id in ["req-a", "req-b"] {
             let mut request = request_with("correlated");
-            request.correlation_id = Some(id.into());
+            request.correlation_id = id.into();
             assert_eq!(cache.check(request).await.0, QuotaGateDecision::Allow);
         }
 
