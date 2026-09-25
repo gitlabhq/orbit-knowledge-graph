@@ -8,7 +8,6 @@ pub use generic::{
     Authz, Backend, DataModel, Entity, EntityId, GraphCatalog, Property, PropertyId,
     PropertyRealization, Relationship, RelationshipId, RelationshipVariant, RelationshipVariantId,
 };
-pub use implementations::DenormalizedProperty;
 pub use implementations::{ClickHouse, DuckDb, GitLabAuthz, TrustedLocal};
 
 pub type ClickHouseDataModel = DataModel<ClickHouse, GitLabAuthz>;

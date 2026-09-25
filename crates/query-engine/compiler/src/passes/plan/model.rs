@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use query_data_model::{ClickHouseDataModel, DenormalizedProperty, DuckDbDataModel, EntityId};
+use query_data_model::{ClickHouseDataModel, DuckDbDataModel, EntityId};
 
 pub trait PlanningModel {
     fn graph(&self) -> &query_data_model::GraphCatalog;
@@ -40,7 +40,7 @@ pub trait PlanningModel {
     ) -> Option<ForeignKey>;
     fn table_columns(&self, table: &str) -> Option<&HashSet<String>>;
     fn table_sort_key(&self, table: &str) -> Option<&[String]>;
-    fn denormalized_properties(&self) -> Vec<ResolvedDenormalizedProperty>;
+    fn denormalized_maps(&self) -> (DenormalizedColumns, DenormalizedRelationships);
     fn traversal_path_lookup(&self, entity: &str) -> Option<(String, String)>;
     fn scope_preserving(&self, relationship: &str, source: &str, target: &str) -> bool;
     fn pruned_scope_endpoint(&self, relationship: &str, source: &str, target: &str)
@@ -68,15 +68,6 @@ pub(super) fn relationship_entities(
         .unwrap_or_default()
 }
 
-pub struct ResolvedDenormalizedProperty {
-    pub relationship: String,
-    pub entity: String,
-    pub property: String,
-    pub direction: ontology::DenormDirection,
-    pub edge_column: String,
-    pub tag_key: String,
-}
-
 pub struct ForeignKey {
     pub holder: String,
     pub column: String,
@@ -85,21 +76,6 @@ pub struct ForeignKey {
 pub type DenormalizedKey = (String, String, String);
 pub type DenormalizedColumns = HashMap<DenormalizedKey, (String, String)>;
 pub type DenormalizedRelationships = HashMap<DenormalizedKey, Vec<String>>;
-
-fn resolve_denormalized(
-    model: &ClickHouseDataModel,
-    property: &DenormalizedProperty,
-) -> ResolvedDenormalizedProperty {
-    let graph = model.graph();
-    ResolvedDenormalizedProperty {
-        relationship: graph.relationship(property.relationship).name.clone(),
-        entity: graph.entity(property.entity).name.clone(),
-        property: graph.property(property.property).name.clone(),
-        direction: property.direction.clone(),
-        edge_column: property.edge_column.clone(),
-        tag_key: property.tag_key.clone(),
-    }
-}
 
 impl PlanningModel for ClickHouseDataModel {
     fn graph(&self) -> &query_data_model::GraphCatalog {
@@ -193,12 +169,12 @@ impl PlanningModel for ClickHouseDataModel {
             .map(|layout| layout.sort_key.as_slice())
     }
 
-    fn denormalized_properties(&self) -> Vec<ResolvedDenormalizedProperty> {
-        self.backend()
-            .denormalized_properties()
-            .iter()
-            .map(|property| resolve_denormalized(self, property))
-            .collect()
+    fn denormalized_maps(&self) -> (DenormalizedColumns, DenormalizedRelationships) {
+        let backend = self.backend();
+        (
+            backend.denormalized_columns().clone(),
+            backend.denormalized_relationships().clone(),
+        )
     }
 
     fn traversal_path_lookup(&self, entity: &str) -> Option<(String, String)> {
@@ -322,8 +298,8 @@ impl PlanningModel for DuckDbDataModel {
         })
     }
 
-    fn denormalized_properties(&self) -> Vec<ResolvedDenormalizedProperty> {
-        Vec::new()
+    fn denormalized_maps(&self) -> (DenormalizedColumns, DenormalizedRelationships) {
+        (HashMap::new(), HashMap::new())
     }
 
     fn traversal_path_lookup(&self, _entity: &str) -> Option<(String, String)> {
@@ -342,24 +318,4 @@ impl PlanningModel for DuckDbDataModel {
     ) -> Option<bool> {
         None
     }
-}
-
-pub fn denormalized_maps(
-    model: &(impl PlanningModel + ?Sized),
-) -> (DenormalizedColumns, DenormalizedRelationships) {
-    let mut columns = HashMap::new();
-    let mut relationships: HashMap<_, Vec<_>> = HashMap::new();
-    for property in model.denormalized_properties() {
-        let direction = match property.direction {
-            ontology::DenormDirection::Source => "source",
-            ontology::DenormDirection::Target => "target",
-        };
-        let key = (property.entity, property.property, direction.to_string());
-        columns.insert(key.clone(), (property.edge_column, property.tag_key));
-        relationships
-            .entry(key)
-            .or_default()
-            .push(property.relationship);
-    }
-    (columns, relationships)
 }

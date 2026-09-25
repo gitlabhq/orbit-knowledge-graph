@@ -50,15 +50,9 @@ pub struct VariantLayout {
     pub foreign_key: Option<PropertyId>,
 }
 
-#[derive(Debug, Clone)]
-pub struct DenormalizedProperty {
-    pub relationship: RelationshipId,
-    pub entity: EntityId,
-    pub property: PropertyId,
-    pub direction: ontology::DenormDirection,
-    pub edge_column: String,
-    pub tag_key: String,
-}
+pub type DenormalizedKey = (String, String, String);
+pub type DenormalizedColumns = HashMap<DenormalizedKey, (String, String)>;
+pub type DenormalizedRelationships = HashMap<DenormalizedKey, Vec<String>>;
 
 #[derive(Debug, Clone)]
 pub struct TraversalPathLookup {
@@ -74,7 +68,8 @@ pub struct ClickHouseCatalog {
     variants: HashMap<RelationshipVariantId, VariantLayout>,
     properties: HashMap<PropertyId, String>,
     tables: HashMap<String, TableLayout>,
-    denormalized_properties: Vec<DenormalizedProperty>,
+    denormalized_columns: DenormalizedColumns,
+    denormalized_relationships: DenormalizedRelationships,
     text_indexes: HashSet<PropertyId>,
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
 }
@@ -122,8 +117,12 @@ impl ClickHouseCatalog {
         &self.default_edge_table
     }
 
-    pub fn denormalized_properties(&self) -> &[DenormalizedProperty] {
-        &self.denormalized_properties
+    pub fn denormalized_columns(&self) -> &DenormalizedColumns {
+        &self.denormalized_columns
+    }
+
+    pub fn denormalized_relationships(&self) -> &DenormalizedRelationships {
+        &self.denormalized_relationships
     }
 
     pub fn has_text_index(&self, property: PropertyId) -> bool {
@@ -311,39 +310,36 @@ impl Backend for ClickHouse {
             relationships.insert(relationship.id, table);
         }
 
-        let denormalized_properties = ontology
-            .denormalized_properties()
-            .iter()
-            .map(|property| {
-                let relationship = graph
-                    .relationship_id(&property.relationship_kind)
-                    .ok_or_else(|| DataModelError::UnknownReference {
-                        kind: "relationship",
-                        name: property.relationship_kind.clone(),
-                    })?;
-                let entity = graph.entity_id(&property.node_kind).ok_or_else(|| {
-                    DataModelError::UnknownReference {
-                        kind: "entity",
-                        name: property.node_kind.clone(),
-                    }
-                })?;
-                let Some(property_id) = graph.property_id(entity, &property.property_name) else {
-                    return Ok(None);
-                };
-                Ok(DenormalizedProperty {
-                    relationship,
-                    entity,
-                    property: property_id,
-                    direction: property.direction.clone(),
-                    edge_column: property.edge_column.clone(),
-                    tag_key: property.tag_key.clone(),
+        let mut denormalized_columns = HashMap::new();
+        let mut denormalized_relationships: HashMap<_, Vec<_>> = HashMap::new();
+        for property in ontology.denormalized_properties() {
+            let entity = graph.entity_id(&property.node_kind).ok_or_else(|| {
+                DataModelError::UnknownReference {
+                    kind: "entity",
+                    name: property.node_kind.clone(),
                 }
-                .into())
-            })
-            .collect::<Result<Vec<_>, DataModelError>>()?
-            .into_iter()
-            .flatten()
-            .collect();
+            })?;
+            if graph.property_id(entity, &property.property_name).is_none() {
+                continue;
+            }
+            let direction = match property.direction {
+                ontology::DenormDirection::Source => "source",
+                ontology::DenormDirection::Target => "target",
+            };
+            let key = (
+                property.node_kind.clone(),
+                property.property_name.clone(),
+                direction.to_string(),
+            );
+            denormalized_columns.insert(
+                key.clone(),
+                (property.edge_column.clone(), property.tag_key.clone()),
+            );
+            denormalized_relationships
+                .entry(key)
+                .or_default()
+                .push(property.relationship_kind.clone());
+        }
 
         let mut traversal_path_lookups = HashMap::new();
         for lookup in ontology.traversal_path_lookups() {
@@ -415,7 +411,8 @@ impl Backend for ClickHouse {
             variants,
             properties,
             tables,
-            denormalized_properties,
+            denormalized_columns,
+            denormalized_relationships,
             text_indexes,
             traversal_path_lookups,
         })

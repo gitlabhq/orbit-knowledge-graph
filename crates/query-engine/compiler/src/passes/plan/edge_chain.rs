@@ -164,17 +164,13 @@ where
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
     let _ = reversed;
+    let (denorm_columns, denorm_rel_kinds) = model.denormalized_maps();
 
     for node_plan in nodes.values_mut() {
         if model.force_join() {
             node_plan.hydration = HydrationStrategy::Join;
         } else {
-            node_plan.hydration = determine_hydration(
-                node_plan,
-                input,
-                &hops,
-                &super::model::denormalized_maps(model).1,
-            );
+            node_plan.hydration = determine_hydration(node_plan, input, &hops, &denorm_rel_kinds);
         }
     }
 
@@ -216,7 +212,6 @@ where
         PlanBody::Traversal
     };
 
-    let (denorm_columns, denorm_rel_kinds) = super::model::denormalized_maps(model);
     let table_names: HashSet<String> = input
         .nodes
         .iter()

@@ -53,7 +53,7 @@ where
         emit_select: true,
     };
 
-    let (denorm_columns, denorm_rel_kinds) = super::model::denormalized_maps(model);
+    let (denorm_columns, denorm_rel_kinds) = model.denormalized_maps();
     let has_non_denorm = has_non_denorm_filters(
         center_np.entity.as_deref().unwrap_or(""),
         &center_np.filters,
