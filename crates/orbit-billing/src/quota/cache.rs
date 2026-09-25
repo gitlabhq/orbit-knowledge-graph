@@ -208,6 +208,7 @@ mod tests {
             global_user_id: String::new(),
             instance_version: String::new(),
             license_checksum: None,
+            correlation_id: None,
         }
     }
 
@@ -339,6 +340,32 @@ mod tests {
         }
 
         // Single upstream request despite 20 concurrent callers, due to get_with coalescing.
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn requests_differing_only_by_correlation_id_share_a_cache_entry() {
+        let (url, counter) = counting_status_server(AxumStatus::OK).await;
+        let client = Arc::new(
+            QuotaClient::new(
+                url,
+                QuotaAuth::AdminToken {
+                    user: "test@example.com".into(),
+                    token: "test-token".into(),
+                },
+                Duration::from_secs(5),
+                Duration::from_secs(3600),
+            )
+            .unwrap(),
+        );
+        let cache = QuotaCache::new(client, 1024);
+
+        for id in ["req-a", "req-b"] {
+            let mut request = request_with("correlated");
+            request.correlation_id = Some(id.into());
+            assert_eq!(cache.check(request).await.0, QuotaGateDecision::Allow);
+        }
+
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 }

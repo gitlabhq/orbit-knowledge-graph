@@ -13,6 +13,7 @@ labkit = { workspace = true }
 labkit-events = { workspace = true }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
+orbit-utils = { path = "../utils" }
 moka = { workspace = true }
 opentelemetry = { workspace = true }
 query-engine = { path = "../query-engine" }
