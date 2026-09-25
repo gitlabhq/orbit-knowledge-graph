@@ -209,8 +209,7 @@ fn stamp_edge_scope_proofs(
     input: &Input,
     model: &(impl crate::data_model::AuthorizationModel + ?Sized),
 ) -> std::collections::HashMap<String, crate::scope::ScopeProof> {
-    let node_prefix = crate::scope::derive_scope_proofs(input, model);
-    node_prefix
+    crate::scope::derive_scope_proofs(input, model)
 }
 
 fn admin_only(

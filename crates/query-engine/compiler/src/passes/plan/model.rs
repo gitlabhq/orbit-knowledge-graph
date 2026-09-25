@@ -47,6 +47,10 @@ pub struct ForeignKey {
     pub column: String,
 }
 
+pub type DenormalizedKey = (String, String, String);
+pub type DenormalizedColumns = HashMap<DenormalizedKey, (String, String)>;
+pub type DenormalizedRelationships = HashMap<DenormalizedKey, Vec<String>>;
+
 fn names(graph: &query_data_model::GraphCatalog, entities: &[EntityId]) -> Vec<String> {
     entities
         .iter()
@@ -395,10 +399,7 @@ impl PlanningModel for DuckDbDataModel {
 
 pub fn denormalized_maps(
     model: &(impl PlanningModel + ?Sized),
-) -> (
-    HashMap<(String, String, String), (String, String)>,
-    HashMap<(String, String, String), Vec<String>>,
-) {
+) -> (DenormalizedColumns, DenormalizedRelationships) {
     let mut columns = HashMap::new();
     let mut relationships: HashMap<_, Vec<_>> = HashMap::new();
     for property in model.denormalized_properties() {

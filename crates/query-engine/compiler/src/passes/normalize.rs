@@ -203,8 +203,7 @@ mod tests {
         let input = parse_input(json).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
-        let input = normalize(input, model.as_ref()).unwrap();
-        input
+        normalize(input, model.as_ref()).unwrap()
     }
 
     #[test]
