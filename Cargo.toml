@@ -213,8 +213,6 @@ aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
 
-# Full debuginfo makes test and server binaries 2-2.6 GB and linking them
-# peaks at 8-10 GB RSS, close to the 16 GB CI runner limit.
 [profile.dev]
 debug = "line-tables-only"
 
