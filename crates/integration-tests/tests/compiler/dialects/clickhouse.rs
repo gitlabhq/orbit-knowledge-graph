@@ -1089,6 +1089,55 @@ fn orbit_query_rejects_neighbors_center_all_properties() {
 }
 
 #[test]
+fn orbit_query_neighbors_accepts_the_endpoint_on_either_side() {
+    let ontology = embedded_ontology();
+    let ctx = test_ctx();
+    for (direction, rel_types, endpoint_first, center_first) in [
+        (
+            "incoming",
+            r#""rel_types":["AUTHORED"],"#,
+            "MATCH (n)-[:AUTHORED]->(center:WorkItem {id: 1}) RETURN center, n",
+            "MATCH (center:WorkItem {id: 1})<-[:AUTHORED]-(n) RETURN center, n",
+        ),
+        (
+            "outgoing",
+            "",
+            "MATCH (n)<--(center:WorkItem {id: 1}) RETURN center, n",
+            "MATCH (center:WorkItem {id: 1})-->(n) RETURN center, n",
+        ),
+        (
+            "both",
+            "",
+            "MATCH (n)--(center:WorkItem {id: 1}) RETURN center, n",
+            "MATCH (center:WorkItem {id: 1})--(n) RETURN center, n",
+        ),
+    ] {
+        let json = format!(
+            r#"{{"query_type":"neighbors","nodes":[{{"id":"center","entity":"WorkItem","node_ids":[1]}}],"neighbors":{{{rel_types}"direction":"{direction}"}}}}"#
+        );
+        for query in [endpoint_first, center_first] {
+            compile_pair(&json, query, &ontology, &ctx)
+                .unwrap_or_else(|error| panic!("{query}: {error}"));
+        }
+    }
+}
+
+#[test]
+fn orbit_query_rejects_more_than_one_sort_key() {
+    for query in [
+        "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at DESC, mr.iid DESC",
+        "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at,mr.iid LIMIT 5",
+    ] {
+        let error =
+            compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).expect_err(query);
+        assert!(
+            matches!(error, QueryError::Validation(ref message) if message.contains("ORDER BY accepts one sort key")),
+            "{query}: {error}"
+        );
+    }
+}
+
+#[test]
 fn orbit_query_virtual_filter_equality_hydration_parity() {
     let ontology = embedded_ontology();
     for (json, query) in [
