@@ -68,13 +68,13 @@ Set up a service account to give a tool read access to specific groups.
 
 Prerequisites:
 
-- The Owner role for the top-level group.
+- The Owner role for the group.
 
 To set up a service account:
 
 1. [Create a group service account](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account).
    A project service account can only join its own project, so it cannot get scope.
-   A group service account can only join its own group and subgroups, so create one for each top-level group.
+   A group service account can only join its own group and the subgroups and projects in that group, so create one for each top-level group.
 1. [Create a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-personal-access-token-for-a-service-account) for the account.
    Fine-grained personal access tokens are not supported.
    - Select only the `read_api` scope.
@@ -112,7 +112,7 @@ To verify the scope:
 
    ```shell
    curl --request POST \
-     --header "Authorization: Bearer <your_access_token>" \
+     --header "Authorization: Bearer <your_token>" \
      --header "Content-Type: application/json" \
      --data @request.json \
      --url "https://gitlab.com/api/v4/orbit/query"

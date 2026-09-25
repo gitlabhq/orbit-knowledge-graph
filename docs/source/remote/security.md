@@ -55,6 +55,9 @@ are dropped from results, including from aggregate counts.
 | Core, code review, CI/CD, planning | Reporter |
 | Security | Security Manager |
 
+Administrators and auditors can read all resources on the instance.
+Their queries return data from every group where GitLab Orbit is on, not only their own groups.
+
 ## Security architecture
 
 GitLab Orbit never invents permissions. GitLab is the single source of truth for who can see what,
