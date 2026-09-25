@@ -1,9 +1,10 @@
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType};
+use crate::input::{ColumnSelection, Direction, Input, QueryType};
 use ontology::EnumType;
 #[cfg(test)]
 use ontology::Ontology;
 use query_data_model::ClickHouseDataModel;
+use query_data_model::EntityAuthConfig;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
@@ -13,7 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 /// directly without going through `compile()`.
 pub fn build_entity_auth(ontology: &ontology::Ontology) -> HashMap<String, EntityAuthConfig> {
     ClickHouseDataModel::derive(std::sync::Arc::new(ontology.clone()))
-        .map(|model| crate::data_model::AuthorizationModel::entity_auth(&model))
+        .map(|model| crate::data_model::AuthorizationModel::entity_auth(&model).clone())
         .unwrap_or_default()
 }
 

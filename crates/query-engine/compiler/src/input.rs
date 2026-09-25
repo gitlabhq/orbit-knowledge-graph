@@ -31,42 +31,6 @@ pub struct QueryOptions {
     pub include_debug_sql: bool,
 }
 
-/// Authorization config for an entity type, derived from the ontology and carried
-/// through the compilation pipeline so the server never re-consults the ontology at
-/// request time.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EntityAuthConfig {
-    /// Rails resource type sent to the authorization service (e.g. "projects").
-    pub resource_type: String,
-    pub ability: String,
-    /// DB column whose value is used as the authorization ID.
-    /// "id" for most entities; e.g. "project_id" for Definition/File/Branch.
-    pub auth_id_column: String,
-    /// For indirect-auth entities (auth_id_column != "id"): the entity type that
-    /// owns this resource, used to resolve the auth ID from edge columns for
-    /// dynamic (path/neighbor) nodes.
-    pub owner_entity: Option<String>,
-    /// Minimum GitLab role required on a traversal path for rows of this entity
-    /// to survive the security pass. Stored as an access-level integer so the
-    /// compiler can compare against per-path roles carried by `SecurityContext`
-    /// without pulling the ontology crate into `types.rs`.
-    pub required_access_level: u32,
-}
-
-impl Default for EntityAuthConfig {
-    fn default() -> Self {
-        Self {
-            resource_type: String::new(),
-            ability: String::new(),
-            auth_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
-            owner_entity: None,
-            // Reporter mirrors the pre-fix access gate and is the right
-            // default for tests that do not care about role scoping.
-            required_access_level: crate::types::DEFAULT_PATH_ACCESS_LEVEL,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
     pub query_type: QueryType,

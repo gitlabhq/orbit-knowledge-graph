@@ -7,8 +7,8 @@ use query_data_model::{
     RelationshipVariantId,
 };
 
-use crate::input::EntityAuthConfig;
 use crate::passes::plan::PlanningModel;
+use query_data_model::EntityAuthConfig;
 
 pub trait QueryModel: PlanningModel + Send + Sync {
     fn ontology(&self) -> &ontology::Ontology;
@@ -19,7 +19,7 @@ pub trait QueryModel: PlanningModel + Send + Sync {
 }
 
 pub trait AuthorizationModel: QueryModel {
-    fn entity_auth(&self) -> HashMap<String, EntityAuthConfig>;
+    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig>;
     fn is_admin_only(&self, property: PropertyId) -> bool;
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<EdgeVariantScope>;
     fn traversal_path_lookup(
@@ -74,28 +74,8 @@ impl QueryModel for ClickHouseDataModel {
 }
 
 impl AuthorizationModel for ClickHouseDataModel {
-    fn entity_auth(&self) -> HashMap<String, EntityAuthConfig> {
-        let graph = self.graph();
-        self.authorization()
-            .entities()
-            .map(|(entity, policy)| {
-                (
-                    graph.entity(entity).name.clone(),
-                    EntityAuthConfig {
-                        resource_type: policy.resource_type.clone(),
-                        ability: policy.ability.clone(),
-                        auth_id_column: self
-                            .property_column(policy.id_property)
-                            .unwrap_or(ontology::constants::DEFAULT_PRIMARY_KEY)
-                            .to_string(),
-                        owner_entity: policy
-                            .owner_entity
-                            .map(|owner| graph.entity(owner).name.clone()),
-                        required_access_level: policy.required_access_level,
-                    },
-                )
-            })
-            .collect()
+    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
+        self.authorization().entity_auth()
     }
 
     fn is_admin_only(&self, property: PropertyId) -> bool {

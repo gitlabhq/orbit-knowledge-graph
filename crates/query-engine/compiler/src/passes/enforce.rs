@@ -11,10 +11,11 @@ use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
-use crate::input::{EntityAuthConfig, Input, QueryType};
+use crate::input::{Input, QueryType};
 use crate::passes::lower::LoweredMetadata;
 use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id_range_predicate};
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +127,7 @@ pub fn enforce_lowered_return(
     model: &(impl crate::data_model::AuthorizationModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
-    ctx.entity_auth = model.entity_auth();
+    ctx.entity_auth.clone_from(model.entity_auth());
     enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |entity| {
         crate::data_model::AuthorizationModel::redaction_id_column(model, entity).to_string()
     })?;

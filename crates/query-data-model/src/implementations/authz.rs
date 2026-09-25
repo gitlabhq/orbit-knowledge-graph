@@ -4,6 +4,27 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use crate::{Authz, DataModelError, EntityId, GraphCatalog, PropertyId, RelationshipVariantId};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityAuthConfig {
+    pub resource_type: String,
+    pub ability: String,
+    pub auth_id_column: String,
+    pub owner_entity: Option<String>,
+    pub required_access_level: u32,
+}
+
+impl Default for EntityAuthConfig {
+    fn default() -> Self {
+        Self {
+            resource_type: String::new(),
+            ability: String::new(),
+            auth_id_column: DEFAULT_PRIMARY_KEY.to_string(),
+            owner_entity: None,
+            required_access_level: ontology::RequiredRole::Reporter.as_access_level(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct EntityAuthorization {
     pub resource_type: String,
@@ -16,6 +37,7 @@ pub struct EntityAuthorization {
 #[derive(Debug)]
 pub struct GitLabAuthzCatalog {
     entities: HashMap<EntityId, EntityAuthorization>,
+    entity_auth: HashMap<String, EntityAuthConfig>,
     admin_only: HashMap<PropertyId, bool>,
     variant_scopes: HashMap<RelationshipVariantId, ontology::EdgeVariantScope>,
 }
@@ -35,6 +57,10 @@ impl GitLabAuthzCatalog {
 
     pub fn entities(&self) -> impl Iterator<Item = (EntityId, &EntityAuthorization)> {
         self.entities.iter().map(|(id, policy)| (*id, policy))
+    }
+
+    pub fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
+        &self.entity_auth
     }
 }
 
@@ -60,6 +86,7 @@ impl Authz for GitLabAuthz {
             .collect();
 
         let mut entities = HashMap::new();
+        let mut entity_auth = HashMap::new();
         let mut admin_only = HashMap::new();
         for node in ontology.nodes() {
             let entity_id =
@@ -96,6 +123,19 @@ impl Authz for GitLabAuthz {
                         required_access_level: redaction.required_role.as_access_level(),
                     },
                 );
+                entity_auth.insert(
+                    node.name.clone(),
+                    EntityAuthConfig {
+                        resource_type: redaction.resource_type.clone(),
+                        ability: redaction.ability.clone(),
+                        auth_id_column: redaction.id_column.clone(),
+                        owner_entity: (redaction.id_column != DEFAULT_PRIMARY_KEY)
+                            .then(|| owners.get(redaction.resource_type.as_str()).copied())
+                            .flatten()
+                            .map(|owner| graph.entity(owner).name.clone()),
+                        required_access_level: redaction.required_role.as_access_level(),
+                    },
+                );
             }
         }
 
@@ -129,6 +169,7 @@ impl Authz for GitLabAuthz {
 
         Ok(GitLabAuthzCatalog {
             entities,
+            entity_auth,
             admin_only,
             variant_scopes,
         })
