@@ -17,8 +17,8 @@ LOAD_JOBS="${LOAD_JOBS:-4}"
 CAPRONI_DIR="$ROOT/scripts/ci/orbit-perf/caproni"
 
 log() { echo "==> $*" >&2; }
-# Release build: synth generation is several times faster, and the load driver should not be the bottleneck.
-xtask() { mise exec -- cargo run --release -q -p xtask -- "$@"; }
+# Debug build, so it shares the compile cache with the lint jobs that also build xtask.
+xtask() { mise exec -- cargo run -p xtask -- "$@"; }
 cap() { mise -C "$CAPRONI_DIR" exec -- caproni -c "$CAPRONI_DIR/caproni.yaml" "$@"; }
 kc()  { cap kubectl "$@"; }
 chq() { cap kubectl -n gitlab-dev-stack exec -i gitlab-dev-stack-clickhouse-0 -c clickhouse -- clickhouse-client "$@"; }
