@@ -1,6 +1,6 @@
 # Orbit performance test: seeds a synthetic graph into a real caproni + Orbit
 # stack and replays the query corpus over gRPC (scripts/ci/orbit-perf.sh).
-# Default branch only, never on MRs: it is heavy (~30-45 min, full cluster).
+# Default branch only, never on MRs: it stands up a full cluster.
 orbit-perf:
   extends:
     - .job-template
@@ -28,8 +28,7 @@ orbit-perf:
     DOCKER_TLS_VERIFY: 1
     DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
     FF_NETWORK_PER_BUILD: 1
-    SYNTH_CONFIG: crates/xtask/simulator_medium.yaml  # ~10M edges / ~3M nodes
-    CAPRONI_REF: main
+    SYNTH_CONFIG: crates/xtask/simulator_medium.yaml  # ~12M nodes / ~59M edges
     ROUNDS: "5"
     CONCURRENCY: "20"
   script:

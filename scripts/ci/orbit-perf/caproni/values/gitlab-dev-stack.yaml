@@ -1,0 +1,54 @@
+secretNamespace: "gitlab"
+
+postgres:
+  clusters:
+    - name: gitlab
+      image: ghcr.io/cloudnative-pg/postgresql:17.8
+      instances: 1
+      storage:
+        size: 2Gi
+      parameters:
+        wal_sender_timeout: 60s
+        wal_receiver_timeout: 60s
+        max_connections: "200"
+      databases:
+        - name: gitlabhq_production
+          owner: gitlab-dev-stack
+          extensions:
+            - pg_trgm
+            - btree_gist
+            - amcheck
+            - pg_stat_statements
+        - name: openbao
+          owner: openbao
+      extraRoles:
+        - name: siphon
+        - name: siphon_replicator
+          replication: true
+        - name: siphon_snapshot
+
+nats:
+  enabled: true
+
+# The chart defaults to the floating clickhouse:lts-jammy tag, which now resolves
+# to 26.8. GitLab does not support ClickHouse 26.7+ yet: it rejects some GitLab
+# AggregatingMergeTree tables, so migrations fail with Code: 36 (BAD_ARGUMENTS)
+# on fresh installs. Pin the newest supported release instead.
+# See repos/gitlab/doc/integration/clickhouse.md ("ClickHouse 26.7 and later").
+clickhouse:
+  image: clickhouse:26.6.4.55-jammy
+
+garage:
+  buckets:
+    - default
+    - gitlab-lfs
+    - gitlab-artifacts
+    - gitlab-uploads
+    - gitlab-packages
+    - gitlab-dependency-proxy
+    - gitlab-mr-diffs
+    - gitlab-terraform-state
+    - gitlab-backups
+    - gitlab-pages
+    - tmp
+    - runner-cache

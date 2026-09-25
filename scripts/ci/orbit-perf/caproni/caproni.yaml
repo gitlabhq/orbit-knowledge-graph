@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=https://gitlab.com/gitlab-org/caproni/-/raw/main/schema/config.v2.schema.json
+#
+# caproni stack for the orbit-perf job: gitlab-dev-stack (ClickHouse, NATS,
+# Postgres) plus Orbit. No GitLab Rails or siphon: the load test calls Orbit
+# over gRPC directly and the graph is bulk-loaded into ClickHouse.
+
+version: 2
+
+variables:
+  BASE_DOMAIN: caproni.test
+
+extends:
+  # cert-manager, trust-manager, CloudNativePG and the Prometheus operator CRDs.
+  - https://gitlab.com/gitlab-org/gitlab-caproni/-/raw/0883b078c5dfd9cf19774acdd96dcd77d1ca8635/fragments/caproni.infra.yaml
+
+deployers:
+  prerequisites:
+    type: namespace
+    namespace:
+      namespaces:
+        - gitlab
+  gitlab-dev-stack:
+    type: helm
+    needs:
+      - prerequisites
+      - cloudnative-pg
+    helm:
+      namespace: gitlab-dev-stack
+      values_file: ./values/gitlab-dev-stack.yaml
+      dynamic_overrides:
+        - type: inline
+          value_map:
+            clickhouse.enabled: true
+            clickhouse.databases.gkg.create: true
+        - type: inline_file
+          value_map:
+            clickhouse.databases.gkg.schema: ../../../../config/graph.sql
+      release:
+        name: gitlab-dev-stack
+        chart: oci://registry.gitlab.com/gitlab-org/cloud-native/charts/gitlab-dev-stack/gitlab-dev-stack:1.6.0
+  knowledge-graph:
+    type: helm
+    needs:
+      - gitlab-dev-stack
+      # gkg renders PodMonitors, so it needs the operator CRDs.
+      - prometheus-operator-crds
+    helm:
+      namespace: gitlab
+      values_file: ./values/gkg.yaml
+      release:
+        name: gkg
+        chart: oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
+
+cluster:
+  driver: auto
+  network:
+    hostname: gitlab.${BASE_DOMAIN}
+  k3d:
+    servers: 1
+  colima:
+    memory: 20GiB
+    cores: 6
+  registry_mirror:
+    managed: true
+    upstreams:
+      - registry.gitlab.com
+      - docker.io
+      - quay.io
+      - ghcr.io
