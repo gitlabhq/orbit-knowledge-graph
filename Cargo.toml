@@ -213,6 +213,11 @@ aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
 
+# Full debuginfo makes test and server binaries 2-2.6 GB and linking them
+# peaks at 8-10 GB RSS, close to the 16 GB CI runner limit.
+[profile.dev]
+debug = "line-tables-only"
+
 # Optimise the Parquet, Arrow, zstd and RNG deps even in debug builds: synthetic
 # data generation spends most of its time in them. The rest of dev stays unoptimised.
 [profile.dev.package.parquet]
