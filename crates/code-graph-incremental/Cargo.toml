@@ -4,6 +4,9 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[package.metadata.cargo-shear]
+ignored = ["pest"] # used by pest_derive-generated code
+
 [lints]
 workspace = true
 
