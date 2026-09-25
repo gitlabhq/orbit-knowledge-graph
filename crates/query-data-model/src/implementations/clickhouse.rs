@@ -203,8 +203,7 @@ impl Backend for ClickHouse {
                         name: format!("{}.{}", node.name, field.name),
                     }
                 })?;
-                if let Some(column) = field.column_name() {
-                    let _ = column;
+                if field.column_name().is_some() {
                     properties.insert(property_id, field.name.clone());
                 }
                 if node.default_columns.iter().any(|name| name == &field.name) {

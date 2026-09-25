@@ -3,6 +3,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::{ClickHouseDataModel, DuckDbDataModel};
+    use ontology::FieldSource;
 
     #[test]
     fn derives_remote_and_local_models_from_the_same_ontology() {
@@ -49,5 +50,26 @@ mod tests {
             .unwrap();
 
         assert_eq!(graph.property(foreign_key).name, "project_id");
+    }
+
+    #[test]
+    fn keeps_extraction_sources_separate_from_query_columns() {
+        let model =
+            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
+                .unwrap();
+        let entity = model.graph().entity_id("MergeRequest").unwrap();
+        let property = model.graph().property_id(entity, "project_id").unwrap();
+        let table = model.backend().table_for_entity(entity).unwrap();
+
+        assert!(matches!(
+            &model.graph().property(property).source,
+            FieldSource::DatabaseColumn(source) if source == "target_project_id"
+        ));
+        assert_eq!(
+            model.backend().property_column(property),
+            Some("project_id")
+        );
+        assert!(table.column_types.contains_key("project_id"));
+        assert!(!table.column_types.contains_key("target_project_id"));
     }
 }
