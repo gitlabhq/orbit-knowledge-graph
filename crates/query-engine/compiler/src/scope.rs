@@ -1,3 +1,4 @@
+use query_data_model::QueryBackendCatalog;
 use std::collections::HashMap;
 
 use ontology::TraversalPathKind;
@@ -116,14 +117,11 @@ fn anchor_fk_mappings(
         if model.variant_scope(variant.id) != Some(ontology::EdgeVariantScope::NamespaceAnchor) {
             continue;
         }
-        let Some(property) = model.foreign_key(
-            &[model
-                .graph()
-                .relationship(variant.relationship)
-                .name
-                .clone()],
-            &model.graph().entity(variant.source).name,
-            &model.graph().entity(variant.target).name,
+        let Some(property) = model.query_backend().foreign_key(
+            model.graph(),
+            &[variant.relationship],
+            variant.source,
+            variant.target,
         ) else {
             continue;
         };

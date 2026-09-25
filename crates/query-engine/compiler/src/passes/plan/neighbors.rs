@@ -5,13 +5,13 @@ use ontology::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::PlanningModel;
 use super::{EdgeTableConfig, HydrationStrategy, NodePlan, Plan, PlanBody, Selectivity, Strategy};
 use crate::passes::shared::has_non_denorm_filters;
+use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
 pub fn plan_neighbors<M>(input: &Input, model: &M) -> Result<Plan>
 where
-    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
 {
     let config = input
         .neighbors
@@ -34,7 +34,10 @@ where
     let center_np = NodePlan {
         alias: center_node.id.clone(),
         entity: center_node.entity.clone(),
-        table: model.entity_table(center_entity_id).map(String::from),
+        table: model
+            .query_backend()
+            .entity_table(center_entity_id)
+            .map(String::from),
         selectivity: Selectivity::from_node(center_node),
         hydration: HydrationStrategy::Skip,
         filters: crate::passes::shared::ordered_filters(
@@ -44,8 +47,10 @@ where
         ),
         node_ids: center_node.node_ids.clone(),
         id_range: center_node.id_range.clone(),
-        has_traversal_path: model.entity_has_traversal_path(center_entity_id),
-        is_global: model.entity_is_global(center_entity_id),
+        has_traversal_path: model
+            .query_backend()
+            .entity_has_traversal_path(center_entity_id),
+        is_global: model.query_backend().entity_is_global(center_entity_id),
         redaction_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
         columns: center_node.columns.clone(),
         use_narrowing: false,
@@ -53,7 +58,9 @@ where
         emit_select: true,
     };
 
-    let (denorm_columns, denorm_rel_kinds) = model.denormalized_maps();
+    let denormalized = model.query_backend().denormalized();
+    let denorm_columns = denormalized.columns.clone();
+    let denorm_rel_kinds = denormalized.relationships.clone();
     let has_non_denorm = has_non_denorm_filters(
         center_np.entity.as_deref().unwrap_or(""),
         &center_np.filters,
@@ -77,16 +84,20 @@ where
                 .iter()
                 .filter(|r| {
                     let kinds = if source {
-                        super::model::relationship_entities(model.graph(), r, |v| v.source)
+                        super::relationship_entities(model.graph(), r, |v| v.source)
                     } else {
-                        super::model::relationship_entities(model.graph(), r, |v| v.target)
+                        super::relationship_entities(model.graph(), r, |v| v.target)
                     };
                     kinds.iter().any(|kind| kind == center_entity)
                 })
                 .map(|r| {
                     model
-                        .edge_table(r)
-                        .unwrap_or_else(|| model.default_edge_table())
+                        .graph()
+                        .relationship_id(r)
+                        .and_then(|relationship| {
+                            model.query_backend().relationship_table(relationship)
+                        })
+                        .unwrap_or_else(|| model.query_backend().default_edge_table())
                         .to_string()
                 })
                 .collect();
@@ -130,7 +141,19 @@ where
             center_tp_lookup: center_node
                 .entity
                 .as_deref()
-                .and_then(|entity| model.traversal_path_lookup(entity)),
+                .and_then(|entity| model.graph().entity_id(entity))
+                .and_then(|entity| {
+                    let lookup = model
+                        .query_backend()
+                        .traversal_path_lookup(entity, ontology::TraversalPathKind::Id)?;
+                    Some((
+                        lookup.table.clone(),
+                        model
+                            .query_backend()
+                            .property_column(lookup.property)?
+                            .to_string(),
+                    ))
+                }),
         },
     })
 }

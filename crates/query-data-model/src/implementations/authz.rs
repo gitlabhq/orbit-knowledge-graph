@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use crate::{Authz, DataModelError, EntityId, GraphCatalog, PropertyId, RelationshipVariantId};
+use crate::{
+    Authz, DataModelError, EntityId, GraphCatalog, PropertyId, QueryAuthorizationCatalog,
+    RelationshipVariantId,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntityAuthConfig {
@@ -61,6 +64,12 @@ impl GitLabAuthzCatalog {
 
     pub fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
         &self.entity_auth
+    }
+}
+
+impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
+    fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
+        GitLabAuthzCatalog::variant_scope(self, variant)
     }
 }
 
@@ -178,6 +187,12 @@ impl Authz for GitLabAuthz {
 
 #[derive(Debug, Default)]
 pub struct TrustedLocalCatalog;
+
+impl QueryAuthorizationCatalog for TrustedLocalCatalog {
+    fn variant_scope(&self, _variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
+        None
+    }
+}
 
 pub struct TrustedLocal;
 

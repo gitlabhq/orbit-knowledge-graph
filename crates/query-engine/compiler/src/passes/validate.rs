@@ -28,6 +28,7 @@ use orbit_utils::traversal_path::TraversalPath;
 #[cfg(test)]
 use query_data_model::ClickHouseDataModel;
 use query_data_model::PropertyId;
+use query_data_model::QueryBackendCatalog;
 
 use super::errors::format_schema_error;
 
@@ -668,7 +669,12 @@ impl<'a, M: crate::data_model::QueryModel> Validator<'a, M> {
                         .get()
                         .graph()
                         .entity_id(entity)
-                        .is_some_and(|entity| self.model.get().entity_has_traversal_path(entity));
+                        .is_some_and(|entity| {
+                            self.model
+                                .get()
+                                .query_backend()
+                                .entity_has_traversal_path(entity)
+                        });
                 if !is_traversal_path_filter
                     && !self.field_flag(entity, prop, |f| f.filterable, |f| f.filterable)
                 {
@@ -762,9 +768,9 @@ impl<'a, M: crate::data_model::QueryModel> Validator<'a, M> {
                     model
                         .graph()
                         .relationship_id(kind)
-                        .and_then(|id| model.edge_table(&model.graph().relationship(id).name))
+                        .and_then(|id| model.query_backend().relationship_table(id))
                 })
-                .unwrap_or_else(|| model.default_edge_table());
+                .unwrap_or_else(|| model.query_backend().default_edge_table());
             for (prop, filters) in &rel.filters {
                 let Some(data_type) = self.model.get().table_column_type(edge_table, prop) else {
                     return Err(QueryError::Validation(format!(

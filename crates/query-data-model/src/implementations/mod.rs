@@ -6,7 +6,6 @@ pub use authz::{
     EntityAuthConfig, GitLabAuthz, GitLabAuthzCatalog, TrustedLocal, TrustedLocalCatalog,
 };
 pub use clickhouse::{
-    ClickHouse, ClickHouseCatalog, EntityLayout, PathColumn, TableLayout, TraversalPathLookup,
-    VariantLayout,
+    ClickHouse, ClickHouseCatalog, EntityLayout, PathColumn, TableLayout, VariantLayout,
 };
 pub use duckdb::{DuckDb, DuckDbCatalog};

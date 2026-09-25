@@ -16,6 +16,7 @@ use crate::passes::lower::LoweredMetadata;
 use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id_range_predicate};
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use query_data_model::EntityAuthConfig;
+use query_data_model::QueryBackendCatalog;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,6 +235,7 @@ pub fn enforce_role_scans(
             continue;
         };
         let table = model
+            .query_backend()
             .entity_table(
                 model
                     .graph()
@@ -345,7 +347,7 @@ fn enforce_return_columns(
                 // JOIN node table for the auth column (e.g. merge_request_id).
                 // Skip if the alias already exists in FROM (the lowerer
                 // hydrates nodes inline with dedup subqueries).
-                let table = model.entity_table(entity_id).ok_or_else(|| {
+                let table = model.query_backend().entity_table(entity_id).ok_or_else(|| {
                     QueryError::Enforcement(format!(
                         "traversal node '{}' has non-default redaction_id_column '{}' but no resolved table",
                         node.id, redaction_column
@@ -511,7 +513,8 @@ fn enforce_return_columns(
         // and ClickHouse rejects non-GROUP-BY columns in SELECT.
         // Skip when the source alias doesn't exist in FROM (FK-elided nodes
         // where the node table was absorbed into an edge filter).
-        if model.entity_has_traversal_path(entity_id) && input.query_type != QueryType::Aggregation
+        if model.query_backend().entity_has_traversal_path(entity_id)
+            && input.query_type != QueryType::Aggregation
         {
             let tp_col = traversal_path_column(&node.id);
             let has_tp = q.selects_alias(&tp_col);

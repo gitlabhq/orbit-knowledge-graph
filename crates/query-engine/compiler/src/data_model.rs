@@ -7,11 +7,9 @@ use query_data_model::{
     RelationshipVariantId,
 };
 
-use crate::passes::plan::PlanningModel;
 use query_data_model::EntityAuthConfig;
 
-pub trait QueryModel: PlanningModel + Send + Sync {
-    fn ontology(&self) -> &ontology::Ontology;
+pub trait QueryModel: query_data_model::QueryDataModel + Send + Sync {
     fn default_properties(&self, entity: EntityId) -> &[PropertyId];
     fn property_column(&self, property: PropertyId) -> Option<&str>;
     fn table_column_type(&self, table: &str, column: &str) -> Option<DataType>;
@@ -47,10 +45,6 @@ pub fn duckdb(ontology: Arc<ontology::Ontology>) -> Result<Arc<DuckDbDataModel>,
 }
 
 impl QueryModel for ClickHouseDataModel {
-    fn ontology(&self) -> &ontology::Ontology {
-        self.ontology()
-    }
-
     fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
         self.backend()
             .entity(entity)
@@ -128,20 +122,12 @@ impl SecurityModel for ClickHouseDataModel {
 }
 
 impl QueryModel for DuckDbDataModel {
-    fn ontology(&self) -> &ontology::Ontology {
-        self.ontology()
-    }
-
     fn default_properties(&self, entity: EntityId) -> &[PropertyId] {
         self.graph().entity(entity).properties.as_slice()
     }
 
     fn property_column(&self, property: PropertyId) -> Option<&str> {
-        let entity = self.graph().property(property).entity;
-        self.backend()
-            .entity(entity)
-            .and_then(|layout| layout.properties.get(&property))
-            .map(String::as_str)
+        query_data_model::QueryBackendCatalog::property_column(self.backend(), property)
     }
 
     fn table_column_type(&self, table: &str, column: &str) -> Option<DataType> {

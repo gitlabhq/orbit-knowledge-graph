@@ -11,7 +11,6 @@ const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
 const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 100_000;
 
 use crate::ast::{Node, Query, TableRef};
-use crate::data_model::QueryModel;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
@@ -27,6 +26,7 @@ use crate::passes::{
     response_policy, restrict, security, settings, validate,
 };
 use crate::types::SecurityContext;
+use query_data_model::QueryDataModel;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))

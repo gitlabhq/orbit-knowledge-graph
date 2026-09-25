@@ -5,8 +5,10 @@ pub mod implementations;
 
 pub use error::DataModelError;
 pub use generic::{
-    Authz, Backend, DataModel, Entity, EntityId, GraphCatalog, Property, PropertyId,
-    PropertyRealization, Relationship, RelationshipId, RelationshipVariant, RelationshipVariantId,
+    Authz, Backend, DataModel, DenormalizedCatalog, DenormalizedColumns, DenormalizedKey,
+    DenormalizedRelationships, Entity, EntityId, ForeignKey, GraphCatalog, Property, PropertyId,
+    PropertyRealization, QueryAuthorizationCatalog, QueryBackendCatalog, QueryDataModel,
+    Relationship, RelationshipId, RelationshipVariant, RelationshipVariantId, TraversalPathLookup,
 };
 pub use implementations::{ClickHouse, DuckDb, EntityAuthConfig, GitLabAuthz, TrustedLocal};
 

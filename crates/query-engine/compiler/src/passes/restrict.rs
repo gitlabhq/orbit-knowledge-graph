@@ -15,6 +15,7 @@ use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 #[cfg(test)]
 use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::QueryBackendCatalog;
 use std::collections::HashSet;
 
 fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
@@ -33,7 +34,7 @@ fn enforce_aggregation_scope(
         model
             .graph()
             .entity_id(entity)
-            .is_some_and(|entity| model.entity_has_traversal_path(entity))
+            .is_some_and(|entity| model.query_backend().entity_has_traversal_path(entity))
     };
 
     let mut reachable: HashSet<&str> = input

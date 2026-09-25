@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use ontology::VirtualSource;
 #[cfg(test)]
 use ontology::{FieldSource, Ontology};
-use query_data_model::PropertyRealization;
+use query_data_model::{PropertyRealization, QueryBackendCatalog};
 
 use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
@@ -205,11 +205,11 @@ fn build_static_templates(
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
                 node_alias: node.id.clone(),
-                destination_table: model.entity_table(entity_id)?.to_string(),
+                destination_table: model.query_backend().entity_table(entity_id)?.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: model.entity_has_traversal_path(entity_id),
+                has_traversal_path: model.query_backend().entity_has_traversal_path(entity_id),
                 virtual_filters,
                 filter_injected_columns,
             })
@@ -236,7 +236,7 @@ fn build_dynamic_specs(
         .entities()
         .filter_map(|entity| {
             let name = entity.name.as_str();
-            model.entity_table(entity.id)?;
+            model.query_backend().entity_table(entity.id)?;
 
             let admin_only: HashSet<&str> = if security_ctx.admin {
                 HashSet::new()
@@ -289,11 +289,11 @@ fn build_dynamic_specs(
 
             Some(DynamicEntityColumns {
                 entity_type: name.to_string(),
-                destination_table: model.entity_table(entity.id)?.to_string(),
+                destination_table: model.query_backend().entity_table(entity.id)?.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
-                has_traversal_path: model.entity_has_traversal_path(entity.id),
+                has_traversal_path: model.query_backend().entity_has_traversal_path(entity.id),
             })
         })
         .collect()

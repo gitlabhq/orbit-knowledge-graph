@@ -2,8 +2,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::GitLabAuthzCatalog;
 use crate::{
-    Backend, DataModelError, EntityId, GraphCatalog, PropertyId, RelationshipId,
-    RelationshipVariantId,
+    Backend, DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PropertyId,
+    QueryBackendCatalog, RelationshipId, RelationshipVariantId, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
@@ -50,16 +50,6 @@ pub struct VariantLayout {
     pub foreign_key: Option<PropertyId>,
 }
 
-pub type DenormalizedKey = (String, String, String);
-pub type DenormalizedColumns = HashMap<DenormalizedKey, (String, String)>;
-pub type DenormalizedRelationships = HashMap<DenormalizedKey, Vec<String>>;
-
-#[derive(Debug, Clone)]
-pub struct TraversalPathLookup {
-    pub table: String,
-    pub property: PropertyId,
-}
-
 #[derive(Debug)]
 pub struct ClickHouseCatalog {
     default_edge_table: String,
@@ -68,8 +58,7 @@ pub struct ClickHouseCatalog {
     variants: HashMap<RelationshipVariantId, VariantLayout>,
     properties: HashMap<PropertyId, String>,
     tables: HashMap<String, TableLayout>,
-    denormalized_columns: DenormalizedColumns,
-    denormalized_relationships: DenormalizedRelationships,
+    denormalized: DenormalizedCatalog,
     text_indexes: HashSet<PropertyId>,
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
 }
@@ -117,14 +106,6 @@ impl ClickHouseCatalog {
         &self.default_edge_table
     }
 
-    pub fn denormalized_columns(&self) -> &DenormalizedColumns {
-        &self.denormalized_columns
-    }
-
-    pub fn denormalized_relationships(&self) -> &DenormalizedRelationships {
-        &self.denormalized_relationships
-    }
-
     pub fn has_text_index(&self, property: PropertyId) -> bool {
         self.text_indexes.contains(&property)
     }
@@ -135,6 +116,103 @@ impl ClickHouseCatalog {
         kind: ontology::TraversalPathKind,
     ) -> Option<&TraversalPathLookup> {
         self.traversal_path_lookups.get(&(entity, kind))
+    }
+}
+
+impl QueryBackendCatalog for ClickHouseCatalog {
+    fn supports_foreign_key_elision(&self) -> bool {
+        true
+    }
+
+    fn requires_node_joins(&self) -> bool {
+        false
+    }
+
+    fn requires_node_projection(&self) -> bool {
+        false
+    }
+
+    fn entity_table(&self, entity: EntityId) -> Option<&str> {
+        self.entity(entity).map(|layout| layout.table.as_str())
+    }
+
+    fn entity_has_traversal_path(&self, entity: EntityId) -> bool {
+        self.entity(entity)
+            .is_some_and(|layout| layout.has_traversal_path)
+    }
+
+    fn entity_is_global(&self, entity: EntityId) -> bool {
+        self.entity(entity).is_some_and(|layout| layout.global)
+    }
+
+    fn property_column(&self, property: PropertyId) -> Option<&str> {
+        ClickHouseCatalog::property_column(self, property)
+    }
+
+    fn default_edge_table(&self) -> &str {
+        ClickHouseCatalog::default_edge_table(self)
+    }
+
+    fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
+        ClickHouseCatalog::relationship_table(self, relationship)
+    }
+
+    fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
+        if relationships.is_empty() {
+            return self.edge_tables().map(|table| table.name.clone()).collect();
+        }
+        relationships
+            .iter()
+            .filter_map(|relationship| self.relationship_table(*relationship))
+            .map(String::from)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    fn foreign_key(
+        &self,
+        graph: &GraphCatalog,
+        relationships: &[RelationshipId],
+        source: EntityId,
+        target: EntityId,
+    ) -> Option<ForeignKey> {
+        let mut foreign_keys = relationships.iter().map(|relationship| {
+            let variant = graph.variant_id(*relationship, source, target)?;
+            let property = self.variant(variant)?.foreign_key?;
+            Some(ForeignKey {
+                holder: graph.property(property).entity,
+                column: self.property_column(property)?.to_string(),
+            })
+        });
+        let first = foreign_keys.next()??;
+        foreign_keys
+            .all(|foreign_key| {
+                foreign_key.is_some_and(|foreign_key| {
+                    foreign_key.holder == first.holder && foreign_key.column == first.column
+                })
+            })
+            .then_some(first)
+    }
+
+    fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
+        self.table(table).map(|layout| &layout.columns)
+    }
+
+    fn table_sort_key(&self, table: &str) -> Option<&[String]> {
+        self.table(table).map(|layout| layout.sort_key.as_slice())
+    }
+
+    fn denormalized(&self) -> &DenormalizedCatalog {
+        &self.denormalized
+    }
+
+    fn traversal_path_lookup(
+        &self,
+        entity: EntityId,
+        kind: ontology::TraversalPathKind,
+    ) -> Option<&TraversalPathLookup> {
+        ClickHouseCatalog::traversal_path_lookup(self, entity, kind)
     }
 }
 
@@ -411,8 +489,10 @@ impl Backend for ClickHouse {
             variants,
             properties,
             tables,
-            denormalized_columns,
-            denormalized_relationships,
+            denormalized: DenormalizedCatalog {
+                columns: denormalized_columns,
+                relationships: denormalized_relationships,
+            },
             text_indexes,
             traversal_path_lookups,
         })

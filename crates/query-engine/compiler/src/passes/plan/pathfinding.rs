@@ -3,15 +3,15 @@ use std::collections::HashMap;
 use crate::error::Result;
 use crate::input::*;
 
-use super::PlanningModel;
 use super::{
     EdgeTableConfig, HydrationStrategy, NodePlan, PathFindingBody, Plan, PlanBody, Selectivity,
     Strategy, find_node,
 };
+use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
 pub fn plan_pathfinding<M>(input: &Input, model: &M) -> Result<Plan>
 where
-    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
 {
     let path = input
         .path
@@ -35,13 +35,9 @@ where
             .relationships()
             .filter(|relationship| {
                 let entities = if source {
-                    super::model::relationship_entities(model.graph(), &relationship.name, |v| {
-                        v.source
-                    })
+                    super::relationship_entities(model.graph(), &relationship.name, |v| v.source)
                 } else {
-                    super::model::relationship_entities(model.graph(), &relationship.name, |v| {
-                        v.target
-                    })
+                    super::relationship_entities(model.graph(), &relationship.name, |v| v.target)
                 };
                 entities.iter().any(|kind| kind == entity)
             })
@@ -92,7 +88,7 @@ where
 
 fn node_plan_from<M>(node: &InputNode, model: &M) -> Result<NodePlan>
 where
-    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
 {
     let entity = node
         .entity
@@ -105,14 +101,17 @@ where
     Ok(NodePlan {
         alias: node.id.clone(),
         entity: node.entity.clone(),
-        table: model.entity_table(entity_id).map(String::from),
+        table: model
+            .query_backend()
+            .entity_table(entity_id)
+            .map(String::from),
         selectivity: Selectivity::from_node(node),
         hydration: HydrationStrategy::Skip,
         filters: crate::passes::shared::ordered_filters(&node.filters, Some(entity_id), model),
         node_ids: node.node_ids.clone(),
         id_range: node.id_range.clone(),
-        has_traversal_path: model.entity_has_traversal_path(entity_id),
-        is_global: model.entity_is_global(entity_id),
+        has_traversal_path: model.query_backend().entity_has_traversal_path(entity_id),
+        is_global: model.query_backend().entity_is_global(entity_id),
         redaction_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
         columns: node.columns.clone(),
         use_narrowing: false,

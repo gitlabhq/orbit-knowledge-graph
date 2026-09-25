@@ -6,8 +6,8 @@ use ontology::constants::*;
 
 use crate::input::*;
 
-use super::PlanningModel;
 use super::{BoundFilter, Plan, PlanBody};
+use query_data_model::{QueryAuthorizationCatalog, QueryBackendCatalog, QueryDataModel};
 
 pub struct Hop {
     pub rel_types: Vec<String>,
@@ -150,12 +150,13 @@ pub enum FkShape {
 
 pub fn plan<M>(input: &Input, scope_proofs: &HashMap<String, ScopeProof>, model: &M) -> Plan
 where
-    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
 {
     let hops = build_hops(input, scope_proofs, model);
     let mut nodes = build_node_plans(input, model);
+    let backend = model.query_backend();
 
-    let (mut hops, elided_fks, scope_requirements) = if model.skip_fk_elision() {
+    let (mut hops, elided_fks, scope_requirements) = if !backend.supports_foreign_key_elision() {
         (hops, Vec::new(), Vec::new())
     } else {
         elide_hops(hops, &mut nodes, input)
@@ -164,10 +165,11 @@ where
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
     let _ = reversed;
-    let (denorm_columns, denorm_rel_kinds) = model.denormalized_maps();
+    let denorm_columns = backend.denormalized().columns.clone();
+    let denorm_rel_kinds = backend.denormalized().relationships.clone();
 
     for node_plan in nodes.values_mut() {
-        if model.force_join() {
+        if backend.requires_node_joins() {
             node_plan.hydration = HydrationStrategy::Join;
         } else {
             node_plan.hydration = determine_hydration(node_plan, input, &hops, &denorm_rel_kinds);
@@ -176,7 +178,7 @@ where
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if !model.skip_fk_elision()
+    } else if backend.supports_foreign_key_elision()
         && let Some(shape) = detect_fk(&hops, &nodes)
     {
         Strategy::Fk(shape)
@@ -197,7 +199,7 @@ where
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
-    } else if model.force_emit_select() {
+    } else if backend.requires_node_projection() {
         for np in nodes.values_mut() {
             np.emit_select = true;
         }
@@ -219,7 +221,7 @@ where
             node.entity
                 .as_deref()
                 .and_then(|entity| model.graph().entity_id(entity))
-                .and_then(|entity| model.entity_table(entity))
+                .and_then(|entity| backend.entity_table(entity))
                 .map(String::from)
         })
         .chain(hops.iter().map(|hop| hop.edge_table.clone()))
@@ -227,7 +229,7 @@ where
     let table_columns = table_names
         .iter()
         .filter_map(|table| {
-            model
+            backend
                 .table_columns(table)
                 .map(|columns| (table.clone(), columns.clone()))
         })
@@ -235,7 +237,7 @@ where
     let table_sort_keys = table_names
         .iter()
         .filter_map(|table| {
-            model
+            backend
                 .table_sort_key(table)
                 .map(|sort_key| (table.clone(), sort_key.to_vec()))
         })
@@ -254,9 +256,22 @@ where
     }
 }
 
+fn variant_scope(
+    model: &(impl QueryDataModel + ?Sized),
+    relationship: &str,
+    source: &str,
+    target: &str,
+) -> Option<ontology::EdgeVariantScope> {
+    let relationship = model.graph().relationship_id(relationship)?;
+    let source = model.graph().entity_id(source)?;
+    let target = model.graph().entity_id(target)?;
+    let variant = model.graph().variant_id(relationship, source, target)?;
+    model.query_authorization().variant_scope(variant)
+}
+
 fn build_hops<M>(input: &Input, scope_proofs: &HashMap<String, ScopeProof>, model: &M) -> Vec<Hop>
 where
-    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
 {
     let entities: HashMap<&str, &str> = input
         .nodes
@@ -267,11 +282,17 @@ where
         .relationships
         .iter()
         .map(|rel| {
+            let relationship_ids: Vec<_> = rel
+                .types
+                .iter()
+                .filter_map(|relationship| model.graph().relationship_id(relationship))
+                .collect();
             let edge_table = model
-                .edge_tables(&rel.types)
+                .query_backend()
+                .edge_tables(&relationship_ids)
                 .into_iter()
                 .next()
-                .unwrap_or_else(|| model.default_edge_table().to_string());
+                .unwrap_or_else(|| model.query_backend().default_edge_table().to_string());
             let from_entity = input
                 .nodes
                 .iter()
@@ -284,11 +305,21 @@ where
                 .and_then(|node| node.entity.as_deref());
             let fk = from_entity
                 .zip(to_entity)
-                .and_then(|(source, target)| model.foreign_key(&rel.types, source, target))
+                .and_then(|(source, target)| {
+                    let source = model.graph().entity_id(source)?;
+                    let target = model.graph().entity_id(target)?;
+                    model.query_backend().foreign_key(
+                        model.graph(),
+                        &relationship_ids,
+                        source,
+                        target,
+                    )
+                })
                 .and_then(|foreign_key| {
-                    let fk_node = if from_entity == Some(foreign_key.holder.as_str()) {
+                    let holder = &model.graph().entity(foreign_key.holder).name;
+                    let fk_node = if from_entity == Some(holder.as_str()) {
                         rel.from.clone()
-                    } else if to_entity == Some(foreign_key.holder.as_str()) {
+                    } else if to_entity == Some(holder.as_str()) {
                         rel.to.clone()
                     } else {
                         return None;
@@ -308,8 +339,10 @@ where
             let to_entity = entities.get(rel.to.as_str()).copied().unwrap_or_default();
             let scope_preserving = !rel.types.is_empty()
                 && rel.types.iter().all(|kind| {
-                    model.scope_preserving(kind, from_entity, to_entity)
-                        || model.scope_preserving(kind, to_entity, from_entity)
+                    variant_scope(model, kind, from_entity, to_entity)
+                        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
+                        || variant_scope(model, kind, to_entity, from_entity)
+                            .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
                 });
             let from_proof = scope_proofs.get(&rel.from);
             let to_proof = scope_proofs.get(&rel.to);
@@ -317,10 +350,12 @@ where
                 from_proof.cloned()
             } else {
                 rel.types.iter().find_map(|kind| {
-                    model
-                        .pruned_scope_endpoint(kind, from_entity, to_entity)
-                        .and_then(|source| if source { from_proof } else { to_proof })
-                        .cloned()
+                    match variant_scope(model, kind, from_entity, to_entity) {
+                        Some(ontology::EdgeVariantScope::PruneToSource) => from_proof,
+                        Some(ontology::EdgeVariantScope::PruneToTarget) => to_proof,
+                        _ => None,
+                    }
+                    .cloned()
                 })
             };
             Hop {
@@ -344,7 +379,7 @@ where
 
 fn build_node_plans<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
 where
-    M: PlanningModel + crate::data_model::QueryModel + ?Sized,
+    M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
 {
     input
         .nodes
@@ -357,11 +392,14 @@ where
                 NodePlan {
                     alias: n.id.clone(),
                     entity: n.entity.clone(),
-                    table: model.entity_table(entity_id).map(String::from),
+                    table: model
+                        .query_backend()
+                        .entity_table(entity_id)
+                        .map(String::from),
                     selectivity: Selectivity::from_node(n),
                     hydration: HydrationStrategy::Skip,
-                    has_traversal_path: model.entity_has_traversal_path(entity_id),
-                    is_global: model.entity_is_global(entity_id),
+                    has_traversal_path: model.query_backend().entity_has_traversal_path(entity_id),
+                    is_global: model.query_backend().entity_is_global(entity_id),
                     redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
                     filters: crate::passes::shared::ordered_filters(
                         &n.filters

@@ -4,7 +4,8 @@ use crate::error::{QueryError, Result};
 use crate::input::*;
 use orbit_utils::traversal_path::TraversalPath;
 
-use super::{Plan, PlanBody, PlanningModel, Strategy};
+use super::{Plan, PlanBody, Strategy};
+use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HydrationCompileOptions {
@@ -29,7 +30,7 @@ pub struct HydrationNodePlan {
 
 pub fn plan_hydration(
     input: &Input,
-    model: &(impl PlanningModel + ?Sized),
+    model: &(impl QueryDataModel + ?Sized),
     options: HydrationCompileOptions,
 ) -> Result<Plan> {
     if input.nodes.is_empty() {
@@ -45,7 +46,7 @@ pub fn plan_hydration(
                 .entity
                 .as_deref()
                 .and_then(|entity| model.graph().entity_id(entity))
-                .and_then(|entity| model.entity_table(entity))
+                .and_then(|entity| model.query_backend().entity_table(entity))
                 .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
             let entity = node
                 .entity
@@ -56,6 +57,7 @@ pub fn plan_hydration(
                 _ => vec![],
             };
             let sort_key = model
+                .query_backend()
                 .table_sort_key(table)
                 .filter(|sk| !sk.is_empty())
                 .map(<[String]>::to_vec)
