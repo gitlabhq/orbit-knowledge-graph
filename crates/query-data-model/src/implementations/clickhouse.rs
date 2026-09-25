@@ -120,18 +120,6 @@ impl ClickHouseCatalog {
 }
 
 impl QueryBackendCatalog for ClickHouseCatalog {
-    fn supports_foreign_key_elision(&self) -> bool {
-        true
-    }
-
-    fn requires_node_joins(&self) -> bool {
-        false
-    }
-
-    fn requires_node_projection(&self) -> bool {
-        false
-    }
-
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }

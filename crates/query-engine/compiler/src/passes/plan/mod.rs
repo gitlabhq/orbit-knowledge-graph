@@ -160,18 +160,37 @@ pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
         .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
 }
 
-pub fn plan<M>(
+pub fn plan_clickhouse(
+    input: &Input,
+    scope_proofs: &HashMap<String, crate::scope::ScopeProof>,
+    model: &query_data_model::ClickHouseDataModel,
+    hydration_options: HydrationCompileOptions,
+) -> Result<Plan> {
+    plan(input, scope_proofs, model, hydration_options, true)
+}
+
+pub fn plan_duckdb(
+    input: &Input,
+    scope_proofs: &HashMap<String, crate::scope::ScopeProof>,
+    model: &query_data_model::DuckDbDataModel,
+    hydration_options: HydrationCompileOptions,
+) -> Result<Plan> {
+    plan(input, scope_proofs, model, hydration_options, false)
+}
+
+fn plan<M>(
     input: &Input,
     scope_proofs: &HashMap<String, crate::scope::ScopeProof>,
     model: &M,
     hydration_options: HydrationCompileOptions,
+    use_fk_elision: bool,
 ) -> Result<Plan>
 where
     M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
 {
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => {
-            Ok(edge_chain::plan(input, scope_proofs, model))
+            Ok(edge_chain::plan(input, scope_proofs, model, use_fk_elision))
         }
         QueryType::Neighbors => neighbors::plan_neighbors(input, model),
         QueryType::PathFinding => pathfinding::plan_pathfinding(input, model),

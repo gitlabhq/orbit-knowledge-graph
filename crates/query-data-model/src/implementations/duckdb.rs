@@ -23,18 +23,6 @@ pub struct DuckDbCatalog {
 }
 
 impl QueryBackendCatalog for DuckDbCatalog {
-    fn supports_foreign_key_elision(&self) -> bool {
-        false
-    }
-
-    fn requires_node_joins(&self) -> bool {
-        true
-    }
-
-    fn requires_node_projection(&self) -> bool {
-        true
-    }
-
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }

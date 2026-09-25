@@ -53,9 +53,6 @@ pub struct DenormalizedCatalog {
 }
 
 pub trait QueryBackendCatalog {
-    fn supports_foreign_key_elision(&self) -> bool;
-    fn requires_node_joins(&self) -> bool;
-    fn requires_node_projection(&self) -> bool;
     fn entity_table(&self, entity: EntityId) -> Option<&str>;
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;

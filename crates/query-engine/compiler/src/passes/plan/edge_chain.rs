@@ -148,7 +148,12 @@ pub enum FkShape {
     Chain,
 }
 
-pub fn plan<M>(input: &Input, scope_proofs: &HashMap<String, ScopeProof>, model: &M) -> Plan
+pub fn plan<M>(
+    input: &Input,
+    scope_proofs: &HashMap<String, ScopeProof>,
+    model: &M,
+    use_fk_elision: bool,
+) -> Plan
 where
     M: QueryDataModel + crate::data_model::QueryModel + ?Sized,
 {
@@ -156,10 +161,10 @@ where
     let mut nodes = build_node_plans(input, model);
     let backend = model.query_backend();
 
-    let (mut hops, elided_fks, scope_requirements) = if !backend.supports_foreign_key_elision() {
-        (hops, Vec::new(), Vec::new())
-    } else {
+    let (mut hops, elided_fks, scope_requirements) = if use_fk_elision {
         elide_hops(hops, &mut nodes, input)
+    } else {
+        (hops, Vec::new(), Vec::new())
     };
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
@@ -169,18 +174,16 @@ where
     let denorm_rel_kinds = backend.denormalized().relationships.clone();
 
     for node_plan in nodes.values_mut() {
-        if backend.requires_node_joins() {
-            node_plan.hydration = HydrationStrategy::Join;
-        } else {
+        if use_fk_elision {
             node_plan.hydration = determine_hydration(node_plan, input, &hops, &denorm_rel_kinds);
+        } else {
+            node_plan.hydration = HydrationStrategy::Join;
         }
     }
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if backend.supports_foreign_key_elision()
-        && let Some(shape) = detect_fk(&hops, &nodes)
-    {
+    } else if use_fk_elision && let Some(shape) = detect_fk(&hops, &nodes) {
         Strategy::Fk(shape)
     } else {
         Strategy::Flat
@@ -199,7 +202,7 @@ where
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
-    } else if backend.requires_node_projection() {
+    } else if !use_fk_elision {
         for np in nodes.values_mut() {
             np.emit_select = true;
         }
