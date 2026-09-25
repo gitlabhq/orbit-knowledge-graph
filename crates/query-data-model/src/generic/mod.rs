@@ -51,8 +51,8 @@ pub struct PathColumn {
 #[derive(Debug)]
 pub struct RelationshipRoute<'a> {
     pub table: &'a str,
-    pub sources: Vec<&'a str>,
-    pub targets: Vec<&'a str>,
+    pub sources: &'a [EntityId],
+    pub targets: &'a [EntityId],
 }
 
 pub type DenormalizedKey = (String, String, String);
@@ -216,24 +216,13 @@ pub trait QueryDataModel {
     fn relationship_route(&self, relationship: &str) -> Option<RelationshipRoute<'_>> {
         let relationship = self.graph().relationship_id(relationship)?;
         let graph_relationship = self.graph().relationship(relationship);
-        let mut sources = HashSet::new();
-        let mut targets = HashSet::new();
-        for variant in &graph_relationship.variants {
-            let variant = self.graph().variant(*variant);
-            sources.insert(self.graph().entity(variant.source).name.as_str());
-            targets.insert(self.graph().entity(variant.target).name.as_str());
-        }
-        let mut sources: Vec<_> = sources.into_iter().collect();
-        let mut targets: Vec<_> = targets.into_iter().collect();
-        sources.sort_unstable();
-        targets.sort_unstable();
         Some(RelationshipRoute {
             table: self
                 .query_backend()
                 .relationship_table(relationship)
                 .unwrap_or_else(|| self.default_edge_table()),
-            sources,
-            targets,
+            sources: &graph_relationship.sources,
+            targets: &graph_relationship.targets,
         })
     }
 

@@ -67,7 +67,6 @@ where
 
     let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
     {
-        let center_entity = center_node.entity.as_deref().unwrap_or_default();
         let relationships: Vec<&str> = if config.rel_types.is_empty() {
             model
                 .graph()
@@ -82,12 +81,7 @@ where
                 .iter()
                 .filter_map(|relationship| model.relationship_route(relationship))
                 .filter(|route| {
-                    if source {
-                        &route.sources
-                    } else {
-                        &route.targets
-                    }
-                    .contains(&center_entity)
+                    if source { route.sources } else { route.targets }.contains(&center_entity_id)
                 })
                 .map(|route| route.table.to_string())
                 .collect();

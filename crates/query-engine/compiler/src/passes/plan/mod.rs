@@ -109,8 +109,18 @@ impl EdgeTableConfig {
         let mut target_kinds = BTreeSet::new();
         for rt in rel_types {
             if let Some(route) = model.relationship_route(rt) {
-                source_kinds.extend(route.sources.into_iter().map(String::from));
-                target_kinds.extend(route.targets.into_iter().map(String::from));
+                source_kinds.extend(
+                    route
+                        .sources
+                        .iter()
+                        .map(|entity| model.graph().entity(*entity).name.clone()),
+                );
+                target_kinds.extend(
+                    route
+                        .targets
+                        .iter()
+                        .map(|entity| model.graph().entity(*entity).name.clone()),
+                );
             }
         }
         let tables = model.relationship_tables(rel_types);

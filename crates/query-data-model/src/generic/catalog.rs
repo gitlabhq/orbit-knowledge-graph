@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use ontology::{DataType, EnumType, FieldSelectivity, FieldSource, Ontology, VirtualSource};
 
@@ -46,6 +46,8 @@ pub struct Relationship {
     pub id: RelationshipId,
     pub name: String,
     pub variants: Vec<RelationshipVariantId>,
+    pub sources: Vec<EntityId>,
+    pub targets: Vec<EntityId>,
 }
 
 #[derive(Debug)]
@@ -182,10 +184,24 @@ impl GraphCatalog {
                 });
             }
 
+            let sources = relationship_variants
+                .iter()
+                .map(|variant| variants[variant.index()].source)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let targets = relationship_variants
+                .iter()
+                .map(|variant| variants[variant.index()].target)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
             relationships.push(Relationship {
                 id: relationship_id,
                 name: relationship_name.to_string(),
                 variants: relationship_variants,
+                sources,
+                targets,
             });
         }
 
@@ -284,11 +300,8 @@ impl GraphCatalog {
         let target = target.and_then(|name| self.entity_id(name));
         self.relationships()
             .filter(|relationship| {
-                relationship.variants.iter().any(|variant| {
-                    let variant = self.variant(*variant);
-                    source.is_none_or(|source| variant.source == source)
-                        && target.is_none_or(|target| variant.target == target)
-                })
+                source.is_none_or(|source| relationship.sources.contains(&source))
+                    && target.is_none_or(|target| relationship.targets.contains(&target))
             })
             .map(|relationship| relationship.name.clone())
             .collect()
