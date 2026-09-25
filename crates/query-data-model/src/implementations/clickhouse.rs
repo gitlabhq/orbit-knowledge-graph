@@ -241,7 +241,7 @@ impl Backend for ClickHouse {
                         .storage
                         .columns
                         .iter()
-                        .map(|column| column.name.clone())
+                        .map(|column| column.name.trim_matches('`').to_string())
                         .collect(),
                     column_types: node
                         .fields
@@ -281,12 +281,12 @@ impl Backend for ClickHouse {
                 .columns
                 .iter()
                 .chain(config.storage.denormalized_columns.iter())
-                .map(|column| column.name.clone())
+                .map(|column| column.name.trim_matches('`').to_string())
                 .collect();
             let column_types = config
                 .columns
                 .iter()
-                .map(|column| (column.name.clone(), column.data_type))
+                .map(|column| (column.name.trim_matches('`').to_string(), column.data_type))
                 .collect();
             tables.insert(
                 table_name.to_string(),

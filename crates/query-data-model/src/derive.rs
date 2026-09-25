@@ -84,4 +84,18 @@ mod tests {
         assert!(table.column_types.contains_key("project_id"));
         assert!(!table.column_types.contains_key("target_project_id"));
     }
+
+    #[test]
+    fn exposes_storage_columns_as_query_identifiers() {
+        let model =
+            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
+                .unwrap();
+        let entity = model.graph().entity_id("Job").unwrap();
+        let property = model.graph().property_id(entity, "when").unwrap();
+        let table = model.backend().table_for_entity(entity).unwrap();
+
+        assert_eq!(model.backend().property_column(property), Some("when"));
+        assert!(table.columns.contains("when"));
+        assert!(!table.columns.contains("`when`"));
+    }
 }
