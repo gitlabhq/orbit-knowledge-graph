@@ -2,7 +2,7 @@ use super::*;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 pub(super) fn build<B: Flavor>(bound: &BoundCatalog, plan: Plan<B>, cost: Cost) -> Candidate<B> {
-    let visible = visible_relations(&plan);
+    let visible = plan.visible_relations();
     let outputs = bound
         .relations
         .iter()
@@ -62,8 +62,4 @@ fn physical_properties<B: Flavor>(bound: &BoundCatalog, plan: &Plan<B>) -> Physi
         _ => {}
     });
     properties
-}
-
-fn visible_relations<B: Flavor>(plan: &Plan<B>) -> BTreeSet<RelationId> {
-    plan.visible_relations()
 }
