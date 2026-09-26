@@ -9,9 +9,10 @@ use rustc_hash::FxHashSet;
 
 use super::{
     Canonical, Context, DirtyGraph, Error, ItemPhase, Lazy, LinkedFile, Listed, Parsed, Phase,
-    Rewritten, SourceFile, Sources, State, Workset,
+    Resolved, Rewritten, SourceFile, Sources, State, Workset,
 };
 use crate::env::Env;
+use crate::file_tree::ProjectTree;
 use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern;
@@ -319,5 +320,58 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
         }
         Ok(DirtyGraph { state, dirty })
+    }
+}
+
+/// Cross-file resolution over the dirty files. A file that overruns its
+/// resolve budget keeps its intra-file edges and is reported. Manifest files
+/// join the project tree so the resolver can read module roots from them.
+pub struct Resolve;
+
+impl Phase<DirtyGraph> for Resolve {
+    type Output = Resolved;
+
+    fn name(&self) -> Cow<'static, str> {
+        "resolve".into()
+    }
+
+    fn run(self, context: &mut Context, input: DirtyGraph) -> Result<Resolved, Error> {
+        let DirtyGraph { mut state, dirty } = input;
+        let env = context.env;
+        let paths: Vec<&str> = state
+            .trees
+            .iter()
+            .map(|t| t.label.as_str())
+            .chain(state.configs.iter().map(|f| f.path.as_str()))
+            .collect();
+        let walk = ProjectTree::build(
+            &env.lang,
+            &env.rules.config.resolve,
+            &env.rules.resolve_stages,
+            &paths,
+            Some(&state.configs),
+        );
+        let result = state.resolver.resolve(
+            &state.trees,
+            &state.edges,
+            &env.lang,
+            &dirty,
+            env.lang_id,
+            &walk.prefixes,
+            &env.rules.config.resolve,
+            &walk.aliases,
+            env,
+            &context.run,
+        )?;
+        for rsp in &result.resolved_source_paths {
+            let nid = state.trees[rsp.fi].to_id(rsp.node);
+            state.trees[rsp.fi].node_mut(nid).sym = rsp.sym;
+        }
+        state.edges.extend(result.cross_edges);
+        context.run.check()?;
+        for k in result.killed {
+            context.skip(k);
+        }
+        Ok(Resolved { state })
     }
 }

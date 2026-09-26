@@ -1,6 +1,7 @@
 pub mod constants;
 pub mod dsl;
 pub mod env;
+pub mod file_tree;
 pub mod intern;
 pub mod inventory;
 pub mod linker;
