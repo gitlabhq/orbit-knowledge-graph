@@ -1297,14 +1297,31 @@ fn resolve_submodule(
 
 fn apply_aliases(path: &str, aliases: &[(String, String)]) -> String {
     for (key, val) in aliases {
-        if let Some(rest) = path.strip_prefix(key.as_str()) {
-            let rest = rest.strip_prefix('/').unwrap_or(rest);
-            return if rest.is_empty() {
-                val.clone()
-            } else {
-                format!("{val}/{rest}")
-            };
+        let Some(rest) = path.strip_prefix(key.as_str()) else {
+            continue;
+        };
+        if rest.is_empty() {
+            return val.clone();
+        }
+        if let Some(rest) = rest.strip_prefix(PATH_SEP) {
+            return format!("{val}{PATH_SEP}{rest}");
         }
     }
     path.to_string()
+}
+
+#[cfg(test)]
+mod alias_tests {
+    use super::apply_aliases;
+
+    #[test]
+    fn an_alias_matches_whole_path_components_only() {
+        let aliases = [("app".to_string(), "src/app".to_string())];
+        assert_eq!(apply_aliases("app", &aliases), "src/app");
+        assert_eq!(apply_aliases("app/foo", &aliases), "src/app/foo");
+        assert_eq!(
+            apply_aliases("application/foo", &aliases),
+            "application/foo"
+        );
+    }
 }

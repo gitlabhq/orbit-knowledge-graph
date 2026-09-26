@@ -69,7 +69,7 @@ impl<'a> ProjectTree<'a> {
             prefixes: vec![],
             aliases: vec![],
         };
-        if stages.is_empty() && config.lookup_from.is_empty() {
+        if stages.is_empty() && config.lookup_from.is_empty() && config.parse_files.is_empty() {
             return WalkResult {
                 prefixes: vec![],
                 aliases: vec![],
