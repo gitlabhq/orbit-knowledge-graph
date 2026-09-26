@@ -4,6 +4,9 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[package.metadata.cargo-shear]
+ignored = ["pest"] # used by pest_derive-generated code
+
 [lints]
 workspace = true
 
@@ -11,6 +14,10 @@ workspace = true
 arrow = { workspace = true }
 indextree = "4.9"
 lasso = { version = "0.7", features = ["multi-threaded", "ahasher"] }
+pest = { workspace = true }
+pest_consume = { workspace = true }
+pest_derive = { workspace = true }
+regex = { workspace = true }
 rayon = { workspace = true }
 rkyv = { workspace = true }
 rustc-hash = { workspace = true }

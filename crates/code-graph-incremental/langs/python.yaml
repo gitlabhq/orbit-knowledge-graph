@@ -1,0 +1,300 @@
+# Python rewrite rules — complete language definition.
+# Stamps all synthetics needed by SSA and resolver.
+
+config:
+  resolve:
+    external: [
+      abc, argparse, ast, asyncio, base64, bisect, builtins, calendar, collections,
+      concurrent, configparser, contextlib, contextvars, copy, csv, ctypes, dataclasses,
+      datetime, decimal, difflib, email, enum, errno, fnmatch, fractions, ftplib,
+      functools, gc, glob, gzip, hashlib, heapq, hmac, html, http, importlib, inspect,
+      io, ipaddress, itertools, json, logging, math, mimetypes, multiprocessing,
+      numbers, operator, os, pathlib, pdb, pickle, pkgutil, platform, pprint, queue,
+      random, re, secrets, select, selectors, shelve, shlex, shutil, signal, socket,
+      socketserver, sqlite3, ssl, stat, statistics, string, struct, subprocess, sys,
+      sysconfig, tarfile, tempfile, textwrap, threading, time, timeit, tkinter, tomllib,
+      traceback, types, typing, unicodedata, unittest, urllib, uuid, venv, warnings,
+      weakref, xml, xmlrpc, zipfile, zlib, zoneinfo
+    ]
+    lookup_from:
+      - __source_root
+
+stages:
+  - name: normalize
+    rules:
+      - match: '(module $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+      - match: '(return_statement $$$VALS)'
+        replace: '(__ssa_return $$$VALS)'
+
+      # Hoist decorators onto the inner def/class
+      - match: '(decorator $N:identifier)'
+        replace: '(__decorator @$N)'
+      - match: '(decorated_definition $$$DECOS:__decorator definition: $D)'
+        replace: '$D { $$$DECOS }'
+
+      # Superclass list → __supertype children on the class
+      - match: '(class_definition name: $N superclasses: (argument_list $$$SUPERS:identifier|attribute|call) $$$REST)'
+        replace: '(class_definition $N $$$SUPERS=>__supertype $$$REST)'
+
+      # self.x / cls.x → __ivar
+      - match: '(attribute object: (identifier "self") attribute: $A)'
+        replace: '(__ivar @$A)'
+      - match: '(attribute object: (identifier "cls") attribute: $A)'
+        replace: '(__ivar @$A)'
+
+      # Aliased import: capture real name as sym, alias as child
+      - match: '(aliased_import name: $N alias: $A)'
+        replace: '(aliased_import @$N (__alias @$A))'
+      - match: '(aliased_import name: $N)'
+        replace: '(aliased_import @$N)'
+
+  - name: retag-refs
+    rules:
+      # self.x.method → __member "method" (__object __ivar)
+      - match: '(attribute object: $O:__ivar attribute: $M)'
+        replace: '(__member @$M (__object $O))'
+      # a.b.c → __member "c" (__object (__member "b" (__object "a")))
+      - match: '(attribute object: $O:__member attribute: $M)'
+        replace: '(__member @$M (__object $O))'
+      # a.b → __member "b" (__object "a")
+      - match: '(attribute object: $O attribute: $M)'
+        replace: '(__member @$M (__object @$O))'
+
+  - name: retag-calls
+    rules:
+      - match: '(call function: $F:__ivar arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
+      - match: '(call function: $F:__member arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
+      - match: '(call function: $F arguments: $A)'
+        replace: '(__call (__callee @$F) $A)'
+
+  - name: imports
+    rules:
+      # from X import * (must precede named-import rule due to first-match-wins)
+      - match: '(import_from_statement module_name: $M $W:wildcard_import)'
+        replace: '(__import (__source @$M) (__source_path @$M) (__name @$W))'
+
+      # from X import a, b  /  from X import a as b  /  mixed
+      - match: '(import_from_statement module_name: $M $$$NAMES:dotted_name|aliased_import)'
+        replace: '(__import (__source @$M) (__source_path @$M) $$$NAMES->__name)'
+
+      # import X / import X.Y.Z
+      - match: '(import_statement name: $N:dotted_name)'
+        replace: '(__import (__source @$N) (__source_path @$N) (__name @$N (__ssa_hint @$N|split_first("."))))'
+
+      # import X as Y — rekind capture to __name, keeping __alias subtree
+      - match: '(import_statement name: $N:aliased_import)'
+        replace: '(__import (__source @$N) (__source_path @$N) @$N->__name)'
+
+      # from __future__ import X
+      - match: '(future_import_statement $$$NAMES:dotted_name)'
+        replace: '(__import (__source "__future__") (__source_path "__future__") $$$NAMES=>__name)'
+
+  - name: classify
+    rules:
+      # Defs
+      - match: '(assignment left: $N right: $R:lambda)'
+        replace: '(__def (__defname @$N) (__lambda) $R)'
+      - match: '(assignment left: $N type: $T:type)'
+        replace: '(__def (__defname @$N) (__field_def))'
+      - match: '(typed_default_parameter name: $N type: (type $T))'
+        replace: '(__binding @$N (__ssa_typed @$T))'
+      - match: '(typed_default_parameter name: $N)'
+        replace: '(__binding @$N)'
+      - match: '(typed_parameter $C:identifier type: (type $T))'
+        replace: '(__binding @$C (__ssa_typed @$T))'
+      - match: '(typed_parameter $C:identifier)'
+        replace: '(__binding @$C)'
+
+      # Bindings — RHS wrapped in __rhs for canonical containment
+      - match: '(assignment left: $N:__ivar right: $R:__call)'
+        replace: '(__binding $N (__rhs $R))'
+      - match: '(assignment left: $N:__ivar right: $R)'
+        replace: '(__binding $N (__rhs @$R))'
+      - match: '(assignment left: $N right: $R:__call)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment left: $N right: $R:__ssa_loop)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment left: $N right: $R)'
+        replace: '(__binding @$N (__rhs @$R))'
+      - match: '(assignment left: $N:__ivar)'
+        replace: '(__binding $N)'
+      - match: '(assignment left: $N)'
+        replace: '(__binding @$N)'
+      - match: '(augmented_assignment left: $N right: $R:__call)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(augmented_assignment left: $N right: $R)'
+        replace: '(__binding @$N (__rhs @$R))'
+      - match: '(named_expression name: $N value: $V:__call)'
+        replace: '(__binding @$N (__rhs $V))'
+      - match: '(named_expression name: $N value: $V)'
+        replace: '(__binding @$N (__rhs @$V))'
+
+      # Branches
+      - match: '(if_statement condition: $COND consequence: $C $$$ALTS:elif_clause|else_clause)'
+        replace: '(__ssa_branch $COND (__ssa_arm $C) $$$ALTS->__ssa_arm)'
+      - match: '(try_statement body: $B $$$ALTS:except_clause|finally_clause)'
+        replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
+      - match: '(match_statement subject: $S body: (block $$$CASES:case_clause))'
+        replace: '(__ssa_branch $S $$$CASES->__ssa_arm)'
+      - match: '(conditional_expression)'
+        replace: '(__ssa_branch)'
+
+      # Loops
+      - match: '(for_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(while_statement body: $B)'
+        replace: '(__ssa_loop $B)'
+      - match: '(list_comprehension $$$BODY)'
+        replace: '(__ssa_loop $$$BODY)'
+      - match: '(set_comprehension $$$BODY)'
+        replace: '(__ssa_loop $$$BODY)'
+      - match: '(dictionary_comprehension $$$BODY)'
+        replace: '(__ssa_loop $$$BODY)'
+      - match: '(generator_expression $$$BODY)'
+        replace: '(__ssa_loop $$$BODY)'
+
+      # Methods — has self parameter (before generic function rule)
+      - match: '(function_definition name: $N **/(identifier "self") parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
+        tag: { flavor: self_method }
+
+      # Functions — no self parameter
+      - match: '(function_definition name: $N parameters:? (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__decorator)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
+
+      # Classes — variadic before body captures __supertype/__decorator
+      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B **/(__def (__defname "__call__")))'
+        replace: '(__def (__defname @$N) (__class) (__callable "__call__") $$$ANN $B)'
+      - match: '(class_definition name: $N $$$ANN:__supertype|__decorator body: $B)'
+        replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
+
+  - name: ssa-cleanup
+    rules:
+      - match: '(__ssa_return $V:identifier)'
+        replace: '(__ssa_return (__rhs @$V))'
+
+  - name: tag-defs
+    rules:
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: tag-source-path
+    rules:
+      - match: '(__import)'
+        tag:
+          source_rel: '@$ROOT|child_sym("__source_path")|regex_loop("(\w)\.(\w)", "$1/$2")|regex_loop("^((?:~/)*)\.", "$1~/")|regex_first("~/", "./")|regex_replace("~/", "../")|regex_loop("^\./\.\./", "../")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|tag("source_rel")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "tag:source_rel")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+
+resolve:
+  stages:
+    - name: packages
+      rules:
+        - match: '(__dir (__file "__init__.py") $$$REST)'
+          replace: '(__dir (__package) (__file "__init__.py") $$$REST)'
+        - match: '(__dir (__file "__init__.pyi") $$$REST)'
+          replace: '(__dir (__package) (__file "__init__.pyi") $$$REST)'
+    - name: roots
+      climb:
+        while: __package
+        mark: __source_root
+    - name: src_dirs
+      rules:
+         - match: '(__dir "src" $$$REST)'
+           replace: '(__dir "src" (__source_root) $$$REST)'
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          fqn: '@$M|stem|collapse_index("__init__")|replace("/", ".")'
+          file_path: '@$M'
+          language: '@$M|split_last(".")|map("py:python", "pyi:python")'
+
+      - match: '(__def)'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|tag("resolved_source")|replace("/", ".")'
+      - match: '(__name "*")'
+        tag:
+          import_type: WildcardImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      # `import os`: the name repeats the module, so the whole module is imported.
+      - match: '(__import $S:__source $$$A $N:__name $$$B)'
+        where: '$N == $S'
+        tag_on: __name
+        tag:
+          import_type: Import
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'
