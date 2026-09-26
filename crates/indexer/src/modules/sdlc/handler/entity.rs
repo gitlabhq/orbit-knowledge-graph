@@ -8,7 +8,7 @@ use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
-use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
+use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds, namespace_position_key};
 
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
@@ -17,7 +17,7 @@ use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
-use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats, WindowBounds};
+use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats};
 use crate::modules::sdlc::plan::{
     DeletedFilter, Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter,
 };
@@ -143,7 +143,7 @@ impl EntityHandler {
             .await
             .map_err(|err| HandlerError::Processing(err.to_string()))?
             .unwrap_or_else(|| Checkpoint::new(request.watermark));
-        let window = pull_window(&checkpoint, request.watermark);
+        let window = checkpoint.pull_window(request.watermark);
         let mode = window.indexing_mode();
         observer.set_indexing_mode(mode);
 
@@ -301,7 +301,7 @@ impl EntityHandler {
                 .await
                 .map_err(|err| HandlerError::Processing(err.to_string()))?;
             let checkpoint = match existing {
-                Some(cp) if cp.cursor_values.is_none() => {
+                Some(cp) if cp.is_completed() => {
                     info!(partition = %position_key, "skipping already-completed partition");
                     continue;
                 }
@@ -352,20 +352,6 @@ impl EntityHandler {
     }
 }
 
-/// A cursored checkpoint must resume its original window, never widen to `(epoch, target]`.
-fn pull_window(checkpoint: &Checkpoint, request_watermark: DateTime<Utc>) -> WindowBounds {
-    if checkpoint.cursor_values.is_some() {
-        return WindowBounds {
-            target: checkpoint.watermark,
-            floor: checkpoint.resume_floor,
-        };
-    }
-    WindowBounds {
-        target: request_watermark,
-        floor: checkpoint.completed_watermark(),
-    }
-}
-
 /// Parent watermark for a finished partitioned load, or the partitions still
 /// mid-pull: consolidating past a cursored partition silently drops its id range.
 fn consolidated_watermark(
@@ -374,7 +360,7 @@ fn consolidated_watermark(
 ) -> Result<DateTime<Utc>, Vec<String>> {
     let incomplete: Vec<String> = partition_checkpoints
         .iter()
-        .filter(|(_, checkpoint)| checkpoint.cursor_values.is_some())
+        .filter(|(_, checkpoint)| !checkpoint.is_completed())
         .map(|(key, _)| key.clone())
         .collect();
     if !incomplete.is_empty() {
@@ -642,79 +628,22 @@ mod tests {
         s.parse().unwrap()
     }
 
-    #[test]
-    fn pull_window_first_pass_starts_from_beginning() {
-        let now = ts("2026-06-07T22:00:00Z");
-        let first_pass = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
-        assert_eq!(
-            pull_window(&first_pass, now),
-            WindowBounds {
-                target: now,
-                floor: None
-            }
-        );
-    }
-
-    #[test]
-    fn pull_window_completed_advances_to_now() {
-        let now = ts("2026-06-07T22:00:00Z");
-        let mut completed = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
-        completed.complete(ts("2026-06-07T21:59:30Z"));
-        assert_eq!(
-            pull_window(&completed, now),
-            WindowBounds {
-                target: now,
-                floor: Some(ts("2026-06-07T21:59:30Z")),
-            }
-        );
-    }
-
-    #[test]
-    fn pull_window_resume_keeps_original_window() {
-        let now = ts("2026-06-07T22:05:00Z");
-        let in_progress = Checkpoint {
-            cursor_values: Some(vec!["1/65957873/".to_string(), "42".to_string()]),
-            resume_floor: Some(ts("2026-06-07T21:59:30Z")),
-            ..Checkpoint::new(ts("2026-06-07T22:00:00Z"))
-        };
-        assert_eq!(
-            pull_window(&in_progress, now),
-            WindowBounds {
-                target: ts("2026-06-07T22:00:00Z"),
-                floor: Some(ts("2026-06-07T21:59:30Z")),
-            }
-        );
-    }
-
-    #[test]
-    fn pull_window_resume_without_floor_starts_from_beginning() {
-        let now = ts("2026-06-07T22:05:00Z");
-        let legacy = Checkpoint {
-            cursor_values: Some(vec!["42".to_string()]),
-            ..Checkpoint::new(ts("2026-06-07T22:00:00Z"))
-        };
-        assert_eq!(
-            pull_window(&legacy, now),
-            WindowBounds {
-                target: ts("2026-06-07T22:00:00Z"),
-                floor: None,
-            }
-        );
-    }
-
     fn completed_partition(key: &str, watermark: &str) -> (String, Checkpoint) {
-        (key.to_string(), Checkpoint::new(ts(watermark)))
+        let mut checkpoint = Checkpoint::new(ts(watermark));
+        checkpoint.complete(ts(watermark));
+        (key.to_string(), checkpoint)
     }
 
     fn cursored_partition(key: &str, watermark: &str) -> (String, Checkpoint) {
-        (
-            key.to_string(),
-            Checkpoint {
-                cursor_values: Some(vec!["42".to_string()]),
-                resume_floor: Some(ts(watermark)),
-                ..Checkpoint::new(ts(watermark))
-            },
-        )
+        let mut checkpoint = Checkpoint::new(ts(watermark));
+        checkpoint.record_page(ts(watermark), Some(ts(watermark)), vec!["42".to_string()]);
+        (key.to_string(), checkpoint)
+    }
+
+    fn started_partition(key: &str, watermark: &str) -> (String, Checkpoint) {
+        let mut checkpoint = Checkpoint::new(ts(watermark));
+        checkpoint.start_attempt();
+        (key.to_string(), checkpoint)
     }
 
     #[test]
@@ -743,6 +672,18 @@ mod tests {
                 "ns.7.Job.p2of3".to_string(),
                 "ns.7.Job.p3of3".to_string()
             ])
+        );
+    }
+
+    #[test]
+    fn consolidated_watermark_treats_a_started_partition_as_incomplete() {
+        let partitions = vec![
+            completed_partition("ns.7.Job.p1of2", "2026-06-07T22:00:00Z"),
+            started_partition("ns.7.Job.p2of2", "2026-06-07T21:30:00Z"),
+        ];
+        assert_eq!(
+            consolidated_watermark(&partitions, ts("2026-06-07T23:00:00Z")),
+            Err(vec!["ns.7.Job.p2of2".to_string()])
         );
     }
 

@@ -662,10 +662,9 @@ mod tests {
     fn cursor_filter_renders_dnf_in_extract_sql() {
         let built = plans(&test_ontology(), 1000);
         let user = built.global.iter().find(|p| p.name == "User").unwrap();
-        let cursor = Cursor::from_checkpoint(&Checkpoint {
-            cursor_values: Some(vec!["42".to_string()]),
-            ..Checkpoint::new(Utc::now())
-        });
+        let mut checkpoint = Checkpoint::new(Utc::now());
+        checkpoint.record_page(Utc::now(), None, vec!["42".to_string()]);
+        let cursor = Cursor::from_checkpoint(&checkpoint);
         let sql = user
             .prepare()
             .with(WatermarkFilter {

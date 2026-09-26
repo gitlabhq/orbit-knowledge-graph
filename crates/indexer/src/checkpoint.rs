@@ -38,19 +38,34 @@ pub enum CheckpointError {
     Store(String),
 }
 
-/// Where a pipeline left off: both time-position (watermark) and page-position (cursor).
-///
-/// State machine:
-/// - No entry, or no cursor and no `indexed_at`: first pass, start from epoch;
-///   `attempts` counts the first-pass runs that started
-/// - No cursor and `indexed_at`: completed, `watermark` becomes the next `last_watermark`
-/// - `cursor_values: Some(...)`: interrupted mid-pagination, resume from cursor
+/// `floor` is `None` for a backfill (start of time); it is persisted so a resume rebuilds the window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowBounds {
+    pub target: DateTime<Utc>,
+    pub floor: Option<DateTime<Utc>>,
+}
+
+impl WindowBounds {
+    pub fn indexing_mode(&self) -> IndexingMode {
+        match self.floor {
+            Some(_) => IndexingMode::Incremental,
+            None => IndexingMode::Full,
+        }
+    }
+}
+
+enum Progress {
+    FirstPass,
+    Paging,
+    Completed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Checkpoint {
     pub watermark: DateTime<Utc>,
-    pub cursor_values: Option<Vec<String>>,
+    cursor_values: Option<Vec<String>>,
     #[serde(default)]
-    pub resume_floor: Option<DateTime<Utc>>,
+    resume_floor: Option<DateTime<Utc>>,
     #[serde(default)]
     pub attempts: i64,
     #[serde(default)]
@@ -75,12 +90,38 @@ impl Checkpoint {
         }
     }
 
-    pub fn completed_watermark(&self) -> Option<DateTime<Utc>> {
-        self.indexed_at.map(|_| self.watermark)
+    pub fn is_first_pass_before_paging(&self) -> bool {
+        matches!(self.progress(), Progress::FirstPass)
     }
 
-    pub fn is_first_pass_before_paging(&self) -> bool {
-        self.indexed_at.is_none() && self.cursor_values.is_none()
+    pub fn is_paging(&self) -> bool {
+        matches!(self.progress(), Progress::Paging)
+    }
+
+    pub fn is_completed(&self) -> bool {
+        matches!(self.progress(), Progress::Completed)
+    }
+
+    pub fn resume_cursor(&self) -> &[String] {
+        self.cursor_values.as_deref().unwrap_or_default()
+    }
+
+    /// A cursored checkpoint must resume its original window, never widen to `(epoch, target]`.
+    pub fn pull_window(&self, request_watermark: DateTime<Utc>) -> WindowBounds {
+        match self.progress() {
+            Progress::Paging => WindowBounds {
+                target: self.watermark,
+                floor: self.resume_floor,
+            },
+            Progress::Completed => WindowBounds {
+                target: request_watermark,
+                floor: Some(self.watermark),
+            },
+            Progress::FirstPass => WindowBounds {
+                target: request_watermark,
+                floor: None,
+            },
+        }
     }
 
     pub fn start_attempt(&mut self) {
@@ -91,11 +132,11 @@ impl Checkpoint {
         &mut self,
         window_target: DateTime<Utc>,
         window_floor: Option<DateTime<Utc>>,
-        cursor_values: Option<Vec<String>>,
+        cursor: Vec<String>,
     ) {
         self.watermark = window_target;
         self.resume_floor = window_floor;
-        self.cursor_values = cursor_values;
+        self.cursor_values = Some(cursor);
     }
 
     pub fn complete(&mut self, watermark: DateTime<Utc>) {
@@ -104,6 +145,14 @@ impl Checkpoint {
         self.resume_floor = None;
         self.attempts = 0;
         self.indexed_at = Some(Utc::now());
+    }
+
+    fn progress(&self) -> Progress {
+        match (&self.cursor_values, self.indexed_at) {
+            (Some(_), _) => Progress::Paging,
+            (None, Some(_)) => Progress::Completed,
+            (None, None) => Progress::FirstPass,
+        }
     }
 }
 
@@ -383,6 +432,10 @@ impl CheckpointStore for ClickHouseCheckpointStore {
 mod tests {
     use super::*;
 
+    fn ts(s: &str) -> DateTime<Utc> {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn serialization_roundtrip_completed() {
         let checkpoint = Checkpoint::new("2024-06-15T12:00:00Z".parse().unwrap());
@@ -391,22 +444,101 @@ mod tests {
         let deserialized: Checkpoint = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized, checkpoint);
-        assert!(deserialized.cursor_values.is_none());
+        assert!(deserialized.is_first_pass_before_paging());
     }
 
     #[test]
     fn serialization_roundtrip_in_progress() {
-        let checkpoint = Checkpoint {
-            cursor_values: Some(vec!["1/2/".to_string(), "42".to_string()]),
-            resume_floor: Some("2024-06-15T11:59:30Z".parse().unwrap()),
-            ..Checkpoint::new("2024-06-15T12:00:00Z".parse().unwrap())
-        };
+        let target = "2024-06-15T12:00:00Z".parse().unwrap();
+        let floor = Some("2024-06-15T11:59:30Z".parse().unwrap());
+        let mut checkpoint = Checkpoint::new(target);
+        checkpoint.record_page(target, floor, vec!["1/2/".to_string(), "42".to_string()]);
 
         let json = serde_json::to_string(&checkpoint).unwrap();
         let deserialized: Checkpoint = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized, checkpoint);
-        assert_eq!(deserialized.cursor_values.unwrap(), vec!["1/2/", "42"]);
+        assert_eq!(deserialized.resume_cursor(), ["1/2/", "42"]);
+        assert_eq!(
+            deserialized.pull_window(Utc::now()),
+            WindowBounds { target, floor }
+        );
+    }
+
+    #[test]
+    fn progress_follows_the_run_lifecycle() {
+        let target = ts("2024-06-15T12:00:00Z");
+        let mut checkpoint = Checkpoint::new(target);
+        checkpoint.start_attempt();
+        assert!(checkpoint.is_first_pass_before_paging());
+
+        checkpoint.record_page(target, None, vec!["42".to_string()]);
+        assert!(checkpoint.is_paging());
+
+        checkpoint.complete(target);
+        assert!(checkpoint.is_completed());
+
+        checkpoint.start_attempt();
+        assert!(checkpoint.is_completed());
+    }
+
+    #[test]
+    fn pull_window_first_pass_starts_from_beginning() {
+        let now = ts("2026-06-07T22:00:00Z");
+        let first_pass = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
+        assert_eq!(
+            first_pass.pull_window(now),
+            WindowBounds {
+                target: now,
+                floor: None
+            }
+        );
+    }
+
+    #[test]
+    fn pull_window_completed_advances_to_now() {
+        let now = ts("2026-06-07T22:00:00Z");
+        let mut completed = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
+        completed.complete(ts("2026-06-07T21:59:30Z"));
+        assert_eq!(
+            completed.pull_window(now),
+            WindowBounds {
+                target: now,
+                floor: Some(ts("2026-06-07T21:59:30Z")),
+            }
+        );
+    }
+
+    #[test]
+    fn pull_window_resume_keeps_original_window() {
+        let now = ts("2026-06-07T22:05:00Z");
+        let mut in_progress = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
+        in_progress.record_page(
+            ts("2026-06-07T22:00:00Z"),
+            Some(ts("2026-06-07T21:59:30Z")),
+            vec!["1/65957873/".to_string(), "42".to_string()],
+        );
+        assert_eq!(
+            in_progress.pull_window(now),
+            WindowBounds {
+                target: ts("2026-06-07T22:00:00Z"),
+                floor: Some(ts("2026-06-07T21:59:30Z")),
+            }
+        );
+    }
+
+    #[test]
+    fn pull_window_resume_without_floor_starts_from_beginning() {
+        let now = ts("2026-06-07T22:05:00Z");
+        let mut legacy = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
+        legacy.record_page(ts("2026-06-07T22:00:00Z"), None, vec!["42".to_string()]);
+        assert_eq!(
+            legacy.pull_window(now),
+            WindowBounds {
+                target: ts("2026-06-07T22:00:00Z"),
+                floor: None,
+            }
+        );
     }
 
     #[test]

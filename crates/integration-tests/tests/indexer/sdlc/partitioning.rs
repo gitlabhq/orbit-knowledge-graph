@@ -213,9 +213,9 @@ pub async fn retry_skips_completed_resumes_in_progress_and_pins_watermark(ctx: &
 
     for index in 0..2 {
         ctx.execute(&format!(
-            "INSERT INTO {} (key, watermark, cursor_values, _version) \
+            "INSERT INTO {} (key, watermark, cursor_values, indexed_at, _version) \
              VALUES ('global.User.p{index}of4', '2024-01-15 00:00:00.000000', 'null', \
-                     '2024-01-15 00:00:00.000000')",
+                     '2024-01-15 00:00:00.000000', '2024-01-15 00:00:00.000000')",
             t("checkpoint")
         ))
         .await;

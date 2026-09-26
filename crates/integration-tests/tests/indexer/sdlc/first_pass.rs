@@ -61,7 +61,7 @@ pub async fn stale_page_write_after_completion_keeps_indexed_at(ctx: &TestContex
         .expect("checkpoint exists");
 
     assert!(checkpoint.indexed_at.is_some());
-    assert_eq!(checkpoint.cursor_values, Some(vec!["6".to_string()]));
+    assert_eq!(checkpoint.resume_cursor(), ["6"]);
 }
 
 pub async fn tombstoned_key_does_not_resurrect_an_old_completion(ctx: &TestContext) {

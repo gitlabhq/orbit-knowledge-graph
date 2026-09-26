@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
-use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use serde_json::Value;
@@ -13,7 +12,7 @@ use tracing::{debug, info, warn};
 
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
-use crate::observer::{IndexingMode, IndexingObserver};
+use crate::observer::IndexingObserver;
 use crate::retry::{Backoff, LocalRetry, Step, drive_with};
 
 use super::datalake::{DatalakeQuery, FetchedPage, ScanStats, is_arrow_string_overflow};
@@ -21,7 +20,7 @@ use super::metrics::SdlcMetrics;
 use super::paging::{block_size_for, next_page_limit};
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
-use crate::checkpoint::{Checkpoint, CheckpointStore};
+use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds};
 use crate::durability::{RunDurability, WriteDurability};
 use orbit_server_config::DatalakeRetryConfig;
 use orbit_utils::arrow::batch_slice_bytes;
@@ -272,7 +271,7 @@ impl Pipeline {
                 );
             }
 
-            checkpoint.record_page(window.target, window.floor, cursor.to_checkpoint_values());
+            checkpoint.record_page(window.target, window.floor, cursor.values().to_vec());
             self.save_batch_progress(position_key, &checkpoint, &context.progress)
                 .await?;
 
@@ -451,22 +450,6 @@ impl Pipeline {
     }
 }
 
-/// `floor` is `None` for a backfill (start of time); it is persisted so a resume rebuilds the window.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::modules::sdlc) struct WindowBounds {
-    pub target: DateTime<Utc>,
-    pub floor: Option<DateTime<Utc>>,
-}
-
-impl WindowBounds {
-    pub fn indexing_mode(&self) -> IndexingMode {
-        match self.floor {
-            Some(_) => IndexingMode::Incremental,
-            None => IndexingMode::Full,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::plan::{TransformSpec, Transformation};
@@ -480,6 +463,7 @@ mod tests {
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
     use orbit_server_config::AppConfig;
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -646,7 +630,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|checkpoint| checkpoint.cursor_values.is_some())
+                .filter(|checkpoint| checkpoint.is_paging())
                 .cloned()
                 .collect()
         }
@@ -738,18 +722,18 @@ mod tests {
         let history = store.progress_history();
         assert_eq!(history.len(), 2, "should checkpoint after each batch");
         assert_eq!(
-            history[0].cursor_values.as_deref(),
-            Some(vec!["10".to_string()].as_slice()),
+            history[0].resume_cursor(),
+            ["10"],
             "first checkpoint should record cursor from batch 1 (last id=10)"
         );
         assert_eq!(
-            history[1].cursor_values.as_deref(),
-            Some(vec!["5".to_string()].as_slice()),
+            history[1].resume_cursor(),
+            ["5"],
             "second checkpoint should record cursor from batch 2 (last id=5)"
         );
 
         let final_state = store.current_state().unwrap();
-        assert!(final_state.cursor_values.is_none(), "should be completed");
+        assert!(final_state.is_completed(), "should be completed");
     }
 
     #[tokio::test]
@@ -1113,7 +1097,7 @@ mod tests {
     #[tokio::test]
     async fn resumes_from_stored_cursor() {
         let mut stored = Checkpoint::new(test_watermark());
-        stored.record_page(test_watermark(), None, Some(vec!["5".to_string()]));
+        stored.record_page(test_watermark(), None, vec!["5".to_string()]);
 
         let pipeline = Pipeline::new(
             Arc::new(EmptyDatalake),
