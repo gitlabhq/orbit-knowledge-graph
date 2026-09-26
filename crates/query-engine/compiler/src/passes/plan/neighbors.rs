@@ -5,7 +5,7 @@ use ontology::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::{EdgeTableConfig, HydrationStrategy, NodePlan, Plan, PlanBody, Selectivity, Strategy};
+use super::{EdgeTableConfig, NodePlan, Plan, PlanBody, Strategy};
 use crate::passes::shared::has_non_denorm_filters;
 use query_data_model::QueryDataModel;
 
@@ -34,30 +34,9 @@ where
             crate::error::QueryError::Lowering("neighbors center entity is unknown".into())
         })?;
 
-    let center_np = NodePlan {
-        alias: center_node.id.clone(),
-        entity: center_node.entity.clone(),
-        table: model.entity_table(center_entity).map(String::from),
-        selectivity: Selectivity::from_node(center_node),
-        hydration: HydrationStrategy::Skip,
-        filters: crate::passes::shared::ordered_filters(
-            &center_node.filters,
-            Some(center_entity_id),
-            model,
-        ),
-        node_ids: center_node.node_ids.clone(),
-        id_range: center_node.id_range.clone(),
-        has_traversal_path: model.entity_has_traversal_path(center_entity),
-        is_global: model.entity_is_global(center_entity),
-        redaction_id_column: model
-            .redaction_id_column_named(center_entity)
-            .unwrap_or(ontology::constants::DEFAULT_PRIMARY_KEY)
-            .to_string(),
-        columns: center_node.columns.clone(),
-        use_narrowing: false,
-        fk_needs_join: false,
-        emit_select: true,
-    };
+    let center_np = NodePlan::from_input(center_node, model, false).ok_or_else(|| {
+        crate::error::QueryError::Lowering("neighbors center entity is unknown".into())
+    })?;
 
     let denormalized = model.denormalized();
     let denorm_columns = denormalized.columns.clone();

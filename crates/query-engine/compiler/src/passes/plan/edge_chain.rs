@@ -72,6 +72,53 @@ pub struct NodePlan {
 }
 
 impl NodePlan {
+    pub(super) fn from_input<M>(node: &InputNode, model: &M, strip_virtuals: bool) -> Option<Self>
+    where
+        M: QueryDataModel + ?Sized,
+    {
+        let entity = node.entity.as_deref()?;
+        let entity_id = model.graph().entity_id(entity)?;
+        let stored_filters = strip_virtuals.then(|| {
+            node.filters
+                .iter()
+                .filter(|(property, _)| !model.property_is_virtual(entity_id, property))
+                .map(|(property, filters)| (property.clone(), filters.clone()))
+                .collect()
+        });
+        let filters = stored_filters.as_ref().unwrap_or(&node.filters);
+        let columns = node.columns.as_ref().map(|selection| match selection {
+            ColumnSelection::All => ColumnSelection::All,
+            ColumnSelection::List(columns) if strip_virtuals => ColumnSelection::List(
+                columns
+                    .iter()
+                    .filter(|column| !model.property_is_virtual(entity_id, column))
+                    .cloned()
+                    .collect(),
+            ),
+            ColumnSelection::List(columns) => ColumnSelection::List(columns.clone()),
+        });
+        Some(Self {
+            alias: node.id.clone(),
+            entity: node.entity.clone(),
+            table: model.entity_table(entity).map(String::from),
+            selectivity: Selectivity::from_node(node),
+            hydration: HydrationStrategy::Skip,
+            filters: crate::passes::shared::ordered_filters(filters, Some(entity_id), model),
+            node_ids: node.node_ids.clone(),
+            id_range: node.id_range.clone(),
+            has_traversal_path: model.entity_has_traversal_path(entity),
+            is_global: model.entity_is_global(entity),
+            redaction_id_column: model
+                .redaction_id_column_named(entity)
+                .unwrap_or(DEFAULT_PRIMARY_KEY)
+                .to_string(),
+            columns,
+            use_narrowing: false,
+            fk_needs_join: false,
+            emit_select: true,
+        })
+    }
+
     pub fn uses_default_pk(&self) -> bool {
         self.redaction_id_column == DEFAULT_PRIMARY_KEY
     }
@@ -355,48 +402,7 @@ where
     input
         .nodes
         .iter()
-        .filter_map(|n| {
-            let entity = n.entity.as_deref()?;
-            let entity_id = model.graph().entity_id(entity)?;
-            (
-                n.id.clone(),
-                NodePlan {
-                    alias: n.id.clone(),
-                    entity: n.entity.clone(),
-                    table: model.entity_table(entity).map(String::from),
-                    selectivity: Selectivity::from_node(n),
-                    hydration: HydrationStrategy::Skip,
-                    has_traversal_path: model.entity_has_traversal_path(entity),
-                    is_global: model.entity_is_global(entity),
-                    redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
-                    filters: crate::passes::shared::ordered_filters(
-                        &n.filters
-                            .iter()
-                            .filter(|(property, _)| !model.property_is_virtual(entity_id, property))
-                            .map(|(property, filters)| (property.clone(), filters.clone()))
-                            .collect(),
-                        Some(entity_id),
-                        model,
-                    ),
-                    node_ids: n.node_ids.clone(),
-                    id_range: n.id_range.clone(),
-                    columns: n.columns.as_ref().map(|columns| match columns {
-                        ColumnSelection::All => ColumnSelection::All,
-                        ColumnSelection::List(columns) => ColumnSelection::List(
-                            columns
-                                .iter()
-                                .filter(|column| !model.property_is_virtual(entity_id, column))
-                                .cloned()
-                                .collect(),
-                        ),
-                    }),
-                    use_narrowing: false,
-                    fk_needs_join: false,
-                    emit_select: true,
-                },
-            )
-                .into()
-        })
+        .filter_map(|node| Some((node.id.clone(), NodePlan::from_input(node, model, true)?)))
         .collect()
 }
 

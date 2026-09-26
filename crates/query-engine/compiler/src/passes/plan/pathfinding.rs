@@ -3,10 +3,7 @@ use std::collections::HashMap;
 use crate::error::Result;
 use crate::input::*;
 
-use super::{
-    EdgeTableConfig, HydrationStrategy, NodePlan, PathFindingBody, Plan, PlanBody, Selectivity,
-    Strategy, find_node,
-};
+use super::{EdgeTableConfig, NodePlan, PathFindingBody, Plan, PlanBody, Strategy, find_node};
 use query_data_model::QueryDataModel;
 
 pub fn plan_pathfinding<M>(input: &Input, model: &M) -> Result<Plan>
@@ -82,29 +79,6 @@ fn node_plan_from<M>(node: &InputNode, model: &M) -> Result<NodePlan>
 where
     M: QueryDataModel + ?Sized,
 {
-    let entity = node
-        .entity
-        .as_deref()
-        .ok_or_else(|| crate::error::QueryError::Lowering("path node has no entity".into()))?;
-    let entity_id = model
-        .entity(entity)
-        .map(|entity| entity.id)
-        .ok_or_else(|| crate::error::QueryError::Lowering("path node entity is unknown".into()))?;
-    Ok(NodePlan {
-        alias: node.id.clone(),
-        entity: node.entity.clone(),
-        table: model.entity_table(entity).map(String::from),
-        selectivity: Selectivity::from_node(node),
-        hydration: HydrationStrategy::Skip,
-        filters: crate::passes::shared::ordered_filters(&node.filters, Some(entity_id), model),
-        node_ids: node.node_ids.clone(),
-        id_range: node.id_range.clone(),
-        has_traversal_path: model.entity_has_traversal_path(entity),
-        is_global: model.entity_is_global(entity),
-        redaction_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
-        columns: node.columns.clone(),
-        use_narrowing: false,
-        fk_needs_join: false,
-        emit_select: true,
-    })
+    NodePlan::from_input(node, model, false)
+        .ok_or_else(|| crate::error::QueryError::Lowering("path node entity is unknown".into()))
 }
