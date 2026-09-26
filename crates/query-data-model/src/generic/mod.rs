@@ -124,7 +124,7 @@ pub trait QueryAuthorizationCatalog {
     fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId>;
     fn is_admin_only(&self, property: PropertyId) -> bool;
     fn entity_auth(&self) -> &HashMap<String, crate::EntityAuthConfig>;
-    fn redaction_id_property(&self, entity: EntityId) -> Option<PropertyId>;
+    fn redaction_id_column(&self, entity: EntityId) -> Option<&str>;
     fn required_access_level(&self, entity: EntityId) -> Option<u32>;
 }
 
@@ -247,8 +247,7 @@ pub trait QueryDataModel {
     }
 
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
-        let property = self.query_authorization().redaction_id_property(entity)?;
-        self.query_backend().property_column(property)
+        self.query_authorization().redaction_id_column(entity)
     }
 
     fn table_path_scopable(&self, table: &str) -> bool {
@@ -291,6 +290,18 @@ pub trait QueryDataModel {
             .filter_map(|relationship| self.graph().relationship_id(relationship))
             .collect();
         self.query_backend().edge_tables(&relationships)
+    }
+
+    fn relationship_table_for_query(&self, relationships: &[String]) -> &str {
+        relationships
+            .iter()
+            .find_map(|relationship| self.relationship_table(relationship))
+            .unwrap_or_else(|| self.default_edge_table())
+    }
+
+    fn redaction_id_column_named(&self, entity: &str) -> Option<&str> {
+        let entity = self.graph().entity_id(entity)?;
+        self.redaction_id_column(entity)
     }
 
     fn relationship_route(&self, relationship: &str) -> Option<RelationshipRoute<'_>> {

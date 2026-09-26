@@ -293,6 +293,11 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 .entity
                 .as_deref()
                 .ok_or_else(|| QueryError::Validation("each node requires an entity".into()))?;
+            if self.model.get().entity(entity).is_none() {
+                return Err(QueryError::AllowlistRejected(format!(
+                    "unknown entity '{entity}'"
+                )));
+            }
             self.check_field(entity, &node.id_property)?;
             if let Some(ColumnSelection::List(columns)) = &node.columns {
                 if columns.is_empty() {

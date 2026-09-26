@@ -37,6 +37,7 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
                 page_size: size,
                 after,
             });
+            lowering.input.options.include_debug_sql = query.debug;
             return Ok((lowering.input, statement_hash(source, span)));
         }
         None => {}

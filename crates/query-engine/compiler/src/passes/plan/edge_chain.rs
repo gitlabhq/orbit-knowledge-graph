@@ -270,11 +270,7 @@ where
         .relationships
         .iter()
         .map(|rel| {
-            let edge_table = model
-                .relationship_tables(&rel.types)
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| model.default_edge_table().to_string());
+            let edge_table = model.relationship_table_for_query(&rel.types).to_string();
             let from_entity = input
                 .nodes
                 .iter()

@@ -49,7 +49,10 @@ where
         id_range: center_node.id_range.clone(),
         has_traversal_path: model.entity_has_traversal_path(center_entity),
         is_global: model.entity_is_global(center_entity),
-        redaction_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
+        redaction_id_column: model
+            .redaction_id_column_named(center_entity)
+            .unwrap_or(ontology::constants::DEFAULT_PRIMARY_KEY)
+            .to_string(),
         columns: center_node.columns.clone(),
         use_narrowing: false,
         fk_needs_join: false,

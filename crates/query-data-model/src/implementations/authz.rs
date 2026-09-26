@@ -32,7 +32,7 @@ impl Default for EntityAuthConfig {
 pub struct EntityAuthorization {
     pub resource_type: String,
     pub ability: String,
-    pub id_property: PropertyId,
+    pub id_column: String,
     pub owner_entity: Option<EntityId>,
     pub required_access_level: u32,
 }
@@ -85,8 +85,8 @@ impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
         GitLabAuthzCatalog::entity_auth(self)
     }
 
-    fn redaction_id_property(&self, entity: EntityId) -> Option<PropertyId> {
-        self.entity(entity).map(|policy| policy.id_property)
+    fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
+        self.entity(entity).map(|policy| policy.id_column.as_str())
     }
 
     fn required_access_level(&self, entity: EntityId) -> Option<u32> {
@@ -139,15 +139,13 @@ impl Authz for GitLabAuthz {
                     admin_only.insert(property_id, true);
                 }
             }
-            if let Some(redaction) = &node.redaction
-                && let Some(id_property) = graph.property_id(entity_id, &redaction.id_column)
-            {
+            if let Some(redaction) = &node.redaction {
                 entities.insert(
                     entity_id,
                     EntityAuthorization {
                         resource_type: redaction.resource_type.clone(),
                         ability: redaction.ability.clone(),
-                        id_property,
+                        id_column: redaction.id_column.clone(),
                         owner_entity: (redaction.id_column != DEFAULT_PRIMARY_KEY)
                             .then(|| owners.get(redaction.resource_type.as_str()).copied())
                             .flatten(),
@@ -238,7 +236,7 @@ impl QueryAuthorizationCatalog for TrustedLocalCatalog {
         &EMPTY
     }
 
-    fn redaction_id_property(&self, _entity: EntityId) -> Option<PropertyId> {
+    fn redaction_id_column(&self, _entity: EntityId) -> Option<&str> {
         None
     }
 
