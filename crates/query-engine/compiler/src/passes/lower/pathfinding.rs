@@ -37,17 +37,17 @@ pub fn emit_pathfinding(plan: &Plan, input: &Input, pf: &PathFindingBody) -> Res
 
     let start_denorm = build_denorm_tags(
         start_entity,
-        query_data_model::DenormalizedDirection::Source,
+        "source",
         "e1",
         &start_np.filters,
-        &plan.denormalized,
+        &plan.denorm_columns,
     );
     let end_denorm = build_denorm_tags(
         end_entity,
-        query_data_model::DenormalizedDirection::Target,
+        "target",
         "e1",
         &end_np.filters,
-        &plan.denormalized,
+        &plan.denorm_columns,
     );
 
     let frontier_opts = FrontierOpts {
@@ -540,31 +540,17 @@ fn type_cond_for(alias: &str, type_filter: &Option<Vec<String>>) -> Option<Expr>
 }
 
 fn build_denorm_tags(
-    _entity: &str,
-    direction: query_data_model::DenormalizedDirection,
+    entity: &str,
+    dir_prefix: &str,
     edge_alias: &str,
     filters: &[(String, crate::passes::plan::BoundFilter)],
-    denormalized: &HashMap<
-        crate::passes::plan::DenormalizedKey,
-        crate::passes::plan::DenormalizedProperty,
-    >,
+    denorm_map: &HashMap<(String, String, String), (String, String)>,
 ) -> Vec<Expr> {
     let mut exprs = Vec::new();
-    for (_, filter) in filters {
-        let Some(property_id) = filter.property else {
-            continue;
-        };
-        let key = crate::passes::plan::DenormalizedKey {
-            property: property_id,
-            direction,
-        };
-        if let Some(property) = denormalized.get(&key)
-            && let Some(expr) = denorm_tag_expr(
-                edge_alias,
-                &property.edge_column,
-                &property.tag_key,
-                &filter.filter,
-            )
+    for (prop, filter) in filters {
+        let key = (entity.to_string(), prop.clone(), dir_prefix.to_string());
+        if let Some((tag_col, tag_key)) = denorm_map.get(&key)
+            && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, &filter.filter)
         {
             exprs.push(expr);
         }

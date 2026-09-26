@@ -373,35 +373,27 @@ pub(super) fn emit_denorm_tags(
         let Some(np) = plan.nodes.get(node_alias) else {
             continue;
         };
-        let direction = if id_col == SOURCE_ID_COLUMN {
-            query_data_model::DenormalizedDirection::Source
+        let Some(ref entity) = np.entity else {
+            continue;
+        };
+        let dir = if id_col == SOURCE_ID_COLUMN {
+            "source"
         } else {
-            query_data_model::DenormalizedDirection::Target
+            "target"
         };
         for (prop, filter) in &np.filters {
             let tag_id = (node_alias.clone(), prop.clone());
             if tagged.contains(&tag_id) {
                 continue;
             }
-            let Some(property_id) = filter.property else {
-                continue;
-            };
-            let key = DenormalizedKey {
-                property: property_id,
-                direction,
-            };
+            let key = (entity.clone(), prop.clone(), dir.to_string());
             // Skip hops that don't write this tag; pushing it there matches an
             // empty edge and silently drops the row.
             if !hop_carries_denorm(plan, hop, &key) {
                 continue;
             }
-            if let Some(property) = plan.denormalized.get(&key)
-                && let Some(expr) = denorm_tag_expr(
-                    edge_alias,
-                    &property.edge_column,
-                    &property.tag_key,
-                    &filter.filter,
-                )
+            if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
+                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, &filter.filter)
             {
                 where_parts.push(expr);
                 tagged.insert(tag_id);
@@ -410,16 +402,14 @@ pub(super) fn emit_denorm_tags(
     }
 }
 
-fn hop_carries_denorm(plan: &Plan, hop: &Hop, key: &DenormalizedKey) -> bool {
+fn hop_carries_denorm(plan: &Plan, hop: &Hop, key: &(String, String, String)) -> bool {
     // A wildcard hop's relationship is unknown at runtime, so no tag is safe.
     if crate::passes::normalize::is_wildcard(&hop.rel_types) {
         return false;
     }
-    plan.denormalized.get(key).is_some_and(|property| {
-        hop.relationships
-            .iter()
-            .any(|relationship| property.relationships.contains(relationship))
-    })
+    plan.denorm_rel_kinds
+        .get(key)
+        .is_some_and(|kinds| hop.rel_types.iter().any(|t| kinds.iter().any(|k| k == t)))
 }
 
 pub(super) fn node_id_pin_predicates(

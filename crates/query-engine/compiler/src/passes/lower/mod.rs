@@ -131,7 +131,6 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
                 &jp.lhs_prop,
                 &crate::passes::plan::BoundFilter {
                     filter,
-                    property: None,
                     data_type: None,
                     selectivity: ontology::FieldSelectivity::High,
                 },

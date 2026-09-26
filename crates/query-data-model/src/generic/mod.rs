@@ -33,15 +33,7 @@ pub trait Authz: Send + Sync + 'static {
 #[derive(Debug, Clone)]
 pub struct ForeignKey {
     pub holder: EntityId,
-    pub property: PropertyId,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextIndex {
-    pub name: String,
-    pub index_type: String,
-    pub granularity: u32,
-    pub tokenizer: String,
+    pub column: String,
 }
 
 #[derive(Debug, Clone)]
@@ -50,7 +42,7 @@ pub struct TraversalPathLookup {
     pub property: PropertyId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct PathColumn {
     pub name: String,
     pub entity: Option<EntityId>,
@@ -87,140 +79,14 @@ impl RelationshipRoute<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DenormalizedDirection {
-    Source,
-    Target,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DenormalizedProperty {
-    pub entity: EntityId,
-    pub property: PropertyId,
-    pub direction: DenormalizedDirection,
-    pub relationships: Vec<RelationshipId>,
-    pub edge_column: String,
-    pub tag_key: String,
-}
-
-impl DenormalizedProperty {
-    pub fn carries(&self, relationship: RelationshipId) -> bool {
-        self.relationships.binary_search(&relationship).is_ok()
-    }
-}
+pub type DenormalizedKey = (String, String, String);
+pub type DenormalizedColumns = HashMap<DenormalizedKey, (String, String)>;
+pub type DenormalizedRelationships = HashMap<DenormalizedKey, Vec<String>>;
 
 #[derive(Debug, Default)]
 pub struct DenormalizedCatalog {
-    properties: Vec<DenormalizedProperty>,
-    property_ids: HashMap<(PropertyId, DenormalizedDirection), usize>,
-}
-
-impl DenormalizedCatalog {
-    pub fn derive(
-        properties: impl IntoIterator<Item = DenormalizedProperty>,
-    ) -> Result<Self, DataModelError> {
-        let mut catalog = Self::default();
-        for mut property in properties {
-            property.relationships.sort_unstable();
-            property.relationships.dedup();
-            let key = (property.property, property.direction);
-            if let Some(existing_id) = catalog.property_ids.get(&key).copied() {
-                let existing: &DenormalizedProperty = &catalog.properties[existing_id];
-                if existing.entity != property.entity
-                    || existing.edge_column != property.edge_column
-                    || existing.tag_key != property.tag_key
-                {
-                    return Err(DataModelError::Invalid(format!(
-                        "conflicting denormalized property {:?}",
-                        property.property
-                    )));
-                }
-                catalog.properties[existing_id]
-                    .relationships
-                    .extend(property.relationships);
-                catalog.properties[existing_id]
-                    .relationships
-                    .sort_unstable();
-                catalog.properties[existing_id].relationships.dedup();
-                continue;
-            }
-            catalog.property_ids.insert(key, catalog.properties.len());
-            catalog.properties.push(property);
-        }
-        Ok(catalog)
-    }
-
-    pub fn properties(&self) -> impl Iterator<Item = &DenormalizedProperty> {
-        self.properties.iter()
-    }
-
-    pub fn property(
-        &self,
-        property: PropertyId,
-        direction: DenormalizedDirection,
-    ) -> Option<&DenormalizedProperty> {
-        self.property_ids
-            .get(&(property, direction))
-            .map(|id| &self.properties[*id])
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DenormalizedJoinPredicate {
-    pub column: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DenormalizedJoinOn {
-    pub previous_column: String,
-    pub column: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DenormalizedJoinTable {
-    pub source_table: String,
-    pub entity: Option<EntityId>,
-    pub join: Option<DenormalizedJoinOn>,
-    pub predicates: Vec<DenormalizedJoinPredicate>,
-    pub columns: HashMap<String, String>,
-    pub properties: HashMap<PropertyId, String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DenormalizedJoinHop {
-    pub variant: RelationshipVariantId,
-    pub source_table: usize,
-    pub target_table: usize,
-    pub edge_table: Option<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DenormalizedJoin {
-    pub name: String,
-    pub table: String,
-    pub tables: Vec<DenormalizedJoinTable>,
-    pub hops: Vec<DenormalizedJoinHop>,
-    pub sort_key: Vec<String>,
-    pub path_columns: Vec<PathColumn>,
-}
-
-impl DenormalizedJoin {
-    pub fn property_column(&self, table: usize, property: PropertyId) -> Option<&str> {
-        self.tables
-            .get(table)?
-            .properties
-            .get(&property)
-            .map(String::as_str)
-    }
-
-    pub fn column(&self, table: usize, source_column: &str) -> Option<&str> {
-        self.tables
-            .get(table)?
-            .columns
-            .get(source_column)
-            .map(String::as_str)
-    }
+    pub columns: DenormalizedColumns,
+    pub relationships: DenormalizedRelationships,
 }
 
 pub trait QueryBackendCatalog {
@@ -230,7 +96,7 @@ pub trait QueryBackendCatalog {
     fn default_properties(&self, entity: EntityId) -> &[PropertyId];
     fn property_column(&self, property: PropertyId) -> Option<&str>;
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
-    fn text_index(&self, property: PropertyId) -> Option<&TextIndex>;
+    fn has_text_index(&self, property: PropertyId) -> bool;
     fn table_path_scopable(&self, table: &str) -> bool;
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
     fn default_edge_table(&self) -> &str;
@@ -246,8 +112,6 @@ pub trait QueryBackendCatalog {
     fn table_columns(&self, table: &str) -> Option<&HashSet<String>>;
     fn table_sort_key(&self, table: &str) -> Option<&[String]>;
     fn denormalized(&self) -> &DenormalizedCatalog;
-    // TODO(plan-lower-v2): Bind these paths to query-local relations as ClickHouse candidates.
-    fn denormalized_joins(&self) -> &[DenormalizedJoin];
     fn traversal_path_lookup(
         &self,
         entity: EntityId,
@@ -356,12 +220,8 @@ pub trait QueryDataModel {
         self.query_backend().table_sort_key(table)
     }
 
-    fn text_index(&self, property: PropertyId) -> Option<&TextIndex> {
-        self.query_backend().text_index(property)
-    }
-
     fn has_text_index(&self, property: PropertyId) -> bool {
-        self.text_index(property).is_some()
+        self.query_backend().has_text_index(property)
     }
 
     fn admin_only(&self, entity: &str, property: &str) -> bool {
@@ -424,20 +284,6 @@ pub trait QueryDataModel {
         self.query_backend().denormalized()
     }
 
-    fn denormalized_joins(&self) -> &[DenormalizedJoin] {
-        self.query_backend().denormalized_joins()
-    }
-
-    fn denormalized_property(
-        &self,
-        entity: &str,
-        property: &str,
-        direction: DenormalizedDirection,
-    ) -> Option<&DenormalizedProperty> {
-        let property = self.property(entity, property)?;
-        self.denormalized().property(property.id, direction)
-    }
-
     fn relationship_tables(&self, relationships: &[String]) -> Vec<String> {
         let relationships: Vec<_> = relationships
             .iter()
@@ -485,10 +331,6 @@ pub trait QueryDataModel {
         let target = self.graph().entity_id(target)?;
         self.query_backend()
             .foreign_key(self.graph(), &relationships, source, target)
-    }
-
-    fn foreign_key_column(&self, foreign_key: &ForeignKey) -> Option<&str> {
-        self.query_backend().property_column(foreign_key.property)
     }
 
     fn variant_scope(
