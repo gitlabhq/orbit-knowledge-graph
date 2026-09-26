@@ -1333,6 +1333,42 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_denorm_filter_stays_on_node_table() {
+        let sql = denorm_traversal_sql(r#""state": {"ne": "merged"}"#);
+        assert!(
+            !sql.contains("target_tags, 'state:merged'"),
+            "unsupported denorm operator must not emit a tag predicate, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("gl_merge_request") && sql.contains("state != 'merged'"),
+            "unsupported denorm operator must remain on the node table, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn neighbors_unsupported_denorm_filter_keeps_center_scan() {
+        let query = r#"{
+            "query_type": "neighbors",
+            "nodes": [{
+                "id": "p",
+                "entity": "Project",
+                "filters": {"visibility_level": {"ne": 20}}
+            }],
+            "neighbors": {"direction": "both", "rel_types": ["IN_PROJECT"]},
+            "limit": 10
+        }"#;
+        let sql = compile_sql(query);
+        assert!(
+            !sql.contains("target_tags, 'visibility_level:20'"),
+            "unsupported denorm operator must not emit a tag predicate, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("gl_project") && sql.contains("visibility_level != 'public'"),
+            "unsupported denorm operator must retain the center node scan, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn denorm_partial_filters_joins_for_non_denorm() {
         let sql =
             denorm_traversal_sql(r#""state": {"eq": "merged"}, "source_branch": {"eq": "main"}"#);

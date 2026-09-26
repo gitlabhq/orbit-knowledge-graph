@@ -6,6 +6,7 @@ use crate::ast::*;
 use crate::constants::*;
 use crate::input::*;
 use crate::passes::plan::BoundFilter;
+use crate::passes::plan::{DenormalizedKey, DenormalizedProperty};
 
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
     let filter = &bound.filter;
@@ -129,6 +130,7 @@ pub fn ordered_filters(
                     property.clone(),
                     BoundFilter {
                         filter: filter.clone(),
+                        property: metadata.map(|property| property.id),
                         data_type: metadata.map(|property| property.data_type),
                         selectivity: metadata
                             .map(|property| property.selectivity)
@@ -284,6 +286,31 @@ pub fn denorm_tag_expr(
     }
 }
 
+pub fn denorm_tag_filter_supported(filter: &InputFilter) -> bool {
+    match filter.op {
+        None | Some(FilterOp::Eq) => filter.value.as_ref().is_some_and(|value| {
+            !matches!(
+                value,
+                serde_json::Value::Array(_) | serde_json::Value::Object(_)
+            )
+        }),
+        Some(FilterOp::In) => filter
+            .value
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|values| {
+                !values.is_empty()
+                    && values.iter().all(|value| {
+                        !matches!(
+                            value,
+                            serde_json::Value::Array(_) | serde_json::Value::Object(_)
+                        )
+                    })
+            }),
+        _ => false,
+    }
+}
+
 /// When multiple tables are involved, each UNION arm projects only the
 /// columns common to all edge tables (the 6 reserved edge columns) so
 /// that tables with extra columns (e.g. gl_code_edge's project_id/branch)
@@ -373,15 +400,26 @@ pub fn dedup_subquery(
 }
 
 pub fn has_non_denorm_filters(
-    entity: &str,
     filters: &[(String, BoundFilter)],
-    denorm_map: &HashMap<(String, String, String), (String, String)>,
+    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> bool {
-    filters.iter().any(|(prop, _)| {
-        let src =
-            denorm_map.contains_key(&(entity.to_string(), prop.clone(), "source".to_string()));
-        let tgt =
-            denorm_map.contains_key(&(entity.to_string(), prop.clone(), "target".to_string()));
-        !src && !tgt
+    filters.iter().any(|(_, filter)| {
+        if !denorm_tag_filter_supported(&filter.filter) {
+            return true;
+        }
+        let Some(property) = filter.property else {
+            return true;
+        };
+        [
+            query_data_model::DenormalizedDirection::Source,
+            query_data_model::DenormalizedDirection::Target,
+        ]
+        .into_iter()
+        .all(|direction| {
+            !denormalized.contains_key(&DenormalizedKey {
+                property,
+                direction,
+            })
+        })
     })
 }

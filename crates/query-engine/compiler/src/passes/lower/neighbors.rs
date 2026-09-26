@@ -100,10 +100,10 @@ pub fn emit_neighbors(
             Direction::Both => unreachable!(),
         };
 
-        let denorm_dir = if dir == Direction::Outgoing {
-            "source"
+        let denorm_direction = if dir == Direction::Outgoing {
+            query_data_model::DenormalizedDirection::Source
         } else {
-            "target"
+            query_data_model::DenormalizedDirection::Target
         };
 
         let arm_where = |a: &str| -> Vec<Expr> {
@@ -143,10 +143,21 @@ pub fn emit_neighbors(
 
         let mut where_parts: Vec<Expr> = Vec::new();
         // Denorm tags aren't in the per-arm projection, so they filter the union output alias.
-        for (prop, filter) in &center_filters {
-            let key = (center_entity.clone(), prop.clone(), denorm_dir.to_string());
-            if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
-                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, &filter.filter)
+        for (_, filter) in &center_filters {
+            let Some(property_id) = filter.property else {
+                continue;
+            };
+            let key = crate::passes::plan::DenormalizedKey {
+                property: property_id,
+                direction: denorm_direction,
+            };
+            if let Some(property) = plan.denormalized.get(&key)
+                && let Some(expr) = denorm_tag_expr(
+                    edge_alias,
+                    &property.edge_column,
+                    &property.tag_key,
+                    &filter.filter,
+                )
             {
                 where_parts.push(expr);
             }
@@ -303,7 +314,10 @@ fn build_fused_both_arm(
     edge_table: &str,
     edge_alias: &str,
 ) -> Query {
-    let arm_predicate = |kind_col: &str, id_col: &str, denorm_dir: &str| -> Expr {
+    let arm_predicate = |kind_col: &str,
+                         id_col: &str,
+                         direction: query_data_model::DenormalizedDirection|
+     -> Expr {
         let mut parts = vec![Expr::eq(
             Expr::col(edge_alias, kind_col),
             Expr::string(center_entity),
@@ -311,14 +325,21 @@ fn build_fused_both_arm(
         if !center_node_ids.is_empty() {
             parts.push(id_list_predicate(edge_alias, id_col, center_node_ids));
         }
-        for (prop, filter) in center_filters {
-            let key = (
-                center_entity.to_string(),
-                prop.clone(),
-                denorm_dir.to_string(),
-            );
-            if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
-                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, &filter.filter)
+        for (_, filter) in center_filters {
+            let Some(property_id) = filter.property else {
+                continue;
+            };
+            let key = crate::passes::plan::DenormalizedKey {
+                property: property_id,
+                direction,
+            };
+            if let Some(property) = plan.denormalized.get(&key)
+                && let Some(expr) = denorm_tag_expr(
+                    edge_alias,
+                    &property.edge_column,
+                    &property.tag_key,
+                    &filter.filter,
+                )
             {
                 parts.push(expr);
             }
@@ -326,8 +347,16 @@ fn build_fused_both_arm(
         Expr::conjoin(parts).expect("fused arm predicate always has the center-kind conjunct")
     };
 
-    let source_arm = arm_predicate(SOURCE_KIND_COLUMN, SOURCE_ID_COLUMN, "source");
-    let target_arm = arm_predicate(TARGET_KIND_COLUMN, TARGET_ID_COLUMN, "target");
+    let source_arm = arm_predicate(
+        SOURCE_KIND_COLUMN,
+        SOURCE_ID_COLUMN,
+        query_data_model::DenormalizedDirection::Source,
+    );
+    let target_arm = arm_predicate(
+        TARGET_KIND_COLUMN,
+        TARGET_ID_COLUMN,
+        query_data_model::DenormalizedDirection::Target,
+    );
 
     // (matched, is_outgoing, neighbor_id, neighbor_kind, center_id)
     let out_tuple = Expr::func(

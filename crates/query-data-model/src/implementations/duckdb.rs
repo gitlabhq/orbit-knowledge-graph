@@ -1,16 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    Backend, DataModelError, DenormalizedCatalog, EntityId, GraphCatalog, PropertyId,
-    QueryBackendCatalog, RelationshipId, TraversalPathLookup,
+    Backend, DataModelError, DenormalizedCatalog, DenormalizedJoin, EntityId, GraphCatalog,
+    PropertyId, QueryBackendCatalog, RelationshipId, TextIndex, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
 pub struct DuckDbEntityLayout {
     pub table: String,
-    pub properties: HashMap<PropertyId, String>,
     pub default_properties: Vec<PropertyId>,
     pub sort_key: Vec<String>,
+    pub has_traversal_path: bool,
 }
 
 #[derive(Debug)]
@@ -20,6 +20,8 @@ pub struct DuckDbCatalog {
     edge_column_types: HashMap<String, ontology::DataType>,
     edge_sort_key: Vec<String>,
     entities: HashMap<EntityId, DuckDbEntityLayout>,
+    properties: HashMap<PropertyId, String>,
+    table_entities: HashMap<String, EntityId>,
     relationships: HashMap<RelationshipId, String>,
     denormalized: DenormalizedCatalog,
 }
@@ -30,12 +32,8 @@ impl QueryBackendCatalog for DuckDbCatalog {
     }
 
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool {
-        self.entity(entity).is_some_and(|layout| {
-            layout
-                .properties
-                .values()
-                .any(|column| column == "traversal_path")
-        })
+        self.entity(entity)
+            .is_some_and(|layout| layout.has_traversal_path)
     }
 
     fn entity_is_global(&self, _entity: EntityId) -> bool {
@@ -49,13 +47,7 @@ impl QueryBackendCatalog for DuckDbCatalog {
     }
 
     fn property_column(&self, property: PropertyId) -> Option<&str> {
-        let entity = self.entities.iter().find_map(|(entity, layout)| {
-            layout.properties.contains_key(&property).then_some(entity)
-        })?;
-        self.entity(*entity)?
-            .properties
-            .get(&property)
-            .map(String::as_str)
+        self.properties.get(&property).map(String::as_str)
     }
 
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
@@ -64,8 +56,8 @@ impl QueryBackendCatalog for DuckDbCatalog {
             .flatten()
     }
 
-    fn has_text_index(&self, _property: PropertyId) -> bool {
-        false
+    fn text_index(&self, _property: PropertyId) -> Option<&TextIndex> {
+        None
     }
 
     fn table_path_scopable(&self, _table: &str) -> bool {
@@ -106,14 +98,18 @@ impl QueryBackendCatalog for DuckDbCatalog {
         if table == self.edge_table() {
             return Some(&self.edge_sort_key);
         }
-        self.entities
-            .values()
-            .find(|layout| layout.table == table)
+        self.table_entities
+            .get(table)
+            .and_then(|entity| self.entity(*entity))
             .map(|layout| layout.sort_key.as_slice())
     }
 
     fn denormalized(&self) -> &DenormalizedCatalog {
         &self.denormalized
+    }
+
+    fn denormalized_joins(&self) -> &[DenormalizedJoin] {
+        &[]
     }
 
     fn traversal_path_lookup(
@@ -175,6 +171,8 @@ impl Backend for DuckDb {
             .unwrap_or_else(|| ontology.edge_sort_key())
             .to_vec();
         let mut entities = HashMap::new();
+        let mut property_columns = HashMap::new();
+        let mut table_entities = HashMap::new();
         let local_entities = ontology.local_entity_names();
         let entity_names: Vec<_> = if local_entities.is_empty() {
             ontology.node_names().collect()
@@ -196,7 +194,7 @@ impl Backend for DuckDb {
                         kind: "entity",
                         name: entity_name.to_string(),
                     })?;
-            let properties = ontology
+            let properties: HashMap<_, _> = ontology
                 .local_entity_fields(entity_name)
                 .unwrap_or_else(|| node.fields.iter().collect())
                 .into_iter()
@@ -206,15 +204,18 @@ impl Backend for DuckDb {
                     Some((property, column))
                 })
                 .collect();
+            let has_traversal_path = properties.values().any(|column| column == "traversal_path");
+            property_columns.extend(properties);
             entities.insert(
                 entity_id,
                 DuckDbEntityLayout {
                     table: node.destination_table.clone(),
-                    properties,
                     default_properties: graph.entity(entity_id).properties.clone(),
                     sort_key: node.sort_key.clone(),
+                    has_traversal_path,
                 },
             );
+            table_entities.insert(node.destination_table.clone(), entity_id);
         }
         let relationships = graph
             .relationships()
@@ -226,6 +227,8 @@ impl Backend for DuckDb {
             edge_column_types,
             edge_sort_key,
             entities,
+            properties: property_columns,
+            table_entities,
             relationships,
             denormalized: DenormalizedCatalog::default(),
         })

@@ -2,8 +2,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::GitLabAuthzCatalog;
 use crate::{
-    Backend, DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PathColumn,
-    PropertyId, QueryBackendCatalog, RelationshipId, RelationshipVariantId, TraversalPathLookup,
+    Backend, DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedJoin,
+    DenormalizedJoinHop, DenormalizedJoinOn, DenormalizedJoinPredicate, DenormalizedJoinTable,
+    DenormalizedProperty, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyId,
+    QueryBackendCatalog, RelationshipId, RelationshipVariantId, TextIndex, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
@@ -53,7 +55,8 @@ pub struct ClickHouseCatalog {
     properties: HashMap<PropertyId, String>,
     tables: HashMap<String, TableLayout>,
     denormalized: DenormalizedCatalog,
-    text_indexes: HashSet<PropertyId>,
+    denormalized_joins: Vec<DenormalizedJoin>,
+    text_indexes: HashMap<PropertyId, TextIndex>,
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
 }
 
@@ -100,8 +103,8 @@ impl ClickHouseCatalog {
         &self.default_edge_table
     }
 
-    pub fn has_text_index(&self, property: PropertyId) -> bool {
-        self.text_indexes.contains(&property)
+    pub fn text_index(&self, property: PropertyId) -> Option<&TextIndex> {
+        self.text_indexes.get(&property)
     }
 
     pub fn traversal_path_lookup(
@@ -142,8 +145,8 @@ impl QueryBackendCatalog for ClickHouseCatalog {
             .and_then(|layout| layout.column_types.get(column).copied())
     }
 
-    fn has_text_index(&self, property: PropertyId) -> bool {
-        ClickHouseCatalog::has_text_index(self, property)
+    fn text_index(&self, property: PropertyId) -> Option<&TextIndex> {
+        ClickHouseCatalog::text_index(self, property)
     }
 
     fn table_path_scopable(&self, table: &str) -> bool {
@@ -188,14 +191,14 @@ impl QueryBackendCatalog for ClickHouseCatalog {
             let property = self.variant(variant)?.foreign_key?;
             Some(ForeignKey {
                 holder: graph.property(property).entity,
-                column: self.property_column(property)?.to_string(),
+                property,
             })
         });
         let first = foreign_keys.next()??;
         foreign_keys
             .all(|foreign_key| {
                 foreign_key.is_some_and(|foreign_key| {
-                    foreign_key.holder == first.holder && foreign_key.column == first.column
+                    foreign_key.holder == first.holder && foreign_key.property == first.property
                 })
             })
             .then_some(first)
@@ -211,6 +214,10 @@ impl QueryBackendCatalog for ClickHouseCatalog {
 
     fn denormalized(&self) -> &DenormalizedCatalog {
         &self.denormalized
+    }
+
+    fn denormalized_joins(&self) -> &[DenormalizedJoin] {
+        &self.denormalized_joins
     }
 
     fn traversal_path_lookup(
@@ -234,7 +241,7 @@ impl Backend for ClickHouse {
         let mut entities = HashMap::new();
         let mut properties = HashMap::new();
         let mut tables = HashMap::new();
-        let mut text_indexes = HashSet::new();
+        let mut text_indexes = HashMap::new();
 
         for node in ontology.nodes() {
             let entity_id =
@@ -258,11 +265,18 @@ impl Backend for ClickHouse {
                 if node.default_columns.iter().any(|name| name == &field.name) {
                     default_properties.push(property_id);
                 }
-                if ontology
-                    .text_index_tokenizer(&node.name, &field.name)
-                    .is_some()
-                {
-                    text_indexes.insert(property_id);
+                if let Some(index) = node.storage.indexes.iter().find(|index| {
+                    index.column == field.name && index.index_type.starts_with("text(")
+                }) {
+                    text_indexes.insert(
+                        property_id,
+                        TextIndex {
+                            name: index.name.clone(),
+                            index_type: index.index_type.clone(),
+                            granularity: index.granularity,
+                            tokenizer: index.index_type[5..index.index_type.len() - 1].to_string(),
+                        },
+                    );
                 }
             }
             if let Some(property) =
@@ -394,8 +408,7 @@ impl Backend for ClickHouse {
             relationships.insert(relationship.id, table);
         }
 
-        let mut denormalized_columns = HashMap::new();
-        let mut denormalized_relationships: HashMap<_, Vec<_>> = HashMap::new();
+        let mut denormalized_properties: HashMap<_, DenormalizedProperty> = HashMap::new();
         for property in ontology.denormalized_properties() {
             let entity = graph.entity_id(&property.node_kind).ok_or_else(|| {
                 DataModelError::UnknownReference {
@@ -403,26 +416,27 @@ impl Backend for ClickHouse {
                     name: property.node_kind.clone(),
                 }
             })?;
-            if graph.property_id(entity, &property.property_name).is_none() {
+            let Some(property_id) = graph.property_id(entity, &property.property_name) else {
                 continue;
-            }
-            let direction = match property.direction {
-                ontology::DenormDirection::Source => "source",
-                ontology::DenormDirection::Target => "target",
             };
-            let key = (
-                property.node_kind.clone(),
-                property.property_name.clone(),
-                direction.to_string(),
-            );
-            denormalized_columns.insert(
-                key.clone(),
-                (property.edge_column.clone(), property.tag_key.clone()),
-            );
-            denormalized_relationships
-                .entry(key)
-                .or_default()
-                .push(property.relationship_kind.clone());
+            let Some(relationship) = graph.relationship_id(&property.relationship_kind) else {
+                continue;
+            };
+            let direction = match property.direction {
+                ontology::DenormDirection::Source => DenormalizedDirection::Source,
+                ontology::DenormDirection::Target => DenormalizedDirection::Target,
+            };
+            denormalized_properties
+                .entry((property_id, direction))
+                .and_modify(|layout| layout.relationships.push(relationship))
+                .or_insert_with(|| DenormalizedProperty {
+                    entity,
+                    property: property_id,
+                    direction,
+                    relationships: vec![relationship],
+                    edge_column: property.edge_column.clone(),
+                    tag_key: property.tag_key.clone(),
+                });
         }
 
         let mut traversal_path_lookups = HashMap::new();
@@ -448,8 +462,9 @@ impl Backend for ClickHouse {
             );
         }
 
+        let mut denormalized_joins = Vec::new();
         for join in ontology.denormalized_joins() {
-            let path_columns = join
+            let path_columns: Vec<_> = join
                 .traversal_path_columns()
                 .map(|(index, name)| PathColumn {
                     name,
@@ -482,10 +497,86 @@ impl Backend for ClickHouse {
                     column_types: HashMap::new(),
                     sort_key: join.sort_key(),
                     entity: None,
-                    path_columns,
+                    path_columns: path_columns.clone(),
                     path_scopable: true,
                 },
             );
+            let join_tables: Vec<_> = join
+                .tables
+                .iter()
+                .enumerate()
+                .map(|(index, table)| {
+                    let entity = entities.iter().find_map(|(entity, layout)| {
+                        (layout.table == table.table).then_some(*entity)
+                    });
+                    let columns = tables
+                        .get(&table.table)
+                        .map(|layout| {
+                            layout
+                                .columns
+                                .iter()
+                                .map(|column| (column.clone(), join.column_for(index, column)))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let mapped_properties = entity
+                        .into_iter()
+                        .flat_map(|entity| graph.entity(entity).properties.iter().copied())
+                        .filter_map(|property| {
+                            properties
+                                .get(&property)
+                                .map(|column| (property, join.column_for(index, column)))
+                        })
+                        .collect();
+                    DenormalizedJoinTable {
+                        source_table: table.table.clone(),
+                        entity,
+                        join: table.join.as_ref().map(|join| DenormalizedJoinOn {
+                            previous_column: join.prev_column.clone(),
+                            column: join.this_column.clone(),
+                        }),
+                        predicates: table
+                            .filter
+                            .iter()
+                            .map(|(column, value)| DenormalizedJoinPredicate {
+                                column: column.clone(),
+                                value: value.clone(),
+                            })
+                            .collect(),
+                        columns,
+                        properties: mapped_properties,
+                    }
+                })
+                .collect();
+            let hops: Vec<_> = join
+                .hops
+                .iter()
+                .map(|hop| {
+                    graph
+                        .variant_named(&hop.relationship_kind, &hop.source_kind, &hop.target_kind)
+                        .map(|variant| DenormalizedJoinHop {
+                            variant: variant.id,
+                            source_table: hop.source_table,
+                            target_table: hop.target_table,
+                            edge_table: hop.edge_table,
+                        })
+                        .ok_or_else(|| DataModelError::UnknownReference {
+                            kind: "denormalized join variant",
+                            name: format!(
+                                "{}({}->{})",
+                                hop.relationship_kind, hop.source_kind, hop.target_kind
+                            ),
+                        })
+                })
+                .collect::<Result<_, _>>()?;
+            denormalized_joins.push(DenormalizedJoin {
+                name: join.name.clone(),
+                table: join.table.clone(),
+                tables: join_tables,
+                hops,
+                sort_key: join.sort_key(),
+                path_columns,
+            });
         }
 
         Ok(ClickHouseCatalog {
@@ -495,10 +586,8 @@ impl Backend for ClickHouse {
             variants,
             properties,
             tables,
-            denormalized: DenormalizedCatalog {
-                columns: denormalized_columns,
-                relationships: denormalized_relationships,
-            },
+            denormalized: DenormalizedCatalog::derive(denormalized_properties.into_values())?,
+            denormalized_joins,
             text_indexes,
             traversal_path_lookups,
         })

@@ -16,11 +16,12 @@ pub use edge_chain::{
     FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
 };
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
-use query_data_model::QueryDataModel;
+use query_data_model::{DenormalizedDirection, PropertyId, QueryDataModel, RelationshipId};
 
 #[derive(Clone)]
 pub struct BoundFilter {
     pub filter: InputFilter,
+    pub property: Option<PropertyId>,
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
 }
@@ -33,10 +34,7 @@ pub struct Plan {
     pub hops: Vec<Hop>,
     pub strategy: Strategy,
     pub node_edge_mappings: HashMap<String, (String, String)>,
-    pub denorm_columns: HashMap<(String, String, String), (String, String)>,
-    /// Relationship kinds whose edge writes each denorm tag, keyed like
-    /// `denorm_columns`.
-    pub denorm_rel_kinds: HashMap<(String, String, String), Vec<String>>,
+    pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     /// Per-table column sets from the ontology. Used by the lowerer to
     /// push node-level filters (e.g. project_id, branch) down to edge
     /// scans when the edge table has those columns.
@@ -45,6 +43,51 @@ pub struct Plan {
     pub table_sort_keys: HashMap<String, Vec<String>>,
     pub scope_requirements: Vec<crate::scope::ScopeProof>,
     pub body: PlanBody,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct DenormalizedKey {
+    pub property: PropertyId,
+    pub direction: DenormalizedDirection,
+}
+
+#[derive(Clone)]
+pub struct DenormalizedProperty {
+    pub relationships: Vec<RelationshipId>,
+    pub edge_column: String,
+    pub tag_key: String,
+}
+
+pub fn denormalized_facts(
+    input: &Input,
+    model: &(impl QueryDataModel + ?Sized),
+) -> HashMap<DenormalizedKey, DenormalizedProperty> {
+    input
+        .nodes
+        .iter()
+        .filter_map(|node| Some((model.graph().entity_id(node.entity.as_deref()?)?, node)))
+        .flat_map(|(entity, node)| {
+            [DenormalizedDirection::Source, DenormalizedDirection::Target]
+                .into_iter()
+                .flat_map(move |direction| {
+                    node.filters.keys().filter_map(move |property| {
+                        let property_id = model.graph().property_id(entity, property)?;
+                        let layout = model.denormalized().property(property_id, direction)?;
+                        Some((
+                            DenormalizedKey {
+                                property: property_id,
+                                direction,
+                            },
+                            DenormalizedProperty {
+                                relationships: layout.relationships.clone(),
+                                edge_column: layout.edge_column.clone(),
+                                tag_key: layout.tag_key.clone(),
+                            },
+                        ))
+                    })
+                })
+        })
+        .collect()
 }
 
 impl Plan {
