@@ -3,6 +3,7 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::canonical;
+use crate::intern::Lang;
 
 #[derive(Clone, Copy, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Tag {
@@ -130,6 +131,23 @@ impl Tree {
         Self::with_capacity(1, root_node)
     }
 
+    /// A file that was not parsed: one `__source_file` node spanning its
+    /// size, tagged with the reason when there is one.
+    pub fn unparsed(lang: &Lang, path: &str, size: u64, reason: &str) -> Self {
+        let mut tree = Self::new(Node {
+            kind: canonical::Canonical::SourceFile.into(),
+            named: true,
+            sym: lang.syms.intern(path),
+            end: size as u32,
+            ..Default::default()
+        });
+        tree.label = path.to_string();
+        if !reason.is_empty() {
+            tree.set_tag(0, lang.syms.intern("reason"), lang.syms.intern(reason));
+        }
+        tree
+    }
+
     /// A node's text: the interned sym when it has one, else its source span.
     pub fn text<'a>(&'a self, id: NodeId, lang: &'a crate::intern::Lang) -> &'a str {
         let n = self.node(id);
@@ -145,7 +163,7 @@ impl Tree {
     }
 
     /// A node's sym, interning its source text on first use.
-    pub fn sym_of(&self, id: NodeId, lang: &crate::intern::Lang) -> u32 {
+    pub fn sym_of(&self, id: NodeId, lang: &Lang) -> u32 {
         let n = self.node(id);
         if n.sym != 0 {
             return n.sym;

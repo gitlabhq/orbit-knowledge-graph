@@ -8,13 +8,15 @@ use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
 use super::{
-    Canonical, Context, Error, ItemPhase, Lazy, Listed, Parsed, Phase, Rewritten, SourceFile,
-    Sources, State, Workset,
+    Canonical, Context, DirtyGraph, Error, ItemPhase, Lazy, LinkedFile, Listed, Parsed, Phase,
+    Rewritten, SourceFile, Sources, State, Workset,
 };
 use crate::env::Env;
 use crate::inventory::{FileFault, FileReason};
+use crate::linker;
 use crate::pattern;
 use crate::sentinel::{Killed, Sentinel};
+use crate::tree::Tree;
 use crate::treesitter::{self, SupportLang};
 
 pub struct Prepare;
@@ -225,5 +227,97 @@ impl ItemPhase<Rewritten> for Canonicalize {
         tree.compact();
         tree.source = std::sync::Arc::from("");
         Ok(Canonical(tree))
+    }
+}
+
+pub struct Link;
+
+impl ItemPhase<Canonical> for Link {
+    type Output = LinkedFile;
+
+    fn name(&self) -> Cow<'static, str> {
+        "link".into()
+    }
+
+    fn run(
+        &self,
+        env: &Env,
+        run: &Sentinel,
+        Canonical(tree): Canonical,
+    ) -> Result<LinkedFile, Killed> {
+        let edges = linker::link(&tree, env, run)?;
+        Ok(LinkedFile { tree, edges })
+    }
+}
+
+/// Puts the linked files on the graph, plus everything the inventory listed:
+/// manifests for the resolver, and a `File` row for every unparsed file with
+/// the reason, including candidates that were killed or could not be read.
+pub struct Insert;
+
+impl Phase<Workset<Vec<LinkedFile>>> for Insert {
+    type Output = DirtyGraph;
+
+    fn name(&self) -> Cow<'static, str> {
+        "insert".into()
+    }
+
+    fn run(
+        self,
+        context: &mut Context,
+        input: Workset<Vec<LinkedFile>>,
+    ) -> Result<DirtyGraph, Error> {
+        let Workset {
+            mut state,
+            items,
+            mut dirty,
+            listed,
+        } = input;
+        for file in items {
+            let fi = state.trees.len();
+            dirty.insert(fi);
+            state.trees.push(file.tree);
+            state.edges.extend(file.edges.into_iter().map(|mut e| {
+                e.from_tree = fi as u32;
+                e.to_tree = fi as u32;
+                e
+            }));
+        }
+        let Listed {
+            manifests,
+            files,
+            mut candidates,
+        } = listed;
+        for manifest in manifests {
+            state.configs.retain(|c| c.path != manifest.path);
+            state.configs.push(manifest);
+        }
+        let lang = &context.env.lang;
+        for (path, size, reason) in files {
+            state
+                .trees
+                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
+        }
+        for tree in &state.trees {
+            candidates.remove(&tree.label);
+        }
+        for killed in &context.report.skipped {
+            if let Some(size) = candidates.remove(&killed.path) {
+                let reason = crate::inventory::timeout(killed.label);
+                state.trees.push(Tree::unparsed(
+                    lang,
+                    &killed.path,
+                    size,
+                    &reason.to_string(),
+                ));
+            }
+        }
+        for (path, size) in candidates {
+            let reason = FileReason::Fault(FileFault::FileRead);
+            state
+                .trees
+                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
+        }
+        Ok(DirtyGraph { state, dirty })
     }
 }
