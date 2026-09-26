@@ -365,14 +365,16 @@ fn remove_relations(
     plan.inputs = plan
         .inputs
         .into_iter()
-        .filter(|input| relation_id(input).is_none_or(|relation| !removed.contains(&relation)))
+        .filter(|input| {
+            input
+                .relation()
+                .is_none_or(|relation| !removed.contains(&relation))
+        })
         .map(|input| remove_relations(input, bound, removed))
         .collect();
     if let Operator::Join(conditions) = &mut plan.operator {
         conditions.retain(|condition| {
-            let mut columns = BTreeSet::new();
-            collect_columns(condition, &mut columns);
-            columns.iter().all(|column| {
+            condition.columns().iter().all(|column| {
                 bound
                     .columns
                     .get(column)
@@ -394,7 +396,7 @@ fn rewrite(
     if !matches!(plan.operator, Operator::Join(_)) {
         expressions(&plan.operator)
             .into_iter()
-            .for_each(|expression| collect_columns(expression, &mut required));
+            .for_each(|expression| required.extend(expression.columns()));
     }
     plan.inputs = plan
         .inputs
@@ -414,7 +416,7 @@ fn rewrite(
     let mut filters = Vec::new();
     let mut semi_joins = Vec::new();
     for (index, input) in join.inputs().iter().enumerate() {
-        let Some(relation) = relation_id(input) else {
+        let Some(relation) = input.relation() else {
             continue;
         };
         let Some(node_index) = node_index(bound, relation) else {
@@ -503,10 +505,7 @@ fn rewrite(
         plan = Plan::unary(Operator::Filter(and(filters)), plan);
     }
     for (condition, producer) in semi_joins {
-        plan = Plan {
-            operator: Operator::SemiJoin(condition),
-            inputs: vec![plan, producer],
-        };
+        plan = plan.semi_join(producer, condition);
     }
     plan
 }
@@ -524,7 +523,7 @@ fn add_sip(mut plan: Plan<Logical>, bound: &mut BoundCatalog) -> Plan<Logical> {
         .inputs
         .iter()
         .enumerate()
-        .filter_map(|(index, input)| relation_id(input).map(|relation| (relation, index)))
+        .filter_map(|(index, input)| input.relation().map(|relation| (relation, index)))
         .collect();
     let mut selective: BTreeSet<_> = relations
         .keys()
@@ -560,14 +559,14 @@ fn add_sip(mut plan: Plan<Logical>, bound: &mut BoundCatalog) -> Plan<Logical> {
                 continue;
             }
             let consumer = plan.inputs[consumer_index].clone();
-            plan.inputs[consumer_index] = Plan {
-                operator: Operator::SemiJoin(compare(
+            plan.inputs[consumer_index] = consumer.semi_join(
+                plan.inputs[producer_index].clone(),
+                compare(
                     CompareOp::Eq,
                     Expr::Column(consumer_column),
                     Expr::Column(producer_column),
-                )),
-                inputs: vec![consumer, plan.inputs[producer_index].clone()],
-            };
+                ),
+            );
             selective.insert(consumer_relation);
             changed = true;
         }
@@ -621,42 +620,6 @@ fn expressions<F: Flavor>(operator: &Operator<F>) -> Vec<&Expr> {
     }
 }
 
-fn collect_columns(expression: &Expr, columns: &mut BTreeSet<ColumnId>) {
-    match expression {
-        Expr::Column(column) => {
-            columns.insert(*column);
-        }
-        Expr::Compare { left, right, .. } => {
-            collect_columns(left, columns);
-            collect_columns(right, columns);
-        }
-        Expr::Filter { left, right, .. } => {
-            collect_columns(left, columns);
-            right
-                .iter()
-                .for_each(|right| collect_columns(right, columns));
-        }
-        Expr::And(expressions)
-        | Expr::Or(expressions)
-        | Expr::Array(expressions)
-        | Expr::Tuple(expressions) => expressions
-            .iter()
-            .for_each(|expression| collect_columns(expression, columns)),
-        Expr::In { value, .. }
-        | Expr::DateTrunc { value, .. }
-        | Expr::Stringify(value)
-        | Expr::ListContains { list: value, .. }
-        | Expr::TokenMatch { value, .. } => collect_columns(value, columns),
-        Expr::Aggregate { value, .. } => value
-            .iter()
-            .for_each(|value| collect_columns(value, columns)),
-        Expr::JsonObject(entries) => entries
-            .iter()
-            .for_each(|(_, value)| collect_columns(value, columns)),
-        Expr::Output(_) | Expr::Literal(_) => {}
-    }
-}
-
 fn equality(expression: &Expr) -> Option<(ColumnId, ColumnId)> {
     let Expr::Compare {
         op: CompareOp::Eq,
@@ -670,19 +633,6 @@ fn equality(expression: &Expr) -> Option<(ColumnId, ColumnId)> {
         return None;
     };
     Some((*left, *right))
-}
-
-fn relation_id(plan: &Plan<Logical>) -> Option<RelationId> {
-    match &plan.operator {
-        Operator::Scan(scan) => Some(scan.relation),
-        Operator::Bind(relation) => Some(*relation),
-        Operator::Filter(_)
-        | Operator::Project(_)
-        | Operator::Sort(_)
-        | Operator::Limit(_)
-        | Operator::CurrentRows { .. } => plan.inputs.first().and_then(relation_id),
-        _ => None,
-    }
 }
 
 fn node_index(bound: &BoundCatalog, relation: RelationId) -> Option<usize> {

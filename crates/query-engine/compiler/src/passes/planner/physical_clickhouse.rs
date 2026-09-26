@@ -111,7 +111,9 @@ fn replace_with_denormalized(
         let mut join = JoinEditor::new(plan).unwrap();
         join.replace_inputs(
             |input| {
-                relation_id_ch(input).is_some_and(|relation| access.relations.contains(&relation))
+                input
+                    .relation()
+                    .is_some_and(|relation| access.relations.contains(&relation))
             },
             Plan::leaf(Operator::Scan(PhysicalScan {
                 relation: access.scan_relation,
@@ -178,11 +180,8 @@ fn inject_edge_predicates(
     let Some(predicates) = predicates.get(&scan.relation) else {
         return plan;
     };
-    scan.columns.extend(predicates.iter().flat_map(|predicate| {
-        let mut columns = BTreeSet::new();
-        collect_expression_columns(predicate, &mut columns);
-        columns
-    }));
+    scan.columns
+        .extend(predicates.iter().flat_map(Expr::columns));
     if let ClickHouseAccess::EdgeTables(access) = &mut scan.access {
         access
             .columns
@@ -200,19 +199,6 @@ fn inject_edge_predicates(
         }),
         plan,
     )
-}
-
-fn collect_expression_columns(expression: &Expr, columns: &mut BTreeSet<ColumnId>) {
-    match expression {
-        Expr::Column(column) => {
-            columns.insert(*column);
-        }
-        Expr::ListContains { list, .. } => collect_expression_columns(list, columns),
-        Expr::And(expressions) => expressions
-            .iter()
-            .for_each(|expression| collect_expression_columns(expression, columns)),
-        _ => {}
-    }
 }
 
 fn foreign_key_candidate(
@@ -296,7 +282,9 @@ fn rewrite_fk_plan(
     let mut plan = if is_join {
         let mut join = JoinEditor::new(plan).unwrap();
         join.retain_inputs(|input| {
-            relation_id_ch(input).is_none_or(|relation| !relationships.contains(&relation))
+            input
+                .relation()
+                .is_none_or(|relation| !relationships.contains(&relation))
         });
         join.add_conditions(join_conditions.iter().cloned());
         join.retain_conditions(|condition| !tautology(condition));
@@ -325,16 +313,6 @@ fn tautology(expression: &Expr) -> bool {
 
 fn node_relation(bound: &BoundCatalog, name: &str) -> Option<RelationId> {
     bound.node_relation(name)
-}
-
-fn relation_id_ch(plan: &Plan<ClickHouse>) -> Option<RelationId> {
-    match &plan.operator {
-        Operator::Scan(scan) => Some(scan.relation),
-        Operator::CurrentRows { .. } | Operator::Filter(_) | Operator::Project(_) => {
-            plan.inputs.first().and_then(relation_id_ch)
-        }
-        _ => None,
-    }
 }
 
 fn plan_cost(plan: &Plan<ClickHouse>) -> Cost {
@@ -849,11 +827,7 @@ fn map_clickhouse(
         Operator::Sort(keys) => Operator::Sort(keys.clone()),
         Operator::Limit(limit) => Operator::Limit(*limit),
         Operator::CurrentRows { keys, .. } => {
-            let relation = logical
-                .inputs
-                .first()
-                .and_then(relation_id_logical)
-                .unwrap();
+            let relation = logical.inputs.first().and_then(Plan::relation).unwrap();
             let strategy = catalog.current_rows[&relation]
                 .iter()
                 .find(|strategy| **strategy == ClickHouseCurrentRows::LimitBy)
@@ -901,19 +875,6 @@ fn sort_keys(bound: &BoundCatalog, relation: RelationId, layout: &TableLayout) -
         .iter()
         .filter_map(|name| bound.column_id(relation, &name.0).map(Expr::Column))
         .collect()
-}
-
-fn relation_id_logical(plan: &Plan<Logical>) -> Option<RelationId> {
-    match &plan.operator {
-        Operator::Scan(scan) => Some(scan.relation),
-        Operator::Bind(relation) => Some(*relation),
-        Operator::Filter(_)
-        | Operator::Project(_)
-        | Operator::Sort(_)
-        | Operator::Limit(_)
-        | Operator::CurrentRows { .. } => plan.inputs.first().and_then(relation_id_logical),
-        _ => None,
-    }
 }
 
 fn clickhouse_candidate(bound: &BoundCatalog, plan: Plan<ClickHouse>) -> Candidate<ClickHouse> {

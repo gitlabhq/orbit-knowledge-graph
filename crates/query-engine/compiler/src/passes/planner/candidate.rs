@@ -65,11 +65,5 @@ fn physical_properties<B: Flavor>(bound: &BoundCatalog, plan: &Plan<B>) -> Physi
 }
 
 fn visible_relations<B: Flavor>(plan: &Plan<B>) -> BTreeSet<RelationId> {
-    let mut relations = BTreeSet::new();
-    plan.visit(&mut |plan| {
-        if let Operator::Scan(scan) = &plan.operator {
-            relations.insert(scan.relation());
-        }
-    });
-    relations
+    plan.visible_relations()
 }

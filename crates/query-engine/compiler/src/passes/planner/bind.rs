@@ -443,13 +443,7 @@ impl Builder {
                 &input.id_property,
                 Some(ontology::DataType::Int),
             );
-            let current = Plan::unary(
-                Operator::CurrentRows {
-                    keys: vec![Expr::Column(id)],
-                    strategy: (),
-                },
-                node.plan,
-            );
+            let current = node.plan.current_rows(vec![Expr::Column(id)], ());
             let current = if input.traversal_paths.is_empty() {
                 current
             } else {

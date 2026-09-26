@@ -255,13 +255,13 @@ fn lower_join_ch(
         .then_some(())
         .ok_or_else(|| QueryError::Lowering("join needs an input".into()))
         .map(|_| inputs.remove(0))?;
-    let mut available = relations_ch(&first);
+    let mut available = first.visible_relations();
     let mut query = lower_ch(bound, first, aliases, physical_columns)?;
     while !inputs.is_empty() {
         let index = inputs
             .iter()
             .position(|input| {
-                let right = relations_ch(input);
+                let right = input.visible_relations();
                 conditions.iter().any(|condition| {
                     let relations = expression_relations(bound, condition);
                     !relations.is_disjoint(&right)
@@ -271,9 +271,10 @@ fn lower_join_ch(
             })
             .unwrap_or(0);
         let input = inputs.remove(index);
-        let right_relations = relations_ch(&input);
+        let right_relations = input.visible_relations();
         let joined_relations = available.union(&right_relations).copied().collect();
-        let alias = visible_relation_ch(&input)
+        let alias = input
+            .relation()
             .and_then(|relation| aliases.get(&relation))
             .cloned()
             .unwrap_or_else(|| "right".into());
@@ -310,13 +311,13 @@ fn lower_join_duck(
         .then_some(())
         .ok_or_else(|| QueryError::Lowering("join needs an input".into()))
         .map(|_| inputs.remove(0))?;
-    let mut available = relations_duck(&first);
+    let mut available = first.visible_relations();
     let mut query = lower_duck(bound, first, aliases)?;
     while !inputs.is_empty() {
         let index = inputs
             .iter()
             .position(|input| {
-                let right = relations_duck(input);
+                let right = input.visible_relations();
                 conditions.iter().any(|condition| {
                     let relations = expression_relations(bound, condition);
                     !relations.is_disjoint(&right)
@@ -326,9 +327,10 @@ fn lower_join_duck(
             })
             .unwrap_or(0);
         let input = inputs.remove(index);
-        let right_relations = relations_duck(&input);
+        let right_relations = input.visible_relations();
         let joined_relations = available.union(&right_relations).copied().collect();
-        let alias = visible_relation_duck(&input)
+        let alias = input
+            .relation()
             .and_then(|relation| aliases.get(&relation))
             .cloned()
             .unwrap_or_else(|| "right".into());
@@ -472,104 +474,12 @@ fn join_condition_ch(
         .unwrap_or_else(|| ast::Expr::lit(1)))
 }
 
-fn relations_ch(plan: &Plan<ClickHouse>) -> BTreeSet<RelationId> {
-    match &plan.operator {
-        Operator::Bind(relation) => BTreeSet::from([*relation]),
-        Operator::Scan(scan) => BTreeSet::from([scan.relation]),
-        Operator::CurrentRows { .. }
-        | Operator::Filter(_)
-        | Operator::Project(_)
-        | Operator::Sort(_)
-        | Operator::Limit(_)
-        | Operator::SemiJoin(_) => plan.inputs.first().map(relations_ch).unwrap_or_default(),
-        _ => plan.inputs.iter().flat_map(relations_ch).collect(),
-    }
-}
-
-fn relations_duck(plan: &Plan<DuckDb>) -> BTreeSet<RelationId> {
-    match &plan.operator {
-        Operator::Bind(relation) => BTreeSet::from([*relation]),
-        Operator::Scan(scan) => BTreeSet::from([scan.relation]),
-        Operator::CurrentRows { .. }
-        | Operator::Filter(_)
-        | Operator::Project(_)
-        | Operator::Sort(_)
-        | Operator::Limit(_)
-        | Operator::SemiJoin(_) => plan.inputs.first().map(relations_duck).unwrap_or_default(),
-        _ => plan.inputs.iter().flat_map(relations_duck).collect(),
-    }
-}
-
-fn visible_relation_ch(plan: &Plan<ClickHouse>) -> Option<RelationId> {
-    match &plan.operator {
-        Operator::Bind(relation) => Some(*relation),
-        Operator::Scan(scan) => Some(scan.relation),
-        Operator::CurrentRows { .. }
-        | Operator::Filter(_)
-        | Operator::Project(_)
-        | Operator::Sort(_)
-        | Operator::Limit(_)
-        | Operator::SemiJoin(_) => plan.inputs.first().and_then(visible_relation_ch),
-        _ => None,
-    }
-}
-
-fn visible_relation_duck(plan: &Plan<DuckDb>) -> Option<RelationId> {
-    match &plan.operator {
-        Operator::Bind(relation) => Some(*relation),
-        Operator::Scan(scan) => Some(scan.relation),
-        Operator::CurrentRows { .. }
-        | Operator::Filter(_)
-        | Operator::Project(_)
-        | Operator::Sort(_)
-        | Operator::Limit(_)
-        | Operator::SemiJoin(_) => plan.inputs.first().and_then(visible_relation_duck),
-        _ => None,
-    }
-}
-
 fn expression_relations(bound: &BoundCatalog, expression: &Expr) -> BTreeSet<RelationId> {
-    let mut columns = BTreeSet::new();
-    collect_columns(expression, &mut columns);
-    columns
+    expression
+        .columns()
         .into_iter()
         .map(|column| bound.column(column).relation)
         .collect()
-}
-
-fn collect_columns(expression: &Expr, columns: &mut BTreeSet<ColumnId>) {
-    match expression {
-        Expr::Column(column) => {
-            columns.insert(*column);
-        }
-        Expr::Compare { left, right, .. } => {
-            collect_columns(left, columns);
-            collect_columns(right, columns);
-        }
-        Expr::Filter { left, right, .. } => {
-            collect_columns(left, columns);
-            right
-                .iter()
-                .for_each(|right| collect_columns(right, columns));
-        }
-        Expr::And(values) | Expr::Or(values) | Expr::Array(values) | Expr::Tuple(values) => {
-            values
-                .iter()
-                .for_each(|value| collect_columns(value, columns));
-        }
-        Expr::In { value, .. }
-        | Expr::DateTrunc { value, .. }
-        | Expr::Stringify(value)
-        | Expr::ListContains { list: value, .. }
-        | Expr::TokenMatch { value, .. } => collect_columns(value, columns),
-        Expr::Aggregate { value, .. } => value
-            .iter()
-            .for_each(|value| collect_columns(value, columns)),
-        Expr::JsonObject(entries) => entries
-            .iter()
-            .for_each(|(_, value)| collect_columns(value, columns)),
-        Expr::Output(_) | Expr::Literal(_) => {}
-    }
 }
 
 fn only_ch(

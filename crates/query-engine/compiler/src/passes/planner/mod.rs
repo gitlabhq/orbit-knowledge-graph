@@ -182,6 +182,43 @@ impl Expr {
     fn ge(self, right: impl Into<Self>) -> Self {
         self.compare(CompareOp::Ge, right)
     }
+
+    fn columns(&self) -> BTreeSet<ColumnId> {
+        let mut columns = BTreeSet::new();
+        self.visit(&mut |expression| {
+            if let Self::Column(column) = expression {
+                columns.insert(*column);
+            }
+        });
+        columns
+    }
+
+    fn visit(&self, visitor: &mut impl FnMut(&Self)) {
+        visitor(self);
+        match self {
+            Self::Compare { left, right, .. } => {
+                left.visit(visitor);
+                right.visit(visitor);
+            }
+            Self::Filter { left, right, .. } => {
+                left.visit(visitor);
+                right.iter().for_each(|right| right.visit(visitor));
+            }
+            Self::And(values) | Self::Or(values) | Self::Array(values) | Self::Tuple(values) => {
+                values.iter().for_each(|value| value.visit(visitor));
+            }
+            Self::In { value, .. }
+            | Self::DateTrunc { value, .. }
+            | Self::Stringify(value)
+            | Self::ListContains { list: value, .. }
+            | Self::TokenMatch { value, .. } => value.visit(visitor),
+            Self::Aggregate { value, .. } => {
+                value.iter().for_each(|value| value.visit(visitor));
+            }
+            Self::JsonObject(entries) => entries.iter().for_each(|(_, value)| value.visit(visitor)),
+            Self::Column(_) | Self::Output(_) | Self::Literal(_) => {}
+        }
+    }
 }
 
 impl From<ColumnId> for Expr {
@@ -305,6 +342,17 @@ impl<F: Flavor> Plan<F> {
         Self::unary(Operator::Aggregate { groups, metrics }, self)
     }
 
+    fn semi_join(self, lookup: Self, condition: Expr) -> Self {
+        Self {
+            operator: Operator::SemiJoin(condition),
+            inputs: vec![self, lookup],
+        }
+    }
+
+    fn current_rows(self, keys: Vec<Expr>, strategy: F::CurrentRows) -> Self {
+        Self::unary(Operator::CurrentRows { keys, strategy }, self)
+    }
+
     fn sort(self, keys: Vec<SortKey>) -> Self {
         Self::unary(Operator::Sort(keys), self)
     }
@@ -342,6 +390,42 @@ impl<F: Flavor> Plan<F> {
     fn visit(&self, visitor: &mut impl FnMut(&Self)) {
         visitor(self);
         self.inputs.iter().for_each(|input| input.visit(visitor));
+    }
+
+    fn relation(&self) -> Option<RelationId> {
+        match &self.operator {
+            Operator::Scan(scan) => Some(scan.relation()),
+            Operator::Bind(relation) => Some(*relation),
+            Operator::CurrentRows { .. }
+            | Operator::Filter(_)
+            | Operator::Project(_)
+            | Operator::Sort(_)
+            | Operator::Limit(_)
+            | Operator::SemiJoin(_) => self.inputs.first().and_then(Self::relation),
+            _ => None,
+        }
+    }
+
+    fn visible_relations(&self) -> BTreeSet<RelationId> {
+        match &self.operator {
+            Operator::Bind(relation) => BTreeSet::from([*relation]),
+            Operator::Scan(scan) => BTreeSet::from([scan.relation()]),
+            Operator::CurrentRows { .. }
+            | Operator::Filter(_)
+            | Operator::Project(_)
+            | Operator::Sort(_)
+            | Operator::Limit(_)
+            | Operator::SemiJoin(_) => self
+                .inputs
+                .first()
+                .map(Self::visible_relations)
+                .unwrap_or_default(),
+            _ => self
+                .inputs
+                .iter()
+                .flat_map(Self::visible_relations)
+                .collect(),
+        }
     }
 
     fn map_expressions(mut self, map: &mut impl FnMut(Expr) -> Expr) -> Self {
