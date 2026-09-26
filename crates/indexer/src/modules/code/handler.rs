@@ -223,8 +223,10 @@ impl CodeIndexingTaskHandler {
         };
 
         let checkpoint = self
-            .load_checkpoint(request, &branch)
+            .checkpoint_store
+            .load(&request.traversal_path, request.project_id, &branch)
             .await
+            .map_err(|e| HandlerError::Processing(format!("failed to load checkpoint: {e}")))?
             .unwrap_or_else(|| {
                 CodeCheckpoint::new(request.traversal_path.clone(), request.project_id, &branch)
             });
@@ -436,20 +438,6 @@ impl CodeIndexingTaskHandler {
     }
 }
 
-impl CodeIndexingTaskHandler {
-    async fn load_checkpoint(
-        &self,
-        request: &CodeIndexingTaskRequest,
-        branch: &str,
-    ) -> Option<CodeCheckpoint> {
-        self.checkpoint_store
-            .load(&request.traversal_path, request.project_id, branch)
-            .await
-            .ok()
-            .flatten()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,6 +595,24 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!ctx.lock_exists(123, "main"));
+    }
+
+    #[tokio::test]
+    async fn fails_without_saving_an_attempt_when_the_checkpoint_load_fails() {
+        let ctx = TestContext::new();
+        ctx.mock_checkpoints.set_fail_loads(true);
+
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_err(), "got {result:?}");
+        ctx.mock_checkpoints.set_fail_loads(false);
+        let saved = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap();
+        assert!(saved.is_none(), "no attempt row may replace the stored one");
     }
 
     #[tokio::test]

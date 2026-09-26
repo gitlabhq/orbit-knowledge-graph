@@ -234,16 +234,23 @@ pub mod test_utils {
     use super::*;
     use parking_lot::Mutex;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     pub struct MockCodeCheckpointStore {
         checkpoints: Mutex<HashMap<(TraversalPath, i64, String), CodeCheckpoint>>,
+        fail_loads: AtomicBool,
     }
 
     impl MockCodeCheckpointStore {
         pub fn new() -> Self {
             Self {
                 checkpoints: Mutex::new(HashMap::new()),
+                fail_loads: AtomicBool::new(false),
             }
+        }
+
+        pub fn set_fail_loads(&self, fail: bool) {
+            self.fail_loads.store(fail, Ordering::Relaxed);
         }
     }
 
@@ -261,6 +268,9 @@ pub mod test_utils {
             project_id: i64,
             branch: &str,
         ) -> Result<Option<CodeCheckpoint>, CheckpointError> {
+            if self.fail_loads.load(Ordering::Relaxed) {
+                return Err(CheckpointError::Query("load failed".to_string()));
+            }
             let checkpoints = self.checkpoints.lock();
             Ok(checkpoints
                 .get(&(traversal_path.clone(), project_id, branch.to_string()))
