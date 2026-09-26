@@ -18,6 +18,7 @@ pub struct DuckDbCatalog {
     edge_table: String,
     edge_columns: HashSet<String>,
     edge_column_types: HashMap<String, ontology::DataType>,
+    edge_sort_key: Vec<String>,
     entities: HashMap<EntityId, DuckDbEntityLayout>,
     relationships: HashMap<RelationshipId, String>,
     denormalized: DenormalizedCatalog,
@@ -102,6 +103,9 @@ impl QueryBackendCatalog for DuckDbCatalog {
     }
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
+        if table == self.edge_table() {
+            return Some(&self.edge_sort_key);
+        }
         self.entities
             .values()
             .find(|layout| layout.table == table)
@@ -166,6 +170,10 @@ impl Backend for DuckDb {
             .iter()
             .map(|column| (column.name.clone(), column.data_type))
             .collect();
+        let edge_sort_key = ontology
+            .sort_key_for_table(&edge_table)
+            .unwrap_or_else(|| ontology.edge_sort_key())
+            .to_vec();
         let mut entities = HashMap::new();
         for entity_name in ontology.local_entity_names() {
             let entity_id =
@@ -210,6 +218,7 @@ impl Backend for DuckDb {
             edge_table,
             edge_columns,
             edge_column_types,
+            edge_sort_key,
             entities,
             relationships,
             denormalized: DenormalizedCatalog::default(),
