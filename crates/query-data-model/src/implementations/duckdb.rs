@@ -175,7 +175,13 @@ impl Backend for DuckDb {
             .unwrap_or_else(|| ontology.edge_sort_key())
             .to_vec();
         let mut entities = HashMap::new();
-        for entity_name in ontology.local_entity_names() {
+        let local_entities = ontology.local_entity_names();
+        let entity_names: Vec<_> = if local_entities.is_empty() {
+            ontology.node_names().collect()
+        } else {
+            local_entities
+        };
+        for entity_name in entity_names {
             let entity_id =
                 graph
                     .entity_id(entity_name)
@@ -192,7 +198,7 @@ impl Backend for DuckDb {
                     })?;
             let properties = ontology
                 .local_entity_fields(entity_name)
-                .unwrap_or_default()
+                .unwrap_or_else(|| node.fields.iter().collect())
                 .into_iter()
                 .filter_map(|field| {
                     let property = graph.property_id(entity_id, &field.name)?;

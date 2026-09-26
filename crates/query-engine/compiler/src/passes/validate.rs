@@ -379,8 +379,15 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             return Ok(());
         }
         self.property(entity, property).map(|_| ()).ok_or_else(|| {
+            let entity_record = self.model.get().entity(entity);
+            let properties: Vec<_> = entity_record
+                .into_iter()
+                .flat_map(|entity| &entity.properties)
+                .map(|property| self.model.get().graph().property(*property).name.as_str())
+                .collect();
             QueryError::AllowlistRejected(format!(
-                "field \"{property}\" does not exist on node type \"{entity}\""
+                "field \"{property}\" does not exist on node type \"{entity}\"{}",
+                ontology::errors::format_candidate_list("fields", &properties)
             ))
         })
     }
