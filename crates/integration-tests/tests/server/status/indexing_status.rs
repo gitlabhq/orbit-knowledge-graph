@@ -90,6 +90,12 @@ async fn syncing_while_a_first_pass_pages(ctx: &TestContext) {
     assert_eq!(status.sdlc_phase, Phase::Syncing);
     assert_eq!(domain_phase(&status, "code_review"), Phase::Syncing);
     assert_eq!(domain_phase(&status, "plan"), Phase::Ready);
+    assert_eq!(
+        domain_phase(&status, "core"),
+        Phase::Ready,
+        "the IN_PROJECT edges of MergeRequest belong to code_review, not core"
+    );
+    assert_eq!(domain_phase(&status, "ci"), Phase::Ready);
     assert_eq!(entity_phase(&status, "MergeRequest"), Some(Phase::Syncing));
     assert_eq!(entity_phase(&status, "WorkItem"), Some(Phase::Ready));
 }

@@ -80,6 +80,8 @@ fn plan_belongs_to_domain(
         return true;
     }
 
+    // A node plan's foreign-key edges belong to the node's domain. Only plans that write no node
+    // feed the domains of their edge endpoints.
     let plan_writes_a_node = ontology.get_node(&plan.entity).is_some();
     if plan_writes_a_node {
         return false;
