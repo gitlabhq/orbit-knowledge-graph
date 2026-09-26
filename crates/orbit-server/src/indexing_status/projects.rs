@@ -86,11 +86,13 @@ fn build_project_coverage_query(ontology: &Ontology, scope_count: usize) -> Resu
            FROM (SELECT id, traversal_path FROM {project_table} FINAL \
                   WHERE _deleted = 0 \
                     AND {in_scopes}) AS p \
-          ARRAY JOIN arrayFilter(s -> startsWith(p.traversal_path, s), {{scopes:Array(String)}}) AS scope \
+          ARRAY JOIN arrayMap(depth -> concat(arrayStringConcat(arraySlice(splitByChar('/', p.traversal_path), 1, depth), '/'), '/'), \
+                              range(1, length(splitByChar('/', p.traversal_path)))) AS scope \
            LEFT JOIN (SELECT DISTINCT project_id FROM {code_checkpoint_table} FINAL \
                        WHERE _deleted = 0 AND indexed_at IS NOT NULL \
                          AND {in_scopes}) AS c \
                  ON c.project_id = p.id \
+          WHERE scope IN {{scopes:Array(String)}} \
           GROUP BY scope"
     ))
 }
