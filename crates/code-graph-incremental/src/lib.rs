@@ -3,9 +3,11 @@ pub mod dsl;
 pub mod env;
 pub mod intern;
 pub mod inventory;
+pub mod linker;
 pub mod pipeline;
 pub mod resolver;
 pub mod shared;
+pub mod ssa;
 pub mod tree;
 pub mod treesitter;
 

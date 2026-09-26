@@ -34,6 +34,7 @@ mod tests {
     #[test]
     fn engine_interns_tag_keys_only_here() {
         for (name, src) in [
+            ("linker.rs", include_str!("../linker.rs")),
             ("resolver.rs", include_str!("../resolver.rs")),
             ("tree/walk.rs", include_str!("../tree/walk.rs")),
         ] {
