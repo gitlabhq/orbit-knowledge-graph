@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::engine::{Engine, EngineBuilder};
 use crate::handler::{Handler, HandlerRegistry};
-use crate::indexing_status::IndexingStatusStore;
 use crate::nats::{NatsBroker, NatsServices, NatsServicesImpl};
 use orbit_server_config::{
     AppConfig, ClickHouseConfiguration, CodeIndexingPipelineConfig, EngineConfiguration,
@@ -87,12 +86,8 @@ impl TestEngineBuilder {
             .nats_services
             .unwrap_or_else(|| Arc::new(NatsServicesImpl::new(self.broker.clone())));
 
-        let indexing_status = Arc::new(IndexingStatusStore::new(Arc::new(
-            nats_client::KvServicesImpl::new(self.broker.client().clone()),
-        )));
-
         let engine = Arc::new(
-            EngineBuilder::new(self.broker, self.registry, indexing_status)
+            EngineBuilder::new(self.broker, self.registry)
                 .nats_services(nats_services)
                 .build(),
         );
