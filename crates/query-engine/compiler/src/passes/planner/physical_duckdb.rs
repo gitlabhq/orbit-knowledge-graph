@@ -47,7 +47,7 @@ fn map_plan(bound: &BoundCatalog, logical: &Plan<Logical>) -> Plan<DuckDb> {
 }
 
 fn table_layout(bound: &BoundCatalog, relation: RelationId) -> TableLayout {
-    let table = match &bound.relations[&relation] {
+    let table = match bound.relation(relation) {
         BoundRelation {
             entity: Some(entity),
             ..
@@ -61,7 +61,7 @@ fn table_layout(bound: &BoundCatalog, relation: RelationId) -> TableLayout {
             .map(|relationship| {
                 bound
                     .ontology
-                    .edge_table_for_relationship(&bound.relationships[relationship].name)
+                    .edge_table_for_relationship(bound.relationship_name(*relationship))
             })
             .unwrap_or_else(|| bound.ontology.edge_table()),
     };

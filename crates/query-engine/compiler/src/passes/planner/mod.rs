@@ -556,6 +556,73 @@ pub struct BoundCatalog {
     pub outputs: BTreeMap<OutputId, BoundOutput>,
 }
 
+impl BoundCatalog {
+    fn relation(&self, relation: RelationId) -> &BoundRelation {
+        &self.relations[&relation]
+    }
+
+    fn relations(&self) -> impl Iterator<Item = (RelationId, &BoundRelation)> {
+        self.relations
+            .iter()
+            .map(|(relation, metadata)| (*relation, metadata))
+    }
+
+    fn column(&self, column: ColumnId) -> &BoundColumn {
+        &self.columns[&column]
+    }
+
+    fn column_id(&self, relation: RelationId, name: &str) -> Option<ColumnId> {
+        self.column_ids
+            .get(&ColumnKey {
+                relation,
+                name: name.into(),
+            })
+            .copied()
+    }
+
+    fn columns_for(&self, relation: RelationId) -> impl Iterator<Item = ColumnId> + '_ {
+        self.columns
+            .iter()
+            .filter_map(move |(id, column)| (column.relation == relation).then_some(*id))
+    }
+
+    fn node_input(&self, relation: RelationId) -> Option<InputNodeId> {
+        match self.relation(relation).origin {
+            RelationOrigin::Node { input } => Some(input),
+            _ => None,
+        }
+    }
+
+    fn edge_relation(&self, input: InputRelationshipId) -> Option<RelationId> {
+        self.relations.iter().find_map(|(relation, metadata)| {
+            matches!(metadata.origin, RelationOrigin::Edge { input: Some(candidate), .. } if candidate == input)
+                .then_some(*relation)
+        })
+    }
+
+    fn node_relation(&self, name: &str) -> Option<RelationId> {
+        self.relations.iter().find_map(|(relation, metadata)| {
+            let RelationOrigin::Node { input } = metadata.origin else {
+                return None;
+            };
+            (self.input.nodes[input.0].id == name).then_some(*relation)
+        })
+    }
+
+    fn relationship_name(&self, relationship: RelationshipId) -> &str {
+        &self.relationships[&relationship].name
+    }
+
+    fn remove_relations(&mut self, removed: &BTreeSet<RelationId>) {
+        self.relations
+            .retain(|relation, _| !removed.contains(relation));
+        self.columns
+            .retain(|_, column| !removed.contains(&column.relation));
+        self.column_ids
+            .retain(|key, _| !removed.contains(&key.relation));
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableLayout {
     pub table: TableName,

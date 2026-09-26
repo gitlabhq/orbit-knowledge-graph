@@ -185,7 +185,7 @@ fn node(bound: &BoundCatalog, plan: &Plan<Logical>) -> PlanNode {
     let children = plan.inputs.iter().map(|input| node(bound, input)).collect();
     let (label, head, items) = match &plan.operator {
         Operator::Scan(scan) => {
-            let metadata = &bound.relations[&scan.relation];
+            let metadata = bound.relation(scan.relation);
             match metadata.origin {
                 RelationOrigin::Node { input } => (
                     "NodeScan",
@@ -207,7 +207,7 @@ fn node(bound: &BoundCatalog, plan: &Plan<Logical>) -> PlanNode {
                             metadata
                                 .relationships
                                 .iter()
-                                .map(|kind| bound.relationships[kind].name.as_str())
+                                .map(|kind| bound.relationship_name(*kind))
                                 .collect::<Vec<_>>()
                                 .join("|"),
                             edge.from,
@@ -298,7 +298,7 @@ fn node(bound: &BoundCatalog, plan: &Plan<Logical>) -> PlanNode {
 }
 
 fn relation(bound: &BoundCatalog, relation: RelationId) -> String {
-    let metadata = &bound.relations[&relation];
+    let metadata = bound.relation(relation);
     match metadata.origin {
         RelationOrigin::Node { input } => format!(
             "Node({}) AS {}",
@@ -312,7 +312,7 @@ fn relation(bound: &BoundCatalog, relation: RelationId) -> String {
             metadata
                 .relationships
                 .iter()
-                .map(|kind| bound.relationships[kind].name.as_str())
+                .map(|kind| bound.relationship_name(*kind))
                 .collect::<Vec<_>>()
                 .join("|"),
             input.0
@@ -322,7 +322,7 @@ fn relation(bound: &BoundCatalog, relation: RelationId) -> String {
             metadata
                 .relationships
                 .iter()
-                .map(|kind| bound.relationships[kind].name.as_str())
+                .map(|kind| bound.relationship_name(*kind))
                 .collect::<Vec<_>>()
                 .join("|"),
             depth,
@@ -332,7 +332,7 @@ fn relation(bound: &BoundCatalog, relation: RelationId) -> String {
 }
 
 fn relation_alias(bound: &BoundCatalog, relation: RelationId) -> String {
-    match bound.relations[&relation].origin {
+    match bound.relation(relation).origin {
         RelationOrigin::Node { input } => bound.input.nodes[input.0].id.clone(),
         RelationOrigin::Edge {
             input: Some(input), ..

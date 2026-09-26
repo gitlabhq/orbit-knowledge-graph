@@ -68,7 +68,7 @@ fn remove_deferred_outputs(
             let Expr::Column(id) = column.expression else {
                 return true;
             };
-            !matches!(bound.relations[&bound.columns[&id].relation].origin, RelationOrigin::Node { input } if deferred.contains(&input))
+            !matches!(bound.relation(bound.column(id).relation).origin, RelationOrigin::Node { input } if deferred.contains(&input))
         });
     }
     plan
@@ -231,17 +231,17 @@ fn prune_fk_aggregation_leaves(bound: &mut BoundCatalog, logical: &mut LogicalPl
         if !metrics_supported {
             continue;
         }
-        removed.extend(bound.relations.iter().filter_map(|(relation, metadata)| {
-            match metadata.origin {
+        removed.extend(bound.relations().filter_map(
+            |(relation, metadata)| match metadata.origin {
                 RelationOrigin::Node { input } if input == InputNodeId(node_index) => {
-                    Some(*relation)
+                    Some(relation)
                 }
                 RelationOrigin::Edge {
                     input: Some(input), ..
-                } if input == InputRelationshipId(*relationship_index) => Some(*relation),
+                } if input == InputRelationshipId(*relationship_index) => Some(relation),
                 _ => None,
-            }
-        }));
+            },
+        ));
     }
     if removed.is_empty() {
         return;
@@ -251,7 +251,7 @@ fn prune_fk_aggregation_leaves(bound: &mut BoundCatalog, logical: &mut LogicalPl
             Expr::Aggregate {
                 function: crate::input::AggFunction::Count,
                 value: Some(value),
-            } if matches!(value.as_ref(), Expr::Column(column) if removed.contains(&bound.columns[column].relation)) => {
+            } if matches!(value.as_ref(), Expr::Column(column) if removed.contains(&bound.column(*column).relation)) => {
                 Expr::Aggregate {
                     function: crate::input::AggFunction::Count,
                     value: None,
@@ -260,15 +260,7 @@ fn prune_fk_aggregation_leaves(bound: &mut BoundCatalog, logical: &mut LogicalPl
             expression => expression,
         },
     );
-    bound
-        .relations
-        .retain(|relation, _| !removed.contains(relation));
-    bound
-        .columns
-        .retain(|_, column| !removed.contains(&column.relation));
-    bound
-        .column_ids
-        .retain(|key, _| !removed.contains(&key.relation));
+    bound.remove_relations(&removed);
 }
 
 fn relationship_carries_node_filter(
@@ -414,7 +406,7 @@ fn rewrite(
     };
     let required_relations: BTreeSet<_> = required
         .iter()
-        .filter_map(|column| bound.columns.get(column).map(|column| column.relation))
+        .map(|column| bound.column(*column).relation)
         .collect();
     let mut remove = Vec::new();
     let mut filters = Vec::new();
@@ -429,10 +421,7 @@ fn rewrite(
         if required_relations.contains(&relation) {
             continue;
         }
-        let Some(primary_key) = bound.column_ids.get(&ColumnKey {
-            relation,
-            name: DEFAULT_PRIMARY_KEY.into(),
-        }) else {
+        let Some(primary_key) = bound.column_id(relation, DEFAULT_PRIMARY_KEY) else {
             continue;
         };
         let Some((condition_index, consumer)) =
@@ -441,9 +430,9 @@ fn rewrite(
                 .enumerate()
                 .find_map(|(condition_index, condition)| {
                     let (left, right) = equality(condition)?;
-                    if left == *primary_key {
+                    if left == primary_key {
                         Some((condition_index, right))
-                    } else if right == *primary_key {
+                    } else if right == primary_key {
                         Some((condition_index, left))
                     } else {
                         None
@@ -498,7 +487,7 @@ fn rewrite(
                 compare(
                     CompareOp::Eq,
                     Expr::Column(consumer),
-                    Expr::Column(*primary_key),
+                    Expr::Column(primary_key),
                 ),
                 input.clone(),
             ));
@@ -554,8 +543,8 @@ fn add_sip(mut plan: Plan<Logical>, bound: &mut BoundCatalog) -> Plan<Logical> {
             let Some((left, right)) = equality(condition) else {
                 continue;
             };
-            let left_relation = bound.columns[&left].relation;
-            let right_relation = bound.columns[&right].relation;
+            let left_relation = bound.column(left).relation;
+            let right_relation = bound.column(right).relation;
             let (producer_column, consumer_column) = match (
                 selective.contains(&left_relation),
                 selective.contains(&right_relation),
@@ -564,8 +553,8 @@ fn add_sip(mut plan: Plan<Logical>, bound: &mut BoundCatalog) -> Plan<Logical> {
                 (false, true) => (right, left),
                 _ => continue,
             };
-            let producer_relation = bound.columns[&producer_column].relation;
-            let consumer_relation = bound.columns[&consumer_column].relation;
+            let producer_relation = bound.column(producer_column).relation;
+            let consumer_relation = bound.column(consumer_column).relation;
             let (Some(&producer_index), Some(&consumer_index)) = (
                 relations.get(&producer_relation),
                 relations.get(&consumer_relation),
@@ -595,7 +584,7 @@ fn add_sip(mut plan: Plan<Logical>, bound: &mut BoundCatalog) -> Plan<Logical> {
 }
 
 fn relation_selective(bound: &BoundCatalog, relation: RelationId) -> bool {
-    match bound.relations[&relation].origin {
+    match bound.relation(relation).origin {
         RelationOrigin::Node { input } => {
             let node = &bound.input.nodes[input.0];
             !node.node_ids.is_empty() || node.id_range.is_some() || !node.filters.is_empty()
@@ -703,10 +692,7 @@ fn relation_id(plan: &Plan<Logical>) -> Option<RelationId> {
 }
 
 fn node_index(bound: &BoundCatalog, relation: RelationId) -> Option<usize> {
-    let RelationOrigin::Node { input } = bound.relations.get(&relation)?.origin else {
-        return None;
-    };
-    Some(input.0)
+    bound.node_input(relation).map(|input| input.0)
 }
 
 fn compare(op: CompareOp, left: Expr, right: Expr) -> Expr {

@@ -533,7 +533,7 @@ fn expression_relations(bound: &BoundCatalog, expression: &Expr) -> BTreeSet<Rel
     collect_columns(expression, &mut columns);
     columns
         .into_iter()
-        .filter_map(|column| bound.columns.get(&column).map(|column| column.relation))
+        .map(|column| bound.column(column).relation)
         .collect()
 }
 
@@ -719,7 +719,7 @@ fn lower_expr(
 ) -> Result<ast::Expr> {
     Ok(match expression {
         Expr::Column(column) => {
-            let column = &bound.columns[column];
+            let column = bound.column(*column);
             let alias = aliases.get(&column.relation).ok_or_else(|| {
                 QueryError::Lowering(format!(
                     "relation {} has no physical alias",
@@ -984,7 +984,7 @@ fn lowered<B: Flavor>(
         .collect();
     let top_level_aliases: BTreeSet<_> = table_aliases(&query.from).into_iter().collect();
     node_sources.retain(|_, (alias, _)| top_level_aliases.contains(alias));
-    for (relation, metadata) in &bound.relations {
+    for (relation, metadata) in bound.relations() {
         let RelationOrigin::Edge {
             input: Some(input),
             depth: None,
@@ -999,18 +999,15 @@ fn lowered<B: Flavor>(
             if node_sources.contains_key(node) {
                 continue;
             }
-            let Some(column_id) = bound.column_ids.get(&ColumnKey {
-                relation: *relation,
-                name: column.into(),
-            }) else {
+            let Some(column_id) = bound.column_id(relation, column) else {
                 continue;
             };
             let Some(expression) = physical_columns
-                .get(column_id)
+                .get(&column_id)
                 .map(|(relation, column)| ast::Expr::col(&aliases[relation], &column.0))
                 .or_else(|| {
                     aliases
-                        .get(relation)
+                        .get(&relation)
                         .map(|alias| ast::Expr::col(alias, column))
                 })
             else {
@@ -1203,7 +1200,7 @@ fn filter_op(op: FilterOp) -> ast::Op {
 }
 
 fn relation_alias(bound: &BoundCatalog, relation: RelationId) -> String {
-    match bound.relations[&relation].origin {
+    match bound.relation(relation).origin {
         RelationOrigin::Node { input } => bound.input.nodes[input.0].id.clone(),
         RelationOrigin::Edge {
             input: Some(input),

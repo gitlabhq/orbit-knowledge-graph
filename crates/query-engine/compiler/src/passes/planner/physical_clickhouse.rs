@@ -65,7 +65,7 @@ fn deduplicate_edges(mut plan: Plan<ClickHouse>, bound: &BoundCatalog) -> Plan<C
         return plan;
     };
     if matches!(
-        bound.relations[&scan.relation].origin,
+        bound.relation(scan.relation).origin,
         RelationOrigin::Edge { .. }
     ) {
         Plan::unary(
@@ -232,7 +232,7 @@ fn foreign_key_candidate(
     candidate.plan.visit(&mut |plan| {
         if let Operator::Scan(scan) = &plan.operator
             && matches!(
-                bound.relations[&scan.relation].origin,
+                bound.relation(scan.relation).origin,
                 RelationOrigin::Edge { input: Some(_), .. }
             )
         {
@@ -257,19 +257,9 @@ fn foreign_key_candidate(
         .iter()
         .filter(|access| required.contains(&access.relationship))
     {
-        let holder_column = bound.column_ids.get(&ColumnKey {
-            relation: access.holder,
-            name: access.column.0.clone(),
-        })?;
-        let referenced_column = bound.column_ids.get(&ColumnKey {
-            relation: access.referenced,
-            name: DEFAULT_PRIMARY_KEY.into(),
-        })?;
-        join_conditions.push(Expr::Compare {
-            op: CompareOp::Eq,
-            left: Box::new(Expr::Column(*holder_column)),
-            right: Box::new(Expr::Column(*referenced_column)),
-        });
+        let holder_column = bound.column_id(access.holder, &access.column.0)?;
+        let referenced_column = bound.column_id(access.referenced, DEFAULT_PRIMARY_KEY)?;
+        join_conditions.push(Expr::from(holder_column).eq(referenced_column));
         substitutions.extend(access.substitutions.clone());
         relationships.insert(access.relationship);
     }
@@ -290,7 +280,7 @@ fn foreign_key_candidate(
         .map(|(node, mut output)| {
             if let Some(Expr::Column(column)) = substitutions.get(&output.primary_key) {
                 output.primary_key = *column;
-                output.relation = bound.columns[column].relation;
+                output.relation = bound.column(*column).relation;
             }
             (node, output)
         })
@@ -339,12 +329,7 @@ fn tautology(expression: &Expr) -> bool {
 }
 
 fn node_relation(bound: &BoundCatalog, name: &str) -> Option<RelationId> {
-    bound.relations.iter().find_map(|(relation, metadata)| {
-        let RelationOrigin::Node { input } = metadata.origin else {
-            return None;
-        };
-        (bound.input.nodes[input.0].id == name).then_some(*relation)
-    })
+    bound.node_relation(name)
 }
 
 fn relation_id_ch(plan: &Plan<ClickHouse>) -> Option<RelationId> {
@@ -401,12 +386,7 @@ fn clickhouse_catalog(bound: &BoundCatalog) -> BackendCatalog<'_, ClickHouse> {
                     let columns: BTreeMap<_, _> = layouts
                         .iter()
                         .flat_map(|layout| &layout.columns)
-                        .filter(|physical| {
-                            !bound.column_ids.contains_key(&ColumnKey {
-                                relation: *relation,
-                                name: physical.0.clone(),
-                            })
-                        })
+                        .filter(|physical| bound.column_id(*relation, &physical.0).is_none())
                         .map(|physical| {
                             let column = ColumnId(next_column);
                             next_column += 1;
@@ -533,22 +513,16 @@ fn foreign_key_facts(bound: &BoundCatalog) -> Vec<ForeignKeyAccess> {
             } else {
                 (target, source)
             };
-            let source_id = bound.column_ids.get(&ColumnKey {
-                relation: source,
-                name: DEFAULT_PRIMARY_KEY.into(),
-            })?;
-            let target_id = bound.column_ids.get(&ColumnKey {
-                relation: target,
-                name: DEFAULT_PRIMARY_KEY.into(),
-            })?;
+            let source_id = bound.column_id(source, DEFAULT_PRIMARY_KEY)?;
+            let target_id = bound.column_id(target, DEFAULT_PRIMARY_KEY)?;
             let substitutions = [
                 (
                     ontology::constants::SOURCE_ID_COLUMN,
-                    Expr::Column(*source_id),
+                    Expr::Column(source_id),
                 ),
                 (
                     ontology::constants::TARGET_ID_COLUMN,
-                    Expr::Column(*target_id),
+                    Expr::Column(target_id),
                 ),
                 (
                     ontology::constants::SOURCE_KIND_COLUMN,
@@ -566,12 +540,8 @@ fn foreign_key_facts(bound: &BoundCatalog) -> Vec<ForeignKeyAccess> {
             .into_iter()
             .filter_map(|(name, expression)| {
                 bound
-                    .column_ids
-                    .get(&ColumnKey {
-                        relation: *relationship,
-                        name: name.into(),
-                    })
-                    .map(|column| (*column, expression))
+                    .column_id(*relationship, name)
+                    .map(|column| (column, expression))
             })
             .collect();
             Some(ForeignKeyAccess {
@@ -590,7 +560,7 @@ fn text_index_facts(bound: &BoundCatalog) -> Vec<TextIndexAccess> {
         .columns
         .iter()
         .filter_map(|(column, metadata)| {
-            let entity = bound.relations[&metadata.relation].entity?;
+            let entity = bound.relation(metadata.relation).entity?;
             bound
                 .ontology
                 .text_index_tokenizer(&bound.entities[&entity].name, &metadata.name)
@@ -607,7 +577,7 @@ fn edge_property_facts(
     access_paths: &BTreeMap<RelationId, Vec<PhysicalScan<ClickHouseAccess>>>,
 ) -> Vec<EdgePropertyAccess> {
     let mut facts = Vec::new();
-    for (edge_relation, metadata) in &bound.relations {
+    for (edge_relation, metadata) in bound.relations() {
         let RelationOrigin::Edge {
             input: Some(edge_input),
             ..
@@ -653,13 +623,10 @@ fn edge_property_facts(
                 else {
                     continue;
                 };
-                let Some(source) = bound.column_ids.get(&ColumnKey {
-                    relation: node_relation,
-                    name: property.clone(),
-                }) else {
+                let Some(source) = bound.column_id(node_relation, property) else {
                     continue;
                 };
-                let Some(edge_columns) = access_paths[edge_relation][0].access.edge_columns()
+                let Some(edge_columns) = access_paths[&edge_relation][0].access.edge_columns()
                 else {
                     continue;
                 };
@@ -675,8 +642,8 @@ fn edge_property_facts(
                         None => continue,
                     };
                     facts.push(EdgePropertyAccess {
-                        edge: *edge_relation,
-                        source: *source,
+                        edge: edge_relation,
+                        source,
                         column,
                         edge_column: PhysicalColumn(definition.edge_column.clone()),
                         tokens: values
@@ -749,16 +716,7 @@ fn denormalized_join_facts(bound: &BoundCatalog) -> Vec<DenormalizedAccess> {
                 table_for_relation.insert(node_relation(bound, source)?, hop.source_table);
                 table_for_relation.insert(node_relation(bound, target)?, hop.target_table);
                 if let Some(edge_table) = hop.edge_table {
-                    let edge_relation =
-                        bound.relations.iter().find_map(|(relation, metadata)| {
-                            let RelationOrigin::Edge {
-                                input: Some(input), ..
-                            } = metadata.origin
-                            else {
-                                return None;
-                            };
-                            (input == InputRelationshipId(index)).then_some(*relation)
-                        })?;
+                    let edge_relation = bound.edge_relation(InputRelationshipId(index))?;
                     table_for_relation.insert(edge_relation, edge_table);
                 }
             }
@@ -804,7 +762,7 @@ fn physical_endpoints(relationship: &crate::input::InputRelationship) -> Option<
 }
 
 fn node_layout(bound: &BoundCatalog, relation: RelationId) -> TableLayout {
-    let entity = bound.relations[&relation].entity.unwrap();
+    let entity = bound.relation(relation).entity.unwrap();
     let entity = &bound.entities[&entity].name;
     let table = bound.ontology.table_name(entity).unwrap_or_default();
     table_layout(bound, table)
@@ -815,7 +773,7 @@ fn edge_layouts(bound: &BoundCatalog, relation: &BoundRelation) -> Vec<TableLayo
         || relation
             .relationships
             .iter()
-            .any(|kind| bound.relationships[kind].name == "*")
+            .any(|kind| bound.relationship_name(*kind) == "*")
     {
         bound.ontology.edge_tables()
     } else {
@@ -825,7 +783,7 @@ fn edge_layouts(bound: &BoundCatalog, relation: &BoundRelation) -> Vec<TableLayo
             .map(|kind| {
                 bound
                     .ontology
-                    .edge_table_for_relationship(&bound.relationships[kind].name)
+                    .edge_table_for_relationship(bound.relationship_name(*kind))
             })
             .collect()
     };
@@ -917,7 +875,7 @@ fn map_clickhouse(
     if let Operator::Scan(scan) = &plan.operator
         && !suppress_current_rows
         && matches!(
-            bound.relations[&scan.relation].origin,
+            bound.relation(scan.relation).origin,
             RelationOrigin::Node { .. }
         )
         && catalog.current_rows[&scan.relation].contains(&ClickHouseCurrentRows::Final)
@@ -946,16 +904,7 @@ fn sort_keys(bound: &BoundCatalog, relation: RelationId, layout: &TableLayout) -
     layout
         .sort_key
         .iter()
-        .filter_map(|name| {
-            bound
-                .column_ids
-                .get(&ColumnKey {
-                    relation,
-                    name: name.0.clone(),
-                })
-                .copied()
-                .map(Expr::Column)
-        })
+        .filter_map(|name| bound.column_id(relation, &name.0).map(Expr::Column))
         .collect()
 }
 

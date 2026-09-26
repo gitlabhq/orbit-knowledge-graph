@@ -13,15 +13,12 @@ pub(super) fn build<B: Flavor>(bound: &BoundCatalog, plan: Plan<B>, cost: Cost) 
             if !visible.contains(relation) {
                 return None;
             }
-            let primary_key = bound.column_ids.get(&ColumnKey {
-                relation: *relation,
-                name: DEFAULT_PRIMARY_KEY.into(),
-            })?;
+            let primary_key = bound.column_id(*relation, DEFAULT_PRIMARY_KEY)?;
             Some((
                 input,
                 OutputBinding {
                     relation: *relation,
-                    primary_key: *primary_key,
+                    primary_key,
                 },
             ))
         })
@@ -46,11 +43,7 @@ pub(super) fn build<B: Flavor>(bound: &BoundCatalog, plan: Plan<B>, cost: Cost) 
 }
 
 pub(super) fn relation_columns(bound: &BoundCatalog, relation: RelationId) -> BTreeSet<ColumnId> {
-    bound
-        .columns
-        .iter()
-        .filter_map(|(id, column)| (column.relation == relation).then_some(*id))
-        .collect()
+    bound.columns_for(relation).collect()
 }
 
 fn physical_properties<B: Flavor>(bound: &BoundCatalog, plan: &Plan<B>) -> PhysicalProperties {
