@@ -18,7 +18,7 @@ steps:
 
   - seed:
       checkpoint:
-        - { key: ns.100.Group, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null" }
+        - { key: ns.100.Group, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
       siphon_routes:
         - { id: 100, source_id: 100, source_type: Namespace, path: new-parent, namespace_id: 100, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-20 18:00:00" }
         - { id: 200, source_id: 200, source_type: Namespace, path: new-parent/child, namespace_id: 200, traversal_path: "1/100/200/", _siphon_replicated_at: "2024-01-20 18:00:00" }
