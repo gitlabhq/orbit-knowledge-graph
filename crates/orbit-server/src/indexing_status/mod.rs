@@ -17,7 +17,7 @@ pub use self::phase::Phase;
 pub use self::projects::ProjectCoverage;
 
 use self::checkpoints::PlanCheckpoints;
-use self::phase::fold_phases;
+use self::phase::combine_phases;
 use crate::active_schema::SchemaSnapshot;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,7 +39,7 @@ impl IndexingStatusService {
         Self { client }
     }
 
-    pub async fn read(
+    pub async fn read_scope_statuses(
         &self,
         schema: &SchemaSnapshot,
         scopes: &[TraversalPath],
@@ -76,7 +76,7 @@ impl IndexingStatusService {
         scopes
             .iter()
             .map(|scope| {
-                fold_scope_status(
+                build_scope_status(
                     schema,
                     &plans,
                     scope,
@@ -88,7 +88,7 @@ impl IndexingStatusService {
     }
 }
 
-fn fold_scope_status(
+fn build_scope_status(
     schema: &SchemaSnapshot,
     plans: &[PipelineDescriptor],
     scope: &TraversalPath,
@@ -98,20 +98,20 @@ fn fold_scope_status(
     let root = scope.top_level_namespace_id();
     let plan_phases: Vec<(&PipelineDescriptor, Phase)> = plans
         .iter()
-        .map(|plan| (plan, plan_phase(checkpoints, root, &plan.name)))
+        .map(|plan| (plan, get_root_plan_phase(checkpoints, root, &plan.name)))
         .collect();
 
     let projects =
         coverage.map(|by_scope| by_scope.get(scope.as_str()).copied().unwrap_or_default());
     let code_phase = match projects {
-        Some(projects) => projects.code_phase(),
+        Some(projects) => projects.get_code_phase(),
         None => Some(Phase::Unknown),
     };
 
-    let domains = domains::domain_statuses(&schema.ontology, &plan_phases, code_phase);
-    let phase = fold_phases(domains.iter().map(|domain| domain.phase)).unwrap_or(Phase::Unknown);
+    let domains = domains::get_domain_statuses(&schema.ontology, &plan_phases, code_phase);
+    let phase = combine_phases(domains.iter().map(|domain| domain.phase)).unwrap_or(Phase::Unknown);
     let sdlc_phase =
-        fold_phases(plan_phases.iter().map(|(_, phase)| *phase)).unwrap_or(Phase::Unknown);
+        combine_phases(plan_phases.iter().map(|(_, phase)| *phase)).unwrap_or(Phase::Unknown);
 
     ScopeStatus {
         scope: scope.clone(),
@@ -123,7 +123,7 @@ fn fold_scope_status(
     }
 }
 
-fn plan_phase(
+fn get_root_plan_phase(
     checkpoints: Option<&HashMap<i64, PlanCheckpoints>>,
     root: Option<i64>,
     plan: &str,
@@ -134,6 +134,6 @@ fn plan_phase(
     by_root
         .get(&root)
         .map_or(Phase::NotStarted, |root_checkpoints| {
-            root_checkpoints.phase_of(plan)
+            root_checkpoints.get_plan_phase(plan)
         })
 }

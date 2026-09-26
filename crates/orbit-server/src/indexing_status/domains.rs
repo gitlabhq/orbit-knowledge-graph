@@ -1,7 +1,7 @@
 use ontology::pipelines::PipelineDescriptor;
 use ontology::{DomainInfo, NodeEntity, Ontology};
 
-use super::phase::{Phase, fold_phases};
+use super::phase::{Phase, combine_phases};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DomainStatus {
@@ -16,7 +16,7 @@ pub struct EntityStatus {
     pub phase: Option<Phase>,
 }
 
-pub fn domain_statuses(
+pub fn get_domain_statuses(
     ontology: &Ontology,
     plan_phases: &[(&PipelineDescriptor, Phase)],
     code_phase: Option<Phase>,
@@ -33,16 +33,16 @@ pub fn domain_statuses(
 
             let feeding_plans = plan_phases
                 .iter()
-                .filter(|(plan, _)| plan_feeds_domain(ontology, plan, domain))
+                .filter(|(plan, _)| plan_belongs_to_domain(ontology, plan, domain))
                 .map(|(_, phase)| *phase);
             let code = code_phase.filter(|_| has_code_nodes);
-            let phase = fold_phases(feeding_plans.chain(code)).unwrap_or(Phase::Unknown);
+            let phase = combine_phases(feeding_plans.chain(code)).unwrap_or(Phase::Unknown);
 
             let entities = nodes
                 .iter()
                 .map(|node| EntityStatus {
                     name: node.name.clone(),
-                    phase: entity_phase(node, plan_phases, code_phase),
+                    phase: get_entity_phase(node, plan_phases, code_phase),
                 })
                 .collect();
 
@@ -55,7 +55,7 @@ pub fn domain_statuses(
         .collect()
 }
 
-fn entity_phase(
+fn get_entity_phase(
     node: &NodeEntity,
     plan_phases: &[(&PipelineDescriptor, Phase)],
     code_phase: Option<Phase>,
@@ -67,10 +67,14 @@ fn entity_phase(
         .iter()
         .filter(|(plan, _)| plan.entity == node.name)
         .map(|(_, phase)| *phase);
-    fold_phases(own_plans)
+    combine_phases(own_plans)
 }
 
-fn plan_feeds_domain(ontology: &Ontology, plan: &PipelineDescriptor, domain: &DomainInfo) -> bool {
+fn plan_belongs_to_domain(
+    ontology: &Ontology,
+    plan: &PipelineDescriptor,
+    domain: &DomainInfo,
+) -> bool {
     let in_domain = |kind: &str| domain.node_names.iter().any(|name| name == kind);
     if in_domain(&plan.entity) {
         return true;

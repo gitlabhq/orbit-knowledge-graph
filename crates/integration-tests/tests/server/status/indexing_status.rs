@@ -40,7 +40,7 @@ async fn read(ctx: &TestContext, scopes: &[&str]) -> Vec<ScopeStatus> {
         .map(|s| TraversalPath::new_unchecked(*s))
         .collect();
     IndexingStatusService::new(Arc::new(ctx.create_client()))
-        .read(&pinned_schema(), &scopes)
+        .read_scope_statuses(&pinned_schema(), &scopes)
         .await
 }
 

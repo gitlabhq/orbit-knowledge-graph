@@ -43,9 +43,9 @@ impl GraphStatusService {
 
         let scopes = slice::from_ref(traversal_path);
         let (statuses, counts) = tokio::join!(
-            self.indexing_status.read(schema, scopes),
+            self.indexing_status.read_scope_statuses(schema, scopes),
             self.item_counts
-                .count(&schema.ontology, security_context, scopes),
+                .count_items(&schema.ontology, security_context, scopes),
         );
         let status = statuses
             .into_iter()
@@ -60,7 +60,7 @@ impl GraphStatusService {
             "Graph status fetched"
         );
 
-        let structured = response::structured_status(&status, &counts);
+        let structured = response::build_structured_status(&status, &counts);
         let content = if format == ResponseFormat::Llm as i32 {
             get_graph_status_response::Content::FormattedText(toon::format_status_as_toon(
                 &structured,

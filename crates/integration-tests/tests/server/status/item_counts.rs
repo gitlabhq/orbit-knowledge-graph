@@ -38,7 +38,7 @@ async fn count(
         .map(|s| TraversalPath::new_unchecked(*s))
         .collect();
     ItemCountService::new(Arc::new(ctx.create_client()))
-        .count(&load_ontology(), security_context, &scopes)
+        .count_items(&load_ontology(), security_context, &scopes)
         .await
 }
 

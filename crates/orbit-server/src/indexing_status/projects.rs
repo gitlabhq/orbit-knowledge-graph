@@ -7,7 +7,8 @@ use tonic::Status;
 
 use super::phase::Phase;
 use crate::status_query::{
-    bind_prefixes, extraction_error, fetch_status_rows, starts_with_any_sql,
+    bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
+    map_column_extraction_error,
 };
 
 const PROJECT_NODE: &str = "Project";
@@ -20,7 +21,7 @@ pub struct ProjectCoverage {
 }
 
 impl ProjectCoverage {
-    pub fn code_phase(&self) -> Option<Phase> {
+    pub fn get_code_phase(&self) -> Option<Phase> {
         if self.total_known == 0 {
             None
         } else if self.indexed == 0 {
@@ -38,16 +39,16 @@ pub async fn read_project_coverage(
     ontology: &Ontology,
     scopes: &[TraversalPath],
 ) -> Result<HashMap<String, ProjectCoverage>, Status> {
-    let sql = project_coverage_sql(ontology, scopes.len())?;
+    let sql = build_project_coverage_query(ontology, scopes.len())?;
     let scopes: Vec<&str> = scopes.iter().map(TraversalPath::as_str).collect();
-    let batches = fetch_status_rows(client, &sql, "project coverage", |query| {
-        bind_prefixes(query.param("scopes", &scopes), "scope", &scopes)
+    let batches = fetch_status_query_batches(client, &sql, "project coverage", |query| {
+        bind_prefix_parameters(query.param("scopes", &scopes), "scope", &scopes)
     })
     .await?;
 
-    let scopes = String::extract_column(&batches, 0).map_err(extraction_error)?;
-    let total_known = i64::extract_column(&batches, 1).map_err(extraction_error)?;
-    let indexed = i64::extract_column(&batches, 2).map_err(extraction_error)?;
+    let scopes = String::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
+    let total_known = i64::extract_column(&batches, 1).map_err(map_column_extraction_error)?;
+    let indexed = i64::extract_column(&batches, 2).map_err(map_column_extraction_error)?;
     Ok(scopes
         .into_iter()
         .zip(total_known.into_iter().zip(indexed))
@@ -61,7 +62,7 @@ pub async fn read_project_coverage(
         .collect())
 }
 
-fn project_coverage_sql(ontology: &Ontology, scope_count: usize) -> Result<String, Status> {
+fn build_project_coverage_query(ontology: &Ontology, scope_count: usize) -> Result<String, Status> {
     let project_table = &ontology
         .get_node(PROJECT_NODE)
         .ok_or_else(|| Status::internal(format!("ontology missing required node: {PROJECT_NODE}")))?
@@ -77,7 +78,7 @@ fn project_coverage_sql(ontology: &Ontology, scope_count: usize) -> Result<Strin
         })?
         .name;
 
-    let in_scopes = starts_with_any_sql("traversal_path", "scope", scope_count);
+    let in_scopes = build_prefix_match_condition("traversal_path", "scope", scope_count);
     Ok(format!(
         "SELECT scope, \
                 toInt64(uniqExact(p.id)) AS total_known, \

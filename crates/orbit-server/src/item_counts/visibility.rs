@@ -8,7 +8,7 @@ pub struct VisibleEntity {
     pub scopes: Vec<String>,
 }
 
-pub fn visible_entities(
+pub fn get_visible_entities(
     ontology: &Ontology,
     security_context: &SecurityContext,
     scopes: &[TraversalPath],

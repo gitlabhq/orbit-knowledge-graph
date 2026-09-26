@@ -6,7 +6,7 @@ pub enum Phase {
     Ready,
 }
 
-pub fn fold_phases(phases: impl IntoIterator<Item = Phase>) -> Option<Phase> {
+pub fn combine_phases(phases: impl IntoIterator<Item = Phase>) -> Option<Phase> {
     let phases: Vec<Phase> = phases.into_iter().collect();
     let all = |phase: Phase| phases.iter().all(|each| *each == phase);
 

@@ -5,7 +5,7 @@ use serde::Serialize;
 use tonic::Status;
 use tracing::debug;
 
-pub(crate) async fn fetch_status_rows(
+pub(crate) async fn fetch_status_query_batches(
     client: &ArrowClickHouseClient,
     sql: &str,
     label: &str,
@@ -22,14 +22,18 @@ pub(crate) async fn fetch_status_rows(
         .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
 }
 
-pub(crate) fn starts_with_any_sql(column: &str, param: &str, prefix_count: usize) -> String {
+pub(crate) fn build_prefix_match_condition(
+    column: &str,
+    param: &str,
+    prefix_count: usize,
+) -> String {
     let conditions: Vec<String> = (0..prefix_count)
         .map(|index| format!("startsWith({column}, {{{param}_{index}:String}})"))
         .collect();
     format!("({})", conditions.join(" OR "))
 }
 
-pub(crate) fn bind_prefixes(
+pub(crate) fn bind_prefix_parameters(
     query: ArrowQuery,
     param: &str,
     prefixes: &[impl Serialize],
@@ -42,7 +46,7 @@ pub(crate) fn bind_prefixes(
         })
 }
 
-pub(crate) fn extraction_error(error: impl std::fmt::Display) -> Status {
+pub(crate) fn map_column_extraction_error(error: impl std::fmt::Display) -> Status {
     Status::internal(error.to_string())
 }
 

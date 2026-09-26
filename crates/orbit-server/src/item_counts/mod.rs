@@ -19,18 +19,18 @@ impl ItemCountService {
         Self { client }
     }
 
-    pub async fn count(
+    pub async fn count_items(
         &self,
         ontology: &Ontology,
         security_context: &SecurityContext,
         scopes: &[TraversalPath],
     ) -> HashMap<String, i64> {
-        let entities = visibility::visible_entities(ontology, security_context, scopes);
+        let entities = visibility::get_visible_entities(ontology, security_context, scopes);
         if entities.is_empty() {
             return HashMap::new();
         }
 
-        let counts = counts::count_entities(&self.client, &entities)
+        let counts = counts::count_visible_entities(&self.client, &entities)
             .await
             .inspect_err(|error| warn!(%error, "Item counts could not be read"))
             .unwrap_or_default();

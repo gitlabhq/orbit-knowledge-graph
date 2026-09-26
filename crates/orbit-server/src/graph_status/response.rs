@@ -6,7 +6,7 @@ use crate::proto::{
     StructuredGraphStatus,
 };
 
-pub fn structured_status(
+pub fn build_structured_status(
     status: &ScopeStatus,
     counts: &HashMap<String, i64>,
 ) -> StructuredGraphStatus {
@@ -18,15 +18,15 @@ pub fn structured_status(
         domains: status
             .domains
             .iter()
-            .filter_map(|domain| visible_domain(domain, counts))
+            .filter_map(|domain| build_visible_domain(domain, counts))
             .collect(),
-        indexing: Some(status_in_phase(status.phase)),
-        sdlc_indexing: Some(status_in_phase(status.sdlc_phase)),
-        code_indexing: status.code_phase.map(status_in_phase),
+        indexing: Some(build_indexing_status(status.phase)),
+        sdlc_indexing: Some(build_indexing_status(status.sdlc_phase)),
+        code_indexing: status.code_phase.map(build_indexing_status),
     }
 }
 
-fn visible_domain(
+fn build_visible_domain(
     domain: &DomainStatus,
     counts: &HashMap<String, i64>,
 ) -> Option<GraphStatusDomain> {
@@ -38,7 +38,9 @@ fn visible_domain(
             Some(GraphStatusItem {
                 name: entity.name.clone(),
                 count,
-                state: entity.phase.map(|phase| indexing_state(phase) as i32),
+                state: entity
+                    .phase
+                    .map(|phase| map_phase_to_indexing_state(phase) as i32),
             })
         })
         .collect();
@@ -52,14 +54,14 @@ fn visible_domain(
     })
 }
 
-fn status_in_phase(phase: Phase) -> IndexingStatus {
+fn build_indexing_status(phase: Phase) -> IndexingStatus {
     IndexingStatus {
-        state: indexing_state(phase).into(),
+        state: map_phase_to_indexing_state(phase).into(),
         ..Default::default()
     }
 }
 
-fn indexing_state(phase: Phase) -> IndexingState {
+fn map_phase_to_indexing_state(phase: Phase) -> IndexingState {
     match phase {
         Phase::Ready => IndexingState::Indexed,
         Phase::Syncing => IndexingState::Backfilling,
