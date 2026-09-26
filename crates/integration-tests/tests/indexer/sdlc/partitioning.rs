@@ -114,7 +114,7 @@ pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext)
     let parent = ctx
         .query(&format!(
             "SELECT count() AS cnt FROM {} FINAL \
-             WHERE key = 'global.User' AND _deleted = false",
+             WHERE key = 'global.User' AND indexed_at IS NOT NULL AND _deleted = false",
             t("checkpoint")
         ))
         .await;
@@ -123,7 +123,7 @@ pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext)
     assert_eq!(
         parent_count.value(0),
         0,
-        "parent must stay absent so the next dispatch re-triggers partitioning"
+        "parent must stay unindexed so the next dispatch re-triggers partitioning"
     );
 
     let leftover = ctx
@@ -213,9 +213,9 @@ pub async fn retry_skips_completed_resumes_in_progress_and_pins_watermark(ctx: &
 
     for index in 0..2 {
         ctx.execute(&format!(
-            "INSERT INTO {} (key, watermark, cursor_values, _version) \
+            "INSERT INTO {} (key, watermark, cursor_values, indexed_at, _version) \
              VALUES ('global.User.p{index}of4', '2024-01-15 00:00:00.000000', 'null', \
-                     '2024-01-15 00:00:00.000000')",
+                     '2024-01-15 00:00:00.000000', '2024-01-15 00:00:00.000000')",
             t("checkpoint")
         ))
         .await;

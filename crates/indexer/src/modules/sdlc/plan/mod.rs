@@ -27,16 +27,9 @@ pub(in crate::modules::sdlc) struct Cursor {
 }
 
 impl Cursor {
-    pub fn first_page() -> Self {
-        Self { values: Vec::new() }
-    }
-
     pub fn from_checkpoint(checkpoint: &Checkpoint) -> Self {
-        match &checkpoint.cursor_values {
-            Some(values) => Self {
-                values: values.clone(),
-            },
-            None => Self::first_page(),
+        Self {
+            values: checkpoint.resume_cursor().to_vec(),
         }
     }
 
@@ -68,14 +61,6 @@ impl Cursor {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { values })
-    }
-
-    pub fn to_checkpoint_values(&self) -> Option<Vec<String>> {
-        if self.values.is_empty() {
-            None
-        } else {
-            Some(self.values.clone())
-        }
     }
 }
 
@@ -427,29 +412,16 @@ mod tests {
     }
 
     #[test]
-    fn first_page_cursor_is_first_page() {
-        let cursor = Cursor::first_page();
-        assert!(cursor.is_first_page());
-    }
-
-    #[test]
     fn cursor_from_completed_checkpoint_is_first_page() {
-        let checkpoint = Checkpoint {
-            watermark: Utc::now(),
-            cursor_values: None,
-            resume_floor: None,
-        };
+        let checkpoint = Checkpoint::new(Utc::now());
         let cursor = Cursor::from_checkpoint(&checkpoint);
         assert!(cursor.is_first_page());
     }
 
     #[test]
     fn cursor_from_in_progress_checkpoint_has_values() {
-        let checkpoint = Checkpoint {
-            watermark: Utc::now(),
-            cursor_values: Some(vec!["42".to_string()]),
-            resume_floor: None,
-        };
+        let mut checkpoint = Checkpoint::new(Utc::now());
+        checkpoint.record_page(Utc::now(), None, vec!["42".to_string()]);
         let cursor = Cursor::from_checkpoint(&checkpoint);
         assert!(!cursor.is_first_page());
     }
@@ -470,13 +442,10 @@ mod tests {
             ],
         )
         .unwrap();
-        let cursor = Cursor::first_page();
+        let cursor = Cursor::from_checkpoint(&Checkpoint::new(Utc::now()));
         let sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let advanced = cursor.advance(&batch, &sort_key).unwrap();
-        assert_eq!(
-            advanced.to_checkpoint_values(),
-            Some(vec!["1/4/".to_string(), "30".to_string()])
-        );
+        assert_eq!(advanced.values(), ["1/4/", "30"]);
     }
 
     #[test]

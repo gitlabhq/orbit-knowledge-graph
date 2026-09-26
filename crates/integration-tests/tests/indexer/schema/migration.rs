@@ -1140,8 +1140,8 @@ impl MigrationScenario {
 
 async fn insert_completed_checkpoint(ctx: &TestContext, table: &str, key: &str, version: &str) {
     ctx.execute(&format!(
-        "INSERT INTO {table} (key, watermark, cursor_values, _version) \
-         VALUES ('{key}', '{version}', 'null', '{version}')"
+        "INSERT INTO {table} (key, watermark, cursor_values, indexed_at, _version) \
+         VALUES ('{key}', '{version}', 'null', '{version}', '{version}')"
     ))
     .await;
 }

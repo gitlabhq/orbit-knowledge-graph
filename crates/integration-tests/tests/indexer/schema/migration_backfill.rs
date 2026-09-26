@@ -242,8 +242,8 @@ impl TestContext {
         for checkpoint_key in checkpoint_keys {
             self.clickhouse
                 .execute(&format!(
-                    "INSERT INTO {checkpoint_table} (key, watermark, cursor_values) \
-                     VALUES ('{checkpoint_key}', now(), 'null')"
+                    "INSERT INTO {checkpoint_table} (key, watermark, cursor_values, indexed_at) \
+                     VALUES ('{checkpoint_key}', now(), 'null', now())"
                 ))
                 .await;
         }
@@ -434,7 +434,8 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         .execute(&format!(
             "INSERT INTO {table} \
              (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at) \
-             VALUES ('1/100/11/', 11, 'main', 0, 'sha', now())"
+             VALUES ('1/100/11/', 11, 'main', 0, 'sha', now()), \
+                    ('1/100/12/', 12, 'main', 0, '', NULL)"
         ))
         .await;
 
