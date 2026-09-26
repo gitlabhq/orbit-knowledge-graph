@@ -175,6 +175,14 @@ fn definitions_imports_and_edges_export_as_ontology_rows() {
         ]
     );
     let edges = table(&exported, "gl_edge");
+    let import_to_def = rows(edges, &["source_kind", "relationship_kind", "target_kind"])
+        .iter()
+        .filter(|r| r == &&strs(&["ImportedSymbol", "IMPORTS", "Definition"]))
+        .count();
+    assert_eq!(
+        import_to_def, 2,
+        "both names of `from utils import helper, Store` resolve"
+    );
     let mut kinds: Vec<(String, String, String)> =
         rows(edges, &["source_kind", "relationship_kind", "target_kind"])
             .into_iter()
@@ -264,9 +272,15 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
             "gl_imported_symbol"
         ]
     );
-    assert!(
-        seen.iter()
-            .all(|(_, n)| *n > 0 || names.contains(&"gl_directory"))
+    let empty: Vec<_> = seen
+        .iter()
+        .filter(|(_, n)| *n == 0)
+        .map(|(t, _)| t.as_str())
+        .collect();
+    assert_eq!(
+        empty,
+        ["gl_directory"],
+        "a flat repository has no directories"
     );
     assert_eq!(displayed.state.trees.len(), 2);
 }
