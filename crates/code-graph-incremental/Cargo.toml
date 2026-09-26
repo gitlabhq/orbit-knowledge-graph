@@ -12,7 +12,9 @@ workspace = true
 
 [dependencies]
 arrow = { workspace = true }
+either = { workspace = true }
 indextree = "4.9"
+itertools = "0.14"
 lasso = { version = "0.7", features = ["multi-threaded", "ahasher"] }
 pest = { workspace = true }
 pest_consume = { workspace = true }
@@ -22,10 +24,12 @@ rayon = { workspace = true }
 rkyv = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 smallvec = { workspace = true }
 stacker = { workspace = true }
 strum = { workspace = true }
 termtree = "1.0"
+toml = { workspace = true }
 tree-sitter = "0.26.3"
 tree-sitter-bash = "0.25.1"
 tree-sitter-c = "0.24.2"

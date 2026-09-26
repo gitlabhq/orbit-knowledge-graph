@@ -191,7 +191,6 @@ impl Tree {
         self.arena[id].get()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn node_mut(&mut self, id: NodeId) -> &mut Node {
         self.arena[id].get_mut()
     }
