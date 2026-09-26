@@ -107,27 +107,19 @@ fn replace_with_denormalized(
         .into_iter()
         .map(|input| replace_with_denormalized(input, access))
         .collect();
-    if let Operator::Join(_) = plan.operator {
-        let mut kept = Vec::new();
-        let mut inserted = false;
-        for input in plan.inputs {
-            if relation_id_ch(&input).is_some_and(|relation| access.relations.contains(&relation)) {
-                if !inserted {
-                    kept.push(Plan::leaf(Operator::Scan(PhysicalScan {
-                        relation: access.scan_relation,
-                        access: ClickHouseAccess::DenormalizedJoin(access.clone()),
-                        columns: access.columns.keys().copied().collect(),
-                    })));
-                    inserted = true;
-                }
-            } else {
-                kept.push(input);
-            }
-        }
-        if kept.len() == 1 {
-            return kept.pop().unwrap();
-        }
-        plan.inputs = kept;
+    if matches!(plan.operator, Operator::Join(_)) {
+        let mut join = JoinEditor::new(plan).unwrap();
+        join.replace_inputs(
+            |input| {
+                relation_id_ch(input).is_some_and(|relation| access.relations.contains(&relation))
+            },
+            Plan::leaf(Operator::Scan(PhysicalScan {
+                relation: access.scan_relation,
+                access: ClickHouseAccess::DenormalizedJoin(access.clone()),
+                columns: access.columns.keys().copied().collect(),
+            })),
+        );
+        return join.finish();
     }
     plan
 }
@@ -300,26 +292,29 @@ fn rewrite_fk_plan(
         .into_iter()
         .map(|input| rewrite_fk_plan(input, relationships, join_conditions, substitutions))
         .collect();
-    if let Operator::Join(conditions) = &mut plan.operator {
-        plan.inputs.retain(|input| {
+    let is_join = matches!(plan.operator, Operator::Join(_));
+    let mut plan = if is_join {
+        let mut join = JoinEditor::new(plan).unwrap();
+        join.retain_inputs(|input| {
             relation_id_ch(input).is_none_or(|relation| !relationships.contains(&relation))
         });
-        for relation in join_conditions {
-            if !conditions.contains(relation) {
-                conditions.push(relation.clone());
-            }
-        }
-        conditions.retain(|condition| !tautology(condition));
-    }
-    let mut plan = plan.map_expressions(&mut |expression| match expression {
+        join.add_conditions(join_conditions.iter().cloned());
+        join.retain_conditions(|condition| !tautology(condition));
+        join.finish()
+    } else {
+        plan
+    };
+    plan = plan.map_expressions(&mut |expression| match expression {
         Expr::Column(column) => substitutions
             .get(&column)
             .cloned()
             .unwrap_or(Expr::Column(column)),
         expression => expression,
     });
-    if let Operator::Join(conditions) = &mut plan.operator {
-        conditions.retain(|condition| !tautology(condition));
+    if matches!(plan.operator, Operator::Join(_)) {
+        let mut join = JoinEditor::new(plan).unwrap();
+        join.retain_conditions(|condition| !tautology(condition));
+        plan = join.finish();
     }
     plan
 }

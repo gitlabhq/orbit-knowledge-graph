@@ -382,6 +382,83 @@ impl<F: Flavor> Plan<F> {
     }
 }
 
+struct JoinEditor<F: Flavor> {
+    inputs: Vec<Plan<F>>,
+    conditions: Vec<Expr>,
+}
+
+impl<F: Flavor> JoinEditor<F> {
+    fn new(plan: Plan<F>) -> Option<Self> {
+        let Operator::Join(conditions) = plan.operator else {
+            return None;
+        };
+        Some(Self {
+            inputs: plan.inputs,
+            conditions,
+        })
+    }
+
+    fn retain_inputs(&mut self, keep: impl Fn(&Plan<F>) -> bool) {
+        self.inputs.retain(keep);
+    }
+
+    fn retain_conditions(&mut self, keep: impl Fn(&Expr) -> bool) {
+        self.conditions.retain(keep);
+    }
+
+    fn replace_inputs(&mut self, replace: impl Fn(&Plan<F>) -> bool, replacement: Plan<F>) {
+        let mut replacement = Some(replacement);
+        self.inputs = std::mem::take(&mut self.inputs)
+            .into_iter()
+            .filter_map(|input| {
+                if replace(&input) {
+                    replacement.take()
+                } else {
+                    Some(input)
+                }
+            })
+            .collect();
+    }
+
+    fn add_conditions(&mut self, conditions: impl IntoIterator<Item = Expr>) {
+        for condition in conditions {
+            if !self.conditions.contains(&condition) {
+                self.conditions.push(condition);
+            }
+        }
+    }
+
+    fn remove_inputs(&mut self, mut indexes: Vec<usize>) {
+        indexes.sort_unstable_by(|left, right| right.cmp(left));
+        for index in indexes {
+            self.inputs.remove(index);
+        }
+    }
+
+    fn remove_condition(&mut self, index: usize) {
+        self.conditions.remove(index);
+    }
+
+    fn inputs(&self) -> &[Plan<F>] {
+        &self.inputs
+    }
+
+    fn condition_entries(&self) -> impl Iterator<Item = (usize, &Expr)> {
+        self.conditions.iter().enumerate()
+    }
+
+    fn finish(mut self) -> Plan<F> {
+        if self.inputs.len() == 1 {
+            self.inputs.pop().unwrap()
+        } else {
+            Plan {
+                operator: Operator::Join(self.conditions),
+                inputs: self.inputs,
+            }
+        }
+    }
+}
+
 fn map_named(columns: Vec<NamedExpr>, map: &mut impl FnMut(Expr) -> Expr) -> Vec<NamedExpr> {
     columns
         .into_iter()

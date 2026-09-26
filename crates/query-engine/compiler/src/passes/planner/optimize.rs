@@ -401,17 +401,19 @@ fn rewrite(
         .into_iter()
         .map(|input| rewrite(input, bound, required.clone()))
         .collect();
-    let Operator::Join(mut conditions) = plan.operator else {
+    if !matches!(plan.operator, Operator::Join(_)) {
         return plan;
-    };
+    }
+    let mut join = JoinEditor::new(plan).unwrap();
     let required_relations: BTreeSet<_> = required
         .iter()
         .map(|column| bound.column(*column).relation)
         .collect();
     let mut remove = Vec::new();
+    let mut condition_remove = Vec::new();
     let mut filters = Vec::new();
     let mut semi_joins = Vec::new();
-    for (index, input) in plan.inputs.iter().enumerate() {
+    for (index, input) in join.inputs().iter().enumerate() {
         let Some(relation) = relation_id(input) else {
             continue;
         };
@@ -425,9 +427,7 @@ fn rewrite(
             continue;
         };
         let Some((condition_index, consumer)) =
-            conditions
-                .iter()
-                .enumerate()
+            join.condition_entries()
                 .find_map(|(condition_index, condition)| {
                     let (left, right) = equality(condition)?;
                     if left == primary_key {
@@ -467,7 +467,7 @@ fn rewrite(
         {
             continue;
         }
-        conditions.remove(condition_index);
+        condition_remove.push(condition_index);
         remove.push(index);
         if node.filters.is_empty() && node.id_range.is_none() && !node.node_ids.is_empty() {
             filters.push(match node.node_ids.as_slice() {
@@ -493,18 +493,12 @@ fn rewrite(
             ));
         }
     }
-    remove.sort_unstable_by(|left, right| right.cmp(left));
-    for index in remove {
-        plan.inputs.remove(index);
+    condition_remove.sort_unstable_by(|left, right| right.cmp(left));
+    for index in condition_remove {
+        join.remove_condition(index);
     }
-    let mut plan = if plan.inputs.len() == 1 {
-        plan.inputs.pop().unwrap()
-    } else {
-        Plan {
-            operator: Operator::Join(conditions),
-            inputs: plan.inputs,
-        }
-    };
+    join.remove_inputs(remove);
+    let mut plan = join.finish();
     if !filters.is_empty() {
         plan = Plan::unary(Operator::Filter(and(filters)), plan);
     }
