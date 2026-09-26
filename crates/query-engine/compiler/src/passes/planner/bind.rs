@@ -519,7 +519,7 @@ impl Builder {
         let mut bindings = HashMap::<RelationId, Expr>::new();
         let mut conditions = Vec::new();
         for edge in &edges {
-            for (node, column) in [(edge.from, edge.from_id()), (edge.to, edge.to_id())] {
+            for (node, column) in [(edge.from, edge.start_id()), (edge.to, edge.end_id())] {
                 let edge_column = Expr::from(column);
                 if let Some(bound) = bindings.insert(node, edge_column.clone()) {
                     conditions.push(compare(CompareOp::Eq, bound, edge_column));
@@ -661,8 +661,8 @@ impl Builder {
                     let hop = hop as u32 + 1;
                     let mut predicates = self.kind_predicates(edge.relation, &input.types);
                     if hop == 1 {
-                        let source = edge.from_id(input.direction);
-                        let kind = edge.from_kind(input.direction);
+                        let source = edge.start_id(input.direction);
+                        let kind = edge.start_kind(input.direction);
                         let from = self
                             .catalog
                             .input
@@ -681,8 +681,8 @@ impl Builder {
                         }
                     }
                     if hop == depth {
-                        let target = edge.to_id(input.direction);
-                        let kind = edge.to_kind(input.direction);
+                        let target = edge.end_id(input.direction);
+                        let kind = edge.end_kind(input.direction);
                         let to = self
                             .catalog
                             .input
@@ -1295,28 +1295,28 @@ struct EdgeScan {
 }
 
 impl EdgeScan {
-    fn from_id(&self, direction: Direction) -> ColumnId {
+    fn start_id(&self, direction: Direction) -> ColumnId {
         match direction {
             Direction::Outgoing | Direction::Both => self.source_id,
             Direction::Incoming => self.target_id,
         }
     }
 
-    fn to_id(&self, direction: Direction) -> ColumnId {
+    fn end_id(&self, direction: Direction) -> ColumnId {
         match direction {
             Direction::Outgoing | Direction::Both => self.target_id,
             Direction::Incoming => self.source_id,
         }
     }
 
-    fn from_kind(&self, direction: Direction) -> ColumnId {
+    fn start_kind(&self, direction: Direction) -> ColumnId {
         match direction {
             Direction::Outgoing | Direction::Both => self.source_kind,
             Direction::Incoming => self.target_kind,
         }
     }
 
-    fn to_kind(&self, direction: Direction) -> ColumnId {
+    fn end_kind(&self, direction: Direction) -> ColumnId {
         match direction {
             Direction::Outgoing | Direction::Both => self.target_kind,
             Direction::Incoming => self.source_kind,
@@ -1330,14 +1330,14 @@ struct EdgeChain {
 }
 
 impl Edge {
-    fn from_id(&self) -> ColumnId {
+    fn start_id(&self) -> ColumnId {
         match self.direction {
             Direction::Outgoing | Direction::Both => self.source_id,
             Direction::Incoming => self.target_id,
         }
     }
 
-    fn to_id(&self) -> ColumnId {
+    fn end_id(&self) -> ColumnId {
         match self.direction {
             Direction::Outgoing | Direction::Both => self.target_id,
             Direction::Incoming => self.source_id,
