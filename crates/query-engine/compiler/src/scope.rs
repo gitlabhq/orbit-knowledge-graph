@@ -104,17 +104,6 @@ pub fn derive_scope_proofs(
     propagate_scope_proofs(input, model, &seed)
 }
 
-fn scope_preserving(
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-    relationship: &str,
-    source: &str,
-    target: &str,
-) -> bool {
-    model
-        .variant_scope(relationship, source, target)
-        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
-}
-
 fn propagate_scope_proofs(
     input: &Input,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
@@ -125,20 +114,12 @@ fn propagate_scope_proofs(
     if seed.is_empty() {
         return HashMap::new();
     }
-    let edges = scope_edges(input);
-    let preserving: Vec<bool> = edges
-        .iter()
-        .map(|edge| {
-            edge.types
-                .iter()
-                .all(|kind| scope_preserving(model, kind, edge.source_kind, edge.target_kind))
-        })
-        .collect();
+    let edges = scope_edges(input, model);
     let mut tainted = HashSet::new();
     loop {
         let mut changed = false;
-        for (index, edge) in edges.iter().enumerate() {
-            if preserving[index] {
+        for edge in &edges {
+            if edge.scope_preserving {
                 continue;
             }
             for (from, to) in [(edge.from, edge.to), (edge.to, edge.from)] {
@@ -154,8 +135,8 @@ fn propagate_scope_proofs(
     let mut result = seed.clone();
     loop {
         let mut changed = false;
-        for (index, edge) in edges.iter().enumerate() {
-            if !preserving[index] {
+        for edge in &edges {
+            if !edge.scope_preserving {
                 continue;
             }
             let next = match (result.get(edge.from).cloned(), result.get(edge.to).cloned()) {
@@ -298,32 +279,42 @@ fn single_eq_id(node: &InputNode, column: &str) -> Option<i64> {
     eq_value(node.filters.get(column)?)?.as_i64()
 }
 
-fn entity_of<'a>(input: &'a Input, alias: &str) -> &'a str {
-    input
-        .nodes
-        .iter()
-        .find(|n| n.id == alias)
-        .and_then(|n| n.entity.as_deref())
-        .unwrap_or("")
-}
 struct ScopeEdge<'a> {
     from: &'a str,
     to: &'a str,
-    types: &'a [String],
-    source_kind: &'a str,
-    target_kind: &'a str,
+    scope_preserving: bool,
 }
 
-fn scope_edges(input: &Input) -> Vec<ScopeEdge<'_>> {
+fn scope_edges<'a>(
+    input: &'a Input,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> Vec<ScopeEdge<'a>> {
+    let entities: HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|node| Some((node.id.as_str(), node.entity.as_deref()?)))
+        .collect();
     input
         .relationships
         .iter()
-        .map(|r| ScopeEdge {
-            from: &r.from,
-            to: &r.to,
-            types: &r.types,
-            source_kind: entity_of(input, &r.from),
-            target_kind: entity_of(input, &r.to),
+        .map(|relationship| {
+            let source_kind = entities
+                .get(relationship.from.as_str())
+                .copied()
+                .unwrap_or_default();
+            let target_kind = entities
+                .get(relationship.to.as_str())
+                .copied()
+                .unwrap_or_default();
+            ScopeEdge {
+                from: &relationship.from,
+                to: &relationship.to,
+                scope_preserving: relationship.types.iter().all(|kind| {
+                    model
+                        .variant_scope(kind, source_kind, target_kind)
+                        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
+                }),
+            }
         })
         .collect()
 }
@@ -505,16 +496,19 @@ mod tests {
     }
 
     #[test]
-    fn scope_edges_carries_endpoint_entity_kinds() {
+    fn scope_edges_resolves_scope_policy() {
         let input = crate::parse_input(
             r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"}],"relationships":[{"type":"HAS_DIFF","from":"mr","to":"diff"}],"limit":1}"#,
         )
         .unwrap();
-        let edges = scope_edges(&input);
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(
+            ontology::Ontology::load_embedded().unwrap(),
+        ))
+        .unwrap();
+        let edges = scope_edges(&input, model.as_ref());
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].from, "mr");
         assert_eq!(edges[0].to, "diff");
-        assert_eq!(edges[0].source_kind, "MergeRequest");
-        assert_eq!(edges[0].target_kind, "MergeRequestDiff");
+        assert!(edges[0].scope_preserving);
     }
 }
