@@ -24,6 +24,12 @@ impl From<orbit_utils::yaml::Error> for LoadError {
     }
 }
 
+impl From<regex::Error> for LoadError {
+    fn from(e: regex::Error) -> Self {
+        Self(format!("regex: {e}"))
+    }
+}
+
 /// Anything a pipeline run can fail with.
 #[derive(Debug)]
 pub enum Error {

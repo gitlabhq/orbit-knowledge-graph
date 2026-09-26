@@ -198,7 +198,6 @@ impl Tree {
         parent.append_value(child, &mut self.arena)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn replace(&mut self, target: NodeId, replacements: Vec<NodeId>) {
         let field = self.node(target).field;
         if target == self.root && replacements.len() != 1 {
@@ -220,7 +219,6 @@ impl Tree {
         target.remove_subtree(&mut self.arena);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn postorder(&self) -> Vec<NodeId> {
         self.root
             .reverse_traverse(&self.arena)
@@ -231,7 +229,6 @@ impl Tree {
             .collect()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn preorder(&self) -> Vec<NodeId> {
         self.root.descendants(&self.arena).collect()
     }
