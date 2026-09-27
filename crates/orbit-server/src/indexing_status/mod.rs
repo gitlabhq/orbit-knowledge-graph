@@ -2,6 +2,7 @@ mod checkpoints;
 mod domains;
 mod phase;
 mod projects;
+mod response;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use tracing::warn;
 pub use self::domains::{DomainStatus, EntityStatus};
 pub use self::phase::Phase;
 pub use self::projects::ProjectCoverage;
+pub use self::response::build_indexing_status_response;
 
 use self::checkpoints::PlanCheckpoints;
 use self::phase::combine_phases;

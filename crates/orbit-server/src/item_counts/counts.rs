@@ -9,6 +9,9 @@ use crate::status_query::{
     map_column_extraction_error,
 };
 
+// Counting is expensive, so repeated requests reuse the cached result instead of counting again.
+const COUNT_CACHE: QueryCache = QueryCache::Use { ttl_secs: 300 };
+
 pub async fn count_visible_entities(
     client: &ArrowClickHouseClient,
     entities: &[VisibleEntity],
@@ -19,20 +22,15 @@ pub async fn count_visible_entities(
         .map(|(index, entity)| build_entity_count_query(index, entity))
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
-    let batches =
-        fetch_status_query_batches(client, &sql, "entity counts", QueryCache::Use, |query| {
-            entities
-                .iter()
-                .enumerate()
-                .fold(query, |query, (index, entity)| {
-                    bind_prefix_parameters(
-                        query,
-                        &build_scope_parameter_name(index),
-                        &entity.scopes,
-                    )
-                })
-        })
-        .await?;
+    let batches = fetch_status_query_batches(client, &sql, "entity counts", COUNT_CACHE, |query| {
+        entities
+            .iter()
+            .enumerate()
+            .fold(query, |query, (index, entity)| {
+                bind_prefix_parameters(query, &build_scope_parameter_name(index), &entity.scopes)
+            })
+    })
+    .await?;
 
     let names = String::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
     let counts = i64::extract_column(&batches, 1).map_err(map_column_extraction_error)?;
