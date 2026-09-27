@@ -624,6 +624,64 @@ pub struct GraphStatusItem {
     #[prost(enumeration = "IndexingState", optional, tag = "3")]
     pub state: ::core::option::Option<i32>,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetIndexingStatusRequest {
+    /// 1 to 100 group or project paths (e.g. "1/2/")
+    #[prost(string, repeated, tag = "1")]
+    pub traversal_paths: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetIndexingStatusResponse {
+    /// request order
+    #[prost(message, repeated, tag = "1")]
+    pub statuses: ::prost::alloc::vec::Vec<NamespaceIndexingStatus>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NamespaceIndexingStatus {
+    #[prost(string, tag = "1")]
+    pub traversal_path: ::prost::alloc::string::String,
+    #[prost(enumeration = "IndexingPhase", tag = "2")]
+    pub phase: i32,
+    #[prost(message, repeated, tag = "3")]
+    pub domains: ::prost::alloc::vec::Vec<DomainIndexingStatus>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DomainIndexingStatus {
+    /// e.g. "source_code"
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(enumeration = "IndexingPhase", tag = "2")]
+    pub phase: i32,
+    /// source_code only
+    #[prost(message, optional, tag = "3")]
+    pub projects: ::core::option::Option<ProjectsStatus>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetItemCountsRequest {
+    /// 1 to 100 group or project paths; each entity counts once
+    #[prost(string, repeated, tag = "1")]
+    pub traversal_paths: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetItemCountsResponse {
+    /// only domains with an entity the caller can see
+    #[prost(message, repeated, tag = "1")]
+    pub domains: ::prost::alloc::vec::Vec<DomainItemCount>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DomainItemCount {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "2")]
+    pub entities: ::prost::alloc::vec::Vec<EntityItemCount>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EntityItemCount {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(int64, tag = "2")]
+    pub count: i64,
+}
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
 /// LLM returns compact text (GOON for queries, TOON for schema/health) optimized for token budgets.
@@ -831,6 +889,39 @@ impl IndexingState {
             "INDEXING_STATE_ERROR" => Some(Self::Error),
             "INDEXING_STATE_UNKNOWN" => Some(Self::Unknown),
             "INDEXING_STATE_INDEXING" => Some(Self::Indexing),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum IndexingPhase {
+    /// checkpoints not readable, or no top-level group in the path
+    Unknown = 0,
+    NotStarted = 1,
+    Syncing = 2,
+    Ready = 3,
+}
+impl IndexingPhase {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unknown => "INDEXING_PHASE_UNKNOWN",
+            Self::NotStarted => "INDEXING_PHASE_NOT_STARTED",
+            Self::Syncing => "INDEXING_PHASE_SYNCING",
+            Self::Ready => "INDEXING_PHASE_READY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "INDEXING_PHASE_UNKNOWN" => Some(Self::Unknown),
+            "INDEXING_PHASE_NOT_STARTED" => Some(Self::NotStarted),
+            "INDEXING_PHASE_SYNCING" => Some(Self::Syncing),
+            "INDEXING_PHASE_READY" => Some(Self::Ready),
             _ => None,
         }
     }
@@ -1250,6 +1341,56 @@ pub mod orbit_service_client {
                 .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetGraphStatus"));
             self.inner.unary(req, path, codec).await
         }
+        /// Returns the indexing phase of each namespace and of each domain in it.
+        pub async fn get_indexing_status(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetIndexingStatusRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetIndexingStatusResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/orbit.v1.OrbitService/GetIndexingStatus",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetIndexingStatus"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// Returns entity counts per domain that the caller can see under the paths.
+        pub async fn get_item_counts(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetItemCountsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetItemCountsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/orbit.v1.OrbitService/GetItemCounts",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetItemCounts"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -1382,6 +1523,22 @@ pub mod orbit_service_server {
             request: tonic::Request<super::GetGraphStatusRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetGraphStatusResponse>,
+            tonic::Status,
+        >;
+        /// Returns the indexing phase of each namespace and of each domain in it.
+        async fn get_indexing_status(
+            &self,
+            request: tonic::Request<super::GetIndexingStatusRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetIndexingStatusResponse>,
+            tonic::Status,
+        >;
+        /// Returns entity counts per domain that the caller can see under the paths.
+        async fn get_item_counts(
+            &self,
+            request: tonic::Request<super::GetItemCountsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetItemCountsResponse>,
             tonic::Status,
         >;
     }
@@ -1999,6 +2156,97 @@ pub mod orbit_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetGraphStatusSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/orbit.v1.OrbitService/GetIndexingStatus" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetIndexingStatusSvc<T: OrbitService>(pub Arc<T>);
+                    impl<
+                        T: OrbitService,
+                    > tonic::server::UnaryService<super::GetIndexingStatusRequest>
+                    for GetIndexingStatusSvc<T> {
+                        type Response = super::GetIndexingStatusResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetIndexingStatusRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrbitService>::get_indexing_status(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetIndexingStatusSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/orbit.v1.OrbitService/GetItemCounts" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetItemCountsSvc<T: OrbitService>(pub Arc<T>);
+                    impl<
+                        T: OrbitService,
+                    > tonic::server::UnaryService<super::GetItemCountsRequest>
+                    for GetItemCountsSvc<T> {
+                        type Response = super::GetItemCountsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetItemCountsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrbitService>::get_item_counts(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetItemCountsSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

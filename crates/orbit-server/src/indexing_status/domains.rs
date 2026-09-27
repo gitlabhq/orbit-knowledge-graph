@@ -7,6 +7,7 @@ use super::phase::{Phase, combine_phases};
 pub struct DomainStatus {
     pub name: String,
     pub phase: Phase,
+    pub has_code_nodes: bool,
     pub entities: Vec<EntityStatus>,
 }
 
@@ -49,6 +50,7 @@ pub fn get_domain_statuses(
             DomainStatus {
                 name: domain.name.clone(),
                 phase,
+                has_code_nodes,
                 entities,
             }
         })

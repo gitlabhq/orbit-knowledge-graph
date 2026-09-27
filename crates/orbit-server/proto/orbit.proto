@@ -84,6 +84,12 @@ service OrbitService {
   // Returns entity counts per domain, scoped by traversal_path prefix.
   // Used by admin dashboards to inspect graph coverage.
   rpc GetGraphStatus(GetGraphStatusRequest) returns (GetGraphStatusResponse);
+
+  // Returns the indexing phase of each namespace and of each domain in it.
+  rpc GetIndexingStatus(GetIndexingStatusRequest) returns (GetIndexingStatusResponse);
+
+  // Returns entity counts per domain that the caller can see under the paths.
+  rpc GetItemCounts(GetItemCountsRequest) returns (GetItemCountsResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -528,4 +534,57 @@ message GraphStatusItem {
   string name = 1;
   int64 count = 2;
   optional IndexingState state = 3;  // absent for entities with no per-entity signal
+}
+
+// ---------------------------------------------------------------------------
+// GetIndexingStatus — unary, indexing phase per namespace and domain
+// ---------------------------------------------------------------------------
+
+enum IndexingPhase {
+  INDEXING_PHASE_UNKNOWN = 0;  // checkpoints not readable, or no top-level group in the path
+  INDEXING_PHASE_NOT_STARTED = 1;
+  INDEXING_PHASE_SYNCING = 2;
+  INDEXING_PHASE_READY = 3;
+}
+
+message GetIndexingStatusRequest {
+  repeated string traversal_paths = 1;  // 1 to 100 group or project paths (e.g. "1/2/")
+}
+
+message GetIndexingStatusResponse {
+  repeated NamespaceIndexingStatus statuses = 1;  // request order
+}
+
+message NamespaceIndexingStatus {
+  string traversal_path = 1;
+  IndexingPhase phase = 2;
+  repeated DomainIndexingStatus domains = 3;
+}
+
+message DomainIndexingStatus {
+  string name = 1;  // e.g. "source_code"
+  IndexingPhase phase = 2;
+  optional ProjectsStatus projects = 3;  // source_code only
+}
+
+// ---------------------------------------------------------------------------
+// GetItemCounts — unary, entity counts per domain
+// ---------------------------------------------------------------------------
+
+message GetItemCountsRequest {
+  repeated string traversal_paths = 1;  // 1 to 100 group or project paths; each entity counts once
+}
+
+message GetItemCountsResponse {
+  repeated DomainItemCount domains = 1;  // only domains with an entity the caller can see
+}
+
+message DomainItemCount {
+  string name = 1;
+  repeated EntityItemCount entities = 2;
+}
+
+message EntityItemCount {
+  string name = 1;
+  int64 count = 2;
 }

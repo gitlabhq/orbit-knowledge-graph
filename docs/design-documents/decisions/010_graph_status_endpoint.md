@@ -13,6 +13,22 @@ Accepted
 
 2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the updates below)
 
+## Update: `GetIndexingStatus` and `GetItemCounts` (2026-09-27)
+
+Two RPCs expose the services directly, for the Rails status pages.
+
+- Both take 1 to 100 traversal paths: a top-level group, a subgroup or a project. The
+  caller must have access to each path, and an admin can ask for any path.
+- `GetIndexingStatus` returns one phase per path and per domain: unknown, not started,
+  syncing or ready. A project path reports the SDLC phases of its root, and the source
+  code domain carries the project coverage under the path.
+- `GetItemCounts` returns entity counts per domain that the caller can see. The counts
+  stay in the ClickHouse query cache for one hour. `GetGraphStatus` counts use the same
+  cache.
+- Rails owns the display text of each domain. The responses send the domain name only.
+- A next change adds gap rules, an error phase and gap counts. It only adds fields and
+  enum values.
+
 ## Update: state from checkpoints (2026-09-26)
 
 `GetGraphStatus` no longer reads the NATS KV progress store. It presents the output of two
