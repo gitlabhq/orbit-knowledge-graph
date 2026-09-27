@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 arrow = { workspace = true }
 either = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
 indextree = "4.9"
 itertools = "0.14"
 lasso = { version = "0.7", features = ["multi-threaded", "ahasher"] }
@@ -52,6 +53,7 @@ tree-sitter-zig = "1.1.2"
 tree-sitter-haskell = "0.23.1"
 tree-sitter-ocaml = "0.25.0"
 code-graph = { path = "../code-graph" }
+ontology = { path = "../ontology" }
 orbit-utils = { path = "../utils" }
 
 [dev-dependencies]
