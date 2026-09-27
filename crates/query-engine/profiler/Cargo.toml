@@ -23,6 +23,7 @@ pipeline = { path = "../pipeline" }
 shared = { path = "../shared" }
 types = { path = "../types" }
 ontology = { path = "../../ontology" }
+query-data-model = { path = "../../query-data-model" }
 clap = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

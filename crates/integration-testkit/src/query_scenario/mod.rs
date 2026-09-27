@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_model,
 };
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
@@ -19,7 +19,9 @@ use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
 use crate::visitor::{NodeExt, Requirement, ResponseView};
-use crate::{SeededColumnResolver, collect_subtest_results, load_ontology};
+use crate::{
+    SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
+};
 
 pub use format::{
     PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig,
@@ -177,9 +179,9 @@ async fn run_frontend(
     name: &str,
 ) {
     let label = &format!("{name} [{frontend_key}]");
-    let ontology = load_ontology();
+    let data_model = derive_clickhouse_data_model(&load_ontology());
 
-    let compiled = match compile(query, frontend, &ontology, security) {
+    let compiled = match compile_model(query, frontend, &data_model, security) {
         Ok(c) => {
             let expects_error = !matches!(
                 expect.compile_error,
@@ -244,13 +246,20 @@ async fn run_frontend(
     if !expect.pages.is_empty() {
         expect.validate_pages_exclusive(label);
         run_pages(
-            ctx, frontend, query, &ontology, security, redaction, expect, label,
+            ctx,
+            frontend,
+            query,
+            &data_model,
+            security,
+            redaction,
+            expect,
+            label,
         )
         .await;
         return;
     }
 
-    let resp = execute_pipeline(ctx, frontend, &compiled, &ontology, security, redaction).await;
+    let resp = execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
 
     if let Some(n) = expect.repeat_count {
         assert!(n >= 2, "{label}: repeat_count must be >= 2");
@@ -258,7 +267,7 @@ async fn run_frontend(
         let baseline_edges = canonical_edges(&resp);
         for run in 2..=n {
             let rerun =
-                execute_pipeline(ctx, frontend, &compiled, &ontology, security, redaction).await;
+                execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
             assert_eq!(
                 baseline_node_ids,
                 canonical_ids(&rerun),
@@ -296,7 +305,7 @@ async fn run_pages(
     ctx: &TestContext,
     frontend: Frontend,
     base_query: &str,
-    ontology: &Arc<ontology::Ontology>,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
@@ -315,11 +324,12 @@ async fn run_pages(
         let page_label = format!("{label} page {}", i + 1);
 
         let compiled = Arc::new(
-            compile(&query_str, frontend, ontology, security)
+            compile_model(&query_str, frontend, data_model, security)
                 .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
         );
 
-        let resp = execute_pipeline(ctx, frontend, &compiled, ontology, security, redaction).await;
+        let resp =
+            execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
         let response: query_engine::formatters::GraphResponse =
             serde_json::from_value(resp).expect("response should deserialize");
 
@@ -419,7 +429,7 @@ async fn execute_pipeline(
     ctx: &TestContext,
     frontend: Frontend,
     compiled: &Arc<CompiledQueryContext>,
-    ontology: &Arc<ontology::Ontology>,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> serde_json::Value {
@@ -437,13 +447,14 @@ async fn execute_pipeline(
     let client = Arc::new(ctx.create_client());
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
+    server_extensions.insert(Arc::clone(data_model));
     server_extensions.insert(resolver_registry);
 
     let mut pipeline_ctx = QueryPipelineContext {
         frontend,
         query_json: String::new(),
         compiled: Some(Arc::clone(compiled)),
-        ontology: Arc::clone(ontology),
+        ontology: Arc::clone(data_model.ontology()),
         security_context: Some(security.clone()),
         server_extensions,
         phases: TypeMap::default(),
@@ -1087,6 +1098,7 @@ fn canonical_edges(resp: &serde_json::Value) -> Vec<(String, i64, i64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use query_engine::compiler::compile;
 
     #[test]
     fn json_and_gql_keys_map_to_their_frontends() {

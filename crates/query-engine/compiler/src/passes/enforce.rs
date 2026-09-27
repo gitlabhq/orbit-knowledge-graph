@@ -226,12 +226,9 @@ pub fn enforce_role_scans(
         if alias_exists_in_from(&query.from, &input_node.id) {
             continue;
         }
-        let elevated = model.entity(entity).is_some_and(|entity| {
-            model
-                .redaction_id_column(entity.id)
-                .unwrap_or(DEFAULT_PRIMARY_KEY)
-                != DEFAULT_PRIMARY_KEY
-        });
+        let elevated = model
+            .entity_minimum_access_level(entity)
+            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
         if !elevated {
             continue;
         }

@@ -1,11 +1,11 @@
 pub(super) use std::collections::HashSet;
 pub(super) use std::sync::Arc;
 
-pub(super) use crate::common::compile;
 pub(super) use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, admin_security_context,
-    load_ontology, run_redaction, test_security_context,
+    derive_clickhouse_data_model, load_ontology, run_redaction, test_security_context,
 };
+pub(super) use crate::common::{compile, compile_model};
 pub(super) use integration_testkit::SeededColumnResolver;
 pub(super) use integration_testkit::load_seed;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
@@ -53,12 +53,13 @@ pub(super) async fn run_query_with_security(
     security_ctx: SecurityContext,
 ) -> ResponseView {
     let ontology = load_ontology();
+    let data_model = derive_clickhouse_data_model(&ontology);
     let client = Arc::new(ctx.create_client());
     let compiled = Arc::new(
-        compile(
+        compile_model(
             json,
             query_engine::compiler::Frontend::JsonDsl,
-            &ontology,
+            &data_model,
             &security_ctx,
         )
         .unwrap(),
@@ -74,6 +75,7 @@ pub(super) async fn run_query_with_security(
 
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
+    server_extensions.insert(data_model);
     server_extensions.insert(resolver_registry);
     let mut pipeline_ctx = QueryPipelineContext {
         frontend: query_engine::compiler::Frontend::JsonDsl,

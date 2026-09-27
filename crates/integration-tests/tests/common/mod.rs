@@ -2,13 +2,15 @@
 
 use ontology::Ontology;
 use orbit_server::redaction::QueryResult;
-pub use query_engine::compiler::compile;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext,
 };
+pub use query_engine::compiler::{compile, compile_model};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
-pub use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
+pub use integration_testkit::{
+    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, derive_clickhouse_data_model, load_ontology,
+};
 
 pub fn test_security_context() -> SecurityContext {
     SecurityContext::new(1, vec!["1/".into()]).expect("valid security context")

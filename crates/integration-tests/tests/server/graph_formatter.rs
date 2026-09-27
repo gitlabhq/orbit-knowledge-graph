@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::common::compile;
+use crate::common::compile_model;
 use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, admin_security_context,
-    load_ontology, run_redaction, test_security_context,
+    derive_clickhouse_data_model, load_ontology, run_redaction, test_security_context,
 };
 use integration_testkit::{run_subtests, run_subtests_shared, t};
 use orbit_server::pipeline::HydrationStage;
@@ -192,12 +192,13 @@ async fn run_pipeline_with_security(
     security_ctx: SecurityContext,
 ) -> Value {
     let ontology = load_ontology();
+    let data_model = derive_clickhouse_data_model(&ontology);
     let client = Arc::new(ctx.create_client());
     let compiled = Arc::new(
-        compile(
+        compile_model(
             json,
             query_engine::compiler::Frontend::JsonDsl,
-            &ontology,
+            &data_model,
             &security_ctx,
         )
         .unwrap(),
@@ -209,6 +210,7 @@ async fn run_pipeline_with_security(
 
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
+    server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
         frontend: query_engine::compiler::Frontend::JsonDsl,
         query_json: String::new(),
