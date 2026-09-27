@@ -170,7 +170,6 @@ mod tests {
             mock_nats.clone(),
             Arc::new(MockLockService::new()) as Arc<dyn LockService>,
             ProgressNotifier::noop(),
-            Arc::new(crate::indexing_status::IndexingStatusStore::new(mock_nats)),
         )
     }
 

@@ -386,14 +386,7 @@ pub fn handler_context() -> HandlerContext {
 
 pub fn handler_context_with_lock_service(lock_service: Arc<MockLockService>) -> HandlerContext {
     let mock_nats = Arc::new(MockNatsServices::new());
-    HandlerContext::new(
-        mock_nats.clone(),
-        lock_service,
-        ProgressNotifier::noop(),
-        Arc::new(indexer::indexing_status::IndexingStatusStore::new(
-            mock_nats,
-        )),
-    )
+    HandlerContext::new(mock_nats.clone(), lock_service, ProgressNotifier::noop())
 }
 
 pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {

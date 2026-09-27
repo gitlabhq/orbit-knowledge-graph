@@ -29,7 +29,6 @@ use thiserror::Error;
 
 use super::types::{Envelope, Subscription};
 use crate::{
-    indexing_status::IndexingStatusStore,
     locking::LockService,
     nats::{NatsServices, ProgressNotifier},
 };
@@ -114,8 +113,6 @@ pub struct HandlerContext {
     pub lock_service: Arc<dyn LockService>,
     /// Signals in-progress processing to prevent NATS message redelivery.
     pub progress: ProgressNotifier,
-    /// Records indexing run progress to NATS KV for `GetGraphStatus`.
-    pub indexing_status: Arc<IndexingStatusStore>,
 }
 
 impl HandlerContext {
@@ -123,13 +120,11 @@ impl HandlerContext {
         nats: Arc<dyn NatsServices>,
         lock_service: Arc<dyn LockService>,
         progress: ProgressNotifier,
-        indexing_status: Arc<IndexingStatusStore>,
     ) -> Self {
         HandlerContext {
             nats,
             lock_service,
             progress,
-            indexing_status,
         }
     }
 }
