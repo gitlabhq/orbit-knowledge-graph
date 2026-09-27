@@ -11,7 +11,28 @@ Accepted
 
 ## Date
 
-2026-04-21 (state semantics updated 2026-08-10, see "Update: honest indexing state")
+2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the updates below)
+
+## Update: state from checkpoints (2026-09-26)
+
+`GetGraphStatus` no longer reads the NATS KV progress store. It presents the output of two
+server services, which the next RPCs (`GetIndexingStatus`, `GetItemCounts`) will also use.
+Both take many scopes in one call.
+
+- `indexing_status` reads the checkpoint tables of the served schema version. A plan is
+  ready when its `ns.<root>.<plan>` row has `indexed_at`. The read takes the newest
+  `indexed_at` since the last tombstone, not the `FINAL` row. A background merge keeps
+  only the newest row, so a late page write from an overlapping run can hide a completion
+  after a merge. The plan then reads as syncing until that run completes. A row without `indexed_at` is syncing, and no
+  row is not started. A domain folds the plans that feed it (node, edge and derived
+  plans) and, for code entities, the project coverage. The scope folds its domains.
+- `item_counts` counts each entity only under the requested scopes where the caller holds
+  the entity's required role.
+- The checkpoint and coverage reads skip the ClickHouse query cache, so a phase change is
+  visible on the next call. Item counts keep the cache.
+- `indexing.state` comes from the scope phase, `sdlc_indexing` from the plans, and
+  `code_indexing` from project coverage: ready → `indexed`, syncing → `backfilling`, not
+  started → `not_indexed`. `IndexingStatus` fields 2 to 7 are no longer set.
 
 ## Update: honest indexing state (2026-08-10)
 
