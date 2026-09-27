@@ -8,11 +8,16 @@ use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
 use super::{
-    Context, Error, ItemPhase, Lazy, Listed, Parsed, Phase, SourceFile, Sources, State, Workset,
+    Canonical, Context, DirtyGraph, Error, ItemPhase, Lazy, LinkedFile, Listed, Parsed, Phase,
+    Resolved, Rewritten, SourceFile, Sources, State, Workset,
 };
 use crate::env::Env;
-use crate::inventory::FileReason;
+use crate::file_tree::ProjectTree;
+use crate::inventory::{FileFault, FileReason};
+use crate::linker;
+use crate::pattern;
 use crate::sentinel::{Killed, Sentinel};
+use crate::tree::Tree;
 use crate::treesitter::{self, SupportLang};
 
 pub struct Prepare;
@@ -37,7 +42,8 @@ impl Phase<Sources> for Prepare {
 }
 
 /// Parse entries of this pipeline's languages become the lazy workset, read
-/// from `root` when a worker takes them; every other file is listed now.
+/// from `root` when a worker takes them. Everything else is listed now:
+/// manifests for the resolver, and every file as a `File` row.
 fn workset(
     env: &Env,
     state: State,
@@ -46,6 +52,11 @@ fn workset(
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
     let pipeline = env.lang_id.pipeline();
+    let manifest_names = &env.rules.config.resolve.parse_files;
+    let is_manifest = |path: &str| {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        manifest_names.iter().any(|pf| pf.name == name)
+    };
     let mut listed = Listed::default();
     let mut candidates = Vec::new();
     for entry in entries {
@@ -61,10 +72,21 @@ fn workset(
             candidates.push(path);
             continue;
         }
+        let manifest = decision == Decision::Load && is_manifest(&path);
+        let content = manifest
+            .then(|| std::fs::read_to_string(root.join(&path)).ok())
+            .flatten();
         let reason = match (decision, label.skip) {
             (Decision::ListOnly, Some(skip)) => FileReason::Filter(skip),
+            _ if manifest && content.is_none() => FileReason::Fault(FileFault::FileRead),
             _ => FileReason::None,
         };
+        if let Some(content) = content {
+            listed.manifests.push(SourceFile {
+                path: path.clone(),
+                content,
+            });
+        }
         listed.files.push((path, size, reason));
     }
     let items = candidates.into_iter().filter_map(move |path| {
@@ -158,5 +180,198 @@ impl ItemPhase<SourceFile> for Parse {
     fn run(&self, env: &Env, _run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
         let grammar = SupportLang::from_path(&file.path).unwrap_or(env.lang_id);
         treesitter::parse(&file.content, grammar, &env.lang, &file.path).map(Parsed)
+    }
+}
+
+/// The language's rewrite stages, under the per-file rewrite budget.
+pub struct Rewrite;
+
+impl ItemPhase<Parsed> for Rewrite {
+    type Output = Rewritten;
+
+    fn name(&self) -> Cow<'static, str> {
+        "rewrite".into()
+    }
+
+    fn run(
+        &self,
+        env: &Env,
+        run: &Sentinel,
+        Parsed(mut tree): Parsed,
+    ) -> Result<Rewritten, Killed> {
+        let budget = Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms);
+        for stage in &env.rules.rewrite_stages {
+            pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
+        }
+        Ok(Rewritten(tree))
+    }
+}
+
+/// Drops every non-canonical node and the source text; what is left is what
+/// the linker reads and the snapshot stores.
+pub struct Canonicalize;
+
+impl ItemPhase<Rewritten> for Canonicalize {
+    type Output = Canonical;
+
+    fn name(&self) -> Cow<'static, str> {
+        "canonicalize".into()
+    }
+
+    fn run(
+        &self,
+        _env: &Env,
+        _run: &Sentinel,
+        Rewritten(mut tree): Rewritten,
+    ) -> Result<Canonical, Killed> {
+        tree.prune();
+        tree.compact();
+        tree.source = std::sync::Arc::from("");
+        Ok(Canonical(tree))
+    }
+}
+
+pub struct Link;
+
+impl ItemPhase<Canonical> for Link {
+    type Output = LinkedFile;
+
+    fn name(&self) -> Cow<'static, str> {
+        "link".into()
+    }
+
+    fn run(
+        &self,
+        env: &Env,
+        run: &Sentinel,
+        Canonical(tree): Canonical,
+    ) -> Result<LinkedFile, Killed> {
+        let edges = linker::link(&tree, env, run)?;
+        Ok(LinkedFile { tree, edges })
+    }
+}
+
+/// Puts the linked files on the graph, plus everything the inventory listed:
+/// manifests for the resolver, and a `File` row for every unparsed file with
+/// the reason, including candidates that were killed or could not be read.
+pub struct Insert;
+
+impl Phase<Workset<Vec<LinkedFile>>> for Insert {
+    type Output = DirtyGraph;
+
+    fn name(&self) -> Cow<'static, str> {
+        "insert".into()
+    }
+
+    fn run(
+        self,
+        context: &mut Context,
+        input: Workset<Vec<LinkedFile>>,
+    ) -> Result<DirtyGraph, Error> {
+        let Workset {
+            mut state,
+            items,
+            mut dirty,
+            listed,
+        } = input;
+        for file in items {
+            let fi = state.trees.len();
+            dirty.insert(fi);
+            state.trees.push(file.tree);
+            state.edges.extend(file.edges.into_iter().map(|mut e| {
+                e.from_tree = fi as u32;
+                e.to_tree = fi as u32;
+                e
+            }));
+        }
+        let Listed {
+            manifests,
+            files,
+            mut candidates,
+        } = listed;
+        for manifest in manifests {
+            state.configs.retain(|c| c.path != manifest.path);
+            state.configs.push(manifest);
+        }
+        let lang = &context.env.lang;
+        for (path, size, reason) in files {
+            state
+                .trees
+                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
+        }
+        for tree in &state.trees {
+            candidates.remove(&tree.label);
+        }
+        for killed in &context.report.skipped {
+            if let Some(size) = candidates.remove(&killed.path) {
+                let reason = crate::inventory::timeout(killed.label);
+                state.trees.push(Tree::unparsed(
+                    lang,
+                    &killed.path,
+                    size,
+                    &reason.to_string(),
+                ));
+            }
+        }
+        for (path, size) in candidates {
+            let reason = FileReason::Fault(FileFault::FileRead);
+            state
+                .trees
+                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
+        }
+        Ok(DirtyGraph { state, dirty })
+    }
+}
+
+/// Cross-file resolution over the dirty files. A file that overruns its
+/// resolve budget keeps its intra-file edges and is reported. Manifest files
+/// join the project tree so the resolver can read module roots from them.
+pub struct Resolve;
+
+impl Phase<DirtyGraph> for Resolve {
+    type Output = Resolved;
+
+    fn name(&self) -> Cow<'static, str> {
+        "resolve".into()
+    }
+
+    fn run(self, context: &mut Context, input: DirtyGraph) -> Result<Resolved, Error> {
+        let DirtyGraph { mut state, dirty } = input;
+        let env = context.env;
+        let paths: Vec<&str> = state
+            .trees
+            .iter()
+            .map(|t| t.label.as_str())
+            .chain(state.configs.iter().map(|f| f.path.as_str()))
+            .collect();
+        let walk = ProjectTree::build(
+            &env.lang,
+            &env.rules.config.resolve,
+            &env.rules.resolve_stages,
+            &paths,
+            Some(&state.configs),
+        );
+        let result = state.resolver.resolve(
+            &state.trees,
+            &state.edges,
+            &env.lang,
+            &dirty,
+            env.lang_id,
+            &walk.prefixes,
+            &env.rules.config.resolve,
+            &walk.aliases,
+            env,
+            &context.run,
+        )?;
+        for rsp in &result.resolved_source_paths {
+            let nid = state.trees[rsp.fi].to_id(rsp.node);
+            state.trees[rsp.fi].node_mut(nid).sym = rsp.sym;
+        }
+        state.edges.extend(result.cross_edges);
+        context.run.check()?;
+        for k in result.killed {
+            context.skip(k);
+        }
+        Ok(Resolved { state })
     }
 }

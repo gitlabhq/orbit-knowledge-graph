@@ -44,7 +44,6 @@ pub type Lazy<T> = Box<dyn Iterator<Item = T> + Send>;
 /// What the inventory held besides parseable code: manifests for the
 /// resolver, every other file with the reason it was not parsed, and each
 /// parse candidate's size so a killed or unreadable one still gets a row.
-#[allow(dead_code)]
 #[derive(Default)]
 pub struct Listed {
     pub(super) manifests: Vec<SourceFile>,

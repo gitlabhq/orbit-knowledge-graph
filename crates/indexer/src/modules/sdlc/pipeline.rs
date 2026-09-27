@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
-use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use serde_json::Value;
@@ -13,7 +12,7 @@ use tracing::{debug, info, warn};
 
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
-use crate::observer::{IndexingMode, IndexingObserver};
+use crate::observer::IndexingObserver;
 use crate::retry::{Backoff, LocalRetry, Step, drive_with};
 
 use super::datalake::{DatalakeQuery, FetchedPage, ScanStats, is_arrow_string_overflow};
@@ -21,8 +20,8 @@ use super::metrics::SdlcMetrics;
 use super::paging::{block_size_for, next_page_limit};
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
-use crate::checkpoint::{Checkpoint, CheckpointStore};
-use crate::durability::RunDurability;
+use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds};
+use crate::durability::{RunDurability, WriteDurability};
 use orbit_server_config::DatalakeRetryConfig;
 use orbit_utils::arrow::batch_slice_bytes;
 
@@ -137,11 +136,11 @@ impl Pipeline {
         plan: &Plan,
         mut base_query: PreparedQuery,
         position_key: &str,
+        mut checkpoint: Checkpoint,
         window: WindowBounds,
-        durability: RunDurability,
     ) -> Result<PipelineStats, HandlerError> {
         let started_at = Instant::now();
-        let checkpoint = self.load_checkpoint(position_key).await;
+        let durability = RunDurability::for_mode(window.indexing_mode());
         let mut cursor = Cursor::from_checkpoint(&checkpoint);
 
         if !cursor.is_first_page() {
@@ -272,7 +271,8 @@ impl Pipeline {
                 );
             }
 
-            self.save_batch_progress(position_key, window, &cursor, &context.progress)
+            checkpoint.record_page(window.target, window.floor, cursor.values().to_vec());
+            self.save_batch_progress(position_key, &checkpoint, &context.progress)
                 .await?;
 
             let Some(next) = next_page else {
@@ -282,8 +282,9 @@ impl Pipeline {
             page = next;
         }
 
+        checkpoint.complete(window.target);
         self.checkpoint_store
-            .save_completed(position_key, &window.target, durability.completion)
+            .save(position_key, &checkpoint, durability.completion)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -435,64 +436,17 @@ impl Pipeline {
     async fn save_batch_progress(
         &self,
         position_key: &str,
-        window: WindowBounds,
-        cursor: &Cursor,
+        checkpoint: &Checkpoint,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         self.checkpoint_store
-            .save_progress(
-                position_key,
-                &Checkpoint {
-                    watermark: window.target,
-                    cursor_values: cursor.to_checkpoint_values(),
-                    resume_floor: window.floor,
-                },
-            )
+            .save(position_key, checkpoint, WriteDurability::FireAndForget)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!("failed to save cursor for {position_key}: {err}"))
             })?;
         progress.notify_in_progress().await;
         Ok(())
-    }
-
-    async fn load_checkpoint(&self, position_key: &str) -> Checkpoint {
-        match self.checkpoint_store.load(position_key).await {
-            Ok(Some(checkpoint)) => checkpoint,
-            Ok(None) => Checkpoint {
-                watermark: DateTime::<Utc>::UNIX_EPOCH,
-                cursor_values: None,
-                resume_floor: None,
-            },
-            Err(err) => {
-                warn!(
-                    position_key,
-                    %err,
-                    "failed to load checkpoint, starting from epoch"
-                );
-                Checkpoint {
-                    watermark: DateTime::<Utc>::UNIX_EPOCH,
-                    cursor_values: None,
-                    resume_floor: None,
-                }
-            }
-        }
-    }
-}
-
-/// `floor` is `None` for a backfill (start of time); it is persisted so a resume rebuilds the window.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::modules::sdlc) struct WindowBounds {
-    pub target: DateTime<Utc>,
-    pub floor: Option<DateTime<Utc>>,
-}
-
-impl WindowBounds {
-    pub fn indexing_mode(&self) -> IndexingMode {
-        match self.floor {
-            Some(_) => IndexingMode::Incremental,
-            None => IndexingMode::Full,
-        }
     }
 }
 
@@ -501,7 +455,6 @@ mod tests {
     use super::super::plan::{TransformSpec, Transformation};
     use super::*;
     use crate::checkpoint::CheckpointError;
-    use crate::durability::WriteDurability;
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::partitioning::PartitionAssignment;
     use crate::modules::sdlc::test_helpers::test_metrics;
@@ -510,6 +463,7 @@ mod tests {
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
     use orbit_server_config::AppConfig;
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -656,14 +610,14 @@ mod tests {
 
     struct RecordingCheckpointStore {
         state: Mutex<Option<Checkpoint>>,
-        progress_history: Mutex<Vec<Checkpoint>>,
+        saves: Mutex<Vec<Checkpoint>>,
     }
 
     impl RecordingCheckpointStore {
         fn new() -> Self {
             Self {
                 state: Mutex::new(None),
-                progress_history: Mutex::new(Vec::new()),
+                saves: Mutex::new(Vec::new()),
             }
         }
 
@@ -672,7 +626,13 @@ mod tests {
         }
 
         fn progress_history(&self) -> Vec<Checkpoint> {
-            self.progress_history.lock().unwrap().clone()
+            self.saves
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|checkpoint| checkpoint.is_paging())
+                .cloned()
+                .collect()
         }
     }
 
@@ -682,30 +642,14 @@ mod tests {
             Ok(self.state.lock().unwrap().clone())
         }
 
-        async fn save_progress(
+        async fn save(
             &self,
             _key: &str,
             checkpoint: &Checkpoint,
-        ) -> Result<(), CheckpointError> {
-            self.progress_history
-                .lock()
-                .unwrap()
-                .push(checkpoint.clone());
-            *self.state.lock().unwrap() = Some(checkpoint.clone());
-            Ok(())
-        }
-
-        async fn save_completed(
-            &self,
-            _key: &str,
-            watermark: &DateTime<Utc>,
             _durability: WriteDurability,
         ) -> Result<(), CheckpointError> {
-            *self.state.lock().unwrap() = Some(Checkpoint {
-                watermark: *watermark,
-                cursor_values: None,
-                resume_floor: None,
-            });
+            self.saves.lock().unwrap().push(checkpoint.clone());
+            *self.state.lock().unwrap() = Some(checkpoint.clone());
             Ok(())
         }
 
@@ -741,8 +685,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
         assert!(result.is_ok());
@@ -768,8 +712,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -778,18 +722,60 @@ mod tests {
         let history = store.progress_history();
         assert_eq!(history.len(), 2, "should checkpoint after each batch");
         assert_eq!(
-            history[0].cursor_values.as_deref(),
-            Some(vec!["10".to_string()].as_slice()),
+            history[0].resume_cursor(),
+            ["10"],
             "first checkpoint should record cursor from batch 1 (last id=10)"
         );
         assert_eq!(
-            history[1].cursor_values.as_deref(),
-            Some(vec!["5".to_string()].as_slice()),
+            history[1].resume_cursor(),
+            ["5"],
             "second checkpoint should record cursor from batch 2 (last id=5)"
         );
 
         let final_state = store.current_state().unwrap();
-        assert!(final_state.cursor_values.is_none(), "should be completed");
+        assert!(final_state.is_completed(), "should be completed");
+    }
+
+    #[tokio::test]
+    async fn page_writes_keep_the_attempt_count_and_completion_resets_it() {
+        let mut checkpoint = Checkpoint::new(test_watermark());
+        for _ in 0..3 {
+            checkpoint.start_attempt();
+        }
+        let store = Arc::new(RecordingCheckpointStore::new());
+        let plan = simple_plan_with_batch_size("Test", 10);
+        let pipeline = Pipeline::new(
+            Arc::new(MultiBatchDatalake {
+                call_count: Mutex::new(0),
+                batch_size: 10,
+            }),
+            store.clone(),
+            test_metrics(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
+        );
+
+        pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                checkpoint,
+                test_window(),
+            )
+            .await
+            .unwrap();
+
+        let pages = store.progress_history();
+        assert_eq!(pages.len(), 2);
+        assert!(
+            pages
+                .iter()
+                .all(|page| page.attempts == 3 && page.indexed_at.is_none())
+        );
+        let completed = store.current_state().unwrap();
+        assert_eq!(completed.attempts, 0);
+        assert!(completed.indexed_at.is_some());
     }
 
     // Comparing `has_more` against the plan's budget rather than the query's share ends
@@ -832,8 +818,8 @@ mod tests {
                 &plan,
                 query,
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Full),
             )
             .await
             .expect("partitioned run should succeed");
@@ -861,8 +847,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -935,8 +921,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -973,8 +959,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -1012,8 +998,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1092,8 +1078,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1110,18 +1096,12 @@ mod tests {
 
     #[tokio::test]
     async fn resumes_from_stored_cursor() {
-        let store = Arc::new(RecordingCheckpointStore {
-            state: Mutex::new(Some(Checkpoint {
-                watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
-                cursor_values: Some(vec!["5".to_string()]),
-                resume_floor: None,
-            })),
-            progress_history: Mutex::new(Vec::new()),
-        });
+        let mut stored = Checkpoint::new(test_watermark());
+        stored.record_page(test_watermark(), None, vec!["5".to_string()]);
 
         let pipeline = Pipeline::new(
             Arc::new(EmptyDatalake),
-            store,
+            Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
         );
@@ -1133,8 +1113,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                stored,
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1213,8 +1193,8 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
+                Checkpoint::new(test_watermark()),
                 test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await
             .expect("run should succeed");
