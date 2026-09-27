@@ -23,7 +23,7 @@ Two RPCs expose the services directly, for the Rails status pages.
   syncing or ready. A project path reports the SDLC phases of its root, and the source
   code domain carries the project coverage under the path.
 - `GetItemCounts` returns entity counts per domain that the caller can see. The counts
-  stay in the ClickHouse query cache for one hour. `GetGraphStatus` counts use the same
+  stay in the ClickHouse query cache for five minutes. `GetGraphStatus` counts use the same
   cache.
 - Rails owns the display text of each domain. The responses send the domain name only.
 - A next change adds gap rules, an error phase and gap counts. It only adds fields and

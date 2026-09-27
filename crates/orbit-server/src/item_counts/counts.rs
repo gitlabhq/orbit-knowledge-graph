@@ -9,8 +9,8 @@ use crate::status_query::{
     map_column_extraction_error,
 };
 
-// One count can read tens of GiB, and the UI shows counts as updated hourly.
-const COUNT_CACHE: QueryCache = QueryCache::Use { ttl_secs: 3600 };
+// One count can read tens of GiB.
+const COUNT_CACHE: QueryCache = QueryCache::Use { ttl_secs: 300 };
 
 pub async fn count_visible_entities(
     client: &ArrowClickHouseClient,
