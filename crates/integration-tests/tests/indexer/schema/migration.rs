@@ -865,6 +865,7 @@ async fn alternating_promotions_keep_exactly_one_active_during_reads() {
 
 const SEED_VERSION: &str = "2024-01-01 00:00:00.000000";
 const REINDEX_VERSION: &str = "2024-06-01 00:00:00.000000";
+const LATER_RUN_VERSION: &str = "2024-07-01 00:00:00.000000";
 
 fn sdlc(entities: &[&str]) -> MigrationScope {
     MigrationScope::Sdlc(entities.iter().map(|s| s.to_string()).collect())
@@ -1013,6 +1014,26 @@ impl MigrationScenario {
             .execute(&format!(
                 "INSERT INTO {table} (key, watermark, cursor_values, _version) \
                  VALUES ('{key}', '{SEED_VERSION}', '{cursor}', '{SEED_VERSION}')"
+            ))
+            .await;
+    }
+
+    async fn write_later_run_page(&self, key: &str, indexed_at: &str) {
+        let table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, indexed_at, _version) \
+                 VALUES ('{key}', '{LATER_RUN_VERSION}', '{{\"c\":[\"1/100/\",\"5\"]}}', {indexed_at}, '{LATER_RUN_VERSION}')"
+            ))
+            .await;
+    }
+
+    async fn tombstone_checkpoint(&self, key: &str, version: &str) {
+        let table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, _version, _deleted) \
+                 VALUES ('{key}', '{version}', '', '{version}', true)"
             ))
             .await;
     }
@@ -1370,7 +1391,7 @@ async fn gate_requires_every_enabled_namespace_to_complete() {
     scenario.complete_reindex("ns.100.Note").await;
     assert!(
         scenario.gate(sdlc(&["Note"]), &[100]).await.ready,
-        "the newer completed row must replace the in-progress cursor under FINAL"
+        "a completed row must count over an older in-progress cursor"
     );
 
     let one_of_two = scenario.gate(sdlc(&["Note"]), &[100, 200]).await;
@@ -1382,6 +1403,38 @@ async fn gate_requires_every_enabled_namespace_to_complete() {
 
     scenario.complete_reindex("ns.200.Note").await;
     assert!(scenario.gate(sdlc(&["Note"]), &[100, 200]).await.ready);
+}
+
+#[tokio::test]
+async fn gate_keeps_a_completed_plan_ready_while_a_later_run_pages() {
+    let scenario = MigrationScenario::at_new_version().await;
+    scenario.complete_reindex("ns.100.Note").await;
+    scenario.complete_reindex("ns.200.Note").await;
+
+    scenario
+        .write_later_run_page("ns.100.Note", &format!("'{REINDEX_VERSION}'"))
+        .await;
+    scenario.write_later_run_page("ns.200.Note", "NULL").await;
+
+    assert!(
+        scenario.gate(sdlc(&["Note"]), &[100, 200]).await.ready,
+        "an incremental page or an overlapping run's late page must not hide a completion"
+    );
+}
+
+#[tokio::test]
+async fn gate_ignores_a_completion_from_before_a_tombstone() {
+    let scenario = MigrationScenario::at_new_version().await;
+    scenario.complete_reindex("ns.100.Note").await;
+    scenario
+        .tombstone_checkpoint("ns.100.Note", "2024-06-15 00:00:00.000000")
+        .await;
+    scenario.write_later_run_page("ns.100.Note", "NULL").await;
+
+    assert!(
+        !scenario.gate(sdlc(&["Note"]), &[100]).await.ready,
+        "a completion before the tombstone belongs to the deleted checkpoint"
+    );
 }
 
 #[tokio::test]
