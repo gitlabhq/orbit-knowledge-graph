@@ -7,15 +7,19 @@ use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
+use arrow::record_batch::RecordBatch;
+use ontology::Ontology;
+
 use super::{
-    Canonical, Context, DirtyGraph, Error, ItemPhase, Lazy, LinkedFile, Listed, Parsed, Phase,
-    Resolved, Rewritten, SourceFile, Sources, State, Workset,
+    Canonical, Context, DirtyGraph, Displayed, Error, Exported, ItemPhase, Lazy, LinkedFile,
+    Listed, Parsed, Phase, Resolved, Rewritten, SourceFile, Sources, State, Workset,
 };
 use crate::env::Env;
+use crate::export::{self, Envelope};
 use crate::file_tree::ProjectTree;
 use crate::inventory::{FileFault, FileReason};
 use crate::linker;
-use crate::pattern;
+use crate::pattern::{self, EdgeCtx};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::Tree;
 use crate::treesitter::{self, SupportLang};
@@ -373,5 +377,86 @@ impl Phase<DirtyGraph> for Resolve {
             context.skip(k);
         }
         Ok(Resolved { state })
+    }
+}
+
+/// The language's display rules: the tags export reads (`fqn`, `def_type`, ...).
+pub struct Display;
+
+impl Phase<Resolved> for Display {
+    type Output = Displayed;
+
+    fn name(&self) -> Cow<'static, str> {
+        "display".into()
+    }
+
+    fn run(
+        self,
+        context: &mut Context,
+        Resolved { mut state }: Resolved,
+    ) -> Result<Displayed, Error> {
+        let env = context.env;
+        for (fi, tree) in state.trees.iter_mut().enumerate() {
+            let ctx = EdgeCtx {
+                tree_index: fi as u32,
+                edges: &state.edges,
+            };
+            let _ = pattern::apply_rewrites_with_edges(
+                tree,
+                &env.lang,
+                &env.rules.display_rules,
+                true,
+                &ctx,
+                &[],
+            );
+        }
+        Ok(Displayed { state })
+    }
+}
+
+/// The graph as the ontology's local tables, following `config/export.yaml`.
+pub struct Export<'a> {
+    pub ontology: &'a Ontology,
+    pub envelope: Envelope<'a>,
+}
+
+impl Phase<Displayed> for Export<'_> {
+    type Output = Exported;
+
+    fn name(&self) -> Cow<'static, str> {
+        "export".into()
+    }
+
+    fn run(self, context: &mut Context, Displayed { state }: Displayed) -> Result<Exported, Error> {
+        let tables = export::export(&state, &context.env.lang, self.ontology, &self.envelope)?;
+        Ok(Exported { state, tables })
+    }
+}
+
+/// Hands each exported table to `sink` as the graph leaves the pipeline:
+/// DuckDB, ClickHouse, a channel. The graph stays for the next step.
+pub struct Emit<F>(pub F);
+
+impl<F, E> Phase<Exported> for Emit<F>
+where
+    F: FnMut(&str, RecordBatch) -> Result<(), E>,
+    E: std::fmt::Display,
+{
+    type Output = Displayed;
+
+    fn name(&self) -> Cow<'static, str> {
+        "emit".into()
+    }
+
+    fn run(mut self, _context: &mut Context, input: Exported) -> Result<Displayed, Error> {
+        let Exported { state, tables } = input;
+        for (table, batch) in tables {
+            (self.0)(&table, batch).map_err(|e| {
+                Error::Export(arrow::error::ArrowError::ExternalError(
+                    e.to_string().into(),
+                ))
+            })?;
+        }
+        Ok(Displayed { state })
     }
 }
