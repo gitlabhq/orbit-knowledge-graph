@@ -103,8 +103,8 @@ graph LR
 
 | Component | Description |
 |---|---|
-| `code-graph` crate | Single crate containing the v2 pipeline stack in `src/v2/`, the preserved legacy parser/linker stack in `src/legacy/`, and shared code-indexing utilities |
-| `treesitter-visit` crate | Tree-sitter wrapper crate kept separate for compile-time isolation and shared by the legacy and generic v2 language pipelines |
+| `code-graph` crate | Single crate containing the v2 pipeline stack in `src/v2/` and shared code-indexing utilities |
+| `treesitter-visit` crate | Tree-sitter wrapper crate kept separate for compile-time isolation and used by the generic v2 language pipelines |
 | `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
 | `orbit-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
@@ -202,7 +202,7 @@ The reason and byte volume of skipped entries are exposed via the `gkg.indexer.c
 
 ##### Parser architecture
 
-The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` and the preserved legacy stack under `src/legacy/`. Across those paths, code indexing currently uses several parser and analysis backends:
+The `code-graph` crate contains the v2 pipeline stack under `src/v2/`. Code indexing uses several parser and analysis backends:
 
 - **JavaScript and TypeScript** in the v2 custom JS pipeline use OXC for parsing and semantic analysis. The same pipeline uses parser-side SSA for local value flow and member-call resolution. It treats JSX/TSX component opening elements as call sites while ignoring intrinsic tags. It uses `oxc_resolver` for cross-file module resolution. It honors `tsconfig.json` and `jsconfig.json` path mappings. It statically evaluates explicit webpack alias modules and their local `require()` dependencies. It skips minified files. It keeps ESM `import` resolution separate from CommonJS `require()` resolution, so package export conditions are evaluated in the correct mode.
 - **Vue** sources are handled by extracting script blocks into virtual JavaScript or TypeScript sources and routing them through the same OXC-based JS pipeline.
@@ -210,7 +210,6 @@ The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` a
 - **Webpack alias evaluation** is deliberately partial and bounded. It only evaluates explicit local config modules. It enforces file-count, byte, statement, and recursion budgets. It treats `process.env` as an empty object. It allows filesystem probes such as `fs.existsSync()` only for repo-contained paths that remain under the checkout root after normalization.
 - **Rust** uses a rust-analyzer-backed custom v2 pipeline with a shell-free synthetic repo-local Cargo workspace model. The loader stays inside the checked-out tree. It attaches a pinned embedded Rust `1.95.0` sysroot project plus baked server-side cfg/target data. It disables proc macros and build-script execution. It layers parser-time SSA over rust-analyzer for local callable flow. That flow covers aliases, rebindings, destructuring, tuple/record field slots, and branch joins. rust-analyzer resolves callable semantics for functions, methods, macros, operators, `?`, and `await`. rust-analyzer keeps its type values in process-global interners that only an explicit sweep frees. So a Rust job holds a process-wide read lock while it owns a rust-analyzer database. The job that finishes with no other Rust job in that phase runs the sweep. If enough Rust jobs pass without one, the next job waits a bounded time for exclusive access before it starts. It then proceeds either way.
 - **Python, Kotlin, Java, C#, Go, Ruby, C, C++, PHP, Bash, Elixir, Swift, Lua, HCL, and YAML** use tree-sitter grammars. The declarative DSL in `crates/code-graph/src/v2/langs/generic/` drives them. Contributors adding a new language should follow [`docs/dev/adding-a-language.md`](../../dev/adding-a-language.md). Lua indexes top-level, local, and global `function` declarations as `Function` or `Method` definitions. It extracts `require()` calls as runtime imports. `setmetatable`-based OOP is out of scope for v1.
-- **Legacy JavaScript and TypeScript** parsing still exists under `src/legacy/` and continues to use SWC while the v2 JS pipeline work is integrated.
 
 Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`. The TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`. The Rust pipeline owns `.rs`. Swift owns `.swift`. Lua owns `.lua`. Ruby, JavaScript/TypeScript, Python, Kotlin, Java, PHP, Elixir, Swift, and Lua support full reference extraction. PHP resolves `$this`/`self`/`parent`/`static` member and static calls, trait/interface inheritance via `Extends`, and `use` imports. Swift resolves `self`/`super` member calls. Lua resolves dot and colon method calls with receiver tracking. Rust emits `CALLS` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only. Bash/Shell supports function definitions and `source`/`.` sourced-script imports only; cross-file call resolution, variable bindings, and aliases are out of scope. Swift v1 indexes classes, structs, enums, protocols, functions, constructors, and enum entries; extension-scope reattachment is a planned follow-up. YAML (`.yml`, `.yaml`) indexes anchors and aliases everywhere. Mapping keys become definitions and imports only where a document-type config under `crates/code-graph/src/v2/langs/generic/yaml/document_types/` claims them. Those config types are GitLab CI, ArgoCD, Helm charts and values, and Docker Compose. Unclaimed YAML and files above the YAML size gate keep their `File` node only. No cross-file resolution is performed.
 
@@ -431,8 +430,8 @@ tool. Here are the main architectural differences in the current service:
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
 | Authorization | None (local tool) | Rails gRPC delegation |
-| Parser crate | External `parser-core` dependency | In-tree `code-graph` crate, `src/legacy/parser/` (forked and evolved) |
-| Graph builder | External `indexer` crate | In-tree `code-graph/src/legacy/linker/` |
+| Parser crate | External `parser-core` dependency | In-tree `code-graph` crate, `src/v2/` |
+| Graph builder | External `indexer` crate | In-tree `code-graph/src/v2/linker/` |
 | Concurrency | Streaming model (Rayon + semaphore) | Same streaming model (preserved) |
 
 ### Indexing the active branches
