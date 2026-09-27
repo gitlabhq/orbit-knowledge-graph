@@ -9,7 +9,7 @@ use crate::status_query::{
     map_column_extraction_error,
 };
 
-// A call scans every visible entity table under the paths; in production one read up to 27 GiB.
+// Counting is expensive, so repeated requests reuse the cached result instead of counting again.
 const COUNT_CACHE: QueryCache = QueryCache::Use { ttl_secs: 300 };
 
 pub async fn count_visible_entities(
