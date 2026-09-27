@@ -9,6 +9,7 @@ use crate::etl::EtlScope;
 pub struct PipelineDescriptor {
     pub name: String,
     pub scope: EtlScope,
+    pub entity: String,
     pub reindex_targets: BTreeSet<String>,
 }
 
@@ -50,6 +51,7 @@ impl Ontology {
         PipelineDescriptor {
             name,
             scope,
+            entity: entity.to_string(),
             reindex_targets,
         }
     }

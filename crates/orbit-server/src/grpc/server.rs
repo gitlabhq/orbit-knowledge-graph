@@ -74,14 +74,6 @@ impl GrpcServer {
         self
     }
 
-    pub fn with_indexing_status(
-        mut self,
-        store: indexer::indexing_status::IndexingStatusStore,
-    ) -> Self {
-        self.service = self.service.with_indexing_status(store);
-        self
-    }
-
     pub async fn run(self, listener: TcpListener) -> Result<(), tonic::transport::Error> {
         let tls_enabled = self.tls_config.is_some();
         info!(tls = tls_enabled, "Starting gRPC server");
