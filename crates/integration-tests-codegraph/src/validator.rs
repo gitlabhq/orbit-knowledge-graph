@@ -14,13 +14,13 @@ use super::assertions::{
 };
 
 #[derive(Debug)]
-pub(crate) struct Failure {
+pub struct Failure {
     pub test: String,
     pub severity: Severity,
     pub message: String,
 }
 
-pub(crate) fn run_suite(
+pub fn run_suite(
     suite: &TestSuite,
     client: &DuckDbClient,
     ontology: &Arc<Ontology>,

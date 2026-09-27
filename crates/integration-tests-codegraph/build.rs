@@ -1,5 +1,17 @@
 fn main() {
-    let root = format!("{}/fixtures", std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    generate("fixtures", "generated_suites.rs", "run_yaml_suite");
+    generate(
+        "fixtures_incremental",
+        "generated_incremental_suites.rs",
+        "run_incremental_suite",
+    );
+}
+
+fn generate(fixtures: &str, out_file: &str, runner: &str) {
+    let root = format!(
+        "{}/{fixtures}",
+        std::env::var("CARGO_MANIFEST_DIR").unwrap()
+    );
     let mut tests = Vec::new();
     find_yaml(&root, &root, &mut tests);
     tests.sort();
@@ -17,16 +29,16 @@ fn main() {
     let code: String = tests
         .iter()
         .map(|(name, path)| {
-            format!("#[test]\nfn {name}() {{ run_yaml_suite(include_str!(\"{path}\")); }}\n")
+            format!("#[test]\nfn {name}() {{ {runner}(include_str!(\"{path}\")); }}\n")
         })
         .collect();
 
     std::fs::write(
-        format!("{}/generated_suites.rs", std::env::var("OUT_DIR").unwrap()),
+        format!("{}/{out_file}", std::env::var("OUT_DIR").unwrap()),
         code,
     )
     .unwrap();
-    println!("cargo::rerun-if-changed=fixtures");
+    println!("cargo::rerun-if-changed={fixtures}");
 }
 
 fn find_yaml(root: &str, dir: &str, out: &mut Vec<(String, String)>) {

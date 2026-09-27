@@ -4139,6 +4139,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "code-graph",
+ "code-graph-incremental",
  "compiler",
  "crossbeam-channel",
  "duckdb-client",

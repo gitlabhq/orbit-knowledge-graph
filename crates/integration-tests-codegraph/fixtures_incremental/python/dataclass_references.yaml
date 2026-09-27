@@ -1,0 +1,27 @@
+name: "Python: dataclass field references"
+fixtures:
+  - path: main.py
+    content: |
+      from dataclasses import dataclass
+
+      @dataclass
+      class User:
+          email: str
+
+      @dataclass
+      class Audit:
+          email: str
+
+      def greet(u: User):
+          print(u.email)
+
+tests:
+  - name: "typed dataclass attribute access resolves to the field definition"
+    query: |
+      MATCH (caller:Definition)-[r:CALLS|DEFINES|EXTENDS]->(field:Definition)
+      WHERE caller.fqn = 'main.greet'
+        AND field.name = 'email'
+      RETURN field.fqn AS field
+    assert:
+      - { row_count: 1 }
+      - { row: { field: "main.User.email" } }

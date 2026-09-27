@@ -17,7 +17,7 @@ use super::validator::run_suite;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
-fn create_test_db() -> anyhow::Result<DuckDbClient> {
+pub fn create_test_db() -> anyhow::Result<DuckDbClient> {
     let client =
         DuckDbClient::open(Path::new(":memory:")).context("failed to open in-memory DuckDB")?;
     client

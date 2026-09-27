@@ -1,0 +1,119 @@
+//! The same YAML suites, indexed by `code-graph-incremental` instead of
+//! `code-graph`: fixtures on disk, production's walk, the full pipeline
+//! into a fresh DuckDB, then the suite's queries.
+
+use std::path::Path;
+use std::sync::Arc;
+
+use code_graph_incremental::pipeline::{Display, Emit, Export};
+use code_graph_incremental::treesitter::SupportLang;
+use code_graph_incremental::{Context, Env, Envelope, Scalar, inventory, templates};
+use ontology::Ontology;
+
+use super::assertions::{FixtureFile, Severity, TestSuite};
+use super::runner::create_test_db;
+use super::validator::run_suite;
+
+fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
+    if let Some(lang) = suite.pipeline.as_deref().and_then(SupportLang::from_alias) {
+        return lang;
+    }
+    let langs: std::collections::HashSet<_> = paths
+        .iter()
+        .filter_map(|path| SupportLang::from_path(path))
+        .collect();
+    match langs.len() {
+        1 => *langs.iter().next().unwrap(),
+        _ => panic!("suite mixes languages {langs:?}; declare `pipeline:`"),
+    }
+}
+
+fn write_files(files: &[FixtureFile], root: &Path) -> Vec<String> {
+    files
+        .iter()
+        .map(|f| {
+            let dst = root.join(&f.path);
+            std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+            std::fs::write(&dst, &f.content).unwrap();
+            f.path.clone()
+        })
+        .collect()
+}
+
+pub fn run_incremental_suite(yaml: &str) {
+    let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
+    assert!(
+        suite.fixture_dir.is_none(),
+        "suite {:?}: fixture_dir is not supported by the incremental runner",
+        suite.name
+    );
+    if suite.tests.iter().all(|t| t.skip) {
+        eprintln!(
+            "[PASS] Suite: {} ({} tests, all skipped)",
+            suite.name,
+            suite.tests.len()
+        );
+        return;
+    }
+
+    let repo = tempfile::tempdir().expect("temp repository");
+    let paths = write_files(&suite.fixtures, repo.path());
+    let lang_id = detect_lang(&suite, &paths);
+    let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
+    let env = Env::for_lang(lang_id).expect("rules compile");
+    let envelope = Envelope::new([
+        ("project_id", Scalar::Int(1)),
+        ("branch", Scalar::Str("main")),
+        ("commit_sha", Scalar::Str("test")),
+    ]);
+
+    let inventory = inventory::walk(repo.path())
+        .expect("walk fixtures")
+        .to_vec();
+    let graph = templates::index(Context::new(&env), repo.path(), inventory)
+        .expect("suite exceeded the total budget");
+    let skipped = &graph.context().report.skipped;
+    assert!(
+        skipped.is_empty(),
+        "files exceeded their budget: {skipped:?}"
+    );
+
+    let db = create_test_db().expect("in-memory DuckDB");
+    graph
+        .then(Display)
+        .expect("display rules compile")
+        .then(Export {
+            ontology: &ontology,
+            envelope,
+        })
+        .expect("export")
+        .then(Emit(|table: &str, batch| db.insert_batch(table, &batch)))
+        .expect("insert into DuckDB");
+
+    let failures = run_suite(&suite, &db, &ontology);
+    let skipped = suite.tests.iter().filter(|t| t.skip).count();
+    let failed = failures.len();
+    let passed = suite
+        .tests
+        .len()
+        .saturating_sub(skipped)
+        .saturating_sub(failed);
+    eprintln!("---");
+    eprintln!("suite: {:?}", suite.name);
+    eprintln!("tests: {}", suite.tests.len());
+    eprintln!("passed: {passed}");
+    eprintln!("failed: {failed}");
+    eprintln!("skipped: {skipped}");
+    for f in &failures {
+        eprintln!("  - test: {:?}", f.test);
+        eprintln!("    severity: {}", f.severity);
+        eprintln!("    message: {:?}", f.message);
+    }
+    if failures.iter().any(|f| f.severity == Severity::Error) {
+        panic!(
+            "suite {:?}: {failed}/{} tests failed",
+            suite.name,
+            suite.tests.len()
+        );
+    }
+}
