@@ -5,7 +5,7 @@ use tonic::Status;
 
 use super::visibility::VisibleEntity;
 use crate::status_query::{
-    bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
+    QueryCache, bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
     map_column_extraction_error,
 };
 
@@ -19,15 +19,20 @@ pub async fn count_visible_entities(
         .map(|(index, entity)| build_entity_count_query(index, entity))
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
-    let batches = fetch_status_query_batches(client, &sql, "entity counts", |query| {
-        entities
-            .iter()
-            .enumerate()
-            .fold(query, |query, (index, entity)| {
-                bind_prefix_parameters(query, &build_scope_parameter_name(index), &entity.scopes)
-            })
-    })
-    .await?;
+    let batches =
+        fetch_status_query_batches(client, &sql, "entity counts", QueryCache::Use, |query| {
+            entities
+                .iter()
+                .enumerate()
+                .fold(query, |query, (index, entity)| {
+                    bind_prefix_parameters(
+                        query,
+                        &build_scope_parameter_name(index),
+                        &entity.scopes,
+                    )
+                })
+        })
+        .await?;
 
     let names = String::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
     let counts = i64::extract_column(&batches, 1).map_err(map_column_extraction_error)?;

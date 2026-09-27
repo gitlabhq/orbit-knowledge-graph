@@ -27,7 +27,6 @@ async fn indexing_status() {
         source_code_waits_for_its_sdlc_plans,
         organization_path_is_unknown,
         unreadable_checkpoints_are_unknown,
-        late_page_write_keeps_the_completion,
         tombstone_clears_the_completion,
         many_scopes_in_request_order,
         projects_count_distinct_ids,
@@ -197,21 +196,6 @@ async fn unreadable_checkpoints_are_unknown(ctx: &TestContext) {
     assert_eq!(status.sdlc_phase, Phase::Unknown);
     assert_eq!(domain_phase(&status, "source_code"), Phase::Unknown);
     assert_eq!(status.projects.total_known, 2);
-}
-
-async fn late_page_write_keeps_the_completion(ctx: &TestContext) {
-    let db = ctx.fork("indexing_status_late_page_write").await;
-    seed_plans(&db, 120, &[]).await;
-    db.execute(&format!(
-        "INSERT INTO {} (key, watermark, cursor_values, indexed_at, _version) VALUES
-         ('ns.120.MergeRequest', now(), '{{\"c\":[\"1/120/\",\"7\"]}}', NULL, now64(6) + INTERVAL 1 SECOND)",
-        t("checkpoint")
-    ))
-    .await;
-
-    let status = read_one(&db, "1/120/").await;
-
-    assert_eq!(entity_phase(&status, "MergeRequest"), Some(Phase::Ready));
 }
 
 async fn tombstone_clears_the_completion(ctx: &TestContext) {

@@ -7,7 +7,7 @@ use tonic::Status;
 
 use super::phase::Phase;
 use crate::status_query::{
-    bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
+    QueryCache, bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
     map_column_extraction_error,
 };
 
@@ -41,9 +41,13 @@ pub async fn read_project_coverage(
 ) -> Result<HashMap<String, ProjectCoverage>, Status> {
     let sql = build_project_coverage_query(ontology, scopes.len())?;
     let scopes: Vec<&str> = scopes.iter().map(TraversalPath::as_str).collect();
-    let batches = fetch_status_query_batches(client, &sql, "project coverage", |query| {
-        bind_prefix_parameters(query.param("scopes", &scopes), "scope", &scopes)
-    })
+    let batches = fetch_status_query_batches(
+        client,
+        &sql,
+        "project coverage",
+        QueryCache::Skip,
+        |query| bind_prefix_parameters(query.param("scopes", &scopes), "scope", &scopes),
+    )
     .await?;
 
     let scopes = String::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
