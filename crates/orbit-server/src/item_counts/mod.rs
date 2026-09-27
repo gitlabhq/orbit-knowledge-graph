@@ -1,4 +1,5 @@
 mod counts;
+mod response;
 mod visibility;
 
 use std::collections::HashMap;
@@ -9,6 +10,8 @@ use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::SecurityContext;
 use tracing::warn;
+
+pub use self::response::build_item_counts_response;
 
 pub struct ItemCountService {
     client: Arc<ArrowClickHouseClient>,

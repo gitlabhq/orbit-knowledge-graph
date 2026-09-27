@@ -11,10 +11,7 @@ pub fn build_structured_status(
     counts: &HashMap<String, i64>,
 ) -> StructuredGraphStatus {
     StructuredGraphStatus {
-        projects: Some(ProjectsStatus {
-            indexed: status.projects.indexed,
-            total_known: status.projects.total_known,
-        }),
+        projects: Some(ProjectsStatus::from(status.projects)),
         domains: status
             .domains
             .iter()

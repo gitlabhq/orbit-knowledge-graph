@@ -21,6 +21,8 @@ use crate::analytics::AnalyticsTracker;
 use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
+use crate::indexing_status::{IndexingStatusService, build_indexing_status_response};
+use crate::item_counts::{ItemCountService, build_item_counts_response};
 use crate::pipeline::{
     QueryPipelineService, QueryServiceOutput, RawQuery, receive_query_request,
     send_invalid_request_error, send_query_error,
@@ -28,16 +30,18 @@ use crate::pipeline::{
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
-    GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
-    GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse, GetSkillRequest,
-    GetSkillResponse, InvokeAgentCommandRequest, InvokeAgentCommandResponse,
-    ListAgentCommandsRequest, ListAgentCommandsResponse, ListNamedQueriesRequest,
-    ListNamedQueriesResponse, ListSkillsRequest, ListSkillsResponse, ListToolsRequest,
-    ListToolsResponse, NamedQueryDefinition, QueryLanguage, QueryMetadata, QueryType,
-    ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
-    SchemaNodeStyle, SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary, StructuredSchema,
-    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
-    get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
+    GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse,
+    GetIndexingStatusRequest, GetIndexingStatusResponse, GetItemCountsRequest,
+    GetItemCountsResponse, GetQueryDslRequest, GetQueryDslResponse, GetResponseFormatRequest,
+    GetResponseFormatResponse, GetSkillRequest, GetSkillResponse, InvokeAgentCommandRequest,
+    InvokeAgentCommandResponse, ListAgentCommandsRequest, ListAgentCommandsResponse,
+    ListNamedQueriesRequest, ListNamedQueriesResponse, ListSkillsRequest, ListSkillsResponse,
+    ListToolsRequest, ListToolsResponse, NamedQueryDefinition, QueryLanguage, QueryMetadata,
+    QueryType, ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
+    SchemaNode, SchemaNodeStyle, SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary,
+    StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
+    invoke_agent_command_response,
 };
 use crate::skills::{get_skill, list_skills};
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
@@ -129,6 +133,8 @@ pub struct OrbitServiceImpl {
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
     graph_status: GraphStatusService,
+    indexing_status: IndexingStatusService,
+    item_counts: ItemCountService,
     stream_timeout_secs: u64,
     quota: Arc<QuotaService>,
 }
@@ -145,7 +151,9 @@ impl OrbitServiceImpl {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::default();
         let pipeline = QueryPipelineService::new(Arc::clone(&client), analytics_config);
-        let graph_status = GraphStatusService::new(client);
+        let graph_status = GraphStatusService::new(Arc::clone(&client));
+        let indexing_status = IndexingStatusService::new(Arc::clone(&client));
+        let item_counts = ItemCountService::new(client);
         Self {
             validator,
             active_schema,
@@ -153,6 +161,8 @@ impl OrbitServiceImpl {
             pipeline,
             cluster_health,
             graph_status,
+            indexing_status,
+            item_counts,
             stream_timeout_secs,
             quota: Arc::new(QuotaService::disabled()),
         }
@@ -704,6 +714,56 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             .await?;
         Ok(Response::new(response))
     }
+
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
+    )]
+    async fn get_indexing_status(
+        &self,
+        request: Request<GetIndexingStatusRequest>,
+    ) -> Result<Response<GetIndexingStatusResponse>, Status> {
+        let ctx = extract_request_context(&request, &self.validator)?;
+        ctx.record_in_current_span();
+        let paths = parse_authorized_paths(&ctx.claims, &request.get_ref().traversal_paths)?;
+
+        info!(
+            path_count = paths.len(),
+            "Fetching indexing status for user"
+        );
+        let schema = self.active_schema.snapshot()?;
+        let statuses = self
+            .indexing_status
+            .read_scope_statuses(&schema, &paths)
+            .await;
+        Ok(Response::new(build_indexing_status_response(&statuses)))
+    }
+
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
+    )]
+    async fn get_item_counts(
+        &self,
+        request: Request<GetItemCountsRequest>,
+    ) -> Result<Response<GetItemCountsResponse>, Status> {
+        let ctx = extract_request_context(&request, &self.validator)?;
+        ctx.record_in_current_span();
+        let paths = parse_authorized_paths(&ctx.claims, &request.get_ref().traversal_paths)?;
+        let security_context = build_security_context(&ctx.claims)
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
+        info!(path_count = paths.len(), "Fetching item counts for user");
+        let schema = self.active_schema.snapshot()?;
+        let counts = self
+            .item_counts
+            .count_items(&schema.ontology, &security_context, &paths)
+            .await;
+        Ok(Response::new(build_item_counts_response(
+            &schema.ontology,
+            &counts,
+        )))
+    }
 }
 
 impl OrbitServiceImpl {
@@ -868,6 +928,26 @@ fn named_query_definitions(
         .collect()
 }
 
+const MAX_STATUS_PATHS: usize = 100;
+
+fn parse_authorized_paths(claims: &Claims, paths: &[String]) -> Result<Vec<TraversalPath>, Status> {
+    if paths.is_empty() || paths.len() > MAX_STATUS_PATHS {
+        return Err(Status::invalid_argument(format!(
+            "traversal_paths must hold 1 to {MAX_STATUS_PATHS} paths"
+        )));
+    }
+
+    paths
+        .iter()
+        .map(|path| {
+            let path = TraversalPath::new_unchecked(path.clone());
+            path.validate().map_err(Status::invalid_argument)?;
+            authorize_traversal_path(claims, &path)?;
+            Ok(path)
+        })
+        .collect()
+}
+
 fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> Result<(), Status> {
     if claims.admin {
         return Ok(());
@@ -894,6 +974,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 mod tests {
     mod commands;
     mod skills;
+    mod status;
 
     use super::*;
     use crate::proto::orbit_service_server::OrbitService;

@@ -37,6 +37,8 @@ const (
 	OrbitService_GetResponseFormat_FullMethodName  = "/orbit.v1.OrbitService/GetResponseFormat"
 	OrbitService_GetClusterHealth_FullMethodName   = "/orbit.v1.OrbitService/GetClusterHealth"
 	OrbitService_GetGraphStatus_FullMethodName     = "/orbit.v1.OrbitService/GetGraphStatus"
+	OrbitService_GetIndexingStatus_FullMethodName  = "/orbit.v1.OrbitService/GetIndexingStatus"
+	OrbitService_GetItemCounts_FullMethodName      = "/orbit.v1.OrbitService/GetItemCounts"
 )
 
 // OrbitServiceClient is the client API for OrbitService service.
@@ -90,6 +92,10 @@ type OrbitServiceClient interface {
 	// Returns entity counts per domain, scoped by traversal_path prefix.
 	// Used by admin dashboards to inspect graph coverage.
 	GetGraphStatus(ctx context.Context, in *GetGraphStatusRequest, opts ...grpc.CallOption) (*GetGraphStatusResponse, error)
+	// Returns the indexing phase of each namespace and of each domain in it.
+	GetIndexingStatus(ctx context.Context, in *GetIndexingStatusRequest, opts ...grpc.CallOption) (*GetIndexingStatusResponse, error)
+	// Returns entity counts per domain that the caller can see under the paths.
+	GetItemCounts(ctx context.Context, in *GetItemCountsRequest, opts ...grpc.CallOption) (*GetItemCountsResponse, error)
 }
 
 type orbitServiceClient struct {
@@ -223,6 +229,26 @@ func (c *orbitServiceClient) GetGraphStatus(ctx context.Context, in *GetGraphSta
 	return out, nil
 }
 
+func (c *orbitServiceClient) GetIndexingStatus(ctx context.Context, in *GetIndexingStatusRequest, opts ...grpc.CallOption) (*GetIndexingStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetIndexingStatusResponse)
+	err := c.cc.Invoke(ctx, OrbitService_GetIndexingStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orbitServiceClient) GetItemCounts(ctx context.Context, in *GetItemCountsRequest, opts ...grpc.CallOption) (*GetItemCountsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetItemCountsResponse)
+	err := c.cc.Invoke(ctx, OrbitService_GetItemCounts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrbitServiceServer is the server API for OrbitService service.
 // All implementations must embed UnimplementedOrbitServiceServer
 // for forward compatibility.
@@ -274,6 +300,10 @@ type OrbitServiceServer interface {
 	// Returns entity counts per domain, scoped by traversal_path prefix.
 	// Used by admin dashboards to inspect graph coverage.
 	GetGraphStatus(context.Context, *GetGraphStatusRequest) (*GetGraphStatusResponse, error)
+	// Returns the indexing phase of each namespace and of each domain in it.
+	GetIndexingStatus(context.Context, *GetIndexingStatusRequest) (*GetIndexingStatusResponse, error)
+	// Returns entity counts per domain that the caller can see under the paths.
+	GetItemCounts(context.Context, *GetItemCountsRequest) (*GetItemCountsResponse, error)
 	mustEmbedUnimplementedOrbitServiceServer()
 }
 
@@ -319,6 +349,12 @@ func (UnimplementedOrbitServiceServer) GetClusterHealth(context.Context, *GetClu
 }
 func (UnimplementedOrbitServiceServer) GetGraphStatus(context.Context, *GetGraphStatusRequest) (*GetGraphStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetGraphStatus not implemented")
+}
+func (UnimplementedOrbitServiceServer) GetIndexingStatus(context.Context, *GetIndexingStatusRequest) (*GetIndexingStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetIndexingStatus not implemented")
+}
+func (UnimplementedOrbitServiceServer) GetItemCounts(context.Context, *GetItemCountsRequest) (*GetItemCountsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetItemCounts not implemented")
 }
 func (UnimplementedOrbitServiceServer) mustEmbedUnimplementedOrbitServiceServer() {}
 func (UnimplementedOrbitServiceServer) testEmbeddedByValue()                      {}
@@ -546,6 +582,42 @@ func _OrbitService_GetGraphStatus_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrbitService_GetIndexingStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetIndexingStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrbitServiceServer).GetIndexingStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrbitService_GetIndexingStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrbitServiceServer).GetIndexingStatus(ctx, req.(*GetIndexingStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrbitService_GetItemCounts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetItemCountsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrbitServiceServer).GetItemCounts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrbitService_GetItemCounts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrbitServiceServer).GetItemCounts(ctx, req.(*GetItemCountsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrbitService_ServiceDesc is the grpc.ServiceDesc for OrbitService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -596,6 +668,14 @@ var OrbitService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetGraphStatus",
 			Handler:    _OrbitService_GetGraphStatus_Handler,
+		},
+		{
+			MethodName: "GetIndexingStatus",
+			Handler:    _OrbitService_GetIndexingStatus_Handler,
+		},
+		{
+			MethodName: "GetItemCounts",
+			Handler:    _OrbitService_GetItemCounts_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

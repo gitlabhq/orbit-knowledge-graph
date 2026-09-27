@@ -7,7 +7,7 @@ use tracing::debug;
 
 #[derive(Clone, Copy)]
 pub(crate) enum QueryCache {
-    Use,
+    Use { ttl_secs: u32 },
     Skip,
 }
 
@@ -58,9 +58,17 @@ pub(crate) fn map_column_extraction_error(error: impl std::fmt::Display) -> Stat
 }
 
 fn append_query_settings(sql: &str, cache: QueryCache) -> Result<String, String> {
-    let config = QueryConfig {
-        use_query_cache: Some(matches!(cache, QueryCache::Use)),
-        ..orbit_server_config::query::default_config()
+    let defaults = orbit_server_config::query::default_config();
+    let config = match cache {
+        QueryCache::Use { ttl_secs } => QueryConfig {
+            use_query_cache: Some(true),
+            query_cache_ttl: Some(ttl_secs),
+            ..defaults
+        },
+        QueryCache::Skip => QueryConfig {
+            use_query_cache: Some(false),
+            ..defaults
+        },
     };
     let settings = config.to_clickhouse_settings()?;
     if settings.is_empty() {
