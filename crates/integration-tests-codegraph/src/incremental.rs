@@ -14,8 +14,9 @@ use super::runner::create_test_db;
 use super::validator::{load_suite, report, run_suite, write_fixtures};
 
 fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
-    if let Some(lang) = suite.pipeline.as_deref().and_then(SupportLang::from_alias) {
-        return lang;
+    if let Some(pipeline) = suite.pipeline.as_deref() {
+        return SupportLang::from_alias(pipeline)
+            .unwrap_or_else(|| panic!("suite {:?}: unknown pipeline {pipeline:?}", suite.name));
     }
     let langs: std::collections::HashSet<_> = paths
         .iter()

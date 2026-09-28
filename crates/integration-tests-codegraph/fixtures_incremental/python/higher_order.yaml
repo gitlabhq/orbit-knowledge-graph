@@ -48,7 +48,6 @@ tests:
       - { row_count: 2 }
       - { row: { caller: "main.caller", callee: "main.make_adder" } }
       - { row: { caller: "main.caller", callee: "main.make_adder.adder" } }
-      - { row: { caller: "main.caller", callee: "main.make_adder" } }
 
   - name: Callable class has __call__
     query: |
