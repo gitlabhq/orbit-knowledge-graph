@@ -59,3 +59,4 @@ orbit-utils = { path = "../utils" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+zstd = "0.13"

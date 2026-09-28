@@ -254,6 +254,10 @@ struct FullSnapshot {
     configs: Vec<(String, String)>,
 }
 
+/// Bump when any snapshot struct changes shape; an older file then fails
+/// with a clear message instead of a decode error.
+const SNAPSHOT_VERSION: u32 = 1;
+
 impl State {
     pub fn save(&self, env: &Env, path: &Path) -> io::Result<()> {
         let snap = FullSnapshot {
@@ -270,6 +274,7 @@ impl State {
         let bytes = rkyv::to_bytes::<rkyv::rancor::BoxedError>(&snap).map_err(io::Error::other)?;
         // zstd level 3: about 4x smaller for less time than serialising.
         let mut enc = zstd::Encoder::new(std::fs::File::create(path)?, 3)?;
+        enc.write_all(&SNAPSHOT_VERSION.to_le_bytes())?;
         enc.write_all(&bytes)?;
         enc.finish()?;
         Ok(())
@@ -278,8 +283,22 @@ impl State {
     pub fn load(path: &Path, lang_id: SupportLang) -> io::Result<(Env, Self)> {
         let mut bytes = Vec::new();
         zstd::Decoder::new(std::fs::File::open(path)?)?.read_to_end(&mut bytes)?;
-        let snap: FullSnapshot = rkyv::from_bytes::<FullSnapshot, rkyv::rancor::BoxedError>(&bytes)
-            .map_err(io::Error::other)?;
+        let (header, payload) = bytes.split_at_checked(4).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "snapshot is too short to carry a version",
+            )
+        })?;
+        let version = u32::from_le_bytes(header.try_into().expect("four bytes"));
+        if version != SNAPSHOT_VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("snapshot format v{version}; this build reads v{SNAPSHOT_VERSION}"),
+            ));
+        }
+        let snap: FullSnapshot =
+            rkyv::from_bytes::<FullSnapshot, rkyv::rancor::BoxedError>(payload)
+                .map_err(io::Error::other)?;
         let limits = Limits::load().map_err(io::Error::other)?;
         let env =
             Env::with_lang(lang_id, Lang::from(snap.lang), limits).map_err(io::Error::other)?;

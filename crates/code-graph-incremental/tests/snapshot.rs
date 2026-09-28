@@ -143,3 +143,22 @@ fn removed_files_leave_the_graph_and_dependents_are_revisited() {
             .all(|e| e.from_fi() == 0 && e.to_fi() == 0)
     );
 }
+
+#[test]
+fn a_snapshot_from_another_format_version_is_refused_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let snapshot = dir.path().join("graph.bin");
+    let mut file = zstd::Encoder::new(std::fs::File::create(&snapshot).unwrap(), 3).unwrap();
+    std::io::Write::write_all(&mut file, &99u32.to_le_bytes()).unwrap();
+    std::io::Write::write_all(&mut file, b"whatever came after").unwrap();
+    file.finish().unwrap();
+
+    let Err(error) = State::load(&snapshot, SupportLang::Python) else {
+        panic!("a v99 snapshot loaded");
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "snapshot format v99; this build reads v1"
+    );
+}
