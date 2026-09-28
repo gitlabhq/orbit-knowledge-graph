@@ -54,11 +54,6 @@ impl GrpcServer {
         self
     }
 
-    pub fn with_datalake(mut self, datalake_config: &ClickHouseConfiguration) -> Self {
-        self.service = self.service.with_datalake(datalake_config);
-        self
-    }
-
     pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
         self.service = self.service.with_cache_broker(broker);
         self

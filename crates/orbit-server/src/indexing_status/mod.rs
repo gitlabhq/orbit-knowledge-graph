@@ -1,6 +1,5 @@
 mod checkpoints;
 mod domains;
-mod enabled;
 mod phase;
 mod projects;
 mod response;
@@ -37,20 +36,11 @@ pub struct ScopeStatus {
 
 pub struct IndexingStatusService {
     client: Arc<ArrowClickHouseClient>,
-    datalake: Option<Arc<ArrowClickHouseClient>>,
 }
 
 impl IndexingStatusService {
     pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self {
-            client,
-            datalake: None,
-        }
-    }
-
-    pub fn with_datalake(mut self, datalake: Arc<ArrowClickHouseClient>) -> Self {
-        self.datalake = Some(datalake);
-        self
+        Self { client }
     }
 
     pub async fn read_scope_statuses(
@@ -69,10 +59,9 @@ impl IndexingStatusService {
         roots.sort_unstable();
         roots.dedup();
 
-        let (checkpoints, coverage, enabled_at) = tokio::join!(
+        let (checkpoints, coverage) = tokio::join!(
             checkpoints::read_plan_checkpoints(&self.client, schema, &roots),
             projects::read_project_coverage(&self.client, &schema.ontology, scopes),
-            self.read_enabled_at(&roots),
         );
         let checkpoints = checkpoints
             .inspect_err(|error| warn!(%error, "Indexing status could not read plan checkpoints"))
@@ -98,21 +87,10 @@ impl IndexingStatusService {
                     scope,
                     checkpoints.as_ref(),
                     coverage.as_ref(),
-                    &enabled_at,
                     now,
                 )
             })
             .collect()
-    }
-
-    async fn read_enabled_at(&self, roots: &[i64]) -> HashMap<i64, DateTime<Utc>> {
-        let Some(datalake) = &self.datalake else {
-            return HashMap::new();
-        };
-        enabled::read_enabled_at(datalake, roots)
-            .await
-            .inspect_err(|error| warn!(%error, "Indexing status could not read enabled namespaces"))
-            .unwrap_or_default()
     }
 }
 
@@ -122,16 +100,16 @@ fn build_scope_status(
     scope: &TraversalPath,
     checkpoints: Option<&HashMap<i64, PlanCheckpoints>>,
     coverage: Option<&HashMap<String, ProjectCoverage>>,
-    enabled_at: &HashMap<i64, DateTime<Utc>>,
     now: DateTime<Utc>,
 ) -> ScopeStatus {
     let root = scope.top_level_namespace_id();
-    let root_enabled_at = root.and_then(|root| enabled_at.get(&root).copied());
     let plan_phases: Vec<(&PipelineDescriptor, Phase)> = plans
         .iter()
         .map(|plan| {
-            let phase = get_root_plan_phase(checkpoints, root, &plan.name, root_enabled_at, now);
-            (plan, phase)
+            (
+                plan,
+                get_root_plan_phase(checkpoints, root, &plan.name, now),
+            )
         })
         .collect();
 
@@ -166,7 +144,6 @@ fn get_root_plan_phase(
     checkpoints: Option<&HashMap<i64, PlanCheckpoints>>,
     root: Option<i64>,
     plan: &str,
-    enabled_at: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
 ) -> Phase {
     let (Some(by_root), Some(root)) = (checkpoints, root) else {
@@ -176,5 +153,5 @@ fn get_root_plan_phase(
     by_root
         .get(&root)
         .unwrap_or(&no_checkpoints)
-        .get_plan_phase(plan, enabled_at, now)
+        .get_plan_phase(plan, now)
 }

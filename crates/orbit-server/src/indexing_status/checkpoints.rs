@@ -14,7 +14,6 @@ use crate::status_query::{QueryCache, fetch_status_query_batches, map_column_ext
 const MAX_SDLC_ATTEMPTS: i64 = 3;
 // Two missed hourly sweeps: a run that dies writes nothing after its start write.
 const STALE_AFTER: TimeDelta = TimeDelta::hours(2);
-const NO_ROW_GRACE: TimeDelta = TimeDelta::hours(2);
 
 // Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
 const PLAN_CHECKPOINTS_SQL: &str = "\
@@ -45,19 +44,9 @@ pub struct PlanCheckpoints {
 }
 
 impl PlanCheckpoints {
-    pub fn get_plan_phase(
-        &self,
-        plan: &str,
-        enabled_at: Option<DateTime<Utc>>,
-        now: DateTime<Utc>,
-    ) -> Phase {
+    pub fn get_plan_phase(&self, plan: &str, now: DateTime<Utc>) -> Phase {
         let Some(checkpoint) = self.by_plan.get(plan) else {
-            let past_grace = enabled_at.is_some_and(|enabled_at| now - enabled_at > NO_ROW_GRACE);
-            return if past_grace {
-                Phase::Error
-            } else {
-                Phase::NotStarted
-            };
+            return Phase::NotStarted;
         };
 
         if checkpoint.completed {
