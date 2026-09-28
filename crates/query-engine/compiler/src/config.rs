@@ -21,18 +21,17 @@ use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::HydrationCompileOptions;
 use crate::passes::planner::{self, LoweredMetadata};
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, normalize, relationships,
+    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, relationships,
     response_policy, restrict, security, settings, validate,
 };
 use crate::types::SecurityContext;
 use query_data_model::QueryDataModel;
 
-#[derive(Debug, Clone)]
 enum QueryPlan {
     ClickHouse {
         bound: planner::BoundCatalog<query_data_model::ClickHouseDataModel>,
         candidate: Option<planner::Candidate<planner::ClickHouse>>,
-        scope_requirements: Vec<crate::scope::ScopeProof>,
+        parity: plan::QueryPlan,
     },
     DuckDb {
         bound: planner::BoundCatalog<query_data_model::DuckDbDataModel>,
@@ -303,13 +302,20 @@ fn plan_clickhouse(
         .as_ref()
         .copied()
         .unwrap_or_default();
-    let (bound, candidate, scope_requirements, _) =
+    let (bound, candidate, _, _) =
         planner::clickhouse(input.clone(), ctx.data_model_arc(), hydration_options)?;
+    let scope_proofs = ctx.scope_proofs().as_ref().cloned().unwrap_or_default();
+    let parity = plan::plan_clickhouse(
+        &input,
+        &scope_proofs,
+        ctx.data_model(),
+        hydration_options,
+    )?;
     ctx.set_input(input);
     ctx.set_query_plan(QueryPlan::ClickHouse {
         bound,
         candidate: Some(candidate),
-        scope_requirements,
+        parity,
     });
     Ok(())
 }
@@ -333,14 +339,38 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
         QueryPlan::ClickHouse {
             bound,
             candidate,
-            scope_requirements,
+            parity,
         } => {
             let candidate = require(candidate, "physical candidate")?;
-            let lowered = planner::lower_clickhouse(&bound, planner::SelectedPlan { candidate })?;
+            let lowered = lower::emit(&parity, &bound.input)?;
+            let mut aliases = crate::aliases::AliasManager::default();
+            for node in &bound.input.nodes {
+                aliases.reserve(&node.id);
+            }
+            let lowered = planner::LoweredPlan {
+                ast: lowered.ast,
+                bindings: planner::LoweredBindings::default(),
+                metadata: planner::LoweredMetadata {
+                    node_sources: lowered.metadata.node_sources,
+                    aliases,
+                    edges: lowered
+                        .metadata
+                        .edges
+                        .into_iter()
+                        .map(|edge| planner::LoweredEdge {
+                            column_prefix: edge.column_prefix,
+                            path_column: edge.path_column,
+                            rel_types: edge.rel_types,
+                        })
+                        .collect(),
+                    stable_order: lowered.metadata.stable_order,
+                },
+                explain: format!("scans={}", candidate.cost.scans),
+            };
             ctx.set_query_plan(QueryPlan::ClickHouse {
                 bound,
                 candidate: None,
-                scope_requirements,
+                parity,
             });
             lowered
         }
@@ -363,9 +393,9 @@ fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let mut node = require(ctx.take_node(), "node")?;
     if let Node::Query(query) = &mut node
-        && let QueryPlan::ClickHouse { scope_requirements, .. } = &query_plan
+        && let QueryPlan::ClickHouse { parity, .. } = &query_plan
     {
-        for requirement in scope_requirements {
+        for requirement in &parity.scope_requirements {
             let guard = crate::scope::resolved_scope_guard(requirement);
             query.where_clause = Some(match query.where_clause.take() {
                 Some(existing) => crate::ast::Expr::and(existing, guard),

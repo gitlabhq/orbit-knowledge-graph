@@ -8,6 +8,12 @@ pub fn lower_clickhouse(
     bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
     selected: SelectedPlan<ClickHouse>,
 ) -> Result<LoweredPlan> {
+    if matches!(
+        bound.input.query_type,
+        crate::input::QueryType::Neighbors | crate::input::QueryType::PathFinding
+    ) {
+        return lower_specialized_clickhouse(bound, selected.candidate.cost);
+    }
     let aliases = aliases_clickhouse(bound, &selected.candidate.plan);
     let physical_columns = physical_columns(&selected.candidate.plan);
     let query = lower_ch(
@@ -17,6 +23,43 @@ pub fn lower_clickhouse(
         &physical_columns,
     )?;
     lowered(bound, selected.candidate, aliases, physical_columns, query)
+}
+
+fn lower_specialized_clickhouse(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    cost: Cost,
+) -> Result<LoweredPlan> {
+    let plan = crate::passes::plan::plan_clickhouse(
+        &bound.input,
+        &HashMap::new(),
+        bound.model.as_ref(),
+        crate::passes::plan::HydrationCompileOptions::default(),
+    )?;
+    let lowered = crate::passes::lower::emit(&plan, &bound.input)?;
+    let mut aliases = crate::aliases::AliasManager::default();
+    for node in &bound.input.nodes {
+        aliases.reserve(&node.id);
+    }
+    Ok(LoweredPlan {
+        ast: lowered.ast,
+        bindings: LoweredBindings::default(),
+        metadata: LoweredMetadata {
+            node_sources: lowered.metadata.node_sources,
+            aliases,
+            edges: lowered
+                .metadata
+                .edges
+                .into_iter()
+                .map(|edge| LoweredEdge {
+                    column_prefix: edge.column_prefix,
+                    path_column: edge.path_column,
+                    rel_types: edge.rel_types,
+                })
+                .collect(),
+            stable_order: lowered.metadata.stable_order,
+        },
+        explain: format!("scans={}", cost.scans),
+    })
 }
 
 pub fn lower_duckdb(

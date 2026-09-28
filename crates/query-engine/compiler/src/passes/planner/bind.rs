@@ -398,12 +398,30 @@ impl<M: QueryDataModel> Builder<M> {
                     }
                 }
                 if hop == 1 {
+                    if path.rel_types.as_slice() == ["*"]
+                        && let Some(entity) = self.catalog.input.nodes[start].entity.clone()
+                    {
+                        predicates.push(compare(
+                            CompareOp::Eq,
+                            Expr::Column(edge.source_kind),
+                            literal(entity),
+                        ));
+                    }
                     predicates.extend(ids(
                         edge.source_id,
                         &self.catalog.input.nodes[start].node_ids,
                     ));
                 }
                 if hop == depth {
+                    if path.rel_types.as_slice() == ["*"]
+                        && let Some(entity) = self.catalog.input.nodes[end].entity.clone()
+                    {
+                        predicates.push(compare(
+                            CompareOp::Eq,
+                            Expr::Column(edge.target_kind),
+                            literal(entity),
+                        ));
+                    }
                     predicates.extend(ids(edge.target_id, &self.catalog.input.nodes[end].node_ids));
                 }
                 edge.plan = edge.plan.clone().filter(predicates);

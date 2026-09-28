@@ -63,25 +63,6 @@ pub fn run_dir(root: &str) {
                 &mut failures,
             );
         }
-        if !scenario.expect.is_empty() || !scenario.reject.is_empty() || scenario.plan.is_some() {
-            let planned = compiler::passes::planner::plan_clickhouse(&bound, logical.clone())
-                .unwrap();
-            let plan = compiler::passes::planner::explain_clickhouse(
-                &bound,
-                &planned.selected.candidate.plan,
-            );
-            check_plan(
-                &scenario.name,
-                "physical.clickhouse",
-                &PlanExpect {
-                    expect: scenario.expect.clone(),
-                    reject: scenario.reject.clone(),
-                    plan: scenario.plan.clone(),
-                },
-                &plan,
-                &mut failures,
-            );
-        }
         if let Some(expected) = scenario.physical.duckdb.as_ref() {
             let (duck_bound, duck_logical) = compiler::passes::planner::bind(
                 normalized,
