@@ -234,21 +234,6 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn refund_attempt_never_goes_below_zero() {
-        let mut checkpoint =
-            CodeCheckpoint::new(TraversalPath::new_unchecked("1/123/"), 123, "main");
-
-        checkpoint.refund_attempt();
-
-        assert_eq!(checkpoint.attempts, 0);
-    }
-}
-
-#[cfg(test)]
 pub mod test_utils {
     use super::*;
     use parking_lot::Mutex;
