@@ -128,7 +128,15 @@ fixtures/
   typescript/               # TS-v2 custom pipeline fixtures (use pipeline: js when mixing .ts/.js/.vue)
   vue/                      # Vue SFC fixtures exercised through the JS-v2 pipeline
   examples/                 # example/reference fixtures (e.g. ruby_custom_pipeline)
+fixtures_incremental/       # the same suite format, run by code-graph-incremental
+  python/                   # one directory per language as its rule file lands
+  cross_language/
 ```
+
+Two test targets generate one test per YAML file: `suites` runs `fixtures/`
+through `code-graph`, `incremental_suites` runs `fixtures_incremental/`
+through `code-graph-incremental`. A suite mixing languages declares
+`pipeline:`. A known gap is a `skip: true` with a comment naming the reason.
 
 ## Adding a test
 

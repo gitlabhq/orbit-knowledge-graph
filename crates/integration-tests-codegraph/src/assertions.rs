@@ -3,14 +3,14 @@ use serde::de;
 use std::collections::HashMap;
 use std::fmt;
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct FixtureFile {
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixtureFile {
     pub path: String,
     pub content: String,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct TestSuite {
+pub struct TestSuite {
     pub name: String,
     #[serde(default)]
     pub pipeline: Option<String>,
@@ -28,7 +28,7 @@ pub(crate) struct TestSuite {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct TestCase {
+pub struct TestCase {
     pub name: String,
     #[serde(default)]
     pub severity: Severity,
@@ -59,14 +59,14 @@ impl TestCase {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct QueryBlock {
+pub struct QueryBlock {
     pub query: String,
     pub assert: Vec<Assert>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Severity {
+pub enum Severity {
     #[default]
     Error,
     Warning,
@@ -90,7 +90,7 @@ impl fmt::Display for Severity {
 /// - { not: true, match: { field: fqn, pattern: "bad.*" } }
 /// ```
 #[derive(Debug, Clone)]
-pub(crate) struct Assert {
+pub struct Assert {
     pub filter: Option<HashMap<String, String>>,
     pub negate: bool,
     pub check: AssertCheck,
@@ -124,7 +124,7 @@ impl<'de> Deserialize<'de> for Assert {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum AssertCheck {
+pub enum AssertCheck {
     Empty {
         empty: bool,
     },
@@ -156,19 +156,19 @@ pub(crate) enum AssertCheck {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct FieldValueArgs {
+pub struct FieldValueArgs {
     pub field: String,
     pub value: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct MatchArgs {
+pub struct MatchArgs {
     pub field: String,
     pub pattern: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ColumnValuesArgs {
+pub struct ColumnValuesArgs {
     pub field: String,
     pub values: Vec<String>,
 }
