@@ -566,6 +566,18 @@ fn contains_in_select(query: &Query) -> bool {
         .is_some_and(expression_has_in_select)
         || table_contains_in_select(&query.from)
         || query.ctes.iter().any(|cte| contains_in_select(&cte.query))
+        || query_has_ctes(&query.from)
+}
+
+fn query_has_ctes(table: &TableRef) -> bool {
+    match table {
+        TableRef::Scan { .. } => false,
+        TableRef::Join { left, right, .. } => query_has_ctes(left) || query_has_ctes(right),
+        TableRef::Union { queries, .. } => queries
+            .iter()
+            .any(|query| !query.ctes.is_empty() || query_has_ctes(&query.from)),
+        TableRef::Subquery { query, .. } => !query.ctes.is_empty() || query_has_ctes(&query.from),
+    }
 }
 
 fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {

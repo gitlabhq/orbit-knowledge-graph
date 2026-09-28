@@ -465,15 +465,32 @@ fn rewrite(
             .model
             .entity_minimum_access_level(node.entity.as_deref().unwrap_or_default())
             .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
-        let scoped = node
-            .entity
-            .as_deref()
-            .is_some_and(|entity| bound.model.entity_has_traversal_path(entity));
+        let foreign_key_node = bound.input.relationships.iter().any(|relationship| {
+            (relationship.from == node.id || relationship.to == node.id)
+                && relationship_foreign_key(bound, relationship).is_some()
+        });
+        let all_foreign_keys = bound
+            .input
+            .relationships
+            .iter()
+            .all(|relationship| relationship_foreign_key(bound, relationship).is_some());
+        let filtered = !node.filters.is_empty() || node.id_range.is_some();
         if bound.input.query_type == crate::input::QueryType::Aggregation
-            && ((!elevated && scoped)
-                || !node.filters.is_empty()
-                || node.id_range.is_some()
-                || node.node_ids.is_empty())
+            && (elevated
+                || (filtered
+                    && ((foreign_key_node && all_foreign_keys)
+                        || bound
+                            .input
+                            .relationships
+                            .iter()
+                            .filter(|relationship| {
+                                relationship.from == node.id || relationship.to == node.id
+                            })
+                            .count()
+                            > 1))
+                || (node.filters.is_empty()
+                    && node.id_range.is_none()
+                    && node.node_ids.is_empty()))
         {
             continue;
         }
