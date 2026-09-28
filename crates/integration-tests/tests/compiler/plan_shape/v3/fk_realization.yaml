@@ -1,0 +1,17 @@
+name: "ClickHouse realizes an FK relationship with node tables while DuckDB keeps the edge scan"
+input: {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
+logical:
+  expect:
+    - (Join e0.source_id = u.id AND e0.target_id = mr.id (...))
+    - (EdgeScan AUTHORED u->mr AS e0)
+physical:
+  clickhouse:
+    expect:
+      - (Join ON mr.author_id = u.id (...))
+      - (Scan Table(gl_user) AS u)
+      - (Scan Table(gl_merge_request) AS mr)
+    reject:
+      - (Scan EdgeTables(...))
+  duckdb:
+    expect:
+      - (Scan Table(gl_edge) AS e0)

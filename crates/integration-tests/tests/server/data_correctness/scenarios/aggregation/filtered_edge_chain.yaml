@@ -1,0 +1,25 @@
+description: Filtered label and project predicates bound both edge scans before counting
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
+        {"id": "label", "entity": "Label", "filters": {"title": "bug"}},
+        {"id": "project", "entity": "Project", "filters": {"full_path": "public-group/public-project"}}
+      ],
+      "relationships": [
+        {"type": "HAS_LABEL", "from": "mr", "to": "label"},
+        {"type": "IN_PROJECT", "from": "mr", "to": "project"}
+      ],
+      "aggregations": [{"count": "mr", "as": "n"}],
+      "limit": 1
+    }
+  gql: |
+    MATCH (label:Label)<-[:HAS_LABEL]-(mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(project:Project) WHERE label.title = 'bug' AND project.full_path = 'public-group/public-project' RETURN count(mr) AS n LIMIT 1
+
+expect:
+  skip_requirements: [node_count, node_ids, "filter:title", "filter:full_path"]
+  row_values:
+    - { n: 1 }

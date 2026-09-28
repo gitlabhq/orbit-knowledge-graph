@@ -1,0 +1,43 @@
+description: FK star traversal returns only pipelines whose joined job and project match
+
+config:
+  extra_seed:
+    gl_pipeline:
+      - { id: 14000, iid: 1, status: failed, source: push, ref: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 14001, iid: 2, status: success, source: push, ref: main, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_job:
+      - { id: 14100, name: test, status: failed, pipeline_id: 14000, project_id: 1000, ref: main, traversal_path: "1/100/1000/" }
+      - { id: 14101, name: test, status: success, pipeline_id: 14001, project_id: 1000, ref: main, traversal_path: "1/100/1000/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed", "source": "push"}, "columns": ["status"]},
+        {"id": "job", "entity": "Job", "filters": {"status": "failed"}, "columns": ["status"]},
+        {"id": "project", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+      ],
+      "relationships": [
+        {"type": "HAS_JOB", "from": "pipe", "to": "job"},
+        {"type": "IN_PROJECT", "from": "pipe", "to": "project"}
+      ],
+      "limit": 10
+    }
+  gql: |
+    MATCH (pipe:Pipeline)-[:HAS_JOB]->(job:Job), (pipe)-[:IN_PROJECT]->(project:Project {id: 1000}) WHERE pipe.status = 'failed' AND pipe.source = 'push' AND job.status = 'failed' RETURN pipe.status, job.status, project.name LIMIT 10
+
+expect:
+  referential_integrity: true
+  edge_exists:
+    HAS_JOB: [[14000, 14100]]
+    IN_PROJECT: [[14000, 1000]]
+  edge_absent:
+    HAS_JOB: [[14001, 14101]]
+  nodes:
+    Pipeline:
+      ids: [14000]
+    Job:
+      ids: [14100]
+    Project:
+      ids: [1000]

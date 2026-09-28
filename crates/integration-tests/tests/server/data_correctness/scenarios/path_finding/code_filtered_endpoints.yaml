@@ -1,0 +1,23 @@
+description: Filtered code endpoints return only the path within their project
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "Definition", "filters": {"name": "compile"}},
+        {"id": "end", "entity": "Definition", "filters": {"name": "run_query"}}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["CALLS"]}
+    }
+  gql: |
+    MATCH p = ANY SHORTEST (start:Definition)-[:CALLS*1..3]->(`end`:Definition) WHERE start.name = 'compile' AND `end`.name = 'run_query' RETURN p
+
+expect:
+  referential_integrity: true
+  path_count: 1
+  path_edges:
+    - [{ from: Definition, from_id: 12000, type: CALLS, to: Definition, to_id: 12001 },
+       { type: CALLS, to: Definition, to_id: 12002 }]
+  path_endpoint_absent: [Project]

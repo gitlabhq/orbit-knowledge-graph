@@ -38,14 +38,13 @@ pub fn run_dir(root: &str) {
         let (bound, logical) =
             compiler::passes::planner::bind(normalized.clone(), Arc::clone(&clickhouse_model))
                 .unwrap_or_else(|error| panic!("{}: bind failed: {error}", scenario.name));
-        let logical_bound = bound.clone();
         let (bound, optimized) =
             compiler::passes::planner::optimize(bound, logical.clone(), &Default::default());
         check_plan(
             &scenario.name,
             "logical",
             &scenario.logical,
-            &compiler::passes::planner::explain(&logical_bound, &logical.root),
+            &compiler::passes::planner::explain(&bound, &optimized.root),
             &mut failures,
         );
         if let Some(expected) = scenario.physical.clickhouse.as_ref() {
@@ -60,27 +59,6 @@ pub fn run_dir(root: &str) {
                 "physical.clickhouse",
                 expected,
                 &plan,
-                &mut failures,
-            );
-        }
-        if !scenario.expect.is_empty() || !scenario.reject.is_empty() || scenario.plan.is_some() {
-            let planned = compiler::passes::planner::plan_clickhouse(&bound, optimized)
-                .unwrap_or_else(|error| {
-                    panic!("{}: ClickHouse plan failed: {error}", scenario.name)
-                });
-            let top_level = PlanExpect {
-                expect: scenario.expect.clone(),
-                reject: scenario.reject.clone(),
-                plan: scenario.plan.clone(),
-            };
-            check_plan(
-                &scenario.name,
-                "physical.clickhouse",
-                &top_level,
-                &compiler::passes::planner::explain_clickhouse(
-                    &bound,
-                    &planned.selected.candidate.plan,
-                ),
                 &mut failures,
             );
         }

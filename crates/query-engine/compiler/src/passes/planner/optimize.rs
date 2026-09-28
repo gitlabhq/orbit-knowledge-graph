@@ -16,13 +16,7 @@ pub fn optimize<M: QueryDataModel>(
             break;
         }
     }
-    if matches!(bound.input.query_type, crate::input::QueryType::Traversal)
-        && bound
-            .input
-            .relationships
-            .iter()
-            .all(|relationship| relationship_foreign_key(&bound, relationship).is_none())
-    {
+    if matches!(bound.input.query_type, crate::input::QueryType::Traversal) {
         logical.root = add_sip(logical.root, &mut bound);
     }
     (bound, logical)
@@ -461,36 +455,11 @@ fn rewrite(
             continue;
         };
         let node = &bound.input.nodes[node_index];
-        let elevated = bound
-            .model
-            .entity_minimum_access_level(node.entity.as_deref().unwrap_or_default())
-            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
-        let foreign_key_node = bound.input.relationships.iter().any(|relationship| {
-            (relationship.from == node.id || relationship.to == node.id)
-                && relationship_foreign_key(bound, relationship).is_some()
-        });
-        let all_foreign_keys = bound
-            .input
-            .relationships
-            .iter()
-            .all(|relationship| relationship_foreign_key(bound, relationship).is_some());
-        let filtered = !node.filters.is_empty() || node.id_range.is_some();
         if bound.input.query_type == crate::input::QueryType::Aggregation
-            && (elevated
-                || (filtered
-                    && ((foreign_key_node && all_foreign_keys)
-                        || bound
-                            .input
-                            .relationships
-                            .iter()
-                            .filter(|relationship| {
-                                relationship.from == node.id || relationship.to == node.id
-                            })
-                            .count()
-                            > 1))
-                || (node.filters.is_empty()
-                    && node.id_range.is_none()
-                    && node.node_ids.is_empty()))
+            && (!bound.input.aggregation.group_by.is_empty()
+                || !node.filters.is_empty()
+                || node.id_range.is_some()
+                || node.node_ids.is_empty())
         {
             continue;
         }
@@ -545,10 +514,10 @@ fn rewrite(
     plan
 }
 
-pub(super) fn add_sip<F: Flavor>(
-    mut plan: Plan<F>,
+fn add_sip(
+    mut plan: Plan<Logical>,
     bound: &mut BoundCatalog<impl QueryDataModel>,
-) -> Plan<F> {
+) -> Plan<Logical> {
     plan.inputs = plan
         .inputs
         .into_iter()
@@ -596,22 +565,6 @@ pub(super) fn add_sip<F: Flavor>(
                 selective.insert(consumer_relation);
                 continue;
             }
-            if bound.input.query_type == crate::input::QueryType::Aggregation
-                && projection_requires_relation(bound, &plan, consumer_relation)
-                && bound
-                    .input
-                    .aggregation
-                    .group_by
-                    .iter()
-                    .any(|group| {
-                        bound
-                            .node_input(consumer_relation)
-                            .is_some_and(|input| bound.input.nodes[input.0].id == group.node())
-                    })
-            {
-                selective.insert(consumer_relation);
-                continue;
-            }
             let consumer = plan.inputs[consumer_index].clone();
             plan.inputs[consumer_index] = consumer.semi_join(
                 plan.inputs[producer_index].clone(),
@@ -628,19 +581,6 @@ pub(super) fn add_sip<F: Flavor>(
             return plan;
         }
     }
-}
-
-fn projection_requires_relation<F: Flavor>(
-    bound: &BoundCatalog<impl QueryDataModel>,
-    plan: &Plan<F>,
-    relation: RelationId,
-) -> bool {
-    let required: BTreeSet<_> = expressions(&plan.operator)
-        .into_iter()
-        .flat_map(Expr::columns)
-        .map(|column| bound.column(column).relation)
-        .collect();
-    required.contains(&relation)
 }
 
 fn relation_selective(bound: &BoundCatalog<impl QueryDataModel>, relation: RelationId) -> bool {

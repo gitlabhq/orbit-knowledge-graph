@@ -1,0 +1,40 @@
+description: Selective pipeline self-join returns its auto-canceling pipeline and project
+
+config:
+  extra_seed:
+    gl_pipeline:
+      - { id: 14200, iid: 1, status: canceled, source: push, ref: main, project_id: 1000, auto_canceled_by_id: 14201, traversal_path: "1/100/1000/" }
+      - { id: 14201, iid: 2, status: success, source: push, ref: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 14202, iid: 3, status: canceled, source: push, ref: main, project_id: 1001, auto_canceled_by_id: 14203, traversal_path: "1/101/1001/" }
+      - { id: 14203, iid: 4, status: success, source: push, ref: main, project_id: 1001, traversal_path: "1/101/1001/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "source", "entity": "Pipeline", "filters": {"status": "canceled"}},
+        {"id": "canceling", "entity": "Pipeline"},
+        {"id": "project", "entity": "Project", "node_ids": [1000]}
+      ],
+      "relationships": [
+        {"type": "AUTO_CANCELED_BY", "from": "source", "to": "canceling"},
+        {"type": "IN_PROJECT", "from": "source", "to": "project"}
+      ],
+      "limit": 10
+    }
+  gql: |
+    MATCH (source:Pipeline)-[:AUTO_CANCELED_BY]->(canceling:Pipeline), (source)-[:IN_PROJECT]->(project:Project {id: 1000}) WHERE source.status = 'canceled' RETURN source, canceling, project LIMIT 10
+
+expect:
+  referential_integrity: true
+  edge_exists:
+    AUTO_CANCELED_BY: [[14200, 14201]]
+    IN_PROJECT: [[14200, 1000]]
+  edge_absent:
+    AUTO_CANCELED_BY: [[14202, 14203]]
+  nodes:
+    Pipeline:
+      ids: [14200, 14201]
+    Project:
+      ids: [1000]

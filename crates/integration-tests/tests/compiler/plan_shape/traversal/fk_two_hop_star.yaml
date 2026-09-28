@@ -1,6 +1,14 @@
 name: "Two FK hops sharing a center: both join on the center, no edge scans"
 input: {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[1]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}
-expect:
-  - (Join ON pipe.project_id = p.id (Join ON j.pipeline_id = pipe.id (_) (_)) (_))
-reject:
-  - (Scan gl_edge ...)
+logical:
+  expect:
+    - (Join e0.source_id = e1.source_id AND e1.source_id = pipe.id AND e0.target_id = j.id AND e1.target_id = p.id (...))
+physical:
+  clickhouse:
+    expect:
+      - (Join ON j.pipeline_id = pipe.id AND pipe.project_id = p.id (...))
+      - (Scan Table(gl_pipeline) AS pipe)
+      - (Scan Table(gl_job) AS j)
+      - (Scan Table(gl_project) AS p)
+    reject:
+      - (Scan EdgeTables(...))

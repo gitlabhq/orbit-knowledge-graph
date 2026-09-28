@@ -395,11 +395,13 @@ fn lower_join<F: LowerFlavor>(
             aliases,
             physical_columns,
         )?;
-        let right = lower_plan::<F>(bound, input, aliases, physical_columns)?;
         query.from = TableRef::join(
             JoinType::Inner,
             query.from,
-            join_source(right, alias),
+            TableRef::subquery(
+                select_star(lower_plan::<F>(bound, input, aliases, physical_columns)?),
+                alias,
+            ),
             condition,
         );
         available = joined_relations;
@@ -427,53 +429,17 @@ fn lower_semi<F: LowerFlavor>(
     else {
         return Err(QueryError::Lowering("semi-join needs equality".into()));
     };
-    let Expr::Column(producer_column) = right.as_ref() else {
-        return Err(QueryError::Lowering(
-            "semi-join producer needs a column".into(),
-        ));
-    };
-    let producer_relation = bound.column(*producer_column).relation;
-    let column = bound.column(*producer_column).name.clone();
-    let cte_name = format!("_filter_{}", aliases[&producer_relation]);
-    producer_query.select = vec![SelectExpr::new(
-        lower_expr(bound, &right, aliases, physical_columns)?,
-        &column,
-    )];
-    let mut producer_ctes = std::mem::take(&mut producer_query.ctes);
-    producer_ctes.push(crate::ast::Cte::new(&cte_name, producer_query));
-    for cte in producer_ctes {
-        if !consumer_query
-            .ctes
-            .iter()
-            .any(|current| current.name == cte.name)
-        {
-            consumer_query.ctes.push(cte);
-        }
-    }
-    let predicate = ast::Expr::InSubquery {
-        expr: Box::new(lower_expr(bound, &left, aliases, physical_columns)?),
-        cte_name,
-        column,
-    };
-    let ast::Expr::InSubquery { expr, .. } = &predicate else {
-        unreachable!()
-    };
-    let ast::Expr::Column { table, .. } = expr.as_ref() else {
-        and_where(&mut consumer_query, predicate);
-        return Ok(consumer_query);
-    };
-    let mut retained = Vec::new();
-    if !push_where_to_alias(
-        &mut consumer_query.from,
-        table,
-        predicate.clone(),
-        &mut retained,
-    ) {
-        and_where(&mut consumer_query, predicate);
-    }
-    retained
-        .into_iter()
-        .for_each(|predicate| and_where(&mut consumer_query, predicate));
+    producer_query.select = vec![SelectExpr {
+        expr: lower_expr(bound, &right, aliases, physical_columns)?,
+        alias: None,
+    }];
+    and_where(
+        &mut consumer_query,
+        ast::Expr::InSelect {
+            expr: Box::new(lower_expr(bound, &left, aliases, physical_columns)?),
+            query: Box::new(producer_query),
+        },
+    );
     Ok(consumer_query)
 }
 
@@ -810,86 +776,6 @@ fn table_aliases(table: &TableRef) -> Vec<String> {
             .into_iter()
             .chain(table_aliases(right))
             .collect(),
-    }
-}
-
-fn join_source(query: Query, alias: String) -> TableRef {
-    if query.select.is_empty()
-        && query.where_clause.is_none()
-        && query.group_by.is_empty()
-        && query.order_by.is_empty()
-        && query.limit_by.is_none()
-        && query.limit.is_none()
-        && query.ctes.is_empty()
-        && query.union_all.is_empty()
-    {
-        query.from
-    } else {
-        TableRef::subquery(select_star(query), alias)
-    }
-}
-
-fn push_where_to_alias(
-    table: &mut TableRef,
-    alias: &str,
-    predicate: ast::Expr,
-    retained: &mut Vec<ast::Expr>,
-) -> bool {
-    match table {
-        TableRef::Scan { .. } => false,
-        TableRef::Subquery {
-            query,
-            alias: candidate,
-        } if candidate == alias => {
-            and_where(query, predicate);
-            if let Some(inner) = query.where_clause.take() {
-                let (pushed, outer) = partition_edge_predicates(inner);
-                query.where_clause = pushed;
-                retained.extend(outer);
-            }
-            true
-        }
-        TableRef::Subquery { query, .. } => {
-            push_where_to_alias(&mut query.from, alias, predicate, retained)
-        }
-        TableRef::Union { queries, .. } => queries
-            .iter_mut()
-            .any(|query| {
-                push_where_to_alias(&mut query.from, alias, predicate.clone(), retained)
-            }),
-        TableRef::Join { left, right, .. } => {
-            push_where_to_alias(left, alias, predicate.clone(), retained)
-                || push_where_to_alias(right, alias, predicate, retained)
-        }
-    }
-}
-
-fn partition_edge_predicates(expression: ast::Expr) -> (Option<ast::Expr>, Option<ast::Expr>) {
-    let mut pushed = Vec::new();
-    let mut retained = Vec::new();
-    for expression in flatten_and(expression) {
-        if matches!(&expression, ast::Expr::InSubquery { .. })
-            || matches!(&expression, ast::Expr::BinaryOp { left, .. } if matches!(left.as_ref(), ast::Expr::Column { column, .. } if column == ontology::constants::SOURCE_ID_COLUMN || column == ontology::constants::TARGET_ID_COLUMN))
-        {
-            pushed.push(expression);
-        } else {
-            retained.push(expression);
-        }
-    }
-    (ast::Expr::conjoin(pushed), ast::Expr::conjoin(retained))
-}
-
-fn flatten_and(expression: ast::Expr) -> Vec<ast::Expr> {
-    match expression {
-        ast::Expr::BinaryOp {
-            op: ast::Op::And,
-            left,
-            right,
-        } => flatten_and(*left)
-            .into_iter()
-            .chain(flatten_and(*right))
-            .collect(),
-        expression => vec![expression],
     }
 }
 

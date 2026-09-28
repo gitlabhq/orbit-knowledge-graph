@@ -1,5 +1,18 @@
 name: "Two edge scans in one chain both read with FINAL"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"p","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
-expect:
-  - (Scan gl_edge AS e0 FINAL)
-  - (Scan gl_edge AS e1 FINAL)
+logical:
+  expect:
+    - (Aggregate COUNT() AS n (_))
+    - (EdgeScan HAS_LABEL mr->label AS e0)
+    - (EdgeScan IN_PROJECT mr->p AS e1)
+physical:
+  clickhouse:
+    expect:
+      - (Deduplicate Final (Scan EdgeTables(gl_edge) AS e0))
+      - (Deduplicate Final (Scan EdgeTables(gl_edge) AS e1))
+  duckdb:
+    expect:
+      - (Scan Table(gl_edge) AS e0)
+      - (Scan Table(gl_edge) AS e1)
+    reject:
+      - (Deduplicate ...)

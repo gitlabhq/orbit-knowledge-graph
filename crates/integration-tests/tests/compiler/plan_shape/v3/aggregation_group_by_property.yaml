@@ -5,7 +5,6 @@ logical:
     - (Aggregate group caller.definition_type AS caller_definition_type, COUNT() AS n (_))
     - (EdgeScan CALLS caller->callee AS e0)
     - (NodeScan Definition AS caller)
-    - (NodeScan Definition AS callee)
   reject:
     - (Scan Table...)
     - (Deduplicate ...)

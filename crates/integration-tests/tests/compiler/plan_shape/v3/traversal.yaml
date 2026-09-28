@@ -4,12 +4,11 @@ logical:
   expect:
     - (Limit 11 (Project e0.relationship_kind AS e0_type, e0.source_id AS e0_src, ... (_)))
     - (EdgeScan CALLS caller->callee AS e0)
-    - (NodeScan Definition AS caller)
-    - (NodeScan Definition AS callee)
 physical:
   clickhouse:
     expect:
       - (Scan EdgeTables(gl_code_edge) AS e0)
+    reject:
       - (Scan Table(gl_definition) AS caller)
       - (Scan Table(gl_definition) AS callee)
   duckdb:
