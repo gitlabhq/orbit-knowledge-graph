@@ -42,7 +42,6 @@ fn lower_specialized_clickhouse(
     }
     Ok(LoweredPlan {
         ast: lowered.ast,
-        bindings: LoweredBindings::default(),
         metadata: LoweredMetadata {
             node_sources: lowered.metadata.node_sources,
             aliases,
@@ -89,11 +88,6 @@ fn aliases_clickhouse(
             };
             let alias = manager.generated(&preferred, key);
             aliases.insert(scan.relation, alias.clone());
-            if let ClickHouseAccess::DenormalizedJoin(access) = &scan.access {
-                for relation in &access.relations {
-                    aliases.insert(*relation, alias.clone());
-                }
-            }
         }
         Operator::Bind(relation) => {
             let preferred = relation_alias(bound, *relation);
@@ -178,9 +172,6 @@ fn lower_ch(
                     &access.layouts,
                     &aliases[&scan.relation],
                 ),
-                ClickHouseAccess::DenormalizedJoin(access) => {
-                    TableRef::scan(access.layout.table.0, &aliases[&scan.relation])
-                }
             },
             ..Default::default()
         }),
@@ -928,7 +919,6 @@ fn physical_columns(plan: &Plan<ClickHouse>) -> BTreeMap<ColumnId, (RelationId, 
     visit_ch(plan, &mut |plan| {
         if let Operator::Scan(scan) = &plan.operator {
             let physical = match &scan.access {
-                ClickHouseAccess::DenormalizedJoin(access) => &access.columns,
                 ClickHouseAccess::EdgeTables(access) => &access.columns,
                 ClickHouseAccess::Table(_) => return,
             };
@@ -979,19 +969,12 @@ fn lowered<M: QueryDataModel, B: Flavor>(
         .outputs
         .nodes
         .into_iter()
-        .map(|(node, output)| {
-            Ok((
-                node,
-                LoweredOutputBinding {
-                    primary_key: columns[&output.primary_key].clone(),
-                },
-            ))
-        })
+        .map(|(node, output)| Ok((node, columns[&output.primary_key].clone())))
         .collect::<Result<_>>()?;
     let mut node_sources: HashMap<_, _> = nodes
         .iter()
         .filter_map(|(node, binding)| {
-            let ast::Expr::Column { table, column } = &binding.primary_key else {
+            let ast::Expr::Column { table, column } = binding else {
                 return None;
             };
             Some((
@@ -1064,7 +1047,6 @@ fn lowered<M: QueryDataModel, B: Flavor>(
     }
     Ok(LoweredPlan {
         ast: Node::Query(Box::new(query)),
-        bindings: LoweredBindings { columns, nodes },
         metadata: LoweredMetadata {
             node_sources,
             aliases: alias_manager,

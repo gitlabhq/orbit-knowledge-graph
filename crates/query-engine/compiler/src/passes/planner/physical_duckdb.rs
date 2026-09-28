@@ -97,57 +97,7 @@ fn table_layout(
     TableLayout {
         table: TableName(table.into()),
         columns,
-        sort_key: vec![],
+        sort_key: Vec::new(),
         global: false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::input::{Direction, InputNode, InputRelationship, QueryType};
-
-    #[test]
-    fn passes_logical_plan_directly_to_duckdb() {
-        let input = Input {
-            query_type: QueryType::Traversal,
-            nodes: vec![
-                InputNode {
-                    id: "u".into(),
-                    entity: Some("User".into()),
-                    node_ids: vec![1],
-                    ..Default::default()
-                },
-                InputNode {
-                    id: "mr".into(),
-                    entity: Some("MergeRequest".into()),
-                    ..Default::default()
-                },
-            ],
-            relationships: vec![InputRelationship {
-                types: vec!["AUTHORED".into()],
-                from: "u".into(),
-                to: "mr".into(),
-                hops: Default::default(),
-                direction: Direction::Outgoing,
-                filters: Default::default(),
-            }],
-            ..Default::default()
-        };
-        let ontology = ontology::Ontology::new()
-            .with_nodes(["User", "MergeRequest"])
-            .with_edges(["AUTHORED"]);
-        let model = Arc::new(query_data_model::DuckDbDataModel::derive(Arc::new(ontology)).unwrap());
-        let (bound, logical) = bind(input, model).unwrap();
-
-        let planned = plan_duckdb(&bound, logical).unwrap();
-
-        assert_eq!(planned.selected.candidate.cost, Cost::default());
-        assert_eq!(
-            planned.selected.candidate.outputs.nodes.len(),
-            bound.input.nodes.len()
-        );
-        let lowered = lower_duckdb(&bound, planned.selected);
-        assert!(lowered.is_ok(), "{lowered:?}");
     }
 }

@@ -46,9 +46,6 @@ pub fn plan_clickhouse(
         });
     }
     candidates.insert(edge_property);
-    for access in &catalog.facts.denormalized_joins {
-        candidates.insert(denormalized_join_candidate(&catalog, &logical, access));
-    }
     Ok(PlanningResult {
         logical,
         selected: candidates.select().unwrap(),
@@ -81,52 +78,6 @@ fn deduplicate_edges(
     } else {
         plan
     }
-}
-
-fn denormalized_join_candidate(
-    catalog: &BackendCatalog<'_, ClickHouse>,
-    logical: &LogicalPlan,
-    access: &DenormalizedAccess,
-) -> Candidate<ClickHouse> {
-    let mapped = map_clickhouse(catalog.bound, &logical.root, catalog, false);
-    let mut candidate =
-        clickhouse_candidate(catalog.bound, replace_with_denormalized(mapped, access));
-    candidate.columns.columns = access
-        .columns
-        .keys()
-        .copied()
-        .map(|column| (column, Expr::Column(column)))
-        .collect();
-    candidate.cost = plan_cost(&candidate.plan);
-    candidate
-}
-
-fn replace_with_denormalized(
-    mut plan: Plan<ClickHouse>,
-    access: &DenormalizedAccess,
-) -> Plan<ClickHouse> {
-    plan.inputs = plan
-        .inputs
-        .into_iter()
-        .map(|input| replace_with_denormalized(input, access))
-        .collect();
-    if matches!(plan.operator, Operator::Join(_)) {
-        let mut join = JoinEditor::new(plan).unwrap();
-        join.replace_inputs(
-            |input| {
-                input
-                    .relation()
-                    .is_some_and(|relation| access.relations.contains(&relation))
-            },
-            Plan::leaf(Operator::Scan(PhysicalScan {
-                relation: access.scan_relation,
-                access: ClickHouseAccess::DenormalizedJoin(access.clone()),
-                columns: access.columns.keys().copied().collect(),
-            })),
-        );
-        return join.finish();
-    }
-    plan
 }
 
 fn edge_property_candidate(
@@ -442,9 +393,7 @@ fn clickhouse_facts(
 ) -> ClickHouseFacts {
     ClickHouseFacts {
         foreign_keys: foreign_key_facts(bound),
-        denormalized_joins: denormalized_join_facts(bound),
         edge_properties: edge_property_facts(bound, access_paths),
-        text_indexes: text_index_facts(bound),
     }
 }
 
@@ -547,25 +496,6 @@ fn foreign_key_facts(
         .collect()
 }
 
-fn text_index_facts(
-    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
-) -> Vec<TextIndexAccess> {
-    bound
-        .columns
-        .iter()
-        .filter_map(|(column, metadata)| {
-            let RelationOrigin::Node { entity, .. } = bound.relation(metadata.relation).origin else {
-                return None;
-            };
-            let property = bound.model.graph().property_id(entity, &metadata.name)?;
-            bound.model.has_text_index(property).then(|| TextIndexAccess {
-                column: *column,
-                tokenizer: Tokenizer(String::new()),
-            })
-        })
-        .collect()
-}
-
 fn edge_property_facts(
     bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
     access_paths: &BTreeMap<RelationId, Vec<PhysicalScan<ClickHouseAccess>>>,
@@ -661,12 +591,6 @@ fn edge_property_facts(
         }
     }
     facts
-}
-
-fn denormalized_join_facts(
-    _bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
-) -> Vec<DenormalizedAccess> {
-    Vec::new()
 }
 
 fn physical_endpoints(relationship: &crate::input::InputRelationship) -> Option<(&str, &str)> {

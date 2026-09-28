@@ -22,38 +22,40 @@ pub use optimize::optimize;
 pub use physical_clickhouse::plan_clickhouse;
 pub use physical_duckdb::plan_duckdb;
 
+pub struct PlannedClickHouse {
+    pub bound: BoundCatalog<query_data_model::ClickHouseDataModel>,
+    pub candidate: Candidate<ClickHouse>,
+}
+
+pub struct PlannedDuckDb {
+    pub bound: BoundCatalog<query_data_model::DuckDbDataModel>,
+    pub candidate: Candidate<DuckDb>,
+}
+
 pub fn clickhouse(
     input: Input,
     model: Arc<query_data_model::ClickHouseDataModel>,
     hydration_options: HydrationCompileOptions,
-) -> Result<(
-    BoundCatalog<query_data_model::ClickHouseDataModel>,
-    Candidate<ClickHouse>,
-    Vec<crate::scope::ScopeProof>,
-    String,
-)> {
+) -> Result<PlannedClickHouse> {
     let (bound, logical) = bind_with_options(input, model, hydration_options)?;
     let (bound, logical) = optimize(bound, logical);
-    let scope_requirements = logical.scope_requirements.clone();
     let selected = plan_clickhouse(&bound, logical)?.selected;
-    let explain = explain_clickhouse(&bound, &selected.candidate.plan);
-    Ok((bound, selected.candidate, scope_requirements, explain))
+    Ok(PlannedClickHouse {
+        bound,
+        candidate: selected.candidate,
+    })
 }
 
 pub fn duckdb(
     input: Input,
     model: Arc<query_data_model::DuckDbDataModel>,
-) -> Result<(
-    BoundCatalog<query_data_model::DuckDbDataModel>,
-    Candidate<DuckDb>,
-    Vec<crate::scope::ScopeProof>,
-    String,
-)> {
+) -> Result<PlannedDuckDb> {
     let (bound, logical) = bind(input, model)?;
-    let scope_requirements = logical.scope_requirements.clone();
     let selected = plan_duckdb(&bound, logical)?.selected;
-    let explain = explain_duckdb(&bound, &selected.candidate.plan);
-    Ok((bound, selected.candidate, scope_requirements, explain))
+    Ok(PlannedDuckDb {
+        bound,
+        candidate: selected.candidate,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -76,9 +78,6 @@ pub struct TableName(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PhysicalColumn(pub String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Tokenizer(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ColumnKey {
@@ -489,20 +488,6 @@ impl<F: Flavor> JoinEditor<F> {
         self.conditions.retain(keep);
     }
 
-    fn replace_inputs(&mut self, replace: impl Fn(&Plan<F>) -> bool, replacement: Plan<F>) {
-        let mut replacement = Some(replacement);
-        self.inputs = std::mem::take(&mut self.inputs)
-            .into_iter()
-            .filter_map(|input| {
-                if replace(&input) {
-                    replacement.take()
-                } else {
-                    Some(input)
-                }
-            })
-            .collect();
-    }
-
     fn add_conditions(&mut self, conditions: impl IntoIterator<Item = Expr>) {
         for condition in conditions {
             if !self.conditions.contains(&condition) {
@@ -834,27 +819,12 @@ pub struct ForeignKeyAccess {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DenormalizedAccess {
-    pub scan_relation: RelationId,
-    pub layout: TableLayout,
-    pub relations: BTreeSet<RelationId>,
-    pub columns: BTreeMap<ColumnId, PhysicalColumn>,
-    pub residual_filters: Vec<Expr>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgePropertyAccess {
     pub edge: RelationId,
     pub source: ColumnId,
     pub column: ColumnId,
     pub edge_column: PhysicalColumn,
     pub tokens: Vec<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextIndexAccess {
-    pub column: ColumnId,
-    pub tokenizer: Tokenizer,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -880,7 +850,6 @@ pub struct PhysicalScan<A> {
 pub enum ClickHouseAccess {
     Table(TableAccess),
     EdgeTables(EdgeTableAccess),
-    DenormalizedJoin(DenormalizedAccess),
 }
 
 impl ClickHouseAccess {
@@ -906,19 +875,10 @@ pub enum ClickHouseCurrentRows {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DuckDbCurrentRows;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClickHouseExtension {
-    FusedNeighbors {
-        outgoing: Expr,
-        incoming: Expr,
-        columns: Vec<NamedExpr>,
-    },
-}
-
 impl Flavor for ClickHouse {
     type Scan = PhysicalScan<ClickHouseAccess>;
     type CurrentRows = ClickHouseCurrentRows;
-    type Extension = ClickHouseExtension;
+    type Extension = ();
     type Facts = ClickHouseFacts;
 }
 
@@ -932,9 +892,7 @@ impl Flavor for DuckDb {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClickHouseFacts {
     pub foreign_keys: Vec<ForeignKeyAccess>,
-    pub denormalized_joins: Vec<DenormalizedAccess>,
     pub edge_properties: Vec<EdgePropertyAccess>,
-    pub text_indexes: Vec<TextIndexAccess>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1051,23 +1009,6 @@ pub struct PlanningResult<B: Flavor> {
     pub selected: SelectedPlan<B>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum PlannedQuery {
-    ClickHouse(PlanningResult<ClickHouse>),
-    DuckDb(PlanningResult<DuckDb>),
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct LoweredBindings {
-    pub columns: BTreeMap<ColumnId, ast::Expr>,
-    pub nodes: BTreeMap<InputNodeId, LoweredOutputBinding>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LoweredOutputBinding {
-    pub primary_key: ast::Expr,
-}
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LoweredMetadata {
     pub node_sources: std::collections::HashMap<String, (String, String)>,
@@ -1086,406 +1027,6 @@ pub struct LoweredEdge {
 #[derive(Debug, Clone)]
 pub struct LoweredPlan {
     pub ast: ast::Node,
-    pub bindings: LoweredBindings,
     pub metadata: LoweredMetadata,
     pub explain: String,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const RELATION: RelationId = RelationId(0);
-    const EDGE: RelationId = RelationId(1);
-    const COLUMN: ColumnId = ColumnId(0);
-    const EDGE_COLUMN: ColumnId = ColumnId(1);
-    const OUTPUT: OutputId = OutputId(0);
-    const INPUT_NODE: InputNodeId = InputNodeId(0);
-    const INPUT_RELATIONSHIP: InputRelationshipId = InputRelationshipId(0);
-
-    fn layout(table: &str) -> TableLayout {
-        TableLayout {
-            table: TableName(table.into()),
-            columns: BTreeSet::from([
-                PhysicalColumn("id".into()),
-                PhysicalColumn("traversal_path".into()),
-            ]),
-            sort_key: vec![
-                PhysicalColumn("traversal_path".into()),
-                PhysicalColumn("id".into()),
-            ],
-            global: false,
-        }
-    }
-
-    fn bound_catalog(input: Input, ontology: ontology::Ontology) -> BoundCatalog<query_data_model::ClickHouseDataModel> {
-        let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
-        let entity = model.graph().entity_id("User").unwrap();
-        let relationship = model.graph().relationship_id("AUTHORED").unwrap();
-        BoundCatalog {
-            input,
-            model,
-            relations: BTreeMap::from([
-                (
-                    RELATION,
-                    BoundRelation {
-                        origin: RelationOrigin::Node { input: INPUT_NODE, entity },
-                    },
-                ),
-                (
-                    EDGE,
-                    BoundRelation {
-                        origin: RelationOrigin::Edge {
-                            input: Some(INPUT_RELATIONSHIP),
-                            relationships: vec![relationship],
-                            depth: Some(1),
-                            hop: Some(1),
-                        },
-                    },
-                ),
-            ]),
-            column_ids: BTreeMap::from([
-                (
-                    ColumnKey {
-                        relation: RELATION,
-                        name: "id".into(),
-                    },
-                    COLUMN,
-                ),
-                (
-                    ColumnKey {
-                        relation: EDGE,
-                        name: "source_id".into(),
-                    },
-                    EDGE_COLUMN,
-                ),
-            ]),
-            columns: BTreeMap::from([
-                (
-                    COLUMN,
-                    BoundColumn {
-                        relation: RELATION,
-                        name: "id".into(),
-                        data_type: Some(ontology::DataType::Int),
-                    },
-                ),
-                (
-                    EDGE_COLUMN,
-                    BoundColumn {
-                        relation: EDGE,
-                        name: "source_id".into(),
-                        data_type: Some(ontology::DataType::Int),
-                    },
-                ),
-            ]),
-            outputs: BTreeMap::from([(
-                OUTPUT,
-                BoundOutput {
-                    name: "user_id".into(),
-                },
-            )]),
-        }
-    }
-
-    fn logical_plan() -> LogicalPlan {
-        LogicalPlan {
-            root: Plan {
-                operator: Operator::Project(vec![NamedExpr {
-                    expression: Expr::Column(COLUMN),
-                    output: OUTPUT,
-                }]),
-                inputs: vec![Plan {
-                    operator: Operator::Scan(LogicalScan { relation: RELATION }),
-                    inputs: vec![],
-                }],
-            },
-            scope_requirements: vec![],
-        }
-    }
-
-    fn clickhouse_facts() -> ClickHouseFacts {
-        ClickHouseFacts {
-            foreign_keys: vec![ForeignKeyAccess {
-                relationship: EDGE,
-                holder: RELATION,
-                referenced: EDGE,
-                column: PhysicalColumn("author_id".into()),
-                substitutions: BTreeMap::from([(EDGE_COLUMN, Expr::Column(COLUMN))]),
-            }],
-            denormalized_joins: vec![DenormalizedAccess {
-                scan_relation: RELATION,
-                layout: layout("gl_denorm_authored"),
-                relations: BTreeSet::from([RELATION, EDGE]),
-                columns: BTreeMap::from([(COLUMN, PhysicalColumn("t0_id".into()))]),
-                residual_filters: vec![Expr::Literal(Value::Bool(true))],
-            }],
-            edge_properties: vec![EdgePropertyAccess {
-                edge: EDGE,
-                source: COLUMN,
-                column: EDGE_COLUMN,
-                edge_column: PhysicalColumn("source_tags".into()),
-                tokens: vec![Value::String("state:opened".into())],
-            }],
-            text_indexes: vec![TextIndexAccess {
-                column: COLUMN,
-                tokenizer: Tokenizer("splitByNonAlpha".into()),
-            }],
-        }
-    }
-
-    fn clickhouse_candidate() -> Candidate<ClickHouse> {
-        Candidate {
-            plan: Plan {
-                operator: Operator::CurrentRows {
-                    keys: vec![Expr::Column(COLUMN)],
-                    strategy: ClickHouseCurrentRows::Final,
-                },
-                inputs: vec![Plan {
-                    operator: Operator::Scan(PhysicalScan {
-                        relation: RELATION,
-                        access: ClickHouseAccess::Table(TableAccess {
-                            layout: layout("gl_user"),
-                        }),
-                        columns: BTreeSet::from([COLUMN]),
-                    }),
-                    inputs: vec![],
-                }],
-            },
-            columns: ColumnBindings {
-                columns: BTreeMap::from([(COLUMN, Expr::Column(COLUMN))]),
-            },
-            outputs: OutputBindings {
-                nodes: BTreeMap::from([(
-                    INPUT_NODE,
-                    OutputBinding {
-                        relation: RELATION,
-                        primary_key: COLUMN,
-                    },
-                )]),
-            },
-            properties: PhysicalProperties {
-                ordered_by: vec![SortKey {
-                    expression: Expr::Column(COLUMN),
-                    descending: false,
-                }],
-                current_relations: BTreeSet::from([RELATION]),
-            },
-            cost: Cost {
-                scans: 1,
-                final_reads: 1,
-                columns_read: 1,
-                ..Cost::default()
-            },
-        }
-    }
-
-    fn duckdb_candidate() -> Candidate<DuckDb> {
-        Candidate {
-            plan: Plan {
-                operator: Operator::CurrentRows {
-                    keys: vec![Expr::Column(COLUMN)],
-                    strategy: DuckDbCurrentRows,
-                },
-                inputs: vec![Plan {
-                    operator: Operator::Scan(PhysicalScan {
-                        relation: RELATION,
-                        access: DuckDbAccess::Table(TableAccess {
-                            layout: layout("gl_user"),
-                        }),
-                        columns: BTreeSet::from([COLUMN]),
-                    }),
-                    inputs: vec![],
-                }],
-            },
-            columns: ColumnBindings {
-                columns: BTreeMap::from([(COLUMN, Expr::Column(COLUMN))]),
-            },
-            outputs: OutputBindings {
-                nodes: BTreeMap::from([(
-                    INPUT_NODE,
-                    OutputBinding {
-                        relation: RELATION,
-                        primary_key: COLUMN,
-                    },
-                )]),
-            },
-            properties: PhysicalProperties {
-                ordered_by: vec![],
-                current_relations: BTreeSet::from([RELATION]),
-            },
-            cost: Cost {
-                scans: 1,
-                columns_read: 1,
-                ..Cost::default()
-            },
-        }
-    }
-
-    fn property_key(candidate: &Candidate<impl Flavor>) -> PropertyKey {
-        PropertyKey {
-            ordered_by: candidate.properties.ordered_by.clone(),
-            current_relations: candidate.properties.current_relations.clone(),
-        }
-    }
-
-    #[test]
-    fn all_access_paths_and_backend_facts_are_constructible() {
-        let accesses = [
-            ClickHouseAccess::Table(TableAccess {
-                layout: layout("gl_user"),
-            }),
-            ClickHouseAccess::EdgeTables(EdgeTableAccess {
-                layouts: vec![layout("gl_edge")],
-                columns: BTreeMap::new(),
-            }),
-            ClickHouseAccess::DenormalizedJoin(clickhouse_facts().denormalized_joins.remove(0)),
-        ];
-        assert_eq!(accesses.len(), 3);
-        let facts = clickhouse_facts();
-        assert_eq!(facts.foreign_keys.len(), 1);
-        assert_eq!(facts.denormalized_joins.len(), 1);
-        assert_eq!(facts.edge_properties.len(), 1);
-        assert_eq!(facts.text_indexes.len(), 1);
-    }
-
-    #[test]
-    fn skeleton_flow_exercises_every_type_for_both_backends() {
-        let input = Input::default();
-        let ontology = ontology::Ontology::new().with_nodes(["User"]).with_edges(["AUTHORED"]);
-        let bound = bound_catalog(input, ontology);
-        let logical = logical_plan();
-
-        let clickhouse_candidate = clickhouse_candidate();
-        let clickhouse_catalog = BackendCatalog::<ClickHouse> {
-            bound: &bound,
-            relations: BTreeMap::from([
-                (
-                    RELATION,
-                    PhysicalRelation::Node {
-                        relation: RELATION,
-                        layout: layout("gl_user"),
-                    },
-                ),
-                (
-                    EDGE,
-                    PhysicalRelation::Edge {
-                        relation: EDGE,
-                        layouts: vec![layout("gl_edge")],
-                    },
-                ),
-            ]),
-            access_paths: BTreeMap::from([(
-                RELATION,
-                vec![PhysicalScan {
-                    relation: RELATION,
-                    access: ClickHouseAccess::Table(TableAccess {
-                        layout: layout("gl_user"),
-                    }),
-                    columns: BTreeSet::from([COLUMN]),
-                }],
-            )]),
-            current_rows: BTreeMap::from([(
-                RELATION,
-                vec![ClickHouseCurrentRows::Final, ClickHouseCurrentRows::LimitBy],
-            )]),
-            facts: clickhouse_facts(),
-        };
-        let clickhouse_candidates = CandidateSet {
-            candidates: vec![(
-                property_key(&clickhouse_candidate),
-                clickhouse_candidate.clone(),
-            )],
-        };
-        let clickhouse_result = PlanningResult {
-            logical: logical.clone(),
-            selected: SelectedPlan {
-                candidate: clickhouse_candidate,
-            },
-        };
-
-        let duckdb_candidate = duckdb_candidate();
-        let duckdb_catalog = BackendCatalog::<DuckDb> {
-            bound: &bound,
-            relations: BTreeMap::from([(
-                RELATION,
-                PhysicalRelation::Node {
-                    relation: RELATION,
-                    layout: layout("gl_user"),
-                },
-            )]),
-            access_paths: BTreeMap::from([(
-                RELATION,
-                vec![PhysicalScan {
-                    relation: RELATION,
-                    access: DuckDbAccess::Table(TableAccess {
-                        layout: layout("gl_user"),
-                    }),
-                    columns: BTreeSet::from([COLUMN]),
-                }],
-            )]),
-            current_rows: BTreeMap::from([(RELATION, vec![DuckDbCurrentRows])]),
-            facts: DuckDbFacts,
-        };
-        let duckdb_candidates = CandidateSet {
-            candidates: vec![(property_key(&duckdb_candidate), duckdb_candidate.clone())],
-        };
-        let duckdb_result = PlanningResult {
-            logical,
-            selected: SelectedPlan {
-                candidate: duckdb_candidate,
-            },
-        };
-
-        assert_eq!(clickhouse_catalog.facts.foreign_keys.len(), 1);
-        assert!(matches!(duckdb_catalog.facts, DuckDbFacts));
-        assert_eq!(clickhouse_candidates.candidates.len(), 1);
-        assert_eq!(duckdb_candidates.candidates.len(), 1);
-
-        let planned = [
-            PlannedQuery::ClickHouse(clickhouse_result),
-            PlannedQuery::DuckDb(duckdb_result),
-        ];
-        let lowered: Vec<_> = planned
-            .into_iter()
-            .map(|planned| {
-                let candidate = match planned {
-                    PlannedQuery::ClickHouse(result) => result.selected.candidate.cost,
-                    PlannedQuery::DuckDb(result) => result.selected.candidate.cost,
-                };
-                LoweredPlan {
-                    ast: ast::Node::Query(Box::default()),
-                    bindings: LoweredBindings {
-                        columns: BTreeMap::from([(COLUMN, ast::Expr::col("r0", "id"))]),
-                        nodes: BTreeMap::from([(
-                            INPUT_NODE,
-                            LoweredOutputBinding {
-                                primary_key: ast::Expr::col("r0", "id"),
-                            },
-                        )]),
-                    },
-                    metadata: LoweredMetadata::default(),
-                    explain: format!("scans={}", candidate.scans),
-                }
-            })
-            .collect();
-
-        assert_eq!(lowered.len(), 2);
-        assert!(lowered.iter().all(|plan| plan.explain == "scans=1"));
-        assert!(
-            lowered
-                .iter()
-                .all(|plan| plan.bindings.columns.contains_key(&COLUMN))
-        );
-        assert!(
-            lowered
-                .iter()
-                .all(|plan| plan.bindings.nodes.contains_key(&INPUT_NODE))
-        );
-        let backhalf: Vec<ast::Node> = lowered.into_iter().map(|plan| plan.ast).collect();
-        assert!(
-            backhalf
-                .iter()
-                .all(|node| matches!(node, ast::Node::Query(_)))
-        );
-    }
 }

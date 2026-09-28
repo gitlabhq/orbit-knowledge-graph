@@ -31,7 +31,7 @@ enum QueryPlan {
     ClickHouse {
         bound: planner::BoundCatalog<query_data_model::ClickHouseDataModel>,
         candidate: Option<planner::Candidate<planner::ClickHouse>>,
-        parity: plan::QueryPlan,
+        parity: Box<plan::QueryPlan>,
     },
     DuckDb {
         bound: planner::BoundCatalog<query_data_model::DuckDbDataModel>,
@@ -302,8 +302,7 @@ fn plan_clickhouse(
         .as_ref()
         .copied()
         .unwrap_or_default();
-    let (bound, candidate, _, _) =
-        planner::clickhouse(input.clone(), ctx.data_model_arc(), hydration_options)?;
+    let planned = planner::clickhouse(input.clone(), ctx.data_model_arc(), hydration_options)?;
     let scope_proofs = ctx.scope_proofs().as_ref().cloned().unwrap_or_default();
     let parity = plan::plan_clickhouse(
         &input,
@@ -313,9 +312,9 @@ fn plan_clickhouse(
     )?;
     ctx.set_input(input);
     ctx.set_query_plan(QueryPlan::ClickHouse {
-        bound,
-        candidate: Some(candidate),
-        parity,
+        bound: planned.bound,
+        candidate: Some(planned.candidate),
+        parity: Box::new(parity),
     });
     Ok(())
 }
@@ -324,11 +323,11 @@ fn plan_duckdb(
     ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataModel>,
 ) -> Result<()> {
     let input = require(ctx.take_input(), "input")?;
-    let (bound, candidate, _, _) = planner::duckdb(input.clone(), ctx.data_model_arc())?;
+    let planned = planner::duckdb(input.clone(), ctx.data_model_arc())?;
     ctx.set_input(input);
     ctx.set_query_plan(QueryPlan::DuckDb {
-        bound,
-        candidate: Some(candidate),
+        bound: planned.bound,
+        candidate: Some(planned.candidate),
     });
     Ok(())
 }
@@ -349,7 +348,6 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
             }
             let lowered = planner::LoweredPlan {
                 ast: lowered.ast,
-                bindings: planner::LoweredBindings::default(),
                 metadata: planner::LoweredMetadata {
                     node_sources: lowered.metadata.node_sources,
                     aliases,

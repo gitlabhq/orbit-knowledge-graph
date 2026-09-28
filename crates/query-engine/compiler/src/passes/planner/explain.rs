@@ -32,9 +32,6 @@ fn physical_node<M: QueryDataModel>(bound: &BoundCatalog<M>, plan: &Plan<ClickHo
                         .collect::<Vec<_>>()
                         .join("|")
                 ),
-                ClickHouseAccess::DenormalizedJoin(access) => {
-                    format!("Denormalized({})", access.layout.table.0)
-                }
             };
             (
                 "Scan",
@@ -47,22 +44,7 @@ fn physical_node<M: QueryDataModel>(bound: &BoundCatalog<M>, plan: &Plan<ClickHo
             format!("{strategy:?}"),
             keys.iter().map(|key| expression_text(bound, key)).collect(),
         ),
-        Operator::Extension(extension) => match extension {
-            ClickHouseExtension::FusedNeighbors { columns, .. } => (
-                "FusedNeighbors",
-                String::new(),
-                columns
-                    .iter()
-                    .map(|column| {
-                        format!(
-                            "{} AS {}",
-                            expression_text(bound, &column.expression),
-                            bound.outputs[&column.output].name
-                        )
-                    })
-                    .collect(),
-            ),
-        },
+        Operator::Extension(()) => unreachable!(),
         operator => operator_parts(bound, operator),
     };
     PlanNode {
