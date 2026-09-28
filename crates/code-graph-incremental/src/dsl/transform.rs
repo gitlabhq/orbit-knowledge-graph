@@ -320,7 +320,7 @@ impl Tf {
                 segments.reverse();
                 lang.syms.intern(&segments.join(sep))
             }
-            Tf::KindName => lang.syms.intern(lang.kinds.resolve(t.node(id).kind as u32)),
+            Tf::KindName => lang.syms.intern(lang.kind_name(t.node(id).kind)),
             Tf::SiblingIndex => {
                 let index = id
                     .preceding_siblings(&t.arena)
