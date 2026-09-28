@@ -262,8 +262,8 @@ struct SkillsArgs {
 #[derive(Subcommand, Debug, PartialEq)]
 enum SkillsCommands {
     #[command(
-        about = "Print a bundled agent skill file.",
-        long_about = "Print a file from an agent skill bundled with this binary without installing it."
+        about = "Print an instance-matched agent skill file.",
+        long_about = "Print a file from the selected instance's agent skill, composed with local CLI guidance."
     )]
     Get {
         /// Skill name.
@@ -614,8 +614,8 @@ async fn dispatch(
             name_or_path,
             path,
         }) => match command {
-            Some(SkillsCommands::Get { name, path }) => skill::get(name, path),
-            None => skill::run(name_or_path, path),
+            Some(SkillsCommands::Get { name, path }) => skill::get(name, path).await,
+            None => skill::run(name_or_path, path).await,
         },
         Commands::Setup {
             agents,
