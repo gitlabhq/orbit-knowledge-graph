@@ -23,6 +23,7 @@ struct SetupTexts {
     instructions: String,
     nudge_search: String,
     nudge_read: String,
+    strict_deny: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
 }
@@ -68,6 +69,9 @@ static RENDERED_NUDGE_SEARCH: LazyLock<String> =
 
 static RENDERED_NUDGE_READ: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_read.trim_end(), launcher()));
+
+static RENDERED_STRICT_DENY: LazyLock<String> =
+    LazyLock::new(|| substitute_launcher(TEXTS.strict_deny.trim_end(), launcher()));
 
 fn describe_graph_contents() -> String {
     use strum::IntoEnumIterator;
@@ -118,6 +122,10 @@ pub(crate) fn search_nudge_text() -> &'static str {
 
 pub(crate) fn read_nudge_text() -> &'static str {
     &RENDERED_NUDGE_READ
+}
+
+pub(crate) fn strict_deny_text() -> &'static str {
+    &RENDERED_STRICT_DENY
 }
 
 #[derive(Debug, Deserialize)]
@@ -255,6 +263,15 @@ pub(crate) fn agent_names() -> Vec<&'static str> {
     AGENT_SPECS.iter().map(|spec| spec.name.as_str()).collect()
 }
 
+impl AgentSpec {
+    pub(super) fn supports_strict(&self) -> bool {
+        self.json_merges
+            .iter()
+            .flat_map(|merge| &merge.entries)
+            .any(|entry| entry.to_string().contains("{{strict}}"))
+    }
+}
+
 const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
@@ -292,6 +309,8 @@ mod tests {
             assert!(agent_named(name).is_some(), "missing spec for {name}");
         }
         assert_eq!(agent_names().len(), agents().count());
+        assert!(agent_named("claude").unwrap().supports_strict());
+        assert!(!agent_named("codex").unwrap().supports_strict());
     }
 
     #[test]

@@ -18,11 +18,11 @@ json_merges:
       - matcher: "Bash|Grep|Glob"
         hooks:
           - type: command
-            command: "{{orbit}} hook-guard search"
+            command: "{{orbit}} hook-guard search{{strict}}"
       - matcher: Read
         hooks:
           - type: command
-            command: "{{orbit}} hook-guard read"
+            command: "{{orbit}} hook-guard read{{strict}}"
 mcp:
   file:
     project: .mcp.json

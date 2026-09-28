@@ -312,6 +312,7 @@ impl SetupFlags {
         agents: Vec<String>,
         all: bool,
         index: bool,
+        strict: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
     ) -> commands::setup::Options {
         commands::setup::Options {
@@ -321,6 +322,7 @@ impl SetupFlags {
             dry_run: self.dry_run,
             verbose: self.verbose,
             index,
+            strict,
             components,
         }
     }
@@ -372,6 +374,12 @@ enum Commands {
         #[arg(long)]
         no_index: bool,
 
+        /// Block the first raw search or source read of each Claude Code
+        /// session and redirect it to Orbit. Later calls get the usual nudge.
+        /// Override at runtime with ORBIT_HOOK_STRICT=1 or 0.
+        #[arg(long)]
+        strict: bool,
+
         #[command(flatten)]
         flags: SetupFlags,
     },
@@ -388,6 +396,9 @@ enum Commands {
     HookGuard {
         #[arg(value_name = "KIND")]
         kind: commands::hook_guard::Kind,
+
+        #[arg(long)]
+        strict: bool,
 
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
@@ -629,20 +640,25 @@ async fn dispatch(
             mcp,
             skip,
             no_index,
+            strict,
             flags,
         } => {
             let components = commands::setup::Component::from_flags(mcp, &skip);
-            let options = flags.to_options(agents, all, !no_index, components);
+            let options = flags.to_options(agents, all, !no_index, strict, components);
             let machine = commands::setup::detect::Machine::current()?;
             commands::setup::install(options, flags.target()?, &machine)
         }
         Commands::Uninstall { agents, flags } => {
-            let options = flags.to_options(agents, false, false, Default::default());
+            let options = flags.to_options(agents, false, false, false, Default::default());
             let machine = commands::setup::detect::Machine::current()?;
             commands::setup::uninstall(options, flags.target()?, &machine)
         }
-        Commands::HookGuard { kind, mode: _ } => {
-            commands::hook_guard::run(kind);
+        Commands::HookGuard {
+            kind,
+            strict,
+            mode: _,
+        } => {
+            commands::hook_guard::run(kind, strict);
             Ok(())
         }
         Commands::Query {
@@ -990,6 +1006,7 @@ mod tests {
             ["orbit", "hook-guard", "search"].as_slice(),
             &["orbit", "hook-guard", "search", "--mode", "remote"],
             &["orbit", "hook-guard", "read", "--mode", "local"],
+            &["orbit", "hook-guard", "read", "--strict"],
         ] {
             assert!(
                 matches!(Cli::parse_from(argv).command, Commands::HookGuard { .. }),

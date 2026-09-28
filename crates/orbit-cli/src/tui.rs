@@ -10,6 +10,7 @@ pub(crate) struct Choice {
     pub(crate) key: String,
     pub(crate) label: String,
     pub(crate) hint: String,
+    pub(crate) section: Option<String>,
 }
 
 pub(crate) fn can_prompt(skip_prompts: bool) -> Result<bool> {
@@ -190,7 +191,11 @@ pub(crate) fn multiselect(
         picker = picker.item(choice.key.as_str(), &choice.label, &choice.hint);
     }
     picker = picker.initial_values(preselected.iter().map(String::as_str).collect());
-    cliclack::set_theme(KeyHintsFooter);
+    let sections = choices
+        .iter()
+        .filter_map(|choice| Some((choice.label.clone(), choice.section.clone()?)))
+        .collect();
+    cliclack::set_theme(KeyHintsFooter { sections });
     let chosen = picker.interact();
     cliclack::set_theme(CompactCards);
     Ok(chosen?.into_iter().map(str::to_string).collect())
@@ -217,9 +222,35 @@ impl Theme for CompactCards {
 }
 
 /// Set only while a picker is open: every active widget shares this footer.
-struct KeyHintsFooter;
+struct KeyHintsFooter {
+    sections: Vec<(String, String)>,
+}
 
 impl Theme for KeyHintsFooter {
+    fn format_multiselect_item(
+        &self,
+        state: &ThemeState,
+        selected: bool,
+        active: bool,
+        label: &str,
+        hint: &str,
+    ) -> String {
+        let item = Stock.format_multiselect_item(state, selected, active, label, hint);
+        let heading = self
+            .sections
+            .iter()
+            .find(|(item_label, _)| item_label == label)
+            .map(|(_, heading)| heading);
+        match (state, heading) {
+            (ThemeState::Active | ThemeState::Error(_), Some(heading)) => {
+                let bar = self.bar_color(state).apply_to("│");
+                let heading = self.placeholder_style(state).apply_to(heading);
+                format!("{bar}\n{bar}  {heading}\n{item}")
+            }
+            _ => item,
+        }
+    }
+
     fn format_footer_with_message(&self, state: &ThemeState, message: &str) -> String {
         let keys = match state {
             ThemeState::Active => "space toggles, enter confirms",
