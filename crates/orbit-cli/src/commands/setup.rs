@@ -127,15 +127,15 @@ fn ask_which_agents(
     location_hints: &BTreeMap<String, String>,
     offer_strict: bool,
 ) -> Result<Selection> {
-    const STRICT_KEY: &str = "--strict";
+    const STRICT_KEY: &str = "--graph-first";
     let mut choices = summary::agent_picker_choices(offered_agents, location_hints);
     let mut preselected = selection.selected_agent_names();
     if offer_strict {
         choices.push(tui::Choice {
             key: STRICT_KEY.to_string(),
-            label: "Strict mode".to_string(),
-            hint: "Claude Code: block the first raw search or read of each session so agents \
-                   use the graph first"
+            label: "Require graph search first".to_string(),
+            hint: "Claude Code: blocks the first grep or source read of each session until the \
+                   agent queries Orbit"
                 .to_string(),
             section: Some("Options".to_string()),
         });

@@ -374,11 +374,12 @@ enum Commands {
         #[arg(long)]
         no_index: bool,
 
-        /// Block the first raw search or source read of each Claude Code
-        /// session and redirect it to Orbit. Later calls get the usual nudge.
-        /// Override at runtime with ORBIT_HOOK_STRICT=1 or 0.
+        /// Require a graph search first: block the first raw search or source
+        /// read of each Claude Code session and redirect it to Orbit. Later
+        /// calls get the usual nudge. Override at runtime with
+        /// ORBIT_GRAPH_FIRST=1 or 0.
         #[arg(long)]
-        strict: bool,
+        graph_first: bool,
 
         #[command(flatten)]
         flags: SetupFlags,
@@ -640,11 +641,11 @@ async fn dispatch(
             mcp,
             skip,
             no_index,
-            strict,
+            graph_first,
             flags,
         } => {
             let components = commands::setup::Component::from_flags(mcp, &skip);
-            let options = flags.to_options(agents, all, !no_index, strict, components);
+            let options = flags.to_options(agents, all, !no_index, graph_first, components);
             let machine = commands::setup::detect::Machine::current()?;
             commands::setup::install(options, flags.target()?, &machine)
         }

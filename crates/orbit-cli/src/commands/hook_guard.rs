@@ -35,7 +35,7 @@ const SOURCE_EXTS: &[&str] = &[
     "h", "cpp", "hpp", "cc", "cs", "kt", "kts", "swift", "php", "scala", "lua", "sh", "pl",
 ];
 
-const STRICT_ENV: &str = "ORBIT_HOOK_STRICT";
+const STRICT_ENV: &str = "ORBIT_GRAPH_FIRST";
 
 pub(crate) fn run(kind: Kind, strict: bool) {
     let mut input = String::new();
