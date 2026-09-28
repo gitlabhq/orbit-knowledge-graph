@@ -35,6 +35,7 @@ SELECT DISTINCT project_id
 FROM {table:Identifier} FINAL
 WHERE _deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
+  -- Skip indexed projects, gaps, and projects with an attempt in the retry window.
   AND (indexed_at IS NOT NULL
        OR attempts >= {max_attempts:Int64}
        OR _version > now64(6) - toIntervalSecond({retry_after_secs:UInt64}))
