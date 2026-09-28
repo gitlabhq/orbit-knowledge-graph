@@ -6,6 +6,4 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Join ON start.id = e1.source_id AND e1.target_id = e2.source_id (...))
-    reject:
-      - (Join ON ... traversal_path ...)
+      - (PathFinding max_depth=3 forward=2 backward=1 scoped=false (...))

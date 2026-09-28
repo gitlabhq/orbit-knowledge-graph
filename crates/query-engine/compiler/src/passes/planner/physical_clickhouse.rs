@@ -19,6 +19,17 @@ pub fn plan_clickhouse(
         plan = deduplicate_edges(plan, bound, bound.input.relationships.len() > 1);
     }
     let ordinary = clickhouse_candidate(bound, plan);
+    if bound.input.query_type == crate::input::QueryType::PathFinding {
+        let candidate = pathfinding_candidate(bound, ordinary).ok_or_else(|| {
+            crate::error::QueryError::PipelineInvariant(
+                "path finding has no physical frontier".into(),
+            )
+        })?;
+        return Ok(PlanningResult {
+            logical,
+            selected: SelectedPlan { candidate },
+        });
+    }
     if bound.input.query_type == crate::input::QueryType::Aggregation
         && catalog.edge_properties.len() == 1
         && bound.input.relationships.len() > 1
@@ -71,6 +82,56 @@ pub fn plan_clickhouse(
         logical,
         selected: candidates.select().unwrap(),
     })
+}
+
+fn pathfinding_candidate(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    mut candidate: Candidate<ClickHouse>,
+) -> Option<Candidate<ClickHouse>> {
+    let path = bound.input.path.as_ref()?;
+    let start = bound.node_relation(&path.from)?;
+    let end = bound.node_relation(&path.to)?;
+    let start_plan = relation_plan(&candidate.plan, start)?;
+    let end_plan = relation_plan(&candidate.plan, end)?;
+    let edge_scan = first_edge_scan(&candidate.plan)?;
+    let scoped = [start, end].into_iter().all(|relation| {
+        let RelationOrigin::Node { entity, .. } = bound.relation(relation).origin else {
+            return false;
+        };
+        bound
+            .model
+            .entity_has_traversal_path(bound.entity_name(entity))
+    });
+    let backward_depth = path.max_depth / 2;
+    candidate.plan = Plan {
+        operator: Operator::Extension(ClickHouseExtension::PathFinding {
+            max_depth: path.max_depth,
+            forward_depth: path.max_depth - backward_depth,
+            backward_depth,
+            scoped,
+        }),
+        inputs: vec![start_plan, end_plan, Plan::leaf(Operator::Scan(edge_scan))],
+    };
+    candidate.cost = plan_cost(&candidate.plan);
+    Some(candidate)
+}
+
+fn relation_plan(plan: &Plan<ClickHouse>, relation: RelationId) -> Option<Plan<ClickHouse>> {
+    if plan.relation() == Some(relation) {
+        return Some(plan.clone());
+    }
+    plan.inputs
+        .iter()
+        .find_map(|input| relation_plan(input, relation))
+}
+
+fn first_edge_scan(plan: &Plan<ClickHouse>) -> Option<PhysicalScan<ClickHouseAccess>> {
+    if let Operator::Scan(scan) = &plan.operator
+        && matches!(scan.access, ClickHouseAccess::EdgeTables(_))
+    {
+        return Some(scan.clone());
+    }
+    plan.inputs.iter().find_map(first_edge_scan)
 }
 
 fn fused_neighbors_candidate(

@@ -125,13 +125,38 @@ impl LowerFlavor for ClickHouse {
         extension: Self::Extension,
         inputs: Vec<Plan<Self>>,
         aliases: &HashMap<RelationId, String>,
-        _columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
+        columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
     ) -> Result<Query> {
-        let ClickHouseExtension::FusedNeighbors { center } = extension;
-        let [scan]: [Plan<ClickHouse>; 1] = inputs
-            .try_into()
-            .map_err(|_| QueryError::Lowering("fused neighbors need one scan".into()))?;
-        lower_fused_neighbors(bound, center, scan, aliases)
+        match extension {
+            ClickHouseExtension::FusedNeighbors { center } => {
+                let [scan]: [Plan<ClickHouse>; 1] = inputs
+                    .try_into()
+                    .map_err(|_| QueryError::Lowering("fused neighbors need one scan".into()))?;
+                lower_fused_neighbors(bound, center, scan, aliases)
+            }
+            ClickHouseExtension::PathFinding {
+                max_depth,
+                forward_depth,
+                backward_depth,
+                scoped,
+            } => {
+                let [start, end, edge]: [Plan<ClickHouse>; 3] = inputs
+                    .try_into()
+                    .map_err(|_| QueryError::Lowering("path finding needs three sources".into()))?;
+                lower_path_finding(
+                    bound,
+                    start,
+                    end,
+                    edge,
+                    max_depth,
+                    forward_depth,
+                    backward_depth,
+                    scoped,
+                    aliases,
+                    columns,
+                )
+            }
+        }
     }
 
     fn current_rows(
@@ -558,6 +583,467 @@ fn edge_ids(alias: &str, column: &str, ids: &[i64]) -> ast::Expr {
                 serde_json::Value::Array(ids.iter().copied().map(Into::into).collect()),
             ),
         ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_path_finding(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    start: Plan<ClickHouse>,
+    end: Plan<ClickHouse>,
+    edge: Plan<ClickHouse>,
+    max_depth: u32,
+    forward_depth: u32,
+    backward_depth: u32,
+    scoped: bool,
+    aliases: &HashMap<RelationId, String>,
+    columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
+) -> Result<Query> {
+    let start_relation = start
+        .relation()
+        .ok_or_else(|| QueryError::Lowering("path start has no relation".into()))?;
+    let end_relation = end
+        .relation()
+        .ok_or_else(|| QueryError::Lowering("path end has no relation".into()))?;
+    let Operator::Scan(edge) = edge.operator else {
+        return Err(QueryError::Lowering("path edge is not a scan".into()));
+    };
+    let ClickHouseAccess::EdgeTables(access) = edge.access else {
+        return Err(QueryError::Lowering("path edge has no edge tables".into()));
+    };
+    let start_alias = aliases[&start_relation].clone();
+    let end_alias = aliases[&end_relation].clone();
+    let mut start_query = lower_plan::<ClickHouse>(bound, start, aliases, columns)?;
+    start_query.select = path_anchor_select(&start_alias, scoped);
+    start_query.limit = Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32);
+    let mut end_query = lower_plan::<ClickHouse>(bound, end, aliases, columns)?;
+    end_query.select = path_anchor_select(&end_alias, scoped);
+    end_query.limit = Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32);
+    let start_cte = crate::constants::node_filter_cte(&start_alias);
+    let end_cte = crate::constants::node_filter_cte(&end_alias);
+    let start_entity = path_entity(bound, start_relation);
+    let end_entity = path_entity(bound, end_relation);
+    let edge_alias = aliases[&edge.relation].clone();
+    let path = bound.input.path.as_ref().unwrap();
+    let forward = path_frontier(
+        &access.layouts,
+        &edge_alias,
+        &start_cte,
+        forward_depth,
+        true,
+        scoped,
+        start_entity,
+        &path.rel_types,
+    );
+    let backward = (backward_depth > 0).then(|| {
+        path_frontier(
+            &access.layouts,
+            &edge_alias,
+            &end_cte,
+            backward_depth,
+            false,
+            scoped,
+            end_entity,
+            &path.rel_types,
+        )
+    });
+    let direct = Query {
+        select: vec![
+            SelectExpr::new(
+                ast::Expr::func(
+                    "arrayConcat",
+                    vec![
+                        ast::Expr::func(
+                            "array",
+                            vec![ast::Expr::func(
+                                "tuple",
+                                vec![
+                                    ast::Expr::col("f", crate::constants::ANCHOR_ID_COLUMN),
+                                    ast::Expr::string(start_entity),
+                                ],
+                            )],
+                        ),
+                        ast::Expr::col("f", crate::constants::PATH_NODES_COLUMN),
+                    ],
+                ),
+                crate::constants::path_column(),
+            ),
+            SelectExpr::new(
+                ast::Expr::col("f", crate::constants::FRONTIER_EDGE_KINDS_COLUMN),
+                crate::constants::edge_kinds_column(),
+            ),
+            SelectExpr::col("f", crate::constants::DEPTH_COLUMN),
+        ],
+        from: TableRef::scan(crate::constants::FORWARD_CTE, "f"),
+        where_clause: Some(ast::Expr::eq(
+            ast::Expr::col("f", crate::constants::DEPTH_COLUMN),
+            ast::Expr::int(1),
+        )),
+        ..Default::default()
+    };
+    let mut paths = vec![direct];
+    if backward.is_some() {
+        let mut on = ast::Expr::eq(
+            ast::Expr::col("f", crate::constants::END_ID_COLUMN),
+            ast::Expr::col("b", crate::constants::END_ID_COLUMN),
+        );
+        if scoped {
+            on = ast::Expr::and(
+                on,
+                ast::Expr::eq(
+                    ast::Expr::col("f", ontology::constants::TRAVERSAL_PATH_COLUMN),
+                    ast::Expr::col("b", ontology::constants::TRAVERSAL_PATH_COLUMN),
+                ),
+            );
+        }
+        paths.push(Query {
+            select: vec![
+                SelectExpr::new(
+                    ast::Expr::func(
+                        "arrayConcat",
+                        vec![
+                            ast::Expr::func(
+                                "array",
+                                vec![ast::Expr::func(
+                                    "tuple",
+                                    vec![
+                                        ast::Expr::col(
+                                            "f",
+                                            crate::constants::ANCHOR_ID_COLUMN,
+                                        ),
+                                        ast::Expr::string(start_entity),
+                                    ],
+                                )],
+                            ),
+                            ast::Expr::col("f", crate::constants::PATH_NODES_COLUMN),
+                            ast::Expr::func(
+                                "arrayReverse",
+                                vec![ast::Expr::col(
+                                    "b",
+                                    crate::constants::PATH_NODES_COLUMN,
+                                )],
+                            ),
+                            ast::Expr::func(
+                                "array",
+                                vec![ast::Expr::func(
+                                    "tuple",
+                                    vec![
+                                        ast::Expr::col(
+                                            "b",
+                                            crate::constants::ANCHOR_ID_COLUMN,
+                                        ),
+                                        ast::Expr::string(end_entity),
+                                    ],
+                                )],
+                            ),
+                        ],
+                    ),
+                    crate::constants::path_column(),
+                ),
+                SelectExpr::new(
+                    ast::Expr::func(
+                        "arrayConcat",
+                        vec![
+                            ast::Expr::col(
+                                "f",
+                                crate::constants::FRONTIER_EDGE_KINDS_COLUMN,
+                            ),
+                            ast::Expr::func(
+                                "arrayReverse",
+                                vec![ast::Expr::col(
+                                    "b",
+                                    crate::constants::FRONTIER_EDGE_KINDS_COLUMN,
+                                )],
+                            ),
+                        ],
+                    ),
+                    crate::constants::edge_kinds_column(),
+                ),
+                SelectExpr::new(
+                    ast::Expr::binary(
+                        ast::Op::Add,
+                        ast::Expr::col("f", crate::constants::DEPTH_COLUMN),
+                        ast::Expr::col("b", crate::constants::DEPTH_COLUMN),
+                    ),
+                    crate::constants::DEPTH_COLUMN,
+                ),
+            ],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan(crate::constants::FORWARD_CTE, "f"),
+                TableRef::scan(crate::constants::BACKWARD_CTE, "b"),
+                on,
+            ),
+            where_clause: Some(ast::Expr::binary(
+                ast::Op::Le,
+                ast::Expr::binary(
+                    ast::Op::Add,
+                    ast::Expr::col("f", crate::constants::DEPTH_COLUMN),
+                    ast::Expr::col("b", crate::constants::DEPTH_COLUMN),
+                ),
+                ast::Expr::int(i64::from(max_depth)),
+            )),
+            ..Default::default()
+        });
+    }
+    let mut ctes = vec![
+        crate::ast::Cte::new(start_cte, start_query),
+        crate::ast::Cte::new(end_cte, end_query),
+        crate::ast::Cte::new(crate::constants::FORWARD_CTE, forward),
+    ];
+    if let Some(backward) = backward {
+        ctes.push(crate::ast::Cte::new(
+            crate::constants::BACKWARD_CTE,
+            backward,
+        ));
+    }
+    Ok(Query {
+        ctes,
+        select: vec![
+            SelectExpr::col("paths", crate::constants::path_column()),
+            SelectExpr::col("paths", crate::constants::edge_kinds_column()),
+            SelectExpr::col("paths", crate::constants::DEPTH_COLUMN),
+        ],
+        from: TableRef::union_all(paths, "paths"),
+        order_by: vec![OrderExpr::asc(ast::Expr::col(
+            "paths",
+            crate::constants::DEPTH_COLUMN,
+        ))],
+        ..Default::default()
+    })
+}
+
+fn path_anchor_select(alias: &str, scoped: bool) -> Vec<SelectExpr> {
+    let mut select = vec![SelectExpr::new(
+        ast::Expr::col(alias, ontology::constants::DEFAULT_PRIMARY_KEY),
+        crate::constants::ANCHOR_ID_COLUMN,
+    )];
+    if scoped {
+        select.push(SelectExpr::col(
+            alias,
+            ontology::constants::TRAVERSAL_PATH_COLUMN,
+        ));
+    }
+    select
+}
+
+fn path_entity(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    relation: RelationId,
+) -> &str {
+    let RelationOrigin::Node { entity, .. } = bound.relation(relation).origin else {
+        unreachable!()
+    };
+    bound.entity_name(entity)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn path_frontier(
+    layouts: &[TableLayout],
+    alias: &str,
+    anchor_cte: &str,
+    max_depth: u32,
+    forward: bool,
+    scoped: bool,
+    anchor_entity: &str,
+    relationships: &[String],
+) -> Query {
+    let arms = (1..=max_depth)
+        .map(|depth| {
+            path_frontier_arm(
+                layouts,
+                alias,
+                anchor_cte,
+                depth,
+                forward,
+                scoped,
+                anchor_entity,
+                relationships,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut arms = arms.into_iter();
+    let mut first = arms.next().unwrap();
+    first.union_all = arms.collect();
+    first
+}
+
+#[allow(clippy::too_many_arguments)]
+fn path_frontier_arm(
+    layouts: &[TableLayout],
+    alias: &str,
+    anchor_cte: &str,
+    depth: u32,
+    forward: bool,
+    scoped: bool,
+    anchor_entity: &str,
+    relationships: &[String],
+) -> Query {
+    let (anchor_column, next_column, kind_column) = if forward {
+        (
+            ontology::constants::SOURCE_ID_COLUMN,
+            ontology::constants::TARGET_ID_COLUMN,
+            ontology::constants::TARGET_KIND_COLUMN,
+        )
+    } else {
+        (
+            ontology::constants::TARGET_ID_COLUMN,
+            ontology::constants::SOURCE_ID_COLUMN,
+            ontology::constants::SOURCE_KIND_COLUMN,
+        )
+    };
+    let hop_alias = |hop| format!("{alias}_{hop}");
+    let first = hop_alias(1);
+    let scan = |hop_alias: &str| {
+        if layouts.len() == 1 {
+            TableRef::scan(&layouts[0].table.0, hop_alias)
+        } else {
+            TableRef::union_all(
+                layouts
+                    .iter()
+                    .map(|layout| Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::scan(&layout.table.0, hop_alias),
+                        ..Default::default()
+                    })
+                    .collect(),
+                hop_alias,
+            )
+        }
+    };
+    let mut from = scan(&first);
+    for hop in 2..=depth {
+        let previous = hop_alias(hop - 1);
+        let current = hop_alias(hop);
+        let mut on = ast::Expr::eq(
+            ast::Expr::col(&previous, next_column),
+            ast::Expr::col(&current, anchor_column),
+        );
+        if scoped {
+            on = ast::Expr::and(
+                on,
+                ast::Expr::eq(
+                    ast::Expr::col(&previous, ontology::constants::TRAVERSAL_PATH_COLUMN),
+                    ast::Expr::col(&current, ontology::constants::TRAVERSAL_PATH_COLUMN),
+                ),
+            );
+        }
+        from = TableRef::join(JoinType::Inner, from, scan(&current), on);
+    }
+    let last = hop_alias(depth);
+    let path_nodes = if forward {
+        (1..=depth)
+            .map(|hop| {
+                let alias = hop_alias(hop);
+                ast::Expr::func(
+                    "tuple",
+                    vec![
+                        ast::Expr::col(&alias, next_column),
+                        ast::Expr::col(&alias, kind_column),
+                    ],
+                )
+            })
+            .collect()
+    } else {
+        (1..depth)
+            .map(|hop| {
+                let alias = hop_alias(hop);
+                ast::Expr::func(
+                    "tuple",
+                    vec![
+                        ast::Expr::col(&alias, next_column),
+                        ast::Expr::col(&alias, kind_column),
+                    ],
+                )
+            })
+            .collect()
+    };
+    let edge_kinds = (1..=depth)
+        .map(|hop| {
+            ast::Expr::col(
+                hop_alias(hop),
+                ontology::constants::RELATIONSHIP_KIND_COLUMN,
+            )
+        })
+        .collect();
+    let mut predicates = vec![ast::Expr::InSelect {
+        expr: Box::new(ast::Expr::col(&first, anchor_column)),
+        query: Box::new(Query {
+            select: vec![SelectExpr::col(
+                anchor_cte,
+                crate::constants::ANCHOR_ID_COLUMN,
+            )],
+            from: TableRef::scan(anchor_cte, anchor_cte),
+            ..Default::default()
+        }),
+    }];
+    predicates.push(ast::Expr::eq(
+        ast::Expr::col(
+            &first,
+            if forward {
+                ontology::constants::SOURCE_KIND_COLUMN
+            } else {
+                ontology::constants::TARGET_KIND_COLUMN
+            },
+        ),
+        ast::Expr::string(anchor_entity),
+    ));
+    if !relationships.is_empty() && relationships != ["*"] {
+        predicates.push(if relationships.len() == 1 {
+            ast::Expr::eq(
+                ast::Expr::col(&first, ontology::constants::RELATIONSHIP_KIND_COLUMN),
+                ast::Expr::string(&relationships[0]),
+            )
+        } else {
+            ast::Expr::binary(
+                ast::Op::In,
+                ast::Expr::col(&first, ontology::constants::RELATIONSHIP_KIND_COLUMN),
+                ast::Expr::param(
+                    ast::ChType::String.to_array(),
+                    serde_json::Value::Array(
+                        relationships.iter().cloned().map(Into::into).collect(),
+                    ),
+                ),
+            )
+        });
+    }
+    let mut select = vec![
+        SelectExpr::new(
+            ast::Expr::col(&first, anchor_column),
+            crate::constants::ANCHOR_ID_COLUMN,
+        ),
+        SelectExpr::new(
+            ast::Expr::col(&last, next_column),
+            crate::constants::END_ID_COLUMN,
+        ),
+        SelectExpr::new(
+            ast::Expr::col(&last, kind_column),
+            crate::constants::END_KIND_COLUMN,
+        ),
+        SelectExpr::new(
+            ast::Expr::func("array", path_nodes),
+            crate::constants::PATH_NODES_COLUMN,
+        ),
+        SelectExpr::new(
+            ast::Expr::func("array", edge_kinds),
+            crate::constants::FRONTIER_EDGE_KINDS_COLUMN,
+        ),
+        SelectExpr::new(
+            ast::Expr::int(i64::from(depth)),
+            crate::constants::DEPTH_COLUMN,
+        ),
+    ];
+    if scoped {
+        select.push(SelectExpr::col(
+            &first,
+            ontology::constants::TRAVERSAL_PATH_COLUMN,
+        ));
+    }
+    Query {
+        select,
+        from,
+        where_clause: ast::Expr::conjoin(predicates),
+        ..Default::default()
     }
 }
 

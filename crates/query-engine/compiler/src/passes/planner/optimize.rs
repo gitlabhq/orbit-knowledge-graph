@@ -583,6 +583,9 @@ fn rewrite(
             continue;
         };
         let node = &bound.input.nodes[node_index];
+        if bound.input.query_type == crate::input::QueryType::PathFinding {
+            continue;
+        }
         let elevated = bound
             .model
             .entity_minimum_access_level(node.entity.as_deref().unwrap_or_default())

@@ -7,4 +7,5 @@ logical:
 physical:
   clickhouse:
     expect:
+      - (PathFinding max_depth=2 forward=1 backward=1 scoped=true (...))
       - (Scan EdgeTables(gl_code_edge) AS e1)
