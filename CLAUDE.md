@@ -19,6 +19,11 @@ Use mise for all tasks.
 
 `docs-locale/` is generated. Never read, edit, or reference it.
 
+Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
+Commits title to skip unnecessary merge request pipelines while iterating. When
+ready for CI, remove `[skip ci]` and push a commit or trigger an MR pipeline;
+editing the title alone does not start one.
+
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
 ```shell
