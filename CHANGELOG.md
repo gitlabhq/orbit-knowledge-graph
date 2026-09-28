@@ -1,3 +1,11 @@
+## [0.133.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.132.0...v0.133.0) (2026-09-28)
+
+### Features
+
+* **code-graph-incremental:** fourteen more languages and their suites ([0c6033c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0c6033c6b34c217f4f591ba94fdcbe2deceae4b9)) by Michael Usachenko
+* **code-graph-incremental:** language families ([f8dfac3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f8dfac343d58f8fbc707017439e8978faed7534a)) by Michael Usachenko
+* **server:** report indexing gaps and the error phase ([85e3f9f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/85e3f9f97b28b1e34e09681040eab2caeadebb4c)) by Jean-Gabriel Doyon
+
 ## [0.132.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.131.0...v0.132.0) (2026-09-28)
 
 ### Features
