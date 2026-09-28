@@ -659,7 +659,7 @@ async fn dispatch(
             graph_first,
             mode: _,
         } => {
-            commands::hook_guard::run(kind, graph_first);
+            commands::hook_guard::run(kind, graph_first, tracker.as_ref(), coding_agent.as_deref());
             Ok(())
         }
         Commands::Query {

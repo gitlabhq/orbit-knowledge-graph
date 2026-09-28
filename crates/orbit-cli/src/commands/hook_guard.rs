@@ -5,12 +5,13 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
 use crate::commands::setup::spec;
-use crate::workspace;
+use crate::{telemetry, workspace};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub(crate) enum Kind {
@@ -35,7 +36,29 @@ const SOURCE_EXTS: &[&str] = &[
 
 const GRAPH_FIRST_ENV: &str = "ORBIT_GRAPH_FIRST";
 
-pub(crate) fn run(kind: Kind, graph_first: bool) {
+const SESSION_TTL: Duration = Duration::from_secs(2 * 24 * 60 * 60);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Event {
+    Deny,
+    OrbitUsed,
+}
+
+impl Event {
+    fn action(self) -> &'static str {
+        match self {
+            Event::Deny => "graph_first_deny",
+            Event::OrbitUsed => "graph_first_orbit_used",
+        }
+    }
+}
+
+pub(crate) fn run(
+    kind: Kind,
+    graph_first: bool,
+    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
+    coding_agent: Option<&str>,
+) {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
         return;
@@ -57,8 +80,12 @@ pub(crate) fn run(kind: Kind, graph_first: bool) {
                 })
             })
             .flatten();
-    if let Some(response) = respond(kind, &call, graph_first.as_ref()) {
+    let (response, event) = respond(kind, &call, graph_first.as_ref());
+    if let Some(response) = response {
         println!("{response}");
+    }
+    if let (Some(tracker), Some(event)) = (tracker, event) {
+        telemetry::emit_hook_guard_event(tracker, event.action(), coding_agent);
     }
 }
 
@@ -67,35 +94,42 @@ struct GraphFirst {
     project_dir: Option<String>,
 }
 
-fn respond(kind: Kind, call: &Value, graph_first: Option<&GraphFirst>) -> Option<Value> {
+fn respond(
+    kind: Kind,
+    call: &Value,
+    graph_first: Option<&GraphFirst>,
+) -> (Option<Value>, Option<Event>) {
     let session = graph_first.zip(session_id(call));
-    if runs_orbit(call) {
-        if let Some((graph_first, id)) = &session {
-            claim_session(&graph_first.sessions, id);
-        }
-        return None;
+    let mut event = None;
+    if runs_orbit(call)
+        && let Some((graph_first, id)) = &session
+        && claim_session(&graph_first.sessions, id)
+    {
+        event = Some(Event::OrbitUsed);
     }
     if !should_nudge(kind, call) {
-        return None;
+        return (None, event);
     }
     if let Some((graph_first, id)) = &session
         && should_block(kind, call, graph_first)
         && claim_session(&graph_first.sessions, id)
     {
-        return Some(json!({
+        let deny = json!({
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
                 "permissionDecisionReason": spec::graph_first_deny_text(),
             }
-        }));
+        });
+        return (Some(deny), Some(Event::Deny));
     }
-    Some(json!({
+    let nudge = json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "additionalContext": nudge_text(kind),
         }
-    }))
+    });
+    (Some(nudge), event)
 }
 
 fn graph_first_enabled(installed: bool, env: Option<&str>) -> bool {
@@ -110,7 +144,9 @@ fn graph_first_enabled(installed: bool, env: Option<&str>) -> bool {
 }
 
 fn session_dir() -> Option<PathBuf> {
-    let base = dirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
+    let base = dirs::runtime_dir()
+        .or_else(dirs::cache_dir)
+        .unwrap_or_else(std::env::temp_dir);
     Some(base.join("orbit-hook-sessions"))
 }
 
@@ -133,11 +169,32 @@ fn claim_session(dir: &Path, id: &str) -> bool {
     if std::fs::create_dir_all(dir).is_err() {
         return false;
     }
-    std::fs::OpenOptions::new()
+    let claimed = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(dir.join(id))
-        .is_ok()
+        .is_ok();
+    if claimed {
+        prune_sessions(dir, SystemTime::now());
+    }
+    claimed
+}
+
+fn prune_sessions(dir: &Path, now: SystemTime) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age > SESSION_TTL);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn command_of(call: &Value) -> &str {
@@ -171,29 +228,41 @@ fn invokes_orbit(command: &str) -> bool {
 }
 
 fn should_block(kind: Kind, call: &Value, graph_first: &GraphFirst) -> bool {
+    let cwd = call.get("cwd").and_then(Value::as_str);
+    let Some(root) = graph_first.project_dir.as_deref().or(cwd) else {
+        return false;
+    };
+    if cwd.is_some_and(|cwd| !Path::new(cwd).starts_with(root)) {
+        return false;
+    }
+    let command = command_of(call);
+    if !command.is_empty() {
+        return command_paths(command).all(|path| path.starts_with(root));
+    }
     let key = match kind {
         Kind::Search => "path",
         Kind::Read => "file_path",
     };
-    let path = call
-        .get("tool_input")
-        .unwrap_or(call)
-        .get(key)
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    in_project(path, call, graph_first)
+    let path = Path::new(
+        call.get("tool_input")
+            .unwrap_or(call)
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    );
+    path.is_relative() || path.starts_with(root)
 }
 
-fn in_project(path: &str, call: &Value, graph_first: &GraphFirst) -> bool {
-    let path = Path::new(path);
-    if path.as_os_str().is_empty() || path.is_relative() {
-        return true;
-    }
-    graph_first
-        .project_dir
-        .as_deref()
-        .or_else(|| call.get("cwd").and_then(Value::as_str))
-        .is_some_and(|root| path.starts_with(root))
+fn command_paths(command: &str) -> impl Iterator<Item = PathBuf> + '_ {
+    let home = dirs::home_dir();
+    command
+        .split(|c: char| c.is_whitespace() || "|;&()`<>=".contains(c))
+        .map(|token| token.trim_matches(['\'', '"']))
+        .filter_map(move |token| match token.strip_prefix("~/") {
+            Some(rest) => home.as_ref().map(|home| home.join(rest)),
+            None => token.starts_with('/').then(|| PathBuf::from(token)),
+        })
+        .filter(|path| !path.starts_with("/dev") && path.exists())
 }
 
 fn local_graph_exists() -> bool {
@@ -372,7 +441,7 @@ mod tests {
     }
 
     fn decide(kind: Kind, call: &Value, graph_first: Option<&GraphFirst>) -> &'static str {
-        match respond(kind, call, graph_first) {
+        match respond(kind, call, graph_first).0 {
             None => "none",
             Some(out) if out["hookSpecificOutput"]["permissionDecision"] == "deny" => "deny",
             Some(_) => "nudge",
@@ -406,6 +475,13 @@ mod tests {
             (Kind::Read, read("h", "/repo/src/main.rs"), "nudge"),
             (Kind::Read, read("e", "/elsewhere/lib.rs"), "nudge"),
             (
+                Kind::Search,
+                bash("i", "orbit context Foo && grep bar src/"),
+                "nudge",
+            ),
+            (Kind::Search, bash("j", "rg foo /etc"), "nudge"),
+            (Kind::Search, bash("k", "rg foo src 2>/dev/null"), "deny"),
+            (
                 Kind::Read,
                 json!({"tool_input": {"file_path": "/repo/a.rs"}}),
                 "nudge",
@@ -414,6 +490,20 @@ mod tests {
             assert_eq!(decide(kind, &call, Some(&graph_first)), expected, "{call}");
         }
         assert_eq!(decide(Kind::Read, &read("f", "/repo/a.rs"), None), "nudge");
+        let mixed = bash("f", "orbit context Foo && grep bar src/");
+        assert_eq!(decide(Kind::Search, &mixed, None), "nudge");
+        let event = |kind, call| respond(kind, &call, Some(&graph_first)).1;
+        assert_eq!(
+            event(Kind::Search, bash("m", "orbit grep x")),
+            Some(Event::OrbitUsed)
+        );
+        assert_eq!(
+            event(Kind::Read, read("n", "/repo/a.rs")),
+            Some(Event::Deny)
+        );
+        assert_eq!(event(Kind::Read, read("n", "/repo/a.rs")), None);
+        prune_sessions(dir.path(), SystemTime::now() + SESSION_TTL * 2);
+        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
         assert_eq!(
             session_id(&json!({"session_id": "../x"})).as_deref(),
             Some("___x")
