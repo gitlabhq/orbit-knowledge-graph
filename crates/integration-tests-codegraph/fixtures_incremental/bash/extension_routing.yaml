@@ -1,0 +1,32 @@
+name: "Bash extension routing — .sh, .bash, and .zsh all dispatch to the Bash pipeline"
+
+fixtures:
+  - path: scripts/a.sh
+    content: |
+      sh_fn() {
+        echo "sh"
+      }
+
+  - path: scripts/b.bash
+    content: |
+      bash_fn() {
+        echo "bash"
+      }
+
+  - path: scripts/c.zsh
+    content: |
+      zsh_fn() {
+        echo "zsh"
+      }
+
+tests:
+  - name: "Functions from every shell extension are indexed"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "sh_fn" } }
+      - { row: { name: "bash_fn" } }
+      - { row: { name: "zsh_fn" } }
