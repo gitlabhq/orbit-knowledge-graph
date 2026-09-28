@@ -1,10 +1,9 @@
 //! Declarative agent specs embedded from `config/setup/agents/`. Each YAML file describes
 //! one agent as generic operations (detection paths, instruction file, marker-owned JSON
 //! merges, templated files, string registrations, MCP entry, skill directories), so adding an
-//! agent means adding a YAML file, not Rust. The instruction block, hook nudges, MCP server,
-//! and template values live in `config/setup/setup.yaml`.
+//! agent means adding a YAML file, not Rust. The instruction block, hook guard texts, and MCP
+//! server live in `config/setup/setup.yaml`.
 
-use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use ontology::migrations::sha256_hex;
@@ -26,8 +25,6 @@ struct SetupTexts {
     graph_first_deny: String,
     session_start: String,
     graph_first_session: String,
-    #[serde(default)]
-    template_vars: BTreeMap<String, String>,
 }
 
 static TEXTS: LazyLock<SetupTexts> = LazyLock::new(|| {
@@ -221,6 +218,14 @@ pub(super) struct JsonMerge {
     pub(super) path: Vec<String>,
     pub(super) marker: String,
     pub(super) entries: Vec<Value>,
+    pub(super) note: Option<ScopedNote>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ScopedNote {
+    pub(super) project: Option<String>,
+    pub(super) global: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -299,12 +304,8 @@ const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
     pub(super) fn render(&self, graph_first: bool) -> String {
-        let mut body = read_embedded_text(&self.template);
-        for (name, value) in &TEXTS.template_vars {
-            body = body.replace(&format!("{{{{{name}}}}}"), value);
-        }
         let flag = if graph_first { GRAPH_FIRST_FLAG } else { "" };
-        let body = body
+        let body = read_embedded_text(&self.template)
             .replace("{{graph_first}}", flag)
             .replace("{{mcp_server}}", &TEXTS.mcp_server.name);
         let body = substitute_launcher(&body, launcher());
@@ -401,13 +402,6 @@ mod tests {
                     "{name}"
                 );
             }
-        }
-
-        for (name, text) in &TEXTS.template_vars {
-            assert!(
-                !text.contains(['"', '`']) && !text.contains("$("),
-                "{name} is not shell-safe"
-            );
         }
     }
 

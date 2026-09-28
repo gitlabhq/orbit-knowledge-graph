@@ -49,6 +49,7 @@ pub(super) enum Candidate {
         key: String,
         paths: Vec<String>,
     },
+    Cd(String),
 }
 
 pub(super) enum Target {
@@ -129,7 +130,9 @@ pub(super) fn orbit_grep_terms(call: &Value) -> Vec<String> {
 }
 
 fn orbit_invocations(command: &str) -> Vec<Vec<String>> {
+    let head = command.split("<<").next().unwrap_or(command);
     shell::split(command)
+        .or_else(|| shell::split(head))
         .unwrap_or_default()
         .into_iter()
         .flatten()
@@ -163,15 +166,12 @@ fn stage_candidate(index: usize, stage: &[String]) -> Option<Candidate> {
     }
     let (name, args) = words.split_first()?;
     match basename(name) {
+        "cd" | "pushd" if index == 0 => Some(Candidate::Cd(
+            args.first().cloned().unwrap_or_else(|| "~".to_string()),
+        )),
         "git" if args.first().is_some_and(|verb| verb == "grep") => content_search(&args[1..]),
         "find" => Some(find_search(args)),
-        "fd" | "fdfind" => {
-            let mut positional = args.iter().filter(|arg| !arg.starts_with('-')).cloned();
-            Some(Candidate::Files {
-                patterns: positional.next().into_iter().collect(),
-                paths: positional.collect(),
-            })
-        }
+        "fd" | "fdfind" => Some(fd_search(args)),
         name if CONTENT_SEARCH_COMMANDS.contains(&name) => content_search(args),
         "sed"
             if args
@@ -239,7 +239,9 @@ fn content_search(args: &[String]) -> Option<Candidate> {
 fn find_search(args: &[String]) -> Candidate {
     let (mut paths, mut patterns) = (Vec::new(), Vec::new());
     let mut in_expression = false;
-    let mut words = args.iter();
+    let mut words = args
+        .iter()
+        .skip_while(|word| matches!(word.as_str(), "-H" | "-L" | "-P"));
     while let Some(word) = words.next() {
         if word.starts_with('-') || word == "(" || word == "!" {
             in_expression = true;
@@ -253,14 +255,54 @@ fn find_search(args: &[String]) -> Candidate {
     Candidate::Files { patterns, paths }
 }
 
-pub(super) struct Scope<'a> {
-    pub(super) cwd: &'a Path,
-    pub(super) root: &'a Path,
+fn fd_search(args: &[String]) -> Candidate {
+    let (mut positional, mut extensions) = (Vec::new(), Vec::new());
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "-e" | "--extension" => extensions.extend(words.next().map(|ext| format!("*.{ext}"))),
+            "-t" | "--type" | "-E" | "--exclude" | "-d" | "--max-depth" => {
+                words.next();
+            }
+            flag if flag.starts_with('-') => {}
+            _ => positional.push(word.clone()),
+        }
+    }
+    let paths = positional.split_off(positional.len().min(1));
+    let patterns = match extensions.is_empty() {
+        true => positional,
+        false => extensions,
+    };
+    Candidate::Files { patterns, paths }
+}
+
+pub(super) fn first_target(candidates: Vec<Candidate>, cwd: &Path, root: &Path) -> Option<Target> {
+    let mut scope = Scope {
+        cwd: cwd.to_path_buf(),
+        root,
+    };
+    for candidate in candidates {
+        if let Candidate::Cd(dir) = candidate {
+            if !scope.contains(&dir) {
+                return None;
+            }
+            scope.cwd = scope.resolve(&dir);
+        } else if let Some(target) = scope.admit(candidate) {
+            return Some(target);
+        }
+    }
+    None
+}
+
+struct Scope<'a> {
+    cwd: PathBuf,
+    root: &'a Path,
 }
 
 impl Scope<'_> {
-    pub(super) fn admit(&self, candidate: Candidate) -> Option<Target> {
+    fn admit(&self, candidate: Candidate) -> Option<Target> {
         match candidate {
+            Candidate::Cd(_) => None,
             Candidate::Content {
                 pattern,
                 paths,
@@ -302,6 +344,10 @@ impl Scope<'_> {
     }
 
     fn contains(&self, path: &str) -> bool {
+        let unresolvable = path.contains('$') || (path.starts_with('~') && !path.starts_with("~/"));
+        if path == "-" || unresolvable {
+            return false;
+        }
         let resolved = self.resolve(path);
         let Ok(relative) = resolved.strip_prefix(self.root) else {
             return false;

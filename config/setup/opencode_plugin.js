@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { existsSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { homedir } from "os";
 
 const LAUNCHER = "{{orbit}}".split(" ");
@@ -11,7 +11,7 @@ function toGuardCall(tool, args) {
   switch (tool) {
     case "bash":
     case "shell":
-      return ["search", { tool_name: "Bash", tool_input: { command: args.command } }];
+      return ["search", { tool_name: "Bash", tool_input: { command: args.command } }, args.workdir];
     case "read":
       return [
         "read",
@@ -77,8 +77,9 @@ export const OrbitPlugin = async ({ directory }) => {
         if (!existsSync(join(root, "graph.duckdb"))) return;
         const mapped = toGuardCall(input.tool, output.args ?? {});
         if (!mapped) return;
-        const [kind, call] = mapped;
-        decision = await runGuard(kind, { ...call, session_id: input.sessionID, cwd: directory });
+        const [kind, call, workdir] = mapped;
+        const cwd = workdir ? resolve(directory, workdir) : directory;
+        decision = await runGuard(kind, { ...call, session_id: input.sessionID, cwd });
       } catch {
         return;
       }

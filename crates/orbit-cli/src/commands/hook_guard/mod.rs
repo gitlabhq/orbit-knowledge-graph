@@ -19,7 +19,7 @@ use clap::ValueEnum;
 use serde_json::{Value, json};
 
 use self::session::{GRAPH_MARKER, Session, marker};
-use self::target::{Scope, Target};
+use self::target::Target;
 use crate::commands::setup::spec;
 use crate::{telemetry, workspace};
 
@@ -182,11 +182,7 @@ fn decide(kind: Kind, call: &Value, context: &Context, probe: &impl Probe) -> Op
         return None;
     }
     let root = probe.root(&context.cwd)?;
-    let scope = Scope {
-        cwd: &context.cwd,
-        root: &root,
-    };
-    let target = candidates.into_iter().find_map(|c| scope.admit(c))?;
+    let target = target::first_target(candidates, &context.cwd, &root)?;
     let cached = OnceCell::new();
     let index = || *cached.get_or_init(|| probe.index(&root));
     let session = context.session.as_ref();
@@ -333,6 +329,14 @@ mod tests {
             ("!f", "rg foo /etc", "none"),
             ("!f", "rg foo src 2>/dev/null", "deny"),
             ("!g", "Session", "start"),
+            ("-", "cd src && rg foo main.rs", "none"),
+            ("-", "cargo test |& rg FAILED", "none"),
+            ("-", "rg foo \"$HOME/x\" ~", "none"),
+            ("-", "find -L /tmp -name '*.rs'", "none"),
+            ("-", "fd -e yaml", "none"),
+            ("!k", "cd /tmp && rg handler", "none"),
+            ("!l", "orbit sql - <<'S'\nx\nS", "used"),
+            ("!l", "rg Foo src", "search"),
         ] {
             assert_eq!(check(id, spec, Index::Indexed), expected, "{id} {spec}");
         }

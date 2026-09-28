@@ -26,6 +26,11 @@ impl Session {
         let dir = base.join(id);
         match std::fs::create_dir(&dir) {
             Ok(()) => prune(base, &dir, now),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && dir.is_file() => {
+                std::fs::remove_file(&dir).ok()?;
+                std::fs::create_dir(&dir).ok()?;
+                std::fs::File::create(dir.join(GRAPH_MARKER)).ok()?;
+            }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(_) => return None,
         }
@@ -107,6 +112,12 @@ mod tests {
         Session::open(base.path(), "old", now).unwrap();
         Session::open(base.path(), "new", now + TTL * 2).unwrap();
         assert!(!base.path().join("old").exists() && base.path().join("new").exists());
+        std::fs::write(base.path().join("legacy"), "").unwrap();
+        assert!(
+            Session::open(base.path(), "legacy", now)
+                .unwrap()
+                .has(GRAPH_MARKER)
+        );
         let id = id(&serde_json::json!({"session_id": "../x"}));
         assert_eq!(id.as_deref(), Some("___x"));
     }

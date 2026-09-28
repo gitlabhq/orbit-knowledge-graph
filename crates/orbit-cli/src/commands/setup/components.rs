@@ -57,6 +57,7 @@ pub(super) struct Outcome {
 pub(super) struct Report {
     group: String,
     pub(super) outcomes: Vec<Outcome>,
+    pub(super) next_steps: Vec<String>,
 }
 
 impl Report {

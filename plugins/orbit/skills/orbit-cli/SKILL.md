@@ -8,7 +8,7 @@ description: >
   file reads and text greps. Works on the working tree and unpushed branches.
   Not a fit: text or config search, reading one known file, or hosted
   GitLab data (use the `orbit` skill).
-version: 0.18.2
+version: 0.18.3
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -27,9 +27,9 @@ read-only aggregations. `repo-map` orients you at the directory level. For
 production data, use the `orbit` skill.
 
 The binary is `orbit`, or `glab orbit` through the wrapper.
-Run `orbit <command> --help` before you guess a flag. Use `--yes` only when
-that command's help lists it, such as `orbit setup`. Search commands do not
-accept `--yes`.
+Run `orbit <command> --help` before you guess a flag. Bare `orbit` accepts
+`--yes` only where that help lists it, such as `orbit setup`. Through
+`glab orbit`, `--yes` is glab's own flag; pass it in non-interactive shells.
 Run `orbit skills` to list available skills. Use `orbit skills get orbit [path]`
 to print the composed skill (`SKILL.md` by default), or specify a path to print
 a file from the skill tree.

@@ -205,8 +205,10 @@ For every agent it configures, `orbit setup`:
 - With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
   Existing servers and comments are preserved.
 - Adds a hook that reminds the agent to use `orbit grep` in indexed
-  repositories. With `--graph-first`, it also blocks the first code search of
-  each session. Codex runs the hook only after you trust it in `/hooks`. Hook
+  repositories. With `--graph-first`, it also blocks the first code search or
+  file read of each session. GitLab Duo hooks cannot block, so Duo gets a
+  session reminder instead. Codex runs the hook after you trust it in `/hooks`,
+  and GitLab Duo runs project hooks only with `--enable-project-hooks`. Hook
   entries carry an `orbit` marker, and only marked entries are ever replaced or
   removed.
 

@@ -33,7 +33,10 @@ pub(super) fn split(command: &str) -> Option<Vec<Vec<Stage>>> {
                 }
             }
             ' ' | '\t' | '\r' => lexer.end_word(),
-            '|' if chars.peek() != Some(&'|') => lexer.end_stage(),
+            '|' if chars.peek() != Some(&'|') => {
+                chars.next_if_eq(&'&');
+                lexer.end_stage();
+            }
             '|' | '&' | ';' | '\n' | '(' | ')' | '`' => {
                 if (c == '|' || c == '&') && chars.peek() == Some(&c) {
                     chars.next();

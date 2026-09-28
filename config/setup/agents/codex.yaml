@@ -20,6 +20,9 @@ json_merges:
           - type: command
             command: "{{orbit}} hook-guard search{{graph_first}}"
             timeout: 10
+    note:
+      project: "trust the orbit hook in /hooks"
+      global: "trust the orbit hook in /hooks"
 mcp:
   file:
     project: .codex/config.toml

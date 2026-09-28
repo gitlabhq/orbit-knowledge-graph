@@ -18,3 +18,5 @@ json_merges:
           - type: command
             command: "{{orbit}} hook-guard session{{graph_first}}"
             timeout: 10
+    note:
+      project: "start it with --enable-project-hooks"

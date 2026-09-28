@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "setup.schema.json",
   "title": "Orbit setup texts",
-  "description": "Every string `orbit setup` writes into an assistant's files: the managed instruction block, the hook guard texts, the MCP server entry, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-cli/src/commands/setup/spec.rs.",
+  "description": "Every string `orbit setup` writes into an assistant's files: the managed instruction block, the hook guard texts, and the MCP server entry. Read by crates/orbit-cli/src/commands/setup/spec.rs.",
   "type": "object",
   "required": [
     "mcp_server",
@@ -62,12 +62,6 @@
       "type": "string",
       "minLength": 1,
       "description": "Session-start context in graph-first mode, for agents whose hooks cannot block a tool call."
-    },
-    "template_vars": {
-      "type": "object",
-      "minProperties": 1,
-      "additionalProperties": { "type": "string" },
-      "description": "Values substituted for {{name}} placeholders in the templates assistants declare. They reach a shell echo, so they must not contain quotes, backticks, or $(."
     }
   }
 }

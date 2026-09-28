@@ -114,6 +114,15 @@
           "type": "array",
           "minItems": 1,
           "description": "Entries orbit owns at path. `{{orbit}}` in any nested string resolves to the launcher command."
+        },
+        "note": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": { "type": "string", "minLength": 1 },
+            "global": { "type": "string", "minLength": 1 }
+          },
+          "description": "Step the user must take before the agent runs these entries, reported after install in that scope."
         }
       }
     },

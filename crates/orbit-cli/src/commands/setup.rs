@@ -59,10 +59,13 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         return show_dry_run(&plan, "Dry run: nothing written.");
     }
 
-    apply_and_report(&options, |report| {
+    let report = apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
+    if !report.next_steps.is_empty() {
+        tui::card("Before the hooks run", report.next_steps.join("\n"))?;
+    }
 
     let indexed = match options.index {
         true => index_repo::index_current_repository()?,

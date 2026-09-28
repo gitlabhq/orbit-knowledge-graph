@@ -78,6 +78,13 @@ fn install_for_agent(
             .with_context(|| format!("failed to update {}", path.display()))?;
         let installed = json::render(&path, &root)?;
         write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
+        let note = merge.note.as_ref().and_then(|note| match target {
+            Target::Project(_) => note.project.as_deref(),
+            Target::Global => note.global.as_deref(),
+        });
+        if let Some(note) = note {
+            report.next_steps.push(format!("{}: {note}", agent.title));
+        }
     }
 
     for template_file in &agent.template_files {
