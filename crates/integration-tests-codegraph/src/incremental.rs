@@ -2,7 +2,6 @@
 //! `code-graph`: fixtures on disk, production's walk, the full pipeline
 //! into a fresh DuckDB, then the suite's queries.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use code_graph_incremental::pipeline::{Display, Emit, Export};
@@ -10,9 +9,9 @@ use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, Envelope, Scalar, inventory, templates};
 use ontology::Ontology;
 
-use super::assertions::{FixtureFile, Severity, TestSuite};
+use super::assertions::TestSuite;
 use super::runner::create_test_db;
-use super::validator::run_suite;
+use super::validator::{load_suite, report, run_suite, write_fixtures};
 
 fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
     if let Some(lang) = suite.pipeline.as_deref().and_then(SupportLang::from_alias) {
@@ -28,36 +27,19 @@ fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
     }
 }
 
-fn write_files(files: &[FixtureFile], root: &Path) -> Vec<String> {
-    files
-        .iter()
-        .map(|f| {
-            let dst = root.join(&f.path);
-            std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
-            std::fs::write(&dst, &f.content).unwrap();
-            f.path.clone()
-        })
-        .collect()
-}
-
 pub fn run_incremental_suite(yaml: &str) {
-    let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
+    let Some(suite) = load_suite(yaml) else {
+        return;
+    };
     assert!(
         suite.fixture_dir.is_none(),
         "suite {:?}: fixture_dir is not supported by the incremental runner",
         suite.name
     );
-    if suite.tests.iter().all(|t| t.skip) {
-        eprintln!(
-            "[PASS] Suite: {} ({} tests, all skipped)",
-            suite.name,
-            suite.tests.len()
-        );
-        return;
-    }
 
     let repo = tempfile::tempdir().expect("temp repository");
-    let paths = write_files(&suite.fixtures, repo.path());
+    write_fixtures(&suite.fixtures, repo.path());
+    let paths: Vec<String> = suite.fixtures.iter().map(|f| f.path.clone()).collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
     let env = Env::for_lang(lang_id).expect("rules compile");
@@ -91,29 +73,5 @@ pub fn run_incremental_suite(yaml: &str) {
         .expect("insert into DuckDB");
 
     let failures = run_suite(&suite, &db, &ontology);
-    let skipped = suite.tests.iter().filter(|t| t.skip).count();
-    let failed = failures.len();
-    let passed = suite
-        .tests
-        .len()
-        .saturating_sub(skipped)
-        .saturating_sub(failed);
-    eprintln!("---");
-    eprintln!("suite: {:?}", suite.name);
-    eprintln!("tests: {}", suite.tests.len());
-    eprintln!("passed: {passed}");
-    eprintln!("failed: {failed}");
-    eprintln!("skipped: {skipped}");
-    for f in &failures {
-        eprintln!("  - test: {:?}", f.test);
-        eprintln!("    severity: {}", f.severity);
-        eprintln!("    message: {:?}", f.message);
-    }
-    if failures.iter().any(|f| f.severity == Severity::Error) {
-        panic!(
-            "suite {:?}: {failed}/{} tests failed",
-            suite.name,
-            suite.tests.len()
-        );
-    }
+    report(&suite, &failures);
 }

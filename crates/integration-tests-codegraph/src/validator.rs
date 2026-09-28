@@ -10,7 +10,7 @@ use orbit_utils::arrow::ArrowUtils;
 use tabled::{Table, builder::Builder};
 
 use super::assertions::{
-    Assert, AssertCheck, FieldValueArgs, QueryBlock, Severity, TestCase, TestSuite,
+    Assert, AssertCheck, FieldValueArgs, FixtureFile, QueryBlock, Severity, TestCase, TestSuite,
 };
 
 #[derive(Debug)]
@@ -593,4 +593,52 @@ fn fail(test: &str, severity: Severity, message: String) -> Failure {
         severity,
         message,
     }
+}
+
+/// Parses a suite; `None` when every test is skipped and there is nothing to run.
+pub fn load_suite(yaml: &str) -> Option<TestSuite> {
+    let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
+    if suite.tests.iter().all(|t| t.skip) {
+        eprintln!(
+            "[PASS] Suite: {} ({} tests, all skipped)",
+            suite.name,
+            suite.tests.len()
+        );
+        return None;
+    }
+    Some(suite)
+}
+
+/// Writes the suite's inline fixtures under `root`.
+pub fn write_fixtures(fixtures: &[FixtureFile], root: &std::path::Path) {
+    for fixture in fixtures {
+        let path = root.join(&fixture.path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|e| panic!("Failed to create dir {}: {e}", parent.display()));
+        }
+        std::fs::write(&path, &fixture.content)
+            .unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
+    }
+}
+
+/// Prints the outcome; panics when any failure is an error.
+pub fn report(suite: &TestSuite, failures: &[Failure]) {
+    if failures.is_empty() {
+        eprintln!("[PASS] Suite: {} ({} tests)", suite.name, suite.tests.len());
+        return;
+    }
+    let mut msg = format!(
+        "\n[FAIL] Suite: {} ({} failures)\n",
+        suite.name,
+        failures.len()
+    );
+    for f in failures {
+        use std::fmt::Write;
+        writeln!(msg, "  [{}] \"{}\" — {}", f.severity, f.test, f.message).unwrap();
+    }
+    if failures.iter().any(|f| f.severity == Severity::Error) {
+        panic!("{msg}");
+    }
+    eprintln!("{msg}");
 }
