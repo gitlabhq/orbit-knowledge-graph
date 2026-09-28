@@ -2049,6 +2049,53 @@ mod tests {
     }
 
     #[test]
+    fn scope_implied_container_elision_bounds_depth_or_keeps_the_edge_scan() {
+        let cases = [
+            (
+                "Group",
+                "Project",
+                r#""from":"a","to":"x""#,
+                "countSubstrings(x.traversal_path, '/') >=",
+            ),
+            (
+                "Group",
+                "Group",
+                r#""from":"a","to":"x","hops":[2,3]"#,
+                "countSubstrings(x.traversal_path, '/') <=",
+            ),
+            (
+                "Project",
+                "Branch",
+                r#""from":"a","to":"x""#,
+                "(x.traversal_path = (SELECT",
+            ),
+            ("Directory", "File", r#""from":"a","to":"x""#, "gl_edge"),
+            ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),
+            ("Group", "Group", r#""from":"x","to":"a""#, "gl_edge"),
+        ];
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        for (anchor, far, rel, expect) in cases {
+            let query = format!(
+                r#"{{"query_type":"aggregation","nodes":[{{"id":"a","entity":"{anchor}","node_ids":[1]}},{{"id":"x","entity":"{far}"}}],"relationships":[{{"type":"CONTAINS",{rel}}}],"aggregations":[{{"count":"x","as":"c"}}],"limit":20}}"#
+            );
+            let sql = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
+                .unwrap()
+                .base
+                .render();
+            assert!(
+                sql.contains(expect),
+                "{anchor} -> {far} ({rel}): {expect} missing:\n{sql}"
+            );
+            if expect != "gl_edge" {
+                assert!(
+                    !sql.contains("gl_edge"),
+                    "{anchor} -> {far} ({rel}) kept the edge scan:\n{sql}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
         let query = r#"{
             "query_type": "aggregation",

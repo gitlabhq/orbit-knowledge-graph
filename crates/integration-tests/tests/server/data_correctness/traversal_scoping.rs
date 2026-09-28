@@ -209,6 +209,68 @@ pub(super) async fn scope_implied_container_elision_star_counts_authored_mrs(ctx
     resp.assert_group_row_value_i64("u", "User", 7702, "c", 1);
 }
 
+pub(super) async fn scope_implied_container_elision_respects_hop_depth(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, full_path, visibility_level, traversal_path) VALUES
+         (702, 'g702', 'g702', 'public', '1/702/'),
+         (703, 'g703', 'g702/g703', 'public', '1/702/703/')",
+        t("gl_group")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, full_path, visibility_level, traversal_path) VALUES
+         (7020, 'p7020', 'g702/p7020', 'public', '1/702/7020/'),
+         (7030, 'p7030', 'g702/g703/p7030', 'public', '1/702/703/7030/')",
+        t("gl_project")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/702/', 702, 'Group', 'CONTAINS', 703, 'Group', [], []),
+         ('1/702/', 702, 'Group', 'CONTAINS', 7020, 'Project', [], []),
+         ('1/702/703/', 703, 'Group', 'CONTAINS', 7030, 'Project', [], [])",
+        t("gl_edge")
+    ))
+    .await;
+    ctx.optimize_all().await;
+
+    for (entity, hops, expected) in [
+        ("Project", "[1, 1]", 1),
+        ("Project", "[2, 2]", 1),
+        ("Project", "[1, 2]", 2),
+        ("Group", "[1, 1]", 1),
+    ] {
+        let resp = run_query_with_security(
+            ctx,
+            &format!(
+                r#"{{
+                    "query_type": "aggregation",
+                    "nodes": [
+                        {{"id": "g", "entity": "Group", "filters": {{"full_path": "g702"}}}},
+                        {{"id": "x", "entity": "{entity}"}}
+                    ],
+                    "relationships": [{{"type": "CONTAINS", "from": "g", "to": "x", "hops": {hops}}}],
+                    "aggregations": [{{"count": "x", "as": "c"}}],
+                    "limit": 10
+                }}"#
+            ),
+            &{
+                let mut svc = allow_all();
+                svc.allow("group", &[702, 703]);
+                svc.allow("project", &[7020, 7030]);
+                svc
+            },
+            scoped("1/"),
+        )
+        .await;
+
+        resp.skip_requirement(Requirement::Filter {
+            field: "full_path".into(),
+        });
+        resp.assert_row_value_i64(0, "c", expected);
+    }
+}
+
 // Same elision over a 4-hop FK chain (the A_ma3 diff-file shape): MR->latest diff
 // ->files resolved by FK columns once the CONTAINS anchor is elided.
 pub(super) async fn scope_implied_container_elision_chain_counts_diff_files(ctx: &TestContext) {

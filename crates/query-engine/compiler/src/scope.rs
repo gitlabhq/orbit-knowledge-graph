@@ -24,7 +24,10 @@ const UNRESOLVED_PATH: &str = "0/";
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ScopeProof(Vec<ScopeSource>);
+pub struct ScopeProof {
+    sources: Vec<ScopeSource>,
+    depth: Option<(u32, u32)>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ScopeSource {
@@ -38,17 +41,39 @@ enum ScopeSource {
 
 impl ScopeProof {
     pub fn literal(path: &str) -> Self {
-        Self(vec![ScopeSource::Literal(path.to_string())])
+        Self::from_sources(vec![ScopeSource::Literal(path.to_string())])
+    }
+
+    fn from_sources(sources: Vec<ScopeSource>) -> Self {
+        Self {
+            sources,
+            depth: None,
+        }
+    }
+
+    pub fn is_single_source(&self) -> bool {
+        self.sources.len() == 1
+    }
+
+    #[must_use]
+    pub fn with_depth(mut self, min: u32, max: u32) -> Self {
+        self.depth = Some((min, max));
+        self
     }
 }
 
 pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
-    let values: Vec<Expr> = proof.0.iter().map(scope_value_expr).collect();
+    let values: Vec<Expr> = proof.sources.iter().map(scope_value_expr).collect();
     let matches = values.iter().map(|path| {
-        Some(Expr::func(
-            "startsWith",
-            vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path.clone()],
-        ))
+        let column = Expr::col(alias, TRAVERSAL_PATH_COLUMN);
+        Some(match proof.depth {
+            Some((0, 0)) => Expr::eq(column, path.clone()),
+            Some((min, max)) => Expr::and(
+                Expr::func("startsWith", vec![column.clone(), path.clone()]),
+                depth_between(column, path, min, max),
+            ),
+            None => Expr::func("startsWith", vec![column, path.clone()]),
+        })
     });
     let unresolved = values
         .iter()
@@ -57,7 +82,7 @@ pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
 }
 
 pub fn resolved_scope_guard(proof: &ScopeProof) -> Expr {
-    Expr::and_all(proof.0.iter().map(|source| {
+    Expr::and_all(proof.sources.iter().map(|source| {
         Some(Expr::binary(
             Op::Ne,
             scope_value_expr(source),
@@ -65,6 +90,17 @@ pub fn resolved_scope_guard(proof: &ScopeProof) -> Expr {
         ))
     }))
     .expect("scope proof has at least one source")
+}
+
+fn depth_between(column: Expr, path: &Expr, min: u32, max: u32) -> Expr {
+    let segments = |expr: Expr| Expr::func("countSubstrings", vec![expr, Expr::string("/")]);
+    let depth = segments(column);
+    let base = segments(path.clone());
+    let bound = |hops: u32| Expr::binary(Op::Add, base.clone(), Expr::int(i64::from(hops)));
+    Expr::and(
+        Expr::binary(Op::Ge, depth.clone(), bound(min)),
+        Expr::binary(Op::Le, depth, bound(max)),
+    )
 }
 
 fn scope_value_expr(source: &ScopeSource) -> Expr {
@@ -111,7 +147,7 @@ pub fn derive_scope_proofs(
                 .collect();
             (1..=MAX_LOOKUPS_PER_ALIAS)
                 .contains(&lookups.len())
-                .then(|| (node.id.clone(), ScopeProof(lookups)))
+                .then(|| (node.id.clone(), ScopeProof::from_sources(lookups)))
         })
         .collect();
     propagate_scope_proofs(input, model, &seed)
