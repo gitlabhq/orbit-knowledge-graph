@@ -4,14 +4,16 @@
 
 use std::sync::Arc;
 
-use code_graph_incremental::pipeline::{Display, Emit, Export};
+use code_graph_incremental::pipeline::{Changes, Display, Emit, Export, Resolved};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, Envelope, Scalar, inventory, templates};
+use code_graph_incremental::{
+    Context, Env, Envelope, Pipeline, Scalar, State, inventory, templates,
+};
 use ontology::Ontology;
 
-use super::assertions::TestSuite;
+use super::assertions::{TestCase, TestSuite};
 use super::runner::create_test_db;
-use super::validator::{load_suite, report, run_suite, write_fixtures};
+use super::validator::{Failure, load_suite, report, run_suite, write_fixtures};
 
 fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
     if let Some(pipeline) = suite.pipeline.as_deref() {
@@ -51,35 +53,75 @@ pub fn run_incremental_suite(yaml: &str) {
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
     let env = Env::for_lang(lang_id).expect("rules compile");
-    let envelope = Envelope::new([
-        ("project_id", Scalar::Int(1)),
-        ("branch", Scalar::Str("main")),
-        ("commit_sha", Scalar::Str("test")),
-    ]);
 
     let inventory = inventory::walk(repo.path())
         .expect("walk fixtures")
         .to_vec();
     let graph = templates::index(Context::new(&env), repo.path(), inventory)
         .expect("suite exceeded the total budget");
+    let (mut state, mut failures) = check(graph, &ontology, &suite.tests);
+    let mut env = env;
+
+    for step in &suite.steps {
+        if step.snapshot {
+            let snapshot = repo.path().join("graph.bin");
+            state.save(&env, &snapshot).expect("save snapshot");
+            (env, state) = State::load(&snapshot, lang_id).expect("load snapshot");
+            std::fs::remove_file(&snapshot).ok();
+        }
+        for removed in &step.remove {
+            std::fs::remove_file(repo.path().join(removed)).ok();
+        }
+        write_fixtures(&step.add, repo.path());
+        write_fixtures(&step.modify, repo.path());
+        let changed = step.add.iter().chain(&step.modify).map(|f| f.path.clone());
+        let changes = Changes {
+            changed: inventory::classify(repo.path(), changed),
+            removed: step.remove.clone(),
+        };
+        let graph = templates::reindex(Context::new(&env), state, repo.path(), changes)
+            .expect("suite exceeded the total budget");
+        let (next, step_failures) = check(graph, &ontology, &step.tests);
+        state = next;
+        failures.extend(step_failures);
+    }
+    report(&suite, &failures);
+}
+
+/// Exports the graph into a fresh DuckDB and runs `tests` against it; the
+/// graph comes back for the next step.
+fn check(
+    graph: Pipeline<'_, Resolved>,
+    ontology: &Arc<Ontology>,
+    tests: &[TestCase],
+) -> (State, Vec<Failure>) {
     let skipped = &graph.context().report.skipped;
     assert!(
         skipped.is_empty(),
         "files exceeded their budget: {skipped:?}"
     );
-
+    let envelope = Envelope::new([
+        ("project_id", Scalar::Int(1)),
+        ("branch", Scalar::Str("main")),
+        ("commit_sha", Scalar::Str("test")),
+    ]);
     let db = create_test_db().expect("in-memory DuckDB");
-    graph
+    let displayed = graph
         .then(Display)
         .expect("display rules compile")
-        .then(Export {
-            ontology: &ontology,
-            envelope,
-        })
+        .then(Export { ontology, envelope })
         .expect("export")
         .then(Emit(|table: &str, batch| db.insert_batch(table, &batch)))
-        .expect("insert into DuckDB");
-
-    let failures = run_suite(&suite, &db, &ontology);
-    report(&suite, &failures);
+        .expect("insert into DuckDB")
+        .into_value();
+    let suite = TestSuite {
+        name: String::new(),
+        pipeline: None,
+        fixtures: Vec::new(),
+        fixture_dir: None,
+        trace: false,
+        tests: tests.to_vec(),
+        steps: Vec::new(),
+    };
+    (displayed.state, run_suite(&suite, &db, ontology))
 }

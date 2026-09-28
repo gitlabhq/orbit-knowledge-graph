@@ -31,6 +31,7 @@ stacker = { workspace = true }
 strum = { workspace = true }
 termtree = "1.0"
 toml = { workspace = true }
+zstd = "0.13"
 tree-sitter = "0.26.3"
 tree-sitter-bash = "0.25.1"
 tree-sitter-c = "0.24.2"
