@@ -65,7 +65,7 @@ impl CodeCheckpoint {
     }
 
     pub fn refund_attempt(&mut self) {
-        self.attempts -= 1;
+        self.attempts = (self.attempts - 1).max(0);
     }
 
     pub fn complete(
@@ -230,6 +230,21 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .map_err(|e| CheckpointError::Query(e.to_string()))?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refund_attempt_never_goes_below_zero() {
+        let mut checkpoint =
+            CodeCheckpoint::new(TraversalPath::new_unchecked("1/123/"), 123, "main");
+
+        checkpoint.refund_attempt();
+
+        assert_eq!(checkpoint.attempts, 0);
     }
 }
 
